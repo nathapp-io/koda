@@ -30,6 +30,10 @@ logs/
 .DS_Store
 Thumbs.db
 
+# nax HOME mis-set artifact (creates ~/... relative to repo root)
+~/
+~
+
 # IDE
 .vscode/
 .idea/
