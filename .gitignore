@@ -40,13 +40,12 @@ Thumbs.db
 
 # nax runtime
 nax.lock
-nax/features/*/runs/
-nax/features/*/plan/
-nax/features/*/status.json
-test/tmp/
-TEST_SUMMARY_*.md
-.nax-pids
+nax/features/
+nax/status.json
 nax/metrics.json
-
 nax/**/runs/
 .nax-wt/
+.nax-pids
+.nax-verifier-verdict.json
+TEST_SUMMARY_*.md
+test/tmp/
