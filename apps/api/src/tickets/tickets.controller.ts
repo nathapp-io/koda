@@ -62,6 +62,7 @@ export class TicketsController {
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
   async findAll(
     @Param('slug') slug: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     @Query() query: Record<string, any>,
   ) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -131,6 +132,7 @@ export class TicketsController {
   async assign(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     @Body() assignInput: Record<string, any>,
   ) {
     return this.ticketsService.assign(slug, ref, assignInput);

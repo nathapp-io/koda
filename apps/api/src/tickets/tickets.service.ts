@@ -102,6 +102,7 @@ export class TicketsService {
     }
 
     // Build where clause
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const whereConditions: Record<string, any> = {
       projectId: project.id,
       deletedAt: null,
@@ -208,6 +209,7 @@ export class TicketsService {
     }
 
     // Build update data - only allow updating mutable fields
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const updateData: Record<string, any> = {};
 
     if (updateTicketDto.title !== undefined) {
@@ -279,6 +281,7 @@ export class TicketsService {
     }
 
     // Update assignment
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const updateData: Record<string, any> = {};
 
     if (assignInput.userId) {
