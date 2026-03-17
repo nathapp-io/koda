@@ -27,10 +27,10 @@ export class ProjectsService {
     }
 
     // Validate key format
-    const keyPattern = /^[A-Z0-9]{2,6}$/;
+    const keyPattern = /^[A-Z]{2,6}$/;
     if (!keyPattern.test(createProjectDto.key)) {
       throw new BadRequestException(
-        'Key must be 2-6 uppercase alphanumeric characters',
+        'Key must be 2-6 uppercase letters',
       );
     }
 
@@ -121,10 +121,10 @@ export class ProjectsService {
 
     // Validate key format if provided
     if (updateProjectDto.key !== undefined) {
-      const keyPattern = /^[A-Z0-9]{2,6}$/;
+      const keyPattern = /^[A-Z]{2,6}$/;
       if (!keyPattern.test(updateProjectDto.key)) {
         throw new BadRequestException(
-          'Key must be 2-6 uppercase alphanumeric characters',
+          'Key must be 2-6 uppercase letters',
         );
       }
 
