@@ -38,7 +38,7 @@
       "title": "Tickets CRUD",
       "description": "Implement full Tickets CRUD with auto-incrementing ticket numbers and dual-ref resolution.\n\nFiles to create:\n- apps/api/src/tickets/tickets.controller.ts\n- apps/api/src/tickets/tickets.service.ts\n- apps/api/src/tickets/dto/create-ticket.dto.ts\n- apps/api/src/tickets/dto/update-ticket.dto.ts\n- apps/api/src/tickets/dto/transition-ticket.dto.ts\n- apps/api/src/tickets/dto/ticket-response.dto.ts\n\nEndpoints:\n- POST /api/projects/:slug/tickets — create ticket\n- GET /api/projects/:slug/tickets — list tickets (filters: status, type, priority, assignedTo, unassigned, limit, page)\n- GET /api/projects/:slug/tickets/:ref — get by ref (KODA-42 or CUID)\n- PATCH /api/projects/:slug/tickets/:ref — update title/description/priority\n- DELETE /api/projects/:slug/tickets/:ref — soft delete (JWT Admin)\n- POST /api/projects/:slug/tickets/:ref/assign — assign to user or agent\n\nTicket number auto-increment (transaction-safe):\n  Use prisma.$transaction, find last ticket by number DESC, increment by 1.\n\nTicket ref resolution — resolveTicket(projectSlug, ref):\n  If ref matches /^([A-Z]+)-(\\d+)$/, look up by projectId_number composite unique.\n  Otherwise look up by CUID id.\n\nTests:\n- Create ticket auto-assigns correct sequential number\n- Concurrent creates don't produce duplicate numbers\n- Ticket resolved by KODA-42 format\n- Ticket resolved by CUID\n- List filters work correctly (status, type, priority, assignedTo, unassigned)\n- Soft delete excludes from list",
       "complexity": "complex",
-      "status": "pending",
+      "status": "passed",
       "attempts": 0,
       "priorErrors": [],
       "priorFailures": [],
@@ -53,7 +53,8 @@
         "testStrategy": "three-session-tdd",
         "reasoning": "Transaction-safe auto-increment and dual-ref resolution are known patterns; filtering/pagination is straightforward.",
         "contentHash": "3f54bb2a80ea084d89dafe4b0105ca92523d4c8d0b60392241c578b95616a268"
-      }
+      },
+      "passes": true
     },
     {
       "id": "US-004",
@@ -101,5 +102,5 @@
       "storyPoints": 1
     }
   ],
-  "updatedAt": "2026-03-17T12:30:39.291Z"
+  "updatedAt": "2026-03-17T12:45:14.623Z"
 }
