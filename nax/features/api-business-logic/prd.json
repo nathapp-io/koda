@@ -93,7 +93,7 @@
       "title": "Labels CRUD",
       "description": "Implement Labels CRUD per project and label assignment on tickets.\n\nFiles to create:\n- apps/api/src/labels/labels.module.ts\n- apps/api/src/labels/labels.controller.ts\n- apps/api/src/labels/labels.service.ts\n- apps/api/src/labels/dto/create-label.dto.ts\n- apps/api/src/labels/dto/label-response.dto.ts\n\nEndpoints:\n- GET /api/projects/:slug/labels — list labels for project\n- POST /api/projects/:slug/labels — create label (JWT Admin)\n- DELETE /api/projects/:slug/labels/:id — delete label (JWT Admin)\n- POST /api/projects/:slug/tickets/:ref/labels — assign label to ticket (any auth)\n- DELETE /api/projects/:slug/tickets/:ref/labels/:id — remove label from ticket (any auth)\n\nLabel assignment must write a TicketActivity record:\n  action: LABEL_CHANGE, newValue: labelName, actor fields\n\nLabels must appear in ticket response when fetching a ticket.\n\nTests:\n- Create label per project\n- Assign label to ticket — label appears in ticket GET response\n- Remove label from ticket\n- TicketActivity record created on label assign/remove\n- Label scoped to project (cannot assign label from another project)",
       "complexity": "medium",
-      "status": "pending",
+      "status": "passed",
       "attempts": 0,
       "priorErrors": [],
       "priorFailures": [],
@@ -101,8 +101,9 @@
       "dependencies": [],
       "tags": [],
       "acceptanceCriteria": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "passes": true
     }
   ],
-  "updatedAt": "2026-03-17T13:30:18.952Z"
+  "updatedAt": "2026-03-17T13:50:24.312Z"
 }
