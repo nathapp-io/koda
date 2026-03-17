@@ -197,18 +197,7 @@
             "traceImports": false
         }
     },
-    "interaction": {
-        "plugin": "telegram",
-        "config": {},
-        "defaults": {
-            "timeout": 600000,
-            "fallback": "escalate"
-        },
-        "triggers": {
-            "security-review": true,
-            "cost-warning": true
-        }
-    },
+    "interaction": null,
     "precheck": {
         "storySizeGate": {
             "enabled": true,
