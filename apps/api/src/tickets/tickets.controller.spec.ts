@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TicketsController } from './tickets.controller';
 import { TicketsService } from './tickets.service';
+import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
 import { BadRequestException as _BadRequestException, ForbiddenException as _ForbiddenException, NotFoundException as _NotFoundException } from '@nestjs/common';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
@@ -70,10 +71,22 @@ describe('TicketsController', () => {
     assign: jest.fn(),
   };
 
+  const mockTransitionsService = {
+    verify: jest.fn(),
+    start: jest.fn(),
+    fix: jest.fn(),
+    verifyFix: jest.fn(),
+    close: jest.fn(),
+    reject: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [TicketsController],
-      providers: [{ provide: TicketsService, useValue: mockTicketsService }],
+      providers: [
+        { provide: TicketsService, useValue: mockTicketsService },
+        { provide: TicketTransitionsService, useValue: mockTransitionsService },
+      ],
     }).compile();
 
     controller = module.get<TicketsController>(TicketsController);

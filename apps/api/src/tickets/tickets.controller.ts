@@ -18,9 +18,11 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { TicketsService } from './tickets.service';
+import { TicketTransitionsService, TransitionResultWithComment, TransitionResultWithoutComment } from './state-machine/ticket-transitions.service';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TicketResponseDto } from './dto/ticket-response.dto';
+import { TransitionWithCommentDto } from './dto/transition-with-comment.dto';
 import { TicketType, TicketStatus, Priority } from '@prisma/client';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -30,7 +32,10 @@ type RequestWithUser = any & { user?: any; agent?: any };
 @ApiBearerAuth()
 @Controller('projects/:slug/tickets')
 export class TicketsController {
-  constructor(private ticketsService: TicketsService) {}
+  constructor(
+    private ticketsService: TicketsService,
+    private transitionsService: TicketTransitionsService,
+  ) {}
 
   @Post()
   @HttpCode(201)
@@ -136,5 +141,107 @@ export class TicketsController {
     @Body() assignInput: Record<string, any>,
   ) {
     return this.ticketsService.assign(slug, ref, assignInput);
+  }
+
+  @Post(':ref/verify')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Verify a ticket (CREATED → VERIFIED)' })
+  @ApiResponse({ status: 200, description: 'Ticket verified' })
+  @ApiResponse({ status: 400, description: 'Invalid transition' })
+  @ApiResponse({ status: 404, description: 'Ticket or project not found' })
+  async verify(
+    @Param('slug') slug: string,
+    @Param('ref') ref: string,
+    @Body() dto: TransitionWithCommentDto,
+    @Req() req: RequestWithUser,
+  ): Promise<TransitionResultWithComment> {
+    const currentUser = req.user || req.agent;
+    const actorType = req.user ? 'user' : 'agent';
+    return this.transitionsService.verify(slug, ref, dto.body, currentUser, actorType);
+  }
+
+  @Post(':ref/start')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Start work on a ticket (VERIFIED → IN_PROGRESS)' })
+  @ApiResponse({ status: 200, description: 'Ticket started' })
+  @ApiResponse({ status: 400, description: 'Invalid transition' })
+  @ApiResponse({ status: 404, description: 'Ticket or project not found' })
+  async start(
+    @Param('slug') slug: string,
+    @Param('ref') ref: string,
+    @Req() req: RequestWithUser,
+  ): Promise<TransitionResultWithoutComment> {
+    const currentUser = req.user || req.agent;
+    const actorType = req.user ? 'user' : 'agent';
+    return this.transitionsService.start(slug, ref, currentUser, actorType);
+  }
+
+  @Post(':ref/fix')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Submit fix for verification (IN_PROGRESS → VERIFY_FIX)' })
+  @ApiResponse({ status: 200, description: 'Fix submitted' })
+  @ApiResponse({ status: 400, description: 'Invalid transition' })
+  @ApiResponse({ status: 404, description: 'Ticket or project not found' })
+  async fix(
+    @Param('slug') slug: string,
+    @Param('ref') ref: string,
+    @Body() dto: TransitionWithCommentDto,
+    @Req() req: RequestWithUser,
+  ): Promise<TransitionResultWithComment> {
+    const currentUser = req.user || req.agent;
+    const actorType = req.user ? 'user' : 'agent';
+    return this.transitionsService.fix(slug, ref, dto.body, currentUser, actorType);
+  }
+
+  @Post(':ref/verify-fix')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Approve or reject fix (VERIFY_FIX → CLOSED or IN_PROGRESS)' })
+  @ApiResponse({ status: 200, description: 'Fix reviewed' })
+  @ApiResponse({ status: 400, description: 'Invalid transition' })
+  @ApiResponse({ status: 404, description: 'Ticket or project not found' })
+  async verifyFix(
+    @Param('slug') slug: string,
+    @Param('ref') ref: string,
+    @Body() dto: TransitionWithCommentDto,
+    @Query('approve') approve: boolean | string,
+    @Req() req: RequestWithUser,
+  ): Promise<TransitionResultWithComment> {
+    const currentUser = req.user || req.agent;
+    const actorType = req.user ? 'user' : 'agent';
+    const isApproved = approve === 'true' || approve === true;
+    return this.transitionsService.verifyFix(slug, ref, dto.body, isApproved, currentUser, actorType);
+  }
+
+  @Post(':ref/close')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Close a ticket' })
+  @ApiResponse({ status: 200, description: 'Ticket closed' })
+  @ApiResponse({ status: 400, description: 'Invalid transition' })
+  @ApiResponse({ status: 404, description: 'Ticket or project not found' })
+  async close(
+    @Param('slug') slug: string,
+    @Param('ref') ref: string,
+    @Req() req: RequestWithUser,
+  ): Promise<TransitionResultWithoutComment> {
+    const currentUser = req.user || req.agent;
+    const actorType = req.user ? 'user' : 'agent';
+    return this.transitionsService.close(slug, ref, currentUser, actorType);
+  }
+
+  @Post(':ref/reject')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Reject a ticket (CREATED or VERIFIED → REJECTED)' })
+  @ApiResponse({ status: 200, description: 'Ticket rejected' })
+  @ApiResponse({ status: 400, description: 'Invalid transition' })
+  @ApiResponse({ status: 404, description: 'Ticket or project not found' })
+  async reject(
+    @Param('slug') slug: string,
+    @Param('ref') ref: string,
+    @Body() dto: TransitionWithCommentDto,
+    @Req() req: RequestWithUser,
+  ): Promise<TransitionResultWithComment> {
+    const currentUser = req.user || req.agent;
+    const actorType = req.user ? 'user' : 'agent';
+    return this.transitionsService.reject(slug, ref, dto.body, currentUser, actorType);
   }
 }

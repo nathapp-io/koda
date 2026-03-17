@@ -10,22 +10,22 @@ import {
 } from '@prisma/client';
 import { validateTransition } from './ticket-transitions';
 
-interface CurrentUser {
+export interface CurrentUser {
   sub: string;
 }
 
-interface TransitionResultWithComment {
+export interface TransitionResultWithComment {
   ticket: Ticket;
   comment: Comment;
   activity: TicketActivity;
 }
 
-interface TransitionResultWithoutComment {
+export interface TransitionResultWithoutComment {
   ticket: Ticket;
   activity: TicketActivity;
 }
 
-type TransitionResult = TransitionResultWithComment | TransitionResultWithoutComment;
+export type TransitionResult = TransitionResultWithComment | TransitionResultWithoutComment;
 
 @Injectable()
 export class TicketTransitionsService {

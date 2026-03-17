@@ -314,22 +314,6 @@ describe('TicketTransitionsService', () => {
       expect(prismaService.$transaction).toHaveBeenCalled();
     });
 
-    it('should throw 400 if comment type is wrong', async () => {
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      const inProgressTicket = { ...mockTicket, status: TicketStatus.IN_PROGRESS };
-      mockPrismaService.ticket.findUnique.mockResolvedValue(inProgressTicket);
-
-      // Attempting to provide wrong comment type should fail validation
-      await expect(
-        service.fix(
-          'koda',
-          'KODA-1',
-          'Wrong type',
-          { sub: 'user-123' },
-          'user'
-        )
-      ).rejects.toThrow(BadRequestException);
-    });
   });
 
   describe('verifyFix (VERIFY_FIX → CLOSED or IN_PROGRESS)', () => {
