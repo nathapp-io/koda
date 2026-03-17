@@ -16,6 +16,7 @@ import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto, UserResponseDto } from './dto/auth-response.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
+import { IsPublic } from './decorators/is-public.decorator';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -23,6 +24,7 @@ export class AuthController {
   constructor(private authService: AuthService) {}
 
   @Post('register')
+  @IsPublic()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Register a new user' })
   @ApiResponse({ status: 201, type: AuthResponseDto })
@@ -32,6 +34,7 @@ export class AuthController {
   }
 
   @Post('login')
+  @IsPublic()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Login with email and password' })
   @ApiResponse({ status: 200, type: AuthResponseDto })
@@ -41,7 +44,7 @@ export class AuthController {
   }
 
   @Post('refresh')
-  @UseGuards(JwtAuthGuard)
+  @IsPublic()
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Refresh access and refresh tokens' })
