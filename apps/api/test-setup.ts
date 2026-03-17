@@ -3,21 +3,23 @@
 // For unit tests, mocking is used so env vars aren't needed
 
 // Add custom matchers for Date comparisons
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(global as any).expect?.extend?.({
-  toBeLessThanOrEqual(received: unknown, expected: unknown) {
-    // Handle Date objects
-    const receivedValue = received instanceof Date ? received.getTime() : (received as number);
-    const expectedValue = expected instanceof Date ? expected.getTime() : (expected as number);
+// This extends Jest's matchers to allow Date comparisons with toBeLessThanOrEqual
+if (typeof expect !== 'undefined' && expect.extend) {
+  expect.extend({
+    toBeLessThanOrEqual(received: any, expected: any) {
+      // Handle Date objects
+      const receivedValue = received instanceof Date ? received.getTime() : received;
+      const expectedValue = expected instanceof Date ? expected.getTime() : expected;
 
-    const pass = receivedValue <= expectedValue;
+      const pass = receivedValue <= expectedValue;
 
-    return {
-      pass,
-      message: () =>
-        pass
-          ? `expected ${receivedValue} not to be less than or equal to ${expectedValue}`
-          : `expected ${receivedValue} to be less than or equal to ${expectedValue}`,
-    };
-  },
-});
+      return {
+        pass,
+        message: () =>
+          pass
+            ? `expected ${receivedValue} not to be less than or equal to ${expectedValue}`
+            : `expected ${receivedValue} to be less than or equal to ${expectedValue}`,
+      };
+    },
+  });
+}
