@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
-import { ForbiddenException as _ForbiddenException, NotFoundException as _NotFoundException, BadRequestException as _BadRequestException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException as _NotFoundException, BadRequestException as _BadRequestException } from '@nestjs/common';
 
 describe('AgentsController', () => {
   let controller: AgentsController;
@@ -49,6 +49,8 @@ describe('AgentsController', () => {
     findBySlug: jest.fn(),
     findMe: jest.fn(),
     update: jest.fn(),
+    updateRoles: jest.fn(),
+    updateCapabilities: jest.fn(),
     rotateApiKey: jest.fn(),
   };
 
@@ -420,7 +422,7 @@ describe('AgentsController', () => {
         ],
       };
 
-      mockAgentsService.update.mockResolvedValue(updatedAgent);
+      mockAgentsService.updateRoles.mockResolvedValue(updatedAgent);
 
       const req: any = { user: mockAdminUser };
       const result = await controller.updateRoles('test-agent', updateRolesDto, req);
@@ -439,7 +441,7 @@ describe('AgentsController', () => {
         roles: [{ id: 'role-1', role: 'TRIAGER' }],
       };
 
-      mockAgentsService.update.mockResolvedValue(updatedAgent);
+      mockAgentsService.updateRoles.mockResolvedValue(updatedAgent);
 
       const req: any = { user: mockAdminUser };
       const result = await controller.updateRoles('test-agent', updateRolesDto, req);
@@ -458,7 +460,7 @@ describe('AgentsController', () => {
         roles: [{ id: 'new-role', role: 'REVIEWER' }],
       };
 
-      mockAgentsService.update.mockResolvedValue(updatedAgent);
+      mockAgentsService.updateRoles.mockResolvedValue(updatedAgent);
 
       const req: any = { user: mockAdminUser };
       const result = await controller.updateRoles('test-agent', updateRolesDto, req);
@@ -494,7 +496,7 @@ describe('AgentsController', () => {
         ],
       };
 
-      mockAgentsService.update.mockResolvedValue(updatedAgent);
+      mockAgentsService.updateCapabilities.mockResolvedValue(updatedAgent);
 
       const req: any = { user: mockAdminUser };
       const result = await controller.updateCapabilities('test-agent', updateCapabilitiesDto, req);
@@ -516,7 +518,7 @@ describe('AgentsController', () => {
         ],
       };
 
-      mockAgentsService.update.mockResolvedValue(updatedAgent);
+      mockAgentsService.updateCapabilities.mockResolvedValue(updatedAgent);
 
       const req: any = { user: mockAdminUser };
       const result = await controller.updateCapabilities('test-agent', updateCapabilitiesDto, req);
@@ -535,7 +537,7 @@ describe('AgentsController', () => {
         capabilities: [{ id: 'cap-1', capability: 'rust' }],
       };
 
-      mockAgentsService.update.mockResolvedValue(updatedAgent);
+      mockAgentsService.updateCapabilities.mockResolvedValue(updatedAgent);
 
       const req: any = { user: mockAdminUser };
       const result = await controller.updateCapabilities('test-agent', updateCapabilitiesDto, req);
@@ -565,7 +567,7 @@ describe('AgentsController', () => {
         capabilities: [],
       };
 
-      mockAgentsService.update.mockResolvedValue(updatedAgent);
+      mockAgentsService.updateCapabilities.mockResolvedValue(updatedAgent);
 
       const req: any = { user: mockAdminUser };
       const result = await controller.updateCapabilities('test-agent', updateCapabilitiesDto, req);
