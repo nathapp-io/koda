@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ProjectsController } from '../../src/projects/projects.controller';
-import { ProjectsService } from '../../src/projects/projects.service';
+import { ProjectsController } from './projects.controller';
+import { ProjectsService } from './projects.service';
 import { ConflictException as _ConflictException, ForbiddenException as _ForbiddenException, BadRequestException as _BadRequestException, NotFoundException as _NotFoundException } from '@nestjs/common';
 
 describe('ProjectsController', () => {

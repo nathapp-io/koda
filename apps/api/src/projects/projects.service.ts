@@ -113,7 +113,7 @@ export class ProjectsService {
         const existingSlug = await this.prisma.project.findUnique({
           where: { slug: updateProjectDto.slug },
         });
-        if (existingSlug) {
+        if (existingSlug && existingSlug.id !== currentProject.id) {
           throw new ConflictException('Slug already exists');
         }
       }
@@ -133,7 +133,7 @@ export class ProjectsService {
         const existingKey = await this.prisma.project.findUnique({
           where: { key: updateProjectDto.key },
         });
-        if (existingKey) {
+        if (existingKey && existingKey.id !== currentProject.id) {
           throw new ConflictException('Key already exists');
         }
       }
