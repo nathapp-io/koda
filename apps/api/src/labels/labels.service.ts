@@ -229,10 +229,12 @@ export class LabelsService {
           throw new NotFoundException('Ticket not found after update');
         }
         // Transform labels from nested structure to flat array
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        interface TicketLabelWithLabel {
+          label: { id: string; projectId: string; name: string; color: string | null };
+        }
         return {
           ...updated,
-          labels: updated.labels.map((tl: any) => tl.label),
+          labels: updated.labels.map((tl: TicketLabelWithLabel) => tl.label),
         };
       });
 
@@ -342,10 +344,12 @@ export class LabelsService {
         throw new NotFoundException('Ticket not found after removal');
       }
       // Transform labels from nested structure to flat array
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      interface TicketLabelWithLabel {
+        label: { id: string; projectId: string; name: string; color: string | null };
+      }
       return {
         ...updated,
-        labels: updated.labels.map((tl: any) => tl.label),
+        labels: updated.labels.map((tl: TicketLabelWithLabel) => tl.label),
       };
     });
 

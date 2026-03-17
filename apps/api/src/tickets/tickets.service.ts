@@ -179,17 +179,30 @@ export class TicketsService {
             number,
           },
         },
+        include: { labels: { include: { label: true } } },
       });
     } else {
       // Treat as CUID
       ticket = await this.prisma.ticket.findUnique({
         where: { id: ref },
+        include: { labels: { include: { label: true } } },
       });
     }
 
     // Don't return soft-deleted tickets
     if (ticket && ticket.deletedAt) {
       return null;
+    }
+
+    // Transform labels from nested structure to flat array
+    if (ticket && ticket.labels) {
+      interface TicketLabelWithLabel {
+        label: { id: string; projectId: string; name: string; color: string | null };
+      }
+      return {
+        ...ticket,
+        labels: (ticket.labels as TicketLabelWithLabel[]).map((tl: TicketLabelWithLabel) => tl.label),
+      };
     }
 
     return ticket || null;

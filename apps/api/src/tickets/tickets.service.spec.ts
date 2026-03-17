@@ -413,6 +413,7 @@ describe('TicketsService', () => {
             number: 1,
           },
         },
+        include: { labels: { include: { label: true } } },
       });
     });
 
@@ -425,6 +426,7 @@ describe('TicketsService', () => {
       expect(result).toEqual(mockTicket);
       expect(prismaService.ticket.findUnique).toHaveBeenCalledWith({
         where: { id: 'ticket-123' },
+        include: { labels: { include: { label: true } } },
       });
     });
 

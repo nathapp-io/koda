@@ -286,7 +286,7 @@ describe('LabelsController', () => {
 
       const result = await controller.assignLabel('koda', 'KODA-1', assignDto, mockMemberUser, 'user');
 
-      expect(result.labels).toContain(expect.objectContaining({ id: 'label-123' }));
+      expect(result.labels).toContainEqual(expect.objectContaining({ id: 'label-123' }));
       expect(service.assignToTicket).toHaveBeenCalledWith('koda', 'KODA-1', assignDto, mockMemberUser, 'user');
     });
 
