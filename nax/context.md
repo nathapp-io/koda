@@ -41,6 +41,30 @@ Turborepo monorepo with NestJS 11 + Fastify API, Nuxt 3 + Shadcn-nuxt web UI, an
 - **Never push to remote** — the human reviews and pushes.
 - **State machine is the law** — all ticket transitions must go through `validateTransition()`. Never update ticket status directly.
 
+## Quality Gates — Run Before Completing Any Story
+
+After writing or editing any file in `apps/api/`, **always run these two commands** and fix all errors before considering the story done:
+
+```bash
+# Lint (zero warnings allowed)
+bun run --cwd apps/api lint
+
+# TypeScript typecheck (zero errors allowed)
+bun run --cwd apps/api type-check
+```
+
+**Common lint fixes:**
+- Unused imports → remove them or rename with `_` prefix (e.g. `import { Foo as _Foo }`)
+- Unused variables → prefix with `_` (e.g. `const _result = ...`)
+- `any` types in production code → use proper types (e.g. `Record<string, unknown>`, Prisma types from `@prisma/client`, `FastifyRequest`)
+- `any` types in test files → allowed (configured in `.eslintrc.js` overrides)
+- `no-explicit-any` in `*.spec.ts` → suppressed by ESLint override, no action needed
+
+**TypeScript fixes:**
+- Missing types → add explicit type annotations
+- Import order issues → reorder and re-export as needed
+- Prisma return types → import from `@prisma/client` (e.g. `import type { Agent } from '@prisma/client'`)
+
 ## Mandatory Quality Checks (run after EVERY file change)
 
 After writing or modifying any file in `apps/api/`, you **must** run both checks and fix all errors before considering the story done:
