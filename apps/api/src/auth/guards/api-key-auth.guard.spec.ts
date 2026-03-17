@@ -42,7 +42,7 @@ describe('ApiKeyAuthGuard', () => {
 
     guard = module.get<ApiKeyAuthGuard>(ApiKeyAuthGuard);
     prismaService = module.get<PrismaService>(PrismaService);
-    configService = module.get<ConfigService>(ConfigService);
+    _configService = module.get<ConfigService>(ConfigService);
 
     mockConfigService.get.mockReturnValue('test-secret');
   });

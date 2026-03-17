@@ -87,10 +87,12 @@
     "requireLint": true,
     "requireTests": true,
     "commands": {
-      "test": "bun run --cwd apps/api test",
+      "test": "DATABASE_URL=file:./koda-test.db bun run --cwd apps/api test",
       "typecheck": "bun run --cwd apps/api type-check",
       "lint": "bun run --cwd apps/api lint",
-      "testScoped": "bun run --cwd apps/api test"
+      "lintFix": "bun run --cwd apps/api lint:fix",
+      "formatFix": "bun run --cwd apps/api lint:fix",
+      "testScoped": "DATABASE_URL=file:./koda-test.db bun run --cwd apps/api test"
     },
     "forceExit": false,
     "detectOpenHandles": true,
@@ -166,7 +168,9 @@
     ],
     "commands": {
       "typecheck": "bun run --cwd apps/api type-check",
-      "lint": "bun run --cwd apps/api lint"
+      "lint": "bun run --cwd apps/api lint",
+      "lintFix": "bun run --cwd apps/api lint:fix",
+      "formatFix": "bun run --cwd apps/api lint:fix"
     },
     "pluginMode": "deferred"
   },
