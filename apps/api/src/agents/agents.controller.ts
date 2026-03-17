@@ -15,6 +15,7 @@ export class AgentsController {
   @ApiResponse({ status: 201, description: 'API key generated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async generateApiKey(@Body() createAgentDto: CreateAgentDto, @Req() req: any) {
     // Check if user is admin
     if (req.user?.role !== 'ADMIN') {

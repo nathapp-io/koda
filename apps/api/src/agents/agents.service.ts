@@ -15,7 +15,9 @@ export class AgentsService {
     private configService: ConfigService,
   ) {}
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async generateApiKey(agentId: string): Promise<{ apiKey: string; agent: any }>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async generateApiKey(dto: CreateAgentDto): Promise<{ apiKey: string; agent: any }>;
   async generateApiKey(agentIdOrDto: string | CreateAgentDto) {
     // Generate random 32-byte hex key

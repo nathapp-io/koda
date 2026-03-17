@@ -8,7 +8,7 @@ import { createHmac } from 'crypto';
 describe('ApiKeyAuthGuard', () => {
   let guard: ApiKeyAuthGuard;
   let prismaService: PrismaService;
-  let configService: ConfigService;
+  let _configService: ConfigService;
 
   const mockAgent = {
     id: 'agent-123',

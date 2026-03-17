@@ -127,8 +127,9 @@ export class AuthService {
     });
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private formatUser(user: any) {
-    const { passwordHash, ...userWithoutPassword } = user;
+    const { passwordHash: _passwordHash, ...userWithoutPassword } = user;
     return userWithoutPassword;
   }
 }

@@ -9,7 +9,7 @@ import * as bcrypt from 'bcrypt';
 describe('AuthService', () => {
   let service: AuthService;
   let prismaService: PrismaService;
-  let configService: ConfigService;
+  let _configService: ConfigService;
   let jwtService: JwtService;
 
   const mockUser = {
@@ -49,7 +49,7 @@ describe('AuthService', () => {
 
     service = module.get<AuthService>(AuthService);
     prismaService = module.get<PrismaService>(PrismaService);
-    configService = module.get<ConfigService>(ConfigService);
+    _configService = module.get<ConfigService>(ConfigService);
     jwtService = module.get<JwtService>(JwtService);
 
     // Default mock values

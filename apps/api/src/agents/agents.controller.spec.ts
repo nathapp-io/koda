@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException as _ForbiddenException } from '@nestjs/common';
 
 describe('AgentsController', () => {
   let controller: AgentsController;

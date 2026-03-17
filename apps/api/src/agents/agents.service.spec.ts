@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { AgentsService, CreateAgentDto } from './agents.service';
+import { AgentsService, CreateAgentDto as _CreateAgentDto } from './agents.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import { createHmac } from 'crypto';
@@ -8,7 +8,7 @@ import { randomBytes } from 'crypto';
 describe('AgentsService', () => {
   let service: AgentsService;
   let prismaService: PrismaService;
-  let configService: ConfigService;
+  let _configService: ConfigService;
 
   const mockAgent = {
     id: 'agent-123',
@@ -44,7 +44,7 @@ describe('AgentsService', () => {
 
     service = module.get<AgentsService>(AgentsService);
     prismaService = module.get<PrismaService>(PrismaService);
-    configService = module.get<ConfigService>(ConfigService);
+    _configService = module.get<ConfigService>(ConfigService);
 
     mockConfigService.get.mockReturnValue('test-secret');
   });
@@ -55,7 +55,7 @@ describe('AgentsService', () => {
 
   describe('generateApiKey', () => {
     it('should generate random 32-byte hex key', async () => {
-      const agentId = 'agent-123';
+      const _agentId = 'agent-123';
       mockPrismaService.agent.create.mockResolvedValue(mockAgent);
       mockConfigService.get.mockReturnValue('test-secret');
 

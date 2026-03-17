@@ -6,8 +6,8 @@ import { ApiKeyAuthGuard } from './api-key-auth.guard';
 
 describe('CombinedAuthGuard', () => {
   let guard: CombinedAuthGuard;
-  let jwtAuthGuard: JwtAuthGuard;
-  let apiKeyAuthGuard: ApiKeyAuthGuard;
+  let _jwtAuthGuard: JwtAuthGuard;
+  let _apiKeyAuthGuard: ApiKeyAuthGuard;
 
   const mockJwtAuthGuard = {
     canActivate: jest.fn(),
@@ -27,8 +27,8 @@ describe('CombinedAuthGuard', () => {
     }).compile();
 
     guard = module.get<CombinedAuthGuard>(CombinedAuthGuard);
-    jwtAuthGuard = module.get<JwtAuthGuard>(JwtAuthGuard);
-    apiKeyAuthGuard = module.get<ApiKeyAuthGuard>(ApiKeyAuthGuard);
+    _jwtAuthGuard = module.get<JwtAuthGuard>(JwtAuthGuard);
+    _apiKeyAuthGuard = module.get<ApiKeyAuthGuard>(ApiKeyAuthGuard);
   });
 
   afterEach(() => {
@@ -72,11 +72,6 @@ describe('CombinedAuthGuard', () => {
 
     it('should succeed if JWT fails but ApiKey succeeds', async () => {
       const mockContext = {} as ExecutionContext;
-      const mockRequest = {
-        agent: { id: 'agent-123' },
-        actorType: 'agent',
-      };
-
       mockJwtAuthGuard.canActivate.mockRejectedValue(new UnauthorizedException('Invalid token'));
       mockApiKeyAuthGuard.canActivate.mockResolvedValue(true);
 
