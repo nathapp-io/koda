@@ -3,7 +3,7 @@
 ## ⚠️ Read First
 
 **Before writing any NestJS code**, read the skill at:
-`~/subrina-coder/skills/nathapp-nestjs-patterns/SKILL.md`
+`nathapp-nestjs-patterns`
 
 That skill contains the authoritative patterns for:
 - AppFactory bootstrap (Fastify)
