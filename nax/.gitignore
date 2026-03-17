@@ -1,0 +1,4 @@
+# nax temp files
+*.tmp
+.paused.json
+.nax-verifier-verdict.json

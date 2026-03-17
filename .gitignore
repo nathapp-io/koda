@@ -27,3 +27,20 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+
+# nax — generated files
+.nax-verifier-verdict.json
+
+# nax runtime
+nax.lock
+nax/features/*/runs/
+nax/features/*/plan/
+nax/features/*/status.json
+test/tmp/
+TEST_SUMMARY_*.md
+.nax-pids
+nax/metrics.json
+
+nax/**/runs/
+.nax-wt/
