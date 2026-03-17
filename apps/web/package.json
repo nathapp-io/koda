@@ -7,7 +7,8 @@
     "dev": "nuxt dev --port 3101",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
-    "lint": "eslint .",
+    "lint": "eslint \"./**/*.{vue,ts}\" --ignore-pattern \".nuxt/**\" --ignore-pattern \".output/**\" --max-warnings=0",
+    "lint:fix": "eslint \"./**/*.{vue,ts}\" --ignore-pattern \".nuxt/**\" --ignore-pattern \".output/**\" --fix",
     "type-check": "nuxt typecheck"
   },
   "dependencies": {
@@ -25,7 +26,9 @@
   },
   "devDependencies": {
     "@nuxt/devtools": "latest",
+    "@nuxt/eslint": "^0.7.0",
     "@types/node": "^22.0.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vue-tsc": "^2.0.0"
   }
 }

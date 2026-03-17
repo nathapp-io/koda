@@ -10,6 +10,7 @@
     "dev": "turbo run dev",
     "test": "turbo run test",
     "lint": "turbo run lint",
+    "type-check": "turbo run type-check",
     "db:generate": "prisma generate --schema=prisma/schema.prisma",
     "db:migrate": "prisma migrate dev --schema=prisma/schema.prisma",
     "db:migrate:prod": "prisma migrate deploy --schema=prisma/schema.prisma",
@@ -17,6 +18,9 @@
     "db:reset": "prisma migrate reset --schema=prisma/schema.prisma"
   },
   "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.57.0",
     "turbo": "^2.0.0",
     "typescript": "^5.4.0",
     "prisma": "^6.0.0",

@@ -87,9 +87,9 @@
     "requireTests": true,
     "commands": {
       "test": "bun run test",
-      "typecheck": "bun run typecheck",
+      "typecheck": "bun run type-check",
       "lint": "bun run lint",
-      "testScoped": "CI=1 bun test --timeout=60000 {{files}}"
+      "testScoped": "CI=true npx jest {{files}} --no-coverage --forceExit --testTimeout=60000 --rootDir=apps/api/src"
     },
     "forceExit": false,
     "detectOpenHandles": true,
@@ -132,7 +132,7 @@
       "lint"
     ],
     "commands": {
-      "typecheck": "bun run typecheck",
+      "typecheck": "bun run type-check",
       "lint": "bun run lint"
     },
     "pluginMode": "deferred"
