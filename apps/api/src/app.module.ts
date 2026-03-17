@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { PrismaModule } from '@nathapp/nestjs-prisma';
+import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { AgentsModule } from './agents/agents.module';
 import { ProjectsModule } from './projects/projects.module';
@@ -13,9 +13,7 @@ import { CommentsModule } from './comments/comments.module';
       isGlobal: true,
       envFilePath: '.env',
     }),
-    PrismaModule.forRoot({
-      isGlobal: true,
-    }),
+    PrismaModule,
     AuthModule,
     AgentsModule,
     ProjectsModule,
