@@ -1,0 +1,31 @@
+{
+  "name": "@nathapp/koda-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev --port 3101",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "lint": "eslint .",
+    "type-check": "nuxt typecheck"
+  },
+  "dependencies": {
+    "nuxt": "^3.16.0",
+    "vue": "^3.5.0",
+    "vue-router": "^4.0.0",
+    "@nuxtjs/tailwindcss": "^6.0.0",
+    "@nuxtjs/color-mode": "^3.0.0",
+    "shadcn-nuxt": "^0.10.0",
+    "radix-vue": "^1.0.0",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.0.0",
+    "lucide-vue-next": "^0.400.0",
+    "tailwind-merge": "^2.0.0"
+  },
+  "devDependencies": {
+    "@nuxt/devtools": "latest",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.4.0"
+  }
+}

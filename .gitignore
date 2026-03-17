@@ -1,0 +1,29 @@
+node_modules/
+dist/
+.output/
+.nuxt/
+.turbo/
+coverage/
+
+# DB
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

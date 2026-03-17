@@ -1,0 +1,170 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = env("DATABASE_PROVIDER")
+  url      = env("DATABASE_URL")
+}
+
+// ─── Users (Humans) ──────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         UserRole @default(MEMBER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  createdTickets  Ticket[]  @relation("TicketCreatedByUser")
+  assignedTickets Ticket[]  @relation("TicketAssignedToUser")
+  comments        Comment[]
+}
+
+enum UserRole {
+  ADMIN
+  MEMBER
+}
+
+// ─── Agents ──────────────────────────────────────────────────────────────────
+
+model Agent {
+  id                   String        @id @default(cuid())
+  name                 String
+  slug                 String        @unique
+  apiKeyHash           String        @unique
+  roles                AgentRole[]
+  capabilities         String[]
+  status               AgentStatus   @default(ACTIVE)
+  maxConcurrentTickets Int           @default(3)
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  projects        AgentProject[]
+  createdTickets  Ticket[]       @relation("TicketCreatedByAgent")
+  assignedTickets Ticket[]       @relation("TicketAssignedToAgent")
+  comments        Comment[]
+}
+
+enum AgentRole {
+  TRIAGER
+  DEVELOPER
+  REVIEWER
+}
+
+enum AgentStatus {
+  ACTIVE
+  PAUSED
+  OFFLINE
+}
+
+// ─── Projects ────────────────────────────────────────────────────────────────
+
+model Project {
+  id               String   @id @default(cuid())
+  name             String
+  slug             String   @unique
+  description      String?
+  gitRemoteUrl     String?
+  autoIndexOnClose Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  agents  AgentProject[]
+  tickets Ticket[]
+}
+
+model AgentProject {
+  agentId   String
+  projectId String
+  agent     Agent   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([agentId, projectId])
+}
+
+// ─── Tickets ─────────────────────────────────────────────────────────────────
+
+model Ticket {
+  id          String       @id @default(cuid())
+  projectId   String
+  number      Int
+  type        TicketType
+  title       String
+  description String?
+  status      TicketStatus @default(CREATED)
+  priority    Priority     @default(MEDIUM)
+
+  assignedToUserId  String?
+  assignedToAgentId String?
+  assignedToUser    User?   @relation("TicketAssignedToUser", fields: [assignedToUserId], references: [id])
+  assignedToAgent   Agent?  @relation("TicketAssignedToAgent", fields: [assignedToAgentId], references: [id])
+
+  createdByUserId  String?
+  createdByAgentId String?
+  createdByUser    User?   @relation("TicketCreatedByUser", fields: [createdByUserId], references: [id])
+  createdByAgent   Agent?  @relation("TicketCreatedByAgent", fields: [createdByAgentId], references: [id])
+
+  gitRefVersion String?
+  gitRefFile    String?
+  gitRefLine    Int?
+  gitRefUrl     String?
+
+  project  Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  comments Comment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, number])
+  @@index([projectId, status])
+  @@index([assignedToAgentId, status])
+}
+
+enum TicketType {
+  BUG
+  ENHANCEMENT
+}
+
+enum TicketStatus {
+  CREATED
+  VERIFIED
+  IN_PROGRESS
+  VERIFY_FIX
+  CLOSED
+  REJECTED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// ─── Comments ────────────────────────────────────────────────────────────────
+
+model Comment {
+  id       String      @id @default(cuid())
+  ticketId String
+  body     String
+  type     CommentType @default(GENERAL)
+
+  authorUserId  String?
+  authorAgentId String?
+  authorUser    User?   @relation(fields: [authorUserId], references: [id])
+  authorAgent   Agent?  @relation(fields: [authorAgentId], references: [id])
+
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+enum CommentType {
+  VERIFICATION
+  FIX_REPORT
+  REVIEW
+  STATUS_CHANGE
+  GENERAL
+}
