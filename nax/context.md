@@ -170,16 +170,6 @@ Bug / Enhancement:
 
 **Before writing any NestJS code**, read and follow the `nathapp-nestjs-patterns` skill:
 
-```
-~/.openclaw/skills/nathapp-nestjs-patterns/SKILL.md
-```
-
-or on Mac01:
-
-```
-/Users/subrinaai/Desktop/workspace/subrina-coder/skills/nathapp-nestjs-patterns/SKILL.md
-```
-
 This skill is the **authoritative source** for all Nathapp NestJS patterns including:
 - App bootstrapping with Fastify via `AppFactory`
 - JWT auth with CASL permissions
