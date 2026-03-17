@@ -6,7 +6,7 @@
     "build": "nest build",
     "dev": "nest start --watch",
     "start": "node dist/main",
-    "test": "jest --forceExit --passWithNoTests",
+    "test": "jest --forceExit --passWithNoTests --testPathIgnorePatterns=integration",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage --forceExit",
     "lint": "eslint \"{src,test}/**/*.ts\" --max-warnings=0",
