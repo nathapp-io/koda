@@ -97,6 +97,9 @@ describe('ProjectsService', () => {
       const invalidKeys = ['K', 'KODASOMETHING', 'koda', '1234', 'KO-DA'];
 
       for (const invalidKey of invalidKeys) {
+        mockPrismaService.project.findUnique.mockClear();
+        mockPrismaService.project.create.mockClear();
+
         const createDto = {
           name: 'Test',
           slug: 'test',
@@ -268,12 +271,14 @@ describe('ProjectsService', () => {
       };
 
       const updatedProject = { ...mockProject, ...updateDto };
-      mockPrismaService.project.findUnique.mockResolvedValueOnce(mockProject);
+      // Set up mocks for findUnique calls (only one call expected since no uniqueness checks needed)
+      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.project.update.mockResolvedValue(updatedProject);
 
       const result = await service.update('koda', updateDto);
 
       expect(result).toBeDefined();
+      expect(result).toEqual(updatedProject);
     });
   });
 

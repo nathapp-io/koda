@@ -72,9 +72,16 @@ export class ProjectsService {
   }
 
   async findBySlug(slug: string) {
-    return this.prisma.project.findUnique({
+    const project = await this.prisma.project.findUnique({
       where: { slug },
     });
+
+    // Filter out soft-deleted projects
+    if (project && project.deletedAt) {
+      return null;
+    }
+
+    return project;
   }
 
   async update(slug: string, updateProjectDto: UpdateProjectDto) {
