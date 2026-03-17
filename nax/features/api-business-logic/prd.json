@@ -61,7 +61,7 @@
       "title": "Ticket State Machine",
       "description": "Implement ticket state machine with validateTransition() and transition endpoints with automatic activity trail.\n\nFiles to create:\n- apps/api/src/tickets/state-machine/ticket-transitions.ts\n- apps/api/src/tickets/state-machine/ticket-transitions.spec.ts\n\nTransition rules (from → to, required comment type):\n- CREATED → VERIFIED (requires VERIFICATION comment)\n- CREATED → REJECTED (requires GENERAL comment)\n- VERIFIED → IN_PROGRESS (no comment required, auto on assign)\n- VERIFIED → REJECTED (requires GENERAL comment)\n- IN_PROGRESS → VERIFY_FIX (requires FIX_REPORT comment)\n- IN_PROGRESS → VERIFIED (requires GENERAL comment, sent back)\n- VERIFY_FIX → CLOSED (requires REVIEW comment)\n- VERIFY_FIX → IN_PROGRESS (requires REVIEW comment, fix failed)\n\nvalidateTransition(from, to, commentType?) throws BadRequestException if:\n- No rule found for the from→to pair\n- Rule requires a comment type but wrong/missing type provided\n\nTransition endpoints (add to tickets controller):\n- POST /api/projects/:slug/tickets/:ref/verify — CREATED → VERIFIED\n- POST /api/projects/:slug/tickets/:ref/start — VERIFIED → IN_PROGRESS\n- POST /api/projects/:slug/tickets/:ref/fix — IN_PROGRESS → VERIFY_FIX\n- POST /api/projects/:slug/tickets/:ref/verify-fix — VERIFY_FIX → CLOSED or → IN_PROGRESS\n- POST /api/projects/:slug/tickets/:ref/close — any valid → CLOSED\n- POST /api/projects/:slug/tickets/:ref/reject — CREATED or VERIFIED → REJECTED\n\nEvery transition endpoint must use prisma.$transaction to:\n1. Create comment with correct type and actor fields\n2. Update ticket status\n3. Create TicketActivity record (action: STATUS_CHANGE, fromStatus, toStatus, actor)\n\nTests (thorough — this is core business logic):\n- Every valid transition succeeds\n- Every invalid transition throws 400\n- Missing required comment type throws 400\n- Correct comment type passes\n- TicketActivity record created on every transition\n- Comment created on every transition",
       "complexity": "complex",
-      "status": "pending",
+      "status": "passed",
       "attempts": 0,
       "priorErrors": [],
       "priorFailures": [],
@@ -69,7 +69,8 @@
       "dependencies": [],
       "tags": [],
       "acceptanceCriteria": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "passes": true
     },
     {
       "id": "US-005",
@@ -102,5 +103,5 @@
       "storyPoints": 1
     }
   ],
-  "updatedAt": "2026-03-17T12:45:14.623Z"
+  "updatedAt": "2026-03-17T13:07:00.578Z"
 }
