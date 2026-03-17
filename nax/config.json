@@ -23,7 +23,7 @@
     "complexityRouting": {
       "simple": "fast",
       "medium": "balanced",
-      "complex": "balanced",
+      "complex": "powerful",
       "expert": "powerful"
     },
     "escalation": {
@@ -47,7 +47,7 @@
   },
   "agent": {
     "protocol": "acp"
-  },
+  },  
   "routing": {
     "strategy": "llm",
     "llm": {
@@ -60,12 +60,12 @@
   },
   "execution": {
     "permissionProfile": "unrestricted",
-    "maxIterations": 6,
+    "maxIterations": 6,    
     "iterationDelayMs": 2000,
     "costLimit": 8.0,
     "sessionTimeoutSeconds": 7200,
     "verificationTimeoutSeconds": 600,
-    "maxStoriesPerFeature": 15,
+    "maxStoriesPerFeature": 25,
     "rectification": {
       "enabled": true,
       "maxRetries": 2,
@@ -79,7 +79,8 @@
       "timeoutSeconds": 600,
       "acceptOnTimeout": true,
       "maxRectificationAttempts": 2
-    }
+    },
+    "smartTestRunner": true
   },
   "quality": {
     "requireTypecheck": true,
@@ -89,7 +90,7 @@
       "test": "bun run test",
       "typecheck": "bun run type-check",
       "lint": "bun run lint",
-      "testScoped": "CI=true npx jest {{files}} --no-coverage --forceExit --testTimeout=60000 --rootDir=apps/api/src"
+      "testScoped": "turbo run test --filter=[HEAD^1]"
     },
     "forceExit": false,
     "detectOpenHandles": true,
@@ -100,7 +101,33 @@
     "stripEnvVars": [
       "CLAUDECODE",
       "REPL_ID",
-      "AGENT"
+      "AGENT",
+      "GITLAB_ACCESS_TOKEN",
+      "GITHUB_TOKEN",
+      "GITHUB_ACCESS_TOKEN",
+      "GH_TOKEN",
+      "CI_GIT_TOKEN",
+      "CI_JOB_TOKEN",
+      "BITBUCKET_ACCESS_TOKEN",
+      "NPM_TOKEN",
+      "NPM_AUTH_TOKEN",
+      "YARN_NPM_AUTH_TOKEN",
+      "ANTHROPIC_API_KEY",
+      "OPENAI_API_KEY",
+      "GEMINI_API_KEY",
+      "COHERE_API_KEY",
+      "AWS_ACCESS_KEY_ID",
+      "AWS_SECRET_ACCESS_KEY",
+      "AWS_SESSION_TOKEN",
+      "GOOGLE_APPLICATION_CREDENTIALS",
+      "GCLOUD_SERVICE_KEY",
+      "AZURE_CLIENT_SECRET",
+      "AZURE_TENANT_ID",
+      "TELEGRAM_BOT_TOKEN",
+      "SLACK_TOKEN",
+      "SLACK_WEBHOOK_URL",
+      "SENTRY_AUTH_TOKEN",
+      "DATADOG_API_KEY"
     ],
     "environmentalEscalationDivisor": 2
   },
@@ -112,7 +139,13 @@
     "sessionTiers": {
       "testWriter": "balanced",
       "verifier": "fast"
-    }
+    },
+    "testWriterAllowedPaths": [
+      "src/index.ts",
+      "src/**/index.ts"
+    ],
+    "rollbackOnFailure": true,
+    "greenfieldDetection": true
   },
   "constitution": {
     "enabled": true,
@@ -120,7 +153,7 @@
     "maxTokens": 2000
   },
   "analyze": {
-    "llmEnhanced": false,
+    "llmEnhanced": true,
     "model": "balanced",
     "fallbackToKeywords": true,
     "maxCodebaseSummaryTokens": 5000
@@ -145,7 +178,10 @@
     "enabled": true,
     "maxRetries": 2,
     "generateTests": true,
-    "testPath": "acceptance.test.ts"
+    "testPath": "acceptance.test.ts",
+    "model": "sonnet",
+    "refinement": true,
+    "redGate": true
   },
   "context": {
     "fileInjection": "disabled",
@@ -153,16 +189,42 @@
       "enabled": true,
       "detail": "names-and-counts",
       "maxTokens": 500,
-      "testPattern": "**/*.test.{ts,js}",
+      "testPattern": "**/*.test.{ts,js,tsx,jsx}",
       "scopeToStory": true
+    },
+    "autoDetect": {
+      "enabled": true,
+      "maxFiles": 5,
+      "traceImports": false
+    }
+  },
+  "interaction": {
+    "plugin": "telegram",
+    "config": {},
+    "defaults": {
+      "timeout": 600000,
+      "fallback": "escalate"
+    },
+    "triggers": {
+      "security-review": true,
+      "cost-warning": true
     }
   },
   "precheck": {
     "storySizeGate": {
-      "enabled": false
+      "enabled": true,
+      "maxAcCount": 10,
+      "maxDescriptionLength": 2000,
+      "maxBulletPoints": 10
     }
   },
+  "prompts": {},
   "decompose": {
-    "trigger": "disabled"
+    "trigger": "auto",
+    "maxAcceptanceCriteria": 6,
+    "maxSubstories": 5,
+    "maxSubstoryComplexity": "medium",
+    "maxRetries": 2,
+    "model": "balanced"
   }
 }

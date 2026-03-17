@@ -166,6 +166,31 @@ Bug / Enhancement:
 - `PrismaService` lives in `apps/api/src/prisma/` — registered as global module
 - Ticket `number` is auto-incremented per project (not global) — use a transaction to safely get `MAX(number)+1`
 
+## NestJS Development — Mandatory Skill
+
+**Before writing any NestJS code**, read and follow the `nathapp-nestjs-patterns` skill:
+
+```
+~/.openclaw/skills/nathapp-nestjs-patterns/SKILL.md
+```
+
+or on Mac01:
+
+```
+/Users/subrinaai/Desktop/workspace/subrina-coder/skills/nathapp-nestjs-patterns/SKILL.md
+```
+
+This skill is the **authoritative source** for all Nathapp NestJS patterns including:
+- App bootstrapping with Fastify via `AppFactory`
+- JWT auth with CASL permissions
+- Module registration (`register` / `registerAsync`)
+- TDD-driven development with `@golevelup/ts-jest`
+- Enterprise-grade error handling and service patterns
+
+Do NOT use generic NestJS alternatives when a Nathapp pattern exists in this skill.
+
+---
+
 ## Coding Standards & Architecture Patterns
 
 - **NestJS patterns**: follow `@nathapp/nestjs-app` AppFactory bootstrap pattern
