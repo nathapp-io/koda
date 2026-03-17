@@ -1,0 +1,169 @@
+{
+  "project": "koda",
+  "feature": "api-foundation",
+  "branchName": "feat/api-foundation",
+  "createdAt": "2026-03-17T00:00:00.000Z",
+  "updatedAt": "2026-03-17T07:53:40.801237Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "App Bootstrap",
+      "description": "Create `apps/api/src/main.ts` and `apps/api/src/app.module.ts`. `main.ts` uses AppFactory.create with Fastify platform, prefix `api`, Swagger enabled (title: \"Koda API\"). Port from `API_PORT` env (default 3100). `app.module.ts` imports ConfigModule (global), PrismaModule, AuthModule, AgentsModule, ProjectsModule, TicketsModule, CommentsModule.",
+      "acceptanceCriteria": [
+        "`bun run build` passes without errors",
+        "Server starts on port 3100 by default",
+        "`GET /api/docs` returns HTTP 200",
+        "AppFactory.create is used with Fastify platform adapter",
+        "Global route prefix is set to `api`",
+        "Swagger title is 'Koda API'"
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "bootstrap"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "validated from LLM output"
+      }
+    },
+    {
+      "id": "US-002",
+      "title": "Prisma Module",
+      "description": "Create `apps/api/src/prisma/prisma.service.ts` and `prisma.module.ts`. PrismaService extends PrismaClient, implements OnModuleInit ($connect) and OnModuleDestroy ($disconnect). PrismaModule is `@Global()` and exports PrismaService. Run `bun run db:migrate --name init` to create the SQLite DB.",
+      "acceptanceCriteria": [
+        "PrismaService connects without error on module init",
+        "`prisma.user.count()` returns 0 on a fresh database",
+        "PrismaModule is decorated with `@Global()` and exports PrismaService",
+        "OnModuleInit calls `$connect()`",
+        "OnModuleDestroy calls `$disconnect()`",
+        "SQLite database file is created after migration"
+      ],
+      "tags": [
+        "feature",
+        "database",
+        "prisma"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "validated from LLM output"
+      }
+    },
+    {
+      "id": "US-003",
+      "title": "Human Auth (JWT)",
+      "description": "Create `apps/api/src/auth/` \u2014 module, controller, service, JWT strategy, guards, and DTOs. Implement register, login, refresh, and me endpoints. JWT payload includes `{ sub: userId, email, role }`. Access tokens use JWT_SECRET + JWT_EXPIRES_IN (default 7d). Refresh tokens use JWT_REFRESH_SECRET + JWT_REFRESH_EXPIRES_IN (default 30d). Passwords hashed with bcrypt rounds 12. Use `@nathapp/nestjs-auth` JwtStrategy pattern.",
+      "acceptanceCriteria": [
+        "`POST /api/auth/register` with `{ email, name, password }` creates a user and returns `{ accessToken, refreshToken, user }`",
+        "`POST /api/auth/login` with valid credentials returns token pair",
+        "`POST /api/auth/login` with wrong password returns 401",
+        "`POST /api/auth/refresh` with valid refresh token returns new token pair",
+        "`GET /api/auth/me` with valid access token returns current user",
+        "`GET /api/auth/me` without token returns 401",
+        "Passwords are stored as bcrypt hashes (rounds 12)",
+        "JWT payload contains `{ sub, email, role }`"
+      ],
+      "tags": [
+        "feature",
+        "security",
+        "auth",
+        "jwt"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "validated from LLM output"
+      }
+    },
+    {
+      "id": "US-004",
+      "title": "Agent Auth (API Key)",
+      "description": "Create `apps/api/src/agents/guards/api-key.guard.ts` and `src/auth/guards/combined-auth.guard.ts`. ApiKeyGuard extracts Bearer token, computes HMAC-SHA256 with API_KEY_SECRET env, looks up Agent by apiKeyHash, attaches agent to `request.agent`, sets `request.actorType = 'agent'`. Only ACTIVE agents are allowed (reject PAUSED/OFFLINE). CombinedAuthGuard tries JwtAuthGuard first, falls back to ApiKeyGuard. Create stub `POST /api/agents` (admin JWT only) that generates a random 32-byte hex raw key, computes HMAC-SHA256 hash, stores the hash, and returns the raw key once.",
+      "acceptanceCriteria": [
+        "Invalid API key returns 401",
+        "Valid API key for ACTIVE agent attaches agent to request and sets `actorType = 'agent'`",
+        "PAUSED or OFFLINE agent API key is rejected with 401",
+        "CombinedAuthGuard accepts valid JWT tokens",
+        "CombinedAuthGuard accepts valid API keys",
+        "`POST /api/agents` requires admin JWT; returns generated raw key once",
+        "Raw API key is not stored \u2014 only HMAC-SHA256 hash is persisted",
+        "HMAC-SHA256 is used (not bcrypt) for deterministic lookup"
+      ],
+      "tags": [
+        "feature",
+        "security",
+        "auth",
+        "api-key",
+        "agents"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "validated from LLM output"
+      }
+    },
+    {
+      "id": "US-005",
+      "title": "Global Guards & App Wiring",
+      "description": "Create `@IsPublic()` decorator and `@CurrentUser()` param decorator. Register CombinedAuthGuard globally via APP_GUARD. Mark auth endpoints as `@IsPublic()`. `@IsPublic()` uses SetMetadata('isPublic', true). CombinedAuthGuard checks isPublic metadata and skips auth for public routes. `@CurrentUser()` returns `req.user` (JWT) or `req.agent` (API key) based on auth type.",
+      "acceptanceCriteria": [
+        "Protected endpoint returns 401 without any auth",
+        "`@IsPublic()` endpoint is accessible without auth credentials",
+        "`@CurrentUser()` returns the JWT user when authenticated via JWT",
+        "`@CurrentUser()` returns the agent when authenticated via API key",
+        "CombinedAuthGuard is registered globally via APP_GUARD",
+        "Auth endpoints (register, login, refresh) are decorated with `@IsPublic()`"
+      ],
+      "tags": [
+        "feature",
+        "security",
+        "auth",
+        "guards",
+        "decorators"
+      ],
+      "dependencies": [
+        "US-003",
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "validated from LLM output"
+      }
+    }
+  ]
+}
