@@ -1,0 +1,49 @@
+{
+  "project": "koda",
+  "branchName": "feat/api-business-logic",
+  "feature": "api-business-logic",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Projects CRUD",
+      "description": "Implement full Projects CRUD with soft delete.\n\nFiles to create:\n- apps/api/src/projects/projects.module.ts\n- apps/api/src/projects/projects.controller.ts\n- apps/api/src/projects/projects.service.ts\n- apps/api/src/projects/dto/create-project.dto.ts\n- apps/api/src/projects/dto/update-project.dto.ts\n- apps/api/src/projects/dto/project-response.dto.ts\n\nEndpoints:\n- GET /api/projects — list all (exclude deletedAt IS NOT NULL)\n- POST /api/projects — create (JWT Admin only)\n- GET /api/projects/:slug — get by slug\n- PATCH /api/projects/:slug — update (JWT Admin only)\n- DELETE /api/projects/:slug — soft delete (set deletedAt, JWT Admin only)\n\nCreateProjectDto fields: name (string, min 2), slug (lowercase alphanumeric hyphens), key (2-6 uppercase letters), description? (string), gitRemoteUrl? (url), autoIndexOnClose? (boolean)\n\nService logic:\n- findAll() filters WHERE deletedAt IS NULL\n- Validate key and slug uniqueness before create (throw 409)\n- softDelete sets deletedAt = now()\n\nTests:\n- Create project with valid data → 201\n- Create project with duplicate slug → 409\n- Create project with duplicate key → 409\n- Create project with invalid key format → 400\n- Soft delete sets deletedAt, excluded from list\n- Non-admin cannot create/delete → 403",
+      "complexity": "medium",
+      "status": "passed"
+    },
+    {
+      "id": "US-002",
+      "title": "Agents CRUD",
+      "description": "Implement full Agents CRUD with API key management.\n\nFiles to create:\n- apps/api/src/agents/agents.controller.ts (extend existing module)\n- apps/api/src/agents/dto/update-agent.dto.ts\n- apps/api/src/agents/dto/agent-response.dto.ts\n\nEndpoints:\n- GET /api/agents — list agents\n- GET /api/agents/me — get own profile (API key auth)\n- GET /api/agents/:slug — get by slug\n- POST /api/agents — create (JWT Admin). Returns raw API key ONCE.\n- PATCH /api/agents/:slug — update status/capabilities/roles (JWT Admin)\n- POST /api/agents/:slug/rotate-key — rotate API key (JWT Admin). Returns new raw key.\n\nAPI key generation: crypto.randomBytes(32).toString('hex'), HMAC-SHA256 with API_KEY_SECRET env var, store only hash.\n\nupdateRoles(slug, roles[]): delete all AgentRoleEntry for agent, insert new ones.\nupdateCapabilities(slug, capabilities[]): same pattern using AgentCapability join table.\nrotateKey(slug): generate new key, update apiKeyHash, return new raw key.\n\nTests:\n- Create agent returns raw API key in response (shown once)\n- Rotate key invalidates old key, new key authenticates correctly\n- Update roles replaces all role entries (not appends)\n- Update capabilities replaces all capability entries (not appends)\n- GET /agents/me returns own profile with roles and capabilities included",
+      "complexity": "medium",
+      "status": "passed"
+    },
+    {
+      "id": "US-003",
+      "title": "Tickets CRUD",
+      "description": "Implement full Tickets CRUD with auto-incrementing ticket numbers and dual-ref resolution.\n\nFiles to create:\n- apps/api/src/tickets/tickets.controller.ts\n- apps/api/src/tickets/tickets.service.ts\n- apps/api/src/tickets/dto/create-ticket.dto.ts\n- apps/api/src/tickets/dto/update-ticket.dto.ts\n- apps/api/src/tickets/dto/transition-ticket.dto.ts\n- apps/api/src/tickets/dto/ticket-response.dto.ts\n\nEndpoints:\n- POST /api/projects/:slug/tickets — create ticket\n- GET /api/projects/:slug/tickets — list tickets (filters: status, type, priority, assignedTo, unassigned, limit, page)\n- GET /api/projects/:slug/tickets/:ref — get by ref (KODA-42 or CUID)\n- PATCH /api/projects/:slug/tickets/:ref — update title/description/priority\n- DELETE /api/projects/:slug/tickets/:ref — soft delete (JWT Admin)\n- POST /api/projects/:slug/tickets/:ref/assign — assign to user or agent\n\nTicket number auto-increment (transaction-safe):\n  Use prisma.$transaction, find last ticket by number DESC, increment by 1.\n\nTicket ref resolution — resolveTicket(projectSlug, ref):\n  If ref matches /^([A-Z]+)-(\\d+)$/, look up by projectId_number composite unique.\n  Otherwise look up by CUID id.\n\nTests:\n- Create ticket auto-assigns correct sequential number\n- Concurrent creates don't produce duplicate numbers\n- Ticket resolved by KODA-42 format\n- Ticket resolved by CUID\n- List filters work correctly (status, type, priority, assignedTo, unassigned)\n- Soft delete excludes from list",
+      "complexity": "complex",
+      "status": "pending"
+    },
+    {
+      "id": "US-004",
+      "title": "Ticket State Machine",
+      "description": "Implement ticket state machine with validateTransition() and transition endpoints with automatic activity trail.\n\nFiles to create:\n- apps/api/src/tickets/state-machine/ticket-transitions.ts\n- apps/api/src/tickets/state-machine/ticket-transitions.spec.ts\n\nTransition rules (from → to, required comment type):\n- CREATED → VERIFIED (requires VERIFICATION comment)\n- CREATED → REJECTED (requires GENERAL comment)\n- VERIFIED → IN_PROGRESS (no comment required, auto on assign)\n- VERIFIED → REJECTED (requires GENERAL comment)\n- IN_PROGRESS → VERIFY_FIX (requires FIX_REPORT comment)\n- IN_PROGRESS → VERIFIED (requires GENERAL comment, sent back)\n- VERIFY_FIX → CLOSED (requires REVIEW comment)\n- VERIFY_FIX → IN_PROGRESS (requires REVIEW comment, fix failed)\n\nvalidateTransition(from, to, commentType?) throws BadRequestException if:\n- No rule found for the from→to pair\n- Rule requires a comment type but wrong/missing type provided\n\nTransition endpoints (add to tickets controller):\n- POST /api/projects/:slug/tickets/:ref/verify — CREATED → VERIFIED\n- POST /api/projects/:slug/tickets/:ref/start — VERIFIED → IN_PROGRESS\n- POST /api/projects/:slug/tickets/:ref/fix — IN_PROGRESS → VERIFY_FIX\n- POST /api/projects/:slug/tickets/:ref/verify-fix — VERIFY_FIX → CLOSED or → IN_PROGRESS\n- POST /api/projects/:slug/tickets/:ref/close — any valid → CLOSED\n- POST /api/projects/:slug/tickets/:ref/reject — CREATED or VERIFIED → REJECTED\n\nEvery transition endpoint must use prisma.$transaction to:\n1. Create comment with correct type and actor fields\n2. Update ticket status\n3. Create TicketActivity record (action: STATUS_CHANGE, fromStatus, toStatus, actor)\n\nTests (thorough — this is core business logic):\n- Every valid transition succeeds\n- Every invalid transition throws 400\n- Missing required comment type throws 400\n- Correct comment type passes\n- TicketActivity record created on every transition\n- Comment created on every transition",
+      "complexity": "complex",
+      "status": "pending"
+    },
+    {
+      "id": "US-005",
+      "title": "Comments CRUD",
+      "description": "Implement Comments CRUD with author-only edit protection.\n\nFiles to create:\n- apps/api/src/comments/comments.controller.ts\n- apps/api/src/comments/comments.service.ts\n- apps/api/src/comments/dto/create-comment.dto.ts\n- apps/api/src/comments/dto/update-comment.dto.ts\n- apps/api/src/comments/dto/comment-response.dto.ts\n\nEndpoints:\n- GET /api/projects/:slug/tickets/:ref/comments — list comments for ticket\n- POST /api/projects/:slug/tickets/:ref/comments — add comment (any auth)\n- PATCH /api/comments/:id — edit comment body (own author only → 403 otherwise)\n- DELETE /api/comments/:id — delete comment (own author or JWT Admin)\n\nComment type stored from dto. Author identified by userId or agentId on the comment record.\n\nTests:\n- Add comment to ticket — comment appears in list\n- Edit own comment succeeds\n- Edit another user's comment returns 403\n- Delete own comment succeeds\n- Delete another user's comment as admin succeeds\n- Comment type stored correctly",
+      "complexity": "medium",
+      "status": "pending"
+    },
+    {
+      "id": "US-006",
+      "title": "Labels CRUD",
+      "description": "Implement Labels CRUD per project and label assignment on tickets.\n\nFiles to create:\n- apps/api/src/labels/labels.module.ts\n- apps/api/src/labels/labels.controller.ts\n- apps/api/src/labels/labels.service.ts\n- apps/api/src/labels/dto/create-label.dto.ts\n- apps/api/src/labels/dto/label-response.dto.ts\n\nEndpoints:\n- GET /api/projects/:slug/labels — list labels for project\n- POST /api/projects/:slug/labels — create label (JWT Admin)\n- DELETE /api/projects/:slug/labels/:id — delete label (JWT Admin)\n- POST /api/projects/:slug/tickets/:ref/labels — assign label to ticket (any auth)\n- DELETE /api/projects/:slug/tickets/:ref/labels/:id — remove label from ticket (any auth)\n\nLabel assignment must write a TicketActivity record:\n  action: LABEL_CHANGE, newValue: labelName, actor fields\n\nLabels must appear in ticket response when fetching a ticket.\n\nTests:\n- Create label per project\n- Assign label to ticket — label appears in ticket GET response\n- Remove label from ticket\n- TicketActivity record created on label assign/remove\n- Label scoped to project (cannot assign label from another project)",
+      "complexity": "medium",
+      "status": "pending"
+    }
+  ]
+}
