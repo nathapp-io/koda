@@ -1,3 +1,21 @@
+# Codex Instructions
+
+This file is auto-generated from `nax/context.md`.
+DO NOT EDIT MANUALLY — run `nax generate` to regenerate.
+
+---
+
+## Project Metadata
+
+> Auto-injected by `nax generate`
+
+**Project:** `koda`
+
+**Language:** TypeScript
+
+**Key dependencies:** @prisma/client, @typescript-eslint/eslint-plugin, @typescript-eslint/parser, typescript, prisma
+
+---
 # Koda — Dev Ticket Tracker
 
 Turborepo monorepo with NestJS 11 + Fastify API, Nuxt 3 + Shadcn-nuxt web UI, and a Commander.js CLI. Built for human developers and AI agents to collaborate on bug fixes and enhancement tickets.

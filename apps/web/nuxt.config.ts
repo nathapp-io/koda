@@ -26,4 +26,4 @@ export default defineNuxtConfig({
   typescript: {
     strict: true,
   },
-})
+} as any)

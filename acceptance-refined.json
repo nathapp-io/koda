@@ -1,0 +1,296 @@
+[
+  {
+    "acId": "AC-1",
+    "original": "main.ts uses AppFactory.create with Fastify platform",
+    "refined": "main.ts uses AppFactory.create with Fastify platform",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-2",
+    "original": "API prefix is set to 'api'",
+    "refined": "API prefix is set to 'api'",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-3",
+    "original": "Swagger enabled at /api/docs with title 'Koda API'",
+    "refined": "Swagger enabled at /api/docs with title 'Koda API'",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-4",
+    "original": "app.module.ts imports ConfigModule (global), PrismaModule, AuthModule, AgentsModule, ProjectsModule, TicketsModule, CommentsModule",
+    "refined": "app.module.ts imports ConfigModule (global), PrismaModule, AuthModule, AgentsModule, ProjectsModule, TicketsModule, CommentsModule",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-5",
+    "original": "Server starts on port from API_PORT env (default 3100)",
+    "refined": "Server starts on port from API_PORT env (default 3100)",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-6",
+    "original": "bun run build passes",
+    "refined": "bun run build passes",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-7",
+    "original": "GET /api/docs returns 200",
+    "refined": "GET /api/docs returns 200",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-8",
+    "original": "PrismaService extends PrismaClient",
+    "refined": "PrismaService extends PrismaClient",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-9",
+    "original": "PrismaService implements OnModuleInit with $connect",
+    "refined": "PrismaService implements OnModuleInit with $connect",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-10",
+    "original": "PrismaService implements OnModuleDestroy with $disconnect",
+    "refined": "PrismaService implements OnModuleDestroy with $disconnect",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-11",
+    "original": "PrismaModule decorated with @Global()",
+    "refined": "PrismaModule decorated with @Global()",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-12",
+    "original": "PrismaModule exports PrismaService",
+    "refined": "PrismaModule exports PrismaService",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-13",
+    "original": "Database migration 'init' created successfully",
+    "refined": "Database migration 'init' created successfully",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-14",
+    "original": "prisma.user.count() returns 0 without error",
+    "refined": "prisma.user.count() returns 0 without error",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-15",
+    "original": "POST /api/auth/register accepts { email, name, password }, creates User with bcrypt hash (12 rounds), returns { accessToken, refreshToken, user }",
+    "refined": "POST /api/auth/register accepts { email, name, password }, creates User with bcrypt hash (12 rounds), returns { accessToken, refreshToken, user }",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-16",
+    "original": "POST /api/auth/login accepts { email, password }, verifies credentials, returns token pair",
+    "refined": "POST /api/auth/login accepts { email, password }, verifies credentials, returns token pair",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-17",
+    "original": "POST /api/auth/refresh accepts Bearer refreshToken, returns new access and refresh tokens",
+    "refined": "POST /api/auth/refresh accepts Bearer refreshToken, returns new access and refresh tokens",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-18",
+    "original": "GET /api/auth/me accepts Bearer accessToken, returns authenticated User",
+    "refined": "GET /api/auth/me accepts Bearer accessToken, returns authenticated User",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-19",
+    "original": "JWT payload contains sub (userId), email, role",
+    "refined": "JWT payload contains sub (userId), email, role",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-20",
+    "original": "Invalid password returns 401",
+    "refined": "Invalid password returns 401",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-21",
+    "original": "Missing token on /api/auth/me returns 401",
+    "refined": "Missing token on /api/auth/me returns 401",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-22",
+    "original": "All endpoints properly documented in Swagger",
+    "refined": "All endpoints properly documented in Swagger",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-23",
+    "original": "ApiKeyGuard extracts Bearer token from Authorization header",
+    "refined": "ApiKeyGuard extracts Bearer token from Authorization header",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-24",
+    "original": "ApiKeyGuard computes HMAC-SHA256 with API_KEY_SECRET env",
+    "refined": "ApiKeyGuard computes HMAC-SHA256 with API_KEY_SECRET env",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-25",
+    "original": "ApiKeyGuard looks up Agent by apiKeyHash",
+    "refined": "ApiKeyGuard looks up Agent by apiKeyHash",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-26",
+    "original": "ApiKeyGuard attaches agent to request.agent and sets request.actorType = 'agent'",
+    "refined": "ApiKeyGuard attaches agent to request.agent and sets request.actorType = 'agent'",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-27",
+    "original": "Only ACTIVE agents accepted (reject PAUSED/OFFLINE)",
+    "refined": "Only ACTIVE agents accepted (reject PAUSED/OFFLINE)",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-28",
+    "original": "POST /api/agents generates random 32-byte hex key",
+    "refined": "POST /api/agents generates random 32-byte hex key",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-29",
+    "original": "POST /api/agents stores HMAC-SHA256 hash in database",
+    "refined": "POST /api/agents stores HMAC-SHA256 hash in database",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-30",
+    "original": "POST /api/agents returns raw key ONCE to client",
+    "refined": "POST /api/agents returns raw key ONCE to client",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-31",
+    "original": "CombinedAuthGuard attempts JWT first, falls back to ApiKeyGuard",
+    "refined": "CombinedAuthGuard attempts JWT first, falls back to ApiKeyGuard",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-32",
+    "original": "Invalid API key returns 401",
+    "refined": "Invalid API key returns 401",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-33",
+    "original": "Valid API key attaches agent to request",
+    "refined": "Valid API key attaches agent to request",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-34",
+    "original": "@IsPublic() decorator uses SetMetadata('isPublic', true)",
+    "refined": "@IsPublic() decorator uses SetMetadata('isPublic', true)",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-35",
+    "original": "CombinedAuthGuard checks isPublic metadata before auth",
+    "refined": "CombinedAuthGuard checks isPublic metadata before auth",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-36",
+    "original": "Public routes accessible without authentication",
+    "refined": "Public routes accessible without authentication",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-37",
+    "original": "Protected endpoints return 401 without token",
+    "refined": "Protected endpoints return 401 without token",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-38",
+    "original": "CombinedAuthGuard registered globally via APP_GUARD",
+    "refined": "CombinedAuthGuard registered globally via APP_GUARD",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-39",
+    "original": "@CurrentUser() returns req.user for JWT auth",
+    "refined": "@CurrentUser() returns req.user for JWT auth",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-40",
+    "original": "@CurrentUser() returns req.agent for API key auth",
+    "refined": "@CurrentUser() returns req.agent for API key auth",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-41",
+    "original": "Auth endpoints (/register, /login, /refresh) marked @IsPublic()",
+    "refined": "Auth endpoints (/register, /login, /refresh) marked @IsPublic()",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-42",
+    "original": "Integration tests verify both auth flows work end-to-end",
+    "refined": "Integration tests verify both auth flows work end-to-end",
+    "testable": true,
+    "storyId": "US-001"
+  }
+]

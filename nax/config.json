@@ -1,230 +1,229 @@
 {
-  "version": 1,
-  "models": {
-    "fast": {
-      "provider": "anthropic",
-      "model": "haiku"
-    },
-    "balanced": {
-      "provider": "anthropic",
-      "model": "sonnet"
-    },
-    "powerful": {
-      "provider": "anthropic",
-      "model": "sonnet"
-    }
-  },
-  "autoMode": {
-    "enabled": true,
-    "defaultAgent": "claude",
-    "fallbackOrder": [
-      "claude"
-    ],
-    "complexityRouting": {
-      "simple": "fast",
-      "medium": "balanced",
-      "complex": "powerful",
-      "expert": "powerful"
-    },
-    "escalation": {
-      "enabled": true,
-      "tierOrder": [
-        {
-          "tier": "fast",
-          "attempts": 3
+    "version": 1,
+    "models": {
+        "fast": {
+            "provider": "anthropic",
+            "model": "haiku"
         },
-        {
-          "tier": "balanced",
-          "attempts": 2
+        "balanced": {
+            "provider": "anthropic",
+            "model": "sonnet"
         },
-        {
-          "tier": "powerful",
-          "attempts": 1
+        "powerful": {
+            "provider": "anthropic",
+            "model": "sonnet"
         }
-      ],
-      "escalateEntireBatch": false
+    },
+    "autoMode": {
+        "enabled": true,
+        "defaultAgent": "claude",
+        "fallbackOrder": ["claude"],
+        "complexityRouting": {
+            "simple": "fast",
+            "medium": "balanced",
+            "complex": "powerful",
+            "expert": "powerful"
+        },
+        "escalation": {
+            "enabled": true,
+            "tierOrder": [
+                {
+                    "tier": "fast",
+                    "attempts": 3
+                },
+                {
+                    "tier": "balanced",
+                    "attempts": 2
+                },
+                {
+                    "tier": "powerful",
+                    "attempts": 1
+                }
+            ],
+            "escalateEntireBatch": false
+        }
+    },
+    "agent": {
+        "protocol": "acp"
+    },
+    "routing": {
+        "strategy": "llm",
+        "llm": {
+            "model": "fast",
+            "fallbackToKeywords": true,
+            "cacheDecisions": true,
+            "mode": "hybrid",
+            "timeoutMs": 60000
+        }
+    },
+    "execution": {
+        "permissionProfile": "unrestricted",
+        "maxIterations": 6,
+        "iterationDelayMs": 2000,
+        "costLimit": 8.0,
+        "sessionTimeoutSeconds": 7200,
+        "verificationTimeoutSeconds": 600,
+        "maxStoriesPerFeature": 25,
+        "rectification": {
+            "enabled": true,
+            "maxRetries": 2,
+            "fullSuiteTimeoutSeconds": 600,
+            "maxFailureSummaryChars": 2000,
+            "abortOnIncreasingFailures": true
+        },
+        "regressionGate": {
+            "enabled": true,
+            "mode": "deferred",
+            "timeoutSeconds": 600,
+            "acceptOnTimeout": true,
+            "maxRectificationAttempts": 2
+        },
+        "smartTestRunner": {
+            "enable": true,
+            "testFilePatterns": ["**/**/**.spec.ts"]
+        }
+    },
+    "quality": {
+        "requireTypecheck": true,
+        "requireLint": true,
+        "requireTests": true,
+        "commands": {
+            "test": "bun run --cwd apps/api test:unit",
+            "typecheck": "bun run --cwd apps/api type-check",
+            "lint": "bun run --cwd apps/api lint",
+            "lintFix": "bun run --cwd apps/api lint:fix",
+            "formatFix": "bun run --cwd apps/api lint:fix",
+            "testScoped": "bun run --cwd apps/api test:unit"
+        },
+        "forceExit": false,
+        "detectOpenHandles": true,
+        "detectOpenHandlesRetries": 1,
+        "gracePeriodMs": 5000,
+        "drainTimeoutMs": 2000,
+        "shell": "/bin/sh",
+        "stripEnvVars": [
+            "CLAUDECODE",
+            "REPL_ID",
+            "AGENT",
+            "GITLAB_ACCESS_TOKEN",
+            "GITHUB_TOKEN",
+            "GITHUB_ACCESS_TOKEN",
+            "GH_TOKEN",
+            "CI_GIT_TOKEN",
+            "CI_JOB_TOKEN",
+            "BITBUCKET_ACCESS_TOKEN",
+            "NPM_TOKEN",
+            "NPM_AUTH_TOKEN",
+            "YARN_NPM_AUTH_TOKEN",
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
+            "GEMINI_API_KEY",
+            "COHERE_API_KEY",
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_SESSION_TOKEN",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            "GCLOUD_SERVICE_KEY",
+            "AZURE_CLIENT_SECRET",
+            "AZURE_TENANT_ID",
+            "TELEGRAM_BOT_TOKEN",
+            "SLACK_TOKEN",
+            "SLACK_WEBHOOK_URL",
+            "SENTRY_AUTH_TOKEN",
+            "DATADOG_API_KEY"
+        ],
+        "environmentalEscalationDivisor": 2
+    },
+    "tdd": {
+        "maxRetries": 2,
+        "autoVerifyIsolation": true,
+        "autoApproveVerifier": true,
+        "strategy": "auto",
+        "sessionTiers": {
+            "testWriter": "balanced",
+            "verifier": "fast"
+        },
+        "testWriterAllowedPaths": ["src/index.ts", "src/**/index.ts"],
+        "rollbackOnFailure": true,
+        "greenfieldDetection": true
+    },
+    "constitution": {
+        "enabled": true,
+        "path": "constitution.md",
+        "maxTokens": 2000
+    },
+    "analyze": {
+        "llmEnhanced": true,
+        "model": "balanced",
+        "fallbackToKeywords": true,
+        "maxCodebaseSummaryTokens": 5000
+    },
+    "review": {
+        "enabled": true,
+        "checks": ["typecheck", "lint"],
+        "commands": {
+            "typecheck": "bun run --cwd apps/api type-check",
+            "lint": "bun run --cwd apps/api lint",
+            "lintFix": "bun run --cwd apps/api lint:fix",
+            "formatFix": "bun run --cwd apps/api lint:fix"
+        },
+        "pluginMode": "deferred"
+    },
+    "plan": {
+        "model": "balanced",
+        "outputPath": "spec.md"
+    },
+    "acceptance": {
+        "enabled": true,
+        "maxRetries": 2,
+        "generateTests": true,
+        "testPath": "acceptance.test.ts",
+        "model": "balanced",
+        "refinement": true,
+        "redGate": true
+    },
+    "context": {
+        "fileInjection": "disabled",
+        "testCoverage": {
+            "enabled": true,
+            "detail": "names-and-counts",
+            "maxTokens": 500,
+            "testPattern": "**/*.test.{ts,js,tsx,jsx}",
+            "scopeToStory": true
+        },
+        "autoDetect": {
+            "enabled": true,
+            "maxFiles": 5,
+            "traceImports": false
+        }
+    },
+    "interaction": {
+        "plugin": "telegram",
+        "config": {},
+        "defaults": {
+            "timeout": 600000,
+            "fallback": "escalate"
+        },
+        "triggers": {
+            "security-review": true,
+            "cost-warning": true
+        }
+    },
+    "precheck": {
+        "storySizeGate": {
+            "enabled": true,
+            "maxAcCount": 10,
+            "maxDescriptionLength": 2000,
+            "maxBulletPoints": 10
+        }
+    },
+    "prompts": {},
+    "decompose": {
+        "trigger": "auto",
+        "maxAcceptanceCriteria": 6,
+        "maxSubstories": 5,
+        "maxSubstoryComplexity": "medium",
+        "maxRetries": 2,
+        "model": "balanced"
     }
-  },
-  "agent": {
-    "protocol": "acp"
-  },  
-  "routing": {
-    "strategy": "llm",
-    "llm": {
-      "model": "fast",
-      "fallbackToKeywords": true,
-      "cacheDecisions": true,
-      "mode": "hybrid",
-      "timeoutMs": 60000
-    }
-  },
-  "execution": {
-    "permissionProfile": "unrestricted",
-    "maxIterations": 6,    
-    "iterationDelayMs": 2000,
-    "costLimit": 8.0,
-    "sessionTimeoutSeconds": 7200,
-    "verificationTimeoutSeconds": 600,
-    "maxStoriesPerFeature": 25,
-    "rectification": {
-      "enabled": true,
-      "maxRetries": 2,
-      "fullSuiteTimeoutSeconds": 600,
-      "maxFailureSummaryChars": 2000,
-      "abortOnIncreasingFailures": true
-    },
-    "regressionGate": {
-      "enabled": true,
-      "mode": "deferred",
-      "timeoutSeconds": 600,
-      "acceptOnTimeout": true,
-      "maxRectificationAttempts": 2
-    },
-    "smartTestRunner": true
-  },
-  "quality": {
-    "requireTypecheck": true,
-    "requireLint": true,
-    "requireTests": true,
-    "commands": {
-      "test": "bun run test",
-      "typecheck": "bun run type-check",
-      "lint": "bun run lint",
-      "testScoped": "turbo run test --filter=[HEAD^1]"
-    },
-    "forceExit": false,
-    "detectOpenHandles": true,
-    "detectOpenHandlesRetries": 1,
-    "gracePeriodMs": 5000,
-    "drainTimeoutMs": 2000,
-    "shell": "/bin/sh",
-    "stripEnvVars": [
-      "CLAUDECODE",
-      "REPL_ID",
-      "AGENT",
-      "GITLAB_ACCESS_TOKEN",
-      "GITHUB_TOKEN",
-      "GITHUB_ACCESS_TOKEN",
-      "GH_TOKEN",
-      "CI_GIT_TOKEN",
-      "CI_JOB_TOKEN",
-      "BITBUCKET_ACCESS_TOKEN",
-      "NPM_TOKEN",
-      "NPM_AUTH_TOKEN",
-      "YARN_NPM_AUTH_TOKEN",
-      "ANTHROPIC_API_KEY",
-      "OPENAI_API_KEY",
-      "GEMINI_API_KEY",
-      "COHERE_API_KEY",
-      "AWS_ACCESS_KEY_ID",
-      "AWS_SECRET_ACCESS_KEY",
-      "AWS_SESSION_TOKEN",
-      "GOOGLE_APPLICATION_CREDENTIALS",
-      "GCLOUD_SERVICE_KEY",
-      "AZURE_CLIENT_SECRET",
-      "AZURE_TENANT_ID",
-      "TELEGRAM_BOT_TOKEN",
-      "SLACK_TOKEN",
-      "SLACK_WEBHOOK_URL",
-      "SENTRY_AUTH_TOKEN",
-      "DATADOG_API_KEY"
-    ],
-    "environmentalEscalationDivisor": 2
-  },
-  "tdd": {
-    "maxRetries": 2,
-    "autoVerifyIsolation": true,
-    "autoApproveVerifier": true,
-    "strategy": "auto",
-    "sessionTiers": {
-      "testWriter": "balanced",
-      "verifier": "fast"
-    },
-    "testWriterAllowedPaths": [
-      "src/index.ts",
-      "src/**/index.ts"
-    ],
-    "rollbackOnFailure": true,
-    "greenfieldDetection": true
-  },
-  "constitution": {
-    "enabled": true,
-    "path": "constitution.md",
-    "maxTokens": 2000
-  },
-  "analyze": {
-    "llmEnhanced": true,
-    "model": "balanced",
-    "fallbackToKeywords": true,
-    "maxCodebaseSummaryTokens": 5000
-  },
-  "review": {
-    "enabled": true,
-    "checks": [
-      "typecheck",
-      "lint"
-    ],
-    "commands": {
-      "typecheck": "bun run type-check",
-      "lint": "bun run lint"
-    },
-    "pluginMode": "deferred"
-  },
-  "plan": {
-    "model": "balanced",
-    "outputPath": "spec.md"
-  },
-  "acceptance": {
-    "enabled": true,
-    "maxRetries": 2,
-    "generateTests": true,
-    "testPath": "acceptance.test.ts",
-    "model": "balanced",
-    "refinement": true,
-    "redGate": true
-  },
-  "context": {
-    "fileInjection": "disabled",
-    "testCoverage": {
-      "enabled": true,
-      "detail": "names-and-counts",
-      "maxTokens": 500,
-      "testPattern": "**/*.test.{ts,js,tsx,jsx}",
-      "scopeToStory": true
-    },
-    "autoDetect": {
-      "enabled": true,
-      "maxFiles": 5,
-      "traceImports": false
-    }
-  },
-  "interaction": {
-    "plugin": "telegram",
-    "config": {},
-    "defaults": {
-      "timeout": 600000,
-      "fallback": "escalate"
-    },
-    "triggers": {
-      "security-review": true,
-      "cost-warning": true
-    }
-  },
-  "precheck": {
-    "storySizeGate": {
-      "enabled": true,
-      "maxAcCount": 10,
-      "maxDescriptionLength": 2000,
-      "maxBulletPoints": 10
-    }
-  },
-  "prompts": {},
-  "decompose": {
-    "trigger": "auto",
-    "maxAcceptanceCriteria": 6,
-    "maxSubstories": 5,
-    "maxSubstoryComplexity": "medium",
-    "maxRetries": 2,
-    "model": "balanced"
-  }
 }
