@@ -26,15 +26,15 @@ export class UpdateProjectDto {
   slug?: string;
 
   @ApiProperty({
-    description: 'Project key - 2-6 uppercase alphanumeric characters',
+    description: 'Project key - 2-6 uppercase letters',
     example: 'UPDATED',
     required: false,
-    pattern: '^[A-Z0-9]{2,6}$',
+    pattern: '^[A-Z]{2,6}$',
   })
   @IsOptional()
   @IsString()
-  @Matches(/^[A-Z0-9]{2,6}$/, {
-    message: 'Key must be 2-6 uppercase alphanumeric characters',
+  @Matches(/^[A-Z]{2,6}$/, {
+    message: 'Key must be 2-6 uppercase letters',
   })
   key?: string;
 

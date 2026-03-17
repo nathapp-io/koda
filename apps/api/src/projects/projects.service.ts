@@ -18,20 +18,16 @@ export class ProjectsService {
       throw new BadRequestException('Name must be at least 2 characters long');
     }
 
-    // Validate slug format
+    // Validate slug format (lowercase alphanumeric and hyphens only)
     const slugPattern = /^[a-z0-9]+(-[a-z0-9]+)*$/;
     if (!slugPattern.test(createProjectDto.slug)) {
-      throw new BadRequestException(
-        'Slug must contain only lowercase alphanumeric characters and hyphens',
-      );
+      throw new BadRequestException('Slug must contain only lowercase alphanumeric characters and hyphens');
     }
 
-    // Validate key format
+    // Validate key format (2-6 uppercase letters only)
     const keyPattern = /^[A-Z]{2,6}$/;
     if (!keyPattern.test(createProjectDto.key)) {
-      throw new BadRequestException(
-        'Key must be 2-6 uppercase letters',
-      );
+      throw new BadRequestException('Key must be 2-6 uppercase letters');
     }
 
     // Check slug uniqueness
@@ -99,13 +95,11 @@ export class ProjectsService {
       throw new BadRequestException('Name must be at least 2 characters long');
     }
 
-    // Validate slug format if provided
+    // Validate slug format if provided (lowercase alphanumeric and hyphens only)
     if (updateProjectDto.slug !== undefined) {
       const slugPattern = /^[a-z0-9]+(-[a-z0-9]+)*$/;
       if (!slugPattern.test(updateProjectDto.slug)) {
-        throw new BadRequestException(
-          'Slug must contain only lowercase alphanumeric characters and hyphens',
-        );
+        throw new BadRequestException('Slug must contain only lowercase alphanumeric characters and hyphens');
       }
 
       // Check slug uniqueness (unless it's the same as current)
@@ -119,13 +113,11 @@ export class ProjectsService {
       }
     }
 
-    // Validate key format if provided
+    // Validate key format if provided (2-6 uppercase letters only)
     if (updateProjectDto.key !== undefined) {
       const keyPattern = /^[A-Z]{2,6}$/;
       if (!keyPattern.test(updateProjectDto.key)) {
-        throw new BadRequestException(
-          'Key must be 2-6 uppercase letters',
-        );
+        throw new BadRequestException('Key must be 2-6 uppercase letters');
       }
 
       // Check key uniqueness (unless it's the same as current)
