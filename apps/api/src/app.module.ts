@@ -7,6 +7,7 @@ import { AgentsModule } from './agents/agents.module';
 import { ProjectsModule } from './projects/projects.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { CommentsModule } from './comments/comments.module';
+import { LabelsModule } from './labels/labels.module';
 import { CombinedAuthGuard } from './auth/guards/combined-auth.guard';
 
 @Module({
@@ -21,6 +22,7 @@ import { CombinedAuthGuard } from './auth/guards/combined-auth.guard';
     ProjectsModule,
     TicketsModule,
     CommentsModule,
+    LabelsModule,
   ],
   providers: [
     {

@@ -1,0 +1,2190 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/api/auth/register": {
+      "post": {
+        "operationId": "AuthController_register",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          }
+        },
+        "summary": "Register a new user",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "operationId": "AuthController_login",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials"
+          }
+        },
+        "summary": "Login with email and password",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/refresh": {
+      "post": {
+        "operationId": "AuthController_refresh",
+        "parameters": [
+          {
+            "name": "authorization",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or missing token"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Refresh access and refresh tokens",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "operationId": "AuthController_me",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid token"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get current authenticated user",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/agents": {
+      "post": {
+        "operationId": "AgentsController_generateApiKey",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Agent created with API key"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - admin role required"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create agent and generate API key (admin only)",
+        "tags": [
+          "agents"
+        ]
+      },
+      "get": {
+        "operationId": "AgentsController_findAll",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Agents retrieved successfully"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List all agents",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/agents/me": {
+      "get": {
+        "operationId": "AgentsController_findMe",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Agent profile retrieved"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get current agent profile (API key auth)",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/agents/{slug}": {
+      "get": {
+        "operationId": "AgentsController_findBySlug",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent retrieved successfully"
+          },
+          "404": {
+            "description": "Agent not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get agent by slug",
+        "tags": [
+          "agents"
+        ]
+      },
+      "patch": {
+        "operationId": "AgentsController_update",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAgentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent updated successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - admin role required"
+          },
+          "404": {
+            "description": "Agent not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update agent (admin only)",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/agents/{slug}/update-roles": {
+      "patch": {
+        "operationId": "AgentsController_updateRoles",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRolesDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Roles updated successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - admin role required"
+          },
+          "404": {
+            "description": "Agent not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update agent roles (admin only)",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/agents/{slug}/update-capabilities": {
+      "patch": {
+        "operationId": "AgentsController_updateCapabilities",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCapabilitiesDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Capabilities updated successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - admin role required"
+          },
+          "404": {
+            "description": "Agent not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update agent capabilities (admin only)",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/agents/{slug}/rotate-key": {
+      "post": {
+        "operationId": "AgentsController_rotateApiKey",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "API key rotated successfully"
+          },
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - admin role required"
+          },
+          "404": {
+            "description": "Agent not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Rotate agent API key (admin only)",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/projects": {
+      "post": {
+        "operationId": "ProjectsController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProjectDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Project created successfully"
+          },
+          "400": {
+            "description": "Invalid request data"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - admin role required"
+          },
+          "409": {
+            "description": "Conflict - duplicate slug or key"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a new project (admin only)",
+        "tags": [
+          "projects"
+        ]
+      },
+      "get": {
+        "operationId": "ProjectsController_findAll",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "List of projects"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List all projects (excluding soft-deleted)",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/projects/{slug}": {
+      "get": {
+        "operationId": "ProjectsController_findBySlug",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project found"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a project by slug",
+        "tags": [
+          "projects"
+        ]
+      },
+      "patch": {
+        "operationId": "ProjectsController_update",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProjectDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Project updated successfully"
+          },
+          "400": {
+            "description": "Invalid request data"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - admin role required"
+          },
+          "404": {
+            "description": "Project not found"
+          },
+          "409": {
+            "description": "Conflict - duplicate slug or key"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update a project (admin only)",
+        "tags": [
+          "projects"
+        ]
+      },
+      "delete": {
+        "operationId": "ProjectsController_remove",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project soft deleted successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - admin role required"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Soft delete a project (admin only)",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/projects/{slug}/tickets": {
+      "post": {
+        "operationId": "TicketsController_create",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTicketDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request data"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a new ticket",
+        "tags": [
+          "tickets"
+        ]
+      },
+      "get": {
+        "operationId": "TicketsController_findAll",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "example": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "example": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "unassigned",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "assignedTo",
+            "required": false,
+            "in": "query",
+            "description": "User ID to filter by",
+            "schema": {}
+          },
+          {
+            "name": "priority",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "BUG",
+                "ENHANCEMENT"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "CREATED",
+                "VERIFIED",
+                "IN_PROGRESS",
+                "VERIFY_FIX",
+                "CLOSED",
+                "REJECTED"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of tickets"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List all tickets for a project",
+        "tags": [
+          "tickets"
+        ]
+      }
+    },
+    "/api/projects/{slug}/tickets/{ref}": {
+      "get": {
+        "operationId": "TicketsController_findByRef",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Ticket or project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a ticket by reference (KODA-42 or CUID)",
+        "tags": [
+          "tickets"
+        ]
+      },
+      "patch": {
+        "operationId": "TicketsController_update",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTicketDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request data"
+          },
+          "404": {
+            "description": "Ticket or project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update a ticket",
+        "tags": [
+          "tickets"
+        ]
+      },
+      "delete": {
+        "operationId": "TicketsController_softDelete",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketResponseDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden - admin role required"
+          },
+          "404": {
+            "description": "Ticket or project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Soft delete a ticket (admin only)",
+        "tags": [
+          "tickets"
+        ]
+      }
+    },
+    "/api/projects/{slug}/tickets/{ref}/assign": {
+      "post": {
+        "operationId": "TicketsController_assign",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Cannot assign to both user and agent"
+          },
+          "404": {
+            "description": "Ticket or project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Assign or unassign a ticket",
+        "tags": [
+          "tickets"
+        ]
+      }
+    },
+    "/api/projects/{slug}/tickets/{ref}/verify": {
+      "post": {
+        "operationId": "TicketsController_verify",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransitionWithCommentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ticket verified"
+          },
+          "400": {
+            "description": "Invalid transition"
+          },
+          "404": {
+            "description": "Ticket or project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Verify a ticket (CREATED → VERIFIED)",
+        "tags": [
+          "tickets"
+        ]
+      }
+    },
+    "/api/projects/{slug}/tickets/{ref}/start": {
+      "post": {
+        "operationId": "TicketsController_start",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ticket started"
+          },
+          "400": {
+            "description": "Invalid transition"
+          },
+          "404": {
+            "description": "Ticket or project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Start work on a ticket (VERIFIED → IN_PROGRESS)",
+        "tags": [
+          "tickets"
+        ]
+      }
+    },
+    "/api/projects/{slug}/tickets/{ref}/fix": {
+      "post": {
+        "operationId": "TicketsController_fix",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransitionWithCommentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Fix submitted"
+          },
+          "400": {
+            "description": "Invalid transition"
+          },
+          "404": {
+            "description": "Ticket or project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Submit fix for verification (IN_PROGRESS → VERIFY_FIX)",
+        "tags": [
+          "tickets"
+        ]
+      }
+    },
+    "/api/projects/{slug}/tickets/{ref}/verify-fix": {
+      "post": {
+        "operationId": "TicketsController_verifyFix",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransitionWithCommentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Fix reviewed"
+          },
+          "400": {
+            "description": "Invalid transition"
+          },
+          "404": {
+            "description": "Ticket or project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Approve or reject fix (VERIFY_FIX → CLOSED or IN_PROGRESS)",
+        "tags": [
+          "tickets"
+        ]
+      }
+    },
+    "/api/projects/{slug}/tickets/{ref}/close": {
+      "post": {
+        "operationId": "TicketsController_close",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ticket closed"
+          },
+          "400": {
+            "description": "Invalid transition"
+          },
+          "404": {
+            "description": "Ticket or project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Close a ticket",
+        "tags": [
+          "tickets"
+        ]
+      }
+    },
+    "/api/projects/{slug}/tickets/{ref}/reject": {
+      "post": {
+        "operationId": "TicketsController_reject",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransitionWithCommentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ticket rejected"
+          },
+          "400": {
+            "description": "Invalid transition"
+          },
+          "404": {
+            "description": "Ticket or project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Reject a ticket (CREATED or VERIFIED → REJECTED)",
+        "tags": [
+          "tickets"
+        ]
+      }
+    },
+    "/api/projects/{slug}/tickets/{ref}/comments": {
+      "post": {
+        "operationId": "CommentsController_createFromHttp",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCommentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Comment created"
+          },
+          "400": {
+            "description": "Invalid request data"
+          },
+          "404": {
+            "description": "Project or ticket not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a comment on a ticket",
+        "tags": [
+          "comments"
+        ]
+      },
+      "get": {
+        "operationId": "CommentsController_listByTicketFromHttp",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of comments"
+          },
+          "404": {
+            "description": "Project or ticket not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List all comments for a ticket",
+        "tags": [
+          "comments"
+        ]
+      }
+    },
+    "/api/comments/{id}": {
+      "patch": {
+        "operationId": "CommentsController_updateFromHttp",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCommentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Comment updated"
+          },
+          "403": {
+            "description": "Not authorized to edit this comment"
+          },
+          "404": {
+            "description": "Comment not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update a comment",
+        "tags": [
+          "comments"
+        ]
+      },
+      "delete": {
+        "operationId": "CommentsController_deleteFromHttp",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Comment deleted"
+          },
+          "403": {
+            "description": "Not authorized to delete this comment"
+          },
+          "404": {
+            "description": "Comment not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a comment",
+        "tags": [
+          "comments"
+        ]
+      }
+    },
+    "/api/projects/{slug}/labels": {
+      "post": {
+        "operationId": "LabelsController_createFromHttp",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateLabelDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Label created"
+          },
+          "400": {
+            "description": "Invalid request data"
+          },
+          "403": {
+            "description": "Unauthorized - admin only"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a label for a project",
+        "tags": [
+          "labels"
+        ]
+      },
+      "get": {
+        "operationId": "LabelsController_findByProjectFromHttp",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of labels"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List all labels for a project",
+        "tags": [
+          "labels"
+        ]
+      }
+    },
+    "/api/projects/{slug}/labels/{id}": {
+      "delete": {
+        "operationId": "LabelsController_deleteFromHttp",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Label deleted"
+          },
+          "403": {
+            "description": "Unauthorized - admin only"
+          },
+          "404": {
+            "description": "Label or project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a label",
+        "tags": [
+          "labels"
+        ]
+      }
+    },
+    "/api/projects/{slug}/tickets/{ref}/labels": {
+      "post": {
+        "operationId": "LabelsController_assignLabelFromHttp",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignLabelDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Label assigned to ticket"
+          },
+          "400": {
+            "description": "Invalid request data or label already assigned"
+          },
+          "404": {
+            "description": "Ticket or label not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Assign a label to a ticket",
+        "tags": [
+          "labels"
+        ]
+      }
+    },
+    "/api/projects/{slug}/tickets/{ref}/labels/{labelId}": {
+      "delete": {
+        "operationId": "LabelsController_removeLabelFromHttp",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "labelId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Label removed from ticket"
+          },
+          "404": {
+            "description": "Ticket or label assignment not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Remove a label from a ticket",
+        "tags": [
+          "labels"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "Koda API",
+    "description": "Dev ticket tracker API",
+    "version": "1.0",
+    "contact": {}
+  },
+  "tags": [],
+  "servers": [],
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "type": "http"
+      }
+    },
+    "schemas": {
+      "RegisterDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "user@example.com"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "example": "John Doe"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "example": "password123"
+          }
+        },
+        "required": [
+          "email",
+          "name",
+          "password"
+        ]
+      },
+      "UserResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "name",
+          "role",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "AuthResponseDto": {
+        "type": "object",
+        "properties": {
+          "accessToken": {
+            "type": "string"
+          },
+          "refreshToken": {
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserResponseDto"
+          }
+        },
+        "required": [
+          "accessToken",
+          "refreshToken",
+          "user"
+        ]
+      },
+      "LoginDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "user@example.com"
+          },
+          "password": {
+            "type": "string",
+            "example": "password123"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ]
+      },
+      "UpdateAgentDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Agent name"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "PAUSED",
+              "OFFLINE"
+            ],
+            "description": "Agent status (ACTIVE, PAUSED, OFFLINE)"
+          },
+          "maxConcurrentTickets": {
+            "type": "number",
+            "description": "Max concurrent tickets agent can handle"
+          }
+        }
+      },
+      "UpdateRolesDto": {
+        "type": "object",
+        "properties": {
+          "roles": {
+            "description": "Agent roles (TRIAGER, DEVELOPER, REVIEWER)",
+            "example": [
+              "DEVELOPER",
+              "REVIEWER"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "roles"
+        ]
+      },
+      "UpdateCapabilitiesDto": {
+        "type": "object",
+        "properties": {
+          "capabilities": {
+            "description": "Agent capabilities (e.g. typescript, react, nodejs)",
+            "example": [
+              "typescript",
+              "nestjs",
+              "react"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "capabilities"
+        ]
+      },
+      "CreateProjectDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 2,
+            "description": "Project name",
+            "example": "Koda"
+          },
+          "slug": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+            "description": "Project slug - lowercase alphanumeric with hyphens",
+            "example": "koda"
+          },
+          "key": {
+            "type": "string",
+            "pattern": "^[A-Z]{2,6}$",
+            "description": "Project key - 2-6 uppercase letters for ticket references",
+            "example": "KODA"
+          },
+          "description": {
+            "type": "string",
+            "description": "Project description",
+            "example": "Dev ticket tracker"
+          },
+          "gitRemoteUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Git remote repository URL",
+            "example": "https://github.com/nathapp-io/koda"
+          },
+          "autoIndexOnClose": {
+            "type": "boolean",
+            "description": "Automatically index commits on ticket close",
+            "example": true,
+            "default": true
+          }
+        },
+        "required": [
+          "name",
+          "slug",
+          "key"
+        ]
+      },
+      "UpdateProjectDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 2,
+            "description": "Project name",
+            "example": "Updated Project Name"
+          },
+          "slug": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+            "description": "Project slug - lowercase alphanumeric with hyphens",
+            "example": "updated-project"
+          },
+          "key": {
+            "type": "string",
+            "pattern": "^[A-Z]{2,6}$",
+            "description": "Project key - 2-6 uppercase letters",
+            "example": "UPDATED"
+          },
+          "description": {
+            "type": "string",
+            "description": "Project description",
+            "example": "Updated description"
+          },
+          "gitRemoteUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Git remote repository URL",
+            "example": "https://github.com/nathapp-io/updated-repo"
+          },
+          "autoIndexOnClose": {
+            "type": "boolean",
+            "description": "Automatically index commits on ticket close",
+            "example": false
+          }
+        }
+      },
+      "CreateTicketDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Ticket type",
+            "enum": [
+              "BUG",
+              "ENHANCEMENT"
+            ],
+            "example": "BUG"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Ticket title",
+            "example": "Fix login bug"
+          },
+          "description": {
+            "type": "string",
+            "description": "Ticket description",
+            "example": "Users cannot login with email"
+          },
+          "priority": {
+            "type": "string",
+            "description": "Ticket priority",
+            "enum": [
+              "LOW",
+              "MEDIUM",
+              "HIGH",
+              "CRITICAL"
+            ],
+            "example": "MEDIUM",
+            "default": "MEDIUM"
+          }
+        },
+        "required": [
+          "type",
+          "title"
+        ]
+      },
+      "TicketResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Ticket ID (CUID)"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "Project ID"
+          },
+          "number": {
+            "type": "number",
+            "description": "Sequential ticket number within project"
+          },
+          "type": {
+            "type": "string",
+            "description": "Ticket type",
+            "enum": [
+              "BUG",
+              "ENHANCEMENT"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "description": "Ticket title"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true,
+            "description": "Ticket description"
+          },
+          "status": {
+            "type": "string",
+            "description": "Ticket status",
+            "enum": [
+              "CREATED",
+              "VERIFIED",
+              "IN_PROGRESS",
+              "VERIFY_FIX",
+              "CLOSED",
+              "REJECTED"
+            ]
+          },
+          "priority": {
+            "type": "string",
+            "description": "Ticket priority",
+            "enum": [
+              "LOW",
+              "MEDIUM",
+              "HIGH",
+              "CRITICAL"
+            ]
+          },
+          "assignedToUserId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Assigned to user ID"
+          },
+          "assignedToAgentId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Assigned to agent ID"
+          },
+          "createdByUserId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Created by user ID"
+          },
+          "createdByAgentId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Created by agent ID"
+          },
+          "gitRefVersion": {
+            "type": "string",
+            "nullable": true,
+            "description": "Git reference version"
+          },
+          "gitRefFile": {
+            "type": "string",
+            "nullable": true,
+            "description": "Git reference file"
+          },
+          "gitRefLine": {
+            "type": "number",
+            "nullable": true,
+            "description": "Git reference line"
+          },
+          "gitRefUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Git reference URL"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Created at timestamp"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Updated at timestamp"
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Soft delete timestamp"
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "number",
+          "type",
+          "title",
+          "status",
+          "priority",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "UpdateTicketDto": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Ticket title",
+            "example": "Updated ticket title"
+          },
+          "description": {
+            "type": "string",
+            "description": "Ticket description",
+            "example": "Updated description"
+          },
+          "priority": {
+            "type": "string",
+            "description": "Ticket priority",
+            "enum": [
+              "LOW",
+              "MEDIUM",
+              "HIGH",
+              "CRITICAL"
+            ],
+            "example": "HIGH"
+          }
+        }
+      },
+      "TransitionWithCommentDto": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "Comment body explaining the transition",
+            "example": "This ticket has been verified and is ready to work on"
+          }
+        },
+        "required": [
+          "body"
+        ]
+      },
+      "CreateCommentDto": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Comment body",
+            "example": "This is a comment"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "VERIFICATION",
+              "FIX_REPORT",
+              "REVIEW",
+              "STATUS_CHANGE",
+              "GENERAL"
+            ],
+            "description": "Comment type",
+            "example": "GENERAL"
+          }
+        }
+      },
+      "UpdateCommentDto": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Comment body",
+            "example": "Updated comment body"
+          }
+        },
+        "required": [
+          "body"
+        ]
+      },
+      "CreateLabelDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "typescript"
+          },
+          "color": {
+            "type": "string",
+            "example": "#0066CC"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "AssignLabelDto": {
+        "type": "object",
+        "properties": {
+          "labelId": {
+            "type": "string",
+            "example": "label-123"
+          }
+        },
+        "required": [
+          "labelId"
+        ]
+      }
+    }
+  }
+}

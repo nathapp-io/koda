@@ -25,6 +25,7 @@
     "@nestjs/core": "^11.0.0",
     "@nestjs/jwt": "^11.0.0",
     "@nestjs/passport": "^11.0.0",
+    "@nestjs/platform-express": "^11.1.17",
     "@nestjs/platform-fastify": "^11.0.0",
     "@nestjs/swagger": "^11.0.0",
     "@prisma/client": "^6.0.0",
@@ -64,7 +65,7 @@
     "coverageDirectory": "../coverage",
     "testEnvironment": "node",
     "forceExit": true,
-    "setupFiles": [
+    "setupFilesAfterEnv": [
       "<rootDir>/../test-setup.ts"
     ]
   }
