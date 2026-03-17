@@ -18,9 +18,10 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  createdTickets  Ticket[]  @relation("TicketCreatedByUser")
-  assignedTickets Ticket[]  @relation("TicketAssignedToUser")
+  createdTickets  Ticket[]         @relation("TicketCreatedByUser")
+  assignedTickets Ticket[]         @relation("TicketAssignedToUser")
   comments        Comment[]
+  activities      TicketActivity[] @relation("ActivityByUser")
 }
 
 enum UserRole {
@@ -31,27 +32,22 @@ enum UserRole {
 // ─── Agents ──────────────────────────────────────────────────────────────────
 
 model Agent {
-  id                   String        @id @default(cuid())
+  id                   String      @id @default(cuid())
   name                 String
-  slug                 String        @unique
-  apiKeyHash           String        @unique
-  roles                AgentRole[]
-  capabilities         String[]
-  status               AgentStatus   @default(ACTIVE)
-  maxConcurrentTickets Int           @default(3)
-  createdAt            DateTime      @default(now())
-  updatedAt            DateTime      @updatedAt
+  slug                 String      @unique
+  apiKeyHash           String      @unique
+  status               AgentStatus @default(ACTIVE)
+  maxConcurrentTickets Int         @default(3)
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
 
+  roles           AgentRoleEntry[]
+  capabilities    AgentCapability[]
   projects        AgentProject[]
-  createdTickets  Ticket[]       @relation("TicketCreatedByAgent")
-  assignedTickets Ticket[]       @relation("TicketAssignedToAgent")
+  createdTickets  Ticket[]         @relation("TicketCreatedByAgent")
+  assignedTickets Ticket[]         @relation("TicketAssignedToAgent")
   comments        Comment[]
-}
-
-enum AgentRole {
-  TRIAGER
-  DEVELOPER
-  REVIEWER
+  activities      TicketActivity[] @relation("ActivityByAgent")
 }
 
 enum AgentStatus {
@@ -60,20 +56,50 @@ enum AgentStatus {
   OFFLINE
 }
 
+// Agent roles as join table (SQLite-safe, queryable)
+model AgentRoleEntry {
+  id      String    @id @default(cuid())
+  agentId String
+  role    AgentRole
+  agent   Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, role])
+}
+
+enum AgentRole {
+  TRIAGER
+  DEVELOPER
+  REVIEWER
+}
+
+// Agent capabilities as join table (SQLite-safe, queryable)
+model AgentCapability {
+  id         String @id @default(cuid())
+  agentId    String
+  capability String // e.g. "typescript", "nestjs", "vue", "python"
+  agent      Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, capability])
+  @@index([capability])
+}
+
 // ─── Projects ────────────────────────────────────────────────────────────────
 
 model Project {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
   name             String
-  slug             String   @unique
+  slug             String    @unique
+  key              String    @unique // Short uppercase key for ticket refs: "KODA" → KODA-42
   description      String?
   gitRemoteUrl     String?
-  autoIndexOnClose Boolean  @default(true)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  autoIndexOnClose Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime? // Soft delete
 
   agents  AgentProject[]
   tickets Ticket[]
+  labels  Label[]
 }
 
 model AgentProject {
@@ -85,42 +111,73 @@ model AgentProject {
   @@id([agentId, projectId])
 }
 
+// ─── Labels (for tickets — enables Phase 7 capability matching) ─────────────
+
+model Label {
+  id        String  @id @default(cuid())
+  projectId String
+  name      String  // e.g. "typescript", "auth", "performance", "ui"
+  color     String? // Hex color for web UI
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  tickets TicketLabel[]
+
+  @@unique([projectId, name])
+}
+
+model TicketLabel {
+  ticketId String
+  labelId  String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  label    Label  @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([ticketId, labelId])
+}
+
 // ─── Tickets ─────────────────────────────────────────────────────────────────
 
 model Ticket {
   id          String       @id @default(cuid())
   projectId   String
-  number      Int
+  number      Int          // Auto-increment per project (KODA-1, KODA-2)
   type        TicketType
   title       String
   description String?
   status      TicketStatus @default(CREATED)
   priority    Priority     @default(MEDIUM)
 
+  // Assignment (polymorphic — either user or agent, not both)
   assignedToUserId  String?
   assignedToAgentId String?
-  assignedToUser    User?   @relation("TicketAssignedToUser", fields: [assignedToUserId], references: [id])
-  assignedToAgent   Agent?  @relation("TicketAssignedToAgent", fields: [assignedToAgentId], references: [id])
+  assignedToUser    User?  @relation("TicketAssignedToUser", fields: [assignedToUserId], references: [id])
+  assignedToAgent   Agent? @relation("TicketAssignedToAgent", fields: [assignedToAgentId], references: [id])
 
+  // Creator (polymorphic — either user or agent)
   createdByUserId  String?
   createdByAgentId String?
-  createdByUser    User?   @relation("TicketCreatedByUser", fields: [createdByUserId], references: [id])
-  createdByAgent   Agent?  @relation("TicketCreatedByAgent", fields: [createdByAgentId], references: [id])
+  createdByUser    User?  @relation("TicketCreatedByUser", fields: [createdByUserId], references: [id])
+  createdByAgent   Agent? @relation("TicketCreatedByAgent", fields: [createdByAgentId], references: [id])
 
+  // Git reference (optional)
   gitRefVersion String?
   gitRefFile    String?
   gitRefLine    Int?
   gitRefUrl     String?
 
-  project  Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  comments Comment[]
+  project    Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  comments   Comment[]
+  labels     TicketLabel[]
+  activities TicketActivity[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // Soft delete
 
   @@unique([projectId, number])
   @@index([projectId, status])
   @@index([assignedToAgentId, status])
+  @@index([assignedToUserId, status])
+  @@index([status, priority])
 }
 
 enum TicketType {
@@ -152,13 +209,15 @@ model Comment {
   body     String
   type     CommentType @default(GENERAL)
 
+  // Author (polymorphic — either user or agent)
   authorUserId  String?
   authorAgentId String?
-  authorUser    User?   @relation(fields: [authorUserId], references: [id])
-  authorAgent   Agent?  @relation(fields: [authorAgentId], references: [id])
+  authorUser    User?  @relation(fields: [authorUserId], references: [id])
+  authorAgent   Agent? @relation(fields: [authorAgentId], references: [id])
 
   ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt // Supports editing comments
 }
 
 enum CommentType {
@@ -167,4 +226,39 @@ enum CommentType {
   REVIEW
   STATUS_CHANGE
   GENERAL
+}
+
+// ─── Ticket Activity (Audit Trail) ──────────────────────────────────────────
+
+model TicketActivity {
+  id       String       @id @default(cuid())
+  ticketId String
+  action   ActivityType
+
+  // What changed
+  fromStatus TicketStatus?
+  toStatus   TicketStatus?
+  field      String?       // For non-status changes: "priority", "assignee", "labels"
+  oldValue   String?       // Previous value (serialized)
+  newValue   String?       // New value (serialized)
+
+  // Who did it (polymorphic)
+  actorUserId  String?
+  actorAgentId String?
+  actorUser    User?  @relation("ActivityByUser", fields: [actorUserId], references: [id])
+  actorAgent   Agent? @relation("ActivityByAgent", fields: [actorAgentId], references: [id])
+
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([ticketId, createdAt])
+}
+
+enum ActivityType {
+  STATUS_CHANGE
+  ASSIGNMENT
+  PRIORITY_CHANGE
+  LABEL_CHANGE
+  COMMENT_ADDED
+  CREATED
 }
