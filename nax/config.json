@@ -179,7 +179,7 @@
     "maxRetries": 2,
     "generateTests": true,
     "testPath": "acceptance.test.ts",
-    "model": "sonnet",
+    "model": "balanced",
     "refinement": true,
     "redGate": true
   },
