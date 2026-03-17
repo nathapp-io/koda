@@ -1,5 +1,5 @@
-import { validate } from 'class-validator';
-import { plainToInstance } from 'class-transformer';
+import { validate as _validate } from 'class-validator';
+import { plainToInstance as _plainToInstance } from 'class-transformer';
 
 describe('CreateProjectDto validation', () => {
   // Note: This test file is for validating the DTO structure

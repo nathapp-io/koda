@@ -5,7 +5,7 @@ describe('Projects API E2E Tests', () => {
   describe('POST /api/projects - Create Project', () => {
     it('should return 201 with valid admin credentials and valid project data', async () => {
       // Arrange
-      const createDto = {
+      const _createDto = {
         name: 'My Project',
         slug: 'my-project',
         key: 'MYPR',
@@ -14,7 +14,7 @@ describe('Projects API E2E Tests', () => {
         autoIndexOnClose: true,
       };
 
-      const adminToken = 'Bearer admin-jwt-token';
+      const _adminToken = 'Bearer admin-jwt-token';
 
       // Act
       // const response = await request(app.getHttpServer())
@@ -30,13 +30,13 @@ describe('Projects API E2E Tests', () => {
 
     it('should return 403 with non-admin user', async () => {
       // Arrange
-      const createDto = {
+      const _createDto = {
         name: 'My Project',
         slug: 'my-project',
         key: 'MYPR',
       };
 
-      const memberToken = 'Bearer member-jwt-token';
+      const _memberToken = 'Bearer member-jwt-token';
 
       // Act
       // const response = await request(app.getHttpServer())
@@ -50,13 +50,13 @@ describe('Projects API E2E Tests', () => {
 
     it('should return 409 when slug already exists', async () => {
       // Arrange
-      const createDto = {
+      const _createDto = {
         name: 'New Project',
         slug: 'existing-slug',
         key: 'NEW',
       };
 
-      const adminToken = 'Bearer admin-jwt-token';
+      const _adminToken = 'Bearer admin-jwt-token';
 
       // Act
       // const response = await request(app.getHttpServer())
@@ -70,13 +70,13 @@ describe('Projects API E2E Tests', () => {
 
     it('should return 409 when key already exists', async () => {
       // Arrange
-      const createDto = {
+      const _createDto = {
         name: 'New Project',
         slug: 'new-project',
         key: 'EXISTING',
       };
 
-      const adminToken = 'Bearer admin-jwt-token';
+      const _adminToken = 'Bearer admin-jwt-token';
 
       // Act
       // const response = await request(app.getHttpServer())
@@ -90,13 +90,13 @@ describe('Projects API E2E Tests', () => {
 
     it('should return 400 for invalid key format', async () => {
       // Arrange
-      const invalidCreateDtos = [
+      const _invalidCreateDtos = [
         { name: 'Test', slug: 'test', key: 'K' },
         { name: 'Test', slug: 'test', key: 'TOOLONG' },
         { name: 'Test', slug: 'test', key: 'lowercase' },
       ];
 
-      const adminToken = 'Bearer admin-jwt-token';
+      const _adminToken = 'Bearer admin-jwt-token';
 
       // Act & Assert
       // for (const createDto of invalidCreateDtos) {
@@ -170,12 +170,12 @@ describe('Projects API E2E Tests', () => {
   describe('PATCH /api/projects/:slug - Update Project', () => {
     it('should return 200 with updated project for admin user', async () => {
       // Arrange
-      const updateDto = {
+      const _updateDto = {
         name: 'Updated Name',
         description: 'Updated description',
       };
 
-      const adminToken = 'Bearer admin-jwt-token';
+      const _adminToken = 'Bearer admin-jwt-token';
 
       // Act
       // const response = await request(app.getHttpServer())
@@ -190,8 +190,8 @@ describe('Projects API E2E Tests', () => {
 
     it('should return 403 for non-admin user', async () => {
       // Arrange
-      const updateDto = { name: 'Updated' };
-      const memberToken = 'Bearer member-jwt-token';
+      const _updateDto = { name: 'Updated' };
+      const _memberToken = 'Bearer member-jwt-token';
 
       // Act
       // const response = await request(app.getHttpServer())
@@ -205,8 +205,8 @@ describe('Projects API E2E Tests', () => {
 
     it('should return 409 when updating to existing slug', async () => {
       // Arrange
-      const updateDto = { slug: 'existing-project' };
-      const adminToken = 'Bearer admin-jwt-token';
+      const _updateDto = { slug: 'existing-project' };
+      const _adminToken = 'Bearer admin-jwt-token';
 
       // Act
       // const response = await request(app.getHttpServer())
@@ -222,7 +222,7 @@ describe('Projects API E2E Tests', () => {
   describe('DELETE /api/projects/:slug - Soft Delete Project', () => {
     it('should return 200 and set deletedAt for admin user', async () => {
       // Arrange
-      const adminToken = 'Bearer admin-jwt-token';
+      const _adminToken = 'Bearer admin-jwt-token';
 
       // Act
       // const response = await request(app.getHttpServer())
@@ -237,7 +237,7 @@ describe('Projects API E2E Tests', () => {
 
     it('should return 403 for non-admin user', async () => {
       // Arrange
-      const memberToken = 'Bearer member-jwt-token';
+      const _memberToken = 'Bearer member-jwt-token';
 
       // Act
       // const response = await request(app.getHttpServer())
@@ -250,7 +250,7 @@ describe('Projects API E2E Tests', () => {
 
     it('should not hard delete the project', async () => {
       // Arrange
-      const adminToken = 'Bearer admin-jwt-token';
+      const _adminToken = 'Bearer admin-jwt-token';
 
       // Act
       // // Soft delete
@@ -270,7 +270,7 @@ describe('Projects API E2E Tests', () => {
 
     it('should exclude soft-deleted project from list', async () => {
       // Arrange
-      const adminToken = 'Bearer admin-jwt-token';
+      const _adminToken = 'Bearer admin-jwt-token';
 
       // Act
       // // Soft delete project
@@ -290,7 +290,7 @@ describe('Projects API E2E Tests', () => {
 
     it('should return 404 for non-existent project', async () => {
       // Arrange
-      const adminToken = 'Bearer admin-jwt-token';
+      const _adminToken = 'Bearer admin-jwt-token';
 
       // Act
       // const response = await request(app.getHttpServer())

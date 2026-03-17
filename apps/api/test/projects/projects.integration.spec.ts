@@ -4,9 +4,9 @@ import { ProjectsService } from '../../src/projects/projects.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
 
 describe('Projects Integration Tests', () => {
-  let app: INestApplication;
+  let _app: INestApplication;
   let projectsService: ProjectsService;
-  let prismaService: PrismaService;
+  let _prismaService: PrismaService;
 
   const mockProject = {
     id: 'proj-123',

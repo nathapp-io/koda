@@ -24,8 +24,8 @@
   },
   "devDependencies": {
     "@hey-api/openapi-ts": "^0.46.0",
-    "@typescript-eslint/eslint-plugin": "^7.0.0",
-    "@typescript-eslint/parser": "^7.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
     "eslint": "^8.57.0",
     "ts-node": "^10.9.0",
     "tsconfig-paths": "^4.0.0",
