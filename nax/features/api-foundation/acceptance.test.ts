@@ -1,4 +1,3 @@
-```typescript
 
 import { Test, TestingModule } from "@nestjs/testing";
 import { INestApplication, ValidationPipe } from "@nestjs/common";
@@ -866,4 +865,3 @@ describe("api-foundation - Acceptance Tests", () => {
     expect([200, 401]).toContain(agentResponse.statusCode);
   });
 });
-```
