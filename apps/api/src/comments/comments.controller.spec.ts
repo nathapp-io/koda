@@ -188,7 +188,7 @@ describe('CommentsController', () => {
 
       const result = await controller.listByTicket('koda', 'KODA-1');
 
-      expect(result[0].createdAt).toBeLessThanOrEqual(result[1].createdAt);
+      expect(result[0].createdAt.getTime()).toBeLessThanOrEqual(result[1].createdAt.getTime());
     });
   });
 

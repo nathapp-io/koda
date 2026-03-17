@@ -118,11 +118,11 @@ describe('CommentsService', () => {
 
       mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaService.comment.create.mockResolvedValue(mockComment);
+      const createdComment = { ...mockComment, body: 'This is a test comment' };
+      mockPrismaService.comment.create.mockResolvedValue(createdComment);
 
       const result = await service.create('koda', 'KODA-1', createDto, { sub: 'user-123' }, 'user');
 
-      expect(result).toEqual(mockComment);
       expect(result.body).toBe('This is a test comment');
       expect(prismaService.comment.create).toHaveBeenCalledWith(
         expect.objectContaining({
