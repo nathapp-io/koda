@@ -1,13 +1,13 @@
-import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
+import { IsString, MinLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class UpdateCommentDto {
   @ApiProperty({
-    description: 'Updated comment body text',
+    description: 'Comment body',
     example: 'Updated comment body',
+    minLength: 1,
   })
   @IsString()
-  @IsNotEmpty()
-  @IsOptional()
-  body?: string;
+  @MinLength(1, { message: 'Body must not be empty' })
+  body!: string;
 }

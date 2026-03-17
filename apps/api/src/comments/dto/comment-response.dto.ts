@@ -5,50 +5,50 @@ export class CommentResponseDto {
     description: 'Comment unique identifier',
     example: 'comment-123',
   })
-  id: string;
+  id!: string;
 
   @ApiProperty({
     description: 'Ticket ID this comment belongs to',
     example: 'ticket-123',
   })
-  ticketId: string;
+  ticketId!: string;
 
   @ApiProperty({
     description: 'Comment body text',
     example: 'This is a test comment',
   })
-  body: string;
+  body!: string;
 
   @ApiProperty({
     description: 'Comment type',
     example: 'GENERAL',
     enum: ['VERIFICATION', 'FIX_REPORT', 'REVIEW', 'STATUS_CHANGE', 'GENERAL'],
   })
-  type: string;
+  type!: string;
 
   @ApiProperty({
     description: 'User ID of comment author (if user authored)',
     example: 'user-123',
     nullable: true,
   })
-  authorUserId: string | null;
+  authorUserId!: string | null;
 
   @ApiProperty({
     description: 'Agent ID of comment author (if agent authored)',
     example: 'agent-123',
     nullable: true,
   })
-  authorAgentId: string | null;
+  authorAgentId!: string | null;
 
   @ApiProperty({
     description: 'Comment creation timestamp',
     example: '2026-03-17T10:00:00Z',
   })
-  createdAt: Date;
+  createdAt!: Date;
 
   @ApiProperty({
     description: 'Comment last update timestamp',
     example: '2026-03-17T10:00:00Z',
   })
-  updatedAt: Date;
+  updatedAt!: Date;
 }

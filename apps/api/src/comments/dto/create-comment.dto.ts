@@ -1,29 +1,27 @@
-import { IsString, IsNotEmpty, IsEnum } from 'class-validator';
+import { IsString, MinLength, IsIn, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { CommentType } from '@prisma/client';
 
-export enum CommentTypeEnum {
-  VERIFICATION = 'VERIFICATION',
-  FIX_REPORT = 'FIX_REPORT',
-  REVIEW = 'REVIEW',
-  STATUS_CHANGE = 'STATUS_CHANGE',
-  GENERAL = 'GENERAL',
-}
+// Re-export as CommentTypeEnum for backward compatibility with tests
+export { CommentType as CommentTypeEnum };
 
 export class CreateCommentDto {
   @ApiProperty({
-    description: 'Comment body text',
-    example: 'This is a test comment',
+    description: 'Comment body',
+    example: 'This is a comment',
+    minLength: 1,
   })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  body: string;
+  @MinLength(1, { message: 'Body must not be empty' })
+  body?: string;
 
   @ApiProperty({
     description: 'Comment type',
-    enum: CommentTypeEnum,
-    example: CommentTypeEnum.GENERAL,
+    enum: CommentType,
+    example: 'GENERAL',
   })
-  @IsEnum(CommentTypeEnum)
-  @IsNotEmpty()
-  type: CommentTypeEnum;
+  @IsOptional()
+  @IsIn(['VERIFICATION', 'FIX_REPORT', 'REVIEW', 'STATUS_CHANGE', 'GENERAL'])
+  type?: string;
 }
