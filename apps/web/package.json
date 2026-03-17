@@ -25,6 +25,7 @@
     "tailwind-merge": "^2.0.0"
   },
   "devDependencies": {
+    "@hey-api/client-fetch": "^0.3.0",
     "@nuxt/devtools": "latest",
     "@nuxt/eslint": "^0.7.0",
     "@types/node": "^22.0.0",

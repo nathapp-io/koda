@@ -28,6 +28,8 @@ Turborepo monorepo with NestJS 11 + Fastify API, Nuxt 3 + Shadcn-nuxt web UI, an
 | `bun run db:generate` | Regenerate Prisma client |
 | `bun run db:migrate` | Run pending SQLite migrations |
 | `bun run db:studio` | Open Prisma Studio |
+| `bun run api:export-spec` | Export OpenAPI spec → `openapi.json` at root |
+| `bun run generate` | Export spec + regenerate CLI + web clients |
 | `cd apps/api && bun run test` | API tests only |
 | `cd packages/cli && bun run test` | CLI tests only |
 
@@ -126,6 +128,26 @@ koda/                              ← monorepo root
 ├── tsconfig.base.json
 └── .env.example
 ```
+
+## OpenAPI Spec & Client Generation
+
+The CLI and web app get their typed API clients from a generated OpenAPI spec.
+
+```
+apps/api (NestJS + @nestjs/swagger)
+  → bun run api:export-spec
+  → openapi.json (monorepo root — source of truth)
+  → bun run generate:cli  → packages/cli/src/generated/   (@hey-api/client-axios)
+  → bun run generate:web  → apps/web/generated/            (@hey-api/client-fetch)
+```
+
+**Rules:**
+- Run `bun run generate` after ANY API endpoint change before touching CLI or web code
+- Never manually edit files inside `*/generated/` — they are overwritten on next generate
+- `openapi.json` is committed to the repo so CI can regenerate clients without booting the API
+- Export script: `apps/api/scripts/export-spec.ts` — boots NestJS, dumps spec, exits
+
+---
 
 ## Ticket State Machine
 
