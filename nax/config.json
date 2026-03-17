@@ -87,10 +87,10 @@
     "requireLint": true,
     "requireTests": true,
     "commands": {
-      "test": "turbo run test --filter=@nathapp/koda-api",
-      "typecheck": "turbo run type-check --filter=@nathapp/koda-api",
-      "lint": "turbo run lint --filter=@nathapp/koda-api",
-      "testScoped": "turbo run test --filter=@nathapp/koda-api...[HEAD^1]"
+      "test": "bun run --cwd apps/api test",
+      "typecheck": "bun run --cwd apps/api type-check",
+      "lint": "bun run --cwd apps/api lint",
+      "testScoped": "bun run --cwd apps/api test"
     },
     "forceExit": false,
     "detectOpenHandles": true,
@@ -165,8 +165,8 @@
       "lint"
     ],
     "commands": {
-      "typecheck": "turbo run type-check --filter=@nathapp/koda-api",
-      "lint": "turbo run lint --filter=@nathapp/koda-api"
+      "typecheck": "bun run --cwd apps/api type-check",
+      "lint": "bun run --cwd apps/api lint"
     },
     "pluginMode": "deferred"
   },
