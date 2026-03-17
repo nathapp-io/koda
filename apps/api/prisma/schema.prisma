@@ -19,3 +19,14 @@ model User {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 }
+
+model Agent {
+  id                     String   @id @default(cuid())
+  name                   String
+  slug                   String   @unique
+  apiKeyHash             String   @unique
+  status                 String   @default("ACTIVE")
+  maxConcurrentTickets   Int      @default(3)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+}

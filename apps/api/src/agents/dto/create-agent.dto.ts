@@ -5,10 +5,10 @@ export class CreateAgentDto {
   @ApiProperty({ description: 'Agent name' })
   @IsString()
   @IsNotEmpty()
-  name: string;
+  name!: string;
 
   @ApiProperty({ description: 'Agent slug (unique identifier)' })
   @IsString()
   @IsNotEmpty()
-  slug: string;
+  slug!: string;
 }
