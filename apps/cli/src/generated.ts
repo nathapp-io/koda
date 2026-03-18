@@ -49,6 +49,106 @@ export class CommentsService {
   }
 }
 
+export interface Ticket {
+  id: string;
+  number: number;
+  projectId?: string;
+  projectKey?: string;
+  type: 'bug' | 'enhancement';
+  title: string;
+  description?: string;
+  status: string;
+  priority?: 'low' | 'medium' | 'high' | 'critical';
+  assignee?: { id: string; slug: string; name: string } | null;
+  createdAt: string;
+  updatedAt?: string;
+  comments?: Comment[];
+}
+
+export class TicketsService {
+  static async create(
+    client: AxiosInstance,
+    data: {
+      projectSlug: string;
+      type: string;
+      title: string;
+      description?: string;
+      priority?: string;
+    }
+  ): Promise<{ data: Ticket }> {
+    const response = await client.post('/tickets', data);
+    return response.data;
+  }
+
+  static async list(
+    client: AxiosInstance,
+    params: Record<string, any>
+  ): Promise<{ data: Ticket[]; meta: { total: number; page: number; limit: number } }> {
+    const response = await client.get('/tickets', { params });
+    return response.data;
+  }
+
+  static async show(client: AxiosInstance, ref: string): Promise<{ data: Ticket }> {
+    const response = await client.get(`/tickets/${ref}`);
+    return response.data;
+  }
+
+  static async verify(
+    client: AxiosInstance,
+    ref: string,
+    data: { body: string; type: string }
+  ): Promise<{ data: Ticket }> {
+    const response = await client.patch(`/tickets/${ref}/verify`, data);
+    return response.data;
+  }
+
+  static async assign(
+    client: AxiosInstance,
+    ref: string,
+    data: { agentSlug: string }
+  ): Promise<{ data: Ticket }> {
+    const response = await client.patch(`/tickets/${ref}/assign`, data);
+    return response.data;
+  }
+
+  static async start(client: AxiosInstance, ref: string): Promise<{ data: Ticket }> {
+    const response = await client.patch(`/tickets/${ref}/start`);
+    return response.data;
+  }
+
+  static async fix(
+    client: AxiosInstance,
+    ref: string,
+    data: { body: string; type: string; gitRef?: string }
+  ): Promise<{ data: Ticket }> {
+    const response = await client.patch(`/tickets/${ref}/fix`, data);
+    return response.data;
+  }
+
+  static async verifyFix(
+    client: AxiosInstance,
+    ref: string,
+    data: { body: string; type: string; status: string }
+  ): Promise<{ data: Ticket }> {
+    const response = await client.patch(`/tickets/${ref}/verify-fix`, data);
+    return response.data;
+  }
+
+  static async close(client: AxiosInstance, ref: string): Promise<{ data: Ticket }> {
+    const response = await client.patch(`/tickets/${ref}/close`);
+    return response.data;
+  }
+
+  static async reject(
+    client: AxiosInstance,
+    ref: string,
+    data: { body: string; type: string }
+  ): Promise<{ data: Ticket }> {
+    const response = await client.patch(`/tickets/${ref}/reject`, data);
+    return response.data;
+  }
+}
+
 export class AgentService {
   static async me(client: AxiosInstance): Promise<{ data: Agent }> {
     const response = await client.get('/agents/me');
