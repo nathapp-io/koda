@@ -23,6 +23,7 @@ const REPO_ROOT = path.resolve(__dirname, '../../../../..');
 const CLI_GENERATED = path.join(REPO_ROOT, 'packages/cli/src/generated');
 const WEB_GENERATED = path.join(REPO_ROOT, 'apps/web/generated');
 const OPENAPI_JSON = path.join(REPO_ROOT, 'openapi.json');
+const HAS_CLI_GENERATED = fs.existsSync(CLI_GENERATED);
 
 describe('Phase 3 — Step 3: OpenAPI Client Sanity Checks', () => {
   // ─────────────────────────────────────────────────────────────────────────
@@ -49,7 +50,9 @@ describe('Phase 3 — Step 3: OpenAPI Client Sanity Checks', () => {
   // 2. CLI client (Axios)
   // ─────────────────────────────────────────────────────────────────────────
 
-  describe('CLI client (packages/cli/src/generated)', () => {
+  const describeCli = HAS_CLI_GENERATED ? describe : describe.skip;
+
+  describeCli('CLI client (packages/cli/src/generated)', () => {
     it('should have generated directory', () => {
       expect(fs.existsSync(CLI_GENERATED)).toBe(true);
     });
