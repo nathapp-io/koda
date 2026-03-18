@@ -248,6 +248,7 @@ Do NOT use generic NestJS alternatives when a Nathapp pattern exists in this ski
 ## Coding Standards & Architecture Patterns
 
 - **NestJS patterns**: follow `@nathapp/nestjs-app` AppFactory bootstrap pattern
+- **Auth**: follow `@nathapp/nestjs-auth` for authentication and authorization
 - **DTOs**: use `class-validator` + `class-transformer` for all request bodies
 - **Swagger**: all controllers decorated with `@ApiTags`, DTOs with `@ApiProperty`
 - **Error handling**: throw NestJS built-in exceptions (`BadRequestException`, `NotFoundException`, etc.)
