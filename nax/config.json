@@ -200,7 +200,9 @@
             "traceImports": false
         }
     },
-    "interaction": null,
+    "interaction": {
+        "plugin": "telegram"
+    },
     "precheck": {
         "storySizeGate": {
             "enabled": true,
