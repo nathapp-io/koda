@@ -92,7 +92,7 @@
         "requireTests": true,
         "commands": {
             "test": "bunx turbo test",
-            "testScoped": "bunx turbo test --filter={{package}}",
+            "testScoped": "bunx turbo test --filter=[HEAD^1]",
             "typecheck": "bunx turbo type-check",
             "lint": "bunx turbo lint",
             "lintFix": "bunx turbo lint:fix",
