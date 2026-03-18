@@ -3,7 +3,7 @@
   "feature": "cli",
   "branchName": "feat/cli",
   "createdAt": "2026-03-18T00:00:00Z",
-  "updatedAt": "2026-03-18T09:13:17.456Z",
+  "updatedAt": "2026-03-18T09:27:45.746Z",
   "userStories": [
     {
       "id": "US-001",
@@ -125,18 +125,39 @@
         "US-001",
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
-      "attempts": 0,
+      "status": "passed",
+      "passes": true,
+      "attempts": 1,
       "escalations": [],
       "routing": {
         "complexity": "simple",
         "testStrategy": "test-after",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "modelTier": "powerful"
       },
       "workdir": "apps/cli",
-      "priorErrors": [],
-      "priorFailures": [],
+      "priorErrors": [
+        "Attempt 1 failed with model tier: fast: Review failed: lint failed (exit code 1)",
+        "Attempt 1 failed with model tier: balanced: Review failed: lint failed (exit code 1)"
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "fast",
+          "stage": "escalation",
+          "summary": "Failed with tier fast, escalating to next tier",
+          "cost": 0,
+          "timestamp": "2026-03-18T09:16:45.574Z"
+        },
+        {
+          "attempt": 1,
+          "modelTier": "balanced",
+          "stage": "escalation",
+          "summary": "Failed with tier balanced, escalating to next tier",
+          "cost": 0,
+          "timestamp": "2026-03-18T09:27:45.746Z"
+        }
+      ],
       "storyPoints": 1
     },
     {
@@ -171,9 +192,9 @@
         "US-001",
         "US-002"
       ],
-      "status": "pending",
+      "status": "paused",
       "passes": false,
-      "attempts": 0,
+      "attempts": 1,
       "escalations": [],
       "routing": {
         "complexity": "complex",
@@ -211,11 +232,23 @@
       "routing": {
         "complexity": "simple",
         "testStrategy": "test-after",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "modelTier": "balanced"
       },
       "workdir": "apps/cli",
-      "priorErrors": [],
-      "priorFailures": [],
+      "priorErrors": [
+        "Attempt 1 failed with model tier: fast: Tests failed (exit code TEST_FAILURE)"
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "fast",
+          "stage": "escalation",
+          "summary": "Failed with tier fast, escalating to next tier",
+          "cost": 0,
+          "timestamp": "2026-03-18T09:25:22.138Z"
+        }
+      ],
       "storyPoints": 1
     },
     {
