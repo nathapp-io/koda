@@ -5,6 +5,8 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { loginCommand } from './commands/login';
 import { configShow, configSet } from './commands/config';
+import { commentCommand } from './commands/comment';
+import { agentCommand } from './commands/agent';
 
 // Read package.json to get version
 let version = '0.1.0';
@@ -88,6 +90,12 @@ program
         }
       })
   );
+
+// Comment command
+commentCommand(program);
+
+// Agent command
+agentCommand(program);
 
 program.parse(process.argv);
 
