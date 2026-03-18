@@ -1,3 +1,21 @@
+# Project Context
+
+This file is auto-generated from `nax/context.md`.
+DO NOT EDIT MANUALLY — run `nax generate` to regenerate.
+
+---
+
+## Project Metadata
+
+> Auto-injected by `nax generate`
+
+**Project:** `@nathapp/koda-api`
+
+**Language:** TypeScript
+
+**Key dependencies:** @nathapp/nestjs-prisma, @nestjs/common, @nestjs/config, @nestjs/core, @nestjs/jwt, @nestjs/passport, @nestjs/platform-express, @nestjs/platform-fastify, @nestjs/swagger, @prisma/client
+
+---
 # CLAUDE.md — Koda API (apps/api)
 
 ## ⚠️ Read First

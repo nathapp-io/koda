@@ -1,3 +1,21 @@
+# Project Context
+
+This file is auto-generated from `nax/context.md`.
+DO NOT EDIT MANUALLY — run `nax generate` to regenerate.
+
+---
+
+## Project Metadata
+
+> Auto-injected by `nax generate`
+
+**Project:** `@nathapp/koda-web`
+
+**Language:** TypeScript
+
+**Key dependencies:** nuxt, vue, vue-router, @nuxtjs/tailwindcss, @nuxtjs/color-mode, shadcn-nuxt, radix-vue, lucide-vue-next, @nuxt/devtools, @nuxt/eslint
+
+---
 # CLAUDE.md — Koda Web (`apps/web`)
 
 Nuxt 3 + Shadcn-nuxt + Tailwind CSS. This file is the authoritative reference for building the Koda web UI. Do not guess component APIs — use the patterns documented here.

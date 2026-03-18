@@ -1,3 +1,21 @@
+# Project Context
+
+This file is auto-generated from `nax/context.md`.
+DO NOT EDIT MANUALLY — run `nax generate` to regenerate.
+
+---
+
+## Project Metadata
+
+> Auto-injected by `nax generate`
+
+**Project:** `@nathapp/koda`
+
+**Language:** TypeScript
+
+**Key dependencies:** @types/jest, jest, ts-jest, typescript
+
+---
 # CLAUDE.md — Koda CLI (apps/cli)
 
 ## Project: Koda CLI
