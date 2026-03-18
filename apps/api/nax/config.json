@@ -2,7 +2,7 @@
     "quality": {
         "commands": {
             "test": "bun run test",
-            "testScoped": "npx jest {{files}} --forceExit --passWithNoTests --testPathIgnorePatterns=integration",
+            "testScoped": "bunx jest {{files}} --forceExit --passWithNoTests --testPathIgnorePatterns=integration",
             "typecheck": "bun run type-check",
             "lint": "bun run lint",
             "lintFix": "bun run lint:fix",
