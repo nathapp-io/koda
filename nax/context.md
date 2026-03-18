@@ -31,7 +31,7 @@ Turborepo monorepo with NestJS 11 + Fastify API, Nuxt 3 + Shadcn-nuxt web UI, an
 | `bun run api:export-spec` | Export OpenAPI spec → `openapi.json` at root |
 | `bun run generate` | Export spec + regenerate CLI + web clients |
 | `cd apps/api && bun run test` | API tests only |
-| `cd packages/cli && bun run test` | CLI tests only |
+| `cd apps/cli && bun run test` | CLI tests only |
 
 ## Engineering Persona
 
@@ -179,7 +179,7 @@ The CLI and web app get their typed API clients from a generated OpenAPI spec.
 apps/api (NestJS + @nestjs/swagger)
   → bun run api:export-spec
   → openapi.json (monorepo root — source of truth)
-  → bun run generate:cli  → packages/cli/src/generated/   (@hey-api/client-axios)
+  → bun run generate:cli  → apps/cli/src/generated/   (@hey-api/client-axios)
   → bun run generate:web  → apps/web/generated/            (@hey-api/client-fetch)
 ```
 

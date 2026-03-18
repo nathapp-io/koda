@@ -34,8 +34,8 @@ case "$FILE_PATH" in
     run_fix "apps/api" ;;
   */apps/web/*|apps/web/*)
     run_fix "apps/web" ;;
-  */packages/cli/*|packages/cli/*)
-    run_fix "packages/cli" ;;
+  */apps/cli/*|apps/cli/*)
+    run_fix "apps/cli" ;;
   *)
     # No matching package — skip
     exit 0 ;;

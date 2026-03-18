@@ -17,9 +17,9 @@ coverage/
 .env.*.local
 
 # Generated (OpenAPI clients — regenerate with `bun run generate`)
-packages/cli/src/generated/
+apps/cli/src/generated/
 apps/web/generated/
-!packages/cli/src/generated/.gitkeep
+!apps/cli/src/generated/.gitkeep
 !apps/web/generated/.gitkeep
 
 # Logs

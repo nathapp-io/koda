@@ -3,8 +3,7 @@
   "private": true,
   "packageManager": "bun@1.0.0",
   "workspaces": [
-    "apps/*",
-    "packages/*"
+    "apps/*"
   ],
   "scripts": {
     "build": "turbo run build",
@@ -18,7 +17,7 @@
     "db:studio": "prisma studio --schema=prisma/schema.prisma",
     "db:reset": "prisma migrate reset --schema=prisma/schema.prisma",
     "api:export-spec": "ts-node -r tsconfig-paths/register apps/api/scripts/export-spec.ts",
-    "generate:cli": "openapi-ts --input openapi.json --output packages/cli/src/generated --client axios",
+    "generate:cli": "openapi-ts --input openapi.json --output apps/cli/src/generated --client axios",
     "generate:web": "openapi-ts --input openapi.json --output apps/web/generated --client fetch",
     "generate": "bun run api:export-spec && bun run generate:cli && bun run generate:web"
   },

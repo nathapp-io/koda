@@ -116,7 +116,7 @@ bun run dev
 
 ```bash
 # Install globally
-cd packages/cli && bun link
+cd apps/cli && bun link
 
 # Authenticate
 koda login --api-key <your-key> --api-url http://localhost:3100/api

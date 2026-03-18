@@ -1,4 +1,4 @@
-# CLAUDE.md — Koda CLI (packages/cli)
+# CLAUDE.md — Koda CLI (apps/cli)
 
 ## Project: Koda CLI
 
