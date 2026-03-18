@@ -9,12 +9,14 @@ module.exports = {
         allowSyntheticDefaultImports: true,
         skipLibCheck: true,
         moduleResolution: 'node',
+        resolveJsonModule: true,
+        declaration: false,
       },
     }],
   },
   testEnvironment: 'node',
   forceExit: true,
   transformIgnorePatterns: [
-    'node_modules/(?!chalk)',
+    'node_modules/(?!chalk|conf|env-paths|dot-prop|atomically|debounce-fn)',
   ],
 };
