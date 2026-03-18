@@ -162,7 +162,7 @@
       "workdir": "apps/cli",
       "description": "Wire up the Commander.js entry point and ensure build + type-check passes.\n\nCreate `src/index.ts`:\n```typescript\n#!/usr/bin/env node\nimport { Command } from 'commander';\nimport { version } from '../package.json';\n\nconst program = new Command();\nprogram\n  .name('koda')\n  .description('Koda — dev ticket tracker CLI')\n  .version(version);\n\n// Register all subcommands\nregisterLoginCommands(program);\nregisterConfigCommands(program);\nregisterProjectCommands(program);\nregisterTicketCommands(program);\nregisterCommentCommands(program);\nregisterAgentCommands(program);\n\nprogram.parse(process.argv);\n```\n\nVerify:\n- All commands registered and callable\n- `bun run build` compiles to dist/\n- `bun run type-check` passes\n- `bun run lint` passes\n- `koda --help` shows all subcommands",
       "complexity": "simple",
-      "status": "pending",
+      "status": "failed",
       "acceptanceCriteria": [
         "bun run build in apps/cli compiles without errors",
         "bun run type-check passes with no type errors",
@@ -172,7 +172,7 @@
         "Shebang line present in compiled dist/index.js",
         "git commit: feat(cli): phase 4 - CLI implementation"
       ],
-      "attempts": 0,
+      "attempts": 1,
       "priorErrors": [
         "Attempt 1 failed with model tier: fast: Tests failed (exit code TEST_FAILURE)",
         "Attempt 1 failed with model tier: balanced: Review failed: Working tree has uncommitted changes:\n  - apps/cli/package.json\n  - tsconfig.base.json\n\nStage and commit these files before running review."
@@ -207,5 +207,5 @@
       }
     }
   ],
-  "updatedAt": "2026-03-18T06:17:44.932Z"
+  "updatedAt": "2026-03-18T06:19:26.784Z"
 }

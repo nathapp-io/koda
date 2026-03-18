@@ -1,0 +1,296 @@
+[
+  {
+    "acId": "AC-1",
+    "original": "koda login --api-key mykey123 saves apiKey to ~/.koda/config.json",
+    "refined": "koda login --api-key mykey123 saves apiKey to ~/.koda/config.json",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-2",
+    "original": "koda config show prints apiUrl and masked key (e.g. '***key123')",
+    "refined": "koda config show prints apiUrl and masked key (e.g. '***key123')",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-3",
+    "original": "resolveAuth() prefers --api-key flag over KODA_API_KEY env over config file",
+    "refined": "resolveAuth() prefers --api-key flag over KODA_API_KEY env over config file",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-4",
+    "original": "koda version prints the version from package.json",
+    "refined": "koda version prints the version from package.json",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-5",
+    "original": "Unit tests for resolveAuth covering all 3 fallback levels",
+    "refined": "Unit tests for resolveAuth covering all 3 fallback levels",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-6",
+    "original": "output(data, {json: true}) prints JSON.stringify with 2-space indent",
+    "refined": "output(data, {json: true}) prints JSON.stringify with 2-space indent",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-7",
+    "original": "output(data, {json: false}) prints human-readable format",
+    "refined": "output(data, {json: false}) prints human-readable format",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-8",
+    "original": "table() produces column-aligned output with chalk-colored headers",
+    "refined": "table() produces column-aligned output with chalk-colored headers",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-9",
+    "original": "handleApiError() exits with code 1 for API errors, prints error message to stderr",
+    "refined": "handleApiError() exits with code 1 for API errors, prints error message to stderr",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-10",
+    "original": "Unit tests for output and error utilities",
+    "refined": "Unit tests for output and error utilities",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-11",
+    "original": "koda project list displays Name, Key, Slug columns",
+    "refined": "koda project list displays Name, Key, Slug columns",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-12",
+    "original": "koda project list --json outputs valid JSON array",
+    "refined": "koda project list --json outputs valid JSON array",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-13",
+    "original": "koda project show <slug> displays project details",
+    "refined": "koda project show <slug> displays project details",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-14",
+    "original": "koda project show <slug> --json outputs valid JSON object",
+    "refined": "koda project show <slug> --json outputs valid JSON object",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-15",
+    "original": "Exits with code 2 if no API key configured",
+    "refined": "Exits with code 2 if no API key configured",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-16",
+    "original": "Unit tests mocking ProjectsService",
+    "refined": "Unit tests mocking ProjectsService",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-17",
+    "original": "koda ticket create --project koda --type bug --title \"Test\" creates a ticket and prints ref (KODA-N)",
+    "refined": "koda ticket create --project koda --type bug --title \"Test\" creates a ticket and prints ref (KODA-N)",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-18",
+    "original": "koda ticket list --project koda --json returns parseable JSON array",
+    "refined": "koda ticket list --project koda --json returns parseable JSON array",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-19",
+    "original": "koda ticket mine returns tickets where assignedToAgent matches current API key",
+    "refined": "koda ticket mine returns tickets where assignedToAgent matches current API key",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-20",
+    "original": "koda ticket show KODA-1 displays full ticket details with comments",
+    "refined": "koda ticket show KODA-1 displays full ticket details with comments",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-21",
+    "original": "koda ticket verify KODA-1 --comment \"Confirmed\" sends verification and prints success",
+    "refined": "koda ticket verify KODA-1 --comment \"Confirmed\" sends verification and prints success",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-22",
+    "original": "koda ticket assign KODA-1 --to subrina-coder assigns the ticket",
+    "refined": "koda ticket assign KODA-1 --to subrina-coder assigns the ticket",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-23",
+    "original": "koda ticket start KODA-1 transitions ticket to IN_PROGRESS",
+    "refined": "koda ticket start KODA-1 transitions ticket to IN_PROGRESS",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-24",
+    "original": "koda ticket fix KODA-1 --comment \"Fixed\" sends fix report",
+    "refined": "koda ticket fix KODA-1 --comment \"Fixed\" sends fix report",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-25",
+    "original": "koda ticket verify-fix KODA-1 --comment \"Pass\" --pass closes the fix",
+    "refined": "koda ticket verify-fix KODA-1 --comment \"Pass\" --pass closes the fix",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-26",
+    "original": "koda ticket close KODA-1 closes the ticket",
+    "refined": "koda ticket close KODA-1 closes the ticket",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-27",
+    "original": "koda ticket reject KODA-1 --comment \"Reason\" rejects the ticket",
+    "refined": "koda ticket reject KODA-1 --comment \"Reason\" rejects the ticket",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-28",
+    "original": "All commands support --json flag",
+    "refined": "All commands support --json flag",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-29",
+    "original": "Ticket ref KODA-42 resolves correctly (project key + number)",
+    "refined": "Ticket ref KODA-42 resolves correctly (project key + number)",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-30",
+    "original": "Unit tests for ticket command handlers mocking TicketsService",
+    "refined": "Unit tests for ticket command handlers mocking TicketsService",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-31",
+    "original": "koda comment add KODA-1 --body \"Looks good\" adds a comment and prints success",
+    "refined": "koda comment add KODA-1 --body \"Looks good\" adds a comment and prints success",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-32",
+    "original": "koda comment add --type verification sets the CommentType correctly",
+    "refined": "koda comment add --type verification sets the CommentType correctly",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-33",
+    "original": "koda agent me displays agent name, slug, roles, status",
+    "refined": "koda agent me displays agent name, slug, roles, status",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-34",
+    "original": "koda agent me --json outputs valid JSON",
+    "refined": "koda agent me --json outputs valid JSON",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-35",
+    "original": "Unit tests for comment and agent command handlers",
+    "refined": "Unit tests for comment and agent command handlers",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-36",
+    "original": "bun run build in apps/cli compiles without errors",
+    "refined": "bun run build in apps/cli compiles without errors",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-37",
+    "original": "bun run type-check passes with no type errors",
+    "refined": "bun run type-check passes with no type errors",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-38",
+    "original": "bun run lint passes with no warnings",
+    "refined": "bun run lint passes with no warnings",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-39",
+    "original": "koda --help lists all subcommand groups (login, config, version, project, ticket, comment, agent)",
+    "refined": "koda --help lists all subcommand groups (login, config, version, project, ticket, comment, agent)",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-40",
+    "original": "koda ticket --help lists all ticket subcommands",
+    "refined": "koda ticket --help lists all ticket subcommands",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-41",
+    "original": "Shebang line present in compiled dist/index.js",
+    "refined": "Shebang line present in compiled dist/index.js",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-42",
+    "original": "git commit: feat(cli): phase 4 - CLI implementation",
+    "refined": "git commit: feat(cli): phase 4 - CLI implementation",
+    "testable": true,
+    "storyId": "US-001"
+  }
+]
