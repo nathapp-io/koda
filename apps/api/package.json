@@ -16,6 +16,7 @@
     "test:integration": "DATABASE_URL=file:./koda-test.db jest --forceExit --passWithNoTests --testPathPattern=integration"
   },
   "dependencies": {
+    "@fastify/static": "^9.0.0",
     "@nathapp/nestjs-app": "^3.0.0",
     "@nathapp/nestjs-auth": "^3.0.0",
     "@nathapp/nestjs-common": "^3.0.0",

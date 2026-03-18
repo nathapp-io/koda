@@ -19,19 +19,25 @@ export class CombinedAuthGuard implements CanActivate {
     }
 
     // Try JWT first
+    console.log('CombinedAuthGuard: trying JWT...');
     return Promise.resolve(this.jwtAuthGuard.canActivate(context))
       .then((result) => {
+        console.log('CombinedAuthGuard: JWT result:', result);
         if (result) return true;
         return false;
       })
-      .catch(() => {
+      .catch((err) => {
+        console.log('CombinedAuthGuard: JWT failed:', err.message);
         // JWT failed, try API key
+        console.log('CombinedAuthGuard: trying API Key...');
         return Promise.resolve(this.apiKeyAuthGuard.canActivate(context))
           .then((result) => {
+            console.log('CombinedAuthGuard: API Key result:', result);
             if (result) return true;
             return false;
           })
-          .catch(() => {
+          .catch((err2) => {
+            console.log('CombinedAuthGuard: Both failed. Last error:', err2.message);
             // Both failed
             throw new UnauthorizedException('Invalid credentials');
           });
