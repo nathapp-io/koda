@@ -3,7 +3,7 @@
     "feature": "cli",
     "branchName": "feat/cli",
     "createdAt": "2026-03-18T00:00:00Z",
-    "updatedAt": "2026-03-18T07:41:21.104Z",
+    "updatedAt": "2026-03-18T07:51:36.653Z",
     "userStories": [
         {
             "id": "US-001",
@@ -21,7 +21,7 @@
             ],
             "tags": ["auth", "config", "security"],
             "dependencies": [],
-            "status": "failed",
+            "status": "pending",
             "passes": false,
             "attempts": 1,
             "escalations": [],
@@ -51,7 +51,7 @@
             ],
             "tags": ["cli-output", "formatting"],
             "dependencies": [],
-            "status": "failed",
+            "status": "pending",
             "passes": false,
             "attempts": 1,
             "escalations": [],
