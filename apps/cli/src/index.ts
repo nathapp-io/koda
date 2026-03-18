@@ -6,6 +6,7 @@ import { join } from 'path';
 import { loginCommand } from './commands/login';
 import { configShow, configSet } from './commands/config';
 import { projectCommand } from './commands/project';
+import { ticketCommand } from './commands/ticket';
 import { commentCommand } from './commands/comment';
 import { agentCommand } from './commands/agent';
 
@@ -95,11 +96,39 @@ program
 // Project command
 projectCommand(program);
 
+// Ticket command
+ticketCommand(program);
+
 // Comment command
 commentCommand(program);
 
 // Agent command
 agentCommand(program);
+
+// Global error handling for uncaught exceptions
+process.on('uncaughtException', (error: Error) => {
+  console.error('Uncaught Exception:', error.message);
+  process.exit(1);
+});
+
+// Global error handling for unhandled promise rejections
+process.on('unhandledRejection', (reason: unknown) => {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  console.error('Unhandled Rejection:', message);
+  process.exit(1);
+});
+
+// Graceful shutdown on SIGINT (Ctrl+C)
+process.on('SIGINT', () => {
+  console.log('\nShutting down gracefully...');
+  process.exit(0);
+});
+
+// Graceful shutdown on SIGTERM (kill signal)
+process.on('SIGTERM', () => {
+  console.log('\nShutting down gracefully...');
+  process.exit(0);
+});
 
 program.parse(process.argv);
 
