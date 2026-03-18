@@ -3,7 +3,7 @@
   "feature": "cli",
   "branchName": "feat/cli",
   "createdAt": "2026-03-18T00:00:00Z",
-  "updatedAt": "2026-03-18T09:46:31.010Z",
+  "updatedAt": "2026-03-18T09:51:31.143Z",
   "userStories": [
     {
       "id": "US-001",
@@ -315,7 +315,10 @@
       "passes": false,
       "escalations": [],
       "attempts": 0,
-      "contextFiles": []
+      "contextFiles": [],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ]
 }
