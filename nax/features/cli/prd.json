@@ -174,7 +174,7 @@
             "dependencies": ["US-001", "US-002"],
             "status": "pending",
             "passes": false,
-            "attempts": 1,
+            "attempts": 0,
             "escalations": [],
             "routing": {
                 "complexity": "complex",
@@ -244,8 +244,8 @@
             ],
             "tags": ["feature", "integration"],
             "dependencies": ["US-001", "US-002", "US-003", "US-004", "US-005"],
-            "status": "passed",
-            "passes": true,
+            "status": "pending",
+            "passes": false,
             "attempts": 0,
             "escalations": [],
             "routing": {
@@ -254,22 +254,6 @@
                 "reasoning": "validated from LLM output"
             },
             "workdir": "apps/cli",
-            "priorErrors": [],
-            "priorFailures": [],
-            "storyPoints": 1
-        },
-        {
-            "id": "US-FIX-001",
-            "title": "Fix: AC-ERROR — No description available",
-            "description": "[client] initialize (running)",
-            "acceptanceCriteria": ["Fix AC-ERROR"],
-            "tags": ["fix", "acceptance-failure"],
-            "dependencies": ["US-001", "US-002", "US-003", "US-004", "US-005"],
-            "status": "pending",
-            "passes": false,
-            "escalations": [],
-            "attempts": 0,
-            "contextFiles": [],
             "priorErrors": [],
             "priorFailures": [],
             "storyPoints": 1

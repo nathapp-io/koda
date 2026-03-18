@@ -217,7 +217,7 @@
         "maxAcceptanceCriteria": 6,
         "maxSubstories": 5,
         "maxSubstoryComplexity": "medium",
-        "maxRetries": 3,
+        "maxRetries": 2,
         "model": "balanced"
     }
 }
