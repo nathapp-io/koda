@@ -1,4 +1,3 @@
-```typescript
 import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
 import { promises as fs } from "fs";
 import path from "path";
@@ -29,7 +28,7 @@ describe("cli - Acceptance Tests", () => {
   test("AC-1: koda login --api-key mykey123 saves apiKey to ~/.koda/config.json", async () => {
     const configPath = path.join(mockConfigDir, ".koda", "config.json");
     const result = execSync(
-      `cd ${process.cwd()}/packages/cli && bun run src/index.ts login --api-key mykey123`,
+      `cd ${process.cwd()}/apps/cli && bun run src/index.ts login --api-key mykey123`,
       { env: { ...process.env, HOME: mockConfigDir }, encoding: "utf-8" }
     );
 
@@ -47,7 +46,7 @@ describe("cli - Acceptance Tests", () => {
     );
 
     const result = execSync(
-      `cd ${process.cwd()}/packages/cli && bun run src/index.ts config show`,
+      `cd ${process.cwd()}/apps/cli && bun run src/index.ts config show`,
       { env: { ...process.env, HOME: mockConfigDir }, encoding: "utf-8" }
     );
 
@@ -70,13 +69,13 @@ describe("cli - Acceptance Tests", () => {
 
   test("AC-4: koda version prints the version from package.json", async () => {
     const result = execSync(
-      `cd ${process.cwd()}/packages/cli && bun run src/index.ts version`,
+      `cd ${process.cwd()}/apps/cli && bun run src/index.ts version`,
       { encoding: "utf-8" }
     );
 
     const pkgJson = JSON.parse(
       await fs.readFile(
-        path.join(process.cwd(), "packages/cli/package.json"),
+        path.join(process.cwd(), "apps/cli/package.json"),
         "utf-8"
       )
     );
@@ -123,7 +122,7 @@ describe("cli - Acceptance Tests", () => {
 
     try {
       const result = execSync(
-        `cd ${process.cwd()}/packages/cli && bun run src/index.ts project list`,
+        `cd ${process.cwd()}/apps/cli && bun run src/index.ts project list`,
         { env: { ...process.env, HOME: mockConfigDir }, encoding: "utf-8" }
       );
 
@@ -150,7 +149,7 @@ describe("cli - Acceptance Tests", () => {
 
     try {
       const result = execSync(
-        `cd ${process.cwd()}/packages/cli && bun run src/index.ts project list --json`,
+        `cd ${process.cwd()}/apps/cli && bun run src/index.ts project list --json`,
         { env: { ...process.env, HOME: mockConfigDir }, encoding: "utf-8" }
       );
 
@@ -175,7 +174,7 @@ describe("cli - Acceptance Tests", () => {
 
     try {
       const result = execSync(
-        `cd ${process.cwd()}/packages/cli && bun run src/index.ts project show koda`,
+        `cd ${process.cwd()}/apps/cli && bun run src/index.ts project show koda`,
         { env: { ...process.env, HOME: mockConfigDir }, encoding: "utf-8" }
       );
 
@@ -200,7 +199,7 @@ describe("cli - Acceptance Tests", () => {
 
     try {
       const result = execSync(
-        `cd ${process.cwd()}/packages/cli && bun run src/index.ts project show koda --json`,
+        `cd ${process.cwd()}/apps/cli && bun run src/index.ts project show koda --json`,
         { env: { ...process.env, HOME: mockConfigDir }, encoding: "utf-8" }
       );
 
@@ -213,7 +212,7 @@ describe("cli - Acceptance Tests", () => {
 
   test("AC-15: Exits with code 2 if no API key configured", async () => {
     try {
-      execSync(`cd ${process.cwd()}/packages/cli && bun run src/index.ts project list`, {
+      execSync(`cd ${process.cwd()}/apps/cli && bun run src/index.ts project list`, {
         env: { ...process.env, HOME: mockConfigDir, KODA_API_KEY: "" },
       });
       expect(true).toBe(false); // Should have exited with error
@@ -240,7 +239,7 @@ describe("cli - Acceptance Tests", () => {
 
     try {
       const result = execSync(
-        `cd ${process.cwd()}/packages/cli && bun run src/index.ts ticket create --project koda --type bug --title "Test"`,
+        `cd ${process.cwd()}/apps/cli && bun run src/index.ts ticket create --project koda --type bug --title "Test"`,
         { env: { ...process.env, HOME: mockConfigDir }, encoding: "utf-8" }
       );
 
@@ -265,7 +264,7 @@ describe("cli - Acceptance Tests", () => {
 
     try {
       const result = execSync(
-        `cd ${process.cwd()}/packages/cli && bun run src/index.ts ticket list --project koda --json`,
+        `cd ${process.cwd()}/apps/cli && bun run src/index.ts ticket list --project koda --json`,
         { env: { ...process.env, HOME: mockConfigDir }, encoding: "utf-8" }
       );
 
@@ -290,7 +289,7 @@ describe("cli - Acceptance Tests", () => {
 
     try {
       const result = execSync(
-        `cd ${process.cwd()}/packages/cli && bun run src/index.ts ticket mine`,
+        `cd ${process.cwd()}/apps/cli && bun run src/index.ts ticket mine`,
         { env: { ...process.env, HOME: mockConfigDir }, encoding: "utf-8" }
       );
 
@@ -315,7 +314,7 @@ describe("cli - Acceptance Tests", () => {
 
     try {
       const result = execSync(
-        `cd ${process.cwd()}/packages/cli && bun run src/index.ts ticket show KODA-1`,
+        `cd ${process.cwd()}/apps/cli && bun run src/index.ts ticket show KODA-1`,
         { env: { ...process.env, HOME: mockConfigDir }, encoding: "utf-8" }
       );
 
@@ -340,7 +339,7 @@ describe("cli - Acceptance Tests", () => {
 
     try {
       const result = execSync(
-        `cd ${process.cwd()}/packages/cli && bun run src/index.ts ticket verify KODA-1 --comment "Confirmed"`,
+        `cd ${process.cwd()}/apps/cli && bun run src/index.ts ticket verify KODA-1 --comment "Confirmed"`,
         { env: { ...process.env, HOME: mockConfigDir }, encoding: "utf-8" }
       );
 
@@ -365,7 +364,7 @@ describe("cli - Acceptance Tests", () => {
 
     try {
       const result = execSync(
-        `cd ${process.cwd()}/packages/cli && bun run src/index.ts ticket assign KODA-1 --to subrina-coder`,
+        `cd ${process.cwd()}/apps/cli && bun run src/index.ts ticket assign KODA-1 --to subrina-coder`,
         { env: { ...process.env, HOME: mockConfigDir }, encoding: "utf-8" }
       );
 
@@ -390,7 +389,7 @@ describe("cli - Acceptance Tests", () => {
 
     try {
       const result = execSync(
-        `cd ${process.cwd()}/packages/cli && bun run src/index.ts ticket start KODA-1`,
+        `cd ${process.cwd()}/apps/cli && bun run src/index.ts ticket start KODA-1`,
         { env: { ...process.env, HOME: mockConfigDir }, encoding: "utf-8" }
       );
 
@@ -415,7 +414,7 @@ describe("cli - Acceptance Tests", () => {
 
     try {
       const result = execSync(
-        `cd ${process.cwd()}/packages/cli && bun run src/index.ts ticket fix KODA-1 --comment "Fixed"`,
+        `cd ${process.cwd()}/apps/cli && bun run src/index.ts ticket fix KODA-1 --comment "Fixed"`,
         { env: { ...process.env, HOME: mockConfigDir }, encoding: "utf-8" }
       );
 
@@ -440,7 +439,7 @@ describe("cli - Acceptance Tests", () => {
 
     try {
       const result = execSync(
-        `cd ${process.cwd()}/packages/cli && bun run src/index.ts ticket verify-fix KODA-1 --comment "Pass" --pass`,
+        `cd ${process.cwd()}/apps/cli && bun run src/index.ts ticket verify-fix KODA-1 --comment "Pass" --pass`,
         { env: { ...process.env, HOME: mockConfigDir }, encoding: "utf-8" }
       );
 
@@ -465,7 +464,7 @@ describe("cli - Acceptance Tests", () => {
 
     try {
       const result = execSync(
-        `cd ${process.cwd()}/packages/cli && bun run src/index.ts ticket close KODA-1`,
+        `cd ${process.cwd()}/apps/cli && bun run src/index.ts ticket close KODA-1`,
         { env: { ...process.env, HOME: mockConfigDir }, encoding: "utf-8" }
       );
 
@@ -490,7 +489,7 @@ describe("cli - Acceptance Tests", () => {
 
     try {
       const result = execSync(
-        `cd ${process.cwd()}/packages/cli && bun run src/index.ts ticket reject KODA-1 --comment "Reason"`,
+        `cd ${process.cwd()}/apps/cli && bun run src/index.ts ticket reject KODA-1 --comment "Reason"`,
         { env: { ...process.env, HOME: mockConfigDir }, encoding: "utf-8" }
       );
 
@@ -515,7 +514,7 @@ describe("cli - Acceptance Tests", () => {
 
     try {
       const result = execSync(
-        `cd ${process.cwd()}/packages/cli && bun run src/index.ts project list --json`,
+        `cd ${process.cwd()}/apps/cli && bun run src/index.ts project list --json`,
         { env: { ...process.env, HOME: mockConfigDir }, encoding: "utf-8" }
       );
 
@@ -548,7 +547,7 @@ describe("cli - Acceptance Tests", () => {
 
     try {
       const result = execSync(
-        `cd ${process.cwd()}/packages/cli && bun run src/index.ts comment add KODA-1 --body "Looks good"`,
+        `cd ${process.cwd()}/apps/cli && bun run src/index.ts comment add KODA-1 --body "Looks good"`,
         { env: { ...process.env, HOME: mockConfigDir }, encoding: "utf-8" }
       );
 
@@ -573,7 +572,7 @@ describe("cli - Acceptance Tests", () => {
 
     try {
       const result = execSync(
-        `cd ${process.cwd()}/packages/cli && bun run src/index.ts comment add KODA-1 --body "Test" --type verification`,
+        `cd ${process.cwd()}/apps/cli && bun run src/index.ts comment add KODA-1 --body "Test" --type verification`,
         { env: { ...process.env, HOME: mockConfigDir }, encoding: "utf-8" }
       );
 
@@ -598,7 +597,7 @@ describe("cli - Acceptance Tests", () => {
 
     try {
       const result = execSync(
-        `cd ${process.cwd()}/packages/cli && bun run src/index.ts agent me`,
+        `cd ${process.cwd()}/apps/cli && bun run src/index.ts agent me`,
         { env: { ...process.env, HOME: mockConfigDir }, encoding: "utf-8" }
       );
 
@@ -623,7 +622,7 @@ describe("cli - Acceptance Tests", () => {
 
     try {
       const result = execSync(
-        `cd ${process.cwd()}/packages/cli && bun run src/index.ts agent me --json`,
+        `cd ${process.cwd()}/apps/cli && bun run src/index.ts agent me --json`,
         { env: { ...process.env, HOME: mockConfigDir }, encoding: "utf-8" }
       );
 
@@ -640,7 +639,7 @@ describe("cli - Acceptance Tests", () => {
 
   test("AC-36: bun run build in apps/cli compiles without errors", async () => {
     try {
-      execSync(`cd ${process.cwd()}/packages/cli && bun run build`, {
+      execSync(`cd ${process.cwd()}/apps/cli && bun run build`, {
         stdio: "pipe",
       });
       expect(true).toBe(true);
@@ -651,7 +650,7 @@ describe("cli - Acceptance Tests", () => {
 
   test("AC-37: bun run type-check passes with no type errors", async () => {
     try {
-      execSync(`cd ${process.cwd()}/packages/cli && bun run type-check`, {
+      execSync(`cd ${process.cwd()}/apps/cli && bun run type-check`, {
         stdio: "pipe",
       });
       expect(true).toBe(true);
@@ -662,7 +661,7 @@ describe("cli - Acceptance Tests", () => {
 
   test("AC-38: bun run lint passes with no warnings", async () => {
     try {
-      execSync(`cd ${process.cwd()}/packages/cli && bun run lint`, {
+      execSync(`cd ${process.cwd()}/apps/cli && bun run lint`, {
         stdio: "pipe",
       });
       expect(true).toBe(true);
@@ -674,7 +673,7 @@ describe("cli - Acceptance Tests", () => {
 
   test("AC-39: koda --help lists all subcommand groups (login, config, version, project, ticket, comment, agent)", async () => {
     const result = execSync(
-      `cd ${process.cwd()}/packages/cli && bun run src/index.ts --help`,
+      `cd ${process.cwd()}/apps/cli && bun run src/index.ts --help`,
       { encoding: "utf-8" }
     );
 
@@ -689,7 +688,7 @@ describe("cli - Acceptance Tests", () => {
 
   test("AC-40: koda ticket --help lists all ticket subcommands", async () => {
     const result = execSync(
-      `cd ${process.cwd()}/packages/cli && bun run src/index.ts ticket --help`,
+      `cd ${process.cwd()}/apps/cli && bun run src/index.ts ticket --help`,
       { encoding: "utf-8" }
     );
 
@@ -706,13 +705,13 @@ describe("cli - Acceptance Tests", () => {
 
   test("AC-41: Shebang line present in compiled dist/index.js", async () => {
     try {
-      execSync(`cd ${process.cwd()}/packages/cli && bun run build`, {
+      execSync(`cd ${process.cwd()}/apps/cli && bun run build`, {
         stdio: "pipe",
       });
 
       const distPath = path.join(
         process.cwd(),
-        "packages/cli/dist/index.js"
+        "apps/cli/dist/index.js"
       );
       const content = await fs.readFile(distPath, "utf-8");
       expect(content.startsWith("#!/usr/bin/env node")).toBe(true);
@@ -730,4 +729,3 @@ describe("cli - Acceptance Tests", () => {
     expect(logResult).toContain("feat(cli)");
   });
 });
-```
