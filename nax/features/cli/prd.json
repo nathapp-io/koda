@@ -1,0 +1,109 @@
+{
+  "project": "koda",
+  "branchName": "feat/cli",
+  "feature": "cli",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Config & Auth",
+      "workdir": "apps/cli",
+      "description": "Implement config store (conf package) and auth resolution for the Koda CLI.\n\nCreate:\n- `src/config.ts` — read/write ~/.koda/config.json using Conf<{apiUrl,apiKey}>\n- `src/utils/auth.ts` — resolveAuth(options): flag → KODA_API_KEY env → config fallback; apiUrl defaults to http://localhost:3100/api\n\nCommands to implement:\n- `koda login --api-key <key> [--api-url <url>]` — saves to config, prints 'Logged in successfully'\n- `koda config show` — prints apiUrl + masked apiKey (show last 4 chars)\n- `koda config set [--api-key <key>] [--api-url <url>]` — updates config\n- `koda version` — prints package.json version",
+      "complexity": "simple",
+      "status": "pending",
+      "acceptanceCriteria": [
+        "koda login --api-key mykey123 saves apiKey to ~/.koda/config.json",
+        "koda config show prints apiUrl and masked key (e.g. '***key123')",
+        "resolveAuth() prefers --api-key flag over KODA_API_KEY env over config file",
+        "koda version prints the version from package.json",
+        "Unit tests for resolveAuth covering all 3 fallback levels"
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "Output Utilities",
+      "workdir": "apps/cli",
+      "description": "Create shared output utilities used by all commands.\n\nCreate:\n- `src/utils/output.ts` — output(data, {json}) for JSON vs human output; table(headers, rows) for column-aligned chalk tables; success/error/warn helpers\n- `src/utils/error.ts` — EXIT codes (0 success, 1 API error, 2 config error, 3 validation error); handleApiError(err): never\n- `src/client.ts` — configure hey-api Axios client with baseUrl and Bearer token header\n\nExit code constants:\n```typescript\nexport const EXIT = { SUCCESS: 0, API_ERROR: 1, CONFIG_ERROR: 2, VALIDATION_ERROR: 3 };\n```",
+      "complexity": "simple",
+      "status": "pending",
+      "acceptanceCriteria": [
+        "output(data, {json: true}) prints JSON.stringify with 2-space indent",
+        "output(data, {json: false}) prints human-readable format",
+        "table() produces column-aligned output with chalk-colored headers",
+        "handleApiError() exits with code 1 for API errors, prints error message to stderr",
+        "Unit tests for output and error utilities"
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "Project Commands",
+      "workdir": "apps/cli",
+      "description": "Implement project subcommands using the generated API client.\n\nCommands:\n- `koda project list [--json]` — list all projects; table cols: Name, Key, Slug\n- `koda project show <slug> [--json]` — show project details\n\nUse ProjectsService from src/generated/. Configure client via configureClient() before each call.",
+      "complexity": "simple",
+      "status": "pending",
+      "acceptanceCriteria": [
+        "koda project list displays Name, Key, Slug columns",
+        "koda project list --json outputs valid JSON array",
+        "koda project show <slug> displays project details",
+        "koda project show <slug> --json outputs valid JSON object",
+        "Exits with code 2 if no API key configured",
+        "Unit tests mocking ProjectsService"
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "Ticket Commands",
+      "workdir": "apps/cli",
+      "description": "Implement all ticket subcommands.\n\nCommands:\n- `koda ticket create --project <slug> --type bug|enhancement --title \"...\" [--desc \"...\"] [--priority low|medium|high|critical] [--json]`\n- `koda ticket list --project <slug> [--status <s>] [--type <t>] [--priority <p>] [--assigned-to <slug>] [--unassigned] [--limit 20] [--page 1] [--json]`\n- `koda ticket mine [--project <slug>] [--status <s>] [--json]` — shorthand for list --assigned-to self\n- `koda ticket show <ref> [--json]` — ref = KODA-42 (PROJECT_KEY-number) or CUID\n- `koda ticket verify <ref> --comment \"...\"`\n- `koda ticket assign <ref> [--to <agent-slug>]` — omit --to = self-assign\n- `koda ticket start <ref>`\n- `koda ticket fix <ref> --comment \"...\" [--git-ref \"v1.0:src/auth.ts:42\"]`\n- `koda ticket verify-fix <ref> --comment \"...\" [--pass|--fail]`\n- `koda ticket close <ref>`\n- `koda ticket reject <ref> --comment \"...\"`\n\nticket list display:\n```\n#        Type  Priority  Status      Assignee         Title\nKODA-42  🐛    HIGH      VERIFIED    subrina-coder    Null ref in auth service\n```\n\nticket show display:\n```\nKODA-42 — Null ref in auth service\nType: BUG  |  Priority: HIGH  |  Status: VERIFIED\nAssignee: subrina-coder  |  Created by: william\n\nDescription:\n  NullPointerException in AuthService...\n\nComments (2):\n  [VERIFICATION] subrina-coder — 2026-03-17\n    Confirmed: null ref at src/auth/auth.service.ts:87\n```",
+      "complexity": "medium",
+      "status": "pending",
+      "acceptanceCriteria": [
+        "koda ticket create --project koda --type bug --title \"Test\" creates a ticket and prints ref (KODA-N)",
+        "koda ticket list --project koda --json returns parseable JSON array",
+        "koda ticket mine returns tickets where assignedToAgent matches current API key",
+        "koda ticket show KODA-1 displays full ticket details with comments",
+        "koda ticket verify KODA-1 --comment \"Confirmed\" sends verification and prints success",
+        "koda ticket assign KODA-1 --to subrina-coder assigns the ticket",
+        "koda ticket start KODA-1 transitions ticket to IN_PROGRESS",
+        "koda ticket fix KODA-1 --comment \"Fixed\" sends fix report",
+        "koda ticket verify-fix KODA-1 --comment \"Pass\" --pass closes the fix",
+        "koda ticket close KODA-1 closes the ticket",
+        "koda ticket reject KODA-1 --comment \"Reason\" rejects the ticket",
+        "All commands support --json flag",
+        "Ticket ref KODA-42 resolves correctly (project key + number)",
+        "Unit tests for ticket command handlers mocking TicketsService"
+      ]
+    },
+    {
+      "id": "US-005",
+      "title": "Comment & Agent Commands",
+      "workdir": "apps/cli",
+      "description": "Implement comment add and agent info commands.\n\nCommands:\n- `koda comment add <ref> --body \"...\" [--type verification|fix_report|review|general]` — add comment to ticket\n- `koda agent me [--json]` — show current agent info (from GET /agents/me using API key auth)",
+      "complexity": "simple",
+      "status": "pending",
+      "acceptanceCriteria": [
+        "koda comment add KODA-1 --body \"Looks good\" adds a comment and prints success",
+        "koda comment add --type verification sets the CommentType correctly",
+        "koda agent me displays agent name, slug, roles, status",
+        "koda agent me --json outputs valid JSON",
+        "Unit tests for comment and agent command handlers"
+      ]
+    },
+    {
+      "id": "US-006",
+      "title": "CLI Entry Point & Build",
+      "workdir": "apps/cli",
+      "description": "Wire up the Commander.js entry point and ensure build + type-check passes.\n\nCreate `src/index.ts`:\n```typescript\n#!/usr/bin/env node\nimport { Command } from 'commander';\nimport { version } from '../package.json';\n\nconst program = new Command();\nprogram\n  .name('koda')\n  .description('Koda — dev ticket tracker CLI')\n  .version(version);\n\n// Register all subcommands\nregisterLoginCommands(program);\nregisterConfigCommands(program);\nregisterProjectCommands(program);\nregisterTicketCommands(program);\nregisterCommentCommands(program);\nregisterAgentCommands(program);\n\nprogram.parse(process.argv);\n```\n\nVerify:\n- All commands registered and callable\n- `bun run build` compiles to dist/\n- `bun run type-check` passes\n- `bun run lint` passes\n- `koda --help` shows all subcommands",
+      "complexity": "simple",
+      "status": "pending",
+      "acceptanceCriteria": [
+        "bun run build in apps/cli compiles without errors",
+        "bun run type-check passes with no type errors",
+        "bun run lint passes with no warnings",
+        "koda --help lists all subcommand groups (login, config, version, project, ticket, comment, agent)",
+        "koda ticket --help lists all ticket subcommands",
+        "Shebang line present in compiled dist/index.js",
+        "git commit: feat(cli): phase 4 - CLI implementation"
+      ]
+    }
+  ]
+}
