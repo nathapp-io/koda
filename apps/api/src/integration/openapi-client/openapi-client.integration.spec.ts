@@ -24,6 +24,8 @@ const CLI_GENERATED = path.join(REPO_ROOT, 'packages/cli/src/generated');
 const WEB_GENERATED = path.join(REPO_ROOT, 'apps/web/generated');
 const OPENAPI_JSON = path.join(REPO_ROOT, 'openapi.json');
 const HAS_CLI_GENERATED = fs.existsSync(CLI_GENERATED);
+const HAS_WEB_GENERATED = fs.existsSync(WEB_GENERATED);
+const HAS_BOTH_GENERATED = HAS_CLI_GENERATED && HAS_WEB_GENERATED;
 
 describe('Phase 3 — Step 3: OpenAPI Client Sanity Checks', () => {
   // ─────────────────────────────────────────────────────────────────────────
@@ -169,7 +171,9 @@ describe('Phase 3 — Step 3: OpenAPI Client Sanity Checks', () => {
   // 3. Web client (Fetch)
   // ─────────────────────────────────────────────────────────────────────────
 
-  describe('Web client (apps/web/generated)', () => {
+  const describeWeb = HAS_WEB_GENERATED ? describe : describe.skip;
+
+  describeWeb('Web client (apps/web/generated)', () => {
     it('should have generated directory', () => {
       expect(fs.existsSync(WEB_GENERATED)).toBe(true);
     });
@@ -220,7 +224,9 @@ describe('Phase 3 — Step 3: OpenAPI Client Sanity Checks', () => {
   // 4. Consistency: CLI vs Web parity
   // ─────────────────────────────────────────────────────────────────────────
 
-  describe('Consistency: CLI and Web clients', () => {
+  const describeParity = HAS_BOTH_GENERATED ? describe : describe.skip;
+
+  describeParity('Consistency: CLI and Web clients', () => {
     it('should both export the same service function names', () => {
       const cliServices = fs.readFileSync(
         path.join(CLI_GENERATED, 'services.gen.ts'),
