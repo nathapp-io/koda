@@ -1,5 +1,5 @@
 {
-  "name": "@nathapp/koda",
+  "name": "@nathapp/koda-cli",
   "version": "0.1.0",
   "description": "CLI for Koda — dev ticket tracker",
   "bin": {
