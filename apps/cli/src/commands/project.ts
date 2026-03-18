@@ -30,13 +30,14 @@ export function projectCommand(program: Command): void {
         }
 
         process.exit(0);
-      } catch (err: any) {
-        const statusCode = err.response?.status;
+      } catch (err: unknown) {
+        const apiError = err as { response?: { status?: number }; message?: string };
+        const statusCode = apiError.response?.status;
         if (statusCode === 401 || statusCode === 403) {
           error('Unauthorized. Please check your API key.');
           process.exit(2);
         }
-        error(err.message || 'Failed to fetch projects');
+        error(apiError.message || 'Failed to fetch projects');
         process.exit(1);
       }
     });
@@ -59,17 +60,14 @@ export function projectCommand(program: Command): void {
         if (options.json) {
           console.log(JSON.stringify(response.data, null, 2));
         } else {
-          console.log(`Project: ${response.data.name}`);
-          console.log(`Key: ${response.data.key}`);
-          console.log(`Slug: ${response.data.slug}`);
-          if (response.data.description) {
-            console.log(`Description: ${response.data.description}`);
-          }
+          const rows = [[response.data.name, response.data.key, response.data.slug]];
+          table(['Name', 'Key', 'Slug'], rows);
         }
 
         process.exit(0);
-      } catch (err: any) {
-        const statusCode = err.response?.status;
+      } catch (err: unknown) {
+        const apiError = err as { response?: { status?: number }; message?: string };
+        const statusCode = apiError.response?.status;
         if (statusCode === 401 || statusCode === 403) {
           error('Unauthorized. Please check your API key.');
           process.exit(2);
@@ -78,7 +76,7 @@ export function projectCommand(program: Command): void {
           error(`Project not found: ${slug}`);
           process.exit(1);
         }
-        error(err.message || 'Failed to fetch project');
+        error(apiError.message || 'Failed to fetch project');
         process.exit(1);
       }
     });

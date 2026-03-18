@@ -5,6 +5,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { loginCommand } from './commands/login';
 import { configShow, configSet } from './commands/config';
+import { projectCommand } from './commands/project';
 import { commentCommand } from './commands/comment';
 import { agentCommand } from './commands/agent';
 
@@ -90,6 +91,9 @@ program
         }
       })
   );
+
+// Project command
+projectCommand(program);
 
 // Comment command
 commentCommand(program);
