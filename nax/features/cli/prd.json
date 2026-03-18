@@ -1,297 +1,262 @@
 {
-  "project": "koda",
-  "feature": "cli",
-  "branchName": "feat/cli",
-  "createdAt": "2026-03-18T00:00:00Z",
-  "updatedAt": "2026-03-18T09:32:42.688Z",
-  "userStories": [
-    {
-      "id": "US-001",
-      "title": "Config & Auth — Store API credentials locally",
-      "description": "Build a config store using `conf` to persist API URL and API key to ~/.koda/config.json. Implement auth resolution with precedence: CLI flag → environment variable → config file. Provide commands to login, show config, and update config.",
-      "acceptanceCriteria": [
-        "koda login --api-key <key> [--api-url <url>] saves to ~/.koda/config.json",
-        "koda config show displays masked API key (e.g., sk-proj-****...)",
-        "koda config set [--api-key <key>] [--api-url <url>] updates config file",
-        "koda version displays CLI version from package.json",
-        "resolveAuth() precedence: flag > env > config > default (http://localhost:3100/api)",
-        "KODA_API_KEY and KODA_API_URL environment variables override config file",
-        "Config file permissions are restrictive (mode 600 or equivalent)",
-        "API key validation before saving (non-empty, reasonable length)"
-      ],
-      "tags": [
-        "auth",
-        "config",
-        "security"
-      ],
-      "dependencies": [],
-      "status": "passed",
-      "passes": true,
-      "attempts": 1,
-      "escalations": [],
-      "routing": {
-        "complexity": "medium",
-        "testStrategy": "tdd-simple",
-        "reasoning": "validated from LLM output",
-        "modelTier": "powerful"
-      },
-      "workdir": "apps/cli",
-      "priorErrors": [
-        "Attempt 2 failed with model tier: balanced: Tests failed (exit code TEST_FAILURE)"
-      ],
-      "priorFailures": [
+    "project": "koda",
+    "feature": "cli",
+    "branchName": "feat/cli",
+    "createdAt": "2026-03-18T00:00:00Z",
+    "updatedAt": "2026-03-18T09:32:42.688Z",
+    "userStories": [
         {
-          "attempt": 2,
-          "modelTier": "balanced",
-          "stage": "escalation",
-          "summary": "Failed with tier balanced, escalating to next tier",
-          "cost": 0,
-          "timestamp": "2026-03-18T08:09:51.020Z"
-        }
-      ],
-      "storyPoints": 1
-    },
-    {
-      "id": "US-002",
-      "title": "Output Utilities — Format human & machine-readable output",
-      "description": "Build output utilities in utils/output.ts for pretty-printing and utils/error.ts for exit code handling. Support --json flag for machine-readable JSON on all commands. Provide chalk-colored success/error/warn helpers and column-aligned table formatter.",
-      "acceptanceCriteria": [
-        "output(data, { json?: boolean }) prints JSON if json=true, else pretty-printed format",
-        "table(headers, rows) renders column-aligned table with chalk-colored headers",
-        "success(msg), error(msg), warn(msg) print colored status messages",
-        "Exit codes: 0 (success), 1 (API error), 2 (config error), 3 (validation error)",
-        "handleApiError(err) logs API error and exits with code 1",
-        "All human-readable output goes to stdout; errors go to stderr",
-        "--json flag produces valid parseable JSON on all commands",
-        "Table headers are bold/cyan; alternating row colors optional"
-      ],
-      "tags": [
-        "cli-output",
-        "formatting"
-      ],
-      "dependencies": [],
-      "status": "passed",
-      "passes": true,
-      "attempts": 1,
-      "escalations": [],
-      "routing": {
-        "complexity": "simple",
-        "testStrategy": "test-after",
-        "reasoning": "validated from LLM output",
-        "modelTier": "powerful"
-      },
-      "workdir": "apps/cli",
-      "priorErrors": [
-        "Attempt 2 failed with model tier: fast: Review failed: Working tree has uncommitted changes:\n  - nax/config.json\n\nStage and commit these files before running review.",
-        "Attempt 1 failed with model tier: balanced: Review failed: Working tree has uncommitted changes:\n  - apps/cli/nax/features/cli/acp-sessions.json\n\nStage and commit these files before running review."
-      ],
-      "priorFailures": [
-        {
-          "attempt": 2,
-          "modelTier": "fast",
-          "stage": "escalation",
-          "summary": "Failed with tier fast, escalating to next tier",
-          "cost": 0,
-          "timestamp": "2026-03-18T08:13:29.909Z"
+            "id": "US-001",
+            "title": "Config & Auth — Store API credentials locally",
+            "description": "Build a config store using `conf` to persist API URL and API key to ~/.koda/config.json. Implement auth resolution with precedence: CLI flag → environment variable → config file. Provide commands to login, show config, and update config.",
+            "acceptanceCriteria": [
+                "koda login --api-key <key> [--api-url <url>] saves to ~/.koda/config.json",
+                "koda config show displays masked API key (e.g., sk-proj-****...)",
+                "koda config set [--api-key <key>] [--api-url <url>] updates config file",
+                "koda version displays CLI version from package.json",
+                "resolveAuth() precedence: flag > env > config > default (http://localhost:3100/api)",
+                "KODA_API_KEY and KODA_API_URL environment variables override config file",
+                "Config file permissions are restrictive (mode 600 or equivalent)",
+                "API key validation before saving (non-empty, reasonable length)"
+            ],
+            "tags": ["auth", "config", "security"],
+            "dependencies": [],
+            "status": "passed",
+            "passes": true,
+            "attempts": 1,
+            "escalations": [],
+            "routing": {
+                "complexity": "medium",
+                "testStrategy": "tdd-simple",
+                "reasoning": "validated from LLM output",
+                "modelTier": "powerful"
+            },
+            "workdir": "apps/cli",
+            "priorErrors": [
+                "Attempt 2 failed with model tier: balanced: Tests failed (exit code TEST_FAILURE)"
+            ],
+            "priorFailures": [
+                {
+                    "attempt": 2,
+                    "modelTier": "balanced",
+                    "stage": "escalation",
+                    "summary": "Failed with tier balanced, escalating to next tier",
+                    "cost": 0,
+                    "timestamp": "2026-03-18T08:09:51.020Z"
+                }
+            ],
+            "storyPoints": 1
         },
         {
-          "attempt": 1,
-          "modelTier": "balanced",
-          "stage": "escalation",
-          "summary": "Failed with tier balanced, escalating to next tier",
-          "cost": 0,
-          "timestamp": "2026-03-18T08:17:11.720Z"
-        }
-      ],
-      "storyPoints": 1
-    },
-    {
-      "id": "US-003",
-      "title": "Project Commands — List and view projects",
-      "description": "Implement project list and show commands using the generated API client. Support --json flag for machine output. Projects display as a table with Name, Key, and Slug columns.",
-      "acceptanceCriteria": [
-        "koda project list [--json] returns all projects",
-        "koda project show <slug> [--json] returns single project details",
-        "Human output displays projects in aligned table format",
-        "--json output returns valid JSON array/object",
-        "API errors are caught and handled with proper exit codes",
-        "Unauthenticated requests fail gracefully with clear error message"
-      ],
-      "tags": [
-        "feature",
-        "api"
-      ],
-      "dependencies": [
-        "US-001",
-        "US-002"
-      ],
-      "status": "passed",
-      "passes": true,
-      "attempts": 0,
-      "escalations": [],
-      "routing": {
-        "complexity": "simple",
-        "testStrategy": "test-after",
-        "reasoning": "validated from LLM output",
-        "modelTier": "powerful"
-      },
-      "workdir": "apps/cli",
-      "priorErrors": [
-        "Attempt 1 failed with model tier: fast: Review failed: lint failed (exit code 1)",
-        "Attempt 1 failed with model tier: balanced: Review failed: lint failed (exit code 1)"
-      ],
-      "priorFailures": [
-        {
-          "attempt": 1,
-          "modelTier": "fast",
-          "stage": "escalation",
-          "summary": "Failed with tier fast, escalating to next tier",
-          "cost": 0,
-          "timestamp": "2026-03-18T09:16:45.574Z"
+            "id": "US-002",
+            "title": "Output Utilities — Format human & machine-readable output",
+            "description": "Build output utilities in utils/output.ts for pretty-printing and utils/error.ts for exit code handling. Support --json flag for machine-readable JSON on all commands. Provide chalk-colored success/error/warn helpers and column-aligned table formatter.",
+            "acceptanceCriteria": [
+                "output(data, { json?: boolean }) prints JSON if json=true, else pretty-printed format",
+                "table(headers, rows) renders column-aligned table with chalk-colored headers",
+                "success(msg), error(msg), warn(msg) print colored status messages",
+                "Exit codes: 0 (success), 1 (API error), 2 (config error), 3 (validation error)",
+                "handleApiError(err) logs API error and exits with code 1",
+                "All human-readable output goes to stdout; errors go to stderr",
+                "--json flag produces valid parseable JSON on all commands",
+                "Table headers are bold/cyan; alternating row colors optional"
+            ],
+            "tags": ["cli-output", "formatting"],
+            "dependencies": [],
+            "status": "passed",
+            "passes": true,
+            "attempts": 1,
+            "escalations": [],
+            "routing": {
+                "complexity": "simple",
+                "testStrategy": "test-after",
+                "reasoning": "validated from LLM output",
+                "modelTier": "powerful"
+            },
+            "workdir": "apps/cli",
+            "priorErrors": [
+                "Attempt 2 failed with model tier: fast: Review failed: Working tree has uncommitted changes:\n  - nax/config.json\n\nStage and commit these files before running review.",
+                "Attempt 1 failed with model tier: balanced: Review failed: Working tree has uncommitted changes:\n  - apps/cli/nax/features/cli/acp-sessions.json\n\nStage and commit these files before running review."
+            ],
+            "priorFailures": [
+                {
+                    "attempt": 2,
+                    "modelTier": "fast",
+                    "stage": "escalation",
+                    "summary": "Failed with tier fast, escalating to next tier",
+                    "cost": 0,
+                    "timestamp": "2026-03-18T08:13:29.909Z"
+                },
+                {
+                    "attempt": 1,
+                    "modelTier": "balanced",
+                    "stage": "escalation",
+                    "summary": "Failed with tier balanced, escalating to next tier",
+                    "cost": 0,
+                    "timestamp": "2026-03-18T08:17:11.720Z"
+                }
+            ],
+            "storyPoints": 1
         },
         {
-          "attempt": 1,
-          "modelTier": "balanced",
-          "stage": "escalation",
-          "summary": "Failed with tier balanced, escalating to next tier",
-          "cost": 0,
-          "timestamp": "2026-03-18T09:27:45.746Z"
-        }
-      ],
-      "storyPoints": 1
-    },
-    {
-      "id": "US-004",
-      "title": "Ticket Commands — Full lifecycle CLI ticket management",
-      "description": "Implement all ticket CRUD and state-machine commands: create, list, show, verify, assign, start, fix, verify-fix, close, reject, open. Support filtering (status, type, priority, assignee), pagination, and state transitions with required comments. Display tickets in aligned table and detailed view formats.",
-      "acceptanceCriteria": [
-        "koda ticket create --project <slug> --type bug|enhancement --title \"...\" [--desc \"...\"] [--priority low|medium|high|critical] [--json] creates ticket",
-        "koda ticket list --project <slug> [--status <s>] [--type <t>] [--priority <p>] [--assigned-to <slug>] [--unassigned] [--limit 20] [--page 1] [--json] returns filtered list",
-        "koda ticket mine [--project <slug>] [--status <s>] [--json] returns tickets assigned to current agent",
-        "koda ticket show <ref> [--json] displays full ticket details (ref = KODA-42 or CUID)",
-        "koda ticket verify <ref> --comment \"...\" transitions CREATED → VERIFIED with VERIFICATION comment",
-        "koda ticket assign <ref> [--to <agent-slug>] assigns ticket (omit --to = self-assign)",
-        "koda ticket start <ref> transitions VERIFIED → IN_PROGRESS",
-        "koda ticket fix <ref> --comment \"...\" [--git-ref \"v1.0:src/auth.ts:42\"] transitions IN_PROGRESS → VERIFY_FIX with FIX_REPORT comment",
-        "koda ticket verify-fix <ref> --comment \"...\" [--pass|--fail] transitions VERIFY_FIX → CLOSED (--pass) or VERIFY_FIX → IN_PROGRESS (--fail) with REVIEW comment",
-        "koda ticket close <ref> manually closes ticket",
-        "koda ticket reject <ref> --comment \"...\" rejects ticket (from any state) with GENERAL comment",
-        "koda ticket open <ref> opens ticket in browser",
-        "Ticket list displays table with columns: #, Type, Priority, Status, Assignee, Title",
-        "Ticket show displays full details including creation/update timestamps and all comments",
-        "All state transitions enforce required comment types via API state-machine validation",
-        "Invalid transitions fail with clear error message",
-        "--json flag produces valid JSON on all commands"
-      ],
-      "tags": [
-        "feature",
-        "api",
-        "state-machine"
-      ],
-      "dependencies": [
-        "US-001",
-        "US-002"
-      ],
-      "status": "paused",
-      "passes": false,
-      "attempts": 1,
-      "escalations": [],
-      "routing": {
-        "complexity": "complex",
-        "testStrategy": "three-session-tdd",
-        "reasoning": "validated from LLM output"
-      },
-      "workdir": "apps/cli",
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1
-    },
-    {
-      "id": "US-005",
-      "title": "Comment & Agent Commands — Add comments and view current agent",
-      "description": "Implement comment add command to post comments on tickets with optional type (verification, fix_report, review, general). Implement agent me command to display current authenticated agent.",
-      "acceptanceCriteria": [
-        "koda comment add <ref> --body \"...\" [--type verification|fix_report|review|general] posts comment to ticket",
-        "koda agent me [--json] displays current agent's profile (name, slug, api_key masked)",
-        "Comment type defaults to general if omitted",
-        "API validates comment type against allowed values",
-        "--json output is parseable JSON"
-      ],
-      "tags": [
-        "feature",
-        "api"
-      ],
-      "dependencies": [
-        "US-001",
-        "US-002"
-      ],
-      "status": "passed",
-      "passes": true,
-      "attempts": 0,
-      "escalations": [],
-      "routing": {
-        "complexity": "simple",
-        "testStrategy": "test-after",
-        "reasoning": "validated from LLM output",
-        "modelTier": "balanced"
-      },
-      "workdir": "apps/cli",
-      "priorErrors": [
-        "Attempt 1 failed with model tier: fast: Tests failed (exit code TEST_FAILURE)"
-      ],
-      "priorFailures": [
+            "id": "US-003",
+            "title": "Project Commands — List and view projects",
+            "description": "Implement project list and show commands using the generated API client. Support --json flag for machine output. Projects display as a table with Name, Key, and Slug columns.",
+            "acceptanceCriteria": [
+                "koda project list [--json] returns all projects",
+                "koda project show <slug> [--json] returns single project details",
+                "Human output displays projects in aligned table format",
+                "--json output returns valid JSON array/object",
+                "API errors are caught and handled with proper exit codes",
+                "Unauthenticated requests fail gracefully with clear error message"
+            ],
+            "tags": ["feature", "api"],
+            "dependencies": ["US-001", "US-002"],
+            "status": "passed",
+            "passes": true,
+            "attempts": 0,
+            "escalations": [],
+            "routing": {
+                "complexity": "simple",
+                "testStrategy": "test-after",
+                "reasoning": "validated from LLM output",
+                "modelTier": "powerful"
+            },
+            "workdir": "apps/cli",
+            "priorErrors": [
+                "Attempt 1 failed with model tier: fast: Review failed: lint failed (exit code 1)",
+                "Attempt 1 failed with model tier: balanced: Review failed: lint failed (exit code 1)"
+            ],
+            "priorFailures": [
+                {
+                    "attempt": 1,
+                    "modelTier": "fast",
+                    "stage": "escalation",
+                    "summary": "Failed with tier fast, escalating to next tier",
+                    "cost": 0,
+                    "timestamp": "2026-03-18T09:16:45.574Z"
+                },
+                {
+                    "attempt": 1,
+                    "modelTier": "balanced",
+                    "stage": "escalation",
+                    "summary": "Failed with tier balanced, escalating to next tier",
+                    "cost": 0,
+                    "timestamp": "2026-03-18T09:27:45.746Z"
+                }
+            ],
+            "storyPoints": 1
+        },
         {
-          "attempt": 1,
-          "modelTier": "fast",
-          "stage": "escalation",
-          "summary": "Failed with tier fast, escalating to next tier",
-          "cost": 0,
-          "timestamp": "2026-03-18T09:25:22.138Z"
+            "id": "US-004",
+            "title": "Ticket Commands — Full lifecycle CLI ticket management",
+            "description": "Implement all ticket CRUD and state-machine commands: create, list, show, verify, assign, start, fix, verify-fix, close, reject, open. Support filtering (status, type, priority, assignee), pagination, and state transitions with required comments. Display tickets in aligned table and detailed view formats.",
+            "acceptanceCriteria": [
+                "koda ticket create --project <slug> --type bug|enhancement --title \"...\" [--desc \"...\"] [--priority low|medium|high|critical] [--json] creates ticket",
+                "koda ticket list --project <slug> [--status <s>] [--type <t>] [--priority <p>] [--assigned-to <slug>] [--unassigned] [--limit 20] [--page 1] [--json] returns filtered list",
+                "koda ticket mine [--project <slug>] [--status <s>] [--json] returns tickets assigned to current agent",
+                "koda ticket show <ref> [--json] displays full ticket details (ref = KODA-42 or CUID)",
+                "koda ticket verify <ref> --comment \"...\" transitions CREATED → VERIFIED with VERIFICATION comment",
+                "koda ticket assign <ref> [--to <agent-slug>] assigns ticket (omit --to = self-assign)",
+                "koda ticket start <ref> transitions VERIFIED → IN_PROGRESS",
+                "koda ticket fix <ref> --comment \"...\" [--git-ref \"v1.0:src/auth.ts:42\"] transitions IN_PROGRESS → VERIFY_FIX with FIX_REPORT comment",
+                "koda ticket verify-fix <ref> --comment \"...\" [--pass|--fail] transitions VERIFY_FIX → CLOSED (--pass) or VERIFY_FIX → IN_PROGRESS (--fail) with REVIEW comment",
+                "koda ticket close <ref> manually closes ticket",
+                "koda ticket reject <ref> --comment \"...\" rejects ticket (from any state) with GENERAL comment",
+                "koda ticket open <ref> opens ticket in browser",
+                "Ticket list displays table with columns: #, Type, Priority, Status, Assignee, Title",
+                "Ticket show displays full details including creation/update timestamps and all comments",
+                "All state transitions enforce required comment types via API state-machine validation",
+                "Invalid transitions fail with clear error message",
+                "--json flag produces valid JSON on all commands"
+            ],
+            "tags": ["feature", "api", "state-machine"],
+            "dependencies": ["US-001", "US-002"],
+            "status": "passed",
+            "passes": true,
+            "attempts": 1,
+            "escalations": [],
+            "routing": {
+                "complexity": "complex",
+                "testStrategy": "three-session-tdd",
+                "reasoning": "validated from LLM output"
+            },
+            "workdir": "apps/cli",
+            "priorErrors": [],
+            "priorFailures": [],
+            "storyPoints": 1
+        },
+        {
+            "id": "US-005",
+            "title": "Comment & Agent Commands — Add comments and view current agent",
+            "description": "Implement comment add command to post comments on tickets with optional type (verification, fix_report, review, general). Implement agent me command to display current authenticated agent.",
+            "acceptanceCriteria": [
+                "koda comment add <ref> --body \"...\" [--type verification|fix_report|review|general] posts comment to ticket",
+                "koda agent me [--json] displays current agent's profile (name, slug, api_key masked)",
+                "Comment type defaults to general if omitted",
+                "API validates comment type against allowed values",
+                "--json output is parseable JSON"
+            ],
+            "tags": ["feature", "api"],
+            "dependencies": ["US-001", "US-002"],
+            "status": "passed",
+            "passes": true,
+            "attempts": 0,
+            "escalations": [],
+            "routing": {
+                "complexity": "simple",
+                "testStrategy": "test-after",
+                "reasoning": "validated from LLM output",
+                "modelTier": "balanced"
+            },
+            "workdir": "apps/cli",
+            "priorErrors": [
+                "Attempt 1 failed with model tier: fast: Tests failed (exit code TEST_FAILURE)"
+            ],
+            "priorFailures": [
+                {
+                    "attempt": 1,
+                    "modelTier": "fast",
+                    "stage": "escalation",
+                    "summary": "Failed with tier fast, escalating to next tier",
+                    "cost": 0,
+                    "timestamp": "2026-03-18T09:25:22.138Z"
+                }
+            ],
+            "storyPoints": 1
+        },
+        {
+            "id": "US-006",
+            "title": "CLI Entry Point & Integration — Bootstrap program and register all commands",
+            "description": "Create index.ts with shebang, initialize Commander program, register all command modules, and ensure proper error handling throughout. Integrate all stories into a cohesive CLI interface.",
+            "acceptanceCriteria": [
+                "#!/usr/bin/env node shebang in index.ts for shell execution",
+                "program.name('koda'), .description(...), .version(...) configured",
+                "All command modules (login, config, project, ticket, comment, agent) are registered",
+                "bun run build in apps/cli passes without errors",
+                "bun run type-check passes (zero TypeScript errors)",
+                "bun run lint passes (zero warnings, max-warnings=0)",
+                "bun run test passes with 80%+ coverage",
+                "Global error handling for uncaught exceptions",
+                "Graceful shutdown on SIGINT/SIGTERM",
+                "package.json bin field points to ./dist/index.js",
+                "koda --help displays all commands and global options"
+            ],
+            "tags": ["feature", "integration"],
+            "dependencies": ["US-001", "US-002", "US-003", "US-004", "US-005"],
+            "status": "pending",
+            "passes": false,
+            "attempts": 0,
+            "escalations": [],
+            "routing": {
+                "complexity": "medium",
+                "testStrategy": "tdd-simple",
+                "reasoning": "validated from LLM output"
+            },
+            "workdir": "apps/cli",
+            "priorErrors": [],
+            "priorFailures": [],
+            "storyPoints": 1
         }
-      ],
-      "storyPoints": 1
-    },
-    {
-      "id": "US-006",
-      "title": "CLI Entry Point & Integration — Bootstrap program and register all commands",
-      "description": "Create index.ts with shebang, initialize Commander program, register all command modules, and ensure proper error handling throughout. Integrate all stories into a cohesive CLI interface.",
-      "acceptanceCriteria": [
-        "#!/usr/bin/env node shebang in index.ts for shell execution",
-        "program.name('koda'), .description(...), .version(...) configured",
-        "All command modules (login, config, project, ticket, comment, agent) are registered",
-        "bun run build in apps/cli passes without errors",
-        "bun run type-check passes (zero TypeScript errors)",
-        "bun run lint passes (zero warnings, max-warnings=0)",
-        "bun run test passes with 80%+ coverage",
-        "Global error handling for uncaught exceptions",
-        "Graceful shutdown on SIGINT/SIGTERM",
-        "package.json bin field points to ./dist/index.js",
-        "koda --help displays all commands and global options"
-      ],
-      "tags": [
-        "feature",
-        "integration"
-      ],
-      "dependencies": [
-        "US-001",
-        "US-002",
-        "US-003",
-        "US-004",
-        "US-005"
-      ],
-      "status": "pending",
-      "passes": false,
-      "attempts": 0,
-      "escalations": [],
-      "routing": {
-        "complexity": "medium",
-        "testStrategy": "tdd-simple",
-        "reasoning": "validated from LLM output"
-      },
-      "workdir": "apps/cli",
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1
-    }
-  ]
+    ]
 }
