@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { getConfig } from '../config';
+import { resolveAuth } from '../utils/auth';
 import { configureClient } from '../client';
 import { CommentsService } from '../generated';
 import { success, error } from '../utils/output';
@@ -15,9 +15,9 @@ export function commentCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (ref: string, options) => {
       try {
-        const config = getConfig();
+        const auth = resolveAuth({});
 
-        if (!config.apiKey || !config.apiUrl) {
+        if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
         }
@@ -29,7 +29,7 @@ export function commentCommand(program: Command): void {
           process.exit(3);
         }
 
-        const client = configureClient(config.apiUrl, config.apiKey);
+        const client = configureClient(auth.apiUrl, auth.apiKey);
         const response = await CommentsService.add(client, ref, {
           body: options.body,
           type: options.type,

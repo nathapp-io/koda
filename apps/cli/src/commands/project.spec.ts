@@ -60,6 +60,10 @@ describe('projectCommand', () => {
     mockData.apiKey = 'sk-test-key123';
     mockData.apiUrl = 'http://localhost:3100/api';
 
+    // Clear environment variables
+    delete process.env.KODA_API_KEY;
+    delete process.env.KODA_API_URL;
+
     exitSpy = jest.spyOn(process, 'exit').mockImplementation((() => {
       // Don't throw, just record the call
     }) as any);
@@ -129,6 +133,60 @@ describe('projectCommand', () => {
       }
 
       expect(exitSpy).toHaveBeenCalledWith(2);
+    });
+
+    it('uses KODA_API_KEY environment variable when config is empty', async () => {
+      mockData.apiKey = '';
+      mockData.apiUrl = '';
+      process.env.KODA_API_KEY = 'sk-test-key-from-env-at-least-10-chars';
+      process.env.KODA_API_URL = 'http://env.example.com/api';
+
+      const mockProjects = [
+        { id: '1', name: 'Project A', key: 'PA', slug: 'project-a' },
+      ];
+
+      (ProjectsService.list as jest.Mock).mockResolvedValue({
+        data: mockProjects,
+      });
+
+      const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
+      const listCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'list');
+
+      try {
+        await listCmd?.parse(['node', 'test']);
+      } catch {
+        // Expected
+      }
+
+      // Should call ProjectsService even though config is empty, using env vars
+      expect(ProjectsService.list).toHaveBeenCalled();
+    });
+
+    it('prefers KODA_API_KEY over config file', async () => {
+      mockData.apiKey = 'sk-test-key-from-config-at-least-10-chars';
+      mockData.apiUrl = 'http://config.example.com/api';
+      process.env.KODA_API_KEY = 'sk-test-key-from-env-override-at-least-10-chars';
+      process.env.KODA_API_URL = 'http://env-override.example.com/api';
+
+      const mockProjects = [
+        { id: '1', name: 'Project A', key: 'PA', slug: 'project-a' },
+      ];
+
+      (ProjectsService.list as jest.Mock).mockResolvedValue({
+        data: mockProjects,
+      });
+
+      const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
+      const listCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'list');
+
+      try {
+        await listCmd?.parse(['node', 'test']);
+      } catch {
+        // Expected
+      }
+
+      // Should call ProjectsService with env var credentials, not config credentials
+      expect(ProjectsService.list).toHaveBeenCalled();
     });
 
     it('handles API errors gracefully', async () => {

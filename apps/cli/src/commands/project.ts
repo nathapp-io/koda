@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { getConfig } from '../config';
+import { resolveAuth } from '../utils/auth';
 import { configureClient } from '../client';
 import { ProjectsService } from '../generated';
 import { table, error } from '../utils/output';
@@ -12,14 +12,14 @@ export function projectCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const config = getConfig();
+        const auth = resolveAuth({});
 
-        if (!config.apiKey || !config.apiUrl) {
+        if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
         }
 
-        const client = configureClient(config.apiUrl, config.apiKey);
+        const client = configureClient(auth.apiUrl, auth.apiKey);
         const response = await ProjectsService.list(client);
 
         if (options.json) {
@@ -47,14 +47,14 @@ export function projectCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (slug: string, options) => {
       try {
-        const config = getConfig();
+        const auth = resolveAuth({});
 
-        if (!config.apiKey || !config.apiUrl) {
+        if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
         }
 
-        const client = configureClient(config.apiUrl, config.apiKey);
+        const client = configureClient(auth.apiUrl, auth.apiKey);
         const response = await ProjectsService.show(client, slug);
 
         if (options.json) {
