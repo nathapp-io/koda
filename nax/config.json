@@ -88,12 +88,12 @@
         "requireLint": true,
         "requireTests": true,
         "commands": {
-            "test": "bun run --cwd apps/api test:unit",
-            "typecheck": "bun run --cwd apps/api type-check",
-            "lint": "bun run --cwd apps/api lint",
-            "lintFix": "bun run --cwd apps/api lint:fix",
-            "formatFix": "bun run --cwd apps/api lint:fix",
-            "testScoped": "bun run --cwd apps/api test:unit"
+            "test": "turbo test",
+            "testScoped": "turbo test --filter={{package}}",
+            "typecheck": "turbo type-check",
+            "lint": "turbo lint",
+            "lintFix": "turbo lint:fix",
+            "formatFix": "turbo lint:fix"
         },
         "forceExit": false,
         "detectOpenHandles": true,
@@ -162,10 +162,10 @@
         "enabled": true,
         "checks": ["typecheck", "lint"],
         "commands": {
-            "typecheck": "bun run --cwd apps/api type-check",
-            "lint": "bun run --cwd apps/api lint",
-            "lintFix": "bun run --cwd apps/api lint:fix",
-            "formatFix": "bun run --cwd apps/api lint:fix"
+            "typecheck": "turbo type-check",
+            "lint": "turbo lint",
+            "lintFix": "turbo lint:fix",
+            "formatFix": "turbo lint:fix"
         },
         "pluginMode": "deferred"
     },

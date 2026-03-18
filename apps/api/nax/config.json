@@ -1,0 +1,12 @@
+{
+    "quality": {
+        "commands": {
+            "test": "bun run test",
+            "testScoped": "bun run test -- {{files}}",
+            "typecheck": "bun run type-check",
+            "lint": "bun run lint",
+            "lintFix": "bun run lint:fix",
+            "formatFix": "bun run lint:fix"
+        }
+    }
+}

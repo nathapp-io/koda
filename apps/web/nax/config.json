@@ -1,0 +1,10 @@
+{
+    "quality": {
+        "commands": {
+            "typecheck": "bun run type-check",
+            "lint": "bun run lint",
+            "lintFix": "bun run lint:fix",
+            "formatFix": "bun run lint:fix"
+        }
+    }
+}
