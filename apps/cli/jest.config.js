@@ -1,4 +1,5 @@
 module.exports = {
+  preset: 'ts-jest',
   moduleFileExtensions: ['js', 'json', 'ts'],
   rootDir: 'src',
   testRegex: '.*\\.spec\\.ts$',
@@ -11,6 +12,7 @@ module.exports = {
         moduleResolution: 'node',
         resolveJsonModule: true,
         declaration: false,
+        strict: false,
       },
     }],
   },
