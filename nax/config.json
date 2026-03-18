@@ -43,6 +43,9 @@
             "escalateEntireBatch": false
         }
     },
+    "generate": {
+        "agents": ["claude", "codex"]
+    },
     "agent": {
         "protocol": "acp"
     },
