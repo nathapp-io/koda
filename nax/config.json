@@ -178,7 +178,7 @@
     },
     "acceptance": {
         "enabled": true,
-        "maxRetries": 2,
+        "maxRetries": 3,
         "generateTests": true,
         "testPath": "acceptance.test.ts",
         "model": "balanced",
@@ -206,9 +206,9 @@
     "precheck": {
         "storySizeGate": {
             "enabled": true,
-            "maxAcCount": 10,
+            "maxAcCount": 20,
             "maxDescriptionLength": 2000,
-            "maxBulletPoints": 10
+            "maxBulletPoints": 20
         }
     },
     "prompts": {},
@@ -217,7 +217,7 @@
         "maxAcceptanceCriteria": 6,
         "maxSubstories": 5,
         "maxSubstoryComplexity": "medium",
-        "maxRetries": 2,
+        "maxRetries": 3,
         "model": "balanced"
     }
 }
