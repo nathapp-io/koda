@@ -91,12 +91,12 @@
         "requireLint": true,
         "requireTests": true,
         "commands": {
-            "test": "turbo test",
-            "testScoped": "turbo test --filter={{package}}",
-            "typecheck": "turbo type-check",
-            "lint": "turbo lint",
-            "lintFix": "turbo lint:fix",
-            "formatFix": "turbo lint:fix"
+            "test": "bunx turbo test",
+            "testScoped": "bunx turbo test --filter={{package}}",
+            "typecheck": "bunx turbo type-check",
+            "lint": "bunx turbo lint",
+            "lintFix": "bunx turbo lint:fix",
+            "formatFix": "bunx turbo lint:fix"
         },
         "forceExit": false,
         "detectOpenHandles": true,
@@ -165,10 +165,10 @@
         "enabled": true,
         "checks": ["typecheck", "lint"],
         "commands": {
-            "typecheck": "turbo type-check",
-            "lint": "turbo lint",
-            "lintFix": "turbo lint:fix",
-            "formatFix": "turbo lint:fix"
+            "typecheck": "bunx turbo type-check",
+            "lint": "bunx turbo lint",
+            "lintFix": "bunx turbo lint:fix",
+            "formatFix": "bunx turbo lint:fix"
         },
         "pluginMode": "deferred"
     },
