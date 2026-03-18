@@ -3,7 +3,7 @@
   "feature": "cli",
   "branchName": "feat/cli",
   "createdAt": "2026-03-18T00:00:00Z",
-  "updatedAt": "2026-03-18T08:17:11.720Z",
+  "updatedAt": "2026-03-18T08:18:47.163Z",
   "userStories": [
     {
       "id": "US-001",
@@ -70,9 +70,9 @@
         "formatting"
       ],
       "dependencies": [],
-      "status": "pending",
+      "status": "failed",
       "passes": false,
-      "attempts": 0,
+      "attempts": 1,
       "escalations": [],
       "routing": {
         "complexity": "simple",
