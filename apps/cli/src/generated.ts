@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // This file is a stub - normally generated from OpenAPI spec
 // In production, use: bun run generate
 
@@ -17,6 +18,7 @@ export interface Comment {
   type: 'verification' | 'fix_report' | 'review' | 'general';
   ticketId: string;
   createdAt: string;
+  author?: { id?: string; name: string; slug?: string };
 }
 
 export interface Agent {
