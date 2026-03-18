@@ -7,7 +7,7 @@
       "~/*": ["./*"]
     },
     "skipLibCheck": true,
-    "suppressImplicitAnyIndexErrors": true
+    "noImplicitAny": false
   },
   "include": [
     ".nuxt/nuxt.d.ts",
