@@ -45,9 +45,11 @@ Thumbs.db
 # nax runtime
 nax.lock
 nax/metrics.json
-nax/status.json
+nax/**/status.json
 nax/**/*.jsonl
 nax/**/runs/
+nax/**/acp-sessions.json
+nax/**/progress.txt
 .nax-wt/
 .nax-pids
 .nax-verifier-verdict.json
