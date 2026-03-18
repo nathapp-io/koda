@@ -5,7 +5,7 @@
  * the complete ticket lifecycle via HTTP:
  *
  *   Human auth → Agent auth → Create project →
- *   Bug workflow (create → verify → assign → start → fix → verify-fix → close) →
+ *   Bug workflow (create → verify → assign → fix → verify-fix → close) →
  *   Enhancement workflow (create → reject) →
  *   Comments → Labels → Ticket labels
  *
