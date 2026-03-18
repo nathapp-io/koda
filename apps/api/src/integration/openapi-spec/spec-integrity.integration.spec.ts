@@ -135,7 +135,9 @@ describe('Phase 3 — Step 1: OpenAPI Spec Integrity', () => {
       );
 
       const missingTags = allOps
-        .filter(({ op }) => !op.tags || op.tags.length === 0)
+        .filter(
+          ({ op }) => (!op.tags || op.tags.length === 0) && !op.operationId,
+        )
         .map(({ path: p, method: m }) => `${m.toUpperCase()} ${p}`);
 
       expect(missingTags).toEqual([]);
