@@ -6,8 +6,7 @@
       "~": ["."],
       "~/*": ["./*"]
     },
-    "skipLibCheck": true,
-    "noImplicitAny": false
+    "skipLibCheck": true
   },
   "include": [
     ".nuxt/nuxt.d.ts",
