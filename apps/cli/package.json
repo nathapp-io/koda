@@ -13,8 +13,8 @@
     "dev": "tsc --watch",
     "test": "jest --forceExit --passWithNoTests",
     "test:watch": "jest --watch",
-    "lint": "eslint \"src/**/*.ts\" --max-warnings=0",
-    "lint:fix": "eslint \"src/**/*.ts\" --fix",
+    "lint": "eslint \"src/**/*.ts\" --ignore-pattern \"src/generated/**\" --max-warnings=0",
+    "lint:fix": "eslint \"src/**/*.ts\" --ignore-pattern \"src/generated/**\" --fix",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {

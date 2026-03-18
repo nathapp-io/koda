@@ -60,7 +60,7 @@ program
         try {
           const config = configShow();
           console.log('API Key: ' + config.apiKey);
-          console.log('API URL: ' + config.apiUrl || '(not set)');
+          console.log('API URL: ' + (config.apiUrl || '(not set)'));
           process.exit(0);
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
@@ -92,6 +92,15 @@ program
         }
       })
   );
+
+// Version command
+program
+  .command('version')
+  .description('Print CLI version')
+  .action(() => {
+    console.log(version);
+    process.exit(0);
+  });
 
 // Project command
 projectCommand(program);

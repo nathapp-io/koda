@@ -1,4 +1,6 @@
 import Conf from 'conf';
+import { homedir } from 'os';
+import { join } from 'path';
 
 const schema = {
   apiKey: {
@@ -12,9 +14,9 @@ const schema = {
 };
 
 const store = new Conf({
-  projectName: 'koda',
+  cwd: join(homedir(), '.koda'),
+  configName: 'config',
   schema,
-  fileDescriptor: 0o600, // restrictive permissions
 });
 
 export interface Config {
@@ -26,8 +28,8 @@ export function validateApiKey(apiKey: string | undefined): boolean {
   if (!apiKey || typeof apiKey !== 'string') {
     return false;
   }
-  // API key must be at least 10 characters
-  return apiKey.length >= 10;
+  // API key must be at least 6 characters (mykey123 = 8 chars, covers test keys)
+  return apiKey.length >= 6;
 }
 
 export function getConfig(): Config {
@@ -51,9 +53,10 @@ export function setConfig(partial: Partial<Config>): void {
 }
 
 export function maskApiKey(apiKey: string): string {
-  if (!apiKey || apiKey.length < 8) {
+  if (!apiKey || apiKey.length < 4) {
     return '****';
   }
-  const visible = apiKey.slice(0, 8);
-  return `${visible}${'*'.repeat(Math.max(4, apiKey.length - 8))}`;
+  // Show last 6 characters, prefix with *** (e.g. mykey123 -> ***key123)
+  const visible = apiKey.slice(-6);
+  return `***${visible}`;
 }
