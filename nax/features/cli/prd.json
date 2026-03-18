@@ -3,7 +3,7 @@
   "feature": "cli",
   "branchName": "feat/cli",
   "createdAt": "2026-03-18T00:00:00Z",
-  "updatedAt": "2026-03-18T08:15:52.370Z",
+  "updatedAt": "2026-03-18T08:17:11.720Z",
   "userStories": [
     {
       "id": "US-001",
@@ -78,11 +78,12 @@
         "complexity": "simple",
         "testStrategy": "test-after",
         "reasoning": "validated from LLM output",
-        "modelTier": "balanced"
+        "modelTier": "powerful"
       },
       "workdir": "apps/cli",
       "priorErrors": [
-        "Attempt 2 failed with model tier: fast: Review failed: Working tree has uncommitted changes:\n  - nax/config.json\n\nStage and commit these files before running review."
+        "Attempt 2 failed with model tier: fast: Review failed: Working tree has uncommitted changes:\n  - nax/config.json\n\nStage and commit these files before running review.",
+        "Attempt 1 failed with model tier: balanced: Review failed: Working tree has uncommitted changes:\n  - apps/cli/nax/features/cli/acp-sessions.json\n\nStage and commit these files before running review."
       ],
       "priorFailures": [
         {
@@ -92,6 +93,14 @@
           "summary": "Failed with tier fast, escalating to next tier",
           "cost": 0,
           "timestamp": "2026-03-18T08:13:29.909Z"
+        },
+        {
+          "attempt": 1,
+          "modelTier": "balanced",
+          "stage": "escalation",
+          "summary": "Failed with tier balanced, escalating to next tier",
+          "cost": 0,
+          "timestamp": "2026-03-18T08:17:11.720Z"
         }
       ],
       "storyPoints": 1
