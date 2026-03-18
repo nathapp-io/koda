@@ -3,7 +3,7 @@
   "feature": "cli",
   "branchName": "feat/cli",
   "createdAt": "2026-03-18T00:00:00Z",
-  "updatedAt": "2026-03-18T07:36:34.957Z",
+  "updatedAt": "2026-03-18T07:41:21.104Z",
   "userStories": [
     {
       "id": "US-001",
@@ -25,16 +25,19 @@
         "security"
       ],
       "dependencies": [],
-      "status": "pending",
+      "status": "failed",
       "passes": false,
-      "attempts": 0,
+      "attempts": 1,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
         "reasoning": "validated from LLM output"
       },
-      "workdir": "packages/cli"
+      "workdir": "packages/cli",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-002",
@@ -55,16 +58,19 @@
         "formatting"
       ],
       "dependencies": [],
-      "status": "pending",
+      "status": "failed",
       "passes": false,
-      "attempts": 0,
+      "attempts": 1,
       "escalations": [],
       "routing": {
         "complexity": "simple",
         "testStrategy": "test-after",
         "reasoning": "validated from LLM output"
       },
-      "workdir": "packages/cli"
+      "workdir": "packages/cli",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -95,7 +101,10 @@
         "testStrategy": "test-after",
         "reasoning": "validated from LLM output"
       },
-      "workdir": "packages/cli"
+      "workdir": "packages/cli",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -138,7 +147,10 @@
         "testStrategy": "three-session-tdd",
         "reasoning": "validated from LLM output"
       },
-      "workdir": "packages/cli"
+      "workdir": "packages/cli",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -168,7 +180,10 @@
         "testStrategy": "test-after",
         "reasoning": "validated from LLM output"
       },
-      "workdir": "packages/cli"
+      "workdir": "packages/cli",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -207,7 +222,10 @@
         "testStrategy": "tdd-simple",
         "reasoning": "validated from LLM output"
       },
-      "workdir": "packages/cli"
+      "workdir": "packages/cli",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ]
 }
