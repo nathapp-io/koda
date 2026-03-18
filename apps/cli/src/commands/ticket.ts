@@ -488,4 +488,61 @@ export function ticketCommand(program: Command): void {
         process.exit(1);
       }
     });
+
+  ticket
+    .command('open <ref>')
+    .description('Open ticket in browser')
+    .option('--project <slug>', 'Project slug (optional, inferred from ticket if available)')
+    .action(async (ref: string, options) => {
+      try {
+        const auth = resolveAuth({});
+
+        if (!auth.apiKey || !auth.apiUrl) {
+          error('API key or URL not configured. Run: koda login --api-key <key>');
+          process.exit(2);
+        }
+
+        const client = configureClient(auth.apiUrl, auth.apiKey);
+        const response = await TicketsService.show(client, ref);
+        const ticket = response.data;
+
+        // Extract base URL from API URL (e.g., http://localhost:3100/api -> http://localhost:3100)
+        const baseUrl = auth.apiUrl.replace(/\/api\/?$/, '');
+        // Use project slug if provided, otherwise use a placeholder or projectId
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const projectIdentifier = options.project || (ticket as any).project?.slug || (ticket as any).projectId;
+        const ticketUrl = `${baseUrl}/projects/${projectIdentifier}/tickets/${ticket.number}`;
+
+        // Use system command to open URL in default browser
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { execFile } = require('child_process');
+        execFile(
+          process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open',
+          process.platform === 'win32' ? ['/c', `start ${ticketUrl}`] : [ticketUrl],
+          { stdio: 'ignore' },
+          (error: unknown) => {
+            if (error) {
+              // If system command fails, just print the URL
+              console.log(`Open this URL in your browser: ${ticketUrl}`);
+            }
+          }
+        );
+
+        console.log(`✓ Opening ticket in browser`);
+        process.exit(0);
+      } catch (err: unknown) {
+        const apiError = err as { response?: { status?: number }; message?: string };
+        const statusCode = apiError.response?.status;
+        if (statusCode === 401 || statusCode === 403) {
+          error('Unauthorized. Please check your API key.');
+          process.exit(2);
+        }
+        if (statusCode === 404) {
+          error(`Ticket not found: ${ref}`);
+          process.exit(1);
+        }
+        error(apiError.message || 'Failed to open ticket');
+        process.exit(1);
+      }
+    });
 }

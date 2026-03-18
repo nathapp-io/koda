@@ -119,6 +119,7 @@ describe('ticketCommand', () => {
         'verify-fix',
         'close',
         'reject',
+        'open',
       ];
 
       expectedSubcommands.forEach((cmd) => {
@@ -309,9 +310,7 @@ describe('ticketCommand', () => {
         // Expected
       }
 
-      expect(processExitSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ code: 3 })
-      );
+      expect(processExitSpy).toHaveBeenCalledWith(3);
     });
 
     it('exits with code 2 when API key is not configured', async () => {
@@ -1062,9 +1061,7 @@ describe('ticketCommand', () => {
         // Expected
       }
 
-      expect(processExitSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ code: 3 })
-      );
+      expect(processExitSpy).toHaveBeenCalledWith(3);
     });
 
     it('enforces VERIFICATION comment type via API', async () => {
@@ -1329,9 +1326,7 @@ describe('ticketCommand', () => {
         // Expected
       }
 
-      expect(processExitSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ code: 3 })
-      );
+      expect(processExitSpy).toHaveBeenCalledWith(3);
     });
 
     it('enforces FIX_REPORT comment type via API', async () => {
@@ -1455,9 +1450,7 @@ describe('ticketCommand', () => {
         // Expected
       }
 
-      expect(processExitSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ code: 3 })
-      );
+      expect(processExitSpy).toHaveBeenCalledWith(3);
     });
 
     it('enforces REVIEW comment type via API', async () => {
@@ -1592,9 +1585,7 @@ describe('ticketCommand', () => {
         // Expected
       }
 
-      expect(processExitSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ code: 3 })
-      );
+      expect(processExitSpy).toHaveBeenCalledWith(3);
     });
 
     it('enforces GENERAL comment type via API', async () => {
@@ -1678,6 +1669,114 @@ describe('ticketCommand', () => {
 
       try {
         await listCmd?.parse(['node', 'test', '--project', 'test-project']);
+      } catch {
+        // Expected
+      }
+
+      expect(processExitSpy).toHaveBeenCalledWith(2);
+    });
+  });
+
+  describe('ticket open', () => {
+    it('opens ticket with correct URL', async () => {
+      const mockTicket = {
+        id: 'ticket-1',
+        number: 42,
+        projectId: 'proj-1',
+        type: 'bug',
+        title: 'Test bug',
+        status: 'created',
+      };
+
+      (TicketsService.show as jest.Mock).mockResolvedValue({
+        data: mockTicket,
+      });
+
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const openCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'open');
+
+      try {
+        await openCmd?.parse(['node', 'test', 'KODA-42']);
+      } catch {
+        // Expected
+      }
+
+      expect(consoleLogSpy).toHaveBeenCalledWith('✓ Opening ticket in browser');
+      expect(processExitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('opens ticket with project option', async () => {
+      const mockTicket = {
+        id: 'ticket-1',
+        number: 42,
+        projectId: 'proj-1',
+        type: 'bug',
+        title: 'Test bug',
+        status: 'created',
+      };
+
+      (TicketsService.show as jest.Mock).mockResolvedValue({
+        data: mockTicket,
+      });
+
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const openCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'open');
+
+      try {
+        await openCmd?.parse(['node', 'test', 'KODA-42', '--project', 'my-project']);
+      } catch {
+        // Expected
+      }
+
+      expect(consoleLogSpy).toHaveBeenCalledWith('✓ Opening ticket in browser');
+      expect(processExitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('exits with code 2 when API key is not configured', async () => {
+      mockData.apiKey = '';
+      mockData.apiUrl = '';
+
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const openCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'open');
+
+      try {
+        await openCmd?.parse(['node', 'test', 'KODA-42']);
+      } catch {
+        // Expected
+      }
+
+      expect(processExitSpy).toHaveBeenCalledWith(2);
+    });
+
+    it('handles ticket not found error', async () => {
+      const mockError = new Error('Not found');
+      (mockError as any).response = { status: 404 };
+
+      (TicketsService.show as jest.Mock).mockRejectedValue(mockError);
+
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const openCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'open');
+
+      try {
+        await openCmd?.parse(['node', 'test', 'KODA-999']);
+      } catch {
+        // Expected
+      }
+
+      expect(processExitSpy).toHaveBeenCalledWith(1);
+    });
+
+    it('handles authorization error', async () => {
+      const mockError = new Error('Unauthorized');
+      (mockError as any).response = { status: 403 };
+
+      (TicketsService.show as jest.Mock).mockRejectedValue(mockError);
+
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const openCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'open');
+
+      try {
+        await openCmd?.parse(['node', 'test', 'KODA-42']);
       } catch {
         // Expected
       }
