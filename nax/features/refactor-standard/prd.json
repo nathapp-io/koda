@@ -3,7 +3,7 @@
   "feature": "refactor-standard",
   "branchName": "feat/refactor-standard",
   "createdAt": "2026-03-20T00:00:00.000Z",
-  "updatedAt": "2026-03-20T11:00:34.816Z",
+  "updatedAt": "2026-03-20T12:07:31.149Z",
   "userStories": [
     {
       "id": "US-001",
@@ -102,15 +102,22 @@
       "dependencies": [
         "US-001-1"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "escalations": [],
       "attempts": 0,
       "parentStoryId": "US-001",
       "workdir": "apps/api",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "routing": {
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Refactoring auth logic to follow established nathapp pattern—requires careful implementation of security-critical code but pattern is documented, scope is well-defined across 2-3 files, and existing response shape must be preserved.",
+        "contentHash": "0575f8dff462d9b0ef944187e07ba29b9a5eb268a9916b9f4acd64ada4e2efb6"
+      }
     },
     {
       "id": "US-001-3",
@@ -129,15 +136,34 @@
       "dependencies": [
         "US-001-1"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "escalations": [],
       "attempts": 0,
       "parentStoryId": "US-001",
       "workdir": "apps/api",
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1
+      "priorErrors": [
+        "Attempt 1 failed with model tier: fast: Rectification exhausted after 2 attempts (6 test failures)"
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "fast",
+          "stage": "escalation",
+          "summary": "Failed with tier fast, escalating to next tier",
+          "cost": 1.2393766,
+          "timestamp": "2026-03-20T11:51:13.826Z"
+        }
+      ],
+      "storyPoints": 1,
+      "routing": {
+        "complexity": "simple",
+        "initialComplexity": "simple",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Pure file deletion with mechanical import cleanup; no new behavior or logic, straightforward type-check verification.",
+        "contentHash": "86b7a7cc260c211a73ac1f205d6791fe173a1000675959c0f8e26e96daf77440",
+        "modelTier": "balanced"
+      }
     },
     {
       "id": "US-001-4",
@@ -158,15 +184,22 @@
       "dependencies": [
         "US-001-3"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "escalations": [],
       "attempts": 0,
       "parentStoryId": "US-001",
       "workdir": "apps/api",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "routing": {
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Requires research on nathapp support, conditional guard implementation (straightforward but security-critical), multiple endpoint updates, and standard unit tests—all within known NestJS patterns but spanning several concerns.",
+        "contentHash": "f84e48c89878330edb61b128bbe238871e8429233ad353f87c5ad39336112b51"
+      }
     },
     {
       "id": "US-001-5",
@@ -197,7 +230,14 @@
       "workdir": "apps/api",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "routing": {
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Removing packages is simple, but writing/updating tests for 80% auth module coverage requires understanding existing code patterns and test infrastructure—standard medium-complexity work.",
+        "contentHash": "30c0193c532f925a8256fde557afa466d289c2dfb608c8df7ee57ca58cb8a899"
+      }
     },
     {
       "id": "US-002",
@@ -411,8 +451,8 @@
         "api"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
