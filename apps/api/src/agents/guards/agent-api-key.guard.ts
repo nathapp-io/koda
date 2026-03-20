@@ -8,7 +8,7 @@ import { AppException } from '../../common/app-exception';
 export class AgentApiKeyGuard implements CanActivate {
   constructor(
     @Inject('PrismaService') private readonly prismaService: { client: { agent: { findFirst: (args: unknown) => Promise<unknown> } } },
-    private readonly configService: ConfigService,
+    @Inject(ConfigService) private readonly configService: ConfigService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {

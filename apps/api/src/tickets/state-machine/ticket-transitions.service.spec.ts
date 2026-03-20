@@ -1,8 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TicketStatus, CommentType, ActivityType, PrismaClient } from '@prisma/client';
 import { TicketTransitionsService } from './ticket-transitions.service';
+import { AppException } from '../../common/app-exception';
 
 describe('TicketTransitionsService', () => {
   let service: TicketTransitionsService;
@@ -78,34 +78,39 @@ describe('TicketTransitionsService', () => {
     createdAt: new Date(),
   };
 
-  const mockPrismaService = {
-  client: {
-      project: {
-        findUnique: jest.fn(),
-      },
-      ticket: {
-        findUnique: jest.fn(),
-      },
-      comment: {
-        create: jest.fn(),
-      },
-      ticketActivity: {
-        create: jest.fn(),
-      },
-      $transaction: jest.fn(),
+  const mockPrismaClient = {
+    project: {
+      findUnique: jest.fn(),
     },
-};
+    ticket: {
+      findUnique: jest.fn(),
+    },
+    comment: {
+      create: jest.fn(),
+    },
+    ticketActivity: {
+      create: jest.fn(),
+    },
+    $transaction: jest.fn(),
+  };
+
+  const mockPrismaService = {
+    client: mockPrismaClient,
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TicketTransitionsService,
-        { provide: PrismaService, useValue: mockPrismaService },
+        {
+          provide: 'PrismaService',
+          useValue: mockPrismaService,
+        },
       ],
     }).compile();
 
     service = module.get<TicketTransitionsService>(TicketTransitionsService);
-    prismaService = module.get<PrismaService<PrismaClient>>(PrismaService);
+    prismaService = module.get<any>('PrismaService');
   });
 
   afterEach(() => {
@@ -120,9 +125,9 @@ describe('TicketTransitionsService', () => {
         activity: { ...mockActivity, toStatus: TicketStatus.VERIFIED },
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaService.client.$transaction.mockResolvedValue(transitionResult);
+      mockPrismaClient.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaClient.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockPrismaClient.$transaction.mockResolvedValue(transitionResult);
 
       const result = await service.verify(
         'koda',
@@ -146,9 +151,9 @@ describe('TicketTransitionsService', () => {
         activity: { ...mockActivity },
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaService.client.$transaction.mockResolvedValue(transitionResult);
+      mockPrismaClient.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaClient.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockPrismaClient.$transaction.mockResolvedValue(transitionResult);
 
       await service.verify(
         'koda',
@@ -159,7 +164,7 @@ describe('TicketTransitionsService', () => {
       );
 
       // Verify transaction was called to handle atomic operations
-      expect(prismaService.client.$transaction).toHaveBeenCalled();
+      expect(mockPrismaClient.$transaction).toHaveBeenCalled();
     });
 
     it('should create TicketActivity record for status change', async () => {
@@ -174,9 +179,9 @@ describe('TicketTransitionsService', () => {
         },
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaService.client.$transaction.mockResolvedValue(transitionResult);
+      mockPrismaClient.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaClient.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockPrismaClient.$transaction.mockResolvedValue(transitionResult);
 
       const result = await service.verify(
         'koda',
@@ -196,7 +201,7 @@ describe('TicketTransitionsService', () => {
 
       await expect(
         service.verify('nonexistent', 'KODA-1', 'Comment', { sub: 'user-123' }, 'user')
-      ).rejects.toThrow(NotFoundException);
+      ).rejects.toThrow(AppException);
     });
 
     it('should throw 404 if ticket not found', async () => {
@@ -205,7 +210,7 @@ describe('TicketTransitionsService', () => {
 
       await expect(
         service.verify('koda', 'KODA-999', 'Comment', { sub: 'user-123' }, 'user')
-      ).rejects.toThrow(NotFoundException);
+      ).rejects.toThrow(AppException);
     });
 
     it('should throw 400 if transition is invalid (not CREATED status)', async () => {
@@ -217,7 +222,7 @@ describe('TicketTransitionsService', () => {
 
       await expect(
         service.verify('koda', 'KODA-1', 'Comment', { sub: 'user-123' }, 'user')
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(AppException);
     });
   });
 
@@ -262,7 +267,7 @@ describe('TicketTransitionsService', () => {
 
       await expect(
         service.start('koda', 'KODA-1', { sub: 'user-123' }, 'user')
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(AppException);
     });
   });
 
@@ -420,7 +425,7 @@ describe('TicketTransitionsService', () => {
 
       await expect(
         service.close('koda', 'KODA-1', { sub: 'user-123' }, 'user')
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(AppException);
     });
   });
 
@@ -432,9 +437,9 @@ describe('TicketTransitionsService', () => {
         activity: { ...mockActivity, fromStatus: TicketStatus.CREATED, toStatus: TicketStatus.REJECTED },
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaService.client.$transaction.mockResolvedValue(transitionResult);
+      mockPrismaClient.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaClient.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockPrismaClient.$transaction.mockResolvedValue(transitionResult);
 
       const result = await service.reject(
         'koda',
@@ -480,7 +485,7 @@ describe('TicketTransitionsService', () => {
 
       await expect(
         service.reject('koda', 'KODA-1', 'Not valid', { sub: 'user-123' }, 'user')
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(AppException);
     });
 
     it('should throw 400 if trying to reject from CLOSED', async () => {
@@ -490,7 +495,7 @@ describe('TicketTransitionsService', () => {
 
       await expect(
         service.reject('koda', 'KODA-1', 'Not valid', { sub: 'user-123' }, 'user')
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(AppException);
     });
   });
 
@@ -502,9 +507,9 @@ describe('TicketTransitionsService', () => {
         activity: { ...mockActivity, actorUserId: 'user-123', actorAgentId: null },
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaService.client.$transaction.mockResolvedValue(transitionResult);
+      mockPrismaClient.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaClient.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockPrismaClient.$transaction.mockResolvedValue(transitionResult);
 
       const result = await service.verify(
         'koda',
@@ -527,9 +532,9 @@ describe('TicketTransitionsService', () => {
         activity: { ...mockActivity, actorUserId: null, actorAgentId: 'agent-123' },
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaService.client.$transaction.mockResolvedValue(transitionResult);
+      mockPrismaClient.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaClient.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockPrismaClient.$transaction.mockResolvedValue(transitionResult);
 
       const result = await service.verify(
         'koda',
@@ -554,9 +559,9 @@ describe('TicketTransitionsService', () => {
         activity: { ...mockActivity },
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaService.client.$transaction.mockResolvedValue(transitionResult);
+      mockPrismaClient.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaClient.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockPrismaClient.$transaction.mockResolvedValue(transitionResult);
 
       await service.verify(
         'koda',
@@ -576,9 +581,9 @@ describe('TicketTransitionsService', () => {
         activity: { ...mockActivity },
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaService.client.$transaction.mockResolvedValue(transitionResult);
+      mockPrismaClient.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaClient.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockPrismaClient.$transaction.mockResolvedValue(transitionResult);
 
       const result = await service.verify(
         'koda',

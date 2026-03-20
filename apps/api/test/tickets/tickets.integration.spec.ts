@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TicketsService } from '../../src/tickets/tickets.service';
-import { PrismaService } from '../../src/prisma/prisma.service';
+import { PrismaService } from '@nathapp/nestjs-prisma';
 
 describe('Tickets Integration Tests', () => {
   let ticketsService: TicketsService;

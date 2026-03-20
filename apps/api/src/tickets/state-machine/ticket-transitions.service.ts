@@ -1,4 +1,4 @@
-import { Injectable, HttpStatus } from '@nestjs/common';
+import { Injectable, HttpStatus, Inject } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { AppException } from '../../common/app-exception';
 import {
@@ -31,7 +31,7 @@ export type TransitionResult = TransitionResultWithComment | TransitionResultWit
 
 @Injectable()
 export class TicketTransitionsService {
-  constructor(private prisma: PrismaService<PrismaClient>) {}
+  constructor(@Inject('PrismaService') private prisma: PrismaService<PrismaClient>) {}
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private get db(): PrismaClient { return (this.prisma as any).client ?? (this.prisma as unknown as PrismaClient); }
 

@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import { ProjectsService } from '../../src/projects/projects.service';
-import { PrismaService } from '../../src/prisma/prisma.service';
+import { PrismaService } from '@nathapp/nestjs-prisma';
 
 describe('Projects Integration Tests', () => {
   let _app: INestApplication;

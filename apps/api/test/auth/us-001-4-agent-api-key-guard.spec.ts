@@ -12,12 +12,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { createHmac } from 'crypto';
-import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import { ExecutionContext, HttpStatus } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 
 // This import will fail (RED) until AgentApiKeyGuard is implemented
 import { AgentApiKeyGuard } from '../../src/agents/guards/agent-api-key.guard';
+import { AppException } from '../../src/common/app-exception';
 
 const SRC = path.resolve(__dirname, '../../src');
 
@@ -100,14 +101,8 @@ describe('AgentApiKeyGuard', () => {
     client: mockPrismaClient,
   };
 
-  const mockConfigService = {
-    get: jest.fn((key: string) => {
-      if (key === 'API_KEY_SECRET') return API_KEY_SECRET;
-      return undefined;
-    }),
-  };
-
   let guard: AgentApiKeyGuard;
+  let mockConfigService: Partial<ConfigService>;
 
   function makeContext(authHeader?: string): ExecutionContext {
     const request = {
@@ -121,6 +116,13 @@ describe('AgentApiKeyGuard', () => {
   }
 
   beforeEach(async () => {
+    mockConfigService = {
+      get: jest.fn((key: string) => {
+        if (key === 'API_KEY_SECRET') return API_KEY_SECRET;
+        return undefined;
+      }),
+    } as unknown as ConfigService;
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AgentApiKeyGuard,
@@ -131,28 +133,33 @@ describe('AgentApiKeyGuard', () => {
 
     guard = module.get<AgentApiKeyGuard>(AgentApiKeyGuard);
     jest.clearAllMocks();
+    mockPrismaClient.agent.findFirst.mockReset();
+    (mockConfigService.get as jest.Mock).mockImplementation((key: string) => {
+      if (key === 'API_KEY_SECRET') return API_KEY_SECRET;
+      return undefined;
+    });
   });
 
   // AC1 — Missing API key returns 401
   describe('AC1 — missing API key is rejected', () => {
     it('throws UnauthorizedException when Authorization header is absent', async () => {
       const ctx = makeContext(undefined);
-      await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
+      await expect(guard.canActivate(ctx)).rejects.toThrow(AppException);
     });
 
     it('throws UnauthorizedException when Authorization header is empty string', async () => {
       const ctx = makeContext('');
-      await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
+      await expect(guard.canActivate(ctx)).rejects.toThrow(AppException);
     });
 
     it('throws UnauthorizedException when Authorization header is not Bearer scheme', async () => {
       const ctx = makeContext('Basic somebase64==');
-      await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
+      await expect(guard.canActivate(ctx)).rejects.toThrow(AppException);
     });
 
     it('throws UnauthorizedException when Bearer token is empty', async () => {
       const ctx = makeContext('Bearer ');
-      await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
+      await expect(guard.canActivate(ctx)).rejects.toThrow(AppException);
     });
   });
 
@@ -219,14 +226,14 @@ describe('AgentApiKeyGuard', () => {
       mockPrismaClient.agent.findFirst.mockResolvedValue(null);
 
       const ctx = makeContext(`Bearer wrong-key-that-wont-match`);
-      await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
+      await expect(guard.canActivate(ctx)).rejects.toThrow(AppException);
     });
 
     it('throws UnauthorizedException when agent is not found for computed hash', async () => {
       mockPrismaClient.agent.findFirst.mockResolvedValue(null);
 
       const ctx = makeContext(`Bearer ${'d'.repeat(64)}`);
-      await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
+      await expect(guard.canActivate(ctx)).rejects.toThrow(AppException);
     });
 
     it('does NOT return the raw API key to the caller on any code path', async () => {

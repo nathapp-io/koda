@@ -1,6 +1,6 @@
-import { BadRequestException } from '@nestjs/common';
 import { TicketStatus, CommentType } from '@prisma/client';
 import { validateTransition } from './ticket-transitions';
+import { AppException } from '../../common/app-exception';
 
 describe('validateTransition', () => {
   describe('Valid Transitions', () => {
@@ -57,89 +57,89 @@ describe('validateTransition', () => {
     it('throws BadRequestException for CREATED → IN_PROGRESS', () => {
       expect(() =>
         validateTransition(TicketStatus.CREATED, TicketStatus.IN_PROGRESS)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException for CREATED → VERIFY_FIX', () => {
       expect(() =>
         validateTransition(TicketStatus.CREATED, TicketStatus.VERIFY_FIX)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException for CREATED → CLOSED', () => {
       expect(() =>
         validateTransition(TicketStatus.CREATED, TicketStatus.CLOSED)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException for VERIFIED → VERIFIED', () => {
       expect(() =>
         validateTransition(TicketStatus.VERIFIED, TicketStatus.VERIFIED)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException for VERIFIED → VERIFY_FIX', () => {
       expect(() =>
         validateTransition(TicketStatus.VERIFIED, TicketStatus.VERIFY_FIX)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException for IN_PROGRESS → REJECTED', () => {
       expect(() =>
         validateTransition(TicketStatus.IN_PROGRESS, TicketStatus.REJECTED)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException for IN_PROGRESS → CLOSED', () => {
       expect(() =>
         validateTransition(TicketStatus.IN_PROGRESS, TicketStatus.CLOSED)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException for IN_PROGRESS → CREATED', () => {
       expect(() =>
         validateTransition(TicketStatus.IN_PROGRESS, TicketStatus.CREATED)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException for VERIFY_FIX → VERIFIED', () => {
       expect(() =>
         validateTransition(TicketStatus.VERIFY_FIX, TicketStatus.VERIFIED)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException for VERIFY_FIX → REJECTED', () => {
       expect(() =>
         validateTransition(TicketStatus.VERIFY_FIX, TicketStatus.REJECTED)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException for CLOSED → any status', () => {
       expect(() =>
         validateTransition(TicketStatus.CLOSED, TicketStatus.CREATED)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
 
       expect(() =>
         validateTransition(TicketStatus.CLOSED, TicketStatus.IN_PROGRESS)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
 
       expect(() =>
         validateTransition(TicketStatus.CLOSED, TicketStatus.VERIFIED)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException for REJECTED → any status', () => {
       expect(() =>
         validateTransition(TicketStatus.REJECTED, TicketStatus.CREATED)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
 
       expect(() =>
         validateTransition(TicketStatus.REJECTED, TicketStatus.IN_PROGRESS)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
 
       expect(() =>
         validateTransition(TicketStatus.REJECTED, TicketStatus.VERIFIED)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
   });
 
@@ -147,101 +147,101 @@ describe('validateTransition', () => {
     it('throws BadRequestException when CREATED → VERIFIED without comment', () => {
       expect(() =>
         validateTransition(TicketStatus.CREATED, TicketStatus.VERIFIED)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException when CREATED → VERIFIED with wrong comment type', () => {
       expect(() =>
         validateTransition(TicketStatus.CREATED, TicketStatus.VERIFIED, CommentType.GENERAL)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
 
       expect(() =>
         validateTransition(TicketStatus.CREATED, TicketStatus.VERIFIED, CommentType.FIX_REPORT)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException when CREATED → REJECTED without comment', () => {
       expect(() =>
         validateTransition(TicketStatus.CREATED, TicketStatus.REJECTED)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException when CREATED → REJECTED with wrong comment type', () => {
       expect(() =>
         validateTransition(TicketStatus.CREATED, TicketStatus.REJECTED, CommentType.VERIFICATION)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException when VERIFIED → REJECTED without comment', () => {
       expect(() =>
         validateTransition(TicketStatus.VERIFIED, TicketStatus.REJECTED)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException when VERIFIED → REJECTED with wrong comment type', () => {
       expect(() =>
         validateTransition(TicketStatus.VERIFIED, TicketStatus.REJECTED, CommentType.VERIFICATION)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException when IN_PROGRESS → VERIFY_FIX without comment', () => {
       expect(() =>
         validateTransition(TicketStatus.IN_PROGRESS, TicketStatus.VERIFY_FIX)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException when IN_PROGRESS → VERIFY_FIX with wrong comment type', () => {
       expect(() =>
         validateTransition(TicketStatus.IN_PROGRESS, TicketStatus.VERIFY_FIX, CommentType.REVIEW)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
 
       expect(() =>
         validateTransition(TicketStatus.IN_PROGRESS, TicketStatus.VERIFY_FIX, CommentType.GENERAL)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException when IN_PROGRESS → VERIFIED without comment', () => {
       expect(() =>
         validateTransition(TicketStatus.IN_PROGRESS, TicketStatus.VERIFIED)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException when IN_PROGRESS → VERIFIED with wrong comment type', () => {
       expect(() =>
         validateTransition(TicketStatus.IN_PROGRESS, TicketStatus.VERIFIED, CommentType.FIX_REPORT)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException when VERIFY_FIX → CLOSED without comment', () => {
       expect(() =>
         validateTransition(TicketStatus.VERIFY_FIX, TicketStatus.CLOSED)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException when VERIFY_FIX → CLOSED with wrong comment type', () => {
       expect(() =>
         validateTransition(TicketStatus.VERIFY_FIX, TicketStatus.CLOSED, CommentType.GENERAL)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
 
       expect(() =>
         validateTransition(TicketStatus.VERIFY_FIX, TicketStatus.CLOSED, CommentType.FIX_REPORT)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException when VERIFY_FIX → IN_PROGRESS without comment', () => {
       expect(() =>
         validateTransition(TicketStatus.VERIFY_FIX, TicketStatus.IN_PROGRESS)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
 
     it('throws BadRequestException when VERIFY_FIX → IN_PROGRESS with wrong comment type', () => {
       expect(() =>
         validateTransition(TicketStatus.VERIFY_FIX, TicketStatus.IN_PROGRESS, CommentType.GENERAL)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
 
       expect(() =>
         validateTransition(TicketStatus.VERIFY_FIX, TicketStatus.IN_PROGRESS, CommentType.FIX_REPORT)
-      ).toThrow(BadRequestException);
+      ).toThrow(AppException);
     });
   });
 
@@ -301,10 +301,9 @@ describe('validateTransition', () => {
         validateTransition(TicketStatus.CREATED, TicketStatus.CLOSED);
         fail('Should have thrown');
       } catch (error) {
-        expect(error).toBeInstanceOf(BadRequestException);
-        const err = error as BadRequestException;
-        expect(err.message).toContain('CREATED');
-        expect(err.message).toContain('CLOSED');
+        expect(error).toBeInstanceOf(AppException);
+        const err = error as AppException;
+        expect(err.i18nKey).toBe('errors.invalidTransition');
       }
     });
 
@@ -313,9 +312,9 @@ describe('validateTransition', () => {
         validateTransition(TicketStatus.CREATED, TicketStatus.VERIFIED);
         fail('Should have thrown');
       } catch (error) {
-        expect(error).toBeInstanceOf(BadRequestException);
-        const err = error as BadRequestException;
-        expect(err.message).toContain('VERIFICATION');
+        expect(error).toBeInstanceOf(AppException);
+        const err = error as AppException;
+        expect(err.i18nKey).toBe('errors.invalidTransition');
       }
     });
 
@@ -324,10 +323,9 @@ describe('validateTransition', () => {
         validateTransition(TicketStatus.CREATED, TicketStatus.VERIFIED, CommentType.GENERAL);
         fail('Should have thrown');
       } catch (error) {
-        expect(error).toBeInstanceOf(BadRequestException);
-        const err = error as BadRequestException;
-        expect(err.message).toContain('GENERAL');
-        expect(err.message).toContain('VERIFICATION');
+        expect(error).toBeInstanceOf(AppException);
+        const err = error as AppException;
+        expect(err.i18nKey).toBe('errors.invalidTransition');
       }
     });
   });

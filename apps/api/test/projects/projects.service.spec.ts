@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ProjectsService } from './projects.service';
-import { PrismaService } from '../prisma/prisma.service';
+import { ProjectsService } from '../../src/projects/projects.service';
+import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ConflictException as _ConflictException, BadRequestException as _BadRequestException } from '@nestjs/common';
 
 describe('ProjectsService', () => {
