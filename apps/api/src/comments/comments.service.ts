@@ -1,6 +1,6 @@
 import { Injectable, HttpStatus } from '@nestjs/common';
-import { CommentType } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { CommentType, PrismaClient } from '@prisma/client';
+import { PrismaService } from '@nathapp/nestjs-prisma';
 import { AppException } from '../common/app-exception';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
@@ -12,7 +12,10 @@ interface CurrentUser {
 
 @Injectable()
 export class CommentsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService<PrismaClient>) {}
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private get db(): PrismaClient { return (this.prisma as any).client ?? (this.prisma as unknown as PrismaClient); }
+
 
   async create(
     projectSlug: string,
@@ -33,7 +36,7 @@ export class CommentsService {
     }
 
     // Find project by slug
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
@@ -50,7 +53,7 @@ export class CommentsService {
     if (match) {
       // Resolve by composite unique key (projectId, number)
       const number = parseInt(match[2], 10);
-      ticket = await this.prisma.ticket.findUnique({
+      ticket = await this.db.ticket.findUnique({
         where: {
           projectId_number: {
             projectId: project.id,
@@ -60,7 +63,7 @@ export class CommentsService {
       });
     } else {
       // Treat as CUID
-      ticket = await this.prisma.ticket.findUnique({
+      ticket = await this.db.ticket.findUnique({
         where: { id: ticketRef },
       });
     }
@@ -70,7 +73,7 @@ export class CommentsService {
     }
 
     // Create the comment
-    const comment = await this.prisma.comment.create({
+    const comment = await this.db.comment.create({
       data: {
         ticketId: ticket.id,
         body: createCommentDto.body,
@@ -85,7 +88,7 @@ export class CommentsService {
 
   async findByTicket(projectSlug: string, ticketRef: string) {
     // Find project by slug
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
@@ -102,7 +105,7 @@ export class CommentsService {
     if (match) {
       // Resolve by composite unique key (projectId, number)
       const number = parseInt(match[2], 10);
-      ticket = await this.prisma.ticket.findUnique({
+      ticket = await this.db.ticket.findUnique({
         where: {
           projectId_number: {
             projectId: project.id,
@@ -112,7 +115,7 @@ export class CommentsService {
       });
     } else {
       // Treat as CUID
-      ticket = await this.prisma.ticket.findUnique({
+      ticket = await this.db.ticket.findUnique({
         where: { id: ticketRef },
       });
     }
@@ -122,7 +125,7 @@ export class CommentsService {
     }
 
     // Find all comments for this ticket, ordered by creation date
-    const comments = await this.prisma.comment.findMany({
+    const comments = await this.db.comment.findMany({
       where: { ticketId: ticket.id },
       orderBy: { createdAt: 'asc' },
     });
@@ -131,7 +134,7 @@ export class CommentsService {
   }
 
   async findById(id: string) {
-    const comment = await this.prisma.comment.findUnique({
+    const comment = await this.db.comment.findUnique({
       where: { id },
     });
 
@@ -145,7 +148,7 @@ export class CommentsService {
     actorType: 'user' | 'agent',
   ) {
     // Find the comment
-    const comment = await this.prisma.comment.findUnique({
+    const comment = await this.db.comment.findUnique({
       where: { id: commentId },
     });
 
@@ -165,7 +168,7 @@ export class CommentsService {
     }
 
     // Update the comment
-    const updatedComment = await this.prisma.comment.update({
+    const updatedComment = await this.db.comment.update({
       where: { id: commentId },
       data: {
         body: updateCommentDto.body,
@@ -181,7 +184,7 @@ export class CommentsService {
     actorType: 'user' | 'agent',
   ) {
     // Find the comment
-    const comment = await this.prisma.comment.findUnique({
+    const comment = await this.db.comment.findUnique({
       where: { id: commentId },
     });
 
@@ -201,7 +204,7 @@ export class CommentsService {
     }
 
     // Delete the comment
-    await this.prisma.comment.delete({
+    await this.db.comment.delete({
       where: { id: commentId },
     });
   }

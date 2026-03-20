@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService } from '@nathapp/nestjs-prisma';
 import {
   TicketStatus,
   CommentType,
@@ -7,6 +7,7 @@ import {
   Ticket,
   Comment,
   TicketActivity,
+  PrismaClient,
 } from '@prisma/client';
 import { validateTransition } from './ticket-transitions';
 
@@ -29,7 +30,10 @@ export type TransitionResult = TransitionResultWithComment | TransitionResultWit
 
 @Injectable()
 export class TicketTransitionsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService<PrismaClient>) {}
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private get db(): PrismaClient { return (this.prisma as any).client ?? (this.prisma as unknown as PrismaClient); }
+
 
   /**
    * Transition CREATED → VERIFIED
@@ -126,7 +130,7 @@ export class TicketTransitionsService {
     currentUser: CurrentUser,
     actorType: 'user' | 'agent',
   ): Promise<TransitionResultWithoutComment> {
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
     if (!project || project.deletedAt) {
@@ -150,7 +154,7 @@ export class TicketTransitionsService {
     }
 
     // Execute transition without comment requirement
-    const transaction = await this.prisma.$transaction(async (tx) => {
+    const transaction = await this.db.$transaction(async (tx) => {
       const actorUserId = actorType === 'user' ? currentUser.sub : null;
       const actorAgentId = actorType === 'agent' ? currentUser.sub : null;
 
@@ -215,7 +219,7 @@ export class TicketTransitionsService {
     actorType: 'user' | 'agent',
   ): Promise<TransitionResult> {
     // Find project
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
     if (!project || project.deletedAt) {
@@ -232,7 +236,7 @@ export class TicketTransitionsService {
     validateTransition(ticket.status, toStatus, commentType);
 
     // Execute transition in transaction
-    return this.prisma.$transaction(async (tx) => {
+    return this.db.$transaction(async (tx) => {
       const actorUserId = actorType === 'user' ? currentUser.sub : null;
       const actorAgentId = actorType === 'agent' ? currentUser.sub : null;
 
@@ -289,7 +293,7 @@ export class TicketTransitionsService {
    * Helper to find ticket by ref (supports both KODA-1 format and CUID)
    */
   private async findTicketByRef(projectSlug: string, ref: string) {
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
@@ -303,7 +307,7 @@ export class TicketTransitionsService {
 
     if (match) {
       const number = parseInt(match[2], 10);
-      return this.prisma.ticket.findUnique({
+      return this.db.ticket.findUnique({
         where: {
           projectId_number: {
             projectId: project.id,
@@ -314,7 +318,7 @@ export class TicketTransitionsService {
     }
 
     // Try as CUID
-    return this.prisma.ticket.findUnique({
+    return this.db.ticket.findUnique({
       where: { id: ref },
     });
   }

@@ -1,14 +1,18 @@
 import { Injectable, CanActivate, ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaClient } from '@prisma/client';
 import { createHmac } from 'crypto';
 
 @Injectable()
 export class ApiKeyAuthGuard implements CanActivate {
   constructor(
     private configService: ConfigService,
-    private prisma: PrismaService,
+    private prisma: PrismaService<PrismaClient>,
   ) {}
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private get db(): PrismaClient { return (this.prisma as any).client ?? (this.prisma as unknown as PrismaClient); }
+
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
@@ -38,7 +42,7 @@ export class ApiKeyAuthGuard implements CanActivate {
     const hash = createHmac('sha256', apiKeySecret).update(rawKey).digest('hex');
 
     // Look up Agent by apiKeyHash
-    const agent = await this.prisma.agent.findUnique({
+    const agent = await this.db.agent.findUnique({
       where: { apiKeyHash: hash },
     });
 

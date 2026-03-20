@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaClient } from '@prisma/client';
 import { AuthService } from './auth.service';
 import { ConfigService } from '@nestjs/config';
 import { AppException } from '../common/app-exception';
@@ -8,7 +9,7 @@ import * as bcrypt from 'bcrypt';
 
 describe('AuthService', () => {
   let service: AuthService;
-  let prismaService: PrismaService;
+  let prismaService: PrismaService<PrismaClient>;
   let _configService: ConfigService;
   let jwtService: JwtService;
 
@@ -23,11 +24,13 @@ describe('AuthService', () => {
   };
 
   const mockPrismaService = {
-    user: {
-      create: jest.fn(),
-      findUnique: jest.fn(),
+  client: {
+      user: {
+        create: jest.fn(),
+        findUnique: jest.fn(),
+      },
     },
-  };
+};
 
   const mockConfigService = {
     get: jest.fn(),
@@ -48,7 +51,7 @@ describe('AuthService', () => {
     }).compile();
 
     service = module.get<AuthService>(AuthService);
-    prismaService = module.get<PrismaService>(PrismaService);
+    prismaService = module.get<PrismaService<PrismaClient>>(PrismaService);
     _configService = module.get<ConfigService>(ConfigService);
     jwtService = module.get<JwtService>(JwtService);
 
@@ -69,12 +72,12 @@ describe('AuthService', () => {
         password: 'password123',
       };
 
-      mockPrismaService.user.create.mockResolvedValue(mockUser);
+      mockPrismaService.client.user.create.mockResolvedValue(mockUser);
 
       const result = await service.register(registerDto);
 
-      expect(prismaService.user.create).toHaveBeenCalled();
-      const createCall = (prismaService.user.create as jest.Mock).mock.calls[0][0];
+      expect(prismaService.client.user.create).toHaveBeenCalled();
+      const createCall = (prismaService.client.user.create as jest.Mock).mock.calls[0][0];
       expect(createCall.data.email).toBe(registerDto.email);
       expect(createCall.data.name).toBe(registerDto.name);
 
@@ -95,7 +98,7 @@ describe('AuthService', () => {
         password: 'password123',
       };
 
-      mockPrismaService.user.create.mockResolvedValue(mockUser);
+      mockPrismaService.client.user.create.mockResolvedValue(mockUser);
 
       const result = await service.register(registerDto);
 
@@ -114,7 +117,7 @@ describe('AuthService', () => {
       const hashedPassword = await bcrypt.hash(password, 12);
       const userWithHash = { ...mockUser, passwordHash: hashedPassword };
 
-      mockPrismaService.user.findUnique.mockResolvedValue(userWithHash);
+      mockPrismaService.client.user.findUnique.mockResolvedValue(userWithHash);
 
       const result = await service.login({
         email: mockUser.email,
@@ -128,7 +131,7 @@ describe('AuthService', () => {
     });
 
     it('should throw 401 error for invalid password', async () => {
-      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+      mockPrismaService.client.user.findUnique.mockResolvedValue(mockUser);
 
       await expect(
         service.login({
@@ -139,7 +142,7 @@ describe('AuthService', () => {
     });
 
     it('should throw 401 error for non-existent user', async () => {
-      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      mockPrismaService.client.user.findUnique.mockResolvedValue(null);
 
       await expect(
         service.login({
@@ -152,7 +155,7 @@ describe('AuthService', () => {
 
   describe('refresh', () => {
     it('should return new tokens with valid refresh token', async () => {
-      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+      mockPrismaService.client.user.findUnique.mockResolvedValue(mockUser);
 
       const result = await service.refresh({
         sub: mockUser.id,
@@ -168,7 +171,7 @@ describe('AuthService', () => {
 
   describe('validateUser', () => {
     it('should return user for valid JWT payload', async () => {
-      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+      mockPrismaService.client.user.findUnique.mockResolvedValue(mockUser);
 
       const result = await service.validateUser({
         sub: mockUser.id,
@@ -177,13 +180,13 @@ describe('AuthService', () => {
       });
 
       expect(result).toEqual(mockUser);
-      expect(prismaService.user.findUnique).toHaveBeenCalledWith({
+      expect(prismaService.client.user.findUnique).toHaveBeenCalledWith({
         where: { id: mockUser.id },
       });
     });
 
     it('should return null if user not found', async () => {
-      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      mockPrismaService.client.user.findUnique.mockResolvedValue(null);
 
       const result = await service.validateUser({
         sub: 'nonexistent-id',

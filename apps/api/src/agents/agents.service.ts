@@ -1,9 +1,9 @@
 import { Injectable, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '@nathapp/nestjs-prisma';
 import { AppException } from '../common/app-exception';
 import { createHmac, randomBytes } from 'crypto';
-import type { AgentRole } from '@prisma/client';
+import type { AgentRole, PrismaClient } from '@prisma/client';
 
 export interface CreateAgentDto {
   name: string;
@@ -29,9 +29,12 @@ export interface UpdateCapabilitiesDto {
 @Injectable()
 export class AgentsService {
   constructor(
-    private prisma: PrismaService,
+    private prisma: PrismaService<PrismaClient>,
     private configService: ConfigService,
   ) {}
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private get db(): PrismaClient { return (this.prisma as any).client ?? (this.prisma as unknown as PrismaClient); }
+
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async generateApiKey(agentId: string): Promise<{ apiKey: string; agent: any }>;
@@ -53,13 +56,13 @@ export class AgentsService {
     let agent;
     if (typeof agentIdOrDto === 'string') {
       // Update existing agent
-      agent = await this.prisma.agent.update({
+      agent = await this.db.agent.update({
         where: { id: agentIdOrDto },
         data: { apiKeyHash },
       });
     } else {
       // Create new agent
-      agent = await this.prisma.agent.create({
+      agent = await this.db.agent.create({
         data: {
           ...agentIdOrDto,
           apiKeyHash,
@@ -76,7 +79,7 @@ export class AgentsService {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async findAll(): Promise<any[]> {
-    return this.prisma.agent.findMany({
+    return this.db.agent.findMany({
       include: {
         roles: true,
         capabilities: true,
@@ -86,7 +89,7 @@ export class AgentsService {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async findBySlug(slug: string): Promise<any> {
-    const agent = await this.prisma.agent.findUnique({
+    const agent = await this.db.agent.findUnique({
       where: { slug },
       include: {
         roles: true,
@@ -103,7 +106,7 @@ export class AgentsService {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async findMe(agentId: string): Promise<any> {
-    const agent = await this.prisma.agent.findUnique({
+    const agent = await this.db.agent.findUnique({
       where: { id: agentId },
       include: {
         roles: true,
@@ -126,7 +129,7 @@ export class AgentsService {
     if (updateData.maxConcurrentTickets !== undefined) data.maxConcurrentTickets = updateData.maxConcurrentTickets;
     if (updateData.status !== undefined) data.status = updateData.status;
 
-    return this.prisma.agent.update({
+    return this.db.agent.update({
       where: { slug },
       data,
     });
@@ -135,13 +138,13 @@ export class AgentsService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async updateRoles(agentId: string, updateData: UpdateRolesDto): Promise<any> {
     // Delete all existing roles
-    await this.prisma.agentRoleEntry.deleteMany({
+    await this.db.agentRoleEntry.deleteMany({
       where: { agentId },
     });
 
     // Create new roles if provided
     if (updateData.roles && updateData.roles.length > 0) {
-      await this.prisma.agentRoleEntry.createMany({
+      await this.db.agentRoleEntry.createMany({
         data: updateData.roles.map((role) => ({
           agentId,
           role: role as AgentRole,
@@ -150,7 +153,7 @@ export class AgentsService {
     }
 
     // Return updated agent with roles
-    return this.prisma.agent.findUnique({
+    return this.db.agent.findUnique({
       where: { id: agentId },
       include: {
         roles: true,
@@ -162,7 +165,7 @@ export class AgentsService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async updateCapabilities(agentId: string, updateData: UpdateCapabilitiesDto): Promise<any> {
     // Delete all existing capabilities
-    await this.prisma.agentCapability.deleteMany({
+    await this.db.agentCapability.deleteMany({
       where: { agentId },
     });
 
@@ -170,7 +173,7 @@ export class AgentsService {
     if (updateData.capabilities && updateData.capabilities.length > 0) {
       // Filter out duplicates
       const uniqueCapabilities = [...new Set(updateData.capabilities)];
-      await this.prisma.agentCapability.createMany({
+      await this.db.agentCapability.createMany({
         data: uniqueCapabilities.map((capability) => ({
           agentId,
           capability,
@@ -179,7 +182,7 @@ export class AgentsService {
     }
 
     // Return updated agent with capabilities
-    return this.prisma.agent.findUnique({
+    return this.db.agent.findUnique({
       where: { id: agentId },
       include: {
         roles: true,
@@ -191,7 +194,7 @@ export class AgentsService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async rotateApiKey(slug: string): Promise<{ apiKey: string; agent: any }> {
     // Find agent by slug to get the id
-    const agent = await this.prisma.agent.findUnique({
+    const agent = await this.db.agent.findUnique({
       where: { slug },
     });
 

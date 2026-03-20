@@ -1,5 +1,6 @@
 import { Injectable, HttpStatus } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaClient } from '@prisma/client';
 import { AppException } from '../common/app-exception';
 import { CreateLabelDto } from './dto/create-label.dto';
 import { AssignLabelDto } from './dto/assign-label.dto';
@@ -11,7 +12,10 @@ interface CurrentUser {
 
 @Injectable()
 export class LabelsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService<PrismaClient>) {}
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private get db(): PrismaClient { return (this.prisma as any).client ?? (this.prisma as unknown as PrismaClient); }
+
 
   async create(
     projectSlug: string,
@@ -33,7 +37,7 @@ export class LabelsService {
     }
 
     // Find project by slug
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
@@ -43,7 +47,7 @@ export class LabelsService {
 
     // Create the label
     try {
-      const label = await this.prisma.label.create({
+      const label = await this.db.label.create({
         data: {
           projectId: project.id,
           name: createLabelDto.name,
@@ -63,7 +67,7 @@ export class LabelsService {
 
   async findByProject(projectSlug: string) {
     // Find project by slug
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
@@ -72,7 +76,7 @@ export class LabelsService {
     }
 
     // Find all labels for this project
-    const labels = await this.prisma.label.findMany({
+    const labels = await this.db.label.findMany({
       where: { projectId: project.id },
     });
 
@@ -91,7 +95,7 @@ export class LabelsService {
     }
 
     // Find project by slug
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
@@ -100,7 +104,7 @@ export class LabelsService {
     }
 
     // Find the label
-    const label = await this.prisma.label.findUnique({
+    const label = await this.db.label.findUnique({
       where: { id: labelId },
     });
 
@@ -114,7 +118,7 @@ export class LabelsService {
     }
 
     // Delete the label
-    await this.prisma.label.delete({
+    await this.db.label.delete({
       where: { id: labelId },
     });
   }
@@ -127,7 +131,7 @@ export class LabelsService {
     actorType: 'user' | 'agent',
   ) {
     // Find project by slug
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
@@ -144,7 +148,7 @@ export class LabelsService {
     if (match) {
       // Resolve by composite unique key (projectId, number)
       const number = parseInt(match[2], 10);
-      ticket = await this.prisma.ticket.findUnique({
+      ticket = await this.db.ticket.findUnique({
         where: {
           projectId_number: {
             projectId: project.id,
@@ -155,7 +159,7 @@ export class LabelsService {
       });
     } else {
       // Treat as CUID
-      ticket = await this.prisma.ticket.findUnique({
+      ticket = await this.db.ticket.findUnique({
         where: { id: ticketRef },
         include: { labels: { include: { label: true } } },
       });
@@ -166,7 +170,7 @@ export class LabelsService {
     }
 
     // Find the label
-    const label = await this.prisma.label.findUnique({
+    const label = await this.db.label.findUnique({
       where: { id: assignLabelDto.labelId },
     });
 
@@ -181,7 +185,7 @@ export class LabelsService {
 
     // Use transaction to assign label and create activity
     try {
-      const result = await this.prisma.$transaction(async (tx) => {
+      const result = await this.db.$transaction(async (tx) => {
         // Check if label already assigned
         const existingAssignment = await tx.ticketLabel.findUnique({
           where: {
@@ -257,7 +261,7 @@ export class LabelsService {
     actorType: 'user' | 'agent',
   ) {
     // Find project by slug
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
@@ -274,7 +278,7 @@ export class LabelsService {
     if (match) {
       // Resolve by composite unique key (projectId, number)
       const number = parseInt(match[2], 10);
-      ticket = await this.prisma.ticket.findUnique({
+      ticket = await this.db.ticket.findUnique({
         where: {
           projectId_number: {
             projectId: project.id,
@@ -285,7 +289,7 @@ export class LabelsService {
       });
     } else {
       // Treat as CUID
-      ticket = await this.prisma.ticket.findUnique({
+      ticket = await this.db.ticket.findUnique({
         where: { id: ticketRef },
         include: { labels: { include: { label: true } } },
       });
@@ -296,7 +300,7 @@ export class LabelsService {
     }
 
     // Check if label is assigned to ticket
-    const ticketLabel = await this.prisma.ticketLabel.findUnique({
+    const ticketLabel = await this.db.ticketLabel.findUnique({
       where: {
         ticketId_labelId: {
           ticketId: ticket.id,
@@ -311,7 +315,7 @@ export class LabelsService {
     }
 
     // Use transaction to remove label and create activity
-    const result = await this.prisma.$transaction(async (tx) => {
+    const result = await this.db.$transaction(async (tx) => {
       // Remove the label
       await tx.ticketLabel.delete({
         where: {

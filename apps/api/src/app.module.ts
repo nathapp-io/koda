@@ -3,7 +3,8 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { I18nCoreModule } from '@nathapp/nestjs-common';
 import { LoggingModule } from '@nathapp/nestjs-logging';
-import { PrismaModule } from './prisma/prisma.module';
+import { PrismaModule } from '@nathapp/nestjs-prisma';
+import { PrismaClient } from '@prisma/client';
 import { AuthModule } from './auth/auth.module';
 import { AgentsModule } from './agents/agents.module';
 import { ProjectsModule } from './projects/projects.module';
@@ -30,7 +31,10 @@ import { validate } from './config/env.validation';
       },
     }),
     LoggingModule,
-    PrismaModule,
+    PrismaModule.forRoot({
+      isGlobal: true,
+      client: PrismaClient,
+    }),
     AuthModule,
     AgentsModule,
     ProjectsModule,

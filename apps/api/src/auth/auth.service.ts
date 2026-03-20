@@ -1,6 +1,7 @@
 import { Injectable, Inject, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaClient } from '@prisma/client';
 import { AppException } from '../common/app-exception';
 import * as bcrypt from 'bcrypt';
 import { RegisterDto } from './dto/register.dto';
@@ -23,10 +24,13 @@ interface JwtSigner {
 @Injectable()
 export class AuthService {
   constructor(
-    private prisma: PrismaService,
+    private prisma: PrismaService<PrismaClient>,
     @Inject(JwtServiceToken) private jwtService: JwtSigner,
     private configService: ConfigService,
   ) {}
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private get db(): PrismaClient { return (this.prisma as any).client ?? (this.prisma as unknown as PrismaClient); }
+
 
   async register(registerDto: RegisterDto) {
     const { email, name, password } = registerDto;
@@ -35,7 +39,7 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(password, 12);
 
     // Create user
-    const user = await this.prisma.user.create({
+    const user = await this.db.user.create({
       data: {
         email,
         name,
@@ -58,7 +62,7 @@ export class AuthService {
     const { email, password } = loginDto;
 
     // Find user by email
-    const user = await this.prisma.user.findUnique({
+    const user = await this.db.user.findUnique({
       where: { email },
     });
 
@@ -85,7 +89,7 @@ export class AuthService {
 
   async refresh(payload: JwtPayload) {
     // Validate user still exists
-    const user = await this.prisma.user.findUnique({
+    const user = await this.db.user.findUnique({
       where: { id: payload.sub },
     });
 
@@ -105,7 +109,7 @@ export class AuthService {
   }
 
   async validateUser(payload: JwtPayload) {
-    const user = await this.prisma.user.findUnique({
+    const user = await this.db.user.findUnique({
       where: { id: payload.sub },
     });
 

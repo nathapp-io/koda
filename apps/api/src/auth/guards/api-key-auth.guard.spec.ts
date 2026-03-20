@@ -1,13 +1,14 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { ApiKeyAuthGuard } from './api-key-auth.guard';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaClient } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { createHmac } from 'crypto';
 
 describe('ApiKeyAuthGuard', () => {
   let guard: ApiKeyAuthGuard;
-  let prismaService: PrismaService;
+  let prismaService: PrismaService<PrismaClient>;
   let _configService: ConfigService;
 
   const mockAgent = {
@@ -22,10 +23,12 @@ describe('ApiKeyAuthGuard', () => {
   };
 
   const mockPrismaService = {
-    agent: {
-      findUnique: jest.fn(),
+  client: {
+      agent: {
+        findUnique: jest.fn(),
+      },
     },
-  };
+};
 
   const mockConfigService = {
     get: jest.fn(),
@@ -41,7 +44,7 @@ describe('ApiKeyAuthGuard', () => {
     }).compile();
 
     guard = module.get<ApiKeyAuthGuard>(ApiKeyAuthGuard);
-    prismaService = module.get<PrismaService>(PrismaService);
+    prismaService = module.get<PrismaService<PrismaClient>>(PrismaService);
     _configService = module.get<ConfigService>(ConfigService);
 
     mockConfigService.get.mockReturnValue('test-secret');
@@ -61,7 +64,7 @@ describe('ApiKeyAuthGuard', () => {
         },
       };
 
-      mockPrismaService.agent.findUnique.mockResolvedValue(mockAgent);
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(mockAgent);
       mockConfigService.get.mockReturnValue('test-secret');
 
       const mockContext = {
@@ -90,7 +93,7 @@ describe('ApiKeyAuthGuard', () => {
       };
 
       mockConfigService.get.mockReturnValue(secret);
-      mockPrismaService.agent.findUnique.mockResolvedValue(agentWithHash);
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(agentWithHash);
 
       const mockContext = {
         switchToHttp: jest.fn().mockReturnValue({
@@ -101,7 +104,7 @@ describe('ApiKeyAuthGuard', () => {
       const result = await guard.canActivate(mockContext);
 
       expect(result).toBe(true);
-      expect(prismaService.agent.findUnique).toHaveBeenCalledWith({
+      expect(prismaService.client.agent.findUnique).toHaveBeenCalledWith({
         where: { apiKeyHash: hash },
       });
     });
@@ -116,7 +119,7 @@ describe('ApiKeyAuthGuard', () => {
         },
       };
 
-      mockPrismaService.agent.findUnique.mockResolvedValue(mockAgent);
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(mockAgent);
 
       const mockContext = {
         switchToHttp: jest.fn().mockReturnValue({
@@ -126,7 +129,7 @@ describe('ApiKeyAuthGuard', () => {
 
       await guard.canActivate(mockContext);
 
-      expect(prismaService.agent.findUnique).toHaveBeenCalledWith({
+      expect(prismaService.client.agent.findUnique).toHaveBeenCalledWith({
         where: { apiKeyHash: hash },
       });
     });
@@ -140,7 +143,7 @@ describe('ApiKeyAuthGuard', () => {
         },
       };
 
-      mockPrismaService.agent.findUnique.mockResolvedValue(mockAgent);
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(mockAgent);
 
       const mockContext = {
         switchToHttp: jest.fn().mockReturnValue({
@@ -164,7 +167,7 @@ describe('ApiKeyAuthGuard', () => {
         },
       };
 
-      mockPrismaService.agent.findUnique.mockResolvedValue(pausedAgent);
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(pausedAgent);
 
       const mockContext = {
         switchToHttp: jest.fn().mockReturnValue({
@@ -185,7 +188,7 @@ describe('ApiKeyAuthGuard', () => {
         },
       };
 
-      mockPrismaService.agent.findUnique.mockResolvedValue(offlineAgent);
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(offlineAgent);
 
       const mockContext = {
         switchToHttp: jest.fn().mockReturnValue({
@@ -203,7 +206,7 @@ describe('ApiKeyAuthGuard', () => {
         },
       };
 
-      mockPrismaService.agent.findUnique.mockResolvedValue(null);
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(null);
 
       const mockContext = {
         switchToHttp: jest.fn().mockReturnValue({

@@ -1,9 +1,9 @@
 import { Injectable, HttpStatus } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '@nathapp/nestjs-prisma';
 import { AppException } from '../common/app-exception';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
-import { TicketType, TicketStatus, Priority } from '@prisma/client';
+import { TicketType, TicketStatus, Priority, PrismaClient } from '@prisma/client';
 
 interface FindAllFilters {
   status?: TicketStatus;
@@ -27,7 +27,10 @@ interface CurrentUser {
 
 @Injectable()
 export class TicketsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService<PrismaClient>) {}
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private get db(): PrismaClient { return (this.prisma as any).client ?? (this.prisma as unknown as PrismaClient); }
+
 
   async create(
     projectSlug: string,
@@ -36,7 +39,7 @@ export class TicketsService {
     actorType: 'user' | 'agent',
   ) {
     // Find project by slug
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
@@ -59,7 +62,7 @@ export class TicketsService {
     }
 
     // Use transaction to safely auto-increment ticket number
-    const ticket = await this.prisma.$transaction(async (tx) => {
+    const ticket = await this.db.$transaction(async (tx) => {
       // Find the highest number for this project
       const lastTicket = await tx.ticket.findFirst({
         where: { projectId: project.id, deletedAt: null },
@@ -89,7 +92,7 @@ export class TicketsService {
 
   async findAll(projectSlug: string, filters: FindAllFilters) {
     // Find project by slug
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
@@ -132,13 +135,13 @@ export class TicketsService {
 
     // Fetch tickets and total count
     const [tickets, total] = await Promise.all([
-      this.prisma.ticket.findMany({
+      this.db.ticket.findMany({
         where: whereConditions,
         take: limit,
         skip,
         orderBy: { number: 'asc' },
       }),
-      this.prisma.ticket.count({ where: whereConditions }),
+      this.db.ticket.count({ where: whereConditions }),
     ]);
 
     return {
@@ -151,7 +154,7 @@ export class TicketsService {
 
   async findByRef(projectSlug: string, ref: string) {
     // Find project by slug
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
@@ -168,7 +171,7 @@ export class TicketsService {
     if (match) {
       // Resolve by composite unique key (projectId, number)
       const number = parseInt(match[2], 10);
-      ticket = await this.prisma.ticket.findUnique({
+      ticket = await this.db.ticket.findUnique({
         where: {
           projectId_number: {
             projectId: project.id,
@@ -179,7 +182,7 @@ export class TicketsService {
       });
     } else {
       // Treat as CUID
-      ticket = await this.prisma.ticket.findUnique({
+      ticket = await this.db.ticket.findUnique({
         where: { id: ref },
         include: { labels: { include: { label: true } } },
       });
@@ -232,7 +235,7 @@ export class TicketsService {
     }
 
     // Update the ticket
-    return this.prisma.ticket.update({
+    return this.db.ticket.update({
       where: { id: ticket.id },
       data: updateData,
     });
@@ -260,7 +263,7 @@ export class TicketsService {
     }
 
     // Soft delete by setting deletedAt
-    return this.prisma.ticket.update({
+    return this.db.ticket.update({
       where: { id: ticket.id },
       data: {
         deletedAt: new Date(),
@@ -275,7 +278,7 @@ export class TicketsService {
     }
 
     // Find project
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
@@ -305,7 +308,7 @@ export class TicketsService {
       updateData.assignedToAgentId = null;
     }
 
-    return this.prisma.ticket.update({
+    return this.db.ticket.update({
       where: { id: ticket.id },
       data: updateData,
     });

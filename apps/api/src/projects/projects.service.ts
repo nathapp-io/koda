@@ -1,12 +1,16 @@
 import { Injectable, HttpStatus } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaClient } from '@prisma/client';
 import { AppException } from '../common/app-exception';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 
 @Injectable()
 export class ProjectsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService<PrismaClient>) {}
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private get db(): PrismaClient { return (this.prisma as any).client ?? (this.prisma as unknown as PrismaClient); }
+
 
   async create(createProjectDto: CreateProjectDto) {
     // Validate name
@@ -27,7 +31,7 @@ export class ProjectsService {
     }
 
     // Check slug uniqueness
-    const existingSlug = await this.prisma.project.findUnique({
+    const existingSlug = await this.db.project.findUnique({
       where: { slug: createProjectDto.slug },
     });
     if (existingSlug) {
@@ -35,7 +39,7 @@ export class ProjectsService {
     }
 
     // Check key uniqueness
-    const existingKey = await this.prisma.project.findUnique({
+    const existingKey = await this.db.project.findUnique({
       where: { key: createProjectDto.key },
     });
     if (existingKey) {
@@ -43,7 +47,7 @@ export class ProjectsService {
     }
 
     // Create project
-    return this.prisma.project.create({
+    return this.db.project.create({
       data: {
         name: createProjectDto.name,
         slug: createProjectDto.slug,
@@ -56,7 +60,7 @@ export class ProjectsService {
   }
 
   async findAll() {
-    return this.prisma.project.findMany({
+    return this.db.project.findMany({
       where: {
         deletedAt: null,
       },
@@ -64,7 +68,7 @@ export class ProjectsService {
   }
 
   async findBySlug(slug: string) {
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug },
     });
 
@@ -78,7 +82,7 @@ export class ProjectsService {
 
   async update(slug: string, updateProjectDto: UpdateProjectDto) {
     // Find the current project
-    const currentProject = await this.prisma.project.findUnique({
+    const currentProject = await this.db.project.findUnique({
       where: { slug },
     });
 
@@ -100,7 +104,7 @@ export class ProjectsService {
 
       // Check slug uniqueness (unless it's the same as current)
       if (updateProjectDto.slug !== currentProject.slug) {
-        const existingSlug = await this.prisma.project.findUnique({
+        const existingSlug = await this.db.project.findUnique({
           where: { slug: updateProjectDto.slug },
         });
         if (existingSlug && existingSlug.id !== currentProject.id) {
@@ -118,7 +122,7 @@ export class ProjectsService {
 
       // Check key uniqueness (unless it's the same as current)
       if (updateProjectDto.key !== currentProject.key) {
-        const existingKey = await this.prisma.project.findUnique({
+        const existingKey = await this.db.project.findUnique({
           where: { key: updateProjectDto.key },
         });
         if (existingKey && existingKey.id !== currentProject.id) {
@@ -128,7 +132,7 @@ export class ProjectsService {
     }
 
     // Update project
-    return this.prisma.project.update({
+    return this.db.project.update({
       where: { slug },
       data: {
         name: updateProjectDto.name,
@@ -143,7 +147,7 @@ export class ProjectsService {
 
   async softDelete(slug: string) {
     // Find the project
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug },
     });
 
@@ -152,7 +156,7 @@ export class ProjectsService {
     }
 
     // Soft delete by setting deletedAt
-    return this.prisma.project.update({
+    return this.db.project.update({
       where: { slug },
       data: {
         deletedAt: new Date(),
