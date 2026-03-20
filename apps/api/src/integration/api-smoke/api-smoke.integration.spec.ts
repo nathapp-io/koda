@@ -61,17 +61,19 @@ describeSmoke('Phase 3 — Step 2: API Smoke Tests', () => {
     httpServer = app.getHttpServer();
 
     // Clean test data before suite (order matters for FK constraints)
-    await prisma.ticketActivity.deleteMany();
-    await prisma.comment.deleteMany();
-    await prisma.ticketLabel.deleteMany();
-    await prisma.ticket.deleteMany();
-    await prisma.label.deleteMany();
-    await prisma.agentProject.deleteMany();
-    await prisma.agentCapability.deleteMany();
-    await prisma.agentRoleEntry.deleteMany();
-    await prisma.project.deleteMany();
-    await prisma.agent.deleteMany();
-    await prisma.user.deleteMany();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const _prisma = prisma as any;
+    await _prisma.ticketActivity.deleteMany();
+    await _prisma.comment.deleteMany();
+    await _prisma.ticketLabel.deleteMany();
+    await _prisma.ticket.deleteMany();
+    await _prisma.label.deleteMany();
+    await _prisma.agentProject.deleteMany();
+    await _prisma.agentCapability.deleteMany();
+    await _prisma.agentRoleEntry.deleteMany();
+    await _prisma.project.deleteMany();
+    await _prisma.agent.deleteMany();
+    await _prisma.user.deleteMany();
   });
 
   afterAll(async () => {

@@ -398,6 +398,9 @@
           "200": {
             "description": "API key rotated successfully"
           },
+          "201": {
+            "description": ""
+          },
           "401": {
             "description": "Unauthorized"
           },
@@ -1671,14 +1674,17 @@
         "properties": {
           "email": {
             "type": "string",
+            "format": "email",
             "example": "user@example.com"
           },
           "name": {
             "type": "string",
+            "minLength": 1,
             "example": "John Doe"
           },
           "password": {
             "type": "string",
+            "minLength": 8,
             "example": "password123"
           }
         },
@@ -1745,6 +1751,7 @@
         "properties": {
           "email": {
             "type": "string",
+            "format": "email",
             "example": "user@example.com"
           },
           "password": {
@@ -1766,6 +1773,11 @@
           },
           "status": {
             "type": "string",
+            "enum": [
+              "ACTIVE",
+              "PAUSED",
+              "OFFLINE"
+            ],
             "description": "Agent status (ACTIVE, PAUSED, OFFLINE)"
           },
           "maxConcurrentTickets": {
@@ -1818,21 +1830,21 @@
         "properties": {
           "name": {
             "type": "string",
+            "minLength": 2,
             "description": "Project name",
-            "example": "Koda",
-            "minLength": 2
+            "example": "Koda"
           },
           "slug": {
             "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
             "description": "Project slug - lowercase alphanumeric with hyphens",
-            "example": "koda",
-            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+            "example": "koda"
           },
           "key": {
             "type": "string",
+            "pattern": "^[A-Z]{2,6}$",
             "description": "Project key - 2-6 uppercase letters for ticket references",
-            "example": "KODA",
-            "pattern": "^[A-Z]{2,6}$"
+            "example": "KODA"
           },
           "description": {
             "type": "string",
@@ -1841,6 +1853,7 @@
           },
           "gitRemoteUrl": {
             "type": "string",
+            "format": "uri",
             "description": "Git remote repository URL",
             "example": "https://github.com/nathapp-io/koda"
           },
@@ -1862,20 +1875,21 @@
         "properties": {
           "name": {
             "type": "string",
+            "minLength": 2,
             "description": "Project name",
             "example": "Updated Project Name"
           },
           "slug": {
             "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
             "description": "Project slug - lowercase alphanumeric with hyphens",
-            "example": "updated-project",
-            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+            "example": "updated-project"
           },
           "key": {
             "type": "string",
+            "pattern": "^[A-Z]{2,6}$",
             "description": "Project key - 2-6 uppercase letters",
-            "example": "UPDATED",
-            "pattern": "^[A-Z]{2,6}$"
+            "example": "UPDATED"
           },
           "description": {
             "type": "string",
@@ -1884,6 +1898,7 @@
           },
           "gitRemoteUrl": {
             "type": "string",
+            "format": "uri",
             "description": "Git remote repository URL",
             "example": "https://github.com/nathapp-io/updated-repo"
           },
@@ -1908,9 +1923,9 @@
           },
           "title": {
             "type": "string",
+            "minLength": 1,
             "description": "Ticket title",
-            "example": "Fix login bug",
-            "minLength": 1
+            "example": "Fix login bug"
           },
           "description": {
             "type": "string",
@@ -1963,9 +1978,9 @@
             "description": "Ticket title"
           },
           "description": {
-            "type": "object",
-            "description": "Ticket description",
-            "nullable": true
+            "type": "string",
+            "nullable": true,
+            "description": "Ticket description"
           },
           "status": {
             "type": "string",
@@ -1990,44 +2005,44 @@
             ]
           },
           "assignedToUserId": {
-            "type": "object",
-            "description": "Assigned to user ID",
-            "nullable": true
+            "type": "string",
+            "nullable": true,
+            "description": "Assigned to user ID"
           },
           "assignedToAgentId": {
-            "type": "object",
-            "description": "Assigned to agent ID",
-            "nullable": true
+            "type": "string",
+            "nullable": true,
+            "description": "Assigned to agent ID"
           },
           "createdByUserId": {
-            "type": "object",
-            "description": "Created by user ID",
-            "nullable": true
+            "type": "string",
+            "nullable": true,
+            "description": "Created by user ID"
           },
           "createdByAgentId": {
-            "type": "object",
-            "description": "Created by agent ID",
-            "nullable": true
+            "type": "string",
+            "nullable": true,
+            "description": "Created by agent ID"
           },
           "gitRefVersion": {
-            "type": "object",
-            "description": "Git reference version",
-            "nullable": true
+            "type": "string",
+            "nullable": true,
+            "description": "Git reference version"
           },
           "gitRefFile": {
-            "type": "object",
-            "description": "Git reference file",
-            "nullable": true
+            "type": "string",
+            "nullable": true,
+            "description": "Git reference file"
           },
           "gitRefLine": {
-            "type": "object",
-            "description": "Git reference line",
-            "nullable": true
+            "type": "number",
+            "nullable": true,
+            "description": "Git reference line"
           },
           "gitRefUrl": {
-            "type": "object",
-            "description": "Git reference URL",
-            "nullable": true
+            "type": "string",
+            "nullable": true,
+            "description": "Git reference URL"
           },
           "createdAt": {
             "format": "date-time",
@@ -2040,9 +2055,10 @@
             "description": "Updated at timestamp"
           },
           "deletedAt": {
-            "type": "object",
-            "description": "Soft delete timestamp",
-            "nullable": true
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Soft delete timestamp"
           }
         },
         "required": [
@@ -2051,20 +2067,10 @@
           "number",
           "type",
           "title",
-          "description",
           "status",
           "priority",
-          "assignedToUserId",
-          "assignedToAgentId",
-          "createdByUserId",
-          "createdByAgentId",
-          "gitRefVersion",
-          "gitRefFile",
-          "gitRefLine",
-          "gitRefUrl",
           "createdAt",
-          "updatedAt",
-          "deletedAt"
+          "updatedAt"
         ]
       },
       "UpdateTicketDto": {
@@ -2072,9 +2078,9 @@
         "properties": {
           "title": {
             "type": "string",
+            "minLength": 1,
             "description": "Ticket title",
-            "example": "Updated ticket title",
-            "minLength": 1
+            "example": "Updated ticket title"
           },
           "description": {
             "type": "string",
@@ -2112,13 +2118,12 @@
         "properties": {
           "body": {
             "type": "string",
+            "minLength": 1,
             "description": "Comment body",
-            "example": "This is a comment",
-            "minLength": 1
+            "example": "This is a comment"
           },
           "type": {
             "type": "string",
-            "description": "Comment type",
             "enum": [
               "VERIFICATION",
               "FIX_REPORT",
@@ -2126,22 +2131,19 @@
               "STATUS_CHANGE",
               "GENERAL"
             ],
+            "description": "Comment type",
             "example": "GENERAL"
           }
-        },
-        "required": [
-          "body",
-          "type"
-        ]
+        }
       },
       "UpdateCommentDto": {
         "type": "object",
         "properties": {
           "body": {
             "type": "string",
+            "minLength": 1,
             "description": "Comment body",
-            "example": "Updated comment body",
-            "minLength": 1
+            "example": "Updated comment body"
           }
         },
         "required": [
