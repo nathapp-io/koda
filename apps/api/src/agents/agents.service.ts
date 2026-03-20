@@ -1,6 +1,7 @@
 import { Injectable, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
+import type { authConfig } from '../config/auth.config';
 import { AppException } from '../common/app-exception';
 import { createHmac, randomBytes } from 'crypto';
 import type { AgentRole, PrismaClient } from '@prisma/client';
@@ -30,7 +31,7 @@ export interface UpdateCapabilitiesDto {
 export class AgentsService {
   constructor(
     private prisma: PrismaService<PrismaClient>,
-    private configService: ConfigService,
+    private configService: ConfigService<ReturnType<typeof authConfig>>,
   ) {}
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private get db(): PrismaClient { return (this.prisma as any).client ?? (this.prisma as unknown as PrismaClient); }
@@ -45,7 +46,7 @@ export class AgentsService {
     const rawKey = randomBytes(32).toString('hex');
 
     // Compute HMAC-SHA256 hash with API_KEY_SECRET
-    const apiKeySecret = this.configService.get('API_KEY_SECRET');
+    const apiKeySecret = this.configService.get('apiKeySecret', { infer: true });
     if (!apiKeySecret) {
       throw new Error('API_KEY_SECRET is not configured');
     }
