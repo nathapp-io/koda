@@ -61,7 +61,8 @@
       "<rootDir>/../test/auth",
       "<rootDir>/../test/logging",
       "<rootDir>/../test/us-004",
-      "<rootDir>/../test/us-005"
+      "<rootDir>/../test/us-005",
+      "<rootDir>/../test/us-007"
     ],
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
