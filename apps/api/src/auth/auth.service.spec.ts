@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { JwtService } from '@nestjs/jwt';
+import { JwtStrategyProvider, JwtRefreshStrategyProvider } from '@nathapp/nestjs-auth';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
 import { AuthService } from './auth.service';
@@ -10,8 +10,6 @@ import * as bcrypt from 'bcrypt';
 describe('AuthService', () => {
   let service: AuthService;
   let prismaService: PrismaService<PrismaClient>;
-  let _configService: ConfigService;
-  let jwtService: JwtService;
 
   const mockUser = {
     id: 'user-123',
@@ -36,8 +34,12 @@ describe('AuthService', () => {
     get: jest.fn(),
   };
 
-  const mockJwtService = {
-    signAsync: jest.fn(),
+  const mockJwtStrategyProvider = {
+    sign: jest.fn(),
+  };
+
+  const mockJwtRefreshStrategyProvider = {
+    sign: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -46,18 +48,17 @@ describe('AuthService', () => {
         AuthService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: ConfigService, useValue: mockConfigService },
-        { provide: JwtService, useValue: mockJwtService },
+        { provide: JwtStrategyProvider, useValue: mockJwtStrategyProvider },
+        { provide: JwtRefreshStrategyProvider, useValue: mockJwtRefreshStrategyProvider },
       ],
     }).compile();
 
     service = module.get<AuthService>(AuthService);
     prismaService = module.get<PrismaService<PrismaClient>>(PrismaService);
-    _configService = module.get<ConfigService>(ConfigService);
-    jwtService = module.get<JwtService>(JwtService);
 
     // Default mock values
-    mockJwtService.signAsync.mockResolvedValue('mock-token');
-    mockConfigService.get.mockReturnValue('7d');
+    mockJwtStrategyProvider.sign.mockReturnValue('mock-token');
+    mockJwtRefreshStrategyProvider.sign.mockReturnValue('mock-token');
   });
 
   afterEach(() => {
@@ -199,38 +200,31 @@ describe('AuthService', () => {
   });
 
   describe('JWT token generation', () => {
-    it('should generate access token with correct payload', async () => {
-      const token = await service.generateAccessToken(mockUser.id, mockUser.email, mockUser.role);
+    it('should generate access token with correct payload', () => {
+      const token = service.generateAccessToken(mockUser.id, mockUser.email, mockUser.role);
 
       expect(token).toBe('mock-token');
-      expect(jwtService.signAsync).toHaveBeenCalledWith(
-        {
-          sub: mockUser.id,
-          email: mockUser.email,
-          role: mockUser.role,
-        },
-        expect.any(Object),
-      );
+      expect(mockJwtStrategyProvider.sign).toHaveBeenCalledWith({
+        sub: mockUser.id,
+        email: mockUser.email,
+        role: mockUser.role,
+      });
     });
 
-    it('should generate refresh token', async () => {
-      const token = await service.generateRefreshToken(mockUser.id);
+    it('should generate refresh token', () => {
+      const token = service.generateRefreshToken(mockUser.id);
 
       expect(token).toBe('mock-token');
-      expect(jwtService.signAsync).toHaveBeenCalledWith(
-        {
-          sub: mockUser.id,
-        },
-        expect.any(Object),
-      );
+      expect(mockJwtRefreshStrategyProvider.sign).toHaveBeenCalledWith({
+        sub: mockUser.id,
+      });
     });
 
-    it('should include sub, email, and role in JWT payload', async () => {
-      // Decode token manually to verify payload
-      const token = await service.generateAccessToken(mockUser.id, mockUser.email, 'ADMIN');
+    it('should include sub, email, and role in JWT payload', () => {
+      const token = service.generateAccessToken(mockUser.id, mockUser.email, 'ADMIN');
 
       expect(token).toBe('mock-token');
-      const callArgs = (jwtService.signAsync as jest.Mock).mock.calls[0][0];
+      const callArgs = (mockJwtStrategyProvider.sign as jest.Mock).mock.calls[0][0];
       expect(callArgs.sub).toBe(mockUser.id);
       expect(callArgs.email).toBe(mockUser.email);
       expect(callArgs.role).toBe('ADMIN');

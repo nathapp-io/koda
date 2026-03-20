@@ -163,7 +163,7 @@ describe('AuthController', () => {
 
       mockAuthService.refresh.mockResolvedValue(mockTokenResponse);
 
-      const result = await controller.refresh(bearerToken, user);
+      const result = await controller.refresh(user, bearerToken);
 
       expect(result).toBeInstanceOf(JsonResponse);
       expect(result.data).toEqual(mockTokenResponse);
@@ -180,7 +180,7 @@ describe('AuthController', () => {
 
       mockAuthService.refresh.mockRejectedValue(new AppException('errors.unauthorized', 401));
 
-      await expect(controller.refresh(bearerToken, user)).rejects.toThrow(
+      await expect(controller.refresh(user, bearerToken)).rejects.toThrow(
         AppException,
       );
     });

@@ -81,20 +81,20 @@ describe('AuthController — JsonResponse envelope (US-004)', () => {
 
   describe('POST /auth/refresh', () => {
     it('returns a JsonResponse instance', async () => {
-      const result = await controller.refresh('Bearer tok', {
+      const result = await controller.refresh({
         sub: 'user-1',
         email: 'a@b.com',
         role: 'MEMBER',
-      });
+      }, 'Bearer tok');
       expect(result).toBeInstanceOf(JsonResponse);
     });
 
     it('wraps new tokens under result.data', async () => {
-      const result = await controller.refresh('Bearer tok', {
+      const result = await controller.refresh({
         sub: 'user-1',
         email: 'a@b.com',
         role: 'MEMBER',
-      });
+      }, 'Bearer tok');
       const envelope = result as unknown as JsonResponse<typeof mockAuthData>;
       expect(envelope.data).toHaveProperty('accessToken');
       expect(envelope.data).toHaveProperty('refreshToken');
