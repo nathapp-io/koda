@@ -7,7 +7,7 @@ export class UpdateCommentDto {
     example: 'Updated comment body',
     minLength: 1,
   })
-  @IsString()
-  @MinLength(1, { message: 'Body must not be empty' })
+  @IsString({ message: '$t(common.validation.isString)' })
+  @MinLength(1, { message: '$t(common.validation.required)' })
   body!: string;
 }
