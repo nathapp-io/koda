@@ -3,7 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from './auth.service';
 import { ConfigService } from '@nestjs/config';
-import { UnauthorizedException } from '@nestjs/common';
+import { AppException } from '../common/app-exception';
 import * as bcrypt from 'bcrypt';
 
 describe('AuthService', () => {
@@ -135,7 +135,7 @@ describe('AuthService', () => {
           email: mockUser.email,
           password: 'wrongpassword',
         }),
-      ).rejects.toThrow(UnauthorizedException);
+      ).rejects.toThrow(AppException);
     });
 
     it('should throw 401 error for non-existent user', async () => {
@@ -146,7 +146,7 @@ describe('AuthService', () => {
           email: 'nonexistent@example.com',
           password: 'password123',
         }),
-      ).rejects.toThrow(UnauthorizedException);
+      ).rejects.toThrow(AppException);
     });
   });
 

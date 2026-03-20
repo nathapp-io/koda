@@ -318,12 +318,10 @@ describe('AgentsService', () => {
       });
     });
 
-    it('should return null when agent not found', async () => {
+    it('should throw when agent not found', async () => {
       mockPrismaService.agent.findUnique.mockResolvedValue(null);
 
-      const result = await service.findBySlug('nonexistent');
-
-      expect(result).toBeNull();
+      await expect(service.findBySlug('nonexistent')).rejects.toThrow();
     });
 
     it('should include roles in response', async () => {

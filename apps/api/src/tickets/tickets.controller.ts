@@ -23,6 +23,7 @@ import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TicketResponseDto } from './dto/ticket-response.dto';
 import { TransitionWithCommentDto } from './dto/transition-with-comment.dto';
+import { JsonResponse } from '../common/json-response';
 import { TicketType, TicketStatus, Priority } from '@prisma/client';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -47,11 +48,12 @@ export class TicketsController {
     @Param('slug') slug: string,
     @Body() createTicketDto: CreateTicketDto,
     @Req() req: RequestWithUser,
-  ) {
+  ): Promise<JsonResponse> {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
 
-    return this.ticketsService.create(slug, createTicketDto, currentUser, actorType);
+    const data = await this.ticketsService.create(slug, createTicketDto, currentUser, actorType);
+    return JsonResponse.created(data);
   }
 
   @Get()
@@ -69,7 +71,7 @@ export class TicketsController {
     @Param('slug') slug: string,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     @Query() query: Record<string, any>,
-  ) {
+  ): Promise<JsonResponse> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const filters: any = {};
 
@@ -81,7 +83,8 @@ export class TicketsController {
     if (query.limit !== undefined) filters.limit = parseInt(query.limit, 10);
     if (query.page !== undefined) filters.page = parseInt(query.page, 10);
 
-    return this.ticketsService.findAll(slug, filters);
+    const data = await this.ticketsService.findAll(slug, filters);
+    return JsonResponse.ok(data);
   }
 
   @Get(':ref')
@@ -91,8 +94,9 @@ export class TicketsController {
   async findByRef(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
-  ) {
-    return this.ticketsService.findByRef(slug, ref);
+  ): Promise<JsonResponse> {
+    const data = await this.ticketsService.findByRef(slug, ref);
+    return JsonResponse.ok(data);
   }
 
   @Patch(':ref')
@@ -105,11 +109,12 @@ export class TicketsController {
     @Param('ref') ref: string,
     @Body() updateTicketDto: UpdateTicketDto,
     @Req() req: RequestWithUser,
-  ) {
+  ): Promise<JsonResponse> {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
 
-    return this.ticketsService.update(slug, ref, updateTicketDto, currentUser, actorType);
+    const data = await this.ticketsService.update(slug, ref, updateTicketDto, currentUser, actorType);
+    return JsonResponse.ok(data);
   }
 
   @Delete(':ref')
@@ -121,11 +126,12 @@ export class TicketsController {
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Req() req: RequestWithUser,
-  ) {
+  ): Promise<JsonResponse> {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
 
-    return this.ticketsService.softDelete(slug, ref, currentUser, actorType);
+    const data = await this.ticketsService.softDelete(slug, ref, currentUser, actorType);
+    return JsonResponse.ok(data);
   }
 
   @Post(':ref/assign')
@@ -139,8 +145,9 @@ export class TicketsController {
     @Param('ref') ref: string,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     @Body() assignInput: Record<string, any>,
-  ) {
-    return this.ticketsService.assign(slug, ref, assignInput);
+  ): Promise<JsonResponse> {
+    const data = await this.ticketsService.assign(slug, ref, assignInput);
+    return JsonResponse.ok(data);
   }
 
   @Post(':ref/verify')
@@ -154,10 +161,11 @@ export class TicketsController {
     @Param('ref') ref: string,
     @Body() dto: TransitionWithCommentDto,
     @Req() req: RequestWithUser,
-  ): Promise<TransitionResultWithComment> {
+  ): Promise<JsonResponse<TransitionResultWithComment>> {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
-    return this.transitionsService.verify(slug, ref, dto.body, currentUser, actorType);
+    const data = await this.transitionsService.verify(slug, ref, dto.body, currentUser, actorType);
+    return JsonResponse.ok(data);
   }
 
   @Post(':ref/start')
@@ -170,10 +178,11 @@ export class TicketsController {
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Req() req: RequestWithUser,
-  ): Promise<TransitionResultWithoutComment> {
+  ): Promise<JsonResponse<TransitionResultWithoutComment>> {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
-    return this.transitionsService.start(slug, ref, currentUser, actorType);
+    const data = await this.transitionsService.start(slug, ref, currentUser, actorType);
+    return JsonResponse.ok(data);
   }
 
   @Post(':ref/fix')
@@ -187,10 +196,11 @@ export class TicketsController {
     @Param('ref') ref: string,
     @Body() dto: TransitionWithCommentDto,
     @Req() req: RequestWithUser,
-  ): Promise<TransitionResultWithComment> {
+  ): Promise<JsonResponse<TransitionResultWithComment>> {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
-    return this.transitionsService.fix(slug, ref, dto.body, currentUser, actorType);
+    const data = await this.transitionsService.fix(slug, ref, dto.body, currentUser, actorType);
+    return JsonResponse.ok(data);
   }
 
   @Post(':ref/verify-fix')
@@ -205,11 +215,12 @@ export class TicketsController {
     @Body() dto: TransitionWithCommentDto,
     @Query('approve') approve: boolean | string,
     @Req() req: RequestWithUser,
-  ): Promise<TransitionResultWithComment> {
+  ): Promise<JsonResponse<TransitionResultWithComment>> {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     const isApproved = approve === 'true' || approve === true;
-    return this.transitionsService.verifyFix(slug, ref, dto.body, isApproved, currentUser, actorType);
+    const data = await this.transitionsService.verifyFix(slug, ref, dto.body, isApproved, currentUser, actorType);
+    return JsonResponse.ok(data);
   }
 
   @Post(':ref/close')
@@ -222,10 +233,11 @@ export class TicketsController {
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Req() req: RequestWithUser,
-  ): Promise<TransitionResultWithoutComment> {
+  ): Promise<JsonResponse<TransitionResultWithoutComment>> {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
-    return this.transitionsService.close(slug, ref, currentUser, actorType);
+    const data = await this.transitionsService.close(slug, ref, currentUser, actorType);
+    return JsonResponse.ok(data);
   }
 
   @Post(':ref/reject')
@@ -239,9 +251,10 @@ export class TicketsController {
     @Param('ref') ref: string,
     @Body() dto: TransitionWithCommentDto,
     @Req() req: RequestWithUser,
-  ): Promise<TransitionResultWithComment> {
+  ): Promise<JsonResponse<TransitionResultWithComment>> {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
-    return this.transitionsService.reject(slug, ref, dto.body, currentUser, actorType);
+    const data = await this.transitionsService.reject(slug, ref, dto.body, currentUser, actorType);
+    return JsonResponse.ok(data);
   }
 }

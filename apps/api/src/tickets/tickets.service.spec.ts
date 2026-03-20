@@ -441,39 +441,32 @@ describe('TicketsService', () => {
       expect(prismaService.ticket.findUnique).toHaveBeenCalled();
     });
 
-    it('should return null if ticket not found', async () => {
+    it('should throw when ticket not found', async () => {
       mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.ticket.findUnique.mockResolvedValue(null);
 
-      const result = await service.findByRef('koda', 'KODA-999');
-
-      expect(result).toBeNull();
+      await expect(service.findByRef('koda', 'KODA-999')).rejects.toThrow();
     });
 
-    it('should not return soft-deleted ticket', async () => {
+    it('should throw for soft-deleted ticket', async () => {
       mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.ticket.findUnique.mockResolvedValue({
         ...mockTicket,
         deletedAt: new Date(),
       });
 
-      const result = await service.findByRef('koda', 'KODA-1');
-
-      if (result && result.deletedAt) {
-        expect(result.deletedAt).toBeNull();
-      }
+      await expect(service.findByRef('koda', 'KODA-1')).rejects.toThrow();
     });
 
     it('should validate KODA-42 format', async () => {
       mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.ticket.findUnique.mockResolvedValue(null);
 
       const invalidRefs = ['invalid', '123', 'KODA-abc', 'KODA--1'];
 
       for (const ref of invalidRefs) {
-        // Should either treat as CUID or throw
-        await service.findByRef('koda', ref);
-        // At minimum, should attempt lookup
-        expect(prismaService.ticket.findUnique).toHaveBeenCalled();
+        // Invalid refs result in a not-found lookup, which throws AppException
+        await expect(service.findByRef('koda', ref)).rejects.toThrow();
       }
     });
   });

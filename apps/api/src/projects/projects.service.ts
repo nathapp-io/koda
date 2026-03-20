@@ -1,10 +1,6 @@
-import {
-  Injectable,
-  ConflictException,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable, HttpStatus } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AppException } from '../common/app-exception';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 
@@ -15,19 +11,19 @@ export class ProjectsService {
   async create(createProjectDto: CreateProjectDto) {
     // Validate name
     if (createProjectDto.name.length < 2) {
-      throw new BadRequestException('Name must be at least 2 characters long');
+      throw new AppException('projects.nameTooShort', HttpStatus.BAD_REQUEST);
     }
 
     // Validate slug format (lowercase alphanumeric and hyphens only)
     const slugPattern = /^[a-z0-9]+(-[a-z0-9]+)*$/;
     if (!slugPattern.test(createProjectDto.slug)) {
-      throw new BadRequestException('Slug must contain only lowercase alphanumeric characters and hyphens');
+      throw new AppException('projects.invalidSlug', HttpStatus.BAD_REQUEST);
     }
 
     // Validate key format (2-6 uppercase letters only)
     const keyPattern = /^[A-Z]{2,6}$/;
     if (!keyPattern.test(createProjectDto.key)) {
-      throw new BadRequestException('Key must be 2-6 uppercase letters');
+      throw new AppException('projects.invalidKey', HttpStatus.BAD_REQUEST);
     }
 
     // Check slug uniqueness
@@ -35,7 +31,7 @@ export class ProjectsService {
       where: { slug: createProjectDto.slug },
     });
     if (existingSlug) {
-      throw new ConflictException('Slug already exists');
+      throw new AppException('projects.slugTaken', HttpStatus.CONFLICT);
     }
 
     // Check key uniqueness
@@ -43,7 +39,7 @@ export class ProjectsService {
       where: { key: createProjectDto.key },
     });
     if (existingKey) {
-      throw new ConflictException('Key already exists');
+      throw new AppException('projects.keyTaken', HttpStatus.CONFLICT);
     }
 
     // Create project
@@ -73,8 +69,8 @@ export class ProjectsService {
     });
 
     // Filter out soft-deleted projects
-    if (project && project.deletedAt) {
-      return null;
+    if (!project || project.deletedAt) {
+      throw new AppException('projects.notFound', HttpStatus.NOT_FOUND);
     }
 
     return project;
@@ -87,19 +83,19 @@ export class ProjectsService {
     });
 
     if (!currentProject) {
-      throw new NotFoundException('Project not found');
+      throw new AppException('projects.notFound', HttpStatus.NOT_FOUND);
     }
 
     // Validate name if provided
     if (updateProjectDto.name !== undefined && updateProjectDto.name.length < 2) {
-      throw new BadRequestException('Name must be at least 2 characters long');
+      throw new AppException('projects.nameTooShort', HttpStatus.BAD_REQUEST);
     }
 
     // Validate slug format if provided (lowercase alphanumeric and hyphens only)
     if (updateProjectDto.slug !== undefined) {
       const slugPattern = /^[a-z0-9]+(-[a-z0-9]+)*$/;
       if (!slugPattern.test(updateProjectDto.slug)) {
-        throw new BadRequestException('Slug must contain only lowercase alphanumeric characters and hyphens');
+        throw new AppException('projects.invalidSlug', HttpStatus.BAD_REQUEST);
       }
 
       // Check slug uniqueness (unless it's the same as current)
@@ -108,7 +104,7 @@ export class ProjectsService {
           where: { slug: updateProjectDto.slug },
         });
         if (existingSlug && existingSlug.id !== currentProject.id) {
-          throw new ConflictException('Slug already exists');
+          throw new AppException('projects.slugTaken', HttpStatus.CONFLICT);
         }
       }
     }
@@ -117,7 +113,7 @@ export class ProjectsService {
     if (updateProjectDto.key !== undefined) {
       const keyPattern = /^[A-Z]{2,6}$/;
       if (!keyPattern.test(updateProjectDto.key)) {
-        throw new BadRequestException('Key must be 2-6 uppercase letters');
+        throw new AppException('projects.invalidKey', HttpStatus.BAD_REQUEST);
       }
 
       // Check key uniqueness (unless it's the same as current)
@@ -126,7 +122,7 @@ export class ProjectsService {
           where: { key: updateProjectDto.key },
         });
         if (existingKey && existingKey.id !== currentProject.id) {
-          throw new ConflictException('Key already exists');
+          throw new AppException('projects.keyTaken', HttpStatus.CONFLICT);
         }
       }
     }
@@ -152,7 +148,7 @@ export class ProjectsService {
     });
 
     if (!project) {
-      throw new NotFoundException('Project not found');
+      throw new AppException('projects.notFound', HttpStatus.NOT_FOUND);
     }
 
     // Soft delete by setting deletedAt

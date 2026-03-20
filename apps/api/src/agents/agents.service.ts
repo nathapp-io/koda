@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { AppException } from '../common/app-exception';
 import { createHmac, randomBytes } from 'crypto';
 import type { AgentRole } from '@prisma/client';
 
@@ -84,14 +85,20 @@ export class AgentsService {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async findBySlug(slug: string): Promise<any | null> {
-    return this.prisma.agent.findUnique({
+  async findBySlug(slug: string): Promise<any> {
+    const agent = await this.prisma.agent.findUnique({
       where: { slug },
       include: {
         roles: true,
         capabilities: true,
       },
     });
+
+    if (!agent) {
+      throw new AppException('agents.notFound', HttpStatus.NOT_FOUND);
+    }
+
+    return agent;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -105,7 +112,7 @@ export class AgentsService {
     });
 
     if (!agent) {
-      throw new NotFoundException(`Agent with id ${agentId} not found`);
+      throw new AppException('agents.notFound', HttpStatus.NOT_FOUND);
     }
 
     return agent;
@@ -189,7 +196,7 @@ export class AgentsService {
     });
 
     if (!agent) {
-      throw new NotFoundException(`Agent with slug ${slug} not found`);
+      throw new AppException('agents.notFound', HttpStatus.NOT_FOUND);
     }
 
     // Rotate key using agent id

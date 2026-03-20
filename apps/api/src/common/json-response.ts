@@ -1,6 +1,5 @@
 /**
- * Stub — implementation will be filled in by US-004 implementer.
- * Provides the standard API response envelope: { data, meta?, message? }
+ * Standard API response envelope: { data, meta?, message? }
  */
 export class JsonResponse<T = unknown> {
   constructor(
@@ -9,22 +8,18 @@ export class JsonResponse<T = unknown> {
     public readonly message?: string,
   ) {}
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  static ok<T>(_data: T): JsonResponse<T> {
-    throw new Error('JsonResponse.ok is not implemented');
+  static ok<T>(data: T): JsonResponse<T> {
+    return new JsonResponse(data);
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  static created<T>(_data: T): JsonResponse<T> {
-    throw new Error('JsonResponse.created is not implemented');
+  static created<T>(data: T): JsonResponse<T> {
+    return new JsonResponse(data);
   }
 
   static paginated<T>(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _data: T[],
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _meta: Record<string, unknown>,
+    data: T[],
+    meta: Record<string, unknown>,
   ): JsonResponse<T[]> {
-    throw new Error('JsonResponse.paginated is not implemented');
+    return new JsonResponse(data, meta);
   }
 }

@@ -8,14 +8,16 @@ import {
   Param,
   UseGuards,
   Req,
-  ForbiddenException,
   HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { IsPublic } from '../auth/decorators/is-public.decorator';
+import { AppException } from '../common/app-exception';
+import { JsonResponse } from '../common/json-response';
 import {
   ApiTags,
   ApiBearerAuth,
@@ -44,21 +46,23 @@ export class ProjectsController {
   async create(
     @Body() createProjectDto: CreateProjectDto,
     @Req() req: RequestWithUser,
-  ) {
+  ): Promise<JsonResponse> {
     // Check if user is admin
     if (req.user?.role !== 'ADMIN') {
-      throw new ForbiddenException('Admin role required');
+      throw new AppException('errors.forbidden', HttpStatus.FORBIDDEN);
     }
 
-    return this.projectsService.create(createProjectDto);
+    const data = await this.projectsService.create(createProjectDto);
+    return JsonResponse.created(data);
   }
 
   @Get()
   @IsPublic()
   @ApiOperation({ summary: 'List all projects (excluding soft-deleted)' })
   @ApiResponse({ status: 200, description: 'List of projects' })
-  async findAll() {
-    return this.projectsService.findAll();
+  async findAll(): Promise<JsonResponse> {
+    const data = await this.projectsService.findAll();
+    return JsonResponse.ok(data);
   }
 
   @Get(':slug')
@@ -66,8 +70,9 @@ export class ProjectsController {
   @ApiOperation({ summary: 'Get a project by slug' })
   @ApiResponse({ status: 200, description: 'Project found' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  async findBySlug(@Param('slug') slug: string) {
-    return this.projectsService.findBySlug(slug);
+  async findBySlug(@Param('slug') slug: string): Promise<JsonResponse> {
+    const data = await this.projectsService.findBySlug(slug);
+    return JsonResponse.ok(data);
   }
 
   @Patch(':slug')
@@ -83,13 +88,14 @@ export class ProjectsController {
     @Param('slug') slug: string,
     @Body() updateProjectDto: UpdateProjectDto,
     @Req() req: RequestWithUser,
-  ) {
+  ): Promise<JsonResponse> {
     // Check if user is admin
     if (req.user?.role !== 'ADMIN') {
-      throw new ForbiddenException('Admin role required');
+      throw new AppException('errors.forbidden', HttpStatus.FORBIDDEN);
     }
 
-    return this.projectsService.update(slug, updateProjectDto);
+    const data = await this.projectsService.update(slug, updateProjectDto);
+    return JsonResponse.ok(data);
   }
 
   @Delete(':slug')
@@ -102,12 +108,13 @@ export class ProjectsController {
   async remove(
     @Param('slug') slug: string,
     @Req() req: RequestWithUser,
-  ) {
+  ): Promise<JsonResponse> {
     // Check if user is admin
     if (req.user?.role !== 'ADMIN') {
-      throw new ForbiddenException('Admin role required');
+      throw new AppException('errors.forbidden', HttpStatus.FORBIDDEN);
     }
 
-    return this.projectsService.softDelete(slug);
+    const data = await this.projectsService.softDelete(slug);
+    return JsonResponse.ok(data);
   }
 }

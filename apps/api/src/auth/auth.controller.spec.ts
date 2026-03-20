@@ -1,7 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
-import { UnauthorizedException, BadRequestException as _BadRequestException } from '@nestjs/common';
+import { AppException } from '../common/app-exception';
+import { JsonResponse } from '../common/json-response';
 
 describe('AuthController', () => {
   let controller: AuthController;
@@ -57,7 +58,8 @@ describe('AuthController', () => {
 
       const result = await controller.register(registerDto);
 
-      expect(result).toEqual(mockTokenResponse);
+      expect(result).toBeInstanceOf(JsonResponse);
+      expect(result.data).toEqual(mockTokenResponse);
       expect(authService.register).toHaveBeenCalledWith(registerDto);
     });
 
@@ -85,11 +87,13 @@ describe('AuthController', () => {
 
       const result = await controller.register(registerDto);
 
-      expect(result).toHaveProperty('accessToken');
-      expect(result).toHaveProperty('refreshToken');
-      expect(result).toHaveProperty('user');
-      expect(result.user.email).toBe(registerDto.email);
-      expect(result.user.name).toBe(registerDto.name);
+      expect(result.data).toHaveProperty('accessToken');
+      expect(result.data).toHaveProperty('refreshToken');
+      expect(result.data).toHaveProperty('user');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((result.data as any).user.email).toBe(registerDto.email);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((result.data as any).user.name).toBe(registerDto.name);
     });
   });
 
@@ -104,7 +108,8 @@ describe('AuthController', () => {
 
       const result = await controller.login(loginDto);
 
-      expect(result).toEqual(mockTokenResponse);
+      expect(result).toBeInstanceOf(JsonResponse);
+      expect(result.data).toEqual(mockTokenResponse);
       expect(authService.login).toHaveBeenCalledWith(loginDto);
     });
 
@@ -118,9 +123,9 @@ describe('AuthController', () => {
 
       const result = await controller.login(loginDto);
 
-      expect(result).toHaveProperty('accessToken');
-      expect(result).toHaveProperty('refreshToken');
-      expect(result).toHaveProperty('user');
+      expect(result.data).toHaveProperty('accessToken');
+      expect(result.data).toHaveProperty('refreshToken');
+      expect(result.data).toHaveProperty('user');
     });
 
     it('should return 401 for invalid password', async () => {
@@ -129,9 +134,9 @@ describe('AuthController', () => {
         password: 'wrongpassword',
       };
 
-      mockAuthService.login.mockRejectedValue(new UnauthorizedException('Invalid credentials'));
+      mockAuthService.login.mockRejectedValue(new AppException('auth.invalidCredentials', 401));
 
-      await expect(controller.login(loginDto)).rejects.toThrow(UnauthorizedException);
+      await expect(controller.login(loginDto)).rejects.toThrow(AppException);
       expect(authService.login).toHaveBeenCalledWith(loginDto);
     });
 
@@ -141,9 +146,9 @@ describe('AuthController', () => {
         password: 'password123',
       };
 
-      mockAuthService.login.mockRejectedValue(new UnauthorizedException('Invalid credentials'));
+      mockAuthService.login.mockRejectedValue(new AppException('auth.invalidCredentials', 401));
 
-      await expect(controller.login(loginDto)).rejects.toThrow(UnauthorizedException);
+      await expect(controller.login(loginDto)).rejects.toThrow(AppException);
     });
   });
 
@@ -160,7 +165,8 @@ describe('AuthController', () => {
 
       const result = await controller.refresh(bearerToken, user);
 
-      expect(result).toEqual(mockTokenResponse);
+      expect(result).toBeInstanceOf(JsonResponse);
+      expect(result.data).toEqual(mockTokenResponse);
       expect(authService.refresh).toHaveBeenCalledWith(user);
     });
 
@@ -172,10 +178,10 @@ describe('AuthController', () => {
         role: mockUser.role,
       };
 
-      mockAuthService.refresh.mockRejectedValue(new UnauthorizedException('Invalid token'));
+      mockAuthService.refresh.mockRejectedValue(new AppException('errors.unauthorized', 401));
 
       await expect(controller.refresh(bearerToken, user)).rejects.toThrow(
-        UnauthorizedException,
+        AppException,
       );
     });
   });
@@ -192,7 +198,8 @@ describe('AuthController', () => {
 
       const result = await controller.me(user);
 
-      expect(result).toEqual(mockUser);
+      expect(result).toBeInstanceOf(JsonResponse);
+      expect(result.data).toEqual(mockUser);
       expect(authService.validateUser).toHaveBeenCalledWith(user);
     });
 
@@ -215,10 +222,12 @@ describe('AuthController', () => {
 
       const result = await controller.me(user);
 
-      expect(result.id).toBe(mockUser.id);
-      expect(result.email).toBe(mockUser.email);
-      expect(result.name).toBe(mockUser.name);
-      expect(result.role).toBe(mockUser.role);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = result.data as any;
+      expect(data.id).toBe(mockUser.id);
+      expect(data.email).toBe(mockUser.email);
+      expect(data.name).toBe(mockUser.name);
+      expect(data.role).toBe(mockUser.role);
     });
   });
 });

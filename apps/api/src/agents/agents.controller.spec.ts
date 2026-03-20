@@ -1,7 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
-import { ForbiddenException, NotFoundException as _NotFoundException, BadRequestException as _BadRequestException } from '@nestjs/common';
+import { AppException } from '../common/app-exception';
+import { JsonResponse } from '../common/json-response';
 
 describe('AgentsController', () => {
   let controller: AgentsController;
@@ -91,8 +92,9 @@ describe('AgentsController', () => {
 
       const result = await controller.generateApiKey(createAgentDto, req);
 
-      expect(result).toEqual(generatedKey);
-      expect(result.apiKey).toMatch(/^[a-f0-9]{64}$/);
+      expect(result).toBeInstanceOf(JsonResponse);
+      expect(result.data).toEqual(generatedKey);
+      expect((result.data as any).apiKey).toMatch(/^[a-f0-9]{64}$/);
       expect(service.generateApiKey).toHaveBeenCalledWith(createAgentDto);
     });
 
@@ -104,7 +106,7 @@ describe('AgentsController', () => {
 
       const req: any = { user: mockMemberUser };
 
-      await expect(controller.generateApiKey(createAgentDto, req)).rejects.toThrow(ForbiddenException);
+      await expect(controller.generateApiKey(createAgentDto, req)).rejects.toThrow(AppException);
     });
 
     it('should return raw key only ONCE (not stored)', async () => {
@@ -129,8 +131,8 @@ describe('AgentsController', () => {
 
       const result = await controller.generateApiKey(createAgentDto, req);
 
-      expect(result.apiKey).toBe(rawKey);
-      expect(result.apiKey).not.toBe(result.agent.apiKeyHash);
+      expect((result.data as any).apiKey).toBe(rawKey);
+      expect((result.data as any).apiKey).not.toBe((result.data as any).agent.apiKeyHash);
     });
 
     it('should store HMAC-SHA256 hash in database only', async () => {
@@ -176,11 +178,11 @@ describe('AgentsController', () => {
 
       const result = await controller.generateApiKey(createAgentDto, req);
 
-      expect(result.agent).toBeDefined();
-      expect(result.agent.id).toBe('agent-789');
-      expect(result.agent.name).toBe('Test Agent');
-      expect(result.agent.slug).toBe('test-agent');
-      expect(result.agent.status).toBe('ACTIVE');
+      expect((result.data as any).agent).toBeDefined();
+      expect((result.data as any).agent.id).toBe('agent-789');
+      expect((result.data as any).agent.name).toBe('Test Agent');
+      expect((result.data as any).agent.slug).toBe('test-agent');
+      expect((result.data as any).agent.status).toBe('ACTIVE');
     });
   });
 
@@ -191,7 +193,8 @@ describe('AgentsController', () => {
 
       const result = await controller.findAll();
 
-      expect(result).toEqual(agents);
+      expect(result).toBeInstanceOf(JsonResponse);
+      expect(result.data).toEqual(agents);
       expect(service.findAll).toHaveBeenCalled();
     });
 
@@ -200,7 +203,7 @@ describe('AgentsController', () => {
 
       const result = await controller.findAll();
 
-      expect(result).toEqual([]);
+      expect(result.data).toEqual([]);
     });
 
     it('should include roles and capabilities for each agent', async () => {
@@ -209,10 +212,10 @@ describe('AgentsController', () => {
 
       const result = await controller.findAll();
 
-      expect(result[0]).toHaveProperty('roles');
-      expect(result[0]).toHaveProperty('capabilities');
-      expect(Array.isArray(result[0].roles)).toBe(true);
-      expect(Array.isArray(result[0].capabilities)).toBe(true);
+      expect((result.data as any)[0]).toHaveProperty('roles');
+      expect((result.data as any)[0]).toHaveProperty('capabilities');
+      expect(Array.isArray((result.data as any)[0].roles)).toBe(true);
+      expect(Array.isArray((result.data as any)[0].capabilities)).toBe(true);
     });
 
     it('should include agent metadata (id, name, slug, status)', async () => {
@@ -221,10 +224,10 @@ describe('AgentsController', () => {
 
       const result = await controller.findAll();
 
-      expect(result[0]).toHaveProperty('id');
-      expect(result[0]).toHaveProperty('name');
-      expect(result[0]).toHaveProperty('slug');
-      expect(result[0]).toHaveProperty('status');
+      expect((result.data as any)[0]).toHaveProperty('id');
+      expect((result.data as any)[0]).toHaveProperty('name');
+      expect((result.data as any)[0]).toHaveProperty('slug');
+      expect((result.data as any)[0]).toHaveProperty('status');
     });
 
     it('should NOT include raw API key in response', async () => {
@@ -233,8 +236,8 @@ describe('AgentsController', () => {
 
       const result = await controller.findAll();
 
-      expect(result[0]).toHaveProperty('apiKeyHash');
-      expect(result[0].apiKeyHash).not.toMatch(/^[a-f0-9]{64}$/);
+      expect((result.data as any)[0]).toHaveProperty('apiKeyHash');
+      expect((result.data as any)[0].apiKeyHash).not.toMatch(/^[a-f0-9]{64}$/);
     });
   });
 
@@ -246,7 +249,8 @@ describe('AgentsController', () => {
 
       const result = await controller.findMe(req);
 
-      expect(result).toEqual(mockAgent);
+      expect(result).toBeInstanceOf(JsonResponse);
+      expect(result.data).toEqual(mockAgent);
       expect(service.findMe).toHaveBeenCalledWith('agent-456');
     });
 
@@ -270,10 +274,10 @@ describe('AgentsController', () => {
 
       const result = await controller.findMe(req);
 
-      expect(result.roles).toBeDefined();
-      expect(result.capabilities).toBeDefined();
-      expect(result.roles.length).toBe(2);
-      expect(result.capabilities.length).toBe(3);
+      expect((result.data as any).roles).toBeDefined();
+      expect((result.data as any).capabilities).toBeDefined();
+      expect((result.data as any).roles.length).toBe(2);
+      expect((result.data as any).capabilities.length).toBe(3);
     });
 
     it('should NOT include raw API key in response', async () => {
@@ -283,8 +287,8 @@ describe('AgentsController', () => {
 
       const result = await controller.findMe(req);
 
-      expect(result.apiKeyHash).toBeDefined();
-      expect(result.apiKeyHash).not.toMatch(/^[a-f0-9]{64}$/);
+      expect((result.data as any).apiKeyHash).toBeDefined();
+      expect((result.data as any).apiKeyHash).not.toMatch(/^[a-f0-9]{64}$/);
     });
 
     it('should return 401 when not authenticated', async () => {
@@ -300,7 +304,8 @@ describe('AgentsController', () => {
 
       const result = await controller.findBySlug('test-agent');
 
-      expect(result).toEqual(mockAgent);
+      expect(result).toBeInstanceOf(JsonResponse);
+      expect(result.data).toEqual(mockAgent);
       expect(service.findBySlug).toHaveBeenCalledWith('test-agent');
     });
 
@@ -309,16 +314,14 @@ describe('AgentsController', () => {
 
       const result = await controller.findBySlug('test-agent');
 
-      expect(result.roles).toBeDefined();
-      expect(result.capabilities).toBeDefined();
+      expect((result.data as any).roles).toBeDefined();
+      expect((result.data as any).capabilities).toBeDefined();
     });
 
     it('should return 404 when agent not found', async () => {
-      mockAgentsService.findBySlug.mockResolvedValue(null);
+      mockAgentsService.findBySlug.mockRejectedValue(new AppException('agents.notFound', 404));
 
-      const result = await controller.findBySlug('nonexistent');
-
-      expect(result).toBeNull();
+      await expect(controller.findBySlug('nonexistent')).rejects.toThrow(AppException);
     });
 
     it('should NOT return raw API key', async () => {
@@ -326,8 +329,8 @@ describe('AgentsController', () => {
 
       const result = await controller.findBySlug('test-agent');
 
-      expect(result.apiKeyHash).toBeDefined();
-      expect(result.apiKeyHash).not.toMatch(/^[a-f0-9]{64}$/);
+      expect((result.data as any).apiKeyHash).toBeDefined();
+      expect((result.data as any).apiKeyHash).not.toMatch(/^[a-f0-9]{64}$/);
     });
   });
 
@@ -345,7 +348,8 @@ describe('AgentsController', () => {
 
       const result = await controller.update('test-agent', updateDto, req);
 
-      expect(result).toEqual(updatedAgent);
+      expect(result).toBeInstanceOf(JsonResponse);
+      expect(result.data).toEqual(updatedAgent);
       expect(service.update).toHaveBeenCalledWith('test-agent', updateDto);
     });
 
@@ -356,7 +360,7 @@ describe('AgentsController', () => {
 
       const req: any = { user: mockMemberUser };
 
-      await expect(controller.update('test-agent', updateDto, req)).rejects.toThrow(ForbiddenException);
+      await expect(controller.update('test-agent', updateDto, req)).rejects.toThrow(AppException);
     });
 
     it('should return 404 when agent not found', async () => {
@@ -380,7 +384,7 @@ describe('AgentsController', () => {
       const req: any = { user: mockAdminUser };
       const result = await controller.update('test-agent', updateDto, req);
 
-      expect(result.name).toBe('New Agent Name');
+      expect((result.data as any).name).toBe('New Agent Name');
     });
 
     it('should allow updating maxConcurrentTickets', async () => {
@@ -392,7 +396,7 @@ describe('AgentsController', () => {
       const req: any = { user: mockAdminUser };
       const result = await controller.update('test-agent', updateDto, req);
 
-      expect(result.maxConcurrentTickets).toBe(10);
+      expect((result.data as any).maxConcurrentTickets).toBe(10);
     });
 
     it('should allow updating status', async () => {
@@ -404,7 +408,7 @@ describe('AgentsController', () => {
       const req: any = { user: mockAdminUser };
       const result = await controller.update('test-agent', updateDto, req);
 
-      expect(result.status).toBe('PAUSED');
+      expect((result.data as any).status).toBe('PAUSED');
     });
   });
 
@@ -423,12 +427,13 @@ describe('AgentsController', () => {
       };
 
       mockAgentsService.updateRoles.mockResolvedValue(updatedAgent);
+      mockAgentsService.findBySlug.mockResolvedValue(mockAgent);
 
       const req: any = { user: mockAdminUser };
       const result = await controller.updateRoles('test-agent', updateRolesDto, req);
 
-      expect(result.roles.length).toBe(2);
-      expect(result.roles.map((r: any) => r.role)).toEqual(['DEVELOPER', 'REVIEWER']);
+      expect((result.data as any).roles.length).toBe(2);
+      expect((result.data as any).roles.map((r: any) => r.role)).toEqual(['DEVELOPER', 'REVIEWER']);
     });
 
     it('should REPLACE roles (not append)', async () => {
@@ -442,12 +447,13 @@ describe('AgentsController', () => {
       };
 
       mockAgentsService.updateRoles.mockResolvedValue(updatedAgent);
+      mockAgentsService.findBySlug.mockResolvedValue(mockAgent);
 
       const req: any = { user: mockAdminUser };
       const result = await controller.updateRoles('test-agent', updateRolesDto, req);
 
-      expect(result.roles.length).toBe(1);
-      expect(result.roles[0].role).toBe('TRIAGER');
+      expect((result.data as any).roles.length).toBe(1);
+      expect((result.data as any).roles[0].role).toBe('TRIAGER');
     });
 
     it('should delete all old roles before inserting new ones', async () => {
@@ -461,13 +467,14 @@ describe('AgentsController', () => {
       };
 
       mockAgentsService.updateRoles.mockResolvedValue(updatedAgent);
+      mockAgentsService.findBySlug.mockResolvedValue(mockAgent);
 
       const req: any = { user: mockAdminUser };
       const result = await controller.updateRoles('test-agent', updateRolesDto, req);
 
       // Old roles should be gone, new role should be present
-      expect(result.roles.length).toBe(1);
-      expect(result.roles[0].role).toBe('REVIEWER');
+      expect((result.data as any).roles.length).toBe(1);
+      expect((result.data as any).roles[0].role).toBe('REVIEWER');
     });
 
     it('should reject update from non-ADMIN user', async () => {
@@ -477,7 +484,7 @@ describe('AgentsController', () => {
 
       const req: any = { user: mockMemberUser };
 
-      await expect(controller.updateRoles('test-agent', updateRolesDto, req)).rejects.toThrow(ForbiddenException);
+      await expect(controller.updateRoles('test-agent', updateRolesDto, req)).rejects.toThrow(AppException);
     });
   });
 
@@ -497,12 +504,13 @@ describe('AgentsController', () => {
       };
 
       mockAgentsService.updateCapabilities.mockResolvedValue(updatedAgent);
+      mockAgentsService.findBySlug.mockResolvedValue(mockAgent);
 
       const req: any = { user: mockAdminUser };
       const result = await controller.updateCapabilities('test-agent', updateCapabilitiesDto, req);
 
-      expect(result.capabilities.length).toBe(3);
-      expect(result.capabilities.map((c: any) => c.capability)).toEqual(['typescript', 'react', 'nodejs']);
+      expect((result.data as any).capabilities.length).toBe(3);
+      expect((result.data as any).capabilities.map((c: any) => c.capability)).toEqual(['typescript', 'react', 'nodejs']);
     });
 
     it('should REPLACE capabilities (not append)', async () => {
@@ -519,12 +527,13 @@ describe('AgentsController', () => {
       };
 
       mockAgentsService.updateCapabilities.mockResolvedValue(updatedAgent);
+      mockAgentsService.findBySlug.mockResolvedValue(mockAgent);
 
       const req: any = { user: mockAdminUser };
       const result = await controller.updateCapabilities('test-agent', updateCapabilitiesDto, req);
 
-      expect(result.capabilities.length).toBe(2);
-      expect(result.capabilities.map((c: any) => c.capability)).toEqual(['golang', 'python']);
+      expect((result.data as any).capabilities.length).toBe(2);
+      expect((result.data as any).capabilities.map((c: any) => c.capability)).toEqual(['golang', 'python']);
     });
 
     it('should delete all old capabilities before inserting new ones', async () => {
@@ -538,13 +547,14 @@ describe('AgentsController', () => {
       };
 
       mockAgentsService.updateCapabilities.mockResolvedValue(updatedAgent);
+      mockAgentsService.findBySlug.mockResolvedValue(mockAgent);
 
       const req: any = { user: mockAdminUser };
       const result = await controller.updateCapabilities('test-agent', updateCapabilitiesDto, req);
 
       // Old capabilities should be gone
-      expect(result.capabilities.length).toBe(1);
-      expect(result.capabilities[0].capability).toBe('rust');
+      expect((result.data as any).capabilities.length).toBe(1);
+      expect((result.data as any).capabilities[0].capability).toBe('rust');
     });
 
     it('should reject update from non-ADMIN user', async () => {
@@ -554,7 +564,7 @@ describe('AgentsController', () => {
 
       const req: any = { user: mockMemberUser };
 
-      await expect(controller.updateCapabilities('test-agent', updateCapabilitiesDto, req)).rejects.toThrow(ForbiddenException);
+      await expect(controller.updateCapabilities('test-agent', updateCapabilitiesDto, req)).rejects.toThrow(AppException);
     });
 
     it('should allow empty capabilities array', async () => {
@@ -568,11 +578,12 @@ describe('AgentsController', () => {
       };
 
       mockAgentsService.updateCapabilities.mockResolvedValue(updatedAgent);
+      mockAgentsService.findBySlug.mockResolvedValue(mockAgent);
 
       const req: any = { user: mockAdminUser };
       const result = await controller.updateCapabilities('test-agent', updateCapabilitiesDto, req);
 
-      expect(result.capabilities.length).toBe(0);
+      expect((result.data as any).capabilities.length).toBe(0);
     });
   });
 
@@ -588,7 +599,7 @@ describe('AgentsController', () => {
       const req: any = { user: mockAdminUser };
       const result = await controller.rotateApiKey('test-agent', req);
 
-      expect(result.apiKey).toMatch(/^[a-f0-9]{64}$/);
+      expect((result.data as any).apiKey).toMatch(/^[a-f0-9]{64}$/);
       expect(service.rotateApiKey).toHaveBeenCalledWith('test-agent');
     });
 
@@ -604,8 +615,8 @@ describe('AgentsController', () => {
       const req: any = { user: mockAdminUser };
       const result = await controller.rotateApiKey('test-agent', req);
 
-      expect(result.apiKey).toBe(newKey);
-      expect(result.apiKey).not.toBe(result.agent.apiKeyHash);
+      expect((result.data as any).apiKey).toBe(newKey);
+      expect((result.data as any).apiKey).not.toBe((result.data as any).agent.apiKeyHash);
     });
 
     it('should invalidate old API key', async () => {
@@ -625,14 +636,14 @@ describe('AgentsController', () => {
       const req: any = { user: mockAdminUser };
       const result = await controller.rotateApiKey('test-agent', req);
 
-      expect(result.agent.apiKeyHash).toBe(newKeyHash);
-      expect(result.agent.apiKeyHash).not.toBe(oldKeyHash);
+      expect((result.data as any).agent.apiKeyHash).toBe(newKeyHash);
+      expect((result.data as any).agent.apiKeyHash).not.toBe(oldKeyHash);
     });
 
     it('should reject rotate from non-ADMIN user', async () => {
       const req: any = { user: mockMemberUser };
 
-      await expect(controller.rotateApiKey('test-agent', req)).rejects.toThrow(ForbiddenException);
+      await expect(controller.rotateApiKey('test-agent', req)).rejects.toThrow(AppException);
     });
 
     it('should return 404 when agent not found', async () => {
@@ -661,7 +672,7 @@ describe('AgentsController', () => {
       const result1 = await controller.rotateApiKey('test-agent', req);
       const result2 = await controller.rotateApiKey('test-agent', req);
 
-      expect(result1.apiKey).not.toBe(result2.apiKey);
+      expect((result1.data as any).apiKey).not.toBe((result2.data as any).apiKey);
     });
   });
 
@@ -670,7 +681,7 @@ describe('AgentsController', () => {
       const createDto = { name: 'Test', slug: 'test' };
       const req: any = { user: mockMemberUser };
 
-      await expect(controller.generateApiKey(createDto, req)).rejects.toThrow(ForbiddenException);
+      await expect(controller.generateApiKey(createDto, req)).rejects.toThrow(AppException);
     });
 
     it('GET /agents is public', async () => {
@@ -704,13 +715,13 @@ describe('AgentsController', () => {
       const updateDto = { name: 'Updated' };
       const req: any = { user: mockMemberUser };
 
-      await expect(controller.update('test-agent', updateDto, req)).rejects.toThrow(ForbiddenException);
+      await expect(controller.update('test-agent', updateDto, req)).rejects.toThrow(AppException);
     });
 
     it('POST /agents/:slug/rotate-key requires JWT auth with ADMIN role', async () => {
       const req: any = { user: mockMemberUser };
 
-      await expect(controller.rotateApiKey('test-agent', req)).rejects.toThrow(ForbiddenException);
+      await expect(controller.rotateApiKey('test-agent', req)).rejects.toThrow(AppException);
     });
   });
 
@@ -718,9 +729,9 @@ describe('AgentsController', () => {
     it('should not expose raw API key in GET responses', async () => {
       mockAgentsService.findAll.mockResolvedValue([mockAgent]);
 
-      const agents = await controller.findAll();
+      const result = await controller.findAll();
 
-      for (const agent of agents) {
+      for (const agent of (result.data as any)) {
         if (agent.apiKeyHash) {
           expect(agent.apiKeyHash).toBeDefined();
           // Raw keys are 64 hex chars; hashes are different format

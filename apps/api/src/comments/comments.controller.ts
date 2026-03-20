@@ -18,6 +18,7 @@ import {
 import { CommentsService } from './comments.service';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
+import { JsonResponse } from '../common/json-response';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type RequestWithUser = any & { user?: any; agent?: any };
@@ -78,10 +79,11 @@ export class CommentsController {
     @Param('ref') ref: string,
     @Body() createCommentDto: CreateCommentDto,
     @Req() req: RequestWithUser,
-  ) {
+  ): Promise<JsonResponse> {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
-    return this.create(slug, ref, createCommentDto, currentUser, actorType);
+    const data = await this.create(slug, ref, createCommentDto, currentUser, actorType);
+    return JsonResponse.created(data);
   }
 
   @Get('projects/:slug/tickets/:ref/comments')
@@ -91,8 +93,9 @@ export class CommentsController {
   async listByTicketFromHttp(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
-  ) {
-    return this.listByTicket(slug, ref);
+  ): Promise<JsonResponse> {
+    const data = await this.listByTicket(slug, ref);
+    return JsonResponse.ok(data);
   }
 
   @Patch('comments/:id')
@@ -104,10 +107,11 @@ export class CommentsController {
     @Param('id') id: string,
     @Body() updateCommentDto: UpdateCommentDto,
     @Req() req: RequestWithUser,
-  ) {
+  ): Promise<JsonResponse> {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
-    return this.update(id, updateCommentDto, currentUser, actorType);
+    const data = await this.update(id, updateCommentDto, currentUser, actorType);
+    return JsonResponse.ok(data);
   }
 
   @Delete('comments/:id')

@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Patch, Body, Param, UseGuards, Req, ForbiddenException } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Body, Param, UseGuards, Req, HttpStatus } from '@nestjs/common';
 import { AgentsService, CreateAgentDto } from './agents.service';
 import { UpdateAgentDto } from './dto/update-agent.dto';
 import { UpdateRolesDto } from './dto/update-roles.dto';
@@ -6,6 +6,8 @@ import { UpdateCapabilitiesDto } from './dto/update-capabilities.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { IsPublic } from '../auth/decorators/is-public.decorator';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { AppException } from '../common/app-exception';
+import { JsonResponse } from '../common/json-response';
 
 @ApiTags('agents')
 @ApiBearerAuth()
@@ -20,22 +22,23 @@ export class AgentsController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async generateApiKey(@Body() createAgentDto: CreateAgentDto, @Req() req: any) {
+  async generateApiKey(@Body() createAgentDto: CreateAgentDto, @Req() req: any): Promise<JsonResponse> {
     // Check if user is admin
     if (req.user?.role !== 'ADMIN') {
-      throw new ForbiddenException('Admin role required');
+      throw new AppException('errors.forbidden', HttpStatus.FORBIDDEN);
     }
 
-    return this.agentsService.generateApiKey(createAgentDto);
+    const data = await this.agentsService.generateApiKey(createAgentDto);
+    return JsonResponse.created(data);
   }
 
   @Get()
   @IsPublic()
   @ApiOperation({ summary: 'List all agents' })
   @ApiResponse({ status: 200, description: 'Agents retrieved successfully' })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async findAll(): Promise<any[]> {
-    return this.agentsService.findAll();
+  async findAll(): Promise<JsonResponse> {
+    const data = await this.agentsService.findAll();
+    return JsonResponse.ok(data);
   }
 
   @Get('me')
@@ -44,12 +47,13 @@ export class AgentsController {
   @ApiResponse({ status: 200, description: 'Agent profile retrieved' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async findMe(@Req() req: any): Promise<any> {
+  async findMe(@Req() req: any): Promise<JsonResponse> {
     const agentId = req.user?.sub;
     if (!agentId || req.user?.actorType !== 'agent') {
-      throw new ForbiddenException('Agent authentication required');
+      throw new AppException('errors.forbidden', HttpStatus.FORBIDDEN);
     }
-    return this.agentsService.findMe(agentId);
+    const data = await this.agentsService.findMe(agentId);
+    return JsonResponse.ok(data);
   }
 
   @Get(':slug')
@@ -57,9 +61,9 @@ export class AgentsController {
   @ApiOperation({ summary: 'Get agent by slug' })
   @ApiResponse({ status: 200, description: 'Agent retrieved successfully' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async findBySlug(@Param('slug') slug: string): Promise<any> {
-    return this.agentsService.findBySlug(slug);
+  async findBySlug(@Param('slug') slug: string): Promise<JsonResponse> {
+    const data = await this.agentsService.findBySlug(slug);
+    return JsonResponse.ok(data);
   }
 
   @Patch(':slug')
@@ -70,11 +74,12 @@ export class AgentsController {
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async update(@Param('slug') slug: string, @Body() updateDto: UpdateAgentDto, @Req() req: any): Promise<any> {
+  async update(@Param('slug') slug: string, @Body() updateDto: UpdateAgentDto, @Req() req: any): Promise<JsonResponse> {
     if (req.user?.role !== 'ADMIN') {
-      throw new ForbiddenException('Admin role required');
+      throw new AppException('errors.forbidden', HttpStatus.FORBIDDEN);
     }
-    return this.agentsService.update(slug, updateDto);
+    const data = await this.agentsService.update(slug, updateDto);
+    return JsonResponse.ok(data);
   }
 
   @Patch(':slug/update-roles')
@@ -85,16 +90,13 @@ export class AgentsController {
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async updateRoles(@Param('slug') slug: string, @Body() updateRolesDto: UpdateRolesDto, @Req() req: any): Promise<any> {
+  async updateRoles(@Param('slug') slug: string, @Body() updateRolesDto: UpdateRolesDto, @Req() req: any): Promise<JsonResponse> {
     if (req.user?.role !== 'ADMIN') {
-      throw new ForbiddenException('Admin role required');
+      throw new AppException('errors.forbidden', HttpStatus.FORBIDDEN);
     }
-    // Get agent by slug to get id
     const agent = await this.agentsService.findBySlug(slug);
-    if (!agent) {
-      throw new ForbiddenException('Agent not found');
-    }
-    return this.agentsService.updateRoles(agent.id, updateRolesDto);
+    const data = await this.agentsService.updateRoles(agent.id, updateRolesDto);
+    return JsonResponse.ok(data);
   }
 
   @Patch(':slug/update-capabilities')
@@ -105,16 +107,13 @@ export class AgentsController {
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async updateCapabilities(@Param('slug') slug: string, @Body() updateCapabilitiesDto: UpdateCapabilitiesDto, @Req() req: any): Promise<any> {
+  async updateCapabilities(@Param('slug') slug: string, @Body() updateCapabilitiesDto: UpdateCapabilitiesDto, @Req() req: any): Promise<JsonResponse> {
     if (req.user?.role !== 'ADMIN') {
-      throw new ForbiddenException('Admin role required');
+      throw new AppException('errors.forbidden', HttpStatus.FORBIDDEN);
     }
-    // Get agent by slug to get id
     const agent = await this.agentsService.findBySlug(slug);
-    if (!agent) {
-      throw new ForbiddenException('Agent not found');
-    }
-    return this.agentsService.updateCapabilities(agent.id, updateCapabilitiesDto);
+    const data = await this.agentsService.updateCapabilities(agent.id, updateCapabilitiesDto);
+    return JsonResponse.ok(data);
   }
 
   @Post(':slug/rotate-key')
@@ -125,10 +124,11 @@ export class AgentsController {
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async rotateApiKey(@Param('slug') slug: string, @Req() req: any): Promise<any> {
+  async rotateApiKey(@Param('slug') slug: string, @Req() req: any): Promise<JsonResponse> {
     if (req.user?.role !== 'ADMIN') {
-      throw new ForbiddenException('Admin role required');
+      throw new AppException('errors.forbidden', HttpStatus.FORBIDDEN);
     }
-    return this.agentsService.rotateApiKey(slug);
+    const data = await this.agentsService.rotateApiKey(slug);
+    return JsonResponse.ok(data);
   }
 }
