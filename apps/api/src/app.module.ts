@@ -1,7 +1,6 @@
 import { join } from 'path';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
 import { I18nCoreModule } from '@nathapp/nestjs-common';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
@@ -10,7 +9,6 @@ import { ProjectsModule } from './projects/projects.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { CommentsModule } from './comments/comments.module';
 import { LabelsModule } from './labels/labels.module';
-import { CombinedAuthGuard } from './auth/guards/combined-auth.guard';
 
 @Module({
   imports: [
@@ -31,12 +29,6 @@ import { CombinedAuthGuard } from './auth/guards/combined-auth.guard';
     TicketsModule,
     CommentsModule,
     LabelsModule,
-  ],
-  providers: [
-    {
-      provide: APP_GUARD,
-      useClass: CombinedAuthGuard,
-    },
   ],
 })
 export class AppModule {}

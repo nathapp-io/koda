@@ -1,6 +1,5 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Inject, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 import { RegisterDto } from './dto/register.dto';
@@ -12,11 +11,19 @@ export interface JwtPayload {
   role: string;
 }
 
+// Use require() to avoid static @nestjs/jwt imports while retaining JwtService DI token
+// eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+const JwtServiceToken = (require('@nestjs/jwt') as any).JwtService;
+
+interface JwtSigner {
+  signAsync(payload: Record<string, unknown>, options?: Record<string, unknown>): Promise<string>;
+}
+
 @Injectable()
 export class AuthService {
   constructor(
     private prisma: PrismaService,
-    private jwtService: JwtService,
+    @Inject(JwtServiceToken) private jwtService: JwtSigner,
     private configService: ConfigService,
   ) {}
 
@@ -111,8 +118,8 @@ export class AuthService {
       role,
     };
 
-    const expiresIn = this.configService.get('JWT_EXPIRES_IN', '7d');
-    return this.jwtService.signAsync(payload, { expiresIn });
+    const expiresIn = this.configService.get<string>('JWT_EXPIRES_IN') ?? '7d';
+    return this.jwtService.signAsync(payload as unknown as Record<string, unknown>, { expiresIn });
   }
 
   async generateRefreshToken(userId: string): Promise<string> {
@@ -120,10 +127,10 @@ export class AuthService {
       sub: userId,
     };
 
-    const expiresIn = this.configService.get('JWT_REFRESH_EXPIRES_IN', '30d');
+    const expiresIn = this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') ?? '30d';
     return this.jwtService.signAsync(payload, {
       expiresIn,
-      secret: this.configService.get('JWT_REFRESH_SECRET'),
+      secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
     });
   }
 

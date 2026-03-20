@@ -1,29 +1,32 @@
 import { Module } from '@nestjs/common';
-import { JwtModule } from '@nestjs/jwt';
-import { PassportModule } from '@nestjs/passport';
-import { ConfigService } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { AuthModule as NathappAuthModule } from '@nathapp/nestjs-auth';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
-import { JwtStrategy } from './strategies/jwt.strategy';
-import { JwtAuthGuard } from './guards/jwt-auth.guard';
-import { ApiKeyAuthGuard } from './guards/api-key-auth.guard';
-import { CombinedAuthGuard } from './guards/combined-auth.guard';
 
 @Module({
   imports: [
-    PassportModule,
-    JwtModule.registerAsync({
+    NathappAuthModule.forRootAsync({
+      imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: async (configService: ConfigService) => ({
-        secret: configService.get('JWT_SECRET'),
-        signOptions: {
-          expiresIn: configService.get('JWT_EXPIRES_IN', '7d'),
+      useFactory: (config: ConfigService) => ({
+        jwtOptions: {
+          secret: config.get<string>('JWT_SECRET'),
+          signOption: {
+            expiresIn: config.get<string>('JWT_EXPIRES_IN') ?? '7d',
+          },
+        },
+        refreshJwtOptions: {
+          secret: config.get<string>('JWT_REFRESH_SECRET'),
+          signOption: {
+            expiresIn: config.get<string>('JWT_REFRESH_EXPIRES_IN') ?? '30d',
+          },
         },
       }),
     }),
   ],
-  providers: [AuthService, JwtStrategy, JwtAuthGuard, ApiKeyAuthGuard, CombinedAuthGuard],
+  providers: [AuthService],
   controllers: [AuthController],
-  exports: [AuthService, JwtAuthGuard, ApiKeyAuthGuard, CombinedAuthGuard],
+  exports: [AuthService],
 })
 export class AuthModule {}
