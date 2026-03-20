@@ -9,20 +9,28 @@ import { AuthController } from './auth.controller';
     NathappAuthModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        jwtOptions: {
-          secret: config.get<string>('JWT_SECRET'),
-          signOption: {
-            expiresIn: config.get<string>('JWT_EXPIRES_IN') ?? '7d',
+      useFactory: (config: ConfigService) => {
+        const authConfig = config.get<{
+          jwtSecret: string;
+          jwtExpiresIn: string;
+          jwtRefreshSecret: string;
+          jwtRefreshExpiresIn: string;
+        }>('auth');
+        return {
+          jwtOptions: {
+            secret: authConfig?.jwtSecret,
+            signOption: {
+              expiresIn: authConfig?.jwtExpiresIn ?? '7d',
+            },
           },
-        },
-        refreshJwtOptions: {
-          secret: config.get<string>('JWT_REFRESH_SECRET'),
-          signOption: {
-            expiresIn: config.get<string>('JWT_REFRESH_EXPIRES_IN') ?? '30d',
+          refreshJwtOptions: {
+            secret: authConfig?.jwtRefreshSecret,
+            signOption: {
+              expiresIn: authConfig?.jwtRefreshExpiresIn ?? '30d',
+            },
           },
-        },
-      }),
+        };
+      },
     }),
   ],
   providers: [AuthService],
