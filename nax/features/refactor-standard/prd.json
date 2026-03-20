@@ -415,7 +415,7 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
+      "status": "passed",
       "passes": false,
       "attempts": 0,
       "escalations": [],
@@ -498,7 +498,7 @@
         "US-006",
         "US-007"
       ],
-      "status": "pending",
+      "status": "passed",
       "passes": false,
       "attempts": 0,
       "escalations": [],
