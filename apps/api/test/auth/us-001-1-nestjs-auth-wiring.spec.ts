@@ -56,11 +56,13 @@ describe('AC2 — auth.module.ts uses AuthModule.forRootAsync', () => {
   });
 
   it('passes JWT secret from ConfigService', () => {
-    expect(source).toMatch(/JWT_SECRET/);
+    // After US-005 typed config refactor, check for typed config access
+    expect(source).toMatch(/jwtSecret|JWT_SECRET/);
   });
 
   it('passes JWT expires-in from ConfigService', () => {
-    expect(source).toMatch(/JWT_EXPIRES_IN/);
+    // After US-005 typed config refactor, check for typed config access
+    expect(source).toMatch(/jwtExpiresIn|JWT_EXPIRES_IN/);
   });
 });
 
