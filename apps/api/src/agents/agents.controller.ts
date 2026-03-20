@@ -1,9 +1,8 @@
-import { Controller, Post, Get, Patch, Body, Param, UseGuards, Req, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Body, Param, Req, HttpStatus } from '@nestjs/common';
 import { AgentsService, CreateAgentDto } from './agents.service';
 import { UpdateAgentDto } from './dto/update-agent.dto';
 import { UpdateRolesDto } from './dto/update-roles.dto';
 import { UpdateCapabilitiesDto } from './dto/update-capabilities.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { IsPublic } from '../auth/decorators/is-public.decorator';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { AppException } from '../common/app-exception';
@@ -16,7 +15,6 @@ export class AgentsController {
   constructor(private agentsService: AgentsService) {}
 
   @Post()
-  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Create agent and generate API key (admin only)' })
   @ApiResponse({ status: 201, description: 'Agent created with API key' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -42,7 +40,6 @@ export class AgentsController {
   }
 
   @Get('me')
-  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Get current agent profile (API key auth)' })
   @ApiResponse({ status: 200, description: 'Agent profile retrieved' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -67,7 +64,6 @@ export class AgentsController {
   }
 
   @Patch(':slug')
-  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Update agent (admin only)' })
   @ApiResponse({ status: 200, description: 'Agent updated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -83,7 +79,6 @@ export class AgentsController {
   }
 
   @Patch(':slug/update-roles')
-  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Update agent roles (admin only)' })
   @ApiResponse({ status: 200, description: 'Roles updated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -100,7 +95,6 @@ export class AgentsController {
   }
 
   @Patch(':slug/update-capabilities')
-  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Update agent capabilities (admin only)' })
   @ApiResponse({ status: 200, description: 'Capabilities updated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -117,7 +111,6 @@ export class AgentsController {
   }
 
   @Post(':slug/rotate-key')
-  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Rotate agent API key (admin only)' })
   @ApiResponse({ status: 200, description: 'API key rotated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })

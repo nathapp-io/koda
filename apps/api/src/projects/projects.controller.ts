@@ -6,7 +6,6 @@ import {
   Delete,
   Body,
   Param,
-  UseGuards,
   Req,
   HttpCode,
   HttpStatus,
@@ -14,7 +13,6 @@ import {
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { IsPublic } from '../auth/decorators/is-public.decorator';
 import { AppException } from '../common/app-exception';
 import { JsonResponse } from '../common/json-response';
@@ -35,7 +33,6 @@ export class ProjectsController {
   constructor(private projectsService: ProjectsService) {}
 
   @Post()
-  @UseGuards(JwtAuthGuard)
   @HttpCode(201)
   @ApiOperation({ summary: 'Create a new project (admin only)' })
   @ApiResponse({ status: 201, description: 'Project created successfully' })
@@ -76,7 +73,6 @@ export class ProjectsController {
   }
 
   @Patch(':slug')
-  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Update a project (admin only)' })
   @ApiResponse({ status: 200, description: 'Project updated successfully' })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
@@ -99,7 +95,6 @@ export class ProjectsController {
   }
 
   @Delete(':slug')
-  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Soft delete a project (admin only)' })
   @ApiResponse({ status: 200, description: 'Project soft deleted successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })

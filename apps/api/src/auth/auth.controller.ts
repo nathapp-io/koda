@@ -3,7 +3,6 @@ import {
   Post,
   Get,
   Body,
-  UseGuards,
   Headers,
   HttpCode,
   HttpStatus,
@@ -13,7 +12,6 @@ import { AuthService, JwtPayload } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto, UserResponseDto } from './dto/auth-response.dto';
-import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { Public, Principal } from '@nathapp/nestjs-auth';
 import { AppException } from '../common/app-exception';
 import { JsonResponse } from '../common/json-response';
@@ -64,7 +62,6 @@ export class AuthController {
   }
 
   @Get('me')
-  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get current authenticated user' })
