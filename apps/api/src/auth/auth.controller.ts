@@ -14,8 +14,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto, UserResponseDto } from './dto/auth-response.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
-import { CurrentUser } from './decorators/current-user.decorator';
-import { Public } from '@nathapp/nestjs-auth';
+import { Public, Principal } from '@nathapp/nestjs-auth';
 import { AppException } from '../common/app-exception';
 import { JsonResponse } from '../common/json-response';
 
@@ -54,8 +53,8 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Invalid or missing token' })
   @Public()
   async refresh(
+    @Principal() user: JwtPayload,
     @Headers('authorization') authHeader: string,
-    @CurrentUser() user: JwtPayload,
   ): Promise<JsonResponse<AuthResponseDto>> {
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       throw new AppException('errors.unauthorized', HttpStatus.UNAUTHORIZED);
@@ -71,7 +70,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Get current authenticated user' })
   @ApiResponse({ status: 200, type: UserResponseDto })
   @ApiResponse({ status: 401, description: 'Missing or invalid token' })
-  async me(@CurrentUser() user: JwtPayload): Promise<JsonResponse<UserResponseDto>> {
+  async me(@Principal() user: JwtPayload): Promise<JsonResponse<UserResponseDto>> {
     const validatedUser = await this.authService.validateUser(user);
     if (!validatedUser) {
       throw new AppException('errors.unauthorized', HttpStatus.UNAUTHORIZED);
