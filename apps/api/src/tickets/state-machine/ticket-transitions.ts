@@ -1,5 +1,6 @@
-import { BadRequestException } from '@nestjs/common';
+import { HttpStatus } from '@nestjs/common';
 import { TicketStatus, CommentType } from '@prisma/client';
+import { AppException } from '../../common/app-exception';
 
 // Define transition rules: from → to → required comment type (or undefined if no comment needed)
 type TransitionRule = {
@@ -41,14 +42,12 @@ export function validateTransition(
   // Check if transition rule exists
   const fromRules = TRANSITION_RULES[from];
   if (!fromRules) {
-    throw new BadRequestException(`No transitions allowed from status ${from}`);
+    throw new AppException('errors.invalidTransition', HttpStatus.BAD_REQUEST);
   }
 
   const requiredCommentType = fromRules[to];
   if (requiredCommentType === undefined) {
-    throw new BadRequestException(
-      `Transition from ${from} to ${to} is not allowed`,
-    );
+    throw new AppException('errors.invalidTransition', HttpStatus.BAD_REQUEST);
   }
 
   // Check comment type requirement
@@ -59,14 +58,10 @@ export function validateTransition(
 
   // Comment is required
   if (!commentType) {
-    throw new BadRequestException(
-      `Transition from ${from} to ${to} requires a ${requiredCommentType} comment`,
-    );
+    throw new AppException('errors.invalidTransition', HttpStatus.BAD_REQUEST);
   }
 
   if (commentType !== requiredCommentType) {
-    throw new BadRequestException(
-      `Transition from ${from} to ${to} requires a ${requiredCommentType} comment, but got ${commentType}`,
-    );
+    throw new AppException('errors.invalidTransition', HttpStatus.BAD_REQUEST);
   }
 }

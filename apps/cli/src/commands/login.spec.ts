@@ -12,6 +12,23 @@ jest.mock('conf', () => {
   return jest.fn(() => mockStore);
 });
 
+// Mock configureClient
+jest.mock('../client', () => ({
+  configureClient: jest.fn((baseUrl: string, apiKey: string) => {
+    return {
+      get: jest.fn(async () => {
+        // Reject 'invalid' API key, allow others
+        if (apiKey === 'invalid') {
+          const error = new Error('Invalid API key') as unknown as Record<string, unknown>;
+          error.response = { status: 401 };
+          throw error;
+        }
+        return { status: 200, data: {} };
+      }),
+    };
+  }),
+}));
+
 import { loginCommand } from './login';
 
 describe('login command', () => {

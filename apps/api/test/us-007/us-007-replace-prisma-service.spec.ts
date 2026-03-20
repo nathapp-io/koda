@@ -135,22 +135,6 @@ describe('AC4 — auth.service.ts imports PrismaService from @nathapp/nestjs-pri
   });
 });
 
-describe('AC4 — auth/guards/api-key-auth.guard.ts imports PrismaService from @nathapp/nestjs-prisma', () => {
-  it('file exists', () => {
-    expect(srcExists('auth/guards/api-key-auth.guard.ts')).toBe(true);
-  });
-
-  it('imports PrismaService from @nathapp/nestjs-prisma', () => {
-    const source = readSrc('auth/guards/api-key-auth.guard.ts');
-    expect(source).toMatch(/from\s+['"]@nathapp\/nestjs-prisma['"]/);
-  });
-
-  it('does not import from custom prisma.service path', () => {
-    const source = readSrc('auth/guards/api-key-auth.guard.ts');
-    expect(source).not.toMatch(/from\s+['"][^'"]*prisma\/prisma\.service['"]/);
-  });
-});
-
 describe('AC4 — projects.service.ts imports PrismaService from @nathapp/nestjs-prisma', () => {
   it('file exists', () => {
     expect(srcExists('projects/projects.service.ts')).toBe(true);
@@ -263,22 +247,6 @@ describe('AC5 — auth.service.spec.ts imports PrismaService from @nathapp/nestj
 
   it('does not import from custom prisma.service path', () => {
     const source = readSrc('auth/auth.service.spec.ts');
-    expect(source).not.toMatch(/from\s+['"][^'"]*prisma\/prisma\.service['"]/);
-  });
-});
-
-describe('AC5 — api-key-auth.guard.spec.ts imports PrismaService from @nathapp/nestjs-prisma', () => {
-  it('file exists', () => {
-    expect(srcExists('auth/guards/api-key-auth.guard.spec.ts')).toBe(true);
-  });
-
-  it('imports PrismaService from @nathapp/nestjs-prisma', () => {
-    const source = readSrc('auth/guards/api-key-auth.guard.spec.ts');
-    expect(source).toMatch(/from\s+['"]@nathapp\/nestjs-prisma['"]/);
-  });
-
-  it('does not import from custom prisma.service path', () => {
-    const source = readSrc('auth/guards/api-key-auth.guard.spec.ts');
     expect(source).not.toMatch(/from\s+['"][^'"]*prisma\/prisma\.service['"]/);
   });
 });

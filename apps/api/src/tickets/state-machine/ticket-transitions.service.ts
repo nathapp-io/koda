@@ -1,5 +1,6 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, HttpStatus } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
+import { AppException } from '../../common/app-exception';
 import {
   TicketStatus,
   CommentType,
@@ -134,12 +135,12 @@ export class TicketTransitionsService {
       where: { slug: projectSlug },
     });
     if (!project || project.deletedAt) {
-      throw new NotFoundException('Project not found');
+      throw new AppException('errors.notFound', HttpStatus.NOT_FOUND);
     }
 
     const ticket = await this.findTicketByRef(projectSlug, ticketRef);
     if (!ticket) {
-      throw new NotFoundException('Ticket not found');
+      throw new AppException('errors.notFound', HttpStatus.NOT_FOUND);
     }
 
     // Validate that CLOSED is reachable from current status
@@ -148,9 +149,7 @@ export class TicketTransitionsService {
       ticket.status === TicketStatus.CREATED ||
       ticket.status === TicketStatus.REJECTED
     ) {
-      throw new BadRequestException(
-        `Cannot transition from ${ticket.status} to CLOSED`,
-      );
+      throw new AppException('errors.invalidTransition', HttpStatus.BAD_REQUEST);  // i18n key for invalid ticket transition
     }
 
     // Execute transition without comment requirement
@@ -223,13 +222,13 @@ export class TicketTransitionsService {
       where: { slug: projectSlug },
     });
     if (!project || project.deletedAt) {
-      throw new NotFoundException('Project not found');
+      throw new AppException('errors.notFound', HttpStatus.NOT_FOUND);
     }
 
     // Find ticket
     const ticket = await this.findTicketByRef(projectSlug, ticketRef);
     if (!ticket) {
-      throw new NotFoundException('Ticket not found');
+      throw new AppException('errors.notFound', HttpStatus.NOT_FOUND);
     }
 
     // Validate transition

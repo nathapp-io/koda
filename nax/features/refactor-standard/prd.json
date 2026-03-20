@@ -3,7 +3,7 @@
   "feature": "refactor-standard",
   "branchName": "feat/refactor-standard",
   "createdAt": "2026-03-20T00:00:00.000Z",
-  "updatedAt": "2026-03-20T12:07:31.149Z",
+  "updatedAt": "2026-03-20T12:19:35.751Z",
   "userStories": [
     {
       "id": "US-001",
@@ -222,8 +222,8 @@
         "US-001-3",
         "US-001-4"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "escalations": [],
       "attempts": 0,
       "parentStoryId": "US-001",

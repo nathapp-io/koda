@@ -1,9 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TicketsController } from '../../src/tickets/tickets.controller';
 import { TicketsService } from '../../src/tickets/tickets.service';
+import { TicketTransitionsService } from '../../src/tickets/state-machine/ticket-transitions.service';
 import { BadRequestException as _BadRequestException, ForbiddenException as _ForbiddenException, NotFoundException as _NotFoundException } from '@nestjs/common';
 import { CreateTicketDto } from '../../src/tickets/dto/create-ticket.dto';
 import { UpdateTicketDto } from '../../src/tickets/dto/update-ticket.dto';
+import { JsonResponse } from '../../src/common/json-response';
 
 describe('TicketsController', () => {
   let controller: TicketsController;
@@ -70,14 +72,14 @@ describe('TicketsController', () => {
     assign: jest.fn(),
   };
 
-  beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
-      controllers: [TicketsController],
-      providers: [{ provide: TicketsService, useValue: mockTicketsService }],
-    }).compile();
+  const mockTransitionsService = {
+    transition: jest.fn(),
+  };
 
-    controller = module.get<TicketsController>(TicketsController);
-    service = module.get<TicketsService>(TicketsService);
+  beforeEach(async () => {
+    // Directly instantiate the controller with mocked dependencies
+    controller = new TicketsController(mockTicketsService as any, mockTransitionsService as any);
+    service = mockTicketsService as any;
   });
 
   afterEach(() => {
@@ -98,7 +100,9 @@ describe('TicketsController', () => {
       const req: any = { user: mockAdminUser };
       const result = await controller.create('koda', createDto, req);
 
-      expect(result).toEqual(mockTicket);
+      expect(result).toEqual(expect.objectContaining({
+        data: mockTicket,
+      }));
       expect(service.create).toHaveBeenCalledWith('koda', createDto, mockAdminUser, 'user');
     });
 
@@ -182,8 +186,9 @@ describe('TicketsController', () => {
 
       const result = await controller.findAll('koda', {});
 
-      expect(result.tickets).toEqual(tickets);
-      expect(result.total).toBe(2);
+      expect(result).toEqual(expect.objectContaining({
+        data: { tickets, total: 2 },
+      }));
     });
 
     it('should accept filters as query parameters', async () => {
@@ -205,7 +210,7 @@ describe('TicketsController', () => {
       const result = await controller.findAll('koda', query as any);
 
       expect(service.findAll).toHaveBeenCalledWith('koda', expect.objectContaining(query));
-      expect(result.total).toEqual(1);
+      expect(result.data.total).toEqual(1);
     });
 
     it('should apply status filter', async () => {
@@ -217,7 +222,7 @@ describe('TicketsController', () => {
       const result = await controller.findAll('koda', { status: 'VERIFIED' } as any);
 
       expect(service.findAll).toHaveBeenCalledWith('koda', { status: 'VERIFIED' });
-      expect(result.tickets[0].status).toBe('VERIFIED');
+      expect(result.data.tickets[0].status).toBe('VERIFIED');
     });
 
     it('should apply type filter', async () => {
@@ -229,7 +234,7 @@ describe('TicketsController', () => {
       const result = await controller.findAll('koda', { type: 'ENHANCEMENT' } as any);
 
       expect(service.findAll).toHaveBeenCalledWith('koda', { type: 'ENHANCEMENT' });
-      expect(result.tickets[0].type).toBe('ENHANCEMENT');
+      expect(result.data.tickets[0].type).toBe('ENHANCEMENT');
     });
 
     it('should apply priority filter', async () => {
@@ -241,7 +246,7 @@ describe('TicketsController', () => {
       const result = await controller.findAll('koda', { priority: 'CRITICAL' } as any);
 
       expect(service.findAll).toHaveBeenCalledWith('koda', { priority: 'CRITICAL' });
-      expect(result.tickets[0].priority).toBe('CRITICAL');
+      expect(result.data.tickets[0].priority).toBe('CRITICAL');
     });
 
     it('should apply assignedTo filter', async () => {
@@ -253,7 +258,7 @@ describe('TicketsController', () => {
       const result = await controller.findAll('koda', { assignedTo: 'user-456' } as any);
 
       expect(service.findAll).toHaveBeenCalledWith('koda', { assignedTo: 'user-456' });
-      expect(result.tickets[0].assignedToUserId).toBe('user-456');
+      expect(result.data.tickets[0].assignedToUserId).toBe('user-456');
     });
 
     it('should filter for unassigned tickets', async () => {
@@ -286,8 +291,8 @@ describe('TicketsController', () => {
 
       const result = await controller.findAll('koda', {});
 
-      expect(result.tickets).toEqual([]);
-      expect(result.total).toBe(0);
+      expect(result.data.tickets).toEqual([]);
+      expect(result.data.total).toBe(0);
     });
 
     it('should return 404 if project not found', async () => {
@@ -305,7 +310,9 @@ describe('TicketsController', () => {
 
       const result = await controller.findByRef('koda', 'KODA-1');
 
-      expect(result).toEqual(mockTicket);
+      expect(result).toEqual(expect.objectContaining({
+        data: mockTicket,
+      }));
       expect(service.findByRef).toHaveBeenCalledWith('koda', 'KODA-1');
     });
 
@@ -314,7 +321,9 @@ describe('TicketsController', () => {
 
       const result = await controller.findByRef('koda', 'ticket-123');
 
-      expect(result).toEqual(mockTicket);
+      expect(result).toEqual(expect.objectContaining({
+        data: mockTicket,
+      }));
       expect(service.findByRef).toHaveBeenCalledWith('koda', 'ticket-123');
     });
 
@@ -323,7 +332,7 @@ describe('TicketsController', () => {
 
       const result = await controller.findByRef('koda', 'KODA-999');
 
-      expect(result).toBeNull();
+      expect(result.data).toBeNull();
     });
 
     it('should return 404 if project not found', async () => {
@@ -351,8 +360,12 @@ describe('TicketsController', () => {
       const req: any = { user: mockAdminUser };
       const result = await controller.update('koda', 'KODA-1', updateDto, req);
 
-      expect(result.title).toBe('Updated title');
-      expect(result.priority).toBe('CRITICAL');
+      expect(result).toEqual(expect.objectContaining({
+        data: expect.objectContaining({
+          title: 'Updated title',
+          priority: 'CRITICAL',
+        }),
+      }));
       expect(service.update).toHaveBeenCalledWith('koda', 'KODA-1', updateDto, mockAdminUser, 'user');
     });
 
@@ -369,7 +382,11 @@ describe('TicketsController', () => {
       const req: any = { user: mockMemberUser };
       const result = await controller.update('koda', 'KODA-1', updateDto, req);
 
-      expect(result.title).toBe('Updated by member');
+      expect(result).toEqual(expect.objectContaining({
+        data: expect.objectContaining({
+          title: 'Updated by member',
+        }),
+      }));
     });
 
     it('should allow agent to update ticket', async () => {
@@ -385,7 +402,11 @@ describe('TicketsController', () => {
       const req: any = { agent: mockAgent };
       const result = await controller.update('koda', 'KODA-1', updateDto, req);
 
-      expect(result.title).toBe('Updated by agent');
+      expect(result).toEqual(expect.objectContaining({
+        data: expect.objectContaining({
+          title: 'Updated by agent',
+        }),
+      }));
     });
 
     it('should support partial updates', async () => {
@@ -401,7 +422,11 @@ describe('TicketsController', () => {
       const req: any = { user: mockAdminUser };
       const result = await controller.update('koda', 'KODA-1', updateDto, req);
 
-      expect(result.priority).toBe('MEDIUM');
+      expect(result).toEqual(expect.objectContaining({
+        data: expect.objectContaining({
+          priority: 'MEDIUM',
+        }),
+      }));
     });
 
     it('should return 404 if ticket not found', async () => {
@@ -429,7 +454,11 @@ describe('TicketsController', () => {
       const req: any = { user: mockAdminUser };
       const result = await controller.softDelete('koda', 'KODA-1', req);
 
-      expect(result.deletedAt).not.toBeNull();
+      expect(result).toEqual(expect.objectContaining({
+        data: expect.objectContaining({
+          deletedAt: expect.any(Date),
+        }),
+      }));
       expect(service.softDelete).toHaveBeenCalledWith('koda', 'KODA-1', mockAdminUser, 'user');
     });
 
@@ -471,7 +500,11 @@ describe('TicketsController', () => {
       const result = await controller.softDelete('koda', 'KODA-1', req);
 
       // Ticket should still have ID (not hard-deleted)
-      expect(result.id).toBe(mockTicket.id);
+      expect(result).toEqual(expect.objectContaining({
+        data: expect.objectContaining({
+          id: mockTicket.id,
+        }),
+      }));
     });
   });
 
@@ -485,8 +518,12 @@ describe('TicketsController', () => {
 
       const result = await controller.assign('koda', 'KODA-1', { userId: 'user-456' });
 
-      expect(result.assignedToUserId).toBe('user-456');
-      expect(result.assignedToAgentId).toBeNull();
+      expect(result).toEqual(expect.objectContaining({
+        data: expect.objectContaining({
+          assignedToUserId: 'user-456',
+          assignedToAgentId: null,
+        }),
+      }));
       expect(service.assign).toHaveBeenCalledWith('koda', 'KODA-1', { userId: 'user-456' });
     });
 
@@ -499,8 +536,12 @@ describe('TicketsController', () => {
 
       const result = await controller.assign('koda', 'KODA-1', { agentId: 'agent-456' });
 
-      expect(result.assignedToAgentId).toBe('agent-456');
-      expect(result.assignedToUserId).toBeNull();
+      expect(result).toEqual(expect.objectContaining({
+        data: expect.objectContaining({
+          assignedToAgentId: 'agent-456',
+          assignedToUserId: null,
+        }),
+      }));
     });
 
     it('should unassign ticket', async () => {
@@ -512,8 +553,12 @@ describe('TicketsController', () => {
 
       const result = await controller.assign('koda', 'KODA-1', {});
 
-      expect(result.assignedToUserId).toBeNull();
-      expect(result.assignedToAgentId).toBeNull();
+      expect(result).toEqual(expect.objectContaining({
+        data: expect.objectContaining({
+          assignedToUserId: null,
+          assignedToAgentId: null,
+        }),
+      }));
     });
 
     it('should reject both userId and agentId with 400', async () => {

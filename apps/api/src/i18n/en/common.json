@@ -12,6 +12,7 @@
   "errors": {
     "notFound": "Resource not found",
     "forbidden": "Access denied",
-    "unauthorized": "Unauthorized"
+    "unauthorized": "Unauthorized",
+    "invalidTransition": "Invalid ticket transition"
   }
 }

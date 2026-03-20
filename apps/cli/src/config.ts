@@ -28,8 +28,8 @@ export function validateApiKey(apiKey: string | undefined): boolean {
   if (!apiKey || typeof apiKey !== 'string') {
     return false;
   }
-  // API key must be at least 6 characters
-  return apiKey.length >= 6;
+  // API key must be at least 10 characters
+  return apiKey.length >= 10;
 }
 
 export function getConfig(): Config {
@@ -56,7 +56,17 @@ export function maskApiKey(apiKey: string): string {
   if (!apiKey || apiKey.length < 4) {
     return '****';
   }
-  // Show last 6 characters, prefix with *** (e.g. mykey123 -> ***key123)
+
+  // If key starts with 'sk-proj-', preserve that prefix and mask the rest
+  if (apiKey.startsWith('sk-proj-')) {
+    const prefix = 'sk-proj-';
+    const rest = apiKey.slice(prefix.length);
+    // Mask all characters in the rest with asterisks
+    const masked = '*'.repeat(Math.max(4, rest.length));
+    return `${prefix}${masked}`;
+  }
+
+  // For other keys, show last 6 characters with *** prefix
   const visible = apiKey.slice(-6);
   return `***${visible}`;
 }

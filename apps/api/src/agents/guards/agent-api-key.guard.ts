@@ -1,6 +1,8 @@
-import { CanActivate, ExecutionContext, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { CanActivate, ExecutionContext, Inject, Injectable } from '@nestjs/common';
+import { HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac } from 'crypto';
+import { AppException } from '../../common/app-exception';
 
 @Injectable()
 export class AgentApiKeyGuard implements CanActivate {
@@ -15,17 +17,17 @@ export class AgentApiKeyGuard implements CanActivate {
     const authHeader = headers?.['authorization'] ?? '';
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new UnauthorizedException('Missing or invalid Authorization header');
+      throw new AppException('errors.unauthorized', HttpStatus.UNAUTHORIZED);
     }
 
     const rawKey = authHeader.slice('Bearer '.length).trim();
     if (!rawKey) {
-      throw new UnauthorizedException('Missing API key');
+      throw new AppException('errors.unauthorized', HttpStatus.UNAUTHORIZED);
     }
 
     const secret = this.configService.get<string>('API_KEY_SECRET');
     if (!secret) {
-      throw new UnauthorizedException('API_KEY_SECRET is not configured');
+      throw new AppException('errors.unauthorized', HttpStatus.UNAUTHORIZED);
     }
 
     const keyHash = createHmac('sha256', secret).update(rawKey).digest('hex');
@@ -35,7 +37,7 @@ export class AgentApiKeyGuard implements CanActivate {
     });
 
     if (!agent) {
-      throw new UnauthorizedException('Invalid API key');
+      throw new AppException('errors.unauthorized', HttpStatus.UNAUTHORIZED);
     }
 
     delete headers['authorization'];

@@ -1,4 +1,5 @@
 import { setConfig } from '../config';
+import { configureClient } from '../client';
 
 export interface LoginResult {
   success: boolean;
@@ -14,13 +15,17 @@ export async function loginCommand(
     throw new Error('API key is required');
   }
 
-  const config: Record<string, string> = { apiKey };
-  if (apiUrl) {
-    config.apiUrl = apiUrl;
-  } else {
-    config.apiUrl = 'http://localhost:3100/api';
+  const url = apiUrl || 'http://localhost:3100/api';
+
+  // Validate API key by calling /agents/me
+  const client = configureClient(url, apiKey);
+  try {
+    await client.get('/agents/me');
+  } catch (error) {
+    throw new Error('Invalid API key');
   }
 
+  const config: Record<string, string> = { apiKey, apiUrl: url };
   setConfig(config as Parameters<typeof setConfig>[0]);
 
   return {
