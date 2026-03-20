@@ -1,9 +1,11 @@
 import { join } from 'path';
 import { Module } from '@nestjs/common';
+import { ApplicationConfig } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { I18nCoreModule } from '@nathapp/nestjs-common';
 import { LoggingModule } from '@nathapp/nestjs-logging';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
+import { ThrottlerModule, DefaultThrottlerGuard } from '@nathapp/nestjs-throttler';
 import { PrismaClient } from '@prisma/client';
 import { AuthModule } from './auth/auth.module';
 import { AgentsModule } from './agents/agents.module';
@@ -30,10 +32,15 @@ import { validate } from './config/env.validation';
         watch: false,
       },
     }),
-    LoggingModule,
+    LoggingModule.register({}),
     PrismaModule.forRoot({
       isGlobal: true,
       client: PrismaClient,
+    }),
+    ThrottlerModule.forRootAsync({
+      useFactory: () => ({
+        throttlers: [{ name: 'default', ttl: 60000, limit: 100 }],
+      }),
     }),
     AuthModule,
     AgentsModule,
@@ -43,4 +50,12 @@ import { validate } from './config/env.validation';
     LabelsModule,
   ],
 })
-export class AppModule {}
+export class AppModule {
+  constructor(
+    appConfig: ApplicationConfig,
+    throttleGuard: DefaultThrottlerGuard,
+  ) {
+    appConfig.setGlobalPrefix(process.env['GLOBAL_PREFIX'] ?? 'api');
+    appConfig.addGlobalGuard(throttleGuard);
+  }
+}

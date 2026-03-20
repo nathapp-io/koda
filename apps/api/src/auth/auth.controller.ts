@@ -13,10 +13,12 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto, UserResponseDto } from './dto/auth-response.dto';
 import { Public, Principal } from '@nathapp/nestjs-auth';
+import { Throttle } from '@nathapp/nestjs-throttler';
 import { AppException } from '../common/app-exception';
 import { JsonResponse } from '../common/json-response';
 
 @ApiTags('auth')
+@Throttle({ default: { limit: 10, ttl: 60000 } })
 @Controller('auth')
 export class AuthController {
   constructor(private authService: AuthService) {}
