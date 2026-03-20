@@ -20,6 +20,7 @@
     "@nathapp/nestjs-app": "^3.0.0",
     "@nathapp/nestjs-auth": "^3.0.0",
     "@nathapp/nestjs-common": "^3.0.0",
+    "@nathapp/nestjs-logging": "^3.0.0",
     "@nathapp/nestjs-prisma": "^3.1.0",
     "@nestjs/common": "^11.0.0",
     "@nestjs/config": "^4.0.0",

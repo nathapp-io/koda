@@ -2,6 +2,7 @@ import { join } from 'path';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { I18nCoreModule } from '@nathapp/nestjs-common';
+import { LoggingModule } from '@nathapp/nestjs-logging';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { AgentsModule } from './agents/agents.module';
@@ -22,6 +23,7 @@ import { LabelsModule } from './labels/labels.module';
         watch: false,
       },
     }),
+    LoggingModule,
     PrismaModule,
     AuthModule,
     AgentsModule,
