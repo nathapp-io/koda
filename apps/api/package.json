@@ -60,7 +60,8 @@
     "rootDir": "src",
     "roots": [
       "<rootDir>",
-      "<rootDir>/../test/i18n"
+      "<rootDir>/../test/i18n",
+      "<rootDir>/../test/auth"
     ],
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
