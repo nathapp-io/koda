@@ -13,7 +13,7 @@ DO NOT EDIT MANUALLY — run `nax generate` to regenerate.
 
 **Language:** TypeScript
 
-**Key dependencies:** @fastify/static, @nathapp/nestjs-prisma, @nestjs/common, @nestjs/config, @nestjs/core, @nestjs/jwt, @nestjs/passport, @nestjs/platform-express, @nestjs/platform-fastify, @nestjs/swagger
+**Key dependencies:** @fastify/static, @nathapp/nestjs-prisma, @nestjs/common, @nestjs/config, @nestjs/core, @nestjs/platform-fastify, @nestjs/swagger, @prisma/client, @nestjs/cli, @nestjs/testing
 
 ---
 # CLAUDE.md — Koda API (apps/api)
