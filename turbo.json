@@ -1,6 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalDependencies": ["**/.env", "**/.env.*", "prisma/schema.prisma"],
+  "globalDependencies": ["**/.env", "**/.env.*", "apps/api/prisma/schema.prisma"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
@@ -27,6 +27,22 @@
     },
     "type-check": {
       "dependsOn": ["^build"],
+      "outputs": []
+    },
+    "db:generate": {
+      "cache": false,
+      "outputs": []
+    },
+    "db:migrate": {
+      "cache": false,
+      "outputs": []
+    },
+    "db:studio": {
+      "cache": false,
+      "persistent": true
+    },
+    "db:reset": {
+      "cache": false,
       "outputs": []
     }
   }
