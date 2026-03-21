@@ -173,7 +173,9 @@ async function run() {
     body: TEST_USER,
     expectStatus: 201,
   });
+  console.log('[DEBUG] register response:', JSON.stringify(registerRes));
   extractTokens(registerRes);
+  console.log('[DEBUG] accessToken after extract:', accessToken ? accessToken.slice(0, 20) + '...' : 'EMPTY');
 
   if (!accessToken) {
     // Fallback: user may already exist — just login
