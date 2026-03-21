@@ -54,9 +54,9 @@ describe('validateTransition', () => {
   });
 
   describe('Invalid Transitions', () => {
-    it('throws BadRequestException for CREATED → IN_PROGRESS', () => {
+    it('throws BadRequestException for CREATED → CLOSED (no direct path)', () => {
       expect(() =>
-        validateTransition(TicketStatus.CREATED, TicketStatus.IN_PROGRESS)
+        validateTransition(TicketStatus.CREATED, TicketStatus.CLOSED)
       ).toThrow(AppException);
     });
 

@@ -103,7 +103,8 @@ describe('TicketsService', () => {
 
       const result = await service.create('koda', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
 
-      expect(result).toEqual(mockTicket);
+      // service adds ref: `${project.key}-${ticket.number}` to the response
+      expect(result).toEqual({ ...mockTicket, ref: 'KODA-1' });
       expect(result.number).toBe(1);
       expect(prismaService.client.$transaction).toHaveBeenCalled();
     });

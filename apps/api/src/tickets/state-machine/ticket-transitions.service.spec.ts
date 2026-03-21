@@ -262,9 +262,12 @@ describe('TicketTransitionsService', () => {
       expect(prismaService.client.$transaction).toHaveBeenCalled();
     });
 
-    it('should throw 400 if transition is invalid (not VERIFIED status)', async () => {
+    it('should throw 400 if transition is invalid (CLOSED status cannot start)', async () => {
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket); // Still CREATED
+      mockPrismaService.client.ticket.findUnique.mockResolvedValue({
+        ...mockTicket,
+        status: TicketStatus.CLOSED, // CLOSED → IN_PROGRESS is not a valid transition
+      });
 
       await expect(
         service.start('koda', 'KODA-1', { id: 'user-123', sub: 'user-123' }, 'user')
