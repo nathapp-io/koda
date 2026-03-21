@@ -160,33 +160,29 @@ async function run() {
   let commentId = '';
 
   // ── Auth ────────────────────────────────────────────────────────────────
-  const registerData = await test('Register user', 'POST', '/api/auth/register', {
-    body: TEST_USER,
-    expectStatus: 201,
-  }) as { data?: { accessToken?: string; refreshToken?: string } };
-
-  if (registerData && typeof registerData === 'object' && 'data' in registerData) {
-    const d = (registerData as { data: { accessToken: string; refreshToken: string } }).data;
-    accessToken = d?.accessToken ?? '';
-    refreshToken = d?.refreshToken ?? '';
-  }
-
-  if (!accessToken) {
-    // Try login as fallback (user may already exist)
-    const loginData = await test('Login (fallback)', 'POST', '/api/auth/login', {
-      body: { email: TEST_USER.email, password: TEST_USER.password },
-      expectStatus: 200,
-    }) as { data?: { accessToken?: string; refreshToken?: string } };
-
-    if (loginData && typeof loginData === 'object' && 'data' in loginData) {
-      const d = (loginData as { data: { accessToken: string; refreshToken: string } }).data;
-      accessToken = d?.accessToken ?? '';
-      refreshToken = d?.refreshToken ?? '';
+  function extractTokens(res: unknown): void {
+    if (res && typeof res === 'object' && 'data' in res) {
+      const d = (res as { data: { accessToken?: string; refreshToken?: string } }).data;
+      if (d?.accessToken) accessToken = d.accessToken;
+      if (d?.refreshToken) refreshToken = d.refreshToken;
     }
   }
 
+  extractTokens(await test('Register user', 'POST', '/api/auth/register', {
+    body: TEST_USER,
+    expectStatus: 201,
+  }));
+
+  if (!accessToken) {
+    // Fallback: user may already exist — just login
+    extractTokens(await test('Login (fallback)', 'POST', '/api/auth/login', {
+      body: { email: TEST_USER.email, password: TEST_USER.password },
+      expectStatus: 200,
+    }));
+  }
+
   await test('Refresh token', 'POST', '/api/auth/refresh', {
-    body: { refreshToken },
+    token: refreshToken,   // refresh endpoint uses Bearer {refreshToken} in header
     expectStatus: 200,
   });
 

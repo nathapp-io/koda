@@ -3,7 +3,6 @@ import { AgentsService, CreateAgentDto } from './agents.service';
 import { UpdateAgentDto } from './dto/update-agent.dto';
 import { UpdateRolesDto } from './dto/update-roles.dto';
 import { UpdateCapabilitiesDto } from './dto/update-capabilities.dto';
-import { IsPublic } from '../auth/decorators/is-public.decorator';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { ForbiddenAppException, JsonResponse } from '@nathapp/nestjs-common';
 
@@ -30,7 +29,6 @@ export class AgentsController {
   }
 
   @Get()
-  @IsPublic()
   @ApiOperation({ summary: 'List all agents' })
   @ApiResponse({ status: 200, description: 'Agents retrieved successfully' })
   async findAll() {
@@ -53,7 +51,6 @@ export class AgentsController {
   }
 
   @Get(':slug')
-  @IsPublic()
   @ApiOperation({ summary: 'Get agent by slug' })
   @ApiResponse({ status: 200, description: 'Agent retrieved successfully' })
   @ApiResponse({ status: 404, description: 'Agent not found' })

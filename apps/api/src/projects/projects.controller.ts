@@ -12,7 +12,6 @@ import {
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
-import { IsPublic } from '../auth/decorators/is-public.decorator';
 import { ForbiddenAppException, JsonResponse } from '@nathapp/nestjs-common';
 import {
   ApiTags,
@@ -54,7 +53,6 @@ export class ProjectsController {
   }
 
   @Get()
-  @IsPublic()
   @ApiOperation({ summary: 'List all projects (excluding soft-deleted)' })
   @ApiResponse({ status: 200, description: 'List of projects' })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -65,7 +63,6 @@ export class ProjectsController {
   }
 
   @Get(':slug')
-  @IsPublic()
   @ApiOperation({ summary: 'Get a project by slug' })
   @ApiResponse({ status: 200, description: 'Project found' })
   @ApiResponse({ status: 404, description: 'Project not found' })
