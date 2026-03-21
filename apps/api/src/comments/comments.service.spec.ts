@@ -124,7 +124,7 @@ describe('CommentsService', () => {
       const createdComment = { ...mockComment, body: 'This is a test comment' };
       mockPrismaService.client.comment.create.mockResolvedValue(createdComment);
 
-      const result = await service.create('koda', 'KODA-1', createDto, { sub: 'user-123' }, 'user');
+      const result = await service.create('koda', 'KODA-1', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
 
       expect(result.body).toBe('This is a test comment');
       expect(prismaService.client.comment.create).toHaveBeenCalledWith(
@@ -150,7 +150,7 @@ describe('CommentsService', () => {
       const commentWithType = { ...mockComment, type: 'VERIFICATION' };
       mockPrismaService.client.comment.create.mockResolvedValue(commentWithType);
 
-      const result = await service.create('koda', 'KODA-1', createDto, { sub: 'user-123' }, 'user');
+      const result = await service.create('koda', 'KODA-1', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
 
       expect(result.type).toBe('VERIFICATION');
     });
@@ -169,7 +169,7 @@ describe('CommentsService', () => {
           type: commentType as any,
         };
 
-        const result = await service.create('koda', 'KODA-1', createDto, { sub: 'user-123' }, 'user');
+        const result = await service.create('koda', 'KODA-1', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
 
         expect(result.type).toBe(commentType);
       }
@@ -188,7 +188,7 @@ describe('CommentsService', () => {
         authorUserId: 'user-456',
       });
 
-      const result = await service.create('koda', 'KODA-1', createDto, { sub: 'user-456' }, 'user');
+      const result = await service.create('koda', 'KODA-1', createDto, { id: 'user-456', sub: 'user-456' }, 'user');
 
       expect(result.authorUserId).toBe('user-456');
       expect(result.authorAgentId).toBeNull();
@@ -208,7 +208,7 @@ describe('CommentsService', () => {
         authorAgentId: 'agent-456',
       });
 
-      const result = await service.create('koda', 'KODA-1', createDto, { sub: 'agent-456' }, 'agent');
+      const result = await service.create('koda', 'KODA-1', createDto, { id: 'agent-456', sub: 'agent-456' }, 'agent');
 
       expect(result.authorAgentId).toBe('agent-456');
       expect(result.authorUserId).toBeNull();
@@ -223,7 +223,7 @@ describe('CommentsService', () => {
       mockPrismaService.client.project.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.create('nonexistent', 'KODA-1', createDto, { sub: 'user-123' }, 'user')
+        service.create('nonexistent', 'KODA-1', createDto, { id: 'user-123', sub: 'user-123' }, 'user')
       ).rejects.toThrow();
     });
 
@@ -237,7 +237,7 @@ describe('CommentsService', () => {
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.create('koda', 'KODA-999', createDto, { sub: 'user-123' }, 'user')
+        service.create('koda', 'KODA-999', createDto, { id: 'user-123', sub: 'user-123' }, 'user')
       ).rejects.toThrow();
     });
 
@@ -253,7 +253,7 @@ describe('CommentsService', () => {
         mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
 
         await expect(
-          service.create('koda', 'KODA-1', invalidDto as CreateCommentDto, { sub: 'user-123' }, 'user')
+          service.create('koda', 'KODA-1', invalidDto as CreateCommentDto, { id: 'user-123', sub: 'user-123' }, 'user')
         ).rejects.toThrow();
       }
     });
@@ -313,7 +313,7 @@ describe('CommentsService', () => {
         body: 'Updated comment body',
       });
 
-      const result = await service.update('comment-123', updateDto, { sub: 'user-123' }, 'user');
+      const result = await service.update('comment-123', updateDto, { id: 'user-123', sub: 'user-123' }, 'user');
 
       expect(result.body).toBe('Updated comment body');
       expect(prismaService.client.comment.update).toHaveBeenCalledWith({
@@ -334,7 +334,7 @@ describe('CommentsService', () => {
         body: 'Updated by agent',
       });
 
-      const result = await service.update('comment-123', updateDto, { sub: 'agent-123' }, 'agent');
+      const result = await service.update('comment-123', updateDto, { id: 'agent-123', sub: 'agent-123' }, 'agent');
 
       expect(result.body).toBe('Updated by agent');
     });
@@ -347,7 +347,7 @@ describe('CommentsService', () => {
       mockPrismaService.client.comment.findUnique.mockResolvedValue(mockComment);
 
       await expect(
-        service.update('comment-123', updateDto, { sub: 'user-456' }, 'user')
+        service.update('comment-123', updateDto, { id: 'user-456', sub: 'user-456' }, 'user')
       ).rejects.toThrow();
     });
 
@@ -359,7 +359,7 @@ describe('CommentsService', () => {
       mockPrismaService.client.comment.findUnique.mockResolvedValue(mockComment);
 
       await expect(
-        service.update('comment-123', updateDto, { sub: 'agent-456' }, 'agent')
+        service.update('comment-123', updateDto, { id: 'agent-456', sub: 'agent-456' }, 'agent')
       ).rejects.toThrow();
     });
 
@@ -377,7 +377,7 @@ describe('CommentsService', () => {
       const result = await service.update(
         'comment-123',
         updateDto,
-        { sub: 'admin-user', role: 'ADMIN' },
+        { id: 'admin-user', sub: 'admin-user', role: 'ADMIN' },
         'user'
       );
 
@@ -392,7 +392,7 @@ describe('CommentsService', () => {
       mockPrismaService.client.comment.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.update('nonexistent-123', updateDto, { sub: 'user-123' }, 'user')
+        service.update('nonexistent-123', updateDto, { id: 'user-123', sub: 'user-123' }, 'user')
       ).rejects.toThrow();
     });
 
@@ -408,7 +408,7 @@ describe('CommentsService', () => {
         body: 'Updated body only',
       });
 
-      const result = await service.update('comment-123', updateDto, { sub: 'user-123' }, 'user');
+      const result = await service.update('comment-123', updateDto, { id: 'user-123', sub: 'user-123' }, 'user');
 
       expect(result.type).toBe('VERIFICATION');
       expect(result.body).toBe('Updated body only');
@@ -427,7 +427,7 @@ describe('CommentsService', () => {
         updatedAt: now,
       });
 
-      const result = await service.update('comment-123', updateDto, { sub: 'user-123' }, 'user');
+      const result = await service.update('comment-123', updateDto, { id: 'user-123', sub: 'user-123' }, 'user');
 
       expect(result.updatedAt).toEqual(now);
     });
@@ -438,7 +438,7 @@ describe('CommentsService', () => {
       mockPrismaService.client.comment.findUnique.mockResolvedValue(mockComment);
       mockPrismaService.client.comment.delete.mockResolvedValue(mockComment);
 
-      await service.delete('comment-123', { sub: 'user-123' }, 'user');
+      await service.delete('comment-123', { id: 'user-123', sub: 'user-123' }, 'user');
 
       expect(prismaService.client.comment.delete).toHaveBeenCalledWith({
         where: { id: 'comment-123' },
@@ -450,7 +450,7 @@ describe('CommentsService', () => {
       mockPrismaService.client.comment.findUnique.mockResolvedValue(agentComment);
       mockPrismaService.client.comment.delete.mockResolvedValue(agentComment);
 
-      await service.delete('comment-123', { sub: 'agent-123' }, 'agent');
+      await service.delete('comment-123', { id: 'agent-123', sub: 'agent-123' }, 'agent');
 
       expect(prismaService.client.comment.delete).toHaveBeenCalled();
     });
@@ -459,7 +459,7 @@ describe('CommentsService', () => {
       mockPrismaService.client.comment.findUnique.mockResolvedValue(mockComment);
 
       await expect(
-        service.delete('comment-123', { sub: 'user-456' }, 'user')
+        service.delete('comment-123', { id: 'user-456', sub: 'user-456' }, 'user')
       ).rejects.toThrow();
     });
 
@@ -467,7 +467,7 @@ describe('CommentsService', () => {
       mockPrismaService.client.comment.findUnique.mockResolvedValue(mockComment);
 
       await expect(
-        service.delete('comment-123', { sub: 'agent-456' }, 'agent')
+        service.delete('comment-123', { id: 'agent-456', sub: 'agent-456' }, 'agent')
       ).rejects.toThrow();
     });
 
@@ -475,7 +475,7 @@ describe('CommentsService', () => {
       mockPrismaService.client.comment.findUnique.mockResolvedValue(mockComment);
       mockPrismaService.client.comment.delete.mockResolvedValue(mockComment);
 
-      await service.delete('comment-123', { sub: 'admin-user', role: 'ADMIN' }, 'user');
+      await service.delete('comment-123', { id: 'admin-user', sub: 'admin-user', role: 'ADMIN' }, 'user');
 
       expect(prismaService.client.comment.delete).toHaveBeenCalledWith({
         where: { id: 'comment-123' },
@@ -486,7 +486,7 @@ describe('CommentsService', () => {
       mockPrismaService.client.comment.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.delete('nonexistent-123', { sub: 'user-123' }, 'user')
+        service.delete('nonexistent-123', { id: 'user-123', sub: 'user-123' }, 'user')
       ).rejects.toThrow();
     });
 
@@ -494,7 +494,7 @@ describe('CommentsService', () => {
       mockPrismaService.client.comment.findUnique.mockResolvedValue(mockComment);
 
       await expect(
-        service.delete('comment-123', { sub: 'user-456', role: 'MEMBER' }, 'user')
+        service.delete('comment-123', { id: 'user-456', sub: 'user-456', role: 'MEMBER' }, 'user')
       ).rejects.toThrow();
     });
   });

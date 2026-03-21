@@ -152,7 +152,7 @@ describe('LabelsService', () => {
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.client.label.create.mockResolvedValue(mockLabel);
 
-      const result = await service.create('koda', createDto, { sub: 'user-123' }, 'user');
+      const result = await service.create('koda', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
 
       expect(result).toEqual(mockLabel);
       expect(result.name).toBe('typescript');
@@ -166,7 +166,7 @@ describe('LabelsService', () => {
         color: '#0066CC',
       };
 
-      const memberUser = { sub: 'user-456', role: 'MEMBER' };
+      const memberUser = { id: 'user-456', sub: 'user-456', role: 'MEMBER' };
 
       await expect(
         service.create('koda', createDto, memberUser, 'user')
@@ -179,7 +179,7 @@ describe('LabelsService', () => {
         color: '#0066CC',
       };
 
-      const agent = { sub: 'agent-123', slug: 'test-agent' };
+      const agent = { id: 'agent-123', sub: 'agent-123', slug: 'test-agent' };
 
       await expect(
         service.create('koda', createDto, agent, 'agent')
@@ -195,7 +195,7 @@ describe('LabelsService', () => {
       const labelWithoutColor = { ...mockLabel, name: 'frontend', color: null };
       mockPrismaService.client.label.create.mockResolvedValue(labelWithoutColor);
 
-      const result = await service.create('koda', createDto, { sub: 'user-123' }, 'user');
+      const result = await service.create('koda', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
 
       expect(result.color).toBeNull();
     });
@@ -209,7 +209,7 @@ describe('LabelsService', () => {
       mockPrismaService.client.project.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.create('nonexistent', createDto, { sub: 'user-123' }, 'user')
+        service.create('nonexistent', createDto, { id: 'user-123', sub: 'user-123' }, 'user')
       ).rejects.toThrow();
     });
 
@@ -225,7 +225,7 @@ describe('LabelsService', () => {
       );
 
       await expect(
-        service.create('koda', createDto, { sub: 'user-123' }, 'user')
+        service.create('koda', createDto, { id: 'user-123', sub: 'user-123' }, 'user')
       ).rejects.toThrow();
     });
   });
@@ -285,7 +285,7 @@ describe('LabelsService', () => {
       mockPrismaService.client.label.findUnique.mockResolvedValue(mockLabel);
       mockPrismaService.client.label.delete.mockResolvedValue(mockLabel);
 
-      await service.delete('koda', 'label-123', { sub: 'user-123' }, 'user');
+      await service.delete('koda', 'label-123', { id: 'user-123', sub: 'user-123' }, 'user');
 
       expect(prismaService.client.label.delete).toHaveBeenCalledWith({
         where: { id: 'label-123' },
@@ -293,7 +293,7 @@ describe('LabelsService', () => {
     });
 
     it('should reject delete from non-ADMIN user', async () => {
-      const memberUser = { sub: 'user-456', role: 'MEMBER' };
+      const memberUser = { id: 'user-456', sub: 'user-456', role: 'MEMBER' };
 
       await expect(
         service.delete('koda', 'label-123', memberUser, 'user')
@@ -301,7 +301,7 @@ describe('LabelsService', () => {
     });
 
     it('should reject delete from agent', async () => {
-      const agent = { sub: 'agent-123', slug: 'test-agent' };
+      const agent = { id: 'agent-123', sub: 'agent-123', slug: 'test-agent' };
 
       await expect(
         service.delete('koda', 'label-123', agent, 'agent')
@@ -312,7 +312,7 @@ describe('LabelsService', () => {
       mockPrismaService.client.project.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.delete('nonexistent', 'label-123', { sub: 'user-123' }, 'user')
+        service.delete('nonexistent', 'label-123', { id: 'user-123', sub: 'user-123' }, 'user')
       ).rejects.toThrow();
     });
 
@@ -321,7 +321,7 @@ describe('LabelsService', () => {
       mockPrismaService.client.label.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.delete('koda', 'nonexistent', { sub: 'user-123' }, 'user')
+        service.delete('koda', 'nonexistent', { id: 'user-123', sub: 'user-123' }, 'user')
       ).rejects.toThrow();
     });
 
@@ -332,7 +332,7 @@ describe('LabelsService', () => {
       mockPrismaService.client.label.findUnique.mockResolvedValue(otherProjectLabel);
 
       await expect(
-        service.delete('koda', 'label-123', { sub: 'user-123' }, 'user')
+        service.delete('koda', 'label-123', { id: 'user-123', sub: 'user-123' }, 'user')
       ).rejects.toThrow();
     });
   });
@@ -354,7 +354,7 @@ describe('LabelsService', () => {
         'koda',
         'KODA-1',
         assignDto,
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 
@@ -378,7 +378,7 @@ describe('LabelsService', () => {
         'koda',
         'KODA-1',
         assignDto,
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 
@@ -398,7 +398,7 @@ describe('LabelsService', () => {
       mockPrismaService.client.label.findUnique.mockResolvedValue(mockLabel);
       mockPrismaService.client.$transaction.mockResolvedValue(ticketWithLabel);
 
-      const memberUser = { sub: 'user-456', role: 'MEMBER' };
+      const memberUser = { id: 'user-456', sub: 'user-456', role: 'MEMBER' };
       const result = await service.assignToTicket(
         'koda',
         'KODA-1',
@@ -422,7 +422,7 @@ describe('LabelsService', () => {
       mockPrismaService.client.label.findUnique.mockResolvedValue(mockLabel);
       mockPrismaService.client.$transaction.mockResolvedValue(ticketWithLabel);
 
-      const agent = { sub: 'agent-123', slug: 'test-agent' };
+      const agent = { id: 'agent-123', sub: 'agent-123', slug: 'test-agent' };
       const result = await service.assignToTicket(
         'koda',
         'KODA-1',
@@ -445,7 +445,7 @@ describe('LabelsService', () => {
           'koda',
           'KODA-999',
           assignDto,
-          { sub: 'user-123' },
+          { id: 'user-123', sub: 'user-123' },
           'user'
         )
       ).rejects.toThrow();
@@ -463,7 +463,7 @@ describe('LabelsService', () => {
           'koda',
           'KODA-1',
           assignDto,
-          { sub: 'user-123' },
+          { id: 'user-123', sub: 'user-123' },
           'user'
         )
       ).rejects.toThrow();
@@ -482,7 +482,7 @@ describe('LabelsService', () => {
           'koda',
           'KODA-1',
           assignDto,
-          { sub: 'user-123' },
+          { id: 'user-123', sub: 'user-123' },
           'user'
         )
       ).rejects.toThrow();
@@ -503,7 +503,7 @@ describe('LabelsService', () => {
           'koda',
           'KODA-1',
           assignDto,
-          { sub: 'user-123' },
+          { id: 'user-123', sub: 'user-123' },
           'user'
         )
       ).rejects.toThrow();
@@ -531,7 +531,7 @@ describe('LabelsService', () => {
         'koda',
         'KODA-1',
         assignDto,
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 
@@ -559,7 +559,7 @@ describe('LabelsService', () => {
         'koda',
         'KODA-1',
         'label-123',
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 
@@ -586,7 +586,7 @@ describe('LabelsService', () => {
         'koda',
         'KODA-1',
         'label-123',
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 
@@ -607,7 +607,7 @@ describe('LabelsService', () => {
       });
       mockPrismaService.client.$transaction.mockResolvedValue(ticketWithoutLabel);
 
-      const memberUser = { sub: 'user-456', role: 'MEMBER' };
+      const memberUser = { id: 'user-456', sub: 'user-456', role: 'MEMBER' };
       const result = await service.removeFromTicket(
         'koda',
         'KODA-1',
@@ -633,7 +633,7 @@ describe('LabelsService', () => {
       });
       mockPrismaService.client.$transaction.mockResolvedValue(ticketWithoutLabel);
 
-      const agent = { sub: 'agent-123', slug: 'test-agent' };
+      const agent = { id: 'agent-123', sub: 'agent-123', slug: 'test-agent' };
       const result = await service.removeFromTicket(
         'koda',
         'KODA-1',
@@ -654,7 +654,7 @@ describe('LabelsService', () => {
           'koda',
           'KODA-999',
           'label-123',
-          { sub: 'user-123' },
+          { id: 'user-123', sub: 'user-123' },
           'user'
         )
       ).rejects.toThrow();
@@ -670,7 +670,7 @@ describe('LabelsService', () => {
           'koda',
           'KODA-1',
           'label-123',
-          { sub: 'user-123' },
+          { id: 'user-123', sub: 'user-123' },
           'user'
         )
       ).rejects.toThrow();
@@ -694,7 +694,7 @@ describe('LabelsService', () => {
         'koda',
         'KODA-1',
         'label-123',
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 

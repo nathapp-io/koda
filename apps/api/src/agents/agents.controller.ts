@@ -42,7 +42,7 @@ export class AgentsController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async findMe(@Req() req: any) {
-    const agentId = req.user?.sub;
+    const agentId = req.user?.id;
     if (!agentId || req.user?.actorType !== 'agent') {
       throw new ForbiddenAppException();
     }

@@ -22,6 +22,7 @@ interface AssignInput {
 }
 
 interface CurrentUser {
+  id: string;
   sub: string;
   role?: string;
 }
@@ -82,8 +83,8 @@ export class TicketsService {
           description: createTicketDto.description || null,
           status: TicketStatus.CREATED,
           priority: createTicketDto.priority || Priority.MEDIUM,
-          createdByUserId: actorType === 'user' ? currentUser.sub : null,
-          createdByAgentId: actorType === 'agent' ? currentUser.sub : null,
+          createdByUserId: actorType === 'user' ? currentUser.id : null,
+          createdByAgentId: actorType === 'agent' ? currentUser.id : null,
         },
       });
     });

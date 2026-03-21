@@ -74,7 +74,7 @@ export class AuthService {
 
   async refresh(payload: JwtPayload) {
     const user = await this.db.user.findUnique({
-      where: { id: payload.sub },
+      where: { id: payload.sub ?? (payload as any).id },
     });
 
     if (!user) {
@@ -93,7 +93,7 @@ export class AuthService {
 
   async validateUser(payload: JwtPayload) {
     const user = await this.db.user.findUnique({
-      where: { id: payload.sub },
+      where: { id: payload.sub ?? (payload as any).id },
     });
 
     return user || null;

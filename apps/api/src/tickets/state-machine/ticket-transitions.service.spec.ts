@@ -134,7 +134,7 @@ describe('TicketTransitionsService', () => {
         'koda',
         'KODA-1',
         'This is verified',
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 
@@ -160,7 +160,7 @@ describe('TicketTransitionsService', () => {
         'koda',
         'KODA-1',
         'This is verified',
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 
@@ -188,7 +188,7 @@ describe('TicketTransitionsService', () => {
         'koda',
         'KODA-1',
         'This is verified',
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 
@@ -201,7 +201,7 @@ describe('TicketTransitionsService', () => {
       mockPrismaService.client.project.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.verify('nonexistent', 'KODA-1', 'Comment', { sub: 'user-123' }, 'user')
+        service.verify('nonexistent', 'KODA-1', 'Comment', { id: 'user-123', sub: 'user-123' }, 'user')
       ).rejects.toThrow(AppException);
     });
 
@@ -210,7 +210,7 @@ describe('TicketTransitionsService', () => {
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.verify('koda', 'KODA-999', 'Comment', { sub: 'user-123' }, 'user')
+        service.verify('koda', 'KODA-999', 'Comment', { id: 'user-123', sub: 'user-123' }, 'user')
       ).rejects.toThrow(AppException);
     });
 
@@ -222,7 +222,7 @@ describe('TicketTransitionsService', () => {
       });
 
       await expect(
-        service.verify('koda', 'KODA-1', 'Comment', { sub: 'user-123' }, 'user')
+        service.verify('koda', 'KODA-1', 'Comment', { id: 'user-123', sub: 'user-123' }, 'user')
       ).rejects.toThrow(AppException);
     });
   });
@@ -239,7 +239,7 @@ describe('TicketTransitionsService', () => {
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(verifiedTicket);
       mockPrismaService.client.$transaction.mockResolvedValue(transitionResult);
 
-      const result = await service.start('koda', 'KODA-1', { sub: 'user-123' }, 'user');
+      const result = await service.start('koda', 'KODA-1', { id: 'user-123', sub: 'user-123' }, 'user');
 
       expect(result.ticket.status).toBe(TicketStatus.IN_PROGRESS);
       expect(result.activity.fromStatus).toBe(TicketStatus.VERIFIED);
@@ -257,7 +257,7 @@ describe('TicketTransitionsService', () => {
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(verifiedTicket);
       mockPrismaService.client.$transaction.mockResolvedValue(transitionResult);
 
-      await service.start('koda', 'KODA-1', { sub: 'user-123' }, 'user');
+      await service.start('koda', 'KODA-1', { id: 'user-123', sub: 'user-123' }, 'user');
 
       expect(prismaService.client.$transaction).toHaveBeenCalled();
     });
@@ -267,7 +267,7 @@ describe('TicketTransitionsService', () => {
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket); // Still CREATED
 
       await expect(
-        service.start('koda', 'KODA-1', { sub: 'user-123' }, 'user')
+        service.start('koda', 'KODA-1', { id: 'user-123', sub: 'user-123' }, 'user')
       ).rejects.toThrow(AppException);
     });
   });
@@ -289,7 +289,7 @@ describe('TicketTransitionsService', () => {
         'koda',
         'KODA-1',
         'Fixed the bug',
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 
@@ -315,7 +315,7 @@ describe('TicketTransitionsService', () => {
         'koda',
         'KODA-1',
         'Fixed the bug',
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 
@@ -342,7 +342,7 @@ describe('TicketTransitionsService', () => {
         'KODA-1',
         'Approved',
         true, // approve=true → CLOSED
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 
@@ -368,7 +368,7 @@ describe('TicketTransitionsService', () => {
         'KODA-1',
         'Fix is not working',
         false, // approve=false → IN_PROGRESS
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 
@@ -394,7 +394,7 @@ describe('TicketTransitionsService', () => {
         'KODA-1',
         'Approved',
         true,
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 
@@ -414,7 +414,7 @@ describe('TicketTransitionsService', () => {
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(verifyFixTicket);
       mockPrismaService.client.$transaction.mockResolvedValue(transitionResult);
 
-      const result = await service.close('koda', 'KODA-1', { sub: 'user-123' }, 'user');
+      const result = await service.close('koda', 'KODA-1', { id: 'user-123', sub: 'user-123' }, 'user');
 
       expect(result.ticket.status).toBe(TicketStatus.CLOSED);
       expect(result.activity.toStatus).toBe(TicketStatus.CLOSED);
@@ -425,7 +425,7 @@ describe('TicketTransitionsService', () => {
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket); // CREATED status
 
       await expect(
-        service.close('koda', 'KODA-1', { sub: 'user-123' }, 'user')
+        service.close('koda', 'KODA-1', { id: 'user-123', sub: 'user-123' }, 'user')
       ).rejects.toThrow(AppException);
     });
   });
@@ -446,7 +446,7 @@ describe('TicketTransitionsService', () => {
         'koda',
         'KODA-1',
         'Not valid',
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 
@@ -471,7 +471,7 @@ describe('TicketTransitionsService', () => {
         'koda',
         'KODA-1',
         'Not valid',
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 
@@ -485,7 +485,7 @@ describe('TicketTransitionsService', () => {
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(inProgressTicket);
 
       await expect(
-        service.reject('koda', 'KODA-1', 'Not valid', { sub: 'user-123' }, 'user')
+        service.reject('koda', 'KODA-1', 'Not valid', { id: 'user-123', sub: 'user-123' }, 'user')
       ).rejects.toThrow(AppException);
     });
 
@@ -495,7 +495,7 @@ describe('TicketTransitionsService', () => {
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(closedTicket);
 
       await expect(
-        service.reject('koda', 'KODA-1', 'Not valid', { sub: 'user-123' }, 'user')
+        service.reject('koda', 'KODA-1', 'Not valid', { id: 'user-123', sub: 'user-123' }, 'user')
       ).rejects.toThrow(AppException);
     });
   });
@@ -516,7 +516,7 @@ describe('TicketTransitionsService', () => {
         'koda',
         'KODA-1',
         'Verified',
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 
@@ -541,7 +541,7 @@ describe('TicketTransitionsService', () => {
         'koda',
         'KODA-1',
         'Verified',
-        { sub: 'agent-123' },
+        { id: 'agent-123', sub: 'agent-123' },
         'agent'
       );
 
@@ -568,7 +568,7 @@ describe('TicketTransitionsService', () => {
         'koda',
         'KODA-1',
         'Verified',
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 
@@ -590,7 +590,7 @@ describe('TicketTransitionsService', () => {
         'koda',
         'KODA-1',
         'Verified',
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 

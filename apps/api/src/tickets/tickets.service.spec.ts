@@ -101,7 +101,7 @@ describe('TicketsService', () => {
       // Mock transaction to return ticket with number 1
       mockPrismaService.client.$transaction.mockResolvedValue(mockTicket);
 
-      const result = await service.create('koda', createDto, { sub: 'user-123' }, 'user');
+      const result = await service.create('koda', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
 
       expect(result).toEqual(mockTicket);
       expect(result.number).toBe(1);
@@ -123,12 +123,12 @@ describe('TicketsService', () => {
 
       // First create
       mockPrismaService.client.$transaction.mockResolvedValueOnce(ticket1);
-      const result1 = await service.create('koda', createDto, { sub: 'user-123' }, 'user');
+      const result1 = await service.create('koda', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
       expect(result1.number).toBe(1);
 
       // Second create
       mockPrismaService.client.$transaction.mockResolvedValueOnce(ticket2);
-      const result2 = await service.create('koda', createDto, { sub: 'user-123' }, 'user');
+      const result2 = await service.create('koda', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
       expect(result2.number).toBe(2);
     });
 
@@ -150,8 +150,8 @@ describe('TicketsService', () => {
         .mockResolvedValueOnce(ticket2);
 
       const [result1, result2] = await Promise.all([
-        service.create('koda', createDto, { sub: 'user-123' }, 'user'),
-        service.create('koda', createDto, { sub: 'user-123' }, 'user'),
+        service.create('koda', createDto, { id: 'user-123', sub: 'user-123' }, 'user'),
+        service.create('koda', createDto, { id: 'user-123', sub: 'user-123' }, 'user'),
       ]);
 
       // Numbers should be different and sequential
@@ -168,7 +168,7 @@ describe('TicketsService', () => {
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(null);
 
-      await expect(service.create('nonexistent', createDto, { sub: 'user-123' }, 'user')).rejects.toThrow();
+      await expect(service.create('nonexistent', createDto, { id: 'user-123', sub: 'user-123' }, 'user')).rejects.toThrow();
     });
 
     it('should assign ticket to current user when createdByUserId is provided', async () => {
@@ -184,7 +184,7 @@ describe('TicketsService', () => {
         createdByUserId: 'user-123',
       });
 
-      const result = await service.create('koda', createDto, { sub: 'user-123' }, 'user');
+      const result = await service.create('koda', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
 
       expect(result.createdByUserId).toBe('user-123');
     });
@@ -203,7 +203,7 @@ describe('TicketsService', () => {
         createdByUserId: null,
       });
 
-      const result = await service.create('koda', createDto, { sub: 'agent-123' }, 'agent');
+      const result = await service.create('koda', createDto, { id: 'agent-123', sub: 'agent-123' }, 'agent');
 
       expect(result.createdByAgentId).toBe('agent-123');
     });
@@ -219,7 +219,7 @@ describe('TicketsService', () => {
         mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
 
         await expect(
-          service.create('koda', invalidDto as CreateTicketDto, { sub: 'user-123' }, 'user')
+          service.create('koda', invalidDto as CreateTicketDto, { id: 'user-123', sub: 'user-123' }, 'user')
         ).rejects.toThrow();
       }
     });
@@ -238,7 +238,7 @@ describe('TicketsService', () => {
       };
       mockPrismaService.client.$transaction.mockResolvedValue(expectedTicket);
 
-      const result = await service.create('koda', createDto, { sub: 'user-123' }, 'user');
+      const result = await service.create('koda', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
 
       expect(result.status).toBe('CREATED');
       expect(result.priority).toBe('MEDIUM');
@@ -488,7 +488,7 @@ describe('TicketsService', () => {
         ...updateDto,
       });
 
-      const result = await service.update('koda', 'KODA-1', updateDto, { sub: 'user-123' }, 'user');
+      const result = await service.update('koda', 'KODA-1', updateDto, { id: 'user-123', sub: 'user-123' }, 'user');
 
       expect(result.title).toBe('Updated title');
       expect(result.priority).toBe('CRITICAL');
@@ -504,7 +504,7 @@ describe('TicketsService', () => {
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
       mockPrismaService.client.ticket.update.mockResolvedValue(mockTicket);
 
-      const result = await service.update('koda', 'KODA-1', updateDto, { sub: 'user-123' }, 'user');
+      const result = await service.update('koda', 'KODA-1', updateDto, { id: 'user-123', sub: 'user-123' }, 'user');
 
       expect(result.number).toBe(1); // Original number
       expect(result.projectId).toBe('proj-123'); // Original projectId
@@ -519,7 +519,7 @@ describe('TicketsService', () => {
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.update('koda', 'KODA-999', updateDto, { sub: 'user-123' }, 'user')
+        service.update('koda', 'KODA-999', updateDto, { id: 'user-123', sub: 'user-123' }, 'user')
       ).rejects.toThrow();
     });
 
@@ -535,7 +535,7 @@ describe('TicketsService', () => {
         title: 'Only update title',
       });
 
-      const result = await service.update('koda', 'KODA-1', updateDto, { sub: 'user-123' }, 'user');
+      const result = await service.update('koda', 'KODA-1', updateDto, { id: 'user-123', sub: 'user-123' }, 'user');
 
       expect(result.title).toBe('Only update title');
       expect(result.description).toBe(mockTicket.description); // Unchanged
@@ -552,7 +552,7 @@ describe('TicketsService', () => {
         deletedAt: now,
       });
 
-      const result = await service.softDelete('koda', 'KODA-1', { sub: 'user-123' }, 'user');
+      const result = await service.softDelete('koda', 'KODA-1', { id: 'user-123', sub: 'user-123' }, 'user');
 
       expect(result.deletedAt).not.toBeNull();
       expect(prismaService.client.ticket.update).toHaveBeenCalledWith({
@@ -569,7 +569,7 @@ describe('TicketsService', () => {
         deletedAt: new Date(),
       });
 
-      const result = await service.softDelete('koda', 'KODA-1', { sub: 'user-123' }, 'user');
+      const result = await service.softDelete('koda', 'KODA-1', { id: 'user-123', sub: 'user-123' }, 'user');
 
       expect(result.id).toBe(mockTicket.id); // ID still exists
       expect(result).toBeDefined();
@@ -581,7 +581,7 @@ describe('TicketsService', () => {
 
       // Non-admin user should be rejected
       await expect(
-        service.softDelete('koda', 'KODA-1', { sub: 'user-456', role: 'MEMBER' }, 'user')
+        service.softDelete('koda', 'KODA-1', { id: 'user-456', sub: 'user-456', role: 'MEMBER' }, 'user')
       ).rejects.toThrow();
     });
 
@@ -590,7 +590,7 @@ describe('TicketsService', () => {
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.softDelete('koda', 'KODA-999', { sub: 'user-123', role: 'ADMIN' }, 'user')
+        service.softDelete('koda', 'KODA-999', { id: 'user-123', sub: 'user-123', role: 'ADMIN' }, 'user')
       ).rejects.toThrow();
     });
   });

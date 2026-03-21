@@ -7,6 +7,7 @@ import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 
 interface CurrentUser {
+  id: string;
   sub: string;
   role?: string;
 }
@@ -78,8 +79,8 @@ export class CommentsService {
         ticketId: ticket.id,
         body: createCommentDto.body,
         type: createCommentDto.type as CommentType,
-        authorUserId: actorType === 'user' ? currentUser.sub : null,
-        authorAgentId: actorType === 'agent' ? currentUser.sub : null,
+        authorUserId: actorType === 'user' ? currentUser.id : null,
+        authorAgentId: actorType === 'agent' ? currentUser.id : null,
       },
     });
 
@@ -158,8 +159,8 @@ export class CommentsService {
 
     // Check authorization: only author or admin can edit
     const isAuthor =
-      (actorType === 'user' && comment.authorUserId === currentUser.sub) ||
-      (actorType === 'agent' && comment.authorAgentId === currentUser.sub);
+      (actorType === 'user' && comment.authorUserId === currentUser.id) ||
+      (actorType === 'agent' && comment.authorAgentId === currentUser.id);
 
     const isAdmin = actorType === 'user' && currentUser.role === 'ADMIN';
 
@@ -194,8 +195,8 @@ export class CommentsService {
 
     // Check authorization: only author or admin can delete
     const isAuthor =
-      (actorType === 'user' && comment.authorUserId === currentUser.sub) ||
-      (actorType === 'agent' && comment.authorAgentId === currentUser.sub);
+      (actorType === 'user' && comment.authorUserId === currentUser.id) ||
+      (actorType === 'agent' && comment.authorAgentId === currentUser.id);
 
     const isAdmin = actorType === 'user' && currentUser.role === 'ADMIN';
 

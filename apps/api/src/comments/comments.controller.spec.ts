@@ -247,7 +247,7 @@ describe('CommentsController', () => {
         body: 'Unauthorized edit',
       };
 
-      const otherAgent = { sub: 'agent-456', slug: 'other-agent' };
+      const otherAgent = { id: 'agent-456', sub: 'agent-456', slug: 'other-agent' };
       mockCommentsService.update.mockRejectedValue(new Error('Forbidden'));
 
       await expect(
@@ -338,7 +338,7 @@ describe('CommentsController', () => {
     });
 
     it('should return 403 when non-author agent tries to delete comment', async () => {
-      const otherAgent = { sub: 'agent-456', slug: 'other-agent' };
+      const otherAgent = { id: 'agent-456', sub: 'agent-456', slug: 'other-agent' };
       mockCommentsService.delete.mockRejectedValue(new Error('Forbidden'));
 
       await expect(

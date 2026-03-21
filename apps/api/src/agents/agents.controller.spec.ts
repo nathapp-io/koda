@@ -14,13 +14,13 @@ describe('AgentsController', () => {
   };
 
   const mockAgentUser = {
-    sub: 'agent-456',
+    id: 'agent-456', sub: 'agent-456',
     slug: 'test-agent',
     actorType: 'agent',
   };
 
   const mockMemberUser = {
-    sub: 'user-789',
+    id: 'user-789', sub: 'user-789',
     email: 'member@example.com',
     role: 'MEMBER',
   };

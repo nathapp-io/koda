@@ -11,6 +11,7 @@ import { TicketStatus, CommentType, ActivityType } from '../../common/enums';
 import { validateTransition } from './ticket-transitions';
 
 export interface CurrentUser {
+  id: string;
   sub: string;
 }
 

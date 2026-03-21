@@ -6,6 +6,7 @@ import { CreateLabelDto } from './dto/create-label.dto';
 import { AssignLabelDto } from './dto/assign-label.dto';
 
 interface CurrentUser {
+  id: string;
   sub: string;
   role?: string;
 }
