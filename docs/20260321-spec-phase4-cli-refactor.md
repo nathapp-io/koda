@@ -1,6 +1,6 @@
-# Phase 3 — CLI Refactor to Match Phase 2R API
+# Phase 4 — CLI Refactor to Match Phase 2R API
 
-**Branch:** `feat/refactor-cli-standard`  
+**Branch:** `feat/phase4-cli-refactor`  
 **Working directory:** `apps/cli`  
 **Created:** 2026-03-21  
 **Status:** 🟡 Ready to implement  
