@@ -6,7 +6,7 @@
  * These tests are RED until AppException is fully implemented.
  */
 import { HttpException, HttpStatus } from '@nestjs/common';
-import { AppException } from '../../src/common/app-exception';
+import { AppException } from '@nathapp/nestjs-common';
 
 describe('AppException', () => {
   describe('constructor', () => {

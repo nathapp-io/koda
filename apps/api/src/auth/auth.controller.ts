@@ -14,8 +14,7 @@ import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto, UserResponseDto } from './dto/auth-response.dto';
 import { Public, Principal } from '@nathapp/nestjs-auth';
 import { Throttle } from '@nathapp/nestjs-throttler';
-import { AppException } from '../common/app-exception';
-import { JsonResponse } from '../common/json-response';
+import { AuthException, JsonResponse } from '@nathapp/nestjs-common';
 
 @ApiTags('auth')
 @Throttle({ default: { limit: 10, ttl: 60000 } })
@@ -31,7 +30,7 @@ export class AuthController {
   @Public()
   async register(@Body() registerDto: RegisterDto): Promise<JsonResponse<AuthResponseDto>> {
     const data = await this.authService.register(registerDto);
-    return JsonResponse.created(data as unknown as AuthResponseDto);
+    return JsonResponse.Ok(data as unknown as AuthResponseDto) as unknown as JsonResponse<AuthResponseDto>;
   }
 
   @Post('login')
@@ -42,7 +41,7 @@ export class AuthController {
   @Public()
   async login(@Body() loginDto: LoginDto): Promise<JsonResponse<AuthResponseDto>> {
     const data = await this.authService.login(loginDto);
-    return JsonResponse.ok(data as unknown as AuthResponseDto);
+    return JsonResponse.Ok(data as unknown as AuthResponseDto) as unknown as JsonResponse<AuthResponseDto>;
   }
 
   @Post('refresh')
@@ -57,10 +56,10 @@ export class AuthController {
     @Headers('authorization') authHeader: string,
   ): Promise<JsonResponse<AuthResponseDto>> {
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new AppException('errors.unauthorized', HttpStatus.UNAUTHORIZED);
+      throw new AuthException();
     }
     const data = await this.authService.refresh(user);
-    return JsonResponse.ok(data as unknown as AuthResponseDto);
+    return JsonResponse.Ok(data as unknown as AuthResponseDto) as unknown as JsonResponse<AuthResponseDto>;
   }
 
   @Get('me')
@@ -72,8 +71,8 @@ export class AuthController {
   async me(@Principal() user: JwtPayload): Promise<JsonResponse<UserResponseDto>> {
     const validatedUser = await this.authService.validateUser(user);
     if (!validatedUser) {
-      throw new AppException('errors.unauthorized', HttpStatus.UNAUTHORIZED);
+      throw new AuthException();
     }
-    return JsonResponse.ok(validatedUser as unknown as UserResponseDto);
+    return JsonResponse.Ok(validatedUser as unknown as UserResponseDto) as unknown as JsonResponse<UserResponseDto>;
   }
 }

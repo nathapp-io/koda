@@ -1,6 +1,6 @@
-import { Injectable, HttpStatus } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { AppException } from '../common/app-exception';
+import { NotFoundAppException, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TicketType, TicketStatus, Priority, PrismaClient } from '@prisma/client';
@@ -44,21 +44,21 @@ export class TicketsService {
     });
 
     if (!project || project.deletedAt) {
-      throw new AppException('projects.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Validate required fields
     if (createTicketDto.type === undefined) {
-      throw new AppException('tickets.typeRequired', HttpStatus.BAD_REQUEST);
+      throw new ValidationAppException();
     }
     if (createTicketDto.title === undefined) {
-      throw new AppException('tickets.titleRequired', HttpStatus.BAD_REQUEST);
+      throw new ValidationAppException();
     }
     if (typeof createTicketDto.title === 'string' && createTicketDto.title.trim().length === 0) {
-      throw new AppException('tickets.titleEmpty', HttpStatus.BAD_REQUEST);
+      throw new ValidationAppException();
     }
     if (createTicketDto.description !== undefined && typeof createTicketDto.description === 'string' && createTicketDto.description.trim().length === 0) {
-      throw new AppException('tickets.descriptionEmpty', HttpStatus.BAD_REQUEST);
+      throw new ValidationAppException();
     }
 
     // Use transaction to safely auto-increment ticket number
@@ -97,7 +97,7 @@ export class TicketsService {
     });
 
     if (!project || project.deletedAt) {
-      throw new AppException('projects.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Build where clause
@@ -159,7 +159,7 @@ export class TicketsService {
     });
 
     if (!project || project.deletedAt) {
-      throw new AppException('projects.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Check if ref matches KODA-42 format (projectKey-number)
@@ -190,7 +190,7 @@ export class TicketsService {
 
     // Don't return soft-deleted tickets
     if (!ticket || ticket.deletedAt) {
-      throw new AppException('tickets.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Transform labels from nested structure to flat array
@@ -217,7 +217,7 @@ export class TicketsService {
     // Find ticket by ref
     const ticket = await this.findByRef(projectSlug, ref);
     if (!ticket) {
-      throw new AppException('tickets.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Build update data - only allow updating mutable fields
@@ -249,17 +249,17 @@ export class TicketsService {
   ) {
     // Check if user has ADMIN role (only applies to users)
     if (actorType === 'user' && currentUser.role && currentUser.role !== 'ADMIN') {
-      throw new AppException('errors.forbidden', HttpStatus.FORBIDDEN);
+      throw new ForbiddenAppException();
     }
 
     if (actorType === 'agent') {
-      throw new AppException('errors.forbidden', HttpStatus.FORBIDDEN);
+      throw new ForbiddenAppException();
     }
 
     // Find ticket by ref
     const ticket = await this.findByRef(projectSlug, ref);
     if (!ticket) {
-      throw new AppException('tickets.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Soft delete by setting deletedAt
@@ -274,7 +274,7 @@ export class TicketsService {
   async assign(projectSlug: string, ref: string, assignInput: AssignInput) {
     // Validate that we don't have both userId and agentId
     if (assignInput.userId && assignInput.agentId) {
-      throw new AppException('tickets.assignConflict', HttpStatus.BAD_REQUEST);
+      throw new ValidationAppException();
     }
 
     // Find project
@@ -283,13 +283,13 @@ export class TicketsService {
     });
 
     if (!project || project.deletedAt) {
-      throw new AppException('projects.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Find ticket by ref
     const ticket = await this.findByRef(projectSlug, ref);
     if (!ticket) {
-      throw new AppException('tickets.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Update assignment

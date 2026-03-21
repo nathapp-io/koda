@@ -8,7 +8,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { LabelsController } from '../../src/labels/labels.controller';
 import { LabelsService } from '../../src/labels/labels.service';
-import { JsonResponse } from '../../src/common/json-response';
+import { JsonResponse } from '/nestjs-common';
 
 describe('LabelsController — JsonResponse envelope (US-004)', () => {
   let controller: LabelsController;

@@ -1,6 +1,6 @@
 import { TicketStatus, CommentType } from '@prisma/client';
 import { validateTransition } from './ticket-transitions';
-import { AppException } from '../../common/app-exception';
+import { AppException } from '/nestjs-common';
 
 describe('validateTransition', () => {
   describe('Valid Transitions', () => {

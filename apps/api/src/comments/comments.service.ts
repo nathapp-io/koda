@@ -1,7 +1,7 @@
-import { Injectable, HttpStatus } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { CommentType, PrismaClient } from '@prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { AppException } from '../common/app-exception';
+import { ValidationAppException, NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 
@@ -26,13 +26,13 @@ export class CommentsService {
   ) {
     // Validate required fields
     if (!createCommentDto.body) {
-      throw new AppException('comments.bodyRequired', HttpStatus.BAD_REQUEST);
+      throw new ValidationAppException();
     }
     if (typeof createCommentDto.body === 'string' && createCommentDto.body.trim().length === 0) {
-      throw new AppException('comments.bodyEmpty', HttpStatus.BAD_REQUEST);
+      throw new ValidationAppException();
     }
     if (!createCommentDto.type) {
-      throw new AppException('comments.typeRequired', HttpStatus.BAD_REQUEST);
+      throw new ValidationAppException();
     }
 
     // Find project by slug
@@ -41,7 +41,7 @@ export class CommentsService {
     });
 
     if (!project || project.deletedAt) {
-      throw new AppException('projects.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Find ticket by ref (KODA-1 or CUID)
@@ -69,7 +69,7 @@ export class CommentsService {
     }
 
     if (!ticket || ticket.deletedAt) {
-      throw new AppException('tickets.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Create the comment
@@ -93,7 +93,7 @@ export class CommentsService {
     });
 
     if (!project || project.deletedAt) {
-      throw new AppException('projects.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Find ticket by ref (KODA-1 or CUID)
@@ -121,7 +121,7 @@ export class CommentsService {
     }
 
     if (!ticket || ticket.deletedAt) {
-      throw new AppException('tickets.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Find all comments for this ticket, ordered by creation date
@@ -153,7 +153,7 @@ export class CommentsService {
     });
 
     if (!comment) {
-      throw new AppException('comments.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Check authorization: only author or admin can edit
@@ -164,7 +164,7 @@ export class CommentsService {
     const isAdmin = actorType === 'user' && currentUser.role === 'ADMIN';
 
     if (!isAuthor && !isAdmin) {
-      throw new AppException('errors.forbidden', HttpStatus.FORBIDDEN);
+      throw new ForbiddenAppException();
     }
 
     // Update the comment
@@ -189,7 +189,7 @@ export class CommentsService {
     });
 
     if (!comment) {
-      throw new AppException('comments.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Check authorization: only author or admin can delete
@@ -200,7 +200,7 @@ export class CommentsService {
     const isAdmin = actorType === 'user' && currentUser.role === 'ADMIN';
 
     if (!isAuthor && !isAdmin) {
-      throw new AppException('errors.forbidden', HttpStatus.FORBIDDEN);
+      throw new ForbiddenAppException();
     }
 
     // Delete the comment

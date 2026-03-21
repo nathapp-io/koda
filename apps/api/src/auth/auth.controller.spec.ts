@@ -1,8 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
-import { AppException } from '../common/app-exception';
-import { JsonResponse } from '../common/json-response';
+import { AuthException, JsonResponse } from '@nathapp/nestjs-common';
 
 describe('AuthController', () => {
   let controller: AuthController;
@@ -134,9 +133,9 @@ describe('AuthController', () => {
         password: 'wrongpassword',
       };
 
-      mockAuthService.login.mockRejectedValue(new AppException('auth.invalidCredentials', 401));
+      mockAuthService.login.mockRejectedValue(new AuthException());
 
-      await expect(controller.login(loginDto)).rejects.toThrow(AppException);
+      await expect(controller.login(loginDto)).rejects.toThrow(AuthException);
       expect(authService.login).toHaveBeenCalledWith(loginDto);
     });
 
@@ -146,9 +145,9 @@ describe('AuthController', () => {
         password: 'password123',
       };
 
-      mockAuthService.login.mockRejectedValue(new AppException('auth.invalidCredentials', 401));
+      mockAuthService.login.mockRejectedValue(new AuthException());
 
-      await expect(controller.login(loginDto)).rejects.toThrow(AppException);
+      await expect(controller.login(loginDto)).rejects.toThrow(AuthException);
     });
   });
 
@@ -178,10 +177,10 @@ describe('AuthController', () => {
         role: mockUser.role,
       };
 
-      mockAuthService.refresh.mockRejectedValue(new AppException('errors.unauthorized', 401));
+      mockAuthService.refresh.mockRejectedValue(new AuthException());
 
       await expect(controller.refresh(user, bearerToken)).rejects.toThrow(
-        AppException,
+        AuthException,
       );
     });
   });

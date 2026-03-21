@@ -5,7 +5,7 @@ import { TicketTransitionsService } from '../../src/tickets/state-machine/ticket
 import { BadRequestException as _BadRequestException, ForbiddenException as _ForbiddenException, NotFoundException as _NotFoundException } from '@nestjs/common';
 import { CreateTicketDto } from '../../src/tickets/dto/create-ticket.dto';
 import { UpdateTicketDto } from '../../src/tickets/dto/update-ticket.dto';
-import { JsonResponse } from '../../src/common/json-response';
+import { JsonResponse } from '/nestjs-common';
 
 describe('TicketsController', () => {
   let controller: TicketsController;

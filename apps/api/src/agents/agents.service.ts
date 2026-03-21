@@ -1,8 +1,8 @@
-import { Injectable, HttpStatus } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { authConfig } from '../config/auth.config';
-import { AppException } from '../common/app-exception';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { createHmac, randomBytes } from 'crypto';
 import type { AgentRole, PrismaClient } from '@prisma/client';
 
@@ -99,7 +99,7 @@ export class AgentsService {
     });
 
     if (!agent) {
-      throw new AppException('agents.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     return agent;
@@ -116,7 +116,7 @@ export class AgentsService {
     });
 
     if (!agent) {
-      throw new AppException('agents.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     return agent;
@@ -200,7 +200,7 @@ export class AgentsService {
     });
 
     if (!agent) {
-      throw new AppException('agents.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Rotate key using agent id

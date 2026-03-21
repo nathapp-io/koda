@@ -8,7 +8,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { CommentsController } from '../../src/comments/comments.controller';
 import { CommentsService } from '../../src/comments/comments.service';
-import { JsonResponse } from '../../src/common/json-response';
+import { JsonResponse } from '/nestjs-common';
 
 describe('CommentsController — JsonResponse envelope (US-004)', () => {
   let controller: CommentsController;

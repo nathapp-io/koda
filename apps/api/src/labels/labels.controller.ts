@@ -17,7 +17,7 @@ import {
 import { LabelsService } from './labels.service';
 import { CreateLabelDto } from './dto/create-label.dto';
 import { AssignLabelDto } from './dto/assign-label.dto';
-import { JsonResponse } from '../common/json-response';
+import { JsonResponse } from '@nathapp/nestjs-common';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type RequestWithUser = any & { user?: any; agent?: any };
@@ -86,20 +86,20 @@ export class LabelsController {
     @Param('slug') slug: string,
     @Body() createLabelDto: CreateLabelDto,
     @Req() req: RequestWithUser,
-  ): Promise<JsonResponse> {
+  ): Promise<any> {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     const data = await this.create(slug, createLabelDto, currentUser, actorType);
-    return JsonResponse.created(data);
+    return JsonResponse.Ok(data) as any;
   }
 
   @Get('projects/:slug/labels')
   @ApiOperation({ summary: 'List all labels for a project' })
   @ApiResponse({ status: 200, description: 'List of labels' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  async findByProjectFromHttp(@Param('slug') slug: string): Promise<JsonResponse> {
+  async findByProjectFromHttp(@Param('slug') slug: string): Promise<any> {
     const data = await this.findByProject(slug);
-    return JsonResponse.ok(data);
+    return JsonResponse.Ok(data) as any;
   }
 
   @Delete('projects/:slug/labels/:id')
@@ -129,11 +129,11 @@ export class LabelsController {
     @Param('ref') ref: string,
     @Body() assignLabelDto: AssignLabelDto,
     @Req() req: RequestWithUser,
-  ): Promise<JsonResponse> {
+  ): Promise<any> {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     const data = await this.assignLabel(slug, ref, assignLabelDto, currentUser, actorType);
-    return JsonResponse.ok(data);
+    return JsonResponse.Ok(data) as any;
   }
 
   @Delete('projects/:slug/tickets/:ref/labels/:labelId')

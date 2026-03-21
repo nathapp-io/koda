@@ -1,8 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
-import { AppException } from '../common/app-exception';
-import { JsonResponse } from '../common/json-response';
+import { ForbiddenAppException, JsonResponse } from '@nathapp/nestjs-common';
 
 describe('AgentsController', () => {
   let controller: AgentsController;
@@ -106,7 +105,7 @@ describe('AgentsController', () => {
 
       const req: any = { user: mockMemberUser };
 
-      await expect(controller.generateApiKey(createAgentDto, req)).rejects.toThrow(AppException);
+      await expect(controller.generateApiKey(createAgentDto, req)).rejects.toThrow(ForbiddenAppException);
     });
 
     it('should return raw key only ONCE (not stored)', async () => {
@@ -319,9 +318,9 @@ describe('AgentsController', () => {
     });
 
     it('should return 404 when agent not found', async () => {
-      mockAgentsService.findBySlug.mockRejectedValue(new AppException('agents.notFound', 404));
+      mockAgentsService.findBySlug.mockRejectedValue(new ForbiddenAppException());
 
-      await expect(controller.findBySlug('nonexistent')).rejects.toThrow(AppException);
+      await expect(controller.findBySlug('nonexistent')).rejects.toThrow(ForbiddenAppException);
     });
 
     it('should NOT return raw API key', async () => {
@@ -360,7 +359,7 @@ describe('AgentsController', () => {
 
       const req: any = { user: mockMemberUser };
 
-      await expect(controller.update('test-agent', updateDto, req)).rejects.toThrow(AppException);
+      await expect(controller.update('test-agent', updateDto, req)).rejects.toThrow(ForbiddenAppException);
     });
 
     it('should return 404 when agent not found', async () => {
@@ -484,7 +483,7 @@ describe('AgentsController', () => {
 
       const req: any = { user: mockMemberUser };
 
-      await expect(controller.updateRoles('test-agent', updateRolesDto, req)).rejects.toThrow(AppException);
+      await expect(controller.updateRoles('test-agent', updateRolesDto, req)).rejects.toThrow(ForbiddenAppException);
     });
   });
 
@@ -564,7 +563,7 @@ describe('AgentsController', () => {
 
       const req: any = { user: mockMemberUser };
 
-      await expect(controller.updateCapabilities('test-agent', updateCapabilitiesDto, req)).rejects.toThrow(AppException);
+      await expect(controller.updateCapabilities('test-agent', updateCapabilitiesDto, req)).rejects.toThrow(ForbiddenAppException);
     });
 
     it('should allow empty capabilities array', async () => {
@@ -643,7 +642,7 @@ describe('AgentsController', () => {
     it('should reject rotate from non-ADMIN user', async () => {
       const req: any = { user: mockMemberUser };
 
-      await expect(controller.rotateApiKey('test-agent', req)).rejects.toThrow(AppException);
+      await expect(controller.rotateApiKey('test-agent', req)).rejects.toThrow(ForbiddenAppException);
     });
 
     it('should return 404 when agent not found', async () => {
@@ -681,7 +680,7 @@ describe('AgentsController', () => {
       const createDto = { name: 'Test', slug: 'test' };
       const req: any = { user: mockMemberUser };
 
-      await expect(controller.generateApiKey(createDto, req)).rejects.toThrow(AppException);
+      await expect(controller.generateApiKey(createDto, req)).rejects.toThrow(ForbiddenAppException);
     });
 
     it('GET /agents is public', async () => {
@@ -715,13 +714,13 @@ describe('AgentsController', () => {
       const updateDto = { name: 'Updated' };
       const req: any = { user: mockMemberUser };
 
-      await expect(controller.update('test-agent', updateDto, req)).rejects.toThrow(AppException);
+      await expect(controller.update('test-agent', updateDto, req)).rejects.toThrow(ForbiddenAppException);
     });
 
     it('POST /agents/:slug/rotate-key requires JWT auth with ADMIN role', async () => {
       const req: any = { user: mockMemberUser };
 
-      await expect(controller.rotateApiKey('test-agent', req)).rejects.toThrow(AppException);
+      await expect(controller.rotateApiKey('test-agent', req)).rejects.toThrow(ForbiddenAppException);
     });
   });
 

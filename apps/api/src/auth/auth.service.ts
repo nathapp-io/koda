@@ -1,8 +1,8 @@
-import { Injectable, HttpStatus } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
 import { JwtStrategyProvider, JwtRefreshStrategyProvider } from '@nathapp/nestjs-auth';
-import { AppException } from '../common/app-exception';
+import { AuthException } from '@nathapp/nestjs-common';
 import * as bcrypt from 'bcrypt';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -55,12 +55,12 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new AppException('auth.invalidCredentials', HttpStatus.UNAUTHORIZED);
+      throw new AuthException();
     }
 
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
     if (!isPasswordValid) {
-      throw new AppException('auth.invalidCredentials', HttpStatus.UNAUTHORIZED);
+      throw new AuthException();
     }
 
     const accessToken = this.generateAccessToken(user.id, user.email, user.role);
@@ -79,7 +79,7 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new AppException('errors.unauthorized', HttpStatus.UNAUTHORIZED);
+      throw new AuthException();
     }
 
     const accessToken = this.generateAccessToken(user.id, user.email, user.role);

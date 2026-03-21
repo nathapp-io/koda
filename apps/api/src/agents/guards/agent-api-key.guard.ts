@@ -1,8 +1,7 @@
 import { CanActivate, ExecutionContext, Inject, Injectable } from '@nestjs/common';
-import { HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac } from 'crypto';
-import { AppException } from '../../common/app-exception';
+import { AuthException } from '@nathapp/nestjs-common';
 
 @Injectable()
 export class AgentApiKeyGuard implements CanActivate {
@@ -17,17 +16,17 @@ export class AgentApiKeyGuard implements CanActivate {
     const authHeader = headers?.['authorization'] ?? '';
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new AppException('errors.unauthorized', HttpStatus.UNAUTHORIZED);
+      throw new AuthException();
     }
 
     const rawKey = authHeader.slice('Bearer '.length).trim();
     if (!rawKey) {
-      throw new AppException('errors.unauthorized', HttpStatus.UNAUTHORIZED);
+      throw new AuthException();
     }
 
     const secret = this.configService.get<string>('API_KEY_SECRET');
     if (!secret) {
-      throw new AppException('errors.unauthorized', HttpStatus.UNAUTHORIZED);
+      throw new AuthException();
     }
 
     const keyHash = createHmac('sha256', secret).update(rawKey).digest('hex');
@@ -37,7 +36,7 @@ export class AgentApiKeyGuard implements CanActivate {
     });
 
     if (!agent) {
-      throw new AppException('errors.unauthorized', HttpStatus.UNAUTHORIZED);
+      throw new AuthException();
     }
 
     delete headers['authorization'];

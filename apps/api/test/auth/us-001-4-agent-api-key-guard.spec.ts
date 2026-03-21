@@ -18,7 +18,7 @@ import { ConfigService } from '@nestjs/config';
 
 // This import will fail (RED) until AgentApiKeyGuard is implemented
 import { AgentApiKeyGuard } from '../../src/agents/guards/agent-api-key.guard';
-import { AppException } from '../../src/common/app-exception';
+import { AppException } from '/nestjs-common';
 
 const SRC = path.resolve(__dirname, '../../src');
 

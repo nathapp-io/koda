@@ -8,7 +8,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthController } from '../../src/auth/auth.controller';
 import { AuthService } from '../../src/auth/auth.service';
-import { JsonResponse } from '../../src/common/json-response';
+import { JsonResponse } from '/nestjs-common';
 
 describe('AuthController — JsonResponse envelope (US-004)', () => {
   let controller: AuthController;

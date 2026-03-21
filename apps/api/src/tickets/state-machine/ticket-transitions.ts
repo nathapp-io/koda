@@ -1,6 +1,5 @@
-import { HttpStatus } from '@nestjs/common';
 import { TicketStatus, CommentType } from '@prisma/client';
-import { AppException } from '../../common/app-exception';
+import { ValidationAppException } from '@nathapp/nestjs-common';
 
 // Define transition rules: from → to → required comment type (or undefined if no comment needed)
 type TransitionRule = {
@@ -42,12 +41,12 @@ export function validateTransition(
   // Check if transition rule exists
   const fromRules = TRANSITION_RULES[from];
   if (!fromRules) {
-    throw new AppException('errors.invalidTransition', HttpStatus.BAD_REQUEST);
+    throw new ValidationAppException();
   }
 
   const requiredCommentType = fromRules[to];
   if (requiredCommentType === undefined) {
-    throw new AppException('errors.invalidTransition', HttpStatus.BAD_REQUEST);
+    throw new ValidationAppException();
   }
 
   // Check comment type requirement
@@ -58,10 +57,10 @@ export function validateTransition(
 
   // Comment is required
   if (!commentType) {
-    throw new AppException('errors.invalidTransition', HttpStatus.BAD_REQUEST);
+    throw new ValidationAppException();
   }
 
   if (commentType !== requiredCommentType) {
-    throw new AppException('errors.invalidTransition', HttpStatus.BAD_REQUEST);
+    throw new ValidationAppException();
   }
 }

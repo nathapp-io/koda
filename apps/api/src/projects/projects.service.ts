@@ -1,7 +1,7 @@
-import { Injectable, HttpStatus } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
-import { AppException } from '../common/app-exception';
+import { ValidationAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 
@@ -15,19 +15,19 @@ export class ProjectsService {
   async create(createProjectDto: CreateProjectDto) {
     // Validate name
     if (createProjectDto.name.length < 2) {
-      throw new AppException('projects.nameTooShort', HttpStatus.BAD_REQUEST);
+      throw new ValidationAppException();
     }
 
     // Validate slug format (lowercase alphanumeric and hyphens only)
     const slugPattern = /^[a-z0-9]+(-[a-z0-9]+)*$/;
     if (!slugPattern.test(createProjectDto.slug)) {
-      throw new AppException('projects.invalidSlug', HttpStatus.BAD_REQUEST);
+      throw new ValidationAppException();
     }
 
     // Validate key format (2-6 uppercase letters only)
     const keyPattern = /^[A-Z]{2,6}$/;
     if (!keyPattern.test(createProjectDto.key)) {
-      throw new AppException('projects.invalidKey', HttpStatus.BAD_REQUEST);
+      throw new ValidationAppException();
     }
 
     // Check slug uniqueness
@@ -35,7 +35,7 @@ export class ProjectsService {
       where: { slug: createProjectDto.slug },
     });
     if (existingSlug) {
-      throw new AppException('projects.slugTaken', HttpStatus.CONFLICT);
+      throw new ValidationAppException();
     }
 
     // Check key uniqueness
@@ -43,7 +43,7 @@ export class ProjectsService {
       where: { key: createProjectDto.key },
     });
     if (existingKey) {
-      throw new AppException('projects.keyTaken', HttpStatus.CONFLICT);
+      throw new ValidationAppException();
     }
 
     // Create project
@@ -74,7 +74,7 @@ export class ProjectsService {
 
     // Filter out soft-deleted projects
     if (!project || project.deletedAt) {
-      throw new AppException('projects.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     return project;
@@ -87,19 +87,19 @@ export class ProjectsService {
     });
 
     if (!currentProject) {
-      throw new AppException('projects.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Validate name if provided
     if (updateProjectDto.name !== undefined && updateProjectDto.name.length < 2) {
-      throw new AppException('projects.nameTooShort', HttpStatus.BAD_REQUEST);
+      throw new ValidationAppException();
     }
 
     // Validate slug format if provided (lowercase alphanumeric and hyphens only)
     if (updateProjectDto.slug !== undefined) {
       const slugPattern = /^[a-z0-9]+(-[a-z0-9]+)*$/;
       if (!slugPattern.test(updateProjectDto.slug)) {
-        throw new AppException('projects.invalidSlug', HttpStatus.BAD_REQUEST);
+        throw new ValidationAppException();
       }
 
       // Check slug uniqueness (unless it's the same as current)
@@ -108,7 +108,7 @@ export class ProjectsService {
           where: { slug: updateProjectDto.slug },
         });
         if (existingSlug && existingSlug.id !== currentProject.id) {
-          throw new AppException('projects.slugTaken', HttpStatus.CONFLICT);
+          throw new ValidationAppException();
         }
       }
     }
@@ -117,7 +117,7 @@ export class ProjectsService {
     if (updateProjectDto.key !== undefined) {
       const keyPattern = /^[A-Z]{2,6}$/;
       if (!keyPattern.test(updateProjectDto.key)) {
-        throw new AppException('projects.invalidKey', HttpStatus.BAD_REQUEST);
+        throw new ValidationAppException();
       }
 
       // Check key uniqueness (unless it's the same as current)
@@ -126,7 +126,7 @@ export class ProjectsService {
           where: { key: updateProjectDto.key },
         });
         if (existingKey && existingKey.id !== currentProject.id) {
-          throw new AppException('projects.keyTaken', HttpStatus.CONFLICT);
+          throw new ValidationAppException();
         }
       }
     }
@@ -152,7 +152,7 @@ export class ProjectsService {
     });
 
     if (!project) {
-      throw new AppException('projects.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Soft delete by setting deletedAt

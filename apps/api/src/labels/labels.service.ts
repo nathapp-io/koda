@@ -1,7 +1,7 @@
-import { Injectable, HttpStatus } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
-import { AppException } from '../common/app-exception';
+import { ValidationAppException, NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { CreateLabelDto } from './dto/create-label.dto';
 import { AssignLabelDto } from './dto/assign-label.dto';
 
@@ -25,15 +25,15 @@ export class LabelsService {
   ) {
     // Only ADMIN users can create labels
     if (actorType !== 'user' || currentUser.role === 'MEMBER') {
-      throw new AppException('errors.forbidden', HttpStatus.FORBIDDEN);
+      throw new ForbiddenAppException();
     }
 
     // Validate required fields
     if (!createLabelDto.name) {
-      throw new AppException('labels.nameRequired', HttpStatus.BAD_REQUEST);
+      throw new ValidationAppException();
     }
     if (typeof createLabelDto.name === 'string' && createLabelDto.name.trim().length === 0) {
-      throw new AppException('labels.nameEmpty', HttpStatus.BAD_REQUEST);
+      throw new ValidationAppException();
     }
 
     // Find project by slug
@@ -42,7 +42,7 @@ export class LabelsService {
     });
 
     if (!project || project.deletedAt) {
-      throw new AppException('projects.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Create the label
@@ -59,7 +59,7 @@ export class LabelsService {
     } catch (error) {
       // Check if it's a unique constraint violation (duplicate name in project)
       if (error instanceof Error && error.message.includes('Unique constraint')) {
-        throw new AppException('labels.alreadyExists', HttpStatus.BAD_REQUEST);
+        throw new ValidationAppException();
       }
       throw error;
     }
@@ -72,7 +72,7 @@ export class LabelsService {
     });
 
     if (!project || project.deletedAt) {
-      throw new AppException('projects.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Find all labels for this project
@@ -91,7 +91,7 @@ export class LabelsService {
   ) {
     // Only ADMIN users can delete labels
     if (actorType !== 'user' || currentUser.role === 'MEMBER') {
-      throw new AppException('errors.forbidden', HttpStatus.FORBIDDEN);
+      throw new ForbiddenAppException();
     }
 
     // Find project by slug
@@ -100,7 +100,7 @@ export class LabelsService {
     });
 
     if (!project || project.deletedAt) {
-      throw new AppException('projects.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Find the label
@@ -109,12 +109,12 @@ export class LabelsService {
     });
 
     if (!label) {
-      throw new AppException('labels.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Verify the label belongs to the project
     if (label.projectId !== project.id) {
-      throw new AppException('labels.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Delete the label
@@ -136,7 +136,7 @@ export class LabelsService {
     });
 
     if (!project || project.deletedAt) {
-      throw new AppException('projects.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Find ticket by ref (KODA-1 or CUID)
@@ -166,7 +166,7 @@ export class LabelsService {
     }
 
     if (!ticket || ticket.deletedAt) {
-      throw new AppException('tickets.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Find the label
@@ -175,12 +175,12 @@ export class LabelsService {
     });
 
     if (!label) {
-      throw new AppException('labels.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Verify the label belongs to the same project
     if (label.projectId !== project.id) {
-      throw new AppException('labels.notInProject', HttpStatus.BAD_REQUEST);
+      throw new ValidationAppException();
     }
 
     // Use transaction to assign label and create activity
@@ -226,7 +226,7 @@ export class LabelsService {
           include: { labels: { include: { label: true } } },
         });
         if (!updated) {
-          throw new AppException('tickets.notFound', HttpStatus.NOT_FOUND);
+          throw new NotFoundAppException();
         }
         // Transform labels from nested structure to flat array
         interface TicketLabelWithLabel {
@@ -240,14 +240,14 @@ export class LabelsService {
 
       return result;
     } catch (error) {
-      if (error instanceof AppException) {
+      if (error instanceof ValidationAppException || error instanceof NotFoundAppException) {
         throw error;
       }
       if (error instanceof Error && error.message.includes('already assigned')) {
-        throw new AppException('labels.alreadyAssigned', HttpStatus.BAD_REQUEST);
+        throw new ValidationAppException();
       }
       if (error instanceof Error && error.message.includes('Unique constraint')) {
-        throw new AppException('labels.alreadyAssigned', HttpStatus.BAD_REQUEST);
+        throw new ValidationAppException();
       }
       throw error;
     }
@@ -266,7 +266,7 @@ export class LabelsService {
     });
 
     if (!project || project.deletedAt) {
-      throw new AppException('projects.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Find ticket by ref (KODA-1 or CUID)
@@ -296,7 +296,7 @@ export class LabelsService {
     }
 
     if (!ticket || ticket.deletedAt) {
-      throw new AppException('tickets.notFound', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Check if label is assigned to ticket
@@ -311,7 +311,7 @@ export class LabelsService {
     });
 
     if (!ticketLabel) {
-      throw new AppException('labels.notAssigned', HttpStatus.NOT_FOUND);
+      throw new NotFoundAppException();
     }
 
     // Use transaction to remove label and create activity
@@ -344,7 +344,7 @@ export class LabelsService {
         include: { labels: { include: { label: true } } },
       });
       if (!updated) {
-        throw new AppException('tickets.notFound', HttpStatus.NOT_FOUND);
+        throw new NotFoundAppException();
       }
       // Transform labels from nested structure to flat array
       interface TicketLabelWithLabel {

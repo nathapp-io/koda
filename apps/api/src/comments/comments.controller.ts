@@ -18,7 +18,7 @@ import {
 import { CommentsService } from './comments.service';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
-import { JsonResponse } from '../common/json-response';
+import { JsonResponse } from '@nathapp/nestjs-common';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type RequestWithUser = any & { user?: any; agent?: any };
@@ -79,11 +79,11 @@ export class CommentsController {
     @Param('ref') ref: string,
     @Body() createCommentDto: CreateCommentDto,
     @Req() req: RequestWithUser,
-  ): Promise<JsonResponse> {
+  ): Promise<any> {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     const data = await this.create(slug, ref, createCommentDto, currentUser, actorType);
-    return JsonResponse.created(data);
+    return JsonResponse.Ok(data) as any;
   }
 
   @Get('projects/:slug/tickets/:ref/comments')
@@ -93,9 +93,9 @@ export class CommentsController {
   async listByTicketFromHttp(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
-  ): Promise<JsonResponse> {
+  ): Promise<any> {
     const data = await this.listByTicket(slug, ref);
-    return JsonResponse.ok(data);
+    return JsonResponse.Ok(data) as any;
   }
 
   @Patch('comments/:id')
@@ -107,11 +107,11 @@ export class CommentsController {
     @Param('id') id: string,
     @Body() updateCommentDto: UpdateCommentDto,
     @Req() req: RequestWithUser,
-  ): Promise<JsonResponse> {
+  ): Promise<any> {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     const data = await this.update(id, updateCommentDto, currentUser, actorType);
-    return JsonResponse.ok(data);
+    return JsonResponse.Ok(data) as any;
   }
 
   @Delete('comments/:id')
