@@ -67,6 +67,21 @@ bun run --cwd apps/api type-check
 - `any` types in production code → use proper types
 - `any` types in test files → allowed (configured in `.eslintrc.js` overrides)
 
+## Test Organization Rules
+
+| Type | Location | Naming | Purpose |
+|:-----|:---------|:-------|:--------|
+| Unit | `src/**/*.spec.ts` | Co-located next to source file | Test individual services/controllers |
+| Integration | `src/**/*.integration.spec.ts` | Co-located next to source file | Test module interactions, DB queries |
+| E2E | `test/e2e/*.e2e.spec.ts` | Grouped in `test/e2e/` | Full API lifecycle tests |
+
+**Rules:**
+1. Unit and integration tests are **co-located** with the source files they test
+2. E2E tests live in `test/e2e/` — they bootstrap the full app and make HTTP requests
+3. **No `us-XXX` or user-story folders** — nax acceptance tests go in `nax/features/<feature>/acceptance.test.ts`, NOT in `apps/api/test/`
+4. Test file naming: `<name>.spec.ts` (unit), `<name>.integration.spec.ts` (integration), `<name>.e2e.spec.ts` (e2e)
+5. Use `test-setup.ts` for global test configuration (env loading, custom matchers)
+
 ## Repository Structure
 
 ```

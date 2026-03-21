@@ -63,6 +63,8 @@ Wrap external errors with `{ cause: err }`. Never swallow errors silently.
 - Use `test.each()` for 3+ similar test cases
 - Test names describe behavior: "returns null when file is missing"
 - One `describe` per exported function
+- Place acceptance tests in `nax/features/<feature>/acceptance.test.ts`, NOT in `apps/api/test/`
+- Do NOT create `us-XXX` folders in app test directories
 
 ## Logging
 
