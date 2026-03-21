@@ -8,21 +8,31 @@ describe('AgentsController', () => {
   let service: AgentsService;
 
   const mockAdminUser = {
-    sub: 'user-123',
+    id: 'user-123', sub: 'user-123',
     email: 'admin@example.com',
-    role: 'ADMIN',
+    name: 'admin@example.com',
+    blacklisted: false,
+    revoked: false,
+    authorities: [],
+    extra: { sub: 'user-123', email: 'admin@example.com', role: 'ADMIN' },
   };
 
   const mockAgentUser = {
     id: 'agent-456', sub: 'agent-456',
-    slug: 'test-agent',
-    actorType: 'agent',
+    name: 'test-agent',
+    blacklisted: false,
+    revoked: false,
+    authorities: [],
+    extra: { sub: 'agent-456', actorType: 'agent', slug: 'test-agent' },
   };
 
   const mockMemberUser = {
     id: 'user-789', sub: 'user-789',
-    email: 'member@example.com',
-    role: 'MEMBER',
+    name: 'member@example.com',
+    blacklisted: false,
+    revoked: false,
+    authorities: [],
+    extra: { sub: 'user-789', email: 'member@example.com', role: 'MEMBER' },
   };
 
   const mockAgent = {

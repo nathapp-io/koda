@@ -20,7 +20,7 @@ export class AgentsController {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async generateApiKey(@Body() createAgentDto: CreateAgentDto, @Req() req: any) {
     // Check if user is admin
-    if (req.user?.role !== 'ADMIN') {
+    if (req.user?.extra?.role !== 'ADMIN') {
       throw new ForbiddenAppException();
     }
 
@@ -43,7 +43,7 @@ export class AgentsController {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async findMe(@Req() req: any) {
     const agentId = req.user?.id;
-    if (!agentId || req.user?.actorType !== 'agent') {
+    if (!agentId || req.user?.extra?.actorType !== 'agent') {
       throw new ForbiddenAppException();
     }
     const data = await this.agentsService.findMe(agentId);
@@ -67,7 +67,7 @@ export class AgentsController {
   @ApiResponse({ status: 404, description: 'Agent not found' })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async update(@Param('slug') slug: string, @Body() updateDto: UpdateAgentDto, @Req() req: any) {
-    if (req.user?.role !== 'ADMIN') {
+    if (req.user?.extra?.role !== 'ADMIN') {
       throw new ForbiddenAppException();
     }
     const data = await this.agentsService.update(slug, updateDto);
@@ -82,7 +82,7 @@ export class AgentsController {
   @ApiResponse({ status: 404, description: 'Agent not found' })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async updateRoles(@Param('slug') slug: string, @Body() updateRolesDto: UpdateRolesDto, @Req() req: any) {
-    if (req.user?.role !== 'ADMIN') {
+    if (req.user?.extra?.role !== 'ADMIN') {
       throw new ForbiddenAppException();
     }
     const agent = await this.agentsService.findBySlug(slug);
@@ -98,7 +98,7 @@ export class AgentsController {
   @ApiResponse({ status: 404, description: 'Agent not found' })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async updateCapabilities(@Param('slug') slug: string, @Body() updateCapabilitiesDto: UpdateCapabilitiesDto, @Req() req: any) {
-    if (req.user?.role !== 'ADMIN') {
+    if (req.user?.extra?.role !== 'ADMIN') {
       throw new ForbiddenAppException();
     }
     const agent = await this.agentsService.findBySlug(slug);
@@ -114,7 +114,7 @@ export class AgentsController {
   @ApiResponse({ status: 404, description: 'Agent not found' })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async rotateApiKey(@Param('slug') slug: string, @Req() req: any) {
-    if (req.user?.role !== 'ADMIN') {
+    if (req.user?.extra?.role !== 'ADMIN') {
       throw new ForbiddenAppException();
     }
     const data = await this.agentsService.rotateApiKey(slug);

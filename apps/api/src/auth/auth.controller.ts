@@ -3,16 +3,16 @@ import {
   Post,
   Get,
   Body,
-  Headers,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AuthService, JwtPayload } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto, UserResponseDto } from './dto/auth-response.dto';
-import { Public, Principal } from '@nathapp/nestjs-auth';
+import { Public, Principal, JwtRefreshGuard } from '@nathapp/nestjs-auth';
 import { Throttle } from '@nathapp/nestjs-throttler';
 import { AuthException, JsonResponse } from '@nathapp/nestjs-common';
 
@@ -50,14 +50,8 @@ export class AuthController {
   @ApiOperation({ summary: 'Refresh access and refresh tokens' })
   @ApiResponse({ status: 200, type: AuthResponseDto })
   @ApiResponse({ status: 401, description: 'Invalid or missing token' })
-  @Public()
-  async refresh(
-    @Principal() user: JwtPayload,
-    @Headers('authorization') authHeader: string,
-  ) {
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new AuthException();
-    }
+  @UseGuards(JwtRefreshGuard)
+  async refresh(@Principal() user: JwtPayload) {
     const data = await this.authService.refresh(user);
     return JsonResponse.Ok(data);
   }

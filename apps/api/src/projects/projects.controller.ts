@@ -43,7 +43,7 @@ export class ProjectsController {
     @Req() req: RequestWithUser,
   ) {
     // Check if user is admin
-    if (req.user?.role !== 'ADMIN') {
+    if (req.user?.extra?.role !== 'ADMIN') {
       throw new ForbiddenAppException();
     }
 
@@ -88,7 +88,7 @@ export class ProjectsController {
     @Req() req: RequestWithUser,
   ) {
     // Check if user is admin
-    if (req.user?.role !== 'ADMIN') {
+    if (req.user?.extra?.role !== 'ADMIN') {
       throw new ForbiddenAppException();
     }
 
@@ -109,7 +109,7 @@ export class ProjectsController {
     @Req() req: RequestWithUser,
   ) {
     // Check if user is admin
-    if (req.user?.role !== 'ADMIN') {
+    if (req.user?.extra?.role !== 'ADMIN') {
       throw new ForbiddenAppException();
     }
 

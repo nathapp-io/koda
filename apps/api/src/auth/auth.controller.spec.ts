@@ -153,7 +153,6 @@ describe('AuthController', () => {
 
   describe('POST /auth/refresh', () => {
     it('should return new tokens with valid refresh token', async () => {
-      const bearerToken = 'Bearer mock-refresh-token';
       const user = {
         sub: mockUser.id,
         email: mockUser.email,
@@ -162,7 +161,7 @@ describe('AuthController', () => {
 
       mockAuthService.refresh.mockResolvedValue(mockTokenResponse);
 
-      const result = await controller.refresh(user, bearerToken);
+      const result = await controller.refresh(user);
 
       expect(result).toBeInstanceOf(JsonResponse);
       expect(result.data).toEqual(mockTokenResponse);
@@ -170,7 +169,6 @@ describe('AuthController', () => {
     });
 
     it('should return 401 when token is missing', async () => {
-      const bearerToken = '';
       const user = {
         sub: mockUser.id,
         email: mockUser.email,
@@ -179,7 +177,7 @@ describe('AuthController', () => {
 
       mockAuthService.refresh.mockRejectedValue(new AuthException());
 
-      await expect(controller.refresh(user, bearerToken)).rejects.toThrow(
+      await expect(controller.refresh(user)).rejects.toThrow(
         AuthException,
       );
     });
