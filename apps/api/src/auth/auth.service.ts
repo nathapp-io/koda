@@ -21,8 +21,7 @@ export class AuthService {
     private jwtRefreshStrategyProvider: JwtRefreshStrategyProvider,
   ) {}
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private get db(): PrismaClient { return (this.prisma as any).client ?? (this.prisma as unknown as PrismaClient); }
+  private get db() { return this.prisma.client; }
 
   async register(registerDto: RegisterDto) {
     const { email, name, password } = registerDto;

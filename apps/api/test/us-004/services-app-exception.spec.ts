@@ -76,7 +76,7 @@ describe('AuthService — throws AppException (US-004)', () => {
       .overrideProvider(AuthService)
       .useFactory({
         factory: () =>
-          new (AuthService as any)(mockPrisma, mockJwtService, mockConfigService),
+          new (AuthService as any)({ client: mockPrisma }, mockJwtService, mockConfigService),
       })
       .compile();
 
@@ -120,7 +120,7 @@ describe('ProjectsService — throws AppException (US-004)', () => {
     })
       .overrideProvider(ProjectsService)
       .useFactory({
-        factory: () => new (ProjectsService as any)(mockPrisma),
+        factory: () => new (ProjectsService as any)({ client: mockPrisma }),
       })
       .compile();
 
@@ -197,7 +197,7 @@ describe('AgentsService — throws AppException (US-004)', () => {
     })
       .overrideProvider(AgentsService)
       .useFactory({
-        factory: () => new (AgentsService as any)(mockPrisma, mockConfigService),
+        factory: () => new (AgentsService as any)({ client: mockPrisma }, mockConfigService),
       })
       .compile();
 
@@ -242,7 +242,7 @@ describe('TicketsService — throws AppException (US-004)', () => {
     })
       .overrideProvider(TicketsService)
       .useFactory({
-        factory: () => new (TicketsService as any)(mockPrisma),
+        factory: () => new (TicketsService as any)({ client: mockPrisma }),
       })
       .compile();
 
@@ -294,7 +294,7 @@ describe('CommentsService — throws AppException (US-004)', () => {
     })
       .overrideProvider(CommentsService)
       .useFactory({
-        factory: () => new (CommentsService as any)(mockPrisma),
+        factory: () => new (CommentsService as any)({ client: mockPrisma }),
       })
       .compile();
 
@@ -354,7 +354,7 @@ describe('LabelsService — throws AppException (US-004)', () => {
     })
       .overrideProvider(LabelsService)
       .useFactory({
-        factory: () => new (LabelsService as any)(mockPrisma),
+        factory: () => new (LabelsService as any)({ client: mockPrisma }),
       })
       .compile();
 

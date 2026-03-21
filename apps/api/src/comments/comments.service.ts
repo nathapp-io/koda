@@ -14,8 +14,7 @@ interface CurrentUser {
 @Injectable()
 export class CommentsService {
   constructor(private prisma: PrismaService<PrismaClient>) {}
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private get db(): PrismaClient { return (this.prisma as any).client ?? (this.prisma as unknown as PrismaClient); }
+  private get db() { return this.prisma.client; }
 
 
   async create(

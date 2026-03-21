@@ -8,8 +8,7 @@ import { UpdateProjectDto } from './dto/update-project.dto';
 @Injectable()
 export class ProjectsService {
   constructor(private prisma: PrismaService<PrismaClient>) {}
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private get db(): PrismaClient { return (this.prisma as any).client ?? (this.prisma as unknown as PrismaClient); }
+  private get db() { return this.prisma.client; }
 
 
   async create(createProjectDto: CreateProjectDto) {

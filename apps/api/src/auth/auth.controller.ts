@@ -28,9 +28,9 @@ export class AuthController {
   @ApiResponse({ status: 201, type: AuthResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid input' })
   @Public()
-  async register(@Body() registerDto: RegisterDto): Promise<JsonResponse<AuthResponseDto>> {
+  async register(@Body() registerDto: RegisterDto): Promise<JsonResponse<unknown>> {
     const data = await this.authService.register(registerDto);
-    return JsonResponse.Ok(data as unknown as AuthResponseDto) as unknown as JsonResponse<AuthResponseDto>;
+    return JsonResponse.Ok(data);
   }
 
   @Post('login')
@@ -39,9 +39,9 @@ export class AuthController {
   @ApiResponse({ status: 200, type: AuthResponseDto })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
   @Public()
-  async login(@Body() loginDto: LoginDto): Promise<JsonResponse<AuthResponseDto>> {
+  async login(@Body() loginDto: LoginDto): Promise<JsonResponse<unknown>> {
     const data = await this.authService.login(loginDto);
-    return JsonResponse.Ok(data as unknown as AuthResponseDto) as unknown as JsonResponse<AuthResponseDto>;
+    return JsonResponse.Ok(data);
   }
 
   @Post('refresh')
@@ -54,12 +54,12 @@ export class AuthController {
   async refresh(
     @Principal() user: JwtPayload,
     @Headers('authorization') authHeader: string,
-  ): Promise<JsonResponse<AuthResponseDto>> {
+  ): Promise<JsonResponse<unknown>> {
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       throw new AuthException();
     }
     const data = await this.authService.refresh(user);
-    return JsonResponse.Ok(data as unknown as AuthResponseDto) as unknown as JsonResponse<AuthResponseDto>;
+    return JsonResponse.Ok(data);
   }
 
   @Get('me')
@@ -68,11 +68,11 @@ export class AuthController {
   @ApiOperation({ summary: 'Get current authenticated user' })
   @ApiResponse({ status: 200, type: UserResponseDto })
   @ApiResponse({ status: 401, description: 'Missing or invalid token' })
-  async me(@Principal() user: JwtPayload): Promise<JsonResponse<UserResponseDto>> {
+  async me(@Principal() user: JwtPayload): Promise<JsonResponse<unknown>> {
     const validatedUser = await this.authService.validateUser(user);
     if (!validatedUser) {
       throw new AuthException();
     }
-    return JsonResponse.Ok(validatedUser as unknown as UserResponseDto) as unknown as JsonResponse<UserResponseDto>;
+    return JsonResponse.Ok(validatedUser);
   }
 }
