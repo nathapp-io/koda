@@ -161,17 +161,19 @@ async function run() {
 
   // ── Auth ────────────────────────────────────────────────────────────────
   function extractTokens(res: unknown): void {
-    if (res && typeof res === 'object' && 'data' in res) {
-      const d = (res as { data: { accessToken?: string; refreshToken?: string } }).data;
-      if (d?.accessToken) accessToken = d.accessToken;
-      if (d?.refreshToken) refreshToken = d.refreshToken;
-    }
+    if (!res || typeof res !== 'object') return;
+    // Handle both { accessToken, refreshToken } and { data: { accessToken, refreshToken } }
+    const obj = res as Record<string, unknown>;
+    const d = (obj['data'] as Record<string, unknown>) ?? obj;
+    if (typeof d['accessToken'] === 'string' && d['accessToken']) accessToken = d['accessToken'];
+    if (typeof d['refreshToken'] === 'string' && d['refreshToken']) refreshToken = d['refreshToken'];
   }
 
-  extractTokens(await test('Register user', 'POST', '/api/auth/register', {
+  const registerRes = await test('Register user', 'POST', '/api/auth/register', {
     body: TEST_USER,
     expectStatus: 201,
-  }));
+  });
+  extractTokens(registerRes);
 
   if (!accessToken) {
     // Fallback: user may already exist — just login
