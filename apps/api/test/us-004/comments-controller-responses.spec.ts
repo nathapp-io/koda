@@ -55,7 +55,7 @@ describe('CommentsController — JsonResponse envelope (US-004)', () => {
     it('wraps comment under result.data', async () => {
       const dto = { body: 'Looks good', type: 'GENERAL' };
       const result = await controller.createFromHttp('koda', 'KODA-1', dto as any, userReq);
-      const envelope = result as unknown as JsonResponse;
+      const envelope = result as unknown as JsonResponse<any>;
       expect(envelope.data).toHaveProperty('id');
       expect(envelope.data).toHaveProperty('body');
     });
@@ -69,7 +69,7 @@ describe('CommentsController — JsonResponse envelope (US-004)', () => {
 
     it('wraps comments array under result.data', async () => {
       const result = await controller.listByTicketFromHttp('koda', 'KODA-1');
-      const envelope = result as unknown as JsonResponse;
+      const envelope = result as unknown as JsonResponse<any>;
       expect(Array.isArray(envelope.data)).toBe(true);
     });
   });
@@ -84,7 +84,7 @@ describe('CommentsController — JsonResponse envelope (US-004)', () => {
     it('wraps updated comment under result.data', async () => {
       const dto = { body: 'Updated text' };
       const result = await controller.updateFromHttp('comment-1', dto as any, userReq);
-      const envelope = result as unknown as JsonResponse;
+      const envelope = result as unknown as JsonResponse<any>;
       expect(envelope.data).toHaveProperty('id');
     });
   });

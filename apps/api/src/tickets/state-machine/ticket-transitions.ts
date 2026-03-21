@@ -1,4 +1,4 @@
-import { TicketStatus, CommentType } from '@prisma/client';
+import { TicketStatus, CommentType } from '../../common/enums';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 
 // Define transition rules: from → to → required comment type (or undefined if no comment needed)

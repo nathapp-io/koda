@@ -46,7 +46,7 @@ describe('AgentsService', () => {
         deleteMany: jest.fn(),
         createMany: jest.fn(),
       },
-      agentCapability: {
+      agentCapabilityEntry: {
         deleteMany: jest.fn(),
         createMany: jest.fn(),
       },
@@ -510,17 +510,17 @@ describe('AgentsService', () => {
         ],
       };
 
-      mockPrismaService.client.agentCapability.deleteMany.mockResolvedValue({ count: 2 });
-      mockPrismaService.client.agentCapability.createMany.mockResolvedValue({ count: 3 });
+      mockPrismaService.client.agentCapabilityEntry.deleteMany.mockResolvedValue({ count: 2 });
+      mockPrismaService.client.agentCapabilityEntry.createMany.mockResolvedValue({ count: 3 });
       mockPrismaService.client.agent.findUnique.mockResolvedValue(updatedAgent);
 
       const result = await service.updateCapabilities('agent-123', updateData);
 
-      expect(prismaService.client.agentCapability.deleteMany).toHaveBeenCalledWith({
+      expect(prismaService.client.agentCapabilityEntry.deleteMany).toHaveBeenCalledWith({
         where: { agentId: 'agent-123' },
       });
 
-      expect(prismaService.client.agentCapability.createMany).toHaveBeenCalled();
+      expect(prismaService.client.agentCapabilityEntry.createMany).toHaveBeenCalled();
       expect(result.capabilities.length).toBe(3);
       expect(result.capabilities.map((c: any) => c.capability)).toEqual(['typescript', 'react', 'nodejs']);
     });
@@ -535,13 +535,13 @@ describe('AgentsService', () => {
         ],
       };
 
-      mockPrismaService.client.agentCapability.deleteMany.mockResolvedValue({ count: 2 });
-      mockPrismaService.client.agentCapability.createMany.mockResolvedValue({ count: 2 });
+      mockPrismaService.client.agentCapabilityEntry.deleteMany.mockResolvedValue({ count: 2 });
+      mockPrismaService.client.agentCapabilityEntry.createMany.mockResolvedValue({ count: 2 });
       mockPrismaService.client.agent.findUnique.mockResolvedValue(updatedAgent);
 
       const result = await service.updateCapabilities('agent-123', updateData);
 
-      expect(prismaService.client.agentCapability.deleteMany).toHaveBeenCalledWith({
+      expect(prismaService.client.agentCapabilityEntry.deleteMany).toHaveBeenCalledWith({
         where: { agentId: 'agent-123' },
       });
 
@@ -556,7 +556,7 @@ describe('AgentsService', () => {
         capabilities: [],
       };
 
-      mockPrismaService.client.agentCapability.deleteMany.mockResolvedValue({ count: 2 });
+      mockPrismaService.client.agentCapabilityEntry.deleteMany.mockResolvedValue({ count: 2 });
       mockPrismaService.client.agent.findUnique.mockResolvedValue(updatedAgent);
 
       const result = await service.updateCapabilities('agent-123', updateData);
@@ -575,8 +575,8 @@ describe('AgentsService', () => {
         ],
       };
 
-      mockPrismaService.client.agentCapability.deleteMany.mockResolvedValue({ count: 2 });
-      mockPrismaService.client.agentCapability.createMany.mockResolvedValue({ count: 2 });
+      mockPrismaService.client.agentCapabilityEntry.deleteMany.mockResolvedValue({ count: 2 });
+      mockPrismaService.client.agentCapabilityEntry.createMany.mockResolvedValue({ count: 2 });
       mockPrismaService.client.agent.findUnique.mockResolvedValue(updatedAgent);
 
       const result = await service.updateCapabilities('agent-123', updateData);

@@ -56,9 +56,9 @@ describe('AuthController — JsonResponse envelope (US-004)', () => {
     it('wraps auth data under result.data', async () => {
       const dto = { email: 'a@b.com', name: 'A', password: 'pass123' };
       const result = await controller.register(dto);
-      expect((result as unknown as JsonResponse).data).toHaveProperty('accessToken');
-      expect((result as unknown as JsonResponse).data).toHaveProperty('refreshToken');
-      expect((result as unknown as JsonResponse).data).toHaveProperty('user');
+      expect((result as unknown as JsonResponse<any>).data).toHaveProperty('accessToken');
+      expect((result as unknown as JsonResponse<any>).data).toHaveProperty('refreshToken');
+      expect((result as unknown as JsonResponse<any>).data).toHaveProperty('user');
     });
   });
 
@@ -72,7 +72,7 @@ describe('AuthController — JsonResponse envelope (US-004)', () => {
     it('wraps { accessToken, refreshToken, user } under result.data', async () => {
       const dto = { email: 'a@b.com', password: 'pass123' };
       const result = await controller.login(dto);
-      const envelope = result as unknown as JsonResponse<typeof mockAuthData>;
+      const envelope = result as unknown as JsonResponse<any>;
       expect(envelope.data).toHaveProperty('accessToken');
       expect(envelope.data).toHaveProperty('refreshToken');
       expect(envelope.data).toHaveProperty('user');
@@ -95,7 +95,7 @@ describe('AuthController — JsonResponse envelope (US-004)', () => {
         email: 'a@b.com',
         role: 'MEMBER',
       }, 'Bearer tok');
-      const envelope = result as unknown as JsonResponse<typeof mockAuthData>;
+      const envelope = result as unknown as JsonResponse<any>;
       expect(envelope.data).toHaveProperty('accessToken');
       expect(envelope.data).toHaveProperty('refreshToken');
     });
@@ -117,7 +117,7 @@ describe('AuthController — JsonResponse envelope (US-004)', () => {
         email: 'a@b.com',
         role: 'MEMBER',
       });
-      const envelope = result as unknown as JsonResponse<typeof mockUser>;
+      const envelope = result as unknown as JsonResponse<any>;
       expect(envelope.data).toHaveProperty('id');
       expect(envelope.data).toHaveProperty('email');
     });

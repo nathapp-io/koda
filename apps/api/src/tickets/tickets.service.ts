@@ -3,7 +3,8 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { NotFoundAppException, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
-import { TicketType, TicketStatus, Priority, PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import { TicketType, TicketStatus, Priority } from '../common/enums';
 
 interface FindAllFilters {
   status?: TicketStatus;

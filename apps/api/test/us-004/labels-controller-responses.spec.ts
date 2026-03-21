@@ -58,7 +58,7 @@ describe('LabelsController — JsonResponse envelope (US-004)', () => {
     it('wraps label under result.data', async () => {
       const dto = { name: 'bug', color: '#ff0000' };
       const result = await controller.createFromHttp('koda', dto as any, adminReq);
-      const envelope = result as unknown as JsonResponse;
+      const envelope = result as unknown as JsonResponse<any>;
       expect(envelope.data).toHaveProperty('id');
       expect(envelope.data).toHaveProperty('name', 'bug');
     });
@@ -72,7 +72,7 @@ describe('LabelsController — JsonResponse envelope (US-004)', () => {
 
     it('wraps labels array under result.data', async () => {
       const result = await controller.findByProjectFromHttp('koda');
-      const envelope = result as unknown as JsonResponse;
+      const envelope = result as unknown as JsonResponse<any>;
       expect(Array.isArray(envelope.data)).toBe(true);
     });
   });
@@ -87,7 +87,7 @@ describe('LabelsController — JsonResponse envelope (US-004)', () => {
     it('wraps updated ticket under result.data', async () => {
       const dto = { labelId: 'label-1' };
       const result = await controller.assignLabelFromHttp('koda', 'KODA-1', dto as any, adminReq);
-      const envelope = result as unknown as JsonResponse;
+      const envelope = result as unknown as JsonResponse<any>;
       expect(envelope.data).toHaveProperty('id');
     });
   });

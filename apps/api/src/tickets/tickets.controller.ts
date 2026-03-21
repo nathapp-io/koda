@@ -24,7 +24,7 @@ import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TicketResponseDto } from './dto/ticket-response.dto';
 import { TransitionWithCommentDto } from './dto/transition-with-comment.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
-import { TicketType, TicketStatus, Priority } from '@prisma/client';
+import { TicketType, TicketStatus, Priority } from '../common/enums';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type RequestWithUser = any & { user?: any; agent?: any };

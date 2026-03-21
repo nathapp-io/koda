@@ -2,14 +2,12 @@ import { Injectable, Inject } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import {
-  TicketStatus,
-  CommentType,
-  ActivityType,
   Ticket,
   Comment,
   TicketActivity,
   PrismaClient,
 } from '@prisma/client';
+import { TicketStatus, CommentType, ActivityType } from '../../common/enums';
 import { validateTransition } from './ticket-transitions';
 
 export interface CurrentUser {
@@ -231,8 +229,8 @@ export class TicketTransitionsService {
       throw new NotFoundAppException();
     }
 
-    // Validate transition
-    validateTransition(ticket.status, toStatus, commentType);
+    // Validate transition (ticket.status is String in SQLite schema, cast to local enum type)
+    validateTransition(ticket.status as TicketStatus, toStatus, commentType);
 
     // Execute transition in transaction
     return this.db.$transaction(async (tx) => {

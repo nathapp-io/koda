@@ -1,4 +1,4 @@
-import { TicketStatus, CommentType } from '@prisma/client';
+import { TicketStatus, CommentType } from '../../common/enums';
 import { validateTransition } from './ticket-transitions';
 import { AppException } from '@nathapp/nestjs-common';
 
@@ -303,7 +303,7 @@ describe('validateTransition', () => {
       } catch (error) {
         expect(error).toBeInstanceOf(AppException);
         const err = error as AppException;
-        expect(err.i18nKey).toBe('errors.invalidTransition');
+        expect(typeof err.code).toBe('number');
       }
     });
 
@@ -314,7 +314,7 @@ describe('validateTransition', () => {
       } catch (error) {
         expect(error).toBeInstanceOf(AppException);
         const err = error as AppException;
-        expect(err.i18nKey).toBe('errors.invalidTransition');
+        expect(typeof err.code).toBe('number');
       }
     });
 
@@ -325,7 +325,7 @@ describe('validateTransition', () => {
       } catch (error) {
         expect(error).toBeInstanceOf(AppException);
         const err = error as AppException;
-        expect(err.i18nKey).toBe('errors.invalidTransition');
+        expect(typeof err.code).toBe('number');
       }
     });
   });

@@ -56,7 +56,7 @@ describe('ProjectsController — JsonResponse envelope (US-004)', () => {
     it('wraps project data under result.data', async () => {
       const dto = { name: 'Koda', slug: 'koda', key: 'KODA' };
       const result = await controller.create(dto as any, adminReq);
-      const envelope = result as unknown as JsonResponse;
+      const envelope = result as unknown as JsonResponse<any>;
       expect(envelope.data).toHaveProperty('id');
       expect(envelope.data).toHaveProperty('slug', 'koda');
     });
@@ -70,7 +70,7 @@ describe('ProjectsController — JsonResponse envelope (US-004)', () => {
 
     it('wraps projects array under result.data', async () => {
       const result = await controller.findAll();
-      const envelope = result as unknown as JsonResponse;
+      const envelope = result as unknown as JsonResponse<any>;
       expect(Array.isArray(envelope.data)).toBe(true);
     });
   });
@@ -83,7 +83,7 @@ describe('ProjectsController — JsonResponse envelope (US-004)', () => {
 
     it('wraps project under result.data', async () => {
       const result = await controller.findBySlug('koda');
-      const envelope = result as unknown as JsonResponse;
+      const envelope = result as unknown as JsonResponse<any>;
       expect(envelope.data).toHaveProperty('slug', 'koda');
     });
   });
@@ -96,7 +96,7 @@ describe('ProjectsController — JsonResponse envelope (US-004)', () => {
 
     it('wraps updated project under result.data', async () => {
       const result = await controller.update('koda', { name: 'Updated' } as any, adminReq);
-      const envelope = result as unknown as JsonResponse;
+      const envelope = result as unknown as JsonResponse<any>;
       expect(envelope.data).toHaveProperty('id');
     });
   });
@@ -109,7 +109,7 @@ describe('ProjectsController — JsonResponse envelope (US-004)', () => {
 
     it('wraps soft-deleted project under result.data with deletedAt set', async () => {
       const result = await controller.remove('koda', adminReq);
-      const envelope = result as unknown as JsonResponse<typeof mockProject>;
+      const envelope = result as unknown as JsonResponse<any>;
       expect((envelope.data as any).deletedAt).not.toBeNull();
     });
   });

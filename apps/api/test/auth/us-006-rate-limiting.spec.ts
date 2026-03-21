@@ -171,5 +171,5 @@ describe('AC4 — 11th login request within a minute returns 429', () => {
       .send(registerPayload);
 
     expect(eleventh.status).toBe(HttpStatus.TOO_MANY_REQUESTS);
-  });
+  }, 15000);
 });

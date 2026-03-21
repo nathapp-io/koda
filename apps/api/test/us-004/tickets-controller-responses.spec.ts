@@ -81,7 +81,7 @@ describe('TicketsController — JsonResponse envelope (US-004)', () => {
     it('wraps ticket under result.data', async () => {
       const dto = { title: 'Fix bug', type: 'BUG', priority: 'MEDIUM' };
       const result = await controller.create('koda', dto as any, userReq);
-      const envelope = result as unknown as JsonResponse;
+      const envelope = result as unknown as JsonResponse<any>;
       expect(envelope.data).toHaveProperty('id');
       expect(envelope.data).toHaveProperty('status', 'CREATED');
     });
@@ -95,7 +95,7 @@ describe('TicketsController — JsonResponse envelope (US-004)', () => {
 
     it('wraps tickets list under result.data', async () => {
       const result = await controller.findAll('koda', {});
-      const envelope = result as unknown as JsonResponse;
+      const envelope = result as unknown as JsonResponse<any>;
       expect(Array.isArray(envelope.data)).toBe(true);
     });
   });
@@ -108,7 +108,7 @@ describe('TicketsController — JsonResponse envelope (US-004)', () => {
 
     it('wraps ticket under result.data', async () => {
       const result = await controller.findByRef('koda', 'KODA-1');
-      const envelope = result as unknown as JsonResponse;
+      const envelope = result as unknown as JsonResponse<any>;
       expect(envelope.data).toHaveProperty('id');
     });
   });

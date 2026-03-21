@@ -4,7 +4,8 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { authConfig } from '../config/auth.config';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { createHmac, randomBytes } from 'crypto';
-import type { AgentRole, PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
+import { AgentRole } from '../common/enums';
 
 export interface CreateAgentDto {
   name: string;
@@ -166,7 +167,7 @@ export class AgentsService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async updateCapabilities(agentId: string, updateData: UpdateCapabilitiesDto): Promise<any> {
     // Delete all existing capabilities
-    await this.db.agentCapability.deleteMany({
+    await this.db.agentCapabilityEntry.deleteMany({
       where: { agentId },
     });
 
@@ -174,7 +175,7 @@ export class AgentsService {
     if (updateData.capabilities && updateData.capabilities.length > 0) {
       // Filter out duplicates
       const uniqueCapabilities = [...new Set(updateData.capabilities)];
-      await this.db.agentCapability.createMany({
+      await this.db.agentCapabilityEntry.createMany({
         data: uniqueCapabilities.map((capability) => ({
           agentId,
           capability,

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { CommentType, PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import { CommentType } from '../common/enums';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ValidationAppException, NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { CreateCommentDto } from './dto/create-comment.dto';

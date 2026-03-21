@@ -1,57 +1,76 @@
 /**
- * US-004 — AppException class contract
+ * US-004 — AppException class contract (v3 @nathapp/nestjs-common)
  *
- * Tests that AppException carries an i18n key and extends HttpException
- * so NestJS can serialize it into an HTTP error response.
- * These tests are RED until AppException is fully implemented.
+ * Tests that AppException is a numeric-coded HTTP exception.
+ * v3 signature: new AppException(code: number, args?, prefix?, httpStatus?)
  */
 import { HttpException, HttpStatus } from '@nestjs/common';
-import { AppException } from '@nathapp/nestjs-common';
+import { AppException, NotFoundAppException, ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
 
 describe('AppException', () => {
   describe('constructor', () => {
     it('is an instance of HttpException', () => {
-      const ex = new AppException('errors.notFound', HttpStatus.NOT_FOUND);
+      const ex = new AppException(404, undefined, undefined, HttpStatus.NOT_FOUND);
       expect(ex).toBeInstanceOf(HttpException);
     });
 
     it('is an instance of AppException', () => {
-      const ex = new AppException('errors.notFound', HttpStatus.NOT_FOUND);
+      const ex = new AppException(404, undefined, undefined, HttpStatus.NOT_FOUND);
       expect(ex).toBeInstanceOf(AppException);
     });
 
-    it('stores the i18n key on the instance', () => {
-      const ex = new AppException('errors.forbidden', HttpStatus.FORBIDDEN);
-      expect(ex.i18nKey).toBe('errors.forbidden');
+    it('stores the numeric code on the instance', () => {
+      const ex = new AppException(403, undefined, undefined, HttpStatus.FORBIDDEN);
+      expect(ex.code).toBe(403);
     });
 
-    it('carries the provided HTTP status', () => {
-      const ex = new AppException('errors.notFound', HttpStatus.NOT_FOUND);
+    it('carries the provided HTTP status via getStatus()', () => {
+      const ex = new AppException(404, undefined, undefined, HttpStatus.NOT_FOUND);
       expect(ex.getStatus()).toBe(HttpStatus.NOT_FOUND);
     });
 
-    it('defaults to 400 BAD_REQUEST when no status provided', () => {
-      const ex = new AppException('common.validation.required');
-      expect(ex.getStatus()).toBe(HttpStatus.BAD_REQUEST);
+    it('defaults to 500 when no httpStatus provided', () => {
+      const ex = new AppException(-1);
+      expect(ex.getStatus()).toBe(500);
+    });
+
+    it('stores args when provided', () => {
+      const args = { field: 'email' };
+      const ex = new AppException(-2, args);
+      expect(ex.args).toEqual(args);
+    });
+
+    it('stores prefix when provided', () => {
+      const ex = new AppException(-2, undefined, 'tickets');
+      expect(ex.prefix).toBe('tickets');
     });
   });
 
-  describe('i18n key patterns', () => {
+  describe('typed exception subclasses', () => {
+    it('NotFoundAppException has HTTP 404 status', () => {
+      const ex = new NotFoundAppException();
+      expect(ex).toBeInstanceOf(AppException);
+      expect(ex.getStatus()).toBe(HttpStatus.NOT_FOUND);
+    });
+
+    it('ForbiddenAppException has HTTP 403 status', () => {
+      const ex = new ForbiddenAppException();
+      expect(ex).toBeInstanceOf(AppException);
+      expect(ex.getStatus()).toBe(HttpStatus.FORBIDDEN);
+    });
+
+    it('ValidationAppException is an AppException', () => {
+      const ex = new ValidationAppException();
+      expect(ex).toBeInstanceOf(AppException);
+    });
+
     it.each([
-      ['errors.notFound', HttpStatus.NOT_FOUND],
-      ['errors.forbidden', HttpStatus.FORBIDDEN],
-      ['errors.unauthorized', HttpStatus.UNAUTHORIZED],
-      ['auth.invalidCredentials', HttpStatus.UNAUTHORIZED],
-      ['auth.emailTaken', HttpStatus.CONFLICT],
-      ['tickets.notFound', HttpStatus.NOT_FOUND],
-      ['tickets.invalidTransition', HttpStatus.BAD_REQUEST],
-      ['projects.notFound', HttpStatus.NOT_FOUND],
+      [new NotFoundAppException(), HttpStatus.NOT_FOUND],
+      [new ForbiddenAppException(), HttpStatus.FORBIDDEN],
     ] as const)(
-      'accepts i18n key "%s" with status %d',
-      (key, status) => {
-        const ex = new AppException(key, status);
-        expect(ex.i18nKey).toBe(key);
-        expect(ex.getStatus()).toBe(status);
+      'each typed exception carries the correct HTTP status',
+      (ex, expectedStatus) => {
+        expect(ex.getStatus()).toBe(expectedStatus);
       },
     );
   });

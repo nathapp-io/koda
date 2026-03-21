@@ -121,18 +121,18 @@ model Ticket {
 }
 
 model Comment {
-  id        String   @id @default(cuid())
-  ticketId  String
-  body      String
-  type      String   @default("GENERAL") // GENERAL | VERIFICATION | FIX_REPORT | REVIEW
-  userId    String?
-  agentId   String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id            String   @id @default(cuid())
+  ticketId      String
+  body          String
+  type          String   @default("GENERAL") // GENERAL | VERIFICATION | FIX_REPORT | REVIEW
+  authorUserId  String?
+  authorAgentId String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   ticket Ticket @relation(fields: [ticketId], references: [id])
-  user   User?  @relation("CommentByUser", fields: [userId], references: [id])
-  agent  Agent? @relation("CommentByAgent", fields: [agentId], references: [id])
+  user   User?  @relation("CommentByUser", fields: [authorUserId], references: [id])
+  agent  Agent? @relation("CommentByAgent", fields: [authorAgentId], references: [id])
 }
 
 model Label {
@@ -158,14 +158,17 @@ model TicketLabel {
 }
 
 model TicketActivity {
-  id         String   @id @default(cuid())
-  ticketId   String
-  action     String   // STATUS_CHANGE | ASSIGNMENT | COMMENT
-  fromStatus String?
-  toStatus   String?
-  actorId    String?
-  actorType  String?  // user | agent
-  createdAt  DateTime @default(now())
+  id           String   @id @default(cuid())
+  ticketId     String
+  action       String   // STATUS_CHANGE | ASSIGNMENT | COMMENT | LABEL_CHANGE
+  fromStatus   String?
+  toStatus     String?
+  actorUserId  String?
+  actorAgentId String?
+  field        String?
+  oldValue     String?
+  newValue     String?
+  createdAt    DateTime @default(now())
 
   ticket Ticket @relation(fields: [ticketId], references: [id])
 }

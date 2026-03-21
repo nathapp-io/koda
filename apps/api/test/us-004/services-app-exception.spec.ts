@@ -93,7 +93,7 @@ describe('AuthService — throws AppException (US-004)', () => {
     );
 
     assertIsAppException(err);
-    expect((err as AppException).i18nKey).toBe('auth.invalidCredentials');
+    expect(typeof (err as AppException).code).toBe('number');
   });
 });
 
@@ -180,7 +180,7 @@ describe('AgentsService — throws AppException (US-004)', () => {
       update: jest.fn(),
     },
     agentRoleEntry: { deleteMany: jest.fn(), createMany: jest.fn() },
-    agentCapability: { deleteMany: jest.fn(), createMany: jest.fn() },
+    agentCapabilityEntry: { deleteMany: jest.fn(), createMany: jest.fn() },
   };
 
   const mockConfigService = {

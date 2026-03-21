@@ -62,7 +62,7 @@ describe('AgentsController — JsonResponse envelope (US-004)', () => {
     it('wraps agent data with apiKey under result.data', async () => {
       const dto = { name: 'Bot', slug: 'bot' };
       const result = await controller.generateApiKey(dto as any, adminReq);
-      const envelope = result as unknown as JsonResponse;
+      const envelope = result as unknown as JsonResponse<any>;
       expect(envelope.data).toHaveProperty('apiKey');
     });
   });
@@ -75,7 +75,7 @@ describe('AgentsController — JsonResponse envelope (US-004)', () => {
 
     it('wraps agents array under result.data', async () => {
       const result = await controller.findAll();
-      const envelope = result as unknown as JsonResponse;
+      const envelope = result as unknown as JsonResponse<any>;
       expect(Array.isArray(envelope.data)).toBe(true);
     });
   });
@@ -88,7 +88,7 @@ describe('AgentsController — JsonResponse envelope (US-004)', () => {
 
     it('wraps agent profile under result.data', async () => {
       const result = await controller.findMe(agentReq);
-      const envelope = result as unknown as JsonResponse;
+      const envelope = result as unknown as JsonResponse<any>;
       expect(envelope.data).toHaveProperty('id');
     });
   });
@@ -101,7 +101,7 @@ describe('AgentsController — JsonResponse envelope (US-004)', () => {
 
     it('wraps agent under result.data', async () => {
       const result = await controller.findBySlug('test-agent');
-      const envelope = result as unknown as JsonResponse;
+      const envelope = result as unknown as JsonResponse<any>;
       expect(envelope.data).toHaveProperty('slug', 'test-agent');
     });
   });
@@ -135,7 +135,7 @@ describe('AgentsController — JsonResponse envelope (US-004)', () => {
 
     it('wraps rotated key data under result.data', async () => {
       const result = await controller.rotateApiKey('test-agent', adminReq);
-      const envelope = result as unknown as JsonResponse;
+      const envelope = result as unknown as JsonResponse<any>;
       expect(envelope.data).toHaveProperty('apiKey');
     });
   });

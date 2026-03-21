@@ -69,7 +69,7 @@ describeSmoke('Phase 3 — Step 2: API Smoke Tests', () => {
     await _prisma.ticket.deleteMany();
     await _prisma.label.deleteMany();
     await _prisma.agentProject.deleteMany();
-    await _prisma.agentCapability.deleteMany();
+    await _prisma.agentCapabilityEntry.deleteMany();
     await _prisma.agentRoleEntry.deleteMany();
     await _prisma.project.deleteMany();
     await _prisma.agent.deleteMany();
