@@ -74,15 +74,17 @@ export class CommentsController {
   @ApiResponse({ status: 201, description: 'Comment created' })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   @ApiResponse({ status: 404, description: 'Project or ticket not found' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async createFromHttp(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Body() createCommentDto: CreateCommentDto,
     @Req() req: RequestWithUser,
-  ): Promise<any> {
+  ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     const data = await this.create(slug, ref, createCommentDto, currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data) as any;
   }
 
@@ -90,11 +92,13 @@ export class CommentsController {
   @ApiOperation({ summary: 'List all comments for a ticket' })
   @ApiResponse({ status: 200, description: 'List of comments' })
   @ApiResponse({ status: 404, description: 'Project or ticket not found' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async listByTicketFromHttp(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
-  ): Promise<any> {
+  ) {
     const data = await this.listByTicket(slug, ref);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data) as any;
   }
 
@@ -103,14 +107,16 @@ export class CommentsController {
   @ApiResponse({ status: 200, description: 'Comment updated' })
   @ApiResponse({ status: 403, description: 'Not authorized to edit this comment' })
   @ApiResponse({ status: 404, description: 'Comment not found' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async updateFromHttp(
     @Param('id') id: string,
     @Body() updateCommentDto: UpdateCommentDto,
     @Req() req: RequestWithUser,
-  ): Promise<any> {
+  ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     const data = await this.update(id, updateCommentDto, currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data) as any;
   }
 

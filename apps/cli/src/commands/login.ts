@@ -21,7 +21,7 @@ export async function loginCommand(
   const client = configureClient(url, apiKey);
   try {
     await client.get('/agents/me');
-  } catch (error) {
+  } catch {
     throw new Error('Invalid API key');
   }
 

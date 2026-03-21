@@ -82,14 +82,16 @@ export class LabelsController {
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   @ApiResponse({ status: 403, description: 'Unauthorized - admin only' })
   @ApiResponse({ status: 404, description: 'Project not found' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async createFromHttp(
     @Param('slug') slug: string,
     @Body() createLabelDto: CreateLabelDto,
     @Req() req: RequestWithUser,
-  ): Promise<any> {
+  ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     const data = await this.create(slug, createLabelDto, currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data) as any;
   }
 
@@ -97,8 +99,10 @@ export class LabelsController {
   @ApiOperation({ summary: 'List all labels for a project' })
   @ApiResponse({ status: 200, description: 'List of labels' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  async findByProjectFromHttp(@Param('slug') slug: string): Promise<any> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async findByProjectFromHttp(@Param('slug') slug: string) {
     const data = await this.findByProject(slug);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data) as any;
   }
 
@@ -124,15 +128,17 @@ export class LabelsController {
   @ApiResponse({ status: 201, description: 'Label assigned to ticket' })
   @ApiResponse({ status: 400, description: 'Invalid request data or label already assigned' })
   @ApiResponse({ status: 404, description: 'Ticket or label not found' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async assignLabelFromHttp(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Body() assignLabelDto: AssignLabelDto,
     @Req() req: RequestWithUser,
-  ): Promise<any> {
+  ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     const data = await this.assignLabel(slug, ref, assignLabelDto, currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data) as any;
   }
 

@@ -42,13 +42,14 @@ export class ProjectsController {
   async create(
     @Body() createProjectDto: CreateProjectDto,
     @Req() req: RequestWithUser,
-  ): Promise<any> {
+  ) {
     // Check if user is admin
     if (req.user?.role !== 'ADMIN') {
       throw new ForbiddenAppException();
     }
 
     const data = await this.projectsService.create(createProjectDto);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data) as any;
   }
 
@@ -56,8 +57,10 @@ export class ProjectsController {
   @IsPublic()
   @ApiOperation({ summary: 'List all projects (excluding soft-deleted)' })
   @ApiResponse({ status: 200, description: 'List of projects' })
-  async findAll(): Promise<any> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async findAll() {
     const data = await this.projectsService.findAll();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data) as any;
   }
 
@@ -66,8 +69,10 @@ export class ProjectsController {
   @ApiOperation({ summary: 'Get a project by slug' })
   @ApiResponse({ status: 200, description: 'Project found' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  async findBySlug(@Param('slug') slug: string): Promise<any> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async findBySlug(@Param('slug') slug: string) {
     const data = await this.projectsService.findBySlug(slug);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data) as any;
   }
 
@@ -79,17 +84,19 @@ export class ProjectsController {
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Project not found' })
   @ApiResponse({ status: 409, description: 'Conflict - duplicate slug or key' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async update(
     @Param('slug') slug: string,
     @Body() updateProjectDto: UpdateProjectDto,
     @Req() req: RequestWithUser,
-  ): Promise<any> {
+  ) {
     // Check if user is admin
     if (req.user?.role !== 'ADMIN') {
       throw new ForbiddenAppException();
     }
 
     const data = await this.projectsService.update(slug, updateProjectDto);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data) as any;
   }
 
@@ -99,16 +106,18 @@ export class ProjectsController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Project not found' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async remove(
     @Param('slug') slug: string,
     @Req() req: RequestWithUser,
-  ): Promise<any> {
+  ) {
     // Check if user is admin
     if (req.user?.role !== 'ADMIN') {
       throw new ForbiddenAppException();
     }
 
     const data = await this.projectsService.softDelete(slug);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data) as any;
   }
 }

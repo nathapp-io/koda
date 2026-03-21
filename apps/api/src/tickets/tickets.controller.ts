@@ -44,15 +44,17 @@ export class TicketsController {
   @ApiResponse({ status: 201, type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   @ApiResponse({ status: 404, description: 'Project not found' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async create(
     @Param('slug') slug: string,
     @Body() createTicketDto: CreateTicketDto,
     @Req() req: RequestWithUser,
-  ): Promise<any> {
+  ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
 
     const data = await this.ticketsService.create(slug, createTicketDto, currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data) as any;
   }
 
@@ -67,11 +69,12 @@ export class TicketsController {
   @ApiQuery({ name: 'unassigned', required: false, type: Boolean })
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 20 })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async findAll(
     @Param('slug') slug: string,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     @Query() query: Record<string, any>,
-  ): Promise<any> {
+  ) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const filters: any = {};
 
@@ -84,6 +87,7 @@ export class TicketsController {
     if (query.page !== undefined) filters.page = parseInt(query.page, 10);
 
     const data = await this.ticketsService.findAll(slug, filters);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data) as any;
   }
 
@@ -91,11 +95,13 @@ export class TicketsController {
   @ApiOperation({ summary: 'Get a ticket by reference (KODA-42 or CUID)' })
   @ApiResponse({ status: 200, type: TicketResponseDto })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async findByRef(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
-  ): Promise<any> {
+  ) {
     const data = await this.ticketsService.findByRef(slug, ref);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data) as any;
   }
 
@@ -104,16 +110,18 @@ export class TicketsController {
   @ApiResponse({ status: 200, type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async update(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Body() updateTicketDto: UpdateTicketDto,
     @Req() req: RequestWithUser,
-  ): Promise<any> {
+  ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
 
     const data = await this.ticketsService.update(slug, ref, updateTicketDto, currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data) as any;
   }
 
@@ -122,15 +130,17 @@ export class TicketsController {
   @ApiResponse({ status: 200, type: TicketResponseDto })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async softDelete(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Req() req: RequestWithUser,
-  ): Promise<any> {
+  ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
 
     const data = await this.ticketsService.softDelete(slug, ref, currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data) as any;
   }
 
@@ -140,13 +150,15 @@ export class TicketsController {
   @ApiResponse({ status: 200, type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Cannot assign to both user and agent' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async assign(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     @Body() assignInput: Record<string, any>,
-  ): Promise<any> {
+  ) {
     const data = await this.ticketsService.assign(slug, ref, assignInput);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data) as any;
   }
 
@@ -165,6 +177,7 @@ export class TicketsController {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     const data = await this.transitionsService.verify(slug, ref, dto.body, currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data) as any;
   }
 
@@ -182,6 +195,7 @@ export class TicketsController {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     const data = await this.transitionsService.start(slug, ref, currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data) as any;
   }
 
@@ -200,6 +214,7 @@ export class TicketsController {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     const data = await this.transitionsService.fix(slug, ref, dto.body, currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data) as any;
   }
 
@@ -220,6 +235,7 @@ export class TicketsController {
     const actorType = req.user ? 'user' : 'agent';
     const isApproved = approve === 'true' || approve === true;
     const data = await this.transitionsService.verifyFix(slug, ref, dto.body, isApproved, currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data) as any;
   }
 
@@ -237,6 +253,7 @@ export class TicketsController {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     const data = await this.transitionsService.close(slug, ref, currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data) as any;
   }
 
@@ -255,6 +272,7 @@ export class TicketsController {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     const data = await this.transitionsService.reject(slug, ref, dto.body, currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data) as any;
   }
 }
