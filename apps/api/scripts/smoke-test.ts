@@ -27,10 +27,16 @@ const TEST_USER = {
   name: 'Smoke Tester',
 };
 
+// Generate a unique 5-letter uppercase key per run (key must be ^[A-Z]{2,6}$)
+// Derived from the timestamp so it's reproducible per run but unique across runs
+const _TS = Date.now();
+const _L = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const TEST_PROJECT_KEY = [0, 1, 2, 3, 4].map(i => _L[Math.floor(_TS / Math.pow(26, i)) % 26]).join('');
+
 const TEST_PROJECT = {
-  name: `Smoke Project ${Date.now()}`,
-  slug: `smoke-${Date.now()}`,
-  key: 'SMOKE',
+  name: `Smoke Project ${_TS}`,
+  slug: `smoke-${_TS}`,
+  key: TEST_PROJECT_KEY,
   description: 'Auto-generated smoke test project',
 };
 
@@ -292,11 +298,13 @@ async function run() {
 
   await test('Fix ticket', 'POST', `/api/projects/${projectSlug}/tickets/${ticketRef}/fix`, {
     token: accessToken,
+    body: { body: 'Smoke test fix submitted' },
     expectStatus: 200,
   });
 
   await test('Verify ticket', 'POST', `/api/projects/${projectSlug}/tickets/${ticketRef}/verify`, {
     token: accessToken,
+    body: { body: 'Smoke test verification passed' },
     expectStatus: 200,
   });
 
