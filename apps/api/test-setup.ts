@@ -1,28 +1,8 @@
 // Test setup file - runs before each test file
 // Load .env.test so tests that bootstrap AppModule have required env vars
-import * as fs from 'fs';
-import * as path from 'path';
-
-const envTestPath = path.resolve(__dirname, '.env.test');
-if (fs.existsSync(envTestPath)) {
-  const lines = fs.readFileSync(envTestPath, 'utf-8').split('\n');
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eqIdx = trimmed.indexOf('=');
-    if (eqIdx === -1) continue;
-    const key = trimmed.slice(0, eqIdx).trim();
-    let value = trimmed.slice(eqIdx + 1).trim();
-    // Remove surrounding quotes
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-    // Don't override existing env vars
-    if (!(key in process.env)) {
-      process.env[key] = value;
-    }
-  }
-}
+import { config } from 'dotenv';
+import { resolve } from 'path';
+config({ path: resolve(__dirname, '.env.test') });
 
 // @ts-ignore - expect is global in Jest test environment
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
