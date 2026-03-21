@@ -1,573 +1,507 @@
 {
-  "project": "koda",
-  "feature": "refactor-standard",
-  "branchName": "feat/refactor-standard",
-  "createdAt": "2026-03-20T00:00:00.000Z",
-  "updatedAt": "2026-03-21T02:29:09.083Z",
-  "userStories": [
-    {
-      "id": "US-001",
-      "title": "Migrate auth to @nathapp/nestjs-auth and remove custom guards",
-      "description": "The existing `auth.module.ts` imports `JwtModule` from `@nestjs/jwt` and injects `JwtService` directly into `AuthService`. Three custom guards (`JwtAuthGuard`, `ApiKeyAuthGuard`, `CombinedAuthGuard`) and one Passport JWT strategy exist and must be deleted. `AppModule` provides `CombinedAuthGuard` as `APP_GUARD` which must be removed — `useAppGlobalGuards()` in `main.ts` is already the correct registration point.\n\nRewrite `auth.module.ts` using `AuthModule.forRootAsync` from `@nathapp/nestjs-auth`. Rewrite `AuthService` to remove `JwtService` injection — use nathapp's auth provider pattern for token generation. Delete all custom guard and strategy files. Remove `@nestjs/jwt`, `@nestjs/passport`, and `passport-jwt` from `apps/api/package.json`. Apply `@Public()` to login, register, and refresh endpoints. Apply `@Principal()` where current user is needed in controllers. Verify the HMAC-SHA256 agent API key flow is preserved (either through nathapp's API key support or as a standalone guard that does not conflict with the global guard setup).",
-      "acceptanceCriteria": [
-        "No imports from `@nestjs/jwt` or `@nestjs/passport` anywhere in apps/api",
-        "`AuthModule` uses `@nathapp/nestjs-auth` `AuthModule.forRootAsync`",
-        "Login and register endpoints return valid JWT access + refresh tokens",
-        "Protected endpoints reject unauthenticated requests with 401",
-        "`@Public()` endpoints are accessible without a token",
-        "`AppModule` has no `APP_GUARD` provider",
-        "Auth tests pass with >= 80% coverage for auth module",
-        "Packages `@nestjs/jwt`, `@nestjs/passport`, `passport-jwt` removed from package.json",
-        "Files `jwt-auth.guard.ts`, `api-key-auth.guard.ts`, `combined-auth.guard.ts`, `jwt.strategy.ts` deleted",
-        "Agent API key validation still works for agent-authenticated endpoints"
-      ],
-      "tags": [
-        "security",
-        "auth",
-        "api"
-      ],
-      "dependencies": [],
-      "status": "passed",
-      "passes": false,
-      "attempts": 0,
-      "escalations": [],
-      "routing": {
-        "complexity": "expert",
-        "testStrategy": "three-session-tdd",
-        "reasoning": "validated from LLM output"
-      },
-      "workdir": "apps/api",
-      "contextFiles": [
-        "apps/api/src/auth/auth.module.ts",
-        "apps/api/src/auth/auth.service.ts",
-        "apps/api/src/auth/auth.controller.ts",
-        "apps/api/src/app.module.ts",
-        "apps/api/src/main.ts"
-      ],
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1
-    },
-    {
-      "id": "US-001-1",
-      "title": "Install @nathapp/nestjs-auth and wire AuthModule.forRootAsync",
-      "description": "Add `@nathapp/nestjs-auth` to `apps/api/package.json`. Rewrite `auth.module.ts` to use `AuthModule.forRootAsync` with JWT config from environment. Remove `JwtModule` registration and `@nestjs/jwt` import from `auth.module.ts`. Remove `APP_GUARD` provider from `AppModule` and call `useAppGlobalGuards()` in `main.ts` instead. Apply `@Public()` decorator to login, register, and refresh endpoints in `AuthController`.",
-      "acceptanceCriteria": [
-        "@nathapp/nestjs-auth present in apps/api/package.json",
-        "auth.module.ts uses AuthModule.forRootAsync with JWT config",
-        "No JwtModule import from @nestjs/jwt in auth.module.ts",
-        "AppModule has no APP_GUARD provider",
-        "useAppGlobalGuards() called in main.ts",
-        "@Public() applied to login, register, and refresh endpoints"
-      ],
-      "tags": [
-        "security",
-        "auth",
-        "api"
-      ],
-      "dependencies": [],
-      "status": "passed",
-      "passes": true,
-      "escalations": [],
-      "attempts": 0,
-      "parentStoryId": "US-001",
-      "workdir": "apps/api",
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1,
-      "routing": {
-        "complexity": "medium",
-        "initialComplexity": "medium",
-        "testStrategy": "three-session-tdd",
-        "reasoning": "Focused module wiring subtask: package installation, AuthModule.forRootAsync setup, decorator application, main.ts updates—straightforward but requires pattern understanding.",
-        "contentHash": "cd690b6a898847c5c0c157f9e88d48de516f18d84f42eee9b3b7dbf74672c0fb"
-      }
-    },
-    {
-      "id": "US-001-2",
-      "title": "Rewrite AuthService using nathapp auth provider pattern",
-      "description": "Remove `JwtService` injection from `AuthService`. Rewrite token generation (login, register, refresh) to use the auth provider pattern supplied by `@nathapp/nestjs-auth`. Ensure login and register still return valid JWT access + refresh tokens in the existing response shape. Apply `@Principal()` decorator in `AuthController` wherever the current authenticated user is referenced.",
-      "acceptanceCriteria": [
-        "AuthService has no import or injection of JwtService from @nestjs/jwt",
-        "Login endpoint returns valid JWT access + refresh tokens",
-        "Register endpoint returns valid JWT access + refresh tokens",
-        "Refresh endpoint returns new valid JWT access token",
-        "@Principal() used in AuthController instead of manual request.user access"
-      ],
-      "tags": [
-        "security",
-        "auth",
-        "api"
-      ],
-      "dependencies": [
-        "US-001-1"
-      ],
-      "status": "passed",
-      "passes": true,
-      "escalations": [],
-      "attempts": 0,
-      "parentStoryId": "US-001",
-      "workdir": "apps/api",
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1,
-      "routing": {
-        "complexity": "medium",
-        "initialComplexity": "medium",
-        "testStrategy": "three-session-tdd",
-        "reasoning": "Refactoring auth logic to follow established nathapp pattern—requires careful implementation of security-critical code but pattern is documented, scope is well-defined across 2-3 files, and existing response shape must be preserved.",
-        "contentHash": "0575f8dff462d9b0ef944187e07ba29b9a5eb268a9916b9f4acd64ada4e2efb6"
-      }
-    },
-    {
-      "id": "US-001-3",
-      "title": "Delete custom guard and strategy files",
-      "description": "Delete the following files: `apps/api/src/auth/guards/jwt-auth.guard.ts`, `apps/api/src/auth/guards/api-key-auth.guard.ts`, `apps/api/src/auth/guards/combined-auth.guard.ts`, `apps/api/src/auth/strategies/jwt.strategy.ts`. Remove all imports referencing these deleted files from `auth.module.ts`, `agents.module.ts`, and any other module or controller. Verify the app compiles cleanly after deletion.",
-      "acceptanceCriteria": [
-        "Files jwt-auth.guard.ts, api-key-auth.guard.ts, combined-auth.guard.ts, jwt.strategy.ts no longer exist",
-        "No import in apps/api/src references any of the deleted files",
-        "bun run --cwd apps/api type-check exits 0 after deletion"
-      ],
-      "tags": [
-        "security",
-        "auth",
-        "api"
-      ],
-      "dependencies": [
-        "US-001-1"
-      ],
-      "status": "passed",
-      "passes": true,
-      "escalations": [],
-      "attempts": 0,
-      "parentStoryId": "US-001",
-      "workdir": "apps/api",
-      "priorErrors": [
-        "Attempt 1 failed with model tier: fast: Rectification exhausted after 2 attempts (6 test failures)"
-      ],
-      "priorFailures": [
+    "project": "koda",
+    "feature": "refactor-standard",
+    "branchName": "feat/refactor-standard",
+    "createdAt": "2026-03-20T00:00:00.000Z",
+    "updatedAt": "2026-03-21T03:09:10.412Z",
+    "userStories": [
         {
-          "attempt": 1,
-          "modelTier": "fast",
-          "stage": "escalation",
-          "summary": "Failed with tier fast, escalating to next tier",
-          "cost": 1.2393766,
-          "timestamp": "2026-03-20T11:51:13.826Z"
+            "id": "US-001",
+            "title": "Migrate auth to @nathapp/nestjs-auth and remove custom guards",
+            "description": "The existing `auth.module.ts` imports `JwtModule` from `@nestjs/jwt` and injects `JwtService` directly into `AuthService`. Three custom guards (`JwtAuthGuard`, `ApiKeyAuthGuard`, `CombinedAuthGuard`) and one Passport JWT strategy exist and must be deleted. `AppModule` provides `CombinedAuthGuard` as `APP_GUARD` which must be removed — `useAppGlobalGuards()` in `main.ts` is already the correct registration point.\n\nRewrite `auth.module.ts` using `AuthModule.forRootAsync` from `@nathapp/nestjs-auth`. Rewrite `AuthService` to remove `JwtService` injection — use nathapp's auth provider pattern for token generation. Delete all custom guard and strategy files. Remove `@nestjs/jwt`, `@nestjs/passport`, and `passport-jwt` from `apps/api/package.json`. Apply `@Public()` to login, register, and refresh endpoints. Apply `@Principal()` where current user is needed in controllers. Verify the HMAC-SHA256 agent API key flow is preserved (either through nathapp's API key support or as a standalone guard that does not conflict with the global guard setup).",
+            "acceptanceCriteria": [
+                "No imports from `@nestjs/jwt` or `@nestjs/passport` anywhere in apps/api",
+                "`AuthModule` uses `@nathapp/nestjs-auth` `AuthModule.forRootAsync`",
+                "Login and register endpoints return valid JWT access + refresh tokens",
+                "Protected endpoints reject unauthenticated requests with 401",
+                "`@Public()` endpoints are accessible without a token",
+                "`AppModule` has no `APP_GUARD` provider",
+                "Auth tests pass with >= 80% coverage for auth module",
+                "Packages `@nestjs/jwt`, `@nestjs/passport`, `passport-jwt` removed from package.json",
+                "Files `jwt-auth.guard.ts`, `api-key-auth.guard.ts`, `combined-auth.guard.ts`, `jwt.strategy.ts` deleted",
+                "Agent API key validation still works for agent-authenticated endpoints"
+            ],
+            "tags": ["security", "auth", "api"],
+            "dependencies": [],
+            "status": "passed",
+            "passes": false,
+            "attempts": 0,
+            "escalations": [],
+            "routing": {
+                "complexity": "expert",
+                "testStrategy": "three-session-tdd",
+                "reasoning": "validated from LLM output"
+            },
+            "workdir": "apps/api",
+            "contextFiles": [
+                "apps/api/src/auth/auth.module.ts",
+                "apps/api/src/auth/auth.service.ts",
+                "apps/api/src/auth/auth.controller.ts",
+                "apps/api/src/app.module.ts",
+                "apps/api/src/main.ts"
+            ],
+            "priorErrors": [],
+            "priorFailures": [],
+            "storyPoints": 1
+        },
+        {
+            "id": "US-001-1",
+            "title": "Install @nathapp/nestjs-auth and wire AuthModule.forRootAsync",
+            "description": "Add `@nathapp/nestjs-auth` to `apps/api/package.json`. Rewrite `auth.module.ts` to use `AuthModule.forRootAsync` with JWT config from environment. Remove `JwtModule` registration and `@nestjs/jwt` import from `auth.module.ts`. Remove `APP_GUARD` provider from `AppModule` and call `useAppGlobalGuards()` in `main.ts` instead. Apply `@Public()` decorator to login, register, and refresh endpoints in `AuthController`.",
+            "acceptanceCriteria": [
+                "@nathapp/nestjs-auth present in apps/api/package.json",
+                "auth.module.ts uses AuthModule.forRootAsync with JWT config",
+                "No JwtModule import from @nestjs/jwt in auth.module.ts",
+                "AppModule has no APP_GUARD provider",
+                "useAppGlobalGuards() called in main.ts",
+                "@Public() applied to login, register, and refresh endpoints"
+            ],
+            "tags": ["security", "auth", "api"],
+            "dependencies": [],
+            "status": "passed",
+            "passes": true,
+            "escalations": [],
+            "attempts": 0,
+            "parentStoryId": "US-001",
+            "workdir": "apps/api",
+            "priorErrors": [],
+            "priorFailures": [],
+            "storyPoints": 1,
+            "routing": {
+                "complexity": "medium",
+                "initialComplexity": "medium",
+                "testStrategy": "three-session-tdd",
+                "reasoning": "Focused module wiring subtask: package installation, AuthModule.forRootAsync setup, decorator application, main.ts updates—straightforward but requires pattern understanding.",
+                "contentHash": "cd690b6a898847c5c0c157f9e88d48de516f18d84f42eee9b3b7dbf74672c0fb"
+            }
+        },
+        {
+            "id": "US-001-2",
+            "title": "Rewrite AuthService using nathapp auth provider pattern",
+            "description": "Remove `JwtService` injection from `AuthService`. Rewrite token generation (login, register, refresh) to use the auth provider pattern supplied by `@nathapp/nestjs-auth`. Ensure login and register still return valid JWT access + refresh tokens in the existing response shape. Apply `@Principal()` decorator in `AuthController` wherever the current authenticated user is referenced.",
+            "acceptanceCriteria": [
+                "AuthService has no import or injection of JwtService from @nestjs/jwt",
+                "Login endpoint returns valid JWT access + refresh tokens",
+                "Register endpoint returns valid JWT access + refresh tokens",
+                "Refresh endpoint returns new valid JWT access token",
+                "@Principal() used in AuthController instead of manual request.user access"
+            ],
+            "tags": ["security", "auth", "api"],
+            "dependencies": ["US-001-1"],
+            "status": "passed",
+            "passes": true,
+            "escalations": [],
+            "attempts": 0,
+            "parentStoryId": "US-001",
+            "workdir": "apps/api",
+            "priorErrors": [],
+            "priorFailures": [],
+            "storyPoints": 1,
+            "routing": {
+                "complexity": "medium",
+                "initialComplexity": "medium",
+                "testStrategy": "three-session-tdd",
+                "reasoning": "Refactoring auth logic to follow established nathapp pattern—requires careful implementation of security-critical code but pattern is documented, scope is well-defined across 2-3 files, and existing response shape must be preserved.",
+                "contentHash": "0575f8dff462d9b0ef944187e07ba29b9a5eb268a9916b9f4acd64ada4e2efb6"
+            }
+        },
+        {
+            "id": "US-001-3",
+            "title": "Delete custom guard and strategy files",
+            "description": "Delete the following files: `apps/api/src/auth/guards/jwt-auth.guard.ts`, `apps/api/src/auth/guards/api-key-auth.guard.ts`, `apps/api/src/auth/guards/combined-auth.guard.ts`, `apps/api/src/auth/strategies/jwt.strategy.ts`. Remove all imports referencing these deleted files from `auth.module.ts`, `agents.module.ts`, and any other module or controller. Verify the app compiles cleanly after deletion.",
+            "acceptanceCriteria": [
+                "Files jwt-auth.guard.ts, api-key-auth.guard.ts, combined-auth.guard.ts, jwt.strategy.ts no longer exist",
+                "No import in apps/api/src references any of the deleted files",
+                "bun run --cwd apps/api type-check exits 0 after deletion"
+            ],
+            "tags": ["security", "auth", "api"],
+            "dependencies": ["US-001-1"],
+            "status": "passed",
+            "passes": true,
+            "escalations": [],
+            "attempts": 0,
+            "parentStoryId": "US-001",
+            "workdir": "apps/api",
+            "priorErrors": [
+                "Attempt 1 failed with model tier: fast: Rectification exhausted after 2 attempts (6 test failures)"
+            ],
+            "priorFailures": [
+                {
+                    "attempt": 1,
+                    "modelTier": "fast",
+                    "stage": "escalation",
+                    "summary": "Failed with tier fast, escalating to next tier",
+                    "cost": 1.2393766,
+                    "timestamp": "2026-03-20T11:51:13.826Z"
+                }
+            ],
+            "storyPoints": 1,
+            "routing": {
+                "complexity": "simple",
+                "initialComplexity": "simple",
+                "testStrategy": "three-session-tdd",
+                "reasoning": "Pure file deletion with mechanical import cleanup; no new behavior or logic, straightforward type-check verification.",
+                "contentHash": "86b7a7cc260c211a73ac1f205d6791fe173a1000675959c0f8e26e96daf77440",
+                "modelTier": "balanced"
+            }
+        },
+        {
+            "id": "US-001-4",
+            "title": "Preserve agent API key validation after guard migration",
+            "description": "Verify whether `@nathapp/nestjs-auth` includes built-in API key guard support. If it does, configure it for agent-authenticated endpoints. If it does not, implement a minimal standalone `AgentApiKeyGuard` that validates HMAC-SHA256 API keys against the stored bcrypt hash and does not conflict with the global nathapp guard. Apply the guard to all agent-facing endpoints in `AgentsController` and any other endpoint previously protected by `ApiKeyAuthGuard`. Write a targeted unit test confirming agent key auth accepts valid keys and rejects invalid ones.",
+            "acceptanceCriteria": [
+                "Agent-authenticated endpoints return 401 when no API key is provided",
+                "Agent-authenticated endpoints return 200 when a valid API key is provided",
+                "HMAC-SHA256 key validation logic is preserved",
+                "No import of deleted custom guards in agents module",
+                "Unit test for agent key guard covers valid, invalid, and missing key cases"
+            ],
+            "tags": ["security", "auth", "api"],
+            "dependencies": ["US-001-3"],
+            "status": "passed",
+            "passes": true,
+            "escalations": [],
+            "attempts": 0,
+            "parentStoryId": "US-001",
+            "workdir": "apps/api",
+            "priorErrors": [],
+            "priorFailures": [],
+            "storyPoints": 1,
+            "routing": {
+                "complexity": "medium",
+                "initialComplexity": "medium",
+                "testStrategy": "three-session-tdd",
+                "reasoning": "Requires research on nathapp support, conditional guard implementation (straightforward but security-critical), multiple endpoint updates, and standard unit tests—all within known NestJS patterns but spanning several concerns.",
+                "contentHash": "f84e48c89878330edb61b128bbe238871e8429233ad353f87c5ad39336112b51"
+            }
+        },
+        {
+            "id": "US-001-5",
+            "title": "Remove legacy auth packages and validate auth test coverage",
+            "description": "Remove `@nestjs/jwt`, `@nestjs/passport`, and `passport-jwt` from `apps/api/package.json` (and `bun.lockb`). Confirm no remaining import in `apps/api/src` references these packages. Update or write auth module tests (`auth.service.spec.ts`, `auth.controller.spec.ts`) so the auth module has >= 80% statement coverage. Run `bun run --cwd apps/api lint` and `bun run --cwd apps/api type-check` to confirm zero errors.",
+            "acceptanceCriteria": [
+                "@nestjs/jwt, @nestjs/passport, passport-jwt absent from apps/api/package.json",
+                "No import in apps/api/src references @nestjs/jwt, @nestjs/passport, or passport-jwt",
+                "Auth module test coverage >= 80%",
+                "bun run --cwd apps/api lint exits 0 with 0 warnings",
+                "bun run --cwd apps/api type-check exits 0"
+            ],
+            "tags": ["security", "auth", "api"],
+            "dependencies": ["US-001-2", "US-001-3", "US-001-4"],
+            "status": "passed",
+            "passes": true,
+            "escalations": [],
+            "attempts": 0,
+            "parentStoryId": "US-001",
+            "workdir": "apps/api",
+            "priorErrors": [],
+            "priorFailures": [],
+            "storyPoints": 1,
+            "routing": {
+                "complexity": "medium",
+                "initialComplexity": "medium",
+                "testStrategy": "three-session-tdd",
+                "reasoning": "Removing packages is simple, but writing/updating tests for 80% auth module coverage requires understanding existing code patterns and test infrastructure—standard medium-complexity work.",
+                "contentHash": "30c0193c532f925a8256fde557afa466d289c2dfb608c8df7ee57ca58cb8a899"
+            }
+        },
+        {
+            "id": "US-002",
+            "title": "Add i18n support via I18nCoreModule with translation files and DTO message keys",
+            "description": "No i18n infrastructure exists. All validation errors and exception messages are hardcoded English strings. Add `I18nCoreModule` from `@nathapp/nestjs-common` to `AppModule`. Create the translation directory structure at `apps/api/src/i18n/` with `en/` and `zh/` locales, each containing `common.json`, `auth.json`, `tickets.json`, `projects.json`, `agents.json`, and `comments.json`. Update all DTOs across all six modules (auth, agents, projects, tickets, comments, labels) to use i18n validation message keys (`$t(common.validation.required)`, etc.) instead of hardcoded strings. The `zh/` locale can mirror English values initially. Verify that `useAppGlobalPipes()` and `useAppGlobalFilters()` (already in main.ts) activate `I18nValidationPipe` and `I18nValidationExceptionFilter`.",
+            "acceptanceCriteria": [
+                "`I18nCoreModule` registered in `AppModule`",
+                "`apps/api/src/i18n/en/common.json` exists with at minimum: `validation.required`, `validation.isEmail`, `validation.minLength`, `validation.maxLength`, `errors.notFound`, `errors.forbidden`, `errors.unauthorized`",
+                "All six locale namespaces (common, auth, tickets, projects, agents, comments) exist in both `en/` and `zh/`",
+                "All DTO `@IsNotEmpty()`, `@IsEmail()`, `@MinLength()`, `@MaxLength()` carry i18n message keys",
+                "Validation failure response body contains translated message string, not hardcoded English",
+                "No hardcoded English strings in any DTO validation decorators"
+            ],
+            "tags": ["i18n", "api", "feature"],
+            "dependencies": [],
+            "status": "passed",
+            "passes": true,
+            "attempts": 0,
+            "escalations": [],
+            "routing": {
+                "complexity": "complex",
+                "testStrategy": "three-session-tdd-lite",
+                "reasoning": "validated from LLM output"
+            },
+            "workdir": "apps/api",
+            "contextFiles": [
+                "apps/api/src/app.module.ts",
+                "apps/api/src/main.ts",
+                "apps/api/src/auth/dto/register.dto.ts",
+                "apps/api/src/tickets/dto/create-ticket.dto.ts",
+                "apps/api/src/projects/dto/create-project.dto.ts"
+            ],
+            "priorErrors": [],
+            "priorFailures": [],
+            "storyPoints": 1
+        },
+        {
+            "id": "US-003",
+            "title": "Add structured logging via @nathapp/nestjs-logging",
+            "description": "Add `@nathapp/nestjs-logging` to `apps/api/package.json`. Add `LoggingModule` to `AppModule` imports. In `main.ts`, add `app.useLogger(app.get(Logger))` as the first call after `AppFactory.createFastifyApp`. Replace all `import { Logger } from '@nestjs/common'` with `import { Logger } from '@nathapp/nestjs-logging'` across all services and any files that use Logger. Remove all `console.log`, `console.error`, and `console.warn` calls from `apps/api/src/**` — most critically the debugging console.logs in `combined-auth.guard.ts` (which will be deleted by US-001, but any others must be removed).",
+            "acceptanceCriteria": [
+                "`@nathapp/nestjs-logging` present in apps/api/package.json",
+                "`LoggingModule` registered in `AppModule`",
+                "`app.useLogger(app.get(Logger))` is called before `useAppGlobalPrefix()` in main.ts",
+                "No `import { Logger } from '@nestjs/common'` in apps/api/src/**",
+                "No `console.log`, `console.error`, `console.warn` calls in apps/api/src/**",
+                "App starts without logger initialization errors"
+            ],
+            "tags": ["logging", "api", "infrastructure"],
+            "dependencies": [],
+            "status": "passed",
+            "passes": true,
+            "attempts": 0,
+            "escalations": [],
+            "routing": {
+                "complexity": "medium",
+                "testStrategy": "three-session-tdd-lite",
+                "reasoning": "validated from LLM output"
+            },
+            "workdir": "apps/api",
+            "contextFiles": [
+                "apps/api/src/main.ts",
+                "apps/api/src/app.module.ts",
+                "apps/api/src/auth/auth.service.ts",
+                "apps/api/src/agents/agents.service.ts",
+                "apps/api/src/tickets/tickets.service.ts"
+            ],
+            "priorErrors": [],
+            "priorFailures": [],
+            "storyPoints": 1
+        },
+        {
+            "id": "US-004",
+            "title": "Standardize controller responses with JsonResponse and replace HTTP exceptions with AppException",
+            "description": "All controllers currently return raw objects or DTO instances. All services throw raw NestJS HTTP exceptions (`NotFoundException`, `UnauthorizedException`, `ForbiddenException`, `BadRequestException`, `ConflictException`) with hardcoded English messages.\n\nAudit all six controllers (agents, auth, projects, tickets, comments, labels) and wrap every return value in `JsonResponse.ok(data)`, `JsonResponse.created(data)`, or `JsonResponse.paginated(data, meta)` as appropriate. In all services and controllers, replace every `throw new NotFoundException(...)`, `throw new ForbiddenException(...)`, etc. with `throw new AppException(i18nKey)` where the key references the i18n translation files created in US-002. Update existing integration tests to match the new `{ data, meta?, message? }` response envelope shape.",
+            "acceptanceCriteria": [
+                "Every controller method returns a `JsonResponse` instance (ok, created, or paginated)",
+                "No `throw new NotFoundException(...)`, `ForbiddenException(...)`, `UnauthorizedException(...)`, `BadRequestException(...)`, or `ConflictException(...)` remain in apps/api/src/**",
+                "All `AppException` calls reference an i18n key (e.g. `'errors.notFound'`, `'errors.forbidden'`)",
+                "API response shape is consistent: `{ data, meta?, message? }`",
+                "Existing integration tests updated to assert against the new response envelope",
+                "Auth tests pass: login returns `{ data: { accessToken, refreshToken, user } }`"
+            ],
+            "tags": ["api", "responses", "feature"],
+            "dependencies": ["US-002"],
+            "status": "passed",
+            "passes": true,
+            "attempts": 0,
+            "escalations": [],
+            "routing": {
+                "complexity": "complex",
+                "testStrategy": "three-session-tdd-lite",
+                "reasoning": "validated from LLM output"
+            },
+            "workdir": "apps/api",
+            "contextFiles": [
+                "apps/api/src/tickets/tickets.controller.ts",
+                "apps/api/src/tickets/tickets.service.ts",
+                "apps/api/src/projects/projects.controller.ts",
+                "apps/api/src/agents/agents.controller.ts",
+                "apps/api/src/auth/auth.controller.ts"
+            ],
+            "priorErrors": [],
+            "priorFailures": [],
+            "storyPoints": 1
+        },
+        {
+            "id": "US-005",
+            "title": "Add validated typed config with registerAs and Joi schema",
+            "description": "Create typed config files using `registerAs` for three domains: `apps/api/src/config/app.config.ts` (PORT, NODE_ENV, GLOBAL_PREFIX), `apps/api/src/config/auth.config.ts` (JWT_SECRET, JWT_EXPIRES_IN, JWT_REFRESH_SECRET, JWT_REFRESH_EXPIRES_IN — standardize any existing partial implementation), and `apps/api/src/config/database.config.ts` (DATABASE_URL, DATABASE_PROVIDER). Add a Joi validation schema to `ConfigModule.forRoot({ validate })` in `AppModule` so the app throws on startup if required env vars are missing. Update `auth.module.ts` (after US-001) to inject typed auth config instead of raw `configService.get('JWT_SECRET')`. Update `apps/api/.env.example` with all required variables and their descriptions.",
+            "acceptanceCriteria": [
+                "`apps/api/src/config/app.config.ts`, `auth.config.ts`, and `database.config.ts` all use `registerAs`",
+                "`ConfigModule.forRoot` in AppModule has a `validate` function using Joi",
+                "App throws a descriptive error on startup when `JWT_SECRET` or `DATABASE_URL` is missing",
+                "No `configService.get('RAW_STRING')` calls remain — all access goes through typed config objects",
+                "`apps/api/.env.example` is up to date with all required vars",
+                "All existing tests still pass (config mocked appropriately in test modules)"
+            ],
+            "tags": ["config", "infrastructure", "api"],
+            "dependencies": [],
+            "status": "passed",
+            "passes": true,
+            "attempts": 0,
+            "escalations": [],
+            "routing": {
+                "complexity": "medium",
+                "testStrategy": "three-session-tdd-lite",
+                "reasoning": "validated from LLM output"
+            },
+            "workdir": "apps/api",
+            "contextFiles": [
+                "apps/api/src/app.module.ts",
+                "apps/api/src/auth/auth.module.ts",
+                "apps/api/src/auth/auth.service.ts",
+                "apps/api/.env.example"
+            ],
+            "priorErrors": [],
+            "priorFailures": [],
+            "storyPoints": 1
+        },
+        {
+            "id": "US-006",
+            "title": "Add rate limiting on auth endpoints via @nathapp/nestjs-throttler",
+            "description": "Auth endpoints (login, register) have zero rate limiting — a basic security gap. Add `@nathapp/nestjs-throttler` to `apps/api/package.json`. Add `ThrottlerModule.forRootAsync(...)` to `AppModule` imports. Apply `@Throttle({ default: { limit: 10, ttl: 60000 } })` to the `AuthController` class (covering both login and register). Use `DefaultThrottlerGuard` which is proxy-aware and required for Fastify behind a reverse proxy. Add a throttle integration test to auth tests verifying that the 11th request within a minute returns 429.",
+            "acceptanceCriteria": [
+                "`@nathapp/nestjs-throttler` present in apps/api/package.json",
+                "`ThrottlerModule.forRootAsync(...)` registered in `AppModule`",
+                "`AuthController` login and register endpoints are throttled (10 req/min default)",
+                "11th request within a minute returns `429 Too Many Requests`",
+                "Throttle integration test added to auth test suite and passes"
+            ],
+            "tags": ["security", "rate-limiting", "api"],
+            "dependencies": ["US-001"],
+            "status": "passed",
+            "passes": false,
+            "attempts": 0,
+            "escalations": [],
+            "routing": {
+                "complexity": "medium",
+                "testStrategy": "three-session-tdd-lite",
+                "reasoning": "validated from LLM output"
+            },
+            "workdir": "apps/api",
+            "contextFiles": [
+                "apps/api/src/auth/auth.controller.ts",
+                "apps/api/src/auth/auth.module.ts",
+                "apps/api/src/app.module.ts"
+            ],
+            "priorErrors": [],
+            "priorFailures": [],
+            "storyPoints": 1
+        },
+        {
+            "id": "US-007",
+            "title": "Replace custom PrismaService with @nathapp/nestjs-prisma",
+            "description": "Koda has a custom `prisma/prisma.service.ts` that extends `PrismaClient` with `OnModuleInit` (`$connect`) and `OnModuleDestroy` (`$disconnect`) lifecycle hooks, and a `prisma/prisma.module.ts` that is a global module exporting `PrismaService`. `@nathapp/nestjs-prisma` v3.1.0 is already in `package.json`.\n\nCompare `apps/api/src/prisma/prisma.service.ts` against `@nathapp/nestjs-prisma`'s `PrismaService`. If nathapp's service covers all needs (lifecycle management), delete the custom `prisma.service.ts` and `prisma.module.ts` and replace all module imports with `@nathapp/nestjs-prisma`'s `PrismaModule`. If custom behavior is needed (soft-delete middleware, query extensions), extend nathapp's base `PrismaService` rather than reimplementing. Update all feature module imports that reference the custom `PrismaModule`.",
+            "acceptanceCriteria": [
+                "No duplicate `PrismaService` implementation if nathapp's service covers it",
+                "If custom extension needed, it extends (not reimplements) nathapp's base `PrismaService`",
+                "`apps/api/src/prisma/` directory deleted if fully replaced by @nathapp/nestjs-prisma",
+                "All feature modules (agents, projects, tickets, comments, labels) import from the correct `PrismaModule`",
+                "All existing Prisma-dependent tests still pass"
+            ],
+            "tags": ["prisma", "infrastructure", "api"],
+            "dependencies": [],
+            "status": "passed",
+            "passes": true,
+            "attempts": 0,
+            "escalations": [],
+            "routing": {
+                "complexity": "medium",
+                "testStrategy": "three-session-tdd-lite",
+                "reasoning": "validated from LLM output"
+            },
+            "workdir": "apps/api",
+            "contextFiles": [
+                "apps/api/src/prisma/prisma.service.ts",
+                "apps/api/src/prisma/prisma.module.ts",
+                "apps/api/src/app.module.ts",
+                "apps/api/src/agents/agents.module.ts",
+                "apps/api/src/tickets/tickets.module.ts"
+            ],
+            "priorErrors": [],
+            "priorFailures": [],
+            "storyPoints": 1
+        },
+        {
+            "id": "US-008",
+            "title": "Clean up AppModule and run final quality gate",
+            "description": "After all prior user stories are complete, perform a final cleanup pass on `AppModule` to ensure it matches the target shape: `ConfigModule.forRoot({ isGlobal: true, validate })`, `LoggingModule`, `I18nCoreModule`, `ThrottlerModule.forRootAsync(...)`, `PrismaModule` (from @nathapp/nestjs-prisma), `AuthModule.forRootAsync(...)` (from @nathapp/nestjs-auth), and all feature modules. No `APP_GUARD` provider. No redundant or legacy imports.\n\nRun all quality gates:\n- `bun run --cwd apps/api lint` → 0 warnings\n- `bun run --cwd apps/api type-check` → 0 errors  \n- `bun run test` → all pass, >= 80% coverage across apps/api\n- `bun run api:export-spec` → valid OpenAPI JSON exported without errors\n\nFix any remaining lint warnings, type errors, or test failures discovered during this pass. Ensure no breaking changes to existing API contracts (endpoints, status codes, response shapes after US-004 normalization).",
+            "acceptanceCriteria": [
+                "`AppModule` imports list matches target shape exactly: ConfigModule, LoggingModule, I18nCoreModule, ThrottlerModule, PrismaModule, AuthModule, and 6 feature modules",
+                "`AppModule` has no `APP_GUARD` provider",
+                "`bun run --cwd apps/api lint` exits 0 with 0 warnings",
+                "`bun run --cwd apps/api type-check` exits 0 with 0 errors",
+                "`bun run test` passes with >= 80% coverage for apps/api",
+                "`bun run api:export-spec` completes without errors and produces valid JSON"
+            ],
+            "tags": ["cleanup", "quality", "api"],
+            "dependencies": [
+                "US-001",
+                "US-002",
+                "US-003",
+                "US-004",
+                "US-005",
+                "US-006",
+                "US-007"
+            ],
+            "status": "passed",
+            "passes": false,
+            "attempts": 0,
+            "escalations": [],
+            "routing": {
+                "complexity": "simple",
+                "testStrategy": "tdd-simple",
+                "reasoning": "validated from LLM output"
+            },
+            "workdir": "apps/api",
+            "contextFiles": [
+                "apps/api/src/app.module.ts",
+                "apps/api/src/main.ts"
+            ],
+            "priorErrors": [],
+            "priorFailures": [],
+            "storyPoints": 1
+        },
+        {
+            "id": "US-009",
+            "title": "Replace custom JsonResponse & AppException with @nathapp/nestjs-common",
+            "description": "Remove locally-generated json-response.ts and app-exception.ts from apps/api/src/common/. Replace all imports and usages with the correct @nathapp/nestjs-common equivalents: JsonResponse.Ok() (capital O) and pre-built exception classes (NotFoundAppException, ForbiddenAppException, AuthException, ValidationAppException, AppException).",
+            "status": "passed",
+            "priority": "high",
+            "acceptanceCriteria": [
+                "AC-1: apps/api/src/common/json-response.ts does not exist",
+                "AC-2: apps/api/src/common/app-exception.ts does not exist",
+                "AC-3: No imports from local ../common/json-response in any file",
+                "AC-4: No imports from local ../common/app-exception in any file",
+                "AC-5: No JsonResponse.ok() or JsonResponse.created() or JsonResponse.paginated() calls",
+                "AC-6: No string-keyed AppException constructor calls (new AppException('string.key', ...))",
+                "AC-7: npx turbo test --filter=@nathapp/koda-api passes with >= 737 tests",
+                "AC-8: TypeScript compiles without errors (npx tsc --noEmit)"
+            ],
+            "workdir": "apps/api",
+            "contextFiles": [
+                "apps/api/src/common/json-response.ts",
+                "apps/api/src/common/app-exception.ts",
+                "apps/api/src/auth/auth.controller.ts",
+                "apps/api/src/auth/auth.service.ts",
+                "apps/api/src/agents/agents.controller.ts",
+                "apps/api/src/agents/agents.service.ts",
+                "apps/api/src/agents/guards/agent-api-key.guard.ts",
+                "apps/api/src/projects/projects.controller.ts",
+                "apps/api/src/projects/projects.service.ts",
+                "apps/api/src/tickets/tickets.controller.ts",
+                "apps/api/src/tickets/tickets.service.ts",
+                "apps/api/src/comments/comments.controller.ts",
+                "apps/api/src/comments/comments.service.ts",
+                "apps/api/src/labels/labels.controller.ts",
+                "apps/api/src/labels/labels.service.ts",
+                "nax/features/refactor-standard/us-009-spec.md"
+            ],
+            "dependencies": ["US-008"],
+            "attempts": 0,
+            "priorErrors": [],
+            "priorFailures": [],
+            "escalations": [],
+            "tags": [],
+            "storyPoints": 1,
+            "routing": {
+                "complexity": "simple",
+                "initialComplexity": "simple",
+                "testStrategy": "three-session-tdd",
+                "reasoning": "Pure refactoring with no new behavior—systematic find-and-replace of imports and function calls across files. Clear mapping from custom to library equivalents.",
+                "contentHash": "d95318179292d1d14b94a7ac02c43722feca8c1cd5e0cc4398a58bc86536f02e"
+            },
+            "passes": true
         }
-      ],
-      "storyPoints": 1,
-      "routing": {
-        "complexity": "simple",
-        "initialComplexity": "simple",
-        "testStrategy": "three-session-tdd",
-        "reasoning": "Pure file deletion with mechanical import cleanup; no new behavior or logic, straightforward type-check verification.",
-        "contentHash": "86b7a7cc260c211a73ac1f205d6791fe173a1000675959c0f8e26e96daf77440",
-        "modelTier": "balanced"
-      }
-    },
-    {
-      "id": "US-001-4",
-      "title": "Preserve agent API key validation after guard migration",
-      "description": "Verify whether `@nathapp/nestjs-auth` includes built-in API key guard support. If it does, configure it for agent-authenticated endpoints. If it does not, implement a minimal standalone `AgentApiKeyGuard` that validates HMAC-SHA256 API keys against the stored bcrypt hash and does not conflict with the global nathapp guard. Apply the guard to all agent-facing endpoints in `AgentsController` and any other endpoint previously protected by `ApiKeyAuthGuard`. Write a targeted unit test confirming agent key auth accepts valid keys and rejects invalid ones.",
-      "acceptanceCriteria": [
-        "Agent-authenticated endpoints return 401 when no API key is provided",
-        "Agent-authenticated endpoints return 200 when a valid API key is provided",
-        "HMAC-SHA256 key validation logic is preserved",
-        "No import of deleted custom guards in agents module",
-        "Unit test for agent key guard covers valid, invalid, and missing key cases"
-      ],
-      "tags": [
-        "security",
-        "auth",
-        "api"
-      ],
-      "dependencies": [
-        "US-001-3"
-      ],
-      "status": "passed",
-      "passes": true,
-      "escalations": [],
-      "attempts": 0,
-      "parentStoryId": "US-001",
-      "workdir": "apps/api",
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1,
-      "routing": {
-        "complexity": "medium",
-        "initialComplexity": "medium",
-        "testStrategy": "three-session-tdd",
-        "reasoning": "Requires research on nathapp support, conditional guard implementation (straightforward but security-critical), multiple endpoint updates, and standard unit tests—all within known NestJS patterns but spanning several concerns.",
-        "contentHash": "f84e48c89878330edb61b128bbe238871e8429233ad353f87c5ad39336112b51"
-      }
-    },
-    {
-      "id": "US-001-5",
-      "title": "Remove legacy auth packages and validate auth test coverage",
-      "description": "Remove `@nestjs/jwt`, `@nestjs/passport`, and `passport-jwt` from `apps/api/package.json` (and `bun.lockb`). Confirm no remaining import in `apps/api/src` references these packages. Update or write auth module tests (`auth.service.spec.ts`, `auth.controller.spec.ts`) so the auth module has >= 80% statement coverage. Run `bun run --cwd apps/api lint` and `bun run --cwd apps/api type-check` to confirm zero errors.",
-      "acceptanceCriteria": [
-        "@nestjs/jwt, @nestjs/passport, passport-jwt absent from apps/api/package.json",
-        "No import in apps/api/src references @nestjs/jwt, @nestjs/passport, or passport-jwt",
-        "Auth module test coverage >= 80%",
-        "bun run --cwd apps/api lint exits 0 with 0 warnings",
-        "bun run --cwd apps/api type-check exits 0"
-      ],
-      "tags": [
-        "security",
-        "auth",
-        "api"
-      ],
-      "dependencies": [
-        "US-001-2",
-        "US-001-3",
-        "US-001-4"
-      ],
-      "status": "passed",
-      "passes": true,
-      "escalations": [],
-      "attempts": 0,
-      "parentStoryId": "US-001",
-      "workdir": "apps/api",
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1,
-      "routing": {
-        "complexity": "medium",
-        "initialComplexity": "medium",
-        "testStrategy": "three-session-tdd",
-        "reasoning": "Removing packages is simple, but writing/updating tests for 80% auth module coverage requires understanding existing code patterns and test infrastructure—standard medium-complexity work.",
-        "contentHash": "30c0193c532f925a8256fde557afa466d289c2dfb608c8df7ee57ca58cb8a899"
-      }
-    },
-    {
-      "id": "US-002",
-      "title": "Add i18n support via I18nCoreModule with translation files and DTO message keys",
-      "description": "No i18n infrastructure exists. All validation errors and exception messages are hardcoded English strings. Add `I18nCoreModule` from `@nathapp/nestjs-common` to `AppModule`. Create the translation directory structure at `apps/api/src/i18n/` with `en/` and `zh/` locales, each containing `common.json`, `auth.json`, `tickets.json`, `projects.json`, `agents.json`, and `comments.json`. Update all DTOs across all six modules (auth, agents, projects, tickets, comments, labels) to use i18n validation message keys (`$t(common.validation.required)`, etc.) instead of hardcoded strings. The `zh/` locale can mirror English values initially. Verify that `useAppGlobalPipes()` and `useAppGlobalFilters()` (already in main.ts) activate `I18nValidationPipe` and `I18nValidationExceptionFilter`.",
-      "acceptanceCriteria": [
-        "`I18nCoreModule` registered in `AppModule`",
-        "`apps/api/src/i18n/en/common.json` exists with at minimum: `validation.required`, `validation.isEmail`, `validation.minLength`, `validation.maxLength`, `errors.notFound`, `errors.forbidden`, `errors.unauthorized`",
-        "All six locale namespaces (common, auth, tickets, projects, agents, comments) exist in both `en/` and `zh/`",
-        "All DTO `@IsNotEmpty()`, `@IsEmail()`, `@MinLength()`, `@MaxLength()` carry i18n message keys",
-        "Validation failure response body contains translated message string, not hardcoded English",
-        "No hardcoded English strings in any DTO validation decorators"
-      ],
-      "tags": [
-        "i18n",
-        "api",
-        "feature"
-      ],
-      "dependencies": [],
-      "status": "passed",
-      "passes": true,
-      "attempts": 0,
-      "escalations": [],
-      "routing": {
-        "complexity": "complex",
-        "testStrategy": "three-session-tdd-lite",
-        "reasoning": "validated from LLM output"
-      },
-      "workdir": "apps/api",
-      "contextFiles": [
-        "apps/api/src/app.module.ts",
-        "apps/api/src/main.ts",
-        "apps/api/src/auth/dto/register.dto.ts",
-        "apps/api/src/tickets/dto/create-ticket.dto.ts",
-        "apps/api/src/projects/dto/create-project.dto.ts"
-      ],
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1
-    },
-    {
-      "id": "US-003",
-      "title": "Add structured logging via @nathapp/nestjs-logging",
-      "description": "Add `@nathapp/nestjs-logging` to `apps/api/package.json`. Add `LoggingModule` to `AppModule` imports. In `main.ts`, add `app.useLogger(app.get(Logger))` as the first call after `AppFactory.createFastifyApp`. Replace all `import { Logger } from '@nestjs/common'` with `import { Logger } from '@nathapp/nestjs-logging'` across all services and any files that use Logger. Remove all `console.log`, `console.error`, and `console.warn` calls from `apps/api/src/**` — most critically the debugging console.logs in `combined-auth.guard.ts` (which will be deleted by US-001, but any others must be removed).",
-      "acceptanceCriteria": [
-        "`@nathapp/nestjs-logging` present in apps/api/package.json",
-        "`LoggingModule` registered in `AppModule`",
-        "`app.useLogger(app.get(Logger))` is called before `useAppGlobalPrefix()` in main.ts",
-        "No `import { Logger } from '@nestjs/common'` in apps/api/src/**",
-        "No `console.log`, `console.error`, `console.warn` calls in apps/api/src/**",
-        "App starts without logger initialization errors"
-      ],
-      "tags": [
-        "logging",
-        "api",
-        "infrastructure"
-      ],
-      "dependencies": [],
-      "status": "passed",
-      "passes": true,
-      "attempts": 0,
-      "escalations": [],
-      "routing": {
-        "complexity": "medium",
-        "testStrategy": "three-session-tdd-lite",
-        "reasoning": "validated from LLM output"
-      },
-      "workdir": "apps/api",
-      "contextFiles": [
-        "apps/api/src/main.ts",
-        "apps/api/src/app.module.ts",
-        "apps/api/src/auth/auth.service.ts",
-        "apps/api/src/agents/agents.service.ts",
-        "apps/api/src/tickets/tickets.service.ts"
-      ],
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1
-    },
-    {
-      "id": "US-004",
-      "title": "Standardize controller responses with JsonResponse and replace HTTP exceptions with AppException",
-      "description": "All controllers currently return raw objects or DTO instances. All services throw raw NestJS HTTP exceptions (`NotFoundException`, `UnauthorizedException`, `ForbiddenException`, `BadRequestException`, `ConflictException`) with hardcoded English messages.\n\nAudit all six controllers (agents, auth, projects, tickets, comments, labels) and wrap every return value in `JsonResponse.ok(data)`, `JsonResponse.created(data)`, or `JsonResponse.paginated(data, meta)` as appropriate. In all services and controllers, replace every `throw new NotFoundException(...)`, `throw new ForbiddenException(...)`, etc. with `throw new AppException(i18nKey)` where the key references the i18n translation files created in US-002. Update existing integration tests to match the new `{ data, meta?, message? }` response envelope shape.",
-      "acceptanceCriteria": [
-        "Every controller method returns a `JsonResponse` instance (ok, created, or paginated)",
-        "No `throw new NotFoundException(...)`, `ForbiddenException(...)`, `UnauthorizedException(...)`, `BadRequestException(...)`, or `ConflictException(...)` remain in apps/api/src/**",
-        "All `AppException` calls reference an i18n key (e.g. `'errors.notFound'`, `'errors.forbidden'`)",
-        "API response shape is consistent: `{ data, meta?, message? }`",
-        "Existing integration tests updated to assert against the new response envelope",
-        "Auth tests pass: login returns `{ data: { accessToken, refreshToken, user } }`"
-      ],
-      "tags": [
-        "api",
-        "responses",
-        "feature"
-      ],
-      "dependencies": [
-        "US-002"
-      ],
-      "status": "passed",
-      "passes": true,
-      "attempts": 0,
-      "escalations": [],
-      "routing": {
-        "complexity": "complex",
-        "testStrategy": "three-session-tdd-lite",
-        "reasoning": "validated from LLM output"
-      },
-      "workdir": "apps/api",
-      "contextFiles": [
-        "apps/api/src/tickets/tickets.controller.ts",
-        "apps/api/src/tickets/tickets.service.ts",
-        "apps/api/src/projects/projects.controller.ts",
-        "apps/api/src/agents/agents.controller.ts",
-        "apps/api/src/auth/auth.controller.ts"
-      ],
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1
-    },
-    {
-      "id": "US-005",
-      "title": "Add validated typed config with registerAs and Joi schema",
-      "description": "Create typed config files using `registerAs` for three domains: `apps/api/src/config/app.config.ts` (PORT, NODE_ENV, GLOBAL_PREFIX), `apps/api/src/config/auth.config.ts` (JWT_SECRET, JWT_EXPIRES_IN, JWT_REFRESH_SECRET, JWT_REFRESH_EXPIRES_IN — standardize any existing partial implementation), and `apps/api/src/config/database.config.ts` (DATABASE_URL, DATABASE_PROVIDER). Add a Joi validation schema to `ConfigModule.forRoot({ validate })` in `AppModule` so the app throws on startup if required env vars are missing. Update `auth.module.ts` (after US-001) to inject typed auth config instead of raw `configService.get('JWT_SECRET')`. Update `apps/api/.env.example` with all required variables and their descriptions.",
-      "acceptanceCriteria": [
-        "`apps/api/src/config/app.config.ts`, `auth.config.ts`, and `database.config.ts` all use `registerAs`",
-        "`ConfigModule.forRoot` in AppModule has a `validate` function using Joi",
-        "App throws a descriptive error on startup when `JWT_SECRET` or `DATABASE_URL` is missing",
-        "No `configService.get('RAW_STRING')` calls remain — all access goes through typed config objects",
-        "`apps/api/.env.example` is up to date with all required vars",
-        "All existing tests still pass (config mocked appropriately in test modules)"
-      ],
-      "tags": [
-        "config",
-        "infrastructure",
-        "api"
-      ],
-      "dependencies": [],
-      "status": "passed",
-      "passes": true,
-      "attempts": 0,
-      "escalations": [],
-      "routing": {
-        "complexity": "medium",
-        "testStrategy": "three-session-tdd-lite",
-        "reasoning": "validated from LLM output"
-      },
-      "workdir": "apps/api",
-      "contextFiles": [
-        "apps/api/src/app.module.ts",
-        "apps/api/src/auth/auth.module.ts",
-        "apps/api/src/auth/auth.service.ts",
-        "apps/api/.env.example"
-      ],
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1
-    },
-    {
-      "id": "US-006",
-      "title": "Add rate limiting on auth endpoints via @nathapp/nestjs-throttler",
-      "description": "Auth endpoints (login, register) have zero rate limiting — a basic security gap. Add `@nathapp/nestjs-throttler` to `apps/api/package.json`. Add `ThrottlerModule.forRootAsync(...)` to `AppModule` imports. Apply `@Throttle({ default: { limit: 10, ttl: 60000 } })` to the `AuthController` class (covering both login and register). Use `DefaultThrottlerGuard` which is proxy-aware and required for Fastify behind a reverse proxy. Add a throttle integration test to auth tests verifying that the 11th request within a minute returns 429.",
-      "acceptanceCriteria": [
-        "`@nathapp/nestjs-throttler` present in apps/api/package.json",
-        "`ThrottlerModule.forRootAsync(...)` registered in `AppModule`",
-        "`AuthController` login and register endpoints are throttled (10 req/min default)",
-        "11th request within a minute returns `429 Too Many Requests`",
-        "Throttle integration test added to auth test suite and passes"
-      ],
-      "tags": [
-        "security",
-        "rate-limiting",
-        "api"
-      ],
-      "dependencies": [
-        "US-001"
-      ],
-      "status": "passed",
-      "passes": false,
-      "attempts": 0,
-      "escalations": [],
-      "routing": {
-        "complexity": "medium",
-        "testStrategy": "three-session-tdd-lite",
-        "reasoning": "validated from LLM output"
-      },
-      "workdir": "apps/api",
-      "contextFiles": [
-        "apps/api/src/auth/auth.controller.ts",
-        "apps/api/src/auth/auth.module.ts",
-        "apps/api/src/app.module.ts"
-      ],
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1
-    },
-    {
-      "id": "US-007",
-      "title": "Replace custom PrismaService with @nathapp/nestjs-prisma",
-      "description": "Koda has a custom `prisma/prisma.service.ts` that extends `PrismaClient` with `OnModuleInit` (`$connect`) and `OnModuleDestroy` (`$disconnect`) lifecycle hooks, and a `prisma/prisma.module.ts` that is a global module exporting `PrismaService`. `@nathapp/nestjs-prisma` v3.1.0 is already in `package.json`.\n\nCompare `apps/api/src/prisma/prisma.service.ts` against `@nathapp/nestjs-prisma`'s `PrismaService`. If nathapp's service covers all needs (lifecycle management), delete the custom `prisma.service.ts` and `prisma.module.ts` and replace all module imports with `@nathapp/nestjs-prisma`'s `PrismaModule`. If custom behavior is needed (soft-delete middleware, query extensions), extend nathapp's base `PrismaService` rather than reimplementing. Update all feature module imports that reference the custom `PrismaModule`.",
-      "acceptanceCriteria": [
-        "No duplicate `PrismaService` implementation if nathapp's service covers it",
-        "If custom extension needed, it extends (not reimplements) nathapp's base `PrismaService`",
-        "`apps/api/src/prisma/` directory deleted if fully replaced by @nathapp/nestjs-prisma",
-        "All feature modules (agents, projects, tickets, comments, labels) import from the correct `PrismaModule`",
-        "All existing Prisma-dependent tests still pass"
-      ],
-      "tags": [
-        "prisma",
-        "infrastructure",
-        "api"
-      ],
-      "dependencies": [],
-      "status": "passed",
-      "passes": true,
-      "attempts": 0,
-      "escalations": [],
-      "routing": {
-        "complexity": "medium",
-        "testStrategy": "three-session-tdd-lite",
-        "reasoning": "validated from LLM output"
-      },
-      "workdir": "apps/api",
-      "contextFiles": [
-        "apps/api/src/prisma/prisma.service.ts",
-        "apps/api/src/prisma/prisma.module.ts",
-        "apps/api/src/app.module.ts",
-        "apps/api/src/agents/agents.module.ts",
-        "apps/api/src/tickets/tickets.module.ts"
-      ],
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1
-    },
-    {
-      "id": "US-008",
-      "title": "Clean up AppModule and run final quality gate",
-      "description": "After all prior user stories are complete, perform a final cleanup pass on `AppModule` to ensure it matches the target shape: `ConfigModule.forRoot({ isGlobal: true, validate })`, `LoggingModule`, `I18nCoreModule`, `ThrottlerModule.forRootAsync(...)`, `PrismaModule` (from @nathapp/nestjs-prisma), `AuthModule.forRootAsync(...)` (from @nathapp/nestjs-auth), and all feature modules. No `APP_GUARD` provider. No redundant or legacy imports.\n\nRun all quality gates:\n- `bun run --cwd apps/api lint` → 0 warnings\n- `bun run --cwd apps/api type-check` → 0 errors  \n- `bun run test` → all pass, >= 80% coverage across apps/api\n- `bun run api:export-spec` → valid OpenAPI JSON exported without errors\n\nFix any remaining lint warnings, type errors, or test failures discovered during this pass. Ensure no breaking changes to existing API contracts (endpoints, status codes, response shapes after US-004 normalization).",
-      "acceptanceCriteria": [
-        "`AppModule` imports list matches target shape exactly: ConfigModule, LoggingModule, I18nCoreModule, ThrottlerModule, PrismaModule, AuthModule, and 6 feature modules",
-        "`AppModule` has no `APP_GUARD` provider",
-        "`bun run --cwd apps/api lint` exits 0 with 0 warnings",
-        "`bun run --cwd apps/api type-check` exits 0 with 0 errors",
-        "`bun run test` passes with >= 80% coverage for apps/api",
-        "`bun run api:export-spec` completes without errors and produces valid JSON"
-      ],
-      "tags": [
-        "cleanup",
-        "quality",
-        "api"
-      ],
-      "dependencies": [
-        "US-001",
-        "US-002",
-        "US-003",
-        "US-004",
-        "US-005",
-        "US-006",
-        "US-007"
-      ],
-      "status": "passed",
-      "passes": false,
-      "attempts": 0,
-      "escalations": [],
-      "routing": {
-        "complexity": "simple",
-        "testStrategy": "tdd-simple",
-        "reasoning": "validated from LLM output"
-      },
-      "workdir": "apps/api",
-      "contextFiles": [
-        "apps/api/src/app.module.ts",
-        "apps/api/src/main.ts"
-      ],
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1
-    },
-    {
-      "id": "US-009",
-      "title": "Replace custom JsonResponse & AppException with @nathapp/nestjs-common",
-      "description": "Remove locally-generated json-response.ts and app-exception.ts from apps/api/src/common/. Replace all imports and usages with the correct @nathapp/nestjs-common equivalents: JsonResponse.Ok() (capital O) and pre-built exception classes (NotFoundAppException, ForbiddenAppException, AuthException, ValidationAppException, AppException).",
-      "status": "pending",
-      "priority": "high",
-      "acceptanceCriteria": [
-        "AC-1: apps/api/src/common/json-response.ts does not exist",
-        "AC-2: apps/api/src/common/app-exception.ts does not exist",
-        "AC-3: No imports from local ../common/json-response in any file",
-        "AC-4: No imports from local ../common/app-exception in any file",
-        "AC-5: No JsonResponse.ok() or JsonResponse.created() or JsonResponse.paginated() calls",
-        "AC-6: No string-keyed AppException constructor calls (new AppException('string.key', ...))",
-        "AC-7: npx turbo test --filter=@nathapp/koda-api passes with >= 737 tests",
-        "AC-8: TypeScript compiles without errors (npx tsc --noEmit)"
-      ],
-      "contextFiles": [
-        "apps/api/src/common/json-response.ts",
-        "apps/api/src/common/app-exception.ts",
-        "apps/api/src/auth/auth.controller.ts",
-        "apps/api/src/auth/auth.service.ts",
-        "apps/api/src/agents/agents.controller.ts",
-        "apps/api/src/agents/agents.service.ts",
-        "apps/api/src/agents/guards/agent-api-key.guard.ts",
-        "apps/api/src/projects/projects.controller.ts",
-        "apps/api/src/projects/projects.service.ts",
-        "apps/api/src/tickets/tickets.controller.ts",
-        "apps/api/src/tickets/tickets.service.ts",
-        "apps/api/src/comments/comments.controller.ts",
-        "apps/api/src/comments/comments.service.ts",
-        "apps/api/src/labels/labels.controller.ts",
-        "apps/api/src/labels/labels.service.ts",
-        "nax/features/refactor-standard/us-009-spec.md"
-      ],
-      "dependencies": [
-        "US-008"
-      ],
-      "attempts": 0,
-      "priorErrors": [],
-      "priorFailures": [],
-      "escalations": [],
-      "tags": [],
-      "storyPoints": 1,
-      "routing": {
-        "complexity": "simple",
-        "initialComplexity": "simple",
-        "testStrategy": "three-session-tdd",
-        "reasoning": "Pure refactoring with no new behavior—systematic find-and-replace of imports and function calls across files. Clear mapping from custom to library equivalents.",
-        "contentHash": "d95318179292d1d14b94a7ac02c43722feca8c1cd5e0cc4398a58bc86536f02e"
-      }
-    }
-  ],
-  "analysis": "## Codebase Analysis\n\n### Current State\n\nThe `apps/api` is a NestJS 11 + Fastify backend with feature-based module organization (auth, agents, projects, tickets, comments, labels). It is partially migrated to nathapp standards but has several non-compliant patterns that must be corrected.\n\n### Auth (US-001)\n\n`auth/auth.module.ts` still imports `JwtModule` from `@nestjs/jwt` and injects `JwtService` directly into `AuthService`. Three custom guards exist in `auth/guards/`: `jwt-auth.guard.ts` (extends `AuthGuard('jwt')` from `@nestjs/passport`), `api-key-auth.guard.ts` (HMAC-SHA256 key lookup), and `combined-auth.guard.ts` (tries JWT first, falls back to API key, has heavy `console.log` debugging). One strategy exists: `auth/strategies/jwt.strategy.ts` (Passport JWT strategy). `app.module.ts` provides `CombinedAuthGuard` as `APP_GUARD`, which violates the nathapp standard — `useAppGlobalGuards()` in `main.ts` should be the only place guards are registered. `@nathapp/nestjs-auth` v3.0.0 is already in `package.json`, so migration is dependency-available.\n\n`main.ts` already calls `AppFactory.createFastifyApp`, `useAppGlobalPrefix`, `useAppGlobalPipes`, `useAppGlobalFilters`, `useAppGlobalGuards`, `useAppGlobalInterceptors`. The guard registration call is already there — the `APP_GUARD` in AppModule is redundant and conflicting.\n\nThe auth decorators `@IsPublic()` and `@CurrentUser()` already exist but are custom implementations. They will need to be replaced with nathapp equivalents (`@Public()` and `@Principal()`) or the existing decorators verified against nathapp's API.\n\nRisk: The HMAC-SHA256 API key validation for agents is entirely custom. When migrating to `@nathapp/nestjs-auth`, need to verify whether nathapp's auth provider supports this agent/API-key pattern or if it needs to be preserved as a custom extension.\n\n### i18n (US-002)\n\nNo i18n directory exists anywhere in `apps/api/src`. No i18n keys are used in any DTO or service. All validation errors and exception messages are hardcoded English strings. `@nathapp/nestjs-common` v3.0.0 is available (provides `I18nCoreModule`). Six modules need DTO updates: auth, agents, projects, tickets, comments, labels.\n\n### Logging (US-003)\n\n`combined-auth.guard.ts` contains multiple `console.log` calls for debugging. Other services likely use NestJS's built-in `Logger`. `@nathapp/nestjs-logging` is NOT in `apps/api/package.json` — it must be added. `main.ts` does not call `app.useLogger()`.\n\n### Standardized Responses (US-004)\n\nAll controllers return raw objects/DTOs. No `JsonResponse` wrapper is used anywhere. Services throw raw NestJS HTTP exceptions (`NotFoundException`, `UnauthorizedException`, `ForbiddenException`, `BadRequestException`, `ConflictException`). This affects all six controller files: agents, auth, projects, tickets, comments, labels.\n\n### Config (US-005)\n\n`ConfigModule.forRoot` in `app.module.ts` has no validation schema. `AuthService` and other services likely use `configService.get('JWT_SECRET')` style raw string access. A partial `auth.config.ts` may exist — needs verification. The refactor must introduce `registerAs`-based typed config for app, auth, and database, with Joi validation on startup.\n\n### Rate Limiting (US-006)\n\n`@nathapp/nestjs-throttler` is NOT in `apps/api/package.json`. Auth endpoints (login, register) have no rate limiting. Must add package, configure `ThrottlerModule.forRootAsync`, and apply `@Throttle` decorator to `AuthController`.\n\n### Prisma (US-007)\n\nCustom `prisma/prisma.service.ts` extends `PrismaClient` with `OnModuleInit` and `OnModuleDestroy` lifecycle hooks. `@nathapp/nestjs-prisma` v3.1.0 is already in `package.json`. Need to compare implementations — if nathapp's service covers the same lifecycle management, the custom implementation is redundant and should be deleted. `prisma/prisma.module.ts` is a global module exporting `PrismaService` — this would be replaced by nathapp's `PrismaModule`.\n\n### AppModule Cleanup (US-008)\n\nAfter all above stories, `AppModule` needs to have `APP_GUARD` removed, all nathapp modules registered, and verified with lint + type-check + test.\n\n### Key Risk Areas\n\n1. Agent API key auth (HMAC-SHA256) — must survive migration to nathapp auth\n2. Ticket state machine — state machine tests must pass after response shape changes\n3. OpenAPI spec — changing response shapes will affect generated clients (CLI and web)\n4. Breaking changes to existing integration tests — must be updated for new response shapes\n\n### Files to Delete After Migration\n\n- `apps/api/src/auth/guards/jwt-auth.guard.ts`\n- `apps/api/src/auth/guards/api-key-auth.guard.ts`\n- `apps/api/src/auth/guards/combined-auth.guard.ts`\n- `apps/api/src/auth/strategies/jwt.strategy.ts`\n- `apps/api/src/prisma/prisma.module.ts` (if @nathapp/nestjs-prisma covers it)\n- `apps/api/src/prisma/prisma.service.ts` (if @nathapp/nestjs-prisma covers it)\n\n### Dependency Installation Needed\n\n- `@nathapp/nestjs-logging` — not present, must be added\n- `@nathapp/nestjs-throttler` — not present, must be added\n- Remove `@nestjs/jwt`, `@nestjs/passport`, `passport-jwt` after US-001",
-  "costLimit": 30
+    ],
+    "analysis": "## Codebase Analysis\n\n### Current State\n\nThe `apps/api` is a NestJS 11 + Fastify backend with feature-based module organization (auth, agents, projects, tickets, comments, labels). It is partially migrated to nathapp standards but has several non-compliant patterns that must be corrected.\n\n### Auth (US-001)\n\n`auth/auth.module.ts` still imports `JwtModule` from `@nestjs/jwt` and injects `JwtService` directly into `AuthService`. Three custom guards exist in `auth/guards/`: `jwt-auth.guard.ts` (extends `AuthGuard('jwt')` from `@nestjs/passport`), `api-key-auth.guard.ts` (HMAC-SHA256 key lookup), and `combined-auth.guard.ts` (tries JWT first, falls back to API key, has heavy `console.log` debugging). One strategy exists: `auth/strategies/jwt.strategy.ts` (Passport JWT strategy). `app.module.ts` provides `CombinedAuthGuard` as `APP_GUARD`, which violates the nathapp standard — `useAppGlobalGuards()` in `main.ts` should be the only place guards are registered. `@nathapp/nestjs-auth` v3.0.0 is already in `package.json`, so migration is dependency-available.\n\n`main.ts` already calls `AppFactory.createFastifyApp`, `useAppGlobalPrefix`, `useAppGlobalPipes`, `useAppGlobalFilters`, `useAppGlobalGuards`, `useAppGlobalInterceptors`. The guard registration call is already there — the `APP_GUARD` in AppModule is redundant and conflicting.\n\nThe auth decorators `@IsPublic()` and `@CurrentUser()` already exist but are custom implementations. They will need to be replaced with nathapp equivalents (`@Public()` and `@Principal()`) or the existing decorators verified against nathapp's API.\n\nRisk: The HMAC-SHA256 API key validation for agents is entirely custom. When migrating to `@nathapp/nestjs-auth`, need to verify whether nathapp's auth provider supports this agent/API-key pattern or if it needs to be preserved as a custom extension.\n\n### i18n (US-002)\n\nNo i18n directory exists anywhere in `apps/api/src`. No i18n keys are used in any DTO or service. All validation errors and exception messages are hardcoded English strings. `@nathapp/nestjs-common` v3.0.0 is available (provides `I18nCoreModule`). Six modules need DTO updates: auth, agents, projects, tickets, comments, labels.\n\n### Logging (US-003)\n\n`combined-auth.guard.ts` contains multiple `console.log` calls for debugging. Other services likely use NestJS's built-in `Logger`. `@nathapp/nestjs-logging` is NOT in `apps/api/package.json` — it must be added. `main.ts` does not call `app.useLogger()`.\n\n### Standardized Responses (US-004)\n\nAll controllers return raw objects/DTOs. No `JsonResponse` wrapper is used anywhere. Services throw raw NestJS HTTP exceptions (`NotFoundException`, `UnauthorizedException`, `ForbiddenException`, `BadRequestException`, `ConflictException`). This affects all six controller files: agents, auth, projects, tickets, comments, labels.\n\n### Config (US-005)\n\n`ConfigModule.forRoot` in `app.module.ts` has no validation schema. `AuthService` and other services likely use `configService.get('JWT_SECRET')` style raw string access. A partial `auth.config.ts` may exist — needs verification. The refactor must introduce `registerAs`-based typed config for app, auth, and database, with Joi validation on startup.\n\n### Rate Limiting (US-006)\n\n`@nathapp/nestjs-throttler` is NOT in `apps/api/package.json`. Auth endpoints (login, register) have no rate limiting. Must add package, configure `ThrottlerModule.forRootAsync`, and apply `@Throttle` decorator to `AuthController`.\n\n### Prisma (US-007)\n\nCustom `prisma/prisma.service.ts` extends `PrismaClient` with `OnModuleInit` and `OnModuleDestroy` lifecycle hooks. `@nathapp/nestjs-prisma` v3.1.0 is already in `package.json`. Need to compare implementations — if nathapp's service covers the same lifecycle management, the custom implementation is redundant and should be deleted. `prisma/prisma.module.ts` is a global module exporting `PrismaService` — this would be replaced by nathapp's `PrismaModule`.\n\n### AppModule Cleanup (US-008)\n\nAfter all above stories, `AppModule` needs to have `APP_GUARD` removed, all nathapp modules registered, and verified with lint + type-check + test.\n\n### Key Risk Areas\n\n1. Agent API key auth (HMAC-SHA256) — must survive migration to nathapp auth\n2. Ticket state machine — state machine tests must pass after response shape changes\n3. OpenAPI spec — changing response shapes will affect generated clients (CLI and web)\n4. Breaking changes to existing integration tests — must be updated for new response shapes\n\n### Files to Delete After Migration\n\n- `apps/api/src/auth/guards/jwt-auth.guard.ts`\n- `apps/api/src/auth/guards/api-key-auth.guard.ts`\n- `apps/api/src/auth/guards/combined-auth.guard.ts`\n- `apps/api/src/auth/strategies/jwt.strategy.ts`\n- `apps/api/src/prisma/prisma.module.ts` (if @nathapp/nestjs-prisma covers it)\n- `apps/api/src/prisma/prisma.service.ts` (if @nathapp/nestjs-prisma covers it)\n\n### Dependency Installation Needed\n\n- `@nathapp/nestjs-logging` — not present, must be added\n- `@nathapp/nestjs-throttler` — not present, must be added\n- Remove `@nestjs/jwt`, `@nestjs/passport`, `passport-jwt` after US-001",
+    "costLimit": 30
 }
