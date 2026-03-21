@@ -8,7 +8,7 @@ import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { execSync } from 'child_process';
 
-const root = join(__dirname, '..', '..', '..', '..'); // repo root
+const root = join(__dirname, '..', '..', '..'); // repo root
 const apiSrc = join(root, 'apps/api/src');
 
 function srcFiles(pattern = '**/*.ts', excludeTests = true): string[] {
