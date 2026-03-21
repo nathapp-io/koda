@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
-import { JwtStrategyProvider, JwtRefreshStrategyProvider } from '@nathapp/nestjs-auth';
+import { JwtStrategyProvider, JwtRefreshStrategyProvider, IPrincipal } from '@nathapp/nestjs-auth';
 import { AuthException } from '@nathapp/nestjs-common';
 import * as bcrypt from 'bcrypt';
 import { RegisterDto } from './dto/register.dto';
@@ -72,9 +72,10 @@ export class AuthService {
     };
   }
 
-  async refresh(payload: JwtPayload) {
+  async refresh(principal: IPrincipal) {
+    // JwtRefreshStrategy returns IPrincipal (with .id), not JwtPayload (with .sub)
     const user = await this.db.user.findUnique({
-      where: { id: payload.sub ?? (payload as any).id },
+      where: { id: principal.id },
     });
 
     if (!user) {

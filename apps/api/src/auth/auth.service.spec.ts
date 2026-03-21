@@ -159,9 +159,12 @@ describe('AuthService', () => {
       mockPrismaService.client.user.findUnique.mockResolvedValue(mockUser);
 
       const result = await service.refresh({
-        sub: mockUser.id,
-        email: mockUser.email,
-        role: mockUser.role,
+        id: mockUser.id,
+        name: mockUser.email,
+        blacklisted: false,
+        revoked: false,
+        authorities: [],
+        extra: {},
       });
 
       expect(result).toHaveProperty('accessToken');

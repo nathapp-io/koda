@@ -153,10 +153,14 @@ describe('AuthController', () => {
 
   describe('POST /auth/refresh', () => {
     it('should return new tokens with valid refresh token', async () => {
+      // refresh endpoint receives IPrincipal (id field), not JwtPayload (sub field)
       const user = {
-        sub: mockUser.id,
-        email: mockUser.email,
-        role: mockUser.role,
+        id: mockUser.id,
+        name: mockUser.email,
+        blacklisted: false,
+        revoked: false,
+        authorities: [],
+        extra: {},
       };
 
       mockAuthService.refresh.mockResolvedValue(mockTokenResponse);
@@ -170,9 +174,12 @@ describe('AuthController', () => {
 
     it('should return 401 when token is missing', async () => {
       const user = {
-        sub: mockUser.id,
-        email: mockUser.email,
-        role: mockUser.role,
+        id: mockUser.id,
+        name: mockUser.email,
+        blacklisted: false,
+        revoked: false,
+        authorities: [],
+        extra: {},
       };
 
       mockAuthService.refresh.mockRejectedValue(new AuthException());

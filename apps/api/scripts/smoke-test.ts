@@ -30,6 +30,7 @@ const TEST_USER = {
 const TEST_PROJECT = {
   name: `Smoke Project ${Date.now()}`,
   slug: `smoke-${Date.now()}`,
+  key: 'SMOKE',
   description: 'Auto-generated smoke test project',
 };
 
@@ -248,7 +249,7 @@ async function run() {
     body: {
       title: 'Smoke test ticket',
       description: 'Auto-created by smoke test',
-      type: 'FEATURE',
+      type: 'TASK',
       priority: 'MEDIUM',
     },
     expectStatus: 201,
@@ -302,7 +303,7 @@ async function run() {
   // ── Comments ─────────────────────────────────────────────────────────────
   const createCommentData = await test('Create comment', 'POST', `/api/projects/${projectSlug}/tickets/${ticketRef}/comments`, {
     token: accessToken,
-    body: { content: 'Smoke test comment' },
+    body: { body: 'Smoke test comment', type: 'GENERAL' },
     expectStatus: 201,
   });
 
