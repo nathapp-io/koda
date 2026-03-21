@@ -19,7 +19,7 @@ export class AgentsController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async generateApiKey(@Body() createAgentDto: CreateAgentDto, @Req() req: any): Promise<JsonResponse<unknown>> {
+  async generateApiKey(@Body() createAgentDto: CreateAgentDto, @Req() req: any) {
     // Check if user is admin
     if (req.user?.role !== 'ADMIN') {
       throw new ForbiddenAppException();
@@ -33,7 +33,7 @@ export class AgentsController {
   @IsPublic()
   @ApiOperation({ summary: 'List all agents' })
   @ApiResponse({ status: 200, description: 'Agents retrieved successfully' })
-  async findAll(): Promise<JsonResponse<unknown>> {
+  async findAll() {
     const data = await this.agentsService.findAll();
     return JsonResponse.Ok(data);
   }
@@ -43,7 +43,7 @@ export class AgentsController {
   @ApiResponse({ status: 200, description: 'Agent profile retrieved' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async findMe(@Req() req: any): Promise<JsonResponse<unknown>> {
+  async findMe(@Req() req: any) {
     const agentId = req.user?.sub;
     if (!agentId || req.user?.actorType !== 'agent') {
       throw new ForbiddenAppException();
@@ -57,7 +57,7 @@ export class AgentsController {
   @ApiOperation({ summary: 'Get agent by slug' })
   @ApiResponse({ status: 200, description: 'Agent retrieved successfully' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
-  async findBySlug(@Param('slug') slug: string): Promise<JsonResponse<unknown>> {
+  async findBySlug(@Param('slug') slug: string) {
     const data = await this.agentsService.findBySlug(slug);
     return JsonResponse.Ok(data);
   }
@@ -69,7 +69,7 @@ export class AgentsController {
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async update(@Param('slug') slug: string, @Body() updateDto: UpdateAgentDto, @Req() req: any): Promise<JsonResponse<unknown>> {
+  async update(@Param('slug') slug: string, @Body() updateDto: UpdateAgentDto, @Req() req: any) {
     if (req.user?.role !== 'ADMIN') {
       throw new ForbiddenAppException();
     }
@@ -84,7 +84,7 @@ export class AgentsController {
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async updateRoles(@Param('slug') slug: string, @Body() updateRolesDto: UpdateRolesDto, @Req() req: any): Promise<JsonResponse<unknown>> {
+  async updateRoles(@Param('slug') slug: string, @Body() updateRolesDto: UpdateRolesDto, @Req() req: any) {
     if (req.user?.role !== 'ADMIN') {
       throw new ForbiddenAppException();
     }
@@ -100,7 +100,7 @@ export class AgentsController {
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async updateCapabilities(@Param('slug') slug: string, @Body() updateCapabilitiesDto: UpdateCapabilitiesDto, @Req() req: any): Promise<JsonResponse<unknown>> {
+  async updateCapabilities(@Param('slug') slug: string, @Body() updateCapabilitiesDto: UpdateCapabilitiesDto, @Req() req: any) {
     if (req.user?.role !== 'ADMIN') {
       throw new ForbiddenAppException();
     }
@@ -116,7 +116,7 @@ export class AgentsController {
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async rotateApiKey(@Param('slug') slug: string, @Req() req: any): Promise<JsonResponse<unknown>> {
+  async rotateApiKey(@Param('slug') slug: string, @Req() req: any) {
     if (req.user?.role !== 'ADMIN') {
       throw new ForbiddenAppException();
     }

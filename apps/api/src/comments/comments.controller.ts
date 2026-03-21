@@ -85,7 +85,7 @@ export class CommentsController {
     const actorType = req.user ? 'user' : 'agent';
     const data = await this.create(slug, ref, createCommentDto, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data) as any;
+    return JsonResponse.Ok(data);
   }
 
   @Get('projects/:slug/tickets/:ref/comments')
@@ -99,7 +99,7 @@ export class CommentsController {
   ) {
     const data = await this.listByTicket(slug, ref);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data) as any;
+    return JsonResponse.Ok(data);
   }
 
   @Patch('comments/:id')
@@ -117,7 +117,7 @@ export class CommentsController {
     const actorType = req.user ? 'user' : 'agent';
     const data = await this.update(id, updateCommentDto, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data) as any;
+    return JsonResponse.Ok(data);
   }
 
   @Delete('comments/:id')

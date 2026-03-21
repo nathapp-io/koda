@@ -50,7 +50,7 @@ export class ProjectsController {
 
     const data = await this.projectsService.create(createProjectDto);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data) as any;
+    return JsonResponse.Ok(data);
   }
 
   @Get()
@@ -61,7 +61,7 @@ export class ProjectsController {
   async findAll() {
     const data = await this.projectsService.findAll();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data) as any;
+    return JsonResponse.Ok(data);
   }
 
   @Get(':slug')
@@ -73,7 +73,7 @@ export class ProjectsController {
   async findBySlug(@Param('slug') slug: string) {
     const data = await this.projectsService.findBySlug(slug);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data) as any;
+    return JsonResponse.Ok(data);
   }
 
   @Patch(':slug')
@@ -97,7 +97,7 @@ export class ProjectsController {
 
     const data = await this.projectsService.update(slug, updateProjectDto);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data) as any;
+    return JsonResponse.Ok(data);
   }
 
   @Delete(':slug')
@@ -118,6 +118,6 @@ export class ProjectsController {
 
     const data = await this.projectsService.softDelete(slug);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data) as any;
+    return JsonResponse.Ok(data);
   }
 }

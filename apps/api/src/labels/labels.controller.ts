@@ -92,7 +92,7 @@ export class LabelsController {
     const actorType = req.user ? 'user' : 'agent';
     const data = await this.create(slug, createLabelDto, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data) as any;
+    return JsonResponse.Ok(data);
   }
 
   @Get('projects/:slug/labels')
@@ -103,7 +103,7 @@ export class LabelsController {
   async findByProjectFromHttp(@Param('slug') slug: string) {
     const data = await this.findByProject(slug);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data) as any;
+    return JsonResponse.Ok(data);
   }
 
   @Delete('projects/:slug/labels/:id')
@@ -139,7 +139,7 @@ export class LabelsController {
     const actorType = req.user ? 'user' : 'agent';
     const data = await this.assignLabel(slug, ref, assignLabelDto, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data) as any;
+    return JsonResponse.Ok(data);
   }
 
   @Delete('projects/:slug/tickets/:ref/labels/:labelId')

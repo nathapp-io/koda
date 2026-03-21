@@ -55,7 +55,7 @@ export class TicketsController {
 
     const data = await this.ticketsService.create(slug, createTicketDto, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data) as any;
+    return JsonResponse.Ok(data);
   }
 
   @Get()
@@ -88,7 +88,7 @@ export class TicketsController {
 
     const data = await this.ticketsService.findAll(slug, filters);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data) as any;
+    return JsonResponse.Ok(data);
   }
 
   @Get(':ref')
@@ -102,7 +102,7 @@ export class TicketsController {
   ) {
     const data = await this.ticketsService.findByRef(slug, ref);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data) as any;
+    return JsonResponse.Ok(data);
   }
 
   @Patch(':ref')
@@ -122,7 +122,7 @@ export class TicketsController {
 
     const data = await this.ticketsService.update(slug, ref, updateTicketDto, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data) as any;
+    return JsonResponse.Ok(data);
   }
 
   @Delete(':ref')
@@ -141,7 +141,7 @@ export class TicketsController {
 
     const data = await this.ticketsService.softDelete(slug, ref, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data) as any;
+    return JsonResponse.Ok(data);
   }
 
   @Post(':ref/assign')
@@ -159,7 +159,7 @@ export class TicketsController {
   ) {
     const data = await this.ticketsService.assign(slug, ref, assignInput);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data) as any;
+    return JsonResponse.Ok(data);
   }
 
   @Post(':ref/verify')
@@ -173,12 +173,12 @@ export class TicketsController {
     @Param('ref') ref: string,
     @Body() dto: TransitionWithCommentDto,
     @Req() req: RequestWithUser,
-  ): Promise<JsonResponse<TransitionResultWithComment>> {
+  ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     const data = await this.transitionsService.verify(slug, ref, dto.body, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data) as any;
+    return JsonResponse.Ok(data);
   }
 
   @Post(':ref/start')
@@ -191,12 +191,12 @@ export class TicketsController {
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Req() req: RequestWithUser,
-  ): Promise<JsonResponse<TransitionResultWithoutComment>> {
+  ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     const data = await this.transitionsService.start(slug, ref, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data) as any;
+    return JsonResponse.Ok(data);
   }
 
   @Post(':ref/fix')
@@ -210,12 +210,12 @@ export class TicketsController {
     @Param('ref') ref: string,
     @Body() dto: TransitionWithCommentDto,
     @Req() req: RequestWithUser,
-  ): Promise<JsonResponse<TransitionResultWithComment>> {
+  ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     const data = await this.transitionsService.fix(slug, ref, dto.body, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data) as any;
+    return JsonResponse.Ok(data);
   }
 
   @Post(':ref/verify-fix')
@@ -230,13 +230,13 @@ export class TicketsController {
     @Body() dto: TransitionWithCommentDto,
     @Query('approve') approve: boolean | string,
     @Req() req: RequestWithUser,
-  ): Promise<JsonResponse<TransitionResultWithComment>> {
+  ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     const isApproved = approve === 'true' || approve === true;
     const data = await this.transitionsService.verifyFix(slug, ref, dto.body, isApproved, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data) as any;
+    return JsonResponse.Ok(data);
   }
 
   @Post(':ref/close')
@@ -249,12 +249,12 @@ export class TicketsController {
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Req() req: RequestWithUser,
-  ): Promise<JsonResponse<TransitionResultWithoutComment>> {
+  ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     const data = await this.transitionsService.close(slug, ref, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data) as any;
+    return JsonResponse.Ok(data);
   }
 
   @Post(':ref/reject')
@@ -268,11 +268,11 @@ export class TicketsController {
     @Param('ref') ref: string,
     @Body() dto: TransitionWithCommentDto,
     @Req() req: RequestWithUser,
-  ): Promise<JsonResponse<TransitionResultWithComment>> {
+  ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     const data = await this.transitionsService.reject(slug, ref, dto.body, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data) as any;
+    return JsonResponse.Ok(data);
   }
 }

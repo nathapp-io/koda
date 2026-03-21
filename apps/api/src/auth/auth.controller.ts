@@ -28,7 +28,7 @@ export class AuthController {
   @ApiResponse({ status: 201, type: AuthResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid input' })
   @Public()
-  async register(@Body() registerDto: RegisterDto): Promise<JsonResponse<unknown>> {
+  async register(@Body() registerDto: RegisterDto) {
     const data = await this.authService.register(registerDto);
     return JsonResponse.Ok(data);
   }
@@ -39,7 +39,7 @@ export class AuthController {
   @ApiResponse({ status: 200, type: AuthResponseDto })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
   @Public()
-  async login(@Body() loginDto: LoginDto): Promise<JsonResponse<unknown>> {
+  async login(@Body() loginDto: LoginDto) {
     const data = await this.authService.login(loginDto);
     return JsonResponse.Ok(data);
   }
@@ -54,7 +54,7 @@ export class AuthController {
   async refresh(
     @Principal() user: JwtPayload,
     @Headers('authorization') authHeader: string,
-  ): Promise<JsonResponse<unknown>> {
+  ) {
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       throw new AuthException();
     }
@@ -68,7 +68,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Get current authenticated user' })
   @ApiResponse({ status: 200, type: UserResponseDto })
   @ApiResponse({ status: 401, description: 'Missing or invalid token' })
-  async me(@Principal() user: JwtPayload): Promise<JsonResponse<unknown>> {
+  async me(@Principal() user: JwtPayload) {
     const validatedUser = await this.authService.validateUser(user);
     if (!validatedUser) {
       throw new AuthException();
