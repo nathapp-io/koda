@@ -36,7 +36,7 @@ export class TicketTransitionsService {
 
 
   /**
-   * Transition CREATED → VERIFIED
+   * Transition CREATED → VERIFIED, or VERIFY_FIX → CLOSED (if ticket is already in VERIFY_FIX)
    */
   async verify(
     projectSlug: string,
@@ -45,12 +45,24 @@ export class TicketTransitionsService {
     currentUser: CurrentUser,
     actorType: 'user' | 'agent',
   ): Promise<TransitionResultWithComment> {
+    const ticket = await this.findTicketByRef(projectSlug, ticketRef);
+    if (ticket?.status === TicketStatus.VERIFY_FIX) {
+      return this.executeTransition(
+        projectSlug,
+        ticketRef,
+        TicketStatus.CLOSED,
+        CommentType.REVIEW,
+        commentBody ?? 'Verified',
+        currentUser,
+        actorType,
+      ) as Promise<TransitionResultWithComment>;
+    }
     return this.executeTransition(
       projectSlug,
       ticketRef,
       TicketStatus.VERIFIED,
       CommentType.VERIFICATION,
-      commentBody,
+      commentBody ?? 'Verified',
       currentUser,
       actorType,
     ) as Promise<TransitionResultWithComment>;
@@ -91,7 +103,7 @@ export class TicketTransitionsService {
       ticketRef,
       TicketStatus.VERIFY_FIX,
       CommentType.FIX_REPORT,
-      commentBody,
+      commentBody ?? 'Fix submitted',
       currentUser,
       actorType,
     ) as Promise<TransitionResultWithComment>;

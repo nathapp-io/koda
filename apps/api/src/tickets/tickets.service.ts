@@ -89,7 +89,7 @@ export class TicketsService {
       });
     });
 
-    return ticket;
+    return { ...ticket, ref: `${project.key}-${ticket.number}` };
   }
 
   async findAll(projectSlug: string, filters: FindAllFilters) {

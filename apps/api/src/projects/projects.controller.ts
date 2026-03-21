@@ -6,22 +6,18 @@ import {
   Delete,
   Body,
   Param,
-  Req,
   HttpCode,
 } from '@nestjs/common';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
-import { ForbiddenAppException, JsonResponse } from '@nathapp/nestjs-common';
+import { JsonResponse } from '@nathapp/nestjs-common';
 import {
   ApiTags,
   ApiBearerAuth,
   ApiOperation,
   ApiResponse,
 } from '@nestjs/swagger';
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type RequestWithUser = any & { user?: { role: string } };
 
 @ApiTags('projects')
 @ApiBearerAuth()
@@ -37,28 +33,16 @@ export class ProjectsController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 409, description: 'Conflict - duplicate slug or key' })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async create(
-    @Body() createProjectDto: CreateProjectDto,
-    @Req() req: RequestWithUser,
-  ) {
-    // Check if user is admin
-    if (req.user?.extra?.role !== 'ADMIN') {
-      throw new ForbiddenAppException();
-    }
-
+  async create(@Body() createProjectDto: CreateProjectDto) {
     const data = await this.projectsService.create(createProjectDto);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data);
   }
 
   @Get()
   @ApiOperation({ summary: 'List all projects (excluding soft-deleted)' })
   @ApiResponse({ status: 200, description: 'List of projects' })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async findAll() {
     const data = await this.projectsService.findAll();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data);
   }
 
@@ -66,10 +50,8 @@ export class ProjectsController {
   @ApiOperation({ summary: 'Get a project by slug' })
   @ApiResponse({ status: 200, description: 'Project found' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async findBySlug(@Param('slug') slug: string) {
     const data = await this.projectsService.findBySlug(slug);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data);
   }
 
@@ -81,19 +63,11 @@ export class ProjectsController {
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Project not found' })
   @ApiResponse({ status: 409, description: 'Conflict - duplicate slug or key' })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async update(
     @Param('slug') slug: string,
     @Body() updateProjectDto: UpdateProjectDto,
-    @Req() req: RequestWithUser,
   ) {
-    // Check if user is admin
-    if (req.user?.extra?.role !== 'ADMIN') {
-      throw new ForbiddenAppException();
-    }
-
     const data = await this.projectsService.update(slug, updateProjectDto);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data);
   }
 
@@ -103,18 +77,8 @@ export class ProjectsController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async remove(
-    @Param('slug') slug: string,
-    @Req() req: RequestWithUser,
-  ) {
-    // Check if user is admin
-    if (req.user?.extra?.role !== 'ADMIN') {
-      throw new ForbiddenAppException();
-    }
-
+  async remove(@Param('slug') slug: string) {
     const data = await this.projectsService.softDelete(slug);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data);
   }
 }

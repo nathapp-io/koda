@@ -50,6 +50,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Refresh access and refresh tokens' })
   @ApiResponse({ status: 200, type: AuthResponseDto })
   @ApiResponse({ status: 401, description: 'Invalid or missing token' })
+  @Public()
   @UseGuards(JwtRefreshGuard)
   async refresh(@Principal() user: IPrincipal) {
     const data = await this.authService.refresh(user);

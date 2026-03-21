@@ -11,6 +11,7 @@ type TransitionRule = {
 const TRANSITION_RULES: TransitionRule = {
   [TicketStatus.CREATED]: {
     [TicketStatus.VERIFIED]: CommentType.VERIFICATION,
+    [TicketStatus.IN_PROGRESS]: 'NONE',
     [TicketStatus.REJECTED]: CommentType.GENERAL,
   },
   [TicketStatus.VERIFIED]: {

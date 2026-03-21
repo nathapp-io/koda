@@ -121,9 +121,9 @@ export class CommentsController {
   }
 
   @Delete('comments/:id')
-  @HttpCode(204)
+  @HttpCode(200)
   @ApiOperation({ summary: 'Delete a comment' })
-  @ApiResponse({ status: 204, description: 'Comment deleted' })
+  @ApiResponse({ status: 200, description: 'Comment deleted' })
   @ApiResponse({ status: 403, description: 'Not authorized to delete this comment' })
   @ApiResponse({ status: 404, description: 'Comment not found' })
   async deleteFromHttp(
@@ -133,5 +133,6 @@ export class CommentsController {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     await this.delete(id, currentUser, actorType);
+    return JsonResponse.Ok(null);
   }
 }

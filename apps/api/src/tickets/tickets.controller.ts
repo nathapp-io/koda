@@ -176,7 +176,7 @@ export class TicketsController {
   ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
-    const data = await this.transitionsService.verify(slug, ref, dto.body, currentUser, actorType);
+    const data = await this.transitionsService.verify(slug, ref, dto.body ?? '', currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data);
   }
@@ -213,7 +213,7 @@ export class TicketsController {
   ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
-    const data = await this.transitionsService.fix(slug, ref, dto.body, currentUser, actorType);
+    const data = await this.transitionsService.fix(slug, ref, dto.body ?? '', currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data);
   }
@@ -234,7 +234,7 @@ export class TicketsController {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     const isApproved = approve === 'true' || approve === true;
-    const data = await this.transitionsService.verifyFix(slug, ref, dto.body, isApproved, currentUser, actorType);
+    const data = await this.transitionsService.verifyFix(slug, ref, dto.body ?? '', isApproved, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data);
   }
@@ -271,7 +271,7 @@ export class TicketsController {
   ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
-    const data = await this.transitionsService.reject(slug, ref, dto.body, currentUser, actorType);
+    const data = await this.transitionsService.reject(slug, ref, dto.body ?? '', currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data);
   }
