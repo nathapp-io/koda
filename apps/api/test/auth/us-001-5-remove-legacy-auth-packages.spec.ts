@@ -190,7 +190,7 @@ describe('AC3 — AuthService supplemental branch coverage', () => {
 
       await expect(
         service.refresh({ sub: 'nonexistent-id', email: 'gone@example.com', role: 'MEMBER' }),
-      ).rejects.toThrow(AppException);
+      ).rejects.toThrow(AuthException);
     });
 
     it('throws with 401 status when user not found during refresh', async () => {
@@ -203,15 +203,15 @@ describe('AC3 — AuthService supplemental branch coverage', () => {
         thrownError = err;
       }
 
-      expect(thrownError).toBeInstanceOf(AppException);
-      expect((thrownError as AppException).getStatus()).toBe(HttpStatus.UNAUTHORIZED);
+      expect(thrownError).toBeInstanceOf(AuthException);
+      expect((thrownError as AuthException).getStatus()).toBe(HttpStatus.UNAUTHORIZED);
     });
 
     it('queries the database with the payload sub as user id', async () => {
       mockPrismaService.client.user.findUnique.mockResolvedValue(null);
       const payload = { sub: 'specific-user-id', email: 'x@example.com', role: 'MEMBER' };
 
-      await expect(service.refresh(payload)).rejects.toThrow(AppException);
+      await expect(service.refresh(payload)).rejects.toThrow(AuthException);
 
       expect(mockPrismaService.client.user.findUnique).toHaveBeenCalledWith({
         where: { id: payload.sub },
@@ -292,14 +292,14 @@ describe('AC3 — AuthController supplemental branch coverage', () => {
     it('throws AppException when Authorization header is an empty string', async () => {
       const user = { sub: mockUser.id, email: mockUser.email, role: mockUser.role };
 
-      await expect(controller.refresh(user, '')).rejects.toThrow(AppException);
+      await expect(controller.refresh(user, '')).rejects.toThrow(AuthException);
       expect(mockAuthService.refresh).not.toHaveBeenCalled();
     });
 
     it('throws AppException when Authorization header does not use Bearer scheme', async () => {
       const user = { sub: mockUser.id, email: mockUser.email, role: mockUser.role };
 
-      await expect(controller.refresh(user, 'Basic dXNlcjpwYXNz')).rejects.toThrow(AppException);
+      await expect(controller.refresh(user, 'Basic dXNlcjpwYXNz')).rejects.toThrow(AuthException);
       expect(mockAuthService.refresh).not.toHaveBeenCalled();
     });
 
@@ -313,8 +313,8 @@ describe('AC3 — AuthController supplemental branch coverage', () => {
         thrown = err;
       }
 
-      expect(thrown).toBeInstanceOf(AppException);
-      expect((thrown as AppException).getStatus()).toBe(HttpStatus.UNAUTHORIZED);
+      expect(thrown).toBeInstanceOf(AuthException);
+      expect((thrown as AuthException).getStatus()).toBe(HttpStatus.UNAUTHORIZED);
     });
   });
 
@@ -323,7 +323,7 @@ describe('AC3 — AuthController supplemental branch coverage', () => {
       const user = { sub: mockUser.id, email: mockUser.email, role: mockUser.role };
       mockAuthService.validateUser.mockResolvedValue(null);
 
-      await expect(controller.me(user)).rejects.toThrow(AppException);
+      await expect(controller.me(user)).rejects.toThrow(AuthException);
     });
 
     it('throws with UNAUTHORIZED status when user not found by validateUser', async () => {
@@ -337,8 +337,8 @@ describe('AC3 — AuthController supplemental branch coverage', () => {
         thrown = err;
       }
 
-      expect(thrown).toBeInstanceOf(AppException);
-      expect((thrown as AppException).getStatus()).toBe(HttpStatus.UNAUTHORIZED);
+      expect(thrown).toBeInstanceOf(AuthException);
+      expect((thrown as AuthException).getStatus()).toBe(HttpStatus.UNAUTHORIZED);
     });
 
     it('does not call any response builder when validateUser returns null', async () => {
