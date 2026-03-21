@@ -16,7 +16,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { AuthService } from '../../src/auth/auth.service';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
-import { AuthException } from '@nathapp/nestjs-common';
+import { AppException, AuthException } from '@nathapp/nestjs-common';
 
 const SRC = path.resolve(__dirname, '../../src');
 

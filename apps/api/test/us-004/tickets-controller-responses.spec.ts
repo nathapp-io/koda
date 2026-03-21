@@ -8,7 +8,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { TicketsController } from '../../src/tickets/tickets.controller';
 import { TicketsService } from '../../src/tickets/tickets.service';
 import { TicketTransitionsService } from '../../src/tickets/state-machine/ticket-transitions.service';
-import { JsonResponse } from '/nestjs-common';
+import { JsonResponse } from '@nathapp/nestjs-common';
 
 describe('TicketsController — JsonResponse envelope (US-004)', () => {
   let controller: TicketsController;

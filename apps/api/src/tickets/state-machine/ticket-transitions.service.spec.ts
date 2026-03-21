@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TicketStatus, CommentType, ActivityType, PrismaClient } from '@prisma/client';
 import { TicketTransitionsService } from './ticket-transitions.service';
-import { AppException } from '/nestjs-common';
+import { AppException } from '@nathapp/nestjs-common';
 
 describe('TicketTransitionsService', () => {
   let service: TicketTransitionsService;

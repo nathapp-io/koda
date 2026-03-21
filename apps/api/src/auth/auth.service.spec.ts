@@ -4,7 +4,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
 import { AuthService } from './auth.service';
 import { ConfigService } from '@nestjs/config';
-import { AppException } from '/nestjs-common';
+import { AppException } from '@nathapp/nestjs-common';
 import * as bcrypt from 'bcrypt';
 
 describe('AuthService', () => {

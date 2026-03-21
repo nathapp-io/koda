@@ -4,7 +4,7 @@
  * Tests the standard API response envelope: { data, meta?, message? }
  * These tests are RED until JsonResponse is fully implemented.
  */
-import { JsonResponse } from '/nestjs-common';
+import { JsonResponse } from '@nathapp/nestjs-common';
 
 describe('JsonResponse', () => {
   describe('JsonResponse.ok()', () => {

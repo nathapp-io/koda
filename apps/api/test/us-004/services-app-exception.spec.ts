@@ -16,7 +16,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { AppException } from '/nestjs-common';
+import { AppException } from '@nathapp/nestjs-common';
 import { AuthService } from '../../src/auth/auth.service';
 import { ProjectsService } from '../../src/projects/projects.service';
 import { AgentsService } from '../../src/agents/agents.service';

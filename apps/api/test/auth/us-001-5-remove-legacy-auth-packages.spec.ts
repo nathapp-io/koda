@@ -19,7 +19,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from '../../src/auth/auth.service';
 import { AuthController } from '../../src/auth/auth.controller';
-import { AuthException, JsonResponse } from '@nathapp/nestjs-common';
+import { AppException, AuthException, JsonResponse } from '@nathapp/nestjs-common';
 
 const API_ROOT = path.resolve(__dirname, '../..');
 const SRC = path.resolve(API_ROOT, 'src');

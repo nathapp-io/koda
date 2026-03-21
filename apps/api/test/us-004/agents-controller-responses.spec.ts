@@ -7,7 +7,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AgentsController } from '../../src/agents/agents.controller';
 import { AgentsService } from '../../src/agents/agents.service';
-import { JsonResponse } from '/nestjs-common';
+import { JsonResponse } from '@nathapp/nestjs-common';
 
 describe('AgentsController — JsonResponse envelope (US-004)', () => {
   let controller: AgentsController;
