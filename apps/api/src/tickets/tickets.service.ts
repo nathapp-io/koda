@@ -65,9 +65,9 @@ export class TicketsService {
 
     // Use transaction to safely auto-increment ticket number
     const ticket = await this.db.$transaction(async (tx) => {
-      // Find the highest number for this project
+      // Find the highest number for this project (include soft-deleted to avoid number reuse)
       const lastTicket = await tx.ticket.findFirst({
-        where: { projectId: project.id, deletedAt: null },
+        where: { projectId: project.id },
         orderBy: { number: 'desc' },
       });
 
@@ -195,18 +195,20 @@ export class TicketsService {
       throw new NotFoundAppException();
     }
 
-    // Transform labels from nested structure to flat array
+    // Compute ref (e.g. KT-1) and transform labels from nested structure to flat array
+    const ticketRef = `${project.key}-${ticket.number}`;
     if (ticket.labels) {
       interface TicketLabelWithLabel {
         label: { id: string; projectId: string; name: string; color: string | null };
       }
       return {
         ...ticket,
+        ref: ticketRef,
         labels: (ticket.labels as TicketLabelWithLabel[]).map((tl: TicketLabelWithLabel) => tl.label),
       };
     }
 
-    return ticket;
+    return { ...ticket, ref: ticketRef };
   }
 
   async update(

@@ -54,17 +54,7 @@ export class UpdateAgentDto {
   maxConcurrentTickets?: number;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export interface UpdateRolesDto {
-  roles: string[];
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export interface UpdateCapabilitiesDto {
-  capabilities: string[];
-}
-
-class UpdateRolesDto {
+export class UpdateRolesDto {
   @ApiProperty({ example: ['DEVELOPER', 'REVIEWER'] })
   @IsArray()
   @IsString({ each: true })

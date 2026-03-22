@@ -161,19 +161,20 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .send({
           name: 'Subrina Coder',
+          slug: 'subrina-coder',
           maxConcurrentTickets: 3,
           roles: ['DEVELOPER', 'REVIEWER'],
           capabilities: ['typescript', 'nestjs'],
         })
         .expect(201);
 
-      const data = body<{ name: string; slug: string; apiKey: string }>(res);
-      expect(data.name).toBe('Subrina Coder');
-      expect(data.slug).toBe('subrina-coder');
+      const data = body<{ apiKey: string; agent: { name: string; slug: string } }>(res);
+      expect(data.agent.name).toBe('Subrina Coder');
+      expect(data.agent.slug).toBe('subrina-coder');
       expect(data.apiKey).toBeTruthy();
 
       agentApiKey = data.apiKey;
-      agentSlug = data.slug;
+      agentSlug = data.agent.slug;
     });
 
     it('GET /api/agents/me — agent profile via API key', async () => {
@@ -341,10 +342,8 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(200);
 
-      const data = body<{ data: unknown[] } | unknown[]>(res);
-      // Accept both { data: [...], total: N } and plain array shapes
-      const tickets = Array.isArray(data) ? data : (data as { data: unknown[] }).data;
-      expect(tickets.length).toBeGreaterThanOrEqual(1);
+      const data = body<{ tickets: unknown[]; total: number }>(res);
+      expect(data.tickets.length).toBeGreaterThanOrEqual(1);
     });
 
     it('GET .../tickets/:ref — returns ticket by ref', async () => {
@@ -365,8 +364,8 @@ describeIntegration('API Integration Tests', () => {
         .send({ body: 'Reproduced on iOS Safari.' })
         .expect(200);
 
-      const data = body<{ status: string }>(res);
-      expect(data.status).toBe('VERIFIED');
+      const data = body<{ ticket: { status: string } }>(res);
+      expect(data.ticket.status).toBe('VERIFIED');
     });
 
     it('POST .../start — VERIFIED → IN_PROGRESS', async () => {
@@ -375,8 +374,8 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(200);
 
-      const data = body<{ status: string }>(res);
-      expect(data.status).toBe('IN_PROGRESS');
+      const data = body<{ ticket: { status: string } }>(res);
+      expect(data.ticket.status).toBe('IN_PROGRESS');
     });
 
     it('POST .../fix — IN_PROGRESS → VERIFY_FIX (agent API key)', async () => {
@@ -386,8 +385,8 @@ describeIntegration('API Integration Tests', () => {
         .send({ body: 'Fixed null ref in auth.ts:42. PR #17 merged.' })
         .expect(200);
 
-      const data = body<{ status: string }>(res);
-      expect(data.status).toBe('VERIFY_FIX');
+      const data = body<{ ticket: { status: string } }>(res);
+      expect(data.ticket.status).toBe('VERIFY_FIX');
     });
 
     it('POST .../verify-fix?approve=true — VERIFY_FIX → CLOSED', async () => {
@@ -397,8 +396,8 @@ describeIntegration('API Integration Tests', () => {
         .send({ body: 'Confirmed fixed. All tests pass.' })
         .expect(200);
 
-      const data = body<{ status: string }>(res);
-      expect(data.status).toBe('CLOSED');
+      const data = body<{ ticket: { status: string } }>(res);
+      expect(data.ticket.status).toBe('CLOSED');
     });
   });
 
@@ -423,7 +422,7 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(200);
 
-      expect(body<{ status: string }>(res).status).toBe('IN_PROGRESS');
+      expect(body<{ ticket: { status: string } }>(res).ticket.status).toBe('IN_PROGRESS');
     });
   });
 
@@ -450,7 +449,7 @@ describeIntegration('API Integration Tests', () => {
         .send({ body: 'Out of scope for MVP.' })
         .expect(200);
 
-      expect(body<{ status: string }>(res).status).toBe('REJECTED');
+      expect(body<{ ticket: { status: string } }>(res).ticket.status).toBe('REJECTED');
     });
   });
 
@@ -526,14 +525,14 @@ describeIntegration('API Integration Tests', () => {
         .post(`/api/projects/${projectSlug}/tickets/${labelTicketRef}/labels`)
         .set('Authorization', `Bearer ${userAccessToken}`)
         .send({ labelId })
-        .expect(200);
+        .expect(201);
     });
 
     it('DELETE .../labels/:labelId — removes label from ticket', async () => {
       await request(httpServer)
         .delete(`/api/projects/${projectSlug}/tickets/${labelTicketRef}/labels/${labelId}`)
         .set('Authorization', `Bearer ${userAccessToken}`)
-        .expect(200);
+        .expect(204);
     });
   });
 

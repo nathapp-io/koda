@@ -120,6 +120,12 @@ export class TicketTransitionsService {
     currentUser: CurrentUser,
     actorType: 'user' | 'agent',
   ): Promise<TransitionResultWithComment> {
+    // verify-fix is only valid when ticket is in VERIFY_FIX status
+    const ticket = await this.findTicketByRef(projectSlug, ticketRef);
+    if (!ticket) throw new NotFoundAppException();
+    if (ticket.status !== TicketStatus.VERIFY_FIX) {
+      throw new ValidationAppException();
+    }
     const toStatus = approve ? TicketStatus.CLOSED : TicketStatus.IN_PROGRESS;
     return this.executeTransition(
       projectSlug,
