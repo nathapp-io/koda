@@ -357,8 +357,8 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(200);
 
-      const data = body<{ tickets: unknown[]; total: number }>(res);
-      expect(data.tickets.length).toBeGreaterThanOrEqual(1);
+      const data = body<{ items: unknown[]; total: number }>(res);
+      expect(data.items.length).toBeGreaterThanOrEqual(1);
     });
 
     it('GET .../tickets/:ref — returns ticket by ref', async () => {
