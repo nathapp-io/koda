@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { execFile } from 'child_process';
 import { resolveAuth } from '../utils/auth';
 import { configureClient } from '../client';
 import { TicketsService, LabelsService } from '../generated';
@@ -597,12 +598,9 @@ export function ticketCommand(program: Command): void {
         const ticketUrl = `${baseUrl}/projects/${projectIdentifier}/tickets/${ticketData.number}`;
 
         // Use system command to open URL in default browser
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { execFile } = require('child_process');
         execFile(
           process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open',
           process.platform === 'win32' ? ['/c', `start ${ticketUrl}`] : [ticketUrl],
-          { stdio: 'ignore' },
           (error: unknown) => {
             if (error) {
               // If system command fails, just print the URL
