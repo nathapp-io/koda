@@ -411,6 +411,7 @@ describe('AgentsService', () => {
       };
 
       const updatedAgent = { ...mockAgent, ...updateData };
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(mockAgent);
       mockPrismaService.client.agent.update.mockResolvedValue(updatedAgent);
 
       const result = await service.update('test-agent', updateData);
@@ -422,6 +423,7 @@ describe('AgentsService', () => {
     it('should update agent status', async () => {
       const updateData = { status: 'PAUSED' };
       const updatedAgent = { ...mockAgent, status: 'PAUSED' };
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(mockAgent);
       mockPrismaService.client.agent.update.mockResolvedValue(updatedAgent);
 
       const result = await service.update('test-agent', updateData);
@@ -430,7 +432,7 @@ describe('AgentsService', () => {
     });
 
     it('should throw error when agent not found', async () => {
-      mockPrismaService.client.agent.update.mockRejectedValue(new Error('Agent not found'));
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(null);
 
       await expect(service.update('nonexistent', { name: 'New Name' })).rejects.toThrow();
     });
