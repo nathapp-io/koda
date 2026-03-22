@@ -1,46 +1,55 @@
 {
   "version": 1,
   "approved": true,
+  "story": "US-005-2: TicketActionPanel Component — State Machine Buttons and Dialogs",
   "tests": {
     "allPassing": true,
-    "passCount": 23,
+    "passCount": 36,
     "failCount": 0
   },
   "testModifications": {
     "detected": false,
     "files": [],
     "legitimate": true,
-    "reasoning": "No test files were modified by the implementer. All 23 tests passed without changes."
+    "reasoning": "No test files were modified by the implementer. All tests are pre-written acceptance tests."
   },
   "acceptanceCriteria": {
     "allMet": true,
     "criteria": [
       {
-        "criterion": "pages/[project]/tickets/[ref].vue exists and reads slug + ref from useRoute() params",
+        "criterion": "AC1: accepts a ticket prop typed to the generated Ticket schema",
         "met": true
       },
       {
-        "criterion": "useAsyncData fetches GET /projects/${slug}/tickets/${ref} via useApi()",
+        "criterion": "AC2: CREATED status renders Verify and Reject buttons only",
         "met": true
       },
       {
-        "criterion": "Two-column layout: left col is 2/3 width (col-span-2), right col is 1/3 width (col-span-1)",
+        "criterion": "AC3: VERIFIED status renders Start button only",
         "met": true
       },
       {
-        "criterion": "Title and description (white-space: pre-wrap) render from API response",
+        "criterion": "AC4: IN_PROGRESS status renders Submit Fix and Reject buttons only",
         "met": true
       },
       {
-        "criterion": "Status, priority, and type display as styled Badge components",
+        "criterion": "AC5: VERIFY_FIX status renders Approve Fix and Fail Fix buttons only",
         "met": true
       },
       {
-        "criterion": "Right column shows assignee and created date metadata",
+        "criterion": "AC6: CLOSED and REJECTED statuses render no action buttons",
         "met": true
       },
       {
-        "criterion": "Placeholder <div> slots exist for TicketActionPanel and CommentThread",
+        "criterion": "AC7: Verify, Reject, Submit Fix, Fail Fix open a Dialog with Textarea before API call",
+        "met": true
+      },
+      {
+        "criterion": "AC8: Start, Approve Fix call endpoints immediately without a dialog",
+        "met": true
+      },
+      {
+        "criterion": "AC9: Component emits 'transition' event after each successful API response",
         "met": true
       }
     ]
@@ -50,5 +59,5 @@
     "issues": []
   },
   "fixes": [],
-  "reasoning": "All 23 tests pass (100%). Implementation cleanly fulfills all 7 acceptance criteria. Code follows Vue 3 Composition API patterns consistent with the project (useRoute, useApi, useAsyncData, computed). Layout uses Tailwind grid-cols-3 with col-span-2/col-span-1 for correct proportions. Badges properly styled for status/priority/type. Right column displays assignee with Avatar and formatted createdAt date. Placeholder divs included for TicketActionPanel and CommentThread components. File is 153 lines, well-structured with helper functions for formatting/styling, proper TypeScript interfaces, and no console.log statements. No test modifications detected. Implementation is production-ready."
+  "reasoning": "All 36 tests pass. Implementation is clean and follows Vue 3 Composition API best practices with proper TypeScript typing. Component correctly implements state machine button rendering based on ticket status, manages dialog state for comment-required actions, and properly emits 'transition' event after successful API calls. API endpoints are constructed correctly including verify-fix query parameter handling (approve=true|false). Error handling is comprehensive with user-friendly toast notifications. Code is 124 lines, well-organized with clear separation of concerns. No code quality issues detected."
 }
