@@ -42,8 +42,11 @@ export class AgentsController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async findMe(@Req() req: any) {
-    const agentId = req.user?.id;
-    if (!agentId || req.user?.extra?.actorType !== 'agent') {
+    // CombinedAuthGuard sets req.actorType = 'agent' for API key auth
+    // For JWT auth, req.actorType is not set (only req.user)
+    const actorType = req.actorType;
+    const agentId = actorType === 'agent' ? req.agent?.id : req.user?.id;
+    if (!agentId || (actorType !== 'agent' && actorType !== 'user')) {
       throw new ForbiddenAppException();
     }
     const data = await this.agentsService.findMe(agentId);
