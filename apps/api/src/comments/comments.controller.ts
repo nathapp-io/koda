@@ -18,6 +18,7 @@ import {
 import { CommentsService } from './comments.service';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
+import { JsonResponse } from '@nathapp/nestjs-common';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type RequestWithUser = any & { user?: any; agent?: any };
@@ -73,6 +74,7 @@ export class CommentsController {
   @ApiResponse({ status: 201, description: 'Comment created' })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   @ApiResponse({ status: 404, description: 'Project or ticket not found' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async createFromHttp(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
@@ -81,18 +83,23 @@ export class CommentsController {
   ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
-    return this.create(slug, ref, createCommentDto, currentUser, actorType);
+    const data = await this.create(slug, ref, createCommentDto, currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return JsonResponse.Ok(data);
   }
 
   @Get('projects/:slug/tickets/:ref/comments')
   @ApiOperation({ summary: 'List all comments for a ticket' })
   @ApiResponse({ status: 200, description: 'List of comments' })
   @ApiResponse({ status: 404, description: 'Project or ticket not found' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async listByTicketFromHttp(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
   ) {
-    return this.listByTicket(slug, ref);
+    const data = await this.listByTicket(slug, ref);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return JsonResponse.Ok(data);
   }
 
   @Patch('comments/:id')
@@ -100,6 +107,7 @@ export class CommentsController {
   @ApiResponse({ status: 200, description: 'Comment updated' })
   @ApiResponse({ status: 403, description: 'Not authorized to edit this comment' })
   @ApiResponse({ status: 404, description: 'Comment not found' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async updateFromHttp(
     @Param('id') id: string,
     @Body() updateCommentDto: UpdateCommentDto,
@@ -107,13 +115,15 @@ export class CommentsController {
   ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
-    return this.update(id, updateCommentDto, currentUser, actorType);
+    const data = await this.update(id, updateCommentDto, currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return JsonResponse.Ok(data);
   }
 
   @Delete('comments/:id')
-  @HttpCode(204)
+  @HttpCode(200)
   @ApiOperation({ summary: 'Delete a comment' })
-  @ApiResponse({ status: 204, description: 'Comment deleted' })
+  @ApiResponse({ status: 200, description: 'Comment deleted' })
   @ApiResponse({ status: 403, description: 'Not authorized to delete this comment' })
   @ApiResponse({ status: 404, description: 'Comment not found' })
   async deleteFromHttp(
@@ -123,5 +133,6 @@ export class CommentsController {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     await this.delete(id, currentUser, actorType);
+    return JsonResponse.Ok(null);
   }
 }

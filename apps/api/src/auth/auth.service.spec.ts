@@ -1,16 +1,15 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { JwtService } from '@nestjs/jwt';
-import { PrismaService } from '../prisma/prisma.service';
+import { JwtStrategyProvider, JwtRefreshStrategyProvider } from '@nathapp/nestjs-auth';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaClient } from '@prisma/client';
 import { AuthService } from './auth.service';
 import { ConfigService } from '@nestjs/config';
-import { UnauthorizedException } from '@nestjs/common';
+import { AppException } from '@nathapp/nestjs-common';
 import * as bcrypt from 'bcrypt';
 
 describe('AuthService', () => {
   let service: AuthService;
-  let prismaService: PrismaService;
-  let _configService: ConfigService;
-  let jwtService: JwtService;
+  let prismaService: PrismaService<PrismaClient>;
 
   const mockUser = {
     id: 'user-123',
@@ -23,9 +22,11 @@ describe('AuthService', () => {
   };
 
   const mockPrismaService = {
-    user: {
-      create: jest.fn(),
-      findUnique: jest.fn(),
+    client: {
+      user: {
+        create: jest.fn(),
+        findUnique: jest.fn(),
+      },
     },
   };
 
@@ -33,8 +34,12 @@ describe('AuthService', () => {
     get: jest.fn(),
   };
 
-  const mockJwtService = {
-    signAsync: jest.fn(),
+  const mockJwtStrategyProvider = {
+    sign: jest.fn(),
+  };
+
+  const mockJwtRefreshStrategyProvider = {
+    sign: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -43,18 +48,17 @@ describe('AuthService', () => {
         AuthService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: ConfigService, useValue: mockConfigService },
-        { provide: JwtService, useValue: mockJwtService },
+        { provide: JwtStrategyProvider, useValue: mockJwtStrategyProvider },
+        { provide: JwtRefreshStrategyProvider, useValue: mockJwtRefreshStrategyProvider },
       ],
     }).compile();
 
     service = module.get<AuthService>(AuthService);
-    prismaService = module.get<PrismaService>(PrismaService);
-    _configService = module.get<ConfigService>(ConfigService);
-    jwtService = module.get<JwtService>(JwtService);
+    prismaService = module.get<PrismaService<PrismaClient>>(PrismaService);
 
     // Default mock values
-    mockJwtService.signAsync.mockResolvedValue('mock-token');
-    mockConfigService.get.mockReturnValue('7d');
+    mockJwtStrategyProvider.sign.mockReturnValue('mock-token');
+    mockJwtRefreshStrategyProvider.sign.mockReturnValue('mock-token');
   });
 
   afterEach(() => {
@@ -69,12 +73,12 @@ describe('AuthService', () => {
         password: 'password123',
       };
 
-      mockPrismaService.user.create.mockResolvedValue(mockUser);
+      mockPrismaService.client.user.create.mockResolvedValue(mockUser);
 
       const result = await service.register(registerDto);
 
-      expect(prismaService.user.create).toHaveBeenCalled();
-      const createCall = (prismaService.user.create as jest.Mock).mock.calls[0][0];
+      expect(prismaService.client.user.create).toHaveBeenCalled();
+      const createCall = (prismaService.client.user.create as jest.Mock).mock.calls[0][0];
       expect(createCall.data.email).toBe(registerDto.email);
       expect(createCall.data.name).toBe(registerDto.name);
 
@@ -95,7 +99,7 @@ describe('AuthService', () => {
         password: 'password123',
       };
 
-      mockPrismaService.user.create.mockResolvedValue(mockUser);
+      mockPrismaService.client.user.create.mockResolvedValue(mockUser);
 
       const result = await service.register(registerDto);
 
@@ -114,7 +118,7 @@ describe('AuthService', () => {
       const hashedPassword = await bcrypt.hash(password, 12);
       const userWithHash = { ...mockUser, passwordHash: hashedPassword };
 
-      mockPrismaService.user.findUnique.mockResolvedValue(userWithHash);
+      mockPrismaService.client.user.findUnique.mockResolvedValue(userWithHash);
 
       const result = await service.login({
         email: mockUser.email,
@@ -128,36 +132,39 @@ describe('AuthService', () => {
     });
 
     it('should throw 401 error for invalid password', async () => {
-      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+      mockPrismaService.client.user.findUnique.mockResolvedValue(mockUser);
 
       await expect(
         service.login({
           email: mockUser.email,
           password: 'wrongpassword',
         }),
-      ).rejects.toThrow(UnauthorizedException);
+      ).rejects.toThrow(AppException);
     });
 
     it('should throw 401 error for non-existent user', async () => {
-      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      mockPrismaService.client.user.findUnique.mockResolvedValue(null);
 
       await expect(
         service.login({
           email: 'nonexistent@example.com',
           password: 'password123',
         }),
-      ).rejects.toThrow(UnauthorizedException);
+      ).rejects.toThrow(AppException);
     });
   });
 
   describe('refresh', () => {
     it('should return new tokens with valid refresh token', async () => {
-      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+      mockPrismaService.client.user.findUnique.mockResolvedValue(mockUser);
 
       const result = await service.refresh({
-        sub: mockUser.id,
-        email: mockUser.email,
-        role: mockUser.role,
+        id: mockUser.id,
+        name: mockUser.email,
+        blacklisted: false,
+        revoked: false,
+        authorities: [],
+        extra: {},
       });
 
       expect(result).toHaveProperty('accessToken');
@@ -168,7 +175,7 @@ describe('AuthService', () => {
 
   describe('validateUser', () => {
     it('should return user for valid JWT payload', async () => {
-      mockPrismaService.user.findUnique.mockResolvedValue(mockUser);
+      mockPrismaService.client.user.findUnique.mockResolvedValue(mockUser);
 
       const result = await service.validateUser({
         sub: mockUser.id,
@@ -177,13 +184,13 @@ describe('AuthService', () => {
       });
 
       expect(result).toEqual(mockUser);
-      expect(prismaService.user.findUnique).toHaveBeenCalledWith({
+      expect(prismaService.client.user.findUnique).toHaveBeenCalledWith({
         where: { id: mockUser.id },
       });
     });
 
     it('should return null if user not found', async () => {
-      mockPrismaService.user.findUnique.mockResolvedValue(null);
+      mockPrismaService.client.user.findUnique.mockResolvedValue(null);
 
       const result = await service.validateUser({
         sub: 'nonexistent-id',
@@ -196,38 +203,31 @@ describe('AuthService', () => {
   });
 
   describe('JWT token generation', () => {
-    it('should generate access token with correct payload', async () => {
-      const token = await service.generateAccessToken(mockUser.id, mockUser.email, mockUser.role);
+    it('should generate access token with correct payload', () => {
+      const token = service.generateAccessToken(mockUser.id, mockUser.email, mockUser.role);
 
       expect(token).toBe('mock-token');
-      expect(jwtService.signAsync).toHaveBeenCalledWith(
-        {
-          sub: mockUser.id,
-          email: mockUser.email,
-          role: mockUser.role,
-        },
-        expect.any(Object),
-      );
+      expect(mockJwtStrategyProvider.sign).toHaveBeenCalledWith({
+        sub: mockUser.id,
+        email: mockUser.email,
+        role: mockUser.role,
+      });
     });
 
-    it('should generate refresh token', async () => {
-      const token = await service.generateRefreshToken(mockUser.id);
+    it('should generate refresh token', () => {
+      const token = service.generateRefreshToken(mockUser.id);
 
       expect(token).toBe('mock-token');
-      expect(jwtService.signAsync).toHaveBeenCalledWith(
-        {
-          sub: mockUser.id,
-        },
-        expect.any(Object),
-      );
+      expect(mockJwtRefreshStrategyProvider.sign).toHaveBeenCalledWith({
+        sub: mockUser.id,
+      });
     });
 
-    it('should include sub, email, and role in JWT payload', async () => {
-      // Decode token manually to verify payload
-      const token = await service.generateAccessToken(mockUser.id, mockUser.email, 'ADMIN');
+    it('should include sub, email, and role in JWT payload', () => {
+      const token = service.generateAccessToken(mockUser.id, mockUser.email, 'ADMIN');
 
       expect(token).toBe('mock-token');
-      const callArgs = (jwtService.signAsync as jest.Mock).mock.calls[0][0];
+      const callArgs = (mockJwtStrategyProvider.sign as jest.Mock).mock.calls[0][0];
       expect(callArgs.sub).toBe(mockUser.id);
       expect(callArgs.email).toBe(mockUser.email);
       expect(callArgs.role).toBe('ADMIN');

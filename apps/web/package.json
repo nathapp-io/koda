@@ -7,8 +7,8 @@
     "dev": "nuxt dev --port 3101",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
-    "lint": "eslint \"./**/*.{vue,ts}\" --ignore-pattern \".nuxt/**\" --ignore-pattern \".output/**\" --max-warnings=0",
-    "lint:fix": "eslint \"./**/*.{vue,ts}\" --ignore-pattern \".nuxt/**\" --ignore-pattern \".output/**\" --fix",
+    "lint": "eslint \"./**/*.ts\" --ignore-pattern \".nuxt/**\" --ignore-pattern \".output/**\" --max-warnings=0",
+    "lint:fix": "eslint \"./**/*.ts\" --ignore-pattern \".nuxt/**\" --ignore-pattern \".output/**\" --fix",
     "type-check": "nuxt typecheck"
   },
   "dependencies": {

@@ -1,21 +1,21 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  ForbiddenException,
-} from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaClient } from '@prisma/client';
+import { ValidationAppException, NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { CreateLabelDto } from './dto/create-label.dto';
 import { AssignLabelDto } from './dto/assign-label.dto';
 
 interface CurrentUser {
+  id: string;
   sub: string;
   role?: string;
 }
 
 @Injectable()
 export class LabelsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService<PrismaClient>) {}
+  private get db() { return this.prisma.client; }
+
 
   async create(
     projectSlug: string,
@@ -25,29 +25,29 @@ export class LabelsService {
   ) {
     // Only ADMIN users can create labels
     if (actorType !== 'user' || currentUser.role === 'MEMBER') {
-      throw new ForbiddenException('Only admin users can create labels');
+      throw new ForbiddenAppException();
     }
 
     // Validate required fields
     if (!createLabelDto.name) {
-      throw new BadRequestException('Name is required');
+      throw new ValidationAppException();
     }
     if (typeof createLabelDto.name === 'string' && createLabelDto.name.trim().length === 0) {
-      throw new BadRequestException('Name must not be empty');
+      throw new ValidationAppException();
     }
 
     // Find project by slug
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
     if (!project || project.deletedAt) {
-      throw new NotFoundException('Project not found');
+      throw new NotFoundAppException();
     }
 
     // Create the label
     try {
-      const label = await this.prisma.label.create({
+      const label = await this.db.label.create({
         data: {
           projectId: project.id,
           name: createLabelDto.name,
@@ -59,7 +59,7 @@ export class LabelsService {
     } catch (error) {
       // Check if it's a unique constraint violation (duplicate name in project)
       if (error instanceof Error && error.message.includes('Unique constraint')) {
-        throw new BadRequestException('Label already exists in this project');
+        throw new ValidationAppException();
       }
       throw error;
     }
@@ -67,16 +67,16 @@ export class LabelsService {
 
   async findByProject(projectSlug: string) {
     // Find project by slug
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
     if (!project || project.deletedAt) {
-      throw new NotFoundException('Project not found');
+      throw new NotFoundAppException();
     }
 
     // Find all labels for this project
-    const labels = await this.prisma.label.findMany({
+    const labels = await this.db.label.findMany({
       where: { projectId: project.id },
     });
 
@@ -91,34 +91,34 @@ export class LabelsService {
   ) {
     // Only ADMIN users can delete labels
     if (actorType !== 'user' || currentUser.role === 'MEMBER') {
-      throw new ForbiddenException('Only admin users can delete labels');
+      throw new ForbiddenAppException();
     }
 
     // Find project by slug
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
     if (!project || project.deletedAt) {
-      throw new NotFoundException('Project not found');
+      throw new NotFoundAppException();
     }
 
     // Find the label
-    const label = await this.prisma.label.findUnique({
+    const label = await this.db.label.findUnique({
       where: { id: labelId },
     });
 
     if (!label) {
-      throw new NotFoundException('Label not found');
+      throw new NotFoundAppException();
     }
 
     // Verify the label belongs to the project
     if (label.projectId !== project.id) {
-      throw new NotFoundException('Label not found');
+      throw new NotFoundAppException();
     }
 
     // Delete the label
-    await this.prisma.label.delete({
+    await this.db.label.delete({
       where: { id: labelId },
     });
   }
@@ -131,12 +131,12 @@ export class LabelsService {
     actorType: 'user' | 'agent',
   ) {
     // Find project by slug
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
     if (!project || project.deletedAt) {
-      throw new NotFoundException('Project not found');
+      throw new NotFoundAppException();
     }
 
     // Find ticket by ref (KODA-1 or CUID)
@@ -148,7 +148,7 @@ export class LabelsService {
     if (match) {
       // Resolve by composite unique key (projectId, number)
       const number = parseInt(match[2], 10);
-      ticket = await this.prisma.ticket.findUnique({
+      ticket = await this.db.ticket.findUnique({
         where: {
           projectId_number: {
             projectId: project.id,
@@ -159,33 +159,33 @@ export class LabelsService {
       });
     } else {
       // Treat as CUID
-      ticket = await this.prisma.ticket.findUnique({
+      ticket = await this.db.ticket.findUnique({
         where: { id: ticketRef },
         include: { labels: { include: { label: true } } },
       });
     }
 
     if (!ticket || ticket.deletedAt) {
-      throw new NotFoundException('Ticket not found');
+      throw new NotFoundAppException();
     }
 
     // Find the label
-    const label = await this.prisma.label.findUnique({
+    const label = await this.db.label.findUnique({
       where: { id: assignLabelDto.labelId },
     });
 
     if (!label) {
-      throw new NotFoundException('Label not found');
+      throw new NotFoundAppException();
     }
 
     // Verify the label belongs to the same project
     if (label.projectId !== project.id) {
-      throw new BadRequestException('Label not in project');
+      throw new ValidationAppException();
     }
 
     // Use transaction to assign label and create activity
     try {
-      const result = await this.prisma.$transaction(async (tx) => {
+      const result = await this.db.$transaction(async (tx) => {
         // Check if label already assigned
         const existingAssignment = await tx.ticketLabel.findUnique({
           where: {
@@ -226,7 +226,7 @@ export class LabelsService {
           include: { labels: { include: { label: true } } },
         });
         if (!updated) {
-          throw new NotFoundException('Ticket not found after update');
+          throw new NotFoundAppException();
         }
         // Transform labels from nested structure to flat array
         interface TicketLabelWithLabel {
@@ -240,11 +240,14 @@ export class LabelsService {
 
       return result;
     } catch (error) {
+      if (error instanceof ValidationAppException || error instanceof NotFoundAppException) {
+        throw error;
+      }
       if (error instanceof Error && error.message.includes('already assigned')) {
-        throw new BadRequestException('Label already assigned to this ticket');
+        throw new ValidationAppException();
       }
       if (error instanceof Error && error.message.includes('Unique constraint')) {
-        throw new BadRequestException('Label already assigned to this ticket');
+        throw new ValidationAppException();
       }
       throw error;
     }
@@ -258,12 +261,12 @@ export class LabelsService {
     actorType: 'user' | 'agent',
   ) {
     // Find project by slug
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
     if (!project || project.deletedAt) {
-      throw new NotFoundException('Project not found');
+      throw new NotFoundAppException();
     }
 
     // Find ticket by ref (KODA-1 or CUID)
@@ -275,7 +278,7 @@ export class LabelsService {
     if (match) {
       // Resolve by composite unique key (projectId, number)
       const number = parseInt(match[2], 10);
-      ticket = await this.prisma.ticket.findUnique({
+      ticket = await this.db.ticket.findUnique({
         where: {
           projectId_number: {
             projectId: project.id,
@@ -286,18 +289,18 @@ export class LabelsService {
       });
     } else {
       // Treat as CUID
-      ticket = await this.prisma.ticket.findUnique({
+      ticket = await this.db.ticket.findUnique({
         where: { id: ticketRef },
         include: { labels: { include: { label: true } } },
       });
     }
 
     if (!ticket || ticket.deletedAt) {
-      throw new NotFoundException('Ticket not found');
+      throw new NotFoundAppException();
     }
 
     // Check if label is assigned to ticket
-    const ticketLabel = await this.prisma.ticketLabel.findUnique({
+    const ticketLabel = await this.db.ticketLabel.findUnique({
       where: {
         ticketId_labelId: {
           ticketId: ticket.id,
@@ -308,11 +311,11 @@ export class LabelsService {
     });
 
     if (!ticketLabel) {
-      throw new NotFoundException('Label not assigned to ticket');
+      throw new NotFoundAppException();
     }
 
     // Use transaction to remove label and create activity
-    const result = await this.prisma.$transaction(async (tx) => {
+    const result = await this.db.$transaction(async (tx) => {
       // Remove the label
       await tx.ticketLabel.delete({
         where: {
@@ -341,7 +344,7 @@ export class LabelsService {
         include: { labels: { include: { label: true } } },
       });
       if (!updated) {
-        throw new NotFoundException('Ticket not found after removal');
+        throw new NotFoundAppException();
       }
       // Transform labels from nested structure to flat array
       interface TicketLabelWithLabel {

@@ -3,12 +3,12 @@ import { IsString, IsOptional, IsNotEmpty } from 'class-validator';
 
 export class CreateLabelDto {
   @ApiProperty({ example: 'typescript' })
-  @IsString()
-  @IsNotEmpty()
+  @IsString({ message: '$t(common.validation.isString)' })
+  @IsNotEmpty({ message: '$t(common.validation.required)' })
   name!: string;
 
   @ApiProperty({ example: '#0066CC', required: false })
-  @IsString()
+  @IsString({ message: '$t(common.validation.isString)' })
   @IsOptional()
   color?: string;
 }

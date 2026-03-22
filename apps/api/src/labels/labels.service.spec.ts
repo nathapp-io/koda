@@ -1,12 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { LabelsService } from './labels.service';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaClient } from '@prisma/client';
 import { NotFoundException as _NotFoundException, ForbiddenException as _ForbiddenException, BadRequestException as _BadRequestException } from '@nestjs/common';
 import { CreateLabelDto } from './dto/create-label.dto';
 
 describe('LabelsService', () => {
   let service: LabelsService;
-  let prismaService: PrismaService;
+  let prismaService: PrismaService<PrismaClient>;
 
   const mockProject = {
     id: 'proj-123',
@@ -99,28 +100,30 @@ describe('LabelsService', () => {
   };
 
   const mockPrismaService = {
-    project: {
-      findUnique: jest.fn(),
+    client: {
+      project: {
+        findUnique: jest.fn(),
+      },
+      label: {
+        create: jest.fn(),
+        findMany: jest.fn(),
+        findUnique: jest.fn(),
+        delete: jest.fn(),
+      },
+      ticket: {
+        findUnique: jest.fn(),
+        update: jest.fn(),
+      },
+      ticketLabel: {
+        create: jest.fn(),
+        findUnique: jest.fn(),
+        delete: jest.fn(),
+      },
+      ticketActivity: {
+        create: jest.fn(),
+      },
+      $transaction: jest.fn(),
     },
-    label: {
-      create: jest.fn(),
-      findMany: jest.fn(),
-      findUnique: jest.fn(),
-      delete: jest.fn(),
-    },
-    ticket: {
-      findUnique: jest.fn(),
-      update: jest.fn(),
-    },
-    ticketLabel: {
-      create: jest.fn(),
-      findUnique: jest.fn(),
-      delete: jest.fn(),
-    },
-    ticketActivity: {
-      create: jest.fn(),
-    },
-    $transaction: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -132,7 +135,7 @@ describe('LabelsService', () => {
     }).compile();
 
     service = module.get<LabelsService>(LabelsService);
-    prismaService = module.get<PrismaService>(PrismaService);
+    prismaService = module.get<PrismaService<PrismaClient>>(PrismaService);
   });
 
   afterEach(() => {
@@ -146,15 +149,15 @@ describe('LabelsService', () => {
         color: '#0066CC',
       };
 
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.label.create.mockResolvedValue(mockLabel);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.label.create.mockResolvedValue(mockLabel);
 
-      const result = await service.create('koda', createDto, { sub: 'user-123' }, 'user');
+      const result = await service.create('koda', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
 
       expect(result).toEqual(mockLabel);
       expect(result.name).toBe('typescript');
       expect(result.color).toBe('#0066CC');
-      expect(prismaService.label.create).toHaveBeenCalled();
+      expect(prismaService.client.label.create).toHaveBeenCalled();
     });
 
     it('should reject label creation for non-ADMIN user', async () => {
@@ -163,7 +166,7 @@ describe('LabelsService', () => {
         color: '#0066CC',
       };
 
-      const memberUser = { sub: 'user-456', role: 'MEMBER' };
+      const memberUser = { id: 'user-456', sub: 'user-456', role: 'MEMBER' };
 
       await expect(
         service.create('koda', createDto, memberUser, 'user')
@@ -176,7 +179,7 @@ describe('LabelsService', () => {
         color: '#0066CC',
       };
 
-      const agent = { sub: 'agent-123', slug: 'test-agent' };
+      const agent = { id: 'agent-123', sub: 'agent-123', slug: 'test-agent' };
 
       await expect(
         service.create('koda', createDto, agent, 'agent')
@@ -188,11 +191,11 @@ describe('LabelsService', () => {
         name: 'frontend',
       };
 
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       const labelWithoutColor = { ...mockLabel, name: 'frontend', color: null };
-      mockPrismaService.label.create.mockResolvedValue(labelWithoutColor);
+      mockPrismaService.client.label.create.mockResolvedValue(labelWithoutColor);
 
-      const result = await service.create('koda', createDto, { sub: 'user-123' }, 'user');
+      const result = await service.create('koda', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
 
       expect(result.color).toBeNull();
     });
@@ -203,10 +206,10 @@ describe('LabelsService', () => {
         color: '#0066CC',
       };
 
-      mockPrismaService.project.findUnique.mockResolvedValue(null);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.create('nonexistent', createDto, { sub: 'user-123' }, 'user')
+        service.create('nonexistent', createDto, { id: 'user-123', sub: 'user-123' }, 'user')
       ).rejects.toThrow();
     });
 
@@ -216,13 +219,13 @@ describe('LabelsService', () => {
         color: '#0066CC',
       };
 
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.label.create.mockRejectedValue(
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.label.create.mockRejectedValue(
         new Error('Unique constraint failed')
       );
 
       await expect(
-        service.create('koda', createDto, { sub: 'user-123' }, 'user')
+        service.create('koda', createDto, { id: 'user-123', sub: 'user-123' }, 'user')
       ).rejects.toThrow();
     });
   });
@@ -234,22 +237,22 @@ describe('LabelsService', () => {
         { ...mockLabel, id: 'label-124', name: 'backend', color: '#FF6600' },
       ];
 
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.label.findMany.mockResolvedValue(labels);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.label.findMany.mockResolvedValue(labels);
 
       const result = await service.findByProject('koda');
 
       expect(result).toHaveLength(2);
       expect(result[0].name).toBe('typescript');
       expect(result[1].name).toBe('backend');
-      expect(prismaService.label.findMany).toHaveBeenCalledWith({
+      expect(prismaService.client.label.findMany).toHaveBeenCalledWith({
         where: { projectId: 'proj-123' },
       });
     });
 
     it('should return empty array when project has no labels', async () => {
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.label.findMany.mockResolvedValue([]);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.label.findMany.mockResolvedValue([]);
 
       const result = await service.findByProject('koda');
 
@@ -257,7 +260,7 @@ describe('LabelsService', () => {
     });
 
     it('should throw NotFoundException if project not found', async () => {
-      mockPrismaService.project.findUnique.mockResolvedValue(null);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(null);
 
       await expect(service.findByProject('nonexistent')).rejects.toThrow();
     });
@@ -265,12 +268,12 @@ describe('LabelsService', () => {
     it('should return labels scoped to single project', async () => {
       const labels = [mockLabel];
 
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.label.findMany.mockResolvedValue(labels);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.label.findMany.mockResolvedValue(labels);
 
       await service.findByProject('koda');
 
-      expect(prismaService.label.findMany).toHaveBeenCalledWith({
+      expect(prismaService.client.label.findMany).toHaveBeenCalledWith({
         where: { projectId: 'proj-123' },
       });
     });
@@ -278,19 +281,19 @@ describe('LabelsService', () => {
 
   describe('delete', () => {
     it('should delete label for ADMIN user', async () => {
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.label.findUnique.mockResolvedValue(mockLabel);
-      mockPrismaService.label.delete.mockResolvedValue(mockLabel);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.label.findUnique.mockResolvedValue(mockLabel);
+      mockPrismaService.client.label.delete.mockResolvedValue(mockLabel);
 
-      await service.delete('koda', 'label-123', { sub: 'user-123' }, 'user');
+      await service.delete('koda', 'label-123', { id: 'user-123', sub: 'user-123' }, 'user');
 
-      expect(prismaService.label.delete).toHaveBeenCalledWith({
+      expect(prismaService.client.label.delete).toHaveBeenCalledWith({
         where: { id: 'label-123' },
       });
     });
 
     it('should reject delete from non-ADMIN user', async () => {
-      const memberUser = { sub: 'user-456', role: 'MEMBER' };
+      const memberUser = { id: 'user-456', sub: 'user-456', role: 'MEMBER' };
 
       await expect(
         service.delete('koda', 'label-123', memberUser, 'user')
@@ -298,7 +301,7 @@ describe('LabelsService', () => {
     });
 
     it('should reject delete from agent', async () => {
-      const agent = { sub: 'agent-123', slug: 'test-agent' };
+      const agent = { id: 'agent-123', sub: 'agent-123', slug: 'test-agent' };
 
       await expect(
         service.delete('koda', 'label-123', agent, 'agent')
@@ -306,30 +309,30 @@ describe('LabelsService', () => {
     });
 
     it('should throw NotFoundException if project not found', async () => {
-      mockPrismaService.project.findUnique.mockResolvedValue(null);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.delete('nonexistent', 'label-123', { sub: 'user-123' }, 'user')
+        service.delete('nonexistent', 'label-123', { id: 'user-123', sub: 'user-123' }, 'user')
       ).rejects.toThrow();
     });
 
     it('should throw NotFoundException if label not found', async () => {
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.label.findUnique.mockResolvedValue(null);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.label.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.delete('koda', 'nonexistent', { sub: 'user-123' }, 'user')
+        service.delete('koda', 'nonexistent', { id: 'user-123', sub: 'user-123' }, 'user')
       ).rejects.toThrow();
     });
 
     it('should verify label belongs to project before deleting', async () => {
       const otherProjectLabel = { ...mockLabel, projectId: 'proj-456' };
 
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.label.findUnique.mockResolvedValue(otherProjectLabel);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.label.findUnique.mockResolvedValue(otherProjectLabel);
 
       await expect(
-        service.delete('koda', 'label-123', { sub: 'user-123' }, 'user')
+        service.delete('koda', 'label-123', { id: 'user-123', sub: 'user-123' }, 'user')
       ).rejects.toThrow();
     });
   });
@@ -342,21 +345,21 @@ describe('LabelsService', () => {
         labels: [mockLabel],
       };
 
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaService.label.findUnique.mockResolvedValue(mockLabel);
-      mockPrismaService.$transaction.mockResolvedValue(ticketWithLabel);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockPrismaService.client.label.findUnique.mockResolvedValue(mockLabel);
+      mockPrismaService.client.$transaction.mockResolvedValue(ticketWithLabel);
 
       const result = await service.assignToTicket(
         'koda',
         'KODA-1',
         assignDto,
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 
       expect(result.labels).toBeDefined();
-      expect(prismaService.$transaction).toHaveBeenCalled();
+      expect(prismaService.client.$transaction).toHaveBeenCalled();
     });
 
     it('should create TicketActivity with action LABEL_CHANGE and newValue as label name', async () => {
@@ -366,21 +369,21 @@ describe('LabelsService', () => {
         labels: [mockLabel],
       };
 
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaService.label.findUnique.mockResolvedValue(mockLabel);
-      mockPrismaService.$transaction.mockResolvedValue(ticketWithLabel);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockPrismaService.client.label.findUnique.mockResolvedValue(mockLabel);
+      mockPrismaService.client.$transaction.mockResolvedValue(ticketWithLabel);
 
       await service.assignToTicket(
         'koda',
         'KODA-1',
         assignDto,
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 
       // Verify that transaction includes TicketActivity creation
-      expect(prismaService.$transaction).toHaveBeenCalled();
+      expect(prismaService.client.$transaction).toHaveBeenCalled();
     });
 
     it('should allow any authenticated user to assign label', async () => {
@@ -390,12 +393,12 @@ describe('LabelsService', () => {
         labels: [mockLabel],
       };
 
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaService.label.findUnique.mockResolvedValue(mockLabel);
-      mockPrismaService.$transaction.mockResolvedValue(ticketWithLabel);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockPrismaService.client.label.findUnique.mockResolvedValue(mockLabel);
+      mockPrismaService.client.$transaction.mockResolvedValue(ticketWithLabel);
 
-      const memberUser = { sub: 'user-456', role: 'MEMBER' };
+      const memberUser = { id: 'user-456', sub: 'user-456', role: 'MEMBER' };
       const result = await service.assignToTicket(
         'koda',
         'KODA-1',
@@ -414,12 +417,12 @@ describe('LabelsService', () => {
         labels: [mockLabel],
       };
 
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaService.label.findUnique.mockResolvedValue(mockLabel);
-      mockPrismaService.$transaction.mockResolvedValue(ticketWithLabel);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockPrismaService.client.label.findUnique.mockResolvedValue(mockLabel);
+      mockPrismaService.client.$transaction.mockResolvedValue(ticketWithLabel);
 
-      const agent = { sub: 'agent-123', slug: 'test-agent' };
+      const agent = { id: 'agent-123', sub: 'agent-123', slug: 'test-agent' };
       const result = await service.assignToTicket(
         'koda',
         'KODA-1',
@@ -434,15 +437,15 @@ describe('LabelsService', () => {
     it('should throw NotFoundException if ticket not found', async () => {
       const assignDto = { labelId: 'label-123' };
 
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.ticket.findUnique.mockResolvedValue(null);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.ticket.findUnique.mockResolvedValue(null);
 
       await expect(
         service.assignToTicket(
           'koda',
           'KODA-999',
           assignDto,
-          { sub: 'user-123' },
+          { id: 'user-123', sub: 'user-123' },
           'user'
         )
       ).rejects.toThrow();
@@ -451,16 +454,16 @@ describe('LabelsService', () => {
     it('should throw NotFoundException if label not found', async () => {
       const assignDto = { labelId: 'nonexistent' };
 
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaService.label.findUnique.mockResolvedValue(null);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockPrismaService.client.label.findUnique.mockResolvedValue(null);
 
       await expect(
         service.assignToTicket(
           'koda',
           'KODA-1',
           assignDto,
-          { sub: 'user-123' },
+          { id: 'user-123', sub: 'user-123' },
           'user'
         )
       ).rejects.toThrow();
@@ -470,16 +473,16 @@ describe('LabelsService', () => {
       const assignDto = { labelId: 'label-from-other-project' };
       const otherProjectLabel = { ...mockLabel, projectId: 'proj-456' };
 
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaService.label.findUnique.mockResolvedValue(otherProjectLabel);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockPrismaService.client.label.findUnique.mockResolvedValue(otherProjectLabel);
 
       await expect(
         service.assignToTicket(
           'koda',
           'KODA-1',
           assignDto,
-          { sub: 'user-123' },
+          { id: 'user-123', sub: 'user-123' },
           'user'
         )
       ).rejects.toThrow();
@@ -488,10 +491,10 @@ describe('LabelsService', () => {
     it('should prevent duplicate label assignment to same ticket', async () => {
       const assignDto = { labelId: 'label-123' };
 
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaService.label.findUnique.mockResolvedValue(mockLabel);
-      mockPrismaService.$transaction.mockRejectedValue(
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockPrismaService.client.label.findUnique.mockResolvedValue(mockLabel);
+      mockPrismaService.client.$transaction.mockRejectedValue(
         new Error('Unique constraint failed')
       );
 
@@ -500,7 +503,7 @@ describe('LabelsService', () => {
           'koda',
           'KODA-1',
           assignDto,
-          { sub: 'user-123' },
+          { id: 'user-123', sub: 'user-123' },
           'user'
         )
       ).rejects.toThrow();
@@ -519,16 +522,16 @@ describe('LabelsService', () => {
         ],
       };
 
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaService.label.findUnique.mockResolvedValue(mockLabel);
-      mockPrismaService.$transaction.mockResolvedValue(ticketWithLabel);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockPrismaService.client.label.findUnique.mockResolvedValue(mockLabel);
+      mockPrismaService.client.$transaction.mockResolvedValue(ticketWithLabel);
 
       const result = await service.assignToTicket(
         'koda',
         'KODA-1',
         assignDto,
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 
@@ -544,24 +547,24 @@ describe('LabelsService', () => {
         labels: [],
       };
 
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaService.ticketLabel.findUnique.mockResolvedValue({
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockPrismaService.client.ticketLabel.findUnique.mockResolvedValue({
         ticketId: 'ticket-123',
         labelId: 'label-123',
       });
-      mockPrismaService.$transaction.mockResolvedValue(ticketWithoutLabel);
+      mockPrismaService.client.$transaction.mockResolvedValue(ticketWithoutLabel);
 
       const result = await service.removeFromTicket(
         'koda',
         'KODA-1',
         'label-123',
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 
       expect(result.labels).toBeDefined();
-      expect(prismaService.$transaction).toHaveBeenCalled();
+      expect(prismaService.client.$transaction).toHaveBeenCalled();
     });
 
     it('should create TicketActivity with action LABEL_CHANGE and oldValue as label name', async () => {
@@ -570,24 +573,24 @@ describe('LabelsService', () => {
         labels: [],
       };
 
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaService.ticketLabel.findUnique.mockResolvedValue({
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockPrismaService.client.ticketLabel.findUnique.mockResolvedValue({
         ticketId: 'ticket-123',
         labelId: 'label-123',
         label: mockLabel,
       });
-      mockPrismaService.$transaction.mockResolvedValue(ticketWithoutLabel);
+      mockPrismaService.client.$transaction.mockResolvedValue(ticketWithoutLabel);
 
       await service.removeFromTicket(
         'koda',
         'KODA-1',
         'label-123',
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 
-      expect(prismaService.$transaction).toHaveBeenCalled();
+      expect(prismaService.client.$transaction).toHaveBeenCalled();
     });
 
     it('should allow any authenticated user to remove label', async () => {
@@ -596,15 +599,15 @@ describe('LabelsService', () => {
         labels: [],
       };
 
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaService.ticketLabel.findUnique.mockResolvedValue({
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockPrismaService.client.ticketLabel.findUnique.mockResolvedValue({
         ticketId: 'ticket-123',
         labelId: 'label-123',
       });
-      mockPrismaService.$transaction.mockResolvedValue(ticketWithoutLabel);
+      mockPrismaService.client.$transaction.mockResolvedValue(ticketWithoutLabel);
 
-      const memberUser = { sub: 'user-456', role: 'MEMBER' };
+      const memberUser = { id: 'user-456', sub: 'user-456', role: 'MEMBER' };
       const result = await service.removeFromTicket(
         'koda',
         'KODA-1',
@@ -622,15 +625,15 @@ describe('LabelsService', () => {
         labels: [],
       };
 
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaService.ticketLabel.findUnique.mockResolvedValue({
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockPrismaService.client.ticketLabel.findUnique.mockResolvedValue({
         ticketId: 'ticket-123',
         labelId: 'label-123',
       });
-      mockPrismaService.$transaction.mockResolvedValue(ticketWithoutLabel);
+      mockPrismaService.client.$transaction.mockResolvedValue(ticketWithoutLabel);
 
-      const agent = { sub: 'agent-123', slug: 'test-agent' };
+      const agent = { id: 'agent-123', sub: 'agent-123', slug: 'test-agent' };
       const result = await service.removeFromTicket(
         'koda',
         'KODA-1',
@@ -643,31 +646,31 @@ describe('LabelsService', () => {
     });
 
     it('should throw NotFoundException if ticket not found', async () => {
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.ticket.findUnique.mockResolvedValue(null);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.ticket.findUnique.mockResolvedValue(null);
 
       await expect(
         service.removeFromTicket(
           'koda',
           'KODA-999',
           'label-123',
-          { sub: 'user-123' },
+          { id: 'user-123', sub: 'user-123' },
           'user'
         )
       ).rejects.toThrow();
     });
 
     it('should throw NotFoundException if label not assigned to ticket', async () => {
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaService.ticketLabel.findUnique.mockResolvedValue(null);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockPrismaService.client.ticketLabel.findUnique.mockResolvedValue(null);
 
       await expect(
         service.removeFromTicket(
           'koda',
           'KODA-1',
           'label-123',
-          { sub: 'user-123' },
+          { id: 'user-123', sub: 'user-123' },
           'user'
         )
       ).rejects.toThrow();
@@ -679,19 +682,19 @@ describe('LabelsService', () => {
         labels: [],
       };
 
-      mockPrismaService.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaService.ticketLabel.findUnique.mockResolvedValue({
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockPrismaService.client.ticketLabel.findUnique.mockResolvedValue({
         ticketId: 'ticket-123',
         labelId: 'label-123',
       });
-      mockPrismaService.$transaction.mockResolvedValue(ticketWithoutLabel);
+      mockPrismaService.client.$transaction.mockResolvedValue(ticketWithoutLabel);
 
       const result = await service.removeFromTicket(
         'koda',
         'KODA-1',
         'label-123',
-        { sub: 'user-123' },
+        { id: 'user-123', sub: 'user-123' },
         'user'
       );
 

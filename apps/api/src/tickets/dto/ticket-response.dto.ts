@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { TicketType, TicketStatus, Priority } from '@prisma/client';
+import { TicketType, TicketStatus, Priority } from '../../common/enums';
 
 export class TicketResponseDto {
   @ApiProperty({ description: 'Ticket ID (CUID)' })

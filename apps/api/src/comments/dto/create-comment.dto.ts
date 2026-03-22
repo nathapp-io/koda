@@ -1,6 +1,6 @@
 import { IsString, MinLength, IsIn, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { CommentType } from '@prisma/client';
+import { CommentType } from '../../common/enums';
 
 // Re-export as CommentTypeEnum for backward compatibility with tests
 export { CommentType as CommentTypeEnum };
@@ -12,8 +12,8 @@ export class CreateCommentDto {
     minLength: 1,
   })
   @IsOptional()
-  @IsString()
-  @MinLength(1, { message: 'Body must not be empty' })
+  @IsString({ message: '$t(common.validation.isString)' })
+  @MinLength(1, { message: '$t(common.validation.required)' })
   body?: string;
 
   @ApiProperty({
@@ -22,6 +22,8 @@ export class CreateCommentDto {
     example: 'GENERAL',
   })
   @IsOptional()
-  @IsIn(['VERIFICATION', 'FIX_REPORT', 'REVIEW', 'STATUS_CHANGE', 'GENERAL'])
+  @IsIn(['VERIFICATION', 'FIX_REPORT', 'REVIEW', 'STATUS_CHANGE', 'GENERAL'], {
+    message: '$t(common.validation.isEnum)',
+  })
   type?: string;
 }

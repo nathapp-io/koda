@@ -17,6 +17,7 @@ import {
 import { LabelsService } from './labels.service';
 import { CreateLabelDto } from './dto/create-label.dto';
 import { AssignLabelDto } from './dto/assign-label.dto';
+import { JsonResponse } from '@nathapp/nestjs-common';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type RequestWithUser = any & { user?: any; agent?: any };
@@ -81,6 +82,7 @@ export class LabelsController {
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   @ApiResponse({ status: 403, description: 'Unauthorized - admin only' })
   @ApiResponse({ status: 404, description: 'Project not found' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async createFromHttp(
     @Param('slug') slug: string,
     @Body() createLabelDto: CreateLabelDto,
@@ -88,15 +90,20 @@ export class LabelsController {
   ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
-    return this.create(slug, createLabelDto, currentUser, actorType);
+    const data = await this.create(slug, createLabelDto, currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return JsonResponse.Ok(data);
   }
 
   @Get('projects/:slug/labels')
   @ApiOperation({ summary: 'List all labels for a project' })
   @ApiResponse({ status: 200, description: 'List of labels' })
   @ApiResponse({ status: 404, description: 'Project not found' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async findByProjectFromHttp(@Param('slug') slug: string) {
-    return this.findByProject(slug);
+    const data = await this.findByProject(slug);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return JsonResponse.Ok(data);
   }
 
   @Delete('projects/:slug/labels/:id')
@@ -121,6 +128,7 @@ export class LabelsController {
   @ApiResponse({ status: 201, description: 'Label assigned to ticket' })
   @ApiResponse({ status: 400, description: 'Invalid request data or label already assigned' })
   @ApiResponse({ status: 404, description: 'Ticket or label not found' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async assignLabelFromHttp(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
@@ -129,7 +137,9 @@ export class LabelsController {
   ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
-    return this.assignLabel(slug, ref, assignLabelDto, currentUser, actorType);
+    const data = await this.assignLabel(slug, ref, assignLabelDto, currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return JsonResponse.Ok(data);
   }
 
   @Delete('projects/:slug/tickets/:ref/labels/:labelId')

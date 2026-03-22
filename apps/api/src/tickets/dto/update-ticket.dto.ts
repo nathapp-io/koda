@@ -1,6 +1,6 @@
 import { IsString, IsOptional, IsEnum, MinLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { Priority } from '@prisma/client';
+import { Priority } from '../../common/enums';
 
 export class UpdateTicketDto {
   @ApiProperty({
@@ -10,8 +10,8 @@ export class UpdateTicketDto {
     required: false,
   })
   @IsOptional()
-  @IsString()
-  @MinLength(1, { message: 'Title must not be empty' })
+  @IsString({ message: '$t(common.validation.isString)' })
+  @MinLength(1, { message: '$t(common.validation.required)' })
   title?: string;
 
   @ApiProperty({
@@ -20,7 +20,7 @@ export class UpdateTicketDto {
     required: false,
   })
   @IsOptional()
-  @IsString()
+  @IsString({ message: '$t(common.validation.isString)' })
   description?: string;
 
   @ApiProperty({
@@ -30,6 +30,6 @@ export class UpdateTicketDto {
     required: false,
   })
   @IsOptional()
-  @IsEnum(Priority)
+  @IsEnum(Priority, { message: '$t(common.validation.isEnum)' })
   priority?: Priority;
 }

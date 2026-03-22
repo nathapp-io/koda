@@ -23,7 +23,8 @@ import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TicketResponseDto } from './dto/ticket-response.dto';
 import { TransitionWithCommentDto } from './dto/transition-with-comment.dto';
-import { TicketType, TicketStatus, Priority } from '@prisma/client';
+import { JsonResponse } from '@nathapp/nestjs-common';
+import { TicketType, TicketStatus, Priority } from '../common/enums';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type RequestWithUser = any & { user?: any; agent?: any };
@@ -43,6 +44,7 @@ export class TicketsController {
   @ApiResponse({ status: 201, type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   @ApiResponse({ status: 404, description: 'Project not found' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async create(
     @Param('slug') slug: string,
     @Body() createTicketDto: CreateTicketDto,
@@ -51,7 +53,9 @@ export class TicketsController {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
 
-    return this.ticketsService.create(slug, createTicketDto, currentUser, actorType);
+    const data = await this.ticketsService.create(slug, createTicketDto, currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return JsonResponse.Ok(data);
   }
 
   @Get()
@@ -65,6 +69,7 @@ export class TicketsController {
   @ApiQuery({ name: 'unassigned', required: false, type: Boolean })
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 20 })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async findAll(
     @Param('slug') slug: string,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -81,18 +86,23 @@ export class TicketsController {
     if (query.limit !== undefined) filters.limit = parseInt(query.limit, 10);
     if (query.page !== undefined) filters.page = parseInt(query.page, 10);
 
-    return this.ticketsService.findAll(slug, filters);
+    const data = await this.ticketsService.findAll(slug, filters);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return JsonResponse.Ok(data);
   }
 
   @Get(':ref')
   @ApiOperation({ summary: 'Get a ticket by reference (KODA-42 or CUID)' })
   @ApiResponse({ status: 200, type: TicketResponseDto })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async findByRef(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
   ) {
-    return this.ticketsService.findByRef(slug, ref);
+    const data = await this.ticketsService.findByRef(slug, ref);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return JsonResponse.Ok(data);
   }
 
   @Patch(':ref')
@@ -100,6 +110,7 @@ export class TicketsController {
   @ApiResponse({ status: 200, type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async update(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
@@ -109,7 +120,9 @@ export class TicketsController {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
 
-    return this.ticketsService.update(slug, ref, updateTicketDto, currentUser, actorType);
+    const data = await this.ticketsService.update(slug, ref, updateTicketDto, currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return JsonResponse.Ok(data);
   }
 
   @Delete(':ref')
@@ -117,6 +130,7 @@ export class TicketsController {
   @ApiResponse({ status: 200, type: TicketResponseDto })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async softDelete(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
@@ -125,7 +139,9 @@ export class TicketsController {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
 
-    return this.ticketsService.softDelete(slug, ref, currentUser, actorType);
+    const data = await this.ticketsService.softDelete(slug, ref, currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return JsonResponse.Ok(data);
   }
 
   @Post(':ref/assign')
@@ -134,13 +150,16 @@ export class TicketsController {
   @ApiResponse({ status: 200, type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Cannot assign to both user and agent' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async assign(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     @Body() assignInput: Record<string, any>,
   ) {
-    return this.ticketsService.assign(slug, ref, assignInput);
+    const data = await this.ticketsService.assign(slug, ref, assignInput);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return JsonResponse.Ok(data);
   }
 
   @Post(':ref/verify')
@@ -154,10 +173,12 @@ export class TicketsController {
     @Param('ref') ref: string,
     @Body() dto: TransitionWithCommentDto,
     @Req() req: RequestWithUser,
-  ): Promise<TransitionResultWithComment> {
+  ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
-    return this.transitionsService.verify(slug, ref, dto.body, currentUser, actorType);
+    const data = await this.transitionsService.verify(slug, ref, dto.body ?? '', currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return JsonResponse.Ok(data);
   }
 
   @Post(':ref/start')
@@ -170,10 +191,12 @@ export class TicketsController {
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Req() req: RequestWithUser,
-  ): Promise<TransitionResultWithoutComment> {
+  ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
-    return this.transitionsService.start(slug, ref, currentUser, actorType);
+    const data = await this.transitionsService.start(slug, ref, currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return JsonResponse.Ok(data);
   }
 
   @Post(':ref/fix')
@@ -187,10 +210,12 @@ export class TicketsController {
     @Param('ref') ref: string,
     @Body() dto: TransitionWithCommentDto,
     @Req() req: RequestWithUser,
-  ): Promise<TransitionResultWithComment> {
+  ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
-    return this.transitionsService.fix(slug, ref, dto.body, currentUser, actorType);
+    const data = await this.transitionsService.fix(slug, ref, dto.body ?? '', currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return JsonResponse.Ok(data);
   }
 
   @Post(':ref/verify-fix')
@@ -205,11 +230,13 @@ export class TicketsController {
     @Body() dto: TransitionWithCommentDto,
     @Query('approve') approve: boolean | string,
     @Req() req: RequestWithUser,
-  ): Promise<TransitionResultWithComment> {
+  ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
     const isApproved = approve === 'true' || approve === true;
-    return this.transitionsService.verifyFix(slug, ref, dto.body, isApproved, currentUser, actorType);
+    const data = await this.transitionsService.verifyFix(slug, ref, dto.body ?? '', isApproved, currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return JsonResponse.Ok(data);
   }
 
   @Post(':ref/close')
@@ -222,10 +249,12 @@ export class TicketsController {
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Req() req: RequestWithUser,
-  ): Promise<TransitionResultWithoutComment> {
+  ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
-    return this.transitionsService.close(slug, ref, currentUser, actorType);
+    const data = await this.transitionsService.close(slug, ref, currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return JsonResponse.Ok(data);
   }
 
   @Post(':ref/reject')
@@ -239,9 +268,11 @@ export class TicketsController {
     @Param('ref') ref: string,
     @Body() dto: TransitionWithCommentDto,
     @Req() req: RequestWithUser,
-  ): Promise<TransitionResultWithComment> {
+  ) {
     const currentUser = req.user || req.agent;
     const actorType = req.user ? 'user' : 'agent';
-    return this.transitionsService.reject(slug, ref, dto.body, currentUser, actorType);
+    const data = await this.transitionsService.reject(slug, ref, dto.body ?? '', currentUser, actorType);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return JsonResponse.Ok(data);
   }
 }

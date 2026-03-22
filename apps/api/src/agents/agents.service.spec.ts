@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AgentsService, CreateAgentDto as _CreateAgentDto } from './agents.service';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaClient } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { NotFoundException as _NotFoundException } from '@nestjs/common';
 import { createHmac } from 'crypto';
@@ -8,7 +9,7 @@ import { randomBytes } from 'crypto';
 
 describe('AgentsService', () => {
   let service: AgentsService;
-  let prismaService: PrismaService;
+  let prismaService: PrismaService<PrismaClient>;
   let _configService: ConfigService;
 
   const mockAgent = {
@@ -34,19 +35,21 @@ describe('AgentsService', () => {
   };
 
   const mockPrismaService = {
-    agent: {
-      create: jest.fn(),
-      update: jest.fn(),
-      findUnique: jest.fn(),
-      findMany: jest.fn(),
-    },
-    agentRoleEntry: {
-      deleteMany: jest.fn(),
-      createMany: jest.fn(),
-    },
-    agentCapability: {
-      deleteMany: jest.fn(),
-      createMany: jest.fn(),
+    client: {
+      agent: {
+        create: jest.fn(),
+        update: jest.fn(),
+        findUnique: jest.fn(),
+        findMany: jest.fn(),
+      },
+      agentRoleEntry: {
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+      },
+      agentCapabilityEntry: {
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+      },
     },
   };
 
@@ -64,10 +67,15 @@ describe('AgentsService', () => {
     }).compile();
 
     service = module.get<AgentsService>(AgentsService);
-    prismaService = module.get<PrismaService>(PrismaService);
+    prismaService = module.get<PrismaService<PrismaClient>>(PrismaService);
     _configService = module.get<ConfigService>(ConfigService);
 
-    mockConfigService.get.mockReturnValue('test-secret');
+    mockConfigService.get.mockImplementation((key: string) => {
+      if (key === 'auth') {
+        return { apiKeySecret: 'test-secret' };
+      }
+      return null;
+    });
   });
 
   afterEach(() => {
@@ -77,8 +85,8 @@ describe('AgentsService', () => {
   describe('generateApiKey', () => {
     describe('for new agent creation', () => {
       it('should generate random 32-byte hex key', async () => {
-        mockPrismaService.agent.create.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue('test-secret');
+        mockPrismaService.client.agent.create.mockResolvedValue(mockAgent);
+        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey({
           name: 'Test Agent',
@@ -92,24 +100,24 @@ describe('AgentsService', () => {
       });
 
       it('should compute HMAC-SHA256 hash with API_KEY_SECRET', async () => {
-        mockPrismaService.agent.create.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue('test-secret');
+        mockPrismaService.client.agent.create.mockResolvedValue(mockAgent);
+        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
         });
 
-        expect(prismaService.agent.create).toHaveBeenCalled();
-        const createCall = (prismaService.agent.create as jest.Mock).mock.calls[0][0];
+        expect(prismaService.client.agent.create).toHaveBeenCalled();
+        const createCall = (prismaService.client.agent.create as jest.Mock).mock.calls[0][0];
 
         const expectedHash = createHmac('sha256', 'test-secret').update(result.apiKey).digest('hex');
         expect(createCall.data.apiKeyHash).toBe(expectedHash);
       });
 
       it('should return raw key ONCE to client (not stored)', async () => {
-        mockPrismaService.agent.create.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue('test-secret');
+        mockPrismaService.client.agent.create.mockResolvedValue(mockAgent);
+        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey({
           name: 'Test Agent',
@@ -122,15 +130,15 @@ describe('AgentsService', () => {
       });
 
       it('should store only hash in database', async () => {
-        mockPrismaService.agent.create.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue('test-secret');
+        mockPrismaService.client.agent.create.mockResolvedValue(mockAgent);
+        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
         });
 
-        const createCall = (prismaService.agent.create as jest.Mock).mock.calls[0][0];
+        const createCall = (prismaService.client.agent.create as jest.Mock).mock.calls[0][0];
 
         // Should NOT store raw key
         expect(createCall.data.apiKeyHash).not.toBe(result.apiKey);
@@ -138,24 +146,24 @@ describe('AgentsService', () => {
       });
 
       it('should include agent name and slug in creation', async () => {
-        mockPrismaService.agent.create.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue('test-secret');
+        mockPrismaService.client.agent.create.mockResolvedValue(mockAgent);
+        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
         });
 
-        expect(prismaService.agent.create).toHaveBeenCalled();
-        const createCall = (prismaService.agent.create as jest.Mock).mock.calls[0][0];
+        expect(prismaService.client.agent.create).toHaveBeenCalled();
+        const createCall = (prismaService.client.agent.create as jest.Mock).mock.calls[0][0];
         expect(createCall.data.name).toBe('Test Agent');
         expect(createCall.data.slug).toBe('test-agent');
       });
 
       it('should use correct API_KEY_SECRET from config', async () => {
         const secret = 'my-custom-secret';
-        mockPrismaService.agent.create.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue(secret);
+        mockPrismaService.client.agent.create.mockResolvedValue(mockAgent);
+        mockConfigService.get.mockReturnValue({ apiKeySecret: secret });
 
         const result = await service.generateApiKey({
           name: 'Test Agent',
@@ -164,12 +172,12 @@ describe('AgentsService', () => {
 
         const expectedHash = createHmac('sha256', secret).update(result.apiKey).digest('hex');
 
-        const createCall = (prismaService.agent.create as jest.Mock).mock.calls[0][0];
+        const createCall = (prismaService.client.agent.create as jest.Mock).mock.calls[0][0];
         expect(createCall.data.apiKeyHash).toBe(expectedHash);
       });
 
       it('should throw error when API_KEY_SECRET is not configured', async () => {
-        mockConfigService.get.mockReturnValue(null);
+        mockConfigService.get.mockReturnValue({});
 
         await expect(service.generateApiKey({
           name: 'Test Agent',
@@ -178,8 +186,8 @@ describe('AgentsService', () => {
       });
 
       it('should return created agent in response', async () => {
-        mockPrismaService.agent.create.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue('test-secret');
+        mockPrismaService.client.agent.create.mockResolvedValue(mockAgent);
+        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey({
           name: 'Test Agent',
@@ -193,8 +201,8 @@ describe('AgentsService', () => {
 
     describe('for rotating existing agent key', () => {
       it('should generate new random API key', async () => {
-        mockPrismaService.agent.update.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue('test-secret');
+        mockPrismaService.client.agent.update.mockResolvedValue(mockAgent);
+        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey('agent-123');
 
@@ -206,13 +214,13 @@ describe('AgentsService', () => {
         const oldHash = 'old-hashed-key';
         const agentWithOldHash = { ...mockAgent, apiKeyHash: oldHash };
 
-        mockPrismaService.agent.update.mockResolvedValue(agentWithOldHash);
-        mockConfigService.get.mockReturnValue('test-secret');
+        mockPrismaService.client.agent.update.mockResolvedValue(agentWithOldHash);
+        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey('agent-123');
 
-        expect(prismaService.agent.update).toHaveBeenCalled();
-        const updateCall = (prismaService.agent.update as jest.Mock).mock.calls[0][0];
+        expect(prismaService.client.agent.update).toHaveBeenCalled();
+        const updateCall = (prismaService.client.agent.update as jest.Mock).mock.calls[0][0];
 
         const newHash = createHmac('sha256', 'test-secret').update(result.apiKey).digest('hex');
         expect(updateCall.data.apiKeyHash).toBe(newHash);
@@ -224,8 +232,8 @@ describe('AgentsService', () => {
         const oldHash = createHmac('sha256', 'test-secret').update(oldKey).digest('hex');
 
         const agentWithOldKey = { ...mockAgent, apiKeyHash: oldHash };
-        mockPrismaService.agent.update.mockResolvedValue(agentWithOldKey);
-        mockConfigService.get.mockReturnValue('test-secret');
+        mockPrismaService.client.agent.update.mockResolvedValue(agentWithOldKey);
+        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey('agent-123');
 
@@ -235,8 +243,8 @@ describe('AgentsService', () => {
       });
 
       it('should return new raw key ONCE', async () => {
-        mockPrismaService.agent.update.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue('test-secret');
+        mockPrismaService.client.agent.update.mockResolvedValue(mockAgent);
+        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey('agent-123');
 
@@ -249,17 +257,17 @@ describe('AgentsService', () => {
   describe('findAll', () => {
     it('should return all agents with roles and capabilities', async () => {
       const agents = [mockAgentWithRelations];
-      mockPrismaService.agent.findMany.mockResolvedValue(agents);
+      mockPrismaService.client.agent.findMany.mockResolvedValue(agents);
 
       const result = await service.findAll();
 
       expect(result).toEqual(agents);
-      expect(prismaService.agent.findMany).toHaveBeenCalled();
+      expect(prismaService.client.agent.findMany).toHaveBeenCalled();
     });
 
     it('should include role entries for each agent', async () => {
       const agents = [mockAgentWithRelations];
-      mockPrismaService.agent.findMany.mockResolvedValue(agents);
+      mockPrismaService.client.agent.findMany.mockResolvedValue(agents);
 
       const result = await service.findAll();
 
@@ -270,7 +278,7 @@ describe('AgentsService', () => {
 
     it('should include capability entries for each agent', async () => {
       const agents = [mockAgentWithRelations];
-      mockPrismaService.agent.findMany.mockResolvedValue(agents);
+      mockPrismaService.client.agent.findMany.mockResolvedValue(agents);
 
       const result = await service.findAll();
 
@@ -280,7 +288,7 @@ describe('AgentsService', () => {
     });
 
     it('should return empty array when no agents exist', async () => {
-      mockPrismaService.agent.findMany.mockResolvedValue([]);
+      mockPrismaService.client.agent.findMany.mockResolvedValue([]);
 
       const result = await service.findAll();
 
@@ -289,11 +297,11 @@ describe('AgentsService', () => {
 
     it('should fetch agents with related roles and capabilities', async () => {
       const agents = [mockAgentWithRelations];
-      mockPrismaService.agent.findMany.mockResolvedValue(agents);
+      mockPrismaService.client.agent.findMany.mockResolvedValue(agents);
 
       await service.findAll();
 
-      expect(prismaService.agent.findMany).toHaveBeenCalledWith({
+      expect(prismaService.client.agent.findMany).toHaveBeenCalledWith({
         include: {
           roles: true,
           capabilities: true,
@@ -304,12 +312,12 @@ describe('AgentsService', () => {
 
   describe('findBySlug', () => {
     it('should return agent by slug with roles and capabilities', async () => {
-      mockPrismaService.agent.findUnique.mockResolvedValue(mockAgentWithRelations);
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(mockAgentWithRelations);
 
       const result = await service.findBySlug('test-agent');
 
       expect(result).toEqual(mockAgentWithRelations);
-      expect(prismaService.agent.findUnique).toHaveBeenCalledWith({
+      expect(prismaService.client.agent.findUnique).toHaveBeenCalledWith({
         where: { slug: 'test-agent' },
         include: {
           roles: true,
@@ -318,16 +326,14 @@ describe('AgentsService', () => {
       });
     });
 
-    it('should return null when agent not found', async () => {
-      mockPrismaService.agent.findUnique.mockResolvedValue(null);
+    it('should throw when agent not found', async () => {
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(null);
 
-      const result = await service.findBySlug('nonexistent');
-
-      expect(result).toBeNull();
+      await expect(service.findBySlug('nonexistent')).rejects.toThrow();
     });
 
     it('should include roles in response', async () => {
-      mockPrismaService.agent.findUnique.mockResolvedValue(mockAgentWithRelations);
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(mockAgentWithRelations);
 
       const result = await service.findBySlug('test-agent');
 
@@ -336,7 +342,7 @@ describe('AgentsService', () => {
     });
 
     it('should include capabilities in response', async () => {
-      mockPrismaService.agent.findUnique.mockResolvedValue(mockAgentWithRelations);
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(mockAgentWithRelations);
 
       const result = await service.findBySlug('test-agent');
 
@@ -347,12 +353,12 @@ describe('AgentsService', () => {
 
   describe('findMe', () => {
     it('should return authenticated agent profile by id', async () => {
-      mockPrismaService.agent.findUnique.mockResolvedValue(mockAgentWithRelations);
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(mockAgentWithRelations);
 
       const result = await service.findMe('agent-123');
 
       expect(result).toEqual(mockAgentWithRelations);
-      expect(prismaService.agent.findUnique).toHaveBeenCalledWith({
+      expect(prismaService.client.agent.findUnique).toHaveBeenCalledWith({
         where: { id: 'agent-123' },
         include: {
           roles: true,
@@ -371,7 +377,7 @@ describe('AgentsService', () => {
         ],
       };
 
-      mockPrismaService.agent.findUnique.mockResolvedValue(agentWithAllRoles);
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(agentWithAllRoles);
 
       const result = await service.findMe('agent-123');
 
@@ -382,7 +388,7 @@ describe('AgentsService', () => {
     });
 
     it('should include capabilities', async () => {
-      mockPrismaService.agent.findUnique.mockResolvedValue(mockAgentWithRelations);
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(mockAgentWithRelations);
 
       const result = await service.findMe('agent-123');
 
@@ -391,7 +397,7 @@ describe('AgentsService', () => {
     });
 
     it('should throw error when agent not found', async () => {
-      mockPrismaService.agent.findUnique.mockResolvedValue(null);
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(null);
 
       await expect(service.findMe('nonexistent')).rejects.toThrow();
     });
@@ -405,7 +411,8 @@ describe('AgentsService', () => {
       };
 
       const updatedAgent = { ...mockAgent, ...updateData };
-      mockPrismaService.agent.update.mockResolvedValue(updatedAgent);
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(mockAgent);
+      mockPrismaService.client.agent.update.mockResolvedValue(updatedAgent);
 
       const result = await service.update('test-agent', updateData);
 
@@ -416,7 +423,8 @@ describe('AgentsService', () => {
     it('should update agent status', async () => {
       const updateData = { status: 'PAUSED' };
       const updatedAgent = { ...mockAgent, status: 'PAUSED' };
-      mockPrismaService.agent.update.mockResolvedValue(updatedAgent);
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(mockAgent);
+      mockPrismaService.client.agent.update.mockResolvedValue(updatedAgent);
 
       const result = await service.update('test-agent', updateData);
 
@@ -424,7 +432,7 @@ describe('AgentsService', () => {
     });
 
     it('should throw error when agent not found', async () => {
-      mockPrismaService.agent.update.mockRejectedValue(new Error('Agent not found'));
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(null);
 
       await expect(service.update('nonexistent', { name: 'New Name' })).rejects.toThrow();
     });
@@ -441,17 +449,17 @@ describe('AgentsService', () => {
         ],
       };
 
-      mockPrismaService.agentRoleEntry.deleteMany.mockResolvedValue({ count: 1 });
-      mockPrismaService.agentRoleEntry.createMany.mockResolvedValue({ count: 2 });
-      mockPrismaService.agent.findUnique.mockResolvedValue(updatedAgent);
+      mockPrismaService.client.agentRoleEntry.deleteMany.mockResolvedValue({ count: 1 });
+      mockPrismaService.client.agentRoleEntry.createMany.mockResolvedValue({ count: 2 });
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(updatedAgent);
 
       const result = await service.updateRoles('agent-123', updateData);
 
-      expect(prismaService.agentRoleEntry.deleteMany).toHaveBeenCalledWith({
+      expect(prismaService.client.agentRoleEntry.deleteMany).toHaveBeenCalledWith({
         where: { agentId: 'agent-123' },
       });
 
-      expect(prismaService.agentRoleEntry.createMany).toHaveBeenCalled();
+      expect(prismaService.client.agentRoleEntry.createMany).toHaveBeenCalled();
       expect(result.roles.length).toBe(2);
       expect(result.roles.map((r: any) => r.role)).toEqual(['DEVELOPER', 'REVIEWER']);
     });
@@ -465,14 +473,14 @@ describe('AgentsService', () => {
         ],
       };
 
-      mockPrismaService.agentRoleEntry.deleteMany.mockResolvedValue({ count: 1 });
-      mockPrismaService.agentRoleEntry.createMany.mockResolvedValue({ count: 1 });
-      mockPrismaService.agent.findUnique.mockResolvedValue(updatedAgent);
+      mockPrismaService.client.agentRoleEntry.deleteMany.mockResolvedValue({ count: 1 });
+      mockPrismaService.client.agentRoleEntry.createMany.mockResolvedValue({ count: 1 });
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(updatedAgent);
 
       const result = await service.updateRoles('agent-123', updateData);
 
       // Verify delete was called (removes old roles)
-      expect(prismaService.agentRoleEntry.deleteMany).toHaveBeenCalledWith({
+      expect(prismaService.client.agentRoleEntry.deleteMany).toHaveBeenCalledWith({
         where: { agentId: 'agent-123' },
       });
 
@@ -488,8 +496,8 @@ describe('AgentsService', () => {
         roles: [],
       };
 
-      mockPrismaService.agentRoleEntry.deleteMany.mockResolvedValue({ count: 1 });
-      mockPrismaService.agent.findUnique.mockResolvedValue(updatedAgent);
+      mockPrismaService.client.agentRoleEntry.deleteMany.mockResolvedValue({ count: 1 });
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(updatedAgent);
 
       const result = await service.updateRoles('agent-123', updateData);
 
@@ -509,17 +517,17 @@ describe('AgentsService', () => {
         ],
       };
 
-      mockPrismaService.agentCapability.deleteMany.mockResolvedValue({ count: 2 });
-      mockPrismaService.agentCapability.createMany.mockResolvedValue({ count: 3 });
-      mockPrismaService.agent.findUnique.mockResolvedValue(updatedAgent);
+      mockPrismaService.client.agentCapabilityEntry.deleteMany.mockResolvedValue({ count: 2 });
+      mockPrismaService.client.agentCapabilityEntry.createMany.mockResolvedValue({ count: 3 });
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(updatedAgent);
 
       const result = await service.updateCapabilities('agent-123', updateData);
 
-      expect(prismaService.agentCapability.deleteMany).toHaveBeenCalledWith({
+      expect(prismaService.client.agentCapabilityEntry.deleteMany).toHaveBeenCalledWith({
         where: { agentId: 'agent-123' },
       });
 
-      expect(prismaService.agentCapability.createMany).toHaveBeenCalled();
+      expect(prismaService.client.agentCapabilityEntry.createMany).toHaveBeenCalled();
       expect(result.capabilities.length).toBe(3);
       expect(result.capabilities.map((c: any) => c.capability)).toEqual(['typescript', 'react', 'nodejs']);
     });
@@ -534,13 +542,13 @@ describe('AgentsService', () => {
         ],
       };
 
-      mockPrismaService.agentCapability.deleteMany.mockResolvedValue({ count: 2 });
-      mockPrismaService.agentCapability.createMany.mockResolvedValue({ count: 2 });
-      mockPrismaService.agent.findUnique.mockResolvedValue(updatedAgent);
+      mockPrismaService.client.agentCapabilityEntry.deleteMany.mockResolvedValue({ count: 2 });
+      mockPrismaService.client.agentCapabilityEntry.createMany.mockResolvedValue({ count: 2 });
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(updatedAgent);
 
       const result = await service.updateCapabilities('agent-123', updateData);
 
-      expect(prismaService.agentCapability.deleteMany).toHaveBeenCalledWith({
+      expect(prismaService.client.agentCapabilityEntry.deleteMany).toHaveBeenCalledWith({
         where: { agentId: 'agent-123' },
       });
 
@@ -555,8 +563,8 @@ describe('AgentsService', () => {
         capabilities: [],
       };
 
-      mockPrismaService.agentCapability.deleteMany.mockResolvedValue({ count: 2 });
-      mockPrismaService.agent.findUnique.mockResolvedValue(updatedAgent);
+      mockPrismaService.client.agentCapabilityEntry.deleteMany.mockResolvedValue({ count: 2 });
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(updatedAgent);
 
       const result = await service.updateCapabilities('agent-123', updateData);
 
@@ -574,9 +582,9 @@ describe('AgentsService', () => {
         ],
       };
 
-      mockPrismaService.agentCapability.deleteMany.mockResolvedValue({ count: 2 });
-      mockPrismaService.agentCapability.createMany.mockResolvedValue({ count: 2 });
-      mockPrismaService.agent.findUnique.mockResolvedValue(updatedAgent);
+      mockPrismaService.client.agentCapabilityEntry.deleteMany.mockResolvedValue({ count: 2 });
+      mockPrismaService.client.agentCapabilityEntry.createMany.mockResolvedValue({ count: 2 });
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(updatedAgent);
 
       const result = await service.updateCapabilities('agent-123', updateData);
 
@@ -586,8 +594,8 @@ describe('AgentsService', () => {
 
   describe('rotateApiKey', () => {
     it('should generate new API key for agent', async () => {
-      mockPrismaService.agent.update.mockResolvedValue(mockAgent);
-      mockConfigService.get.mockReturnValue('test-secret');
+      mockPrismaService.client.agent.update.mockResolvedValue(mockAgent);
+      mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
       const result = await service.rotateApiKey('agent-123');
 
@@ -598,8 +606,8 @@ describe('AgentsService', () => {
       const oldHash = 'old-hashed-key';
       const agentWithOldHash = { ...mockAgent, apiKeyHash: oldHash };
 
-      mockPrismaService.agent.update.mockResolvedValue(agentWithOldHash);
-      mockConfigService.get.mockReturnValue('test-secret');
+      mockPrismaService.client.agent.update.mockResolvedValue(agentWithOldHash);
+      mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
       const result = await service.rotateApiKey('agent-123');
 
@@ -608,8 +616,8 @@ describe('AgentsService', () => {
     });
 
     it('should return raw key ONCE', async () => {
-      mockPrismaService.agent.update.mockResolvedValue(mockAgent);
-      mockConfigService.get.mockReturnValue('test-secret');
+      mockPrismaService.client.agent.update.mockResolvedValue(mockAgent);
+      mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
       const result = await service.rotateApiKey('agent-123');
 
@@ -618,8 +626,8 @@ describe('AgentsService', () => {
     });
 
     it('should throw error when agent not found', async () => {
-      mockPrismaService.agent.update.mockRejectedValue(new Error('Agent not found'));
-      mockConfigService.get.mockReturnValue('test-secret');
+      mockPrismaService.client.agent.update.mockRejectedValue(new Error('Agent not found'));
+      mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
       await expect(service.rotateApiKey('nonexistent')).rejects.toThrow();
     });
@@ -627,8 +635,8 @@ describe('AgentsService', () => {
 
   describe('API Key Validation', () => {
     it('should generate unique API keys on multiple calls', async () => {
-      mockPrismaService.agent.create.mockResolvedValue(mockAgent);
-      mockConfigService.get.mockReturnValue('test-secret');
+      mockPrismaService.client.agent.create.mockResolvedValue(mockAgent);
+      mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
       const result1 = await service.generateApiKey({
         name: 'Agent 1',

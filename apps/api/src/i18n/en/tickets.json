@@ -1,0 +1,5 @@
+{
+  "notFound": "Ticket not found",
+  "invalidTransition": "Invalid ticket status transition",
+  "commentRequired": "A comment is required for this transition"
+}

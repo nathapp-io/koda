@@ -1,0 +1,18 @@
+{
+  "validation": {
+    "required": "This field is required",
+    "isEmail": "Must be a valid email address",
+    "minLength": "Must be at least {min} characters long",
+    "maxLength": "Must be at most {max} characters long",
+    "isString": "Must be a string",
+    "isEnum": "Invalid value",
+    "isUrl": "Must be a valid URL",
+    "isBoolean": "Must be a boolean"
+  },
+  "errors": {
+    "notFound": "Resource not found",
+    "forbidden": "Access denied",
+    "unauthorized": "Unauthorized",
+    "invalidTransition": "Invalid ticket transition"
+  }
+}

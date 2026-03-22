@@ -9,7 +9,7 @@ DO NOT EDIT MANUALLY — run `nax generate` to regenerate.
 
 > Auto-injected by `nax generate`
 
-**Project:** `@nathapp/koda`
+**Project:** `@nathapp/koda-cli`
 
 **Language:** TypeScript
 

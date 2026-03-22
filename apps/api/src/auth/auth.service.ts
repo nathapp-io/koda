@@ -1,10 +1,12 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
-import { PrismaService } from '../prisma/prisma.service';
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaClient } from '@prisma/client';
+import { JwtStrategyProvider, JwtRefreshStrategyProvider } from '@nathapp/nestjs-auth';
+import { AuthException } from '@nathapp/nestjs-common';
 import * as bcrypt from 'bcrypt';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import type { IPrincipal } from './types';
 
 export interface JwtPayload {
   sub: string;
@@ -15,19 +17,19 @@ export interface JwtPayload {
 @Injectable()
 export class AuthService {
   constructor(
-    private prisma: PrismaService,
-    private jwtService: JwtService,
-    private configService: ConfigService,
+    private prisma: PrismaService<PrismaClient>,
+    private jwtStrategyProvider: JwtStrategyProvider,
+    private jwtRefreshStrategyProvider: JwtRefreshStrategyProvider,
   ) {}
+
+  private get db() { return this.prisma.client; }
 
   async register(registerDto: RegisterDto) {
     const { email, name, password } = registerDto;
 
-    // Hash password with 12 rounds
     const passwordHash = await bcrypt.hash(password, 12);
 
-    // Create user
-    const user = await this.prisma.user.create({
+    const user = await this.db.user.create({
       data: {
         email,
         name,
@@ -35,9 +37,8 @@ export class AuthService {
       },
     });
 
-    // Generate tokens
-    const accessToken = await this.generateAccessToken(user.id, user.email, user.role);
-    const refreshToken = await this.generateRefreshToken(user.id);
+    const accessToken = this.generateAccessToken(user.id, user.email, user.role);
+    const refreshToken = this.generateRefreshToken(user.id);
 
     return {
       accessToken,
@@ -49,24 +50,21 @@ export class AuthService {
   async login(loginDto: LoginDto) {
     const { email, password } = loginDto;
 
-    // Find user by email
-    const user = await this.prisma.user.findUnique({
+    const user = await this.db.user.findUnique({
       where: { email },
     });
 
     if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new AuthException();
     }
 
-    // Verify password
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new AuthException();
     }
 
-    // Generate tokens
-    const accessToken = await this.generateAccessToken(user.id, user.email, user.role);
-    const refreshToken = await this.generateRefreshToken(user.id);
+    const accessToken = this.generateAccessToken(user.id, user.email, user.role);
+    const refreshToken = this.generateRefreshToken(user.id);
 
     return {
       accessToken,
@@ -75,19 +73,18 @@ export class AuthService {
     };
   }
 
-  async refresh(payload: JwtPayload) {
-    // Validate user still exists
-    const user = await this.prisma.user.findUnique({
-      where: { id: payload.sub },
+  async refresh(principal: IPrincipal) {
+    // JwtRefreshStrategy returns IPrincipal (with .id), not JwtPayload (with .sub)
+    const user = await this.db.user.findUnique({
+      where: { id: principal.id },
     });
 
     if (!user) {
-      throw new UnauthorizedException('Invalid token');
+      throw new AuthException();
     }
 
-    // Generate new tokens
-    const accessToken = await this.generateAccessToken(user.id, user.email, user.role);
-    const refreshToken = await this.generateRefreshToken(user.id);
+    const accessToken = this.generateAccessToken(user.id, user.email, user.role);
+    const refreshToken = this.generateRefreshToken(user.id);
 
     return {
       accessToken,
@@ -97,34 +94,20 @@ export class AuthService {
   }
 
   async validateUser(payload: JwtPayload) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: payload.sub },
+    const user = await this.db.user.findUnique({
+      where: { id: payload.sub ?? (payload as any).id },
     });
 
     return user || null;
   }
 
-  async generateAccessToken(userId: string, email: string, role: string): Promise<string> {
-    const payload: JwtPayload = {
-      sub: userId,
-      email,
-      role,
-    };
-
-    const expiresIn = this.configService.get('JWT_EXPIRES_IN', '7d');
-    return this.jwtService.signAsync(payload, { expiresIn });
+  generateAccessToken(userId: string, email: string, role: string): string {
+    const payload: JwtPayload = { sub: userId, email, role };
+    return this.jwtStrategyProvider.sign(payload);
   }
 
-  async generateRefreshToken(userId: string): Promise<string> {
-    const payload = {
-      sub: userId,
-    };
-
-    const expiresIn = this.configService.get('JWT_REFRESH_EXPIRES_IN', '30d');
-    return this.jwtService.signAsync(payload, {
-      expiresIn,
-      secret: this.configService.get('JWT_REFRESH_SECRET'),
-    });
+  generateRefreshToken(userId: string): string {
+    return this.jwtRefreshStrategyProvider.sign({ sub: userId });
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -7,8 +7,8 @@ export class CreateProjectDto {
     example: 'Koda',
     minLength: 2,
   })
-  @IsString()
-  @MinLength(2, { message: 'Name must be at least 2 characters long' })
+  @IsString({ message: '$t(common.validation.isString)' })
+  @MinLength(2, { message: '$t(common.validation.minLength)' })
   name!: string;
 
   @ApiProperty({
@@ -16,9 +16,9 @@ export class CreateProjectDto {
     example: 'koda',
     pattern: '^[a-z0-9]+(-[a-z0-9]+)*$',
   })
-  @IsString()
+  @IsString({ message: '$t(common.validation.isString)' })
   @Matches(/^[a-z0-9]+(-[a-z0-9]+)*$/, {
-    message: 'Slug must contain only lowercase alphanumeric characters and hyphens',
+    message: '$t(projects.slugInvalid)',
   })
   slug!: string;
 
@@ -27,9 +27,9 @@ export class CreateProjectDto {
     example: 'KODA',
     pattern: '^[A-Z]{2,6}$',
   })
-  @IsString()
+  @IsString({ message: '$t(common.validation.isString)' })
   @Matches(/^[A-Z]{2,6}$/, {
-    message: 'Key must be 2-6 uppercase letters',
+    message: '$t(projects.keyInvalid)',
   })
   key!: string;
 
@@ -39,7 +39,7 @@ export class CreateProjectDto {
     required: false,
   })
   @IsOptional()
-  @IsString()
+  @IsString({ message: '$t(common.validation.isString)' })
   description?: string;
 
   @ApiProperty({
@@ -48,7 +48,7 @@ export class CreateProjectDto {
     required: false,
   })
   @IsOptional()
-  @IsUrl()
+  @IsUrl({}, { message: '$t(common.validation.isUrl)' })
   gitRemoteUrl?: string;
 
   @ApiProperty({
@@ -58,6 +58,6 @@ export class CreateProjectDto {
     default: true,
   })
   @IsOptional()
-  @IsBoolean()
+  @IsBoolean({ message: '$t(common.validation.isBoolean)' })
   autoIndexOnClose?: boolean;
 }

@@ -55,3 +55,12 @@ nax/**/progress.txt
 .nax-verifier-verdict.json
 TEST_SUMMARY_*.md
 test/tmp/
+apps/api/smoke-result.txt
+
+.nax/metrics.json
+.nax/**/status.json
+.nax/**/*.jsonl
+.nax/**/runs/
+.nax/**/acp-sessions.json
+.nax/**/progress.txt
+

@@ -1,4 +1,5 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
+
 export default defineNuxtConfig({
   devtools: { enabled: true },
 
@@ -26,4 +27,4 @@ export default defineNuxtConfig({
   typescript: {
     strict: true,
   },
-} as any)
+}) as unknown as Record<string, unknown>

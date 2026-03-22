@@ -1,6 +1,8 @@
 // Test setup file - runs before each test file
-// Note: .env.test loading removed - integration tests need DATABASE_URL set externally
-// For unit tests, mocking is used so env vars aren't needed
+// Load .env.test so tests that bootstrap AppModule have required env vars
+import { config } from 'dotenv';
+import { resolve } from 'path';
+config({ path: resolve(__dirname, '.env.test') });
 
 // @ts-ignore - expect is global in Jest test environment
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

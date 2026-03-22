@@ -1,16 +1,17 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
+import { Injectable, Inject } from '@nestjs/common';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import {
-  TicketStatus,
-  CommentType,
-  ActivityType,
   Ticket,
   Comment,
   TicketActivity,
+  PrismaClient,
 } from '@prisma/client';
+import { TicketStatus, CommentType, ActivityType } from '../../common/enums';
 import { validateTransition } from './ticket-transitions';
 
 export interface CurrentUser {
+  id: string;
   sub: string;
 }
 
@@ -29,10 +30,13 @@ export type TransitionResult = TransitionResultWithComment | TransitionResultWit
 
 @Injectable()
 export class TicketTransitionsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(@Inject('PrismaService') private prisma: PrismaService<PrismaClient>) {}
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private get db() { return this.prisma.client; }
+
 
   /**
-   * Transition CREATED → VERIFIED
+   * Transition CREATED → VERIFIED, or VERIFY_FIX → CLOSED (if ticket is already in VERIFY_FIX)
    */
   async verify(
     projectSlug: string,
@@ -41,12 +45,24 @@ export class TicketTransitionsService {
     currentUser: CurrentUser,
     actorType: 'user' | 'agent',
   ): Promise<TransitionResultWithComment> {
+    const ticket = await this.findTicketByRef(projectSlug, ticketRef);
+    if (ticket?.status === TicketStatus.VERIFY_FIX) {
+      return this.executeTransition(
+        projectSlug,
+        ticketRef,
+        TicketStatus.CLOSED,
+        CommentType.REVIEW,
+        commentBody ?? 'Verified',
+        currentUser,
+        actorType,
+      ) as Promise<TransitionResultWithComment>;
+    }
     return this.executeTransition(
       projectSlug,
       ticketRef,
       TicketStatus.VERIFIED,
       CommentType.VERIFICATION,
-      commentBody,
+      commentBody ?? 'Verified',
       currentUser,
       actorType,
     ) as Promise<TransitionResultWithComment>;
@@ -87,7 +103,7 @@ export class TicketTransitionsService {
       ticketRef,
       TicketStatus.VERIFY_FIX,
       CommentType.FIX_REPORT,
-      commentBody,
+      commentBody ?? 'Fix submitted',
       currentUser,
       actorType,
     ) as Promise<TransitionResultWithComment>;
@@ -104,6 +120,12 @@ export class TicketTransitionsService {
     currentUser: CurrentUser,
     actorType: 'user' | 'agent',
   ): Promise<TransitionResultWithComment> {
+    // verify-fix is only valid when ticket is in VERIFY_FIX status
+    const ticket = await this.findTicketByRef(projectSlug, ticketRef);
+    if (!ticket) throw new NotFoundAppException();
+    if (ticket.status !== TicketStatus.VERIFY_FIX) {
+      throw new ValidationAppException();
+    }
     const toStatus = approve ? TicketStatus.CLOSED : TicketStatus.IN_PROGRESS;
     return this.executeTransition(
       projectSlug,
@@ -126,16 +148,16 @@ export class TicketTransitionsService {
     currentUser: CurrentUser,
     actorType: 'user' | 'agent',
   ): Promise<TransitionResultWithoutComment> {
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
     if (!project || project.deletedAt) {
-      throw new NotFoundException('Project not found');
+      throw new NotFoundAppException();
     }
 
     const ticket = await this.findTicketByRef(projectSlug, ticketRef);
     if (!ticket) {
-      throw new NotFoundException('Ticket not found');
+      throw new NotFoundAppException();
     }
 
     // Validate that CLOSED is reachable from current status
@@ -144,13 +166,11 @@ export class TicketTransitionsService {
       ticket.status === TicketStatus.CREATED ||
       ticket.status === TicketStatus.REJECTED
     ) {
-      throw new BadRequestException(
-        `Cannot transition from ${ticket.status} to CLOSED`,
-      );
+      throw new ValidationAppException();  // i18n key for invalid ticket transition
     }
 
     // Execute transition without comment requirement
-    const transaction = await this.prisma.$transaction(async (tx) => {
+    const transaction = await this.db.$transaction(async (tx) => {
       const actorUserId = actorType === 'user' ? currentUser.sub : null;
       const actorAgentId = actorType === 'agent' ? currentUser.sub : null;
 
@@ -215,24 +235,24 @@ export class TicketTransitionsService {
     actorType: 'user' | 'agent',
   ): Promise<TransitionResult> {
     // Find project
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
     if (!project || project.deletedAt) {
-      throw new NotFoundException('Project not found');
+      throw new NotFoundAppException();
     }
 
     // Find ticket
     const ticket = await this.findTicketByRef(projectSlug, ticketRef);
     if (!ticket) {
-      throw new NotFoundException('Ticket not found');
+      throw new NotFoundAppException();
     }
 
-    // Validate transition
-    validateTransition(ticket.status, toStatus, commentType);
+    // Validate transition (ticket.status is String in SQLite schema, cast to local enum type)
+    validateTransition(ticket.status as TicketStatus, toStatus, commentType);
 
     // Execute transition in transaction
-    return this.prisma.$transaction(async (tx) => {
+    return this.db.$transaction(async (tx) => {
       const actorUserId = actorType === 'user' ? currentUser.sub : null;
       const actorAgentId = actorType === 'agent' ? currentUser.sub : null;
 
@@ -289,7 +309,7 @@ export class TicketTransitionsService {
    * Helper to find ticket by ref (supports both KODA-1 format and CUID)
    */
   private async findTicketByRef(projectSlug: string, ref: string) {
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
@@ -303,7 +323,7 @@ export class TicketTransitionsService {
 
     if (match) {
       const number = parseInt(match[2], 10);
-      return this.prisma.ticket.findUnique({
+      return this.db.ticket.findUnique({
         where: {
           projectId_number: {
             projectId: project.id,
@@ -314,7 +334,7 @@ export class TicketTransitionsService {
     }
 
     // Try as CUID
-    return this.prisma.ticket.findUnique({
+    return this.db.ticket.findUnique({
       where: { id: ref },
     });
   }

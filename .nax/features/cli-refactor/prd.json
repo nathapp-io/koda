@@ -1,0 +1,303 @@
+{
+  "project": "koda",
+  "feature": "cli-refactor",
+  "branchName": "feat/phase4r-cli-refactor",
+  "createdAt": "2026-03-22T04:54:00Z",
+  "updatedAt": "2026-03-22T06:20:57.612Z",
+  "description": "Refactor CLI (apps/cli) to match Phase 2R API. All responses are now wrapped in JsonResponse.Ok({ ret, data }), enum values are uppercase, and new endpoints exist for labels, ticket assign/update/delete, and project create/delete. Full spec: projects/koda/memory/NAX-PHASE4R-CLI-REFACTOR.md",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Response Unwrapping Utility",
+      "description": "All API responses are now wrapped: { ret: 0, data: T }. Add unwrap<T>() to src/utils/api.ts and update ALL existing command files (project.ts, ticket.ts, comment.ts, agent.ts) to use unwrap() instead of direct .data access. For list responses use: const { items, total } = unwrap(response). For --json output, always unwrap before JSON.stringify.",
+      "acceptanceCriteria": [
+        "unwrap<T>() exported from src/utils/api.ts: takes { data: { ret: number; data: T } } and returns T",
+        "unwrap() throws if ret !== 0",
+        "koda project list outputs array of projects (not { ret, data } wrapper)",
+        "koda project list --json outputs clean JSON array without wrapper",
+        "koda ticket show KODA-1 --json returns ticket object directly",
+        "Zero direct .data accesses on API responses remain in command files",
+        "All list commands use const { items } = unwrap(response)"
+      ],
+      "tags": [
+        "refactor",
+        "api",
+        "core"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "workdir": "apps/cli",
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "modelTier": "powerful"
+      },
+      "attempts": 1,
+      "priorErrors": [],
+      "priorFailures": [],
+      "escalations": [],
+      "storyPoints": 1,
+      "passes": true
+    },
+    {
+      "id": "US-002",
+      "title": "Error Handling Utility",
+      "description": "Replace all inline catch blocks with a shared handleApiError(err, opts?) function in src/utils/error.ts. Exit codes: 1=general, 2=401/403 auth, 3=400 validation, 4=404 not found. Error messages go to stderr. Include helpful hint for auth errors: 'Check your API key: koda config set apiKey <key>'.",
+      "acceptanceCriteria": [
+        "handleApiError(err, opts?) exported from src/utils/error.ts",
+        "Exit code 2 for 401/403 with auth hint message",
+        "Exit code 3 for 400 with validation message",
+        "Exit code 4 for 404 with opts.notFoundMessage or default",
+        "Exit code 1 for all other errors",
+        "All catch blocks in project.ts, ticket.ts, comment.ts, agent.ts delegate to handleApiError()",
+        "koda project show nonexistent-slug → exits 4 with clear message",
+        "No inline error handling remains in command files"
+      ],
+      "tags": [
+        "refactor",
+        "error-handling",
+        "dx"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "workdir": "apps/cli",
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "modelTier": "powerful"
+      },
+      "attempts": 0,
+      "priorErrors": [],
+      "priorFailures": [],
+      "escalations": [],
+      "storyPoints": 1,
+      "passes": true
+    },
+    {
+      "id": "US-003",
+      "title": "Enum Casing Fix",
+      "description": "All enum values sent to the API must be UPPERCASE. Update ticket create --type and --priority options, comment --type option, and all hardcoded comment type strings. Add client-side validation with clear errors before hitting the API. Ticket types: BUG|ENHANCEMENT|TASK|QUESTION. Priorities: LOW|MEDIUM|HIGH|CRITICAL. Comment types: GENERAL|VERIFICATION|FIX_REPORT|REVIEW.",
+      "acceptanceCriteria": [
+        "koda ticket create --type BUG succeeds",
+        "koda ticket create --type bug → error 'Invalid type bug. Valid values: BUG, ENHANCEMENT, TASK, QUESTION' (exit 3)",
+        "koda ticket create --priority HIGH succeeds",
+        "koda ticket create --priority high → exit 3 with valid values listed",
+        "ticket fix hardcoded comment type is FIX_REPORT (was fix_report)",
+        "ticket verify hardcoded comment type is VERIFICATION (was verification)",
+        "ticket reject hardcoded comment type is GENERAL (was general)",
+        "ticket verify-fix hardcoded comment type is REVIEW (was review)",
+        "comment add --type GENERAL succeeds; lowercase --type general → exit 3"
+      ],
+      "tags": [
+        "bugfix",
+        "enum",
+        "api"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "workdir": "apps/cli",
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "modelTier": "powerful"
+      },
+      "attempts": 0,
+      "priorErrors": [],
+      "priorFailures": [],
+      "escalations": [],
+      "storyPoints": 1,
+      "passes": true
+    },
+    {
+      "id": "US-004",
+      "title": "Ticket Command Body Fix",
+      "description": "ticket fix, ticket verify, ticket reject now require a --comment option that is sent as { body: string } in the request body. Without it the API returns 400. Make --comment required (error if empty). Also update ticket start help text to say 'CREATED or VERIFIED → IN_PROGRESS'.",
+      "acceptanceCriteria": [
+        "koda ticket fix KODA-1 --project koda --comment 'Fixed null ref' succeeds and sends { body: 'Fixed null ref' }",
+        "koda ticket fix KODA-1 --project koda (no --comment) → exits 3 with 'Comment is required'",
+        "koda ticket verify KODA-1 --project koda --comment 'Verified' succeeds",
+        "koda ticket verify KODA-1 --project koda (no --comment) → exits 3",
+        "koda ticket reject KODA-1 --project koda --comment 'Out of scope' succeeds",
+        "ticket start help text shows 'CREATED or VERIFIED → IN_PROGRESS'"
+      ],
+      "tags": [
+        "bugfix",
+        "ticket",
+        "api"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-003"
+      ],
+      "status": "passed",
+      "workdir": "apps/cli",
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "modelTier": "powerful"
+      },
+      "attempts": 0,
+      "priorErrors": [],
+      "priorFailures": [],
+      "escalations": [],
+      "storyPoints": 1,
+      "passes": true
+    },
+    {
+      "id": "US-005",
+      "title": "Project Commands — create and delete",
+      "description": "Add project create and project delete subcommands. koda project create --name <name> --slug <slug> --key <KEY> [--desc <description>] [--json]. koda project delete <slug> [--force]. Validate --key as 2-6 uppercase letters (/^[A-Z]{2,6}$/), --slug as lowercase alphanumeric+hyphens. --force required for delete. Update project show to display description and key fields.",
+      "acceptanceCriteria": [
+        "koda project create --name 'Test' --slug test --key TEST creates project and displays it",
+        "koda project create --key my-key → exits 3 'Invalid key format. Must be 2-6 uppercase letters (e.g. KODA)'",
+        "koda project create --slug My_App → exits 3 'Invalid slug format'",
+        "koda project create ... --json outputs unwrapped project JSON",
+        "koda project delete test --force soft-deletes project",
+        "koda project delete test (no --force) → exits 1 'Use --force to confirm deletion'",
+        "koda project show <slug> displays key and description fields in table"
+      ],
+      "tags": [
+        "feature",
+        "project",
+        "crud"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002"
+      ],
+      "status": "passed",
+      "workdir": "apps/cli",
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "modelTier": "powerful"
+      },
+      "attempts": 0,
+      "priorErrors": [],
+      "priorFailures": [],
+      "escalations": [],
+      "storyPoints": 1,
+      "passes": true
+    },
+    {
+      "id": "US-006",
+      "title": "Ticket Command Gaps — update, delete, assign",
+      "description": "Add ticket update, ticket delete, and ticket assign subcommands. koda ticket update <ref> --project <slug> [--title] [--desc] [--priority] [--json]. koda ticket delete <ref> --project <slug> [--force]. koda ticket assign <ref> --project <slug> --agent <agent-slug> [--json]. Also fix ticket show to use ticket.ref directly from API response (not manually constructed).",
+      "acceptanceCriteria": [
+        "koda ticket update KODA-1 --project koda --title 'New title' updates and displays ticket",
+        "koda ticket update KODA-1 --project koda --priority HIGH sends uppercase priority",
+        "koda ticket delete KODA-1 --project koda --force soft-deletes ticket",
+        "koda ticket delete KODA-1 --project koda (no --force) → exits 1 with hint",
+        "koda ticket assign KODA-1 --project koda --agent subrina-coder assigns agent",
+        "koda ticket assign KODA-1 --project koda --agent nonexistent → exits 4 'Agent not found'",
+        "koda ticket show KODA-1 displays ref from API response ticket.ref field"
+      ],
+      "tags": [
+        "feature",
+        "ticket",
+        "crud"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002",
+        "US-003"
+      ],
+      "status": "passed",
+      "workdir": "apps/cli",
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "modelTier": "powerful"
+      },
+      "attempts": 0,
+      "priorErrors": [],
+      "priorFailures": [],
+      "escalations": [],
+      "storyPoints": 1,
+      "passes": true
+    },
+    {
+      "id": "US-007",
+      "title": "Label Commands — new command group",
+      "description": "Create src/commands/label.ts with full label CRUD and ticket label assignment. Register labelCommand in src/index.ts. Commands: koda label create --project <slug> --name <name> [--color <hex>] [--json]. koda label list --project <slug> [--json]. koda label delete --project <slug> --id <id>. koda ticket label add <ref> --project <slug> --label <id>. koda ticket label remove <ref> --project <slug> --label <id>.",
+      "acceptanceCriteria": [
+        "koda label create --project koda --name Bug --color '#ff0000' creates and displays label",
+        "koda label create --project koda --name Bug --json outputs unwrapped label JSON",
+        "koda label list --project koda displays labels in formatted table",
+        "koda label delete --project koda --id <id> deletes label",
+        "koda ticket label add KODA-1 --project koda --label <id> attaches label to ticket",
+        "koda ticket label remove KODA-1 --project koda --label <id> detaches label",
+        "labelCommand registered in src/index.ts (accessible as 'koda label')",
+        "'koda ticket label' subcommand accessible via ticket command group"
+      ],
+      "tags": [
+        "feature",
+        "labels",
+        "new"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002"
+      ],
+      "status": "passed",
+      "workdir": "apps/cli",
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "modelTier": "powerful"
+      },
+      "attempts": 0,
+      "priorErrors": [],
+      "priorFailures": [],
+      "escalations": [],
+      "storyPoints": 1,
+      "passes": true
+    },
+    {
+      "id": "US-008",
+      "title": "Unit Tests — coverage ≥ 80% for all modified files",
+      "description": "Write/update Jest unit tests for all modified and new command files. Mock the generated API client (import from src/generated). Test files: project.test.ts (update), ticket.test.ts (update), label.test.ts (new), api.test.ts (unwrap), error.test.ts (handleApiError). Run: cd apps/cli && bun run test. Mock pattern: jest.mock('../generated'); const mockMethod = jest.mocked(Service.method); mockMethod.mockResolvedValue({ data: { ret: 0, data: <payload> } }).",
+      "acceptanceCriteria": [
+        "bun run test passes in apps/cli with 0 failures",
+        "Coverage ≥ 80% for: project.ts, ticket.ts, comment.ts, agent.ts, label.ts, utils/api.ts, utils/error.ts",
+        "unwrap() tested: valid response returns data, ret !== 0 throws, missing data throws",
+        "handleApiError() tested for exit codes 1, 2, 3, 4",
+        "Each new command tested: happy path, API 400/401/404 → correct exit code, --json flag outputs clean JSON",
+        "Invalid enum values (lowercase) tested → exit 3 before API call",
+        "Missing --force on delete → exit 1 before API call",
+        "Generated client mocked via jest.mock('../generated') — no real HTTP calls"
+      ],
+      "tags": [
+        "testing",
+        "coverage",
+        "tdd"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002",
+        "US-003",
+        "US-004",
+        "US-005",
+        "US-006",
+        "US-007"
+      ],
+      "status": "passed",
+      "workdir": "apps/cli",
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "modelTier": "powerful"
+      },
+      "attempts": 0,
+      "priorErrors": [],
+      "priorFailures": [],
+      "escalations": [],
+      "storyPoints": 1,
+      "passes": true
+    }
+  ]
+}

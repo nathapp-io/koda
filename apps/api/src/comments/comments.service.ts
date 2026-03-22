@@ -1,22 +1,22 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  ForbiddenException,
-} from '@nestjs/common';
-import { CommentType } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { Injectable } from '@nestjs/common';
+import { PrismaClient } from '@prisma/client';
+import { CommentType } from '../common/enums';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { ValidationAppException, NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 
 interface CurrentUser {
+  id: string;
   sub: string;
   role?: string;
 }
 
 @Injectable()
 export class CommentsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService<PrismaClient>) {}
+  private get db() { return this.prisma.client; }
+
 
   async create(
     projectSlug: string,
@@ -27,22 +27,22 @@ export class CommentsService {
   ) {
     // Validate required fields
     if (!createCommentDto.body) {
-      throw new BadRequestException('Body is required');
+      throw new ValidationAppException();
     }
     if (typeof createCommentDto.body === 'string' && createCommentDto.body.trim().length === 0) {
-      throw new BadRequestException('Body must not be empty');
+      throw new ValidationAppException();
     }
     if (!createCommentDto.type) {
-      throw new BadRequestException('Type is required');
+      throw new ValidationAppException();
     }
 
     // Find project by slug
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
     if (!project || project.deletedAt) {
-      throw new NotFoundException('Project not found');
+      throw new NotFoundAppException();
     }
 
     // Find ticket by ref (KODA-1 or CUID)
@@ -54,7 +54,7 @@ export class CommentsService {
     if (match) {
       // Resolve by composite unique key (projectId, number)
       const number = parseInt(match[2], 10);
-      ticket = await this.prisma.ticket.findUnique({
+      ticket = await this.db.ticket.findUnique({
         where: {
           projectId_number: {
             projectId: project.id,
@@ -64,23 +64,23 @@ export class CommentsService {
       });
     } else {
       // Treat as CUID
-      ticket = await this.prisma.ticket.findUnique({
+      ticket = await this.db.ticket.findUnique({
         where: { id: ticketRef },
       });
     }
 
     if (!ticket || ticket.deletedAt) {
-      throw new NotFoundException('Ticket not found');
+      throw new NotFoundAppException();
     }
 
     // Create the comment
-    const comment = await this.prisma.comment.create({
+    const comment = await this.db.comment.create({
       data: {
         ticketId: ticket.id,
         body: createCommentDto.body,
         type: createCommentDto.type as CommentType,
-        authorUserId: actorType === 'user' ? currentUser.sub : null,
-        authorAgentId: actorType === 'agent' ? currentUser.sub : null,
+        authorUserId: actorType === 'user' ? currentUser.id : null,
+        authorAgentId: actorType === 'agent' ? currentUser.id : null,
       },
     });
 
@@ -89,12 +89,12 @@ export class CommentsService {
 
   async findByTicket(projectSlug: string, ticketRef: string) {
     // Find project by slug
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
     if (!project || project.deletedAt) {
-      throw new NotFoundException('Project not found');
+      throw new NotFoundAppException();
     }
 
     // Find ticket by ref (KODA-1 or CUID)
@@ -106,7 +106,7 @@ export class CommentsService {
     if (match) {
       // Resolve by composite unique key (projectId, number)
       const number = parseInt(match[2], 10);
-      ticket = await this.prisma.ticket.findUnique({
+      ticket = await this.db.ticket.findUnique({
         where: {
           projectId_number: {
             projectId: project.id,
@@ -116,17 +116,17 @@ export class CommentsService {
       });
     } else {
       // Treat as CUID
-      ticket = await this.prisma.ticket.findUnique({
+      ticket = await this.db.ticket.findUnique({
         where: { id: ticketRef },
       });
     }
 
     if (!ticket || ticket.deletedAt) {
-      throw new NotFoundException('Ticket not found');
+      throw new NotFoundAppException();
     }
 
     // Find all comments for this ticket, ordered by creation date
-    const comments = await this.prisma.comment.findMany({
+    const comments = await this.db.comment.findMany({
       where: { ticketId: ticket.id },
       orderBy: { createdAt: 'asc' },
     });
@@ -135,7 +135,7 @@ export class CommentsService {
   }
 
   async findById(id: string) {
-    const comment = await this.prisma.comment.findUnique({
+    const comment = await this.db.comment.findUnique({
       where: { id },
     });
 
@@ -149,27 +149,27 @@ export class CommentsService {
     actorType: 'user' | 'agent',
   ) {
     // Find the comment
-    const comment = await this.prisma.comment.findUnique({
+    const comment = await this.db.comment.findUnique({
       where: { id: commentId },
     });
 
     if (!comment) {
-      throw new NotFoundException('Comment not found');
+      throw new NotFoundAppException();
     }
 
     // Check authorization: only author or admin can edit
     const isAuthor =
-      (actorType === 'user' && comment.authorUserId === currentUser.sub) ||
-      (actorType === 'agent' && comment.authorAgentId === currentUser.sub);
+      (actorType === 'user' && comment.authorUserId === currentUser.id) ||
+      (actorType === 'agent' && comment.authorAgentId === currentUser.id);
 
     const isAdmin = actorType === 'user' && currentUser.role === 'ADMIN';
 
     if (!isAuthor && !isAdmin) {
-      throw new ForbiddenException('Only the comment author or an admin can edit this comment');
+      throw new ForbiddenAppException();
     }
 
     // Update the comment
-    const updatedComment = await this.prisma.comment.update({
+    const updatedComment = await this.db.comment.update({
       where: { id: commentId },
       data: {
         body: updateCommentDto.body,
@@ -185,27 +185,27 @@ export class CommentsService {
     actorType: 'user' | 'agent',
   ) {
     // Find the comment
-    const comment = await this.prisma.comment.findUnique({
+    const comment = await this.db.comment.findUnique({
       where: { id: commentId },
     });
 
     if (!comment) {
-      throw new NotFoundException('Comment not found');
+      throw new NotFoundAppException();
     }
 
     // Check authorization: only author or admin can delete
     const isAuthor =
-      (actorType === 'user' && comment.authorUserId === currentUser.sub) ||
-      (actorType === 'agent' && comment.authorAgentId === currentUser.sub);
+      (actorType === 'user' && comment.authorUserId === currentUser.id) ||
+      (actorType === 'agent' && comment.authorAgentId === currentUser.id);
 
     const isAdmin = actorType === 'user' && currentUser.role === 'ADMIN';
 
     if (!isAuthor && !isAdmin) {
-      throw new ForbiddenException('Only the comment author or an admin can delete this comment');
+      throw new ForbiddenAppException();
     }
 
     // Delete the comment
-    await this.prisma.comment.delete({
+    await this.db.comment.delete({
       where: { id: commentId },
     });
   }

@@ -10,23 +10,165 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ---------------------------------------------------------------------------
+// Enums (mapped to String in SQLite)
+// ---------------------------------------------------------------------------
+
+// SQLite doesn't support native enums — using @@map on String fields
+
+// ---------------------------------------------------------------------------
+// Phase 1 models
+// ---------------------------------------------------------------------------
+
 model User {
-  id           String     @id @default(cuid())
-  email        String     @unique
+  id           String    @id @default(cuid())
+  email        String    @unique
   name         String?
   passwordHash String
-  role         String     @default("MEMBER")
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  role         String    @default("MEMBER") // MEMBER | ADMIN
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  createdTickets  Ticket[]  @relation("TicketCreatedByUser")
+  assignedTickets Ticket[]  @relation("TicketAssignedToUser")
+  comments        Comment[] @relation("CommentByUser")
 }
 
 model Agent {
-  id                     String   @id @default(cuid())
-  name                   String
-  slug                   String   @unique
-  apiKeyHash             String   @unique
-  status                 String   @default("ACTIVE")
-  maxConcurrentTickets   Int      @default(3)
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  id                   String   @id @default(cuid())
+  name                 String
+  slug                 String   @unique
+  apiKeyHash           String   @unique
+  status               String   @default("ACTIVE") // ACTIVE | PAUSED | OFFLINE
+  maxConcurrentTickets Int      @default(3)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  roles         AgentRoleEntry[]
+  capabilities  AgentCapabilityEntry[]
+  createdTickets  Ticket[]  @relation("TicketCreatedByAgent")
+  assignedTickets Ticket[]  @relation("TicketAssignedToAgent")
+  comments        Comment[] @relation("CommentByAgent")
+}
+
+model AgentRoleEntry {
+  id      String @id @default(cuid())
+  agentId String
+  role    String // VERIFIER | DEVELOPER | REVIEWER
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, role])
+}
+
+model AgentCapabilityEntry {
+  id         String @id @default(cuid())
+  agentId    String
+  capability String
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, capability])
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 models
+// ---------------------------------------------------------------------------
+
+model Project {
+  id               String    @id @default(cuid())
+  name             String
+  slug             String    @unique
+  key              String    @unique // e.g. KODA — used in ticket refs
+  description      String?
+  gitRemoteUrl     String?
+  autoIndexOnClose Boolean   @default(true)
+  deletedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  tickets Ticket[]
+  labels  Label[]
+}
+
+model Ticket {
+  id                String    @id @default(cuid())
+  projectId         String
+  number            Int       // auto-incremented per project
+  type              String    // BUG | ENHANCEMENT | TASK | QUESTION
+  title             String
+  description       String?
+  status            String    @default("CREATED") // CREATED | VERIFIED | IN_PROGRESS | VERIFY_FIX | CLOSED | REJECTED
+  priority          String    @default("MEDIUM")  // LOW | MEDIUM | HIGH | CRITICAL
+  assignedToUserId  String?
+  assignedToAgentId String?
+  createdByUserId   String?
+  createdByAgentId  String?
+  deletedAt         DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  project         Project           @relation(fields: [projectId], references: [id])
+  assignedToUser  User?             @relation("TicketAssignedToUser", fields: [assignedToUserId], references: [id])
+  assignedToAgent Agent?            @relation("TicketAssignedToAgent", fields: [assignedToAgentId], references: [id])
+  createdByUser   User?             @relation("TicketCreatedByUser", fields: [createdByUserId], references: [id])
+  createdByAgent  Agent?            @relation("TicketCreatedByAgent", fields: [createdByAgentId], references: [id])
+  comments        Comment[]
+  labels          TicketLabel[]
+  activities      TicketActivity[]
+
+  @@unique([projectId, number])
+}
+
+model Comment {
+  id            String   @id @default(cuid())
+  ticketId      String
+  body          String
+  type          String   @default("GENERAL") // GENERAL | VERIFICATION | FIX_REPORT | REVIEW
+  authorUserId  String?
+  authorAgentId String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  ticket Ticket @relation(fields: [ticketId], references: [id])
+  user   User?  @relation("CommentByUser", fields: [authorUserId], references: [id])
+  agent  Agent? @relation("CommentByAgent", fields: [authorAgentId], references: [id])
+}
+
+model Label {
+  id        String @id @default(cuid())
+  projectId String
+  name      String
+  color     String?
+
+  project Project       @relation(fields: [projectId], references: [id])
+  tickets TicketLabel[]
+
+  @@unique([projectId, name])
+}
+
+model TicketLabel {
+  ticketId String
+  labelId  String
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  label  Label  @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([ticketId, labelId])
+}
+
+model TicketActivity {
+  id           String   @id @default(cuid())
+  ticketId     String
+  action       String   // STATUS_CHANGE | ASSIGNMENT | COMMENT | LABEL_CHANGE
+  fromStatus   String?
+  toStatus     String?
+  actorUserId  String?
+  actorAgentId String?
+  field        String?
+  oldValue     String?
+  newValue     String?
+  createdAt    DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id])
 }

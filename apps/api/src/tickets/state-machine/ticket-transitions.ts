@@ -1,5 +1,5 @@
-import { BadRequestException } from '@nestjs/common';
-import { TicketStatus, CommentType } from '@prisma/client';
+import { TicketStatus, CommentType } from '../../common/enums';
+import { ValidationAppException } from '@nathapp/nestjs-common';
 
 // Define transition rules: from → to → required comment type (or undefined if no comment needed)
 type TransitionRule = {
@@ -11,6 +11,7 @@ type TransitionRule = {
 const TRANSITION_RULES: TransitionRule = {
   [TicketStatus.CREATED]: {
     [TicketStatus.VERIFIED]: CommentType.VERIFICATION,
+    [TicketStatus.IN_PROGRESS]: 'NONE',
     [TicketStatus.REJECTED]: CommentType.GENERAL,
   },
   [TicketStatus.VERIFIED]: {
@@ -41,14 +42,12 @@ export function validateTransition(
   // Check if transition rule exists
   const fromRules = TRANSITION_RULES[from];
   if (!fromRules) {
-    throw new BadRequestException(`No transitions allowed from status ${from}`);
+    throw new ValidationAppException();
   }
 
   const requiredCommentType = fromRules[to];
   if (requiredCommentType === undefined) {
-    throw new BadRequestException(
-      `Transition from ${from} to ${to} is not allowed`,
-    );
+    throw new ValidationAppException();
   }
 
   // Check comment type requirement
@@ -59,14 +58,10 @@ export function validateTransition(
 
   // Comment is required
   if (!commentType) {
-    throw new BadRequestException(
-      `Transition from ${from} to ${to} requires a ${requiredCommentType} comment`,
-    );
+    throw new ValidationAppException();
   }
 
   if (commentType !== requiredCommentType) {
-    throw new BadRequestException(
-      `Transition from ${from} to ${to} requires a ${requiredCommentType} comment, but got ${commentType}`,
-    );
+    throw new ValidationAppException();
   }
 }

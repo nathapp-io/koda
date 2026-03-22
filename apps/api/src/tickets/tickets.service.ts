@@ -1,13 +1,10 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-  ForbiddenException,
-} from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { NotFoundAppException, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
-import { TicketType, TicketStatus, Priority } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import { TicketType, TicketStatus, Priority } from '../common/enums';
 
 interface FindAllFilters {
   status?: TicketStatus;
@@ -25,13 +22,17 @@ interface AssignInput {
 }
 
 interface CurrentUser {
+  id: string;
   sub: string;
   role?: string;
 }
 
 @Injectable()
 export class TicketsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService<PrismaClient>) {}
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private get db() { return this.prisma.client; }
+
 
   async create(
     projectSlug: string,
@@ -40,33 +41,33 @@ export class TicketsService {
     actorType: 'user' | 'agent',
   ) {
     // Find project by slug
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
     if (!project || project.deletedAt) {
-      throw new NotFoundException('Project not found');
+      throw new NotFoundAppException();
     }
 
     // Validate required fields
     if (createTicketDto.type === undefined) {
-      throw new BadRequestException('Type is required');
+      throw new ValidationAppException();
     }
     if (createTicketDto.title === undefined) {
-      throw new BadRequestException('Title is required');
+      throw new ValidationAppException();
     }
     if (typeof createTicketDto.title === 'string' && createTicketDto.title.trim().length === 0) {
-      throw new BadRequestException('Title must not be empty');
+      throw new ValidationAppException();
     }
     if (createTicketDto.description !== undefined && typeof createTicketDto.description === 'string' && createTicketDto.description.trim().length === 0) {
-      throw new BadRequestException('Description must not be empty if provided');
+      throw new ValidationAppException();
     }
 
     // Use transaction to safely auto-increment ticket number
-    const ticket = await this.prisma.$transaction(async (tx) => {
-      // Find the highest number for this project
+    const ticket = await this.db.$transaction(async (tx) => {
+      // Find the highest number for this project (include soft-deleted to avoid number reuse)
       const lastTicket = await tx.ticket.findFirst({
-        where: { projectId: project.id, deletedAt: null },
+        where: { projectId: project.id },
         orderBy: { number: 'desc' },
       });
 
@@ -82,23 +83,23 @@ export class TicketsService {
           description: createTicketDto.description || null,
           status: TicketStatus.CREATED,
           priority: createTicketDto.priority || Priority.MEDIUM,
-          createdByUserId: actorType === 'user' ? currentUser.sub : null,
-          createdByAgentId: actorType === 'agent' ? currentUser.sub : null,
+          createdByUserId: actorType === 'user' ? currentUser.id : null,
+          createdByAgentId: actorType === 'agent' ? currentUser.id : null,
         },
       });
     });
 
-    return ticket;
+    return { ...ticket, ref: `${project.key}-${ticket.number}` };
   }
 
   async findAll(projectSlug: string, filters: FindAllFilters) {
     // Find project by slug
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
     if (!project || project.deletedAt) {
-      throw new NotFoundException('Project not found');
+      throw new NotFoundAppException();
     }
 
     // Build where clause
@@ -136,13 +137,13 @@ export class TicketsService {
 
     // Fetch tickets and total count
     const [tickets, total] = await Promise.all([
-      this.prisma.ticket.findMany({
+      this.db.ticket.findMany({
         where: whereConditions,
         take: limit,
         skip,
         orderBy: { number: 'asc' },
       }),
-      this.prisma.ticket.count({ where: whereConditions }),
+      this.db.ticket.count({ where: whereConditions }),
     ]);
 
     return {
@@ -155,12 +156,12 @@ export class TicketsService {
 
   async findByRef(projectSlug: string, ref: string) {
     // Find project by slug
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
     if (!project || project.deletedAt) {
-      throw new NotFoundException('Project not found');
+      throw new NotFoundAppException();
     }
 
     // Check if ref matches KODA-42 format (projectKey-number)
@@ -172,7 +173,7 @@ export class TicketsService {
     if (match) {
       // Resolve by composite unique key (projectId, number)
       const number = parseInt(match[2], 10);
-      ticket = await this.prisma.ticket.findUnique({
+      ticket = await this.db.ticket.findUnique({
         where: {
           projectId_number: {
             projectId: project.id,
@@ -183,29 +184,31 @@ export class TicketsService {
       });
     } else {
       // Treat as CUID
-      ticket = await this.prisma.ticket.findUnique({
+      ticket = await this.db.ticket.findUnique({
         where: { id: ref },
         include: { labels: { include: { label: true } } },
       });
     }
 
     // Don't return soft-deleted tickets
-    if (ticket && ticket.deletedAt) {
-      return null;
+    if (!ticket || ticket.deletedAt) {
+      throw new NotFoundAppException();
     }
 
-    // Transform labels from nested structure to flat array
-    if (ticket && ticket.labels) {
+    // Compute ref (e.g. KT-1) and transform labels from nested structure to flat array
+    const ticketRef = `${project.key}-${ticket.number}`;
+    if (ticket.labels) {
       interface TicketLabelWithLabel {
         label: { id: string; projectId: string; name: string; color: string | null };
       }
       return {
         ...ticket,
+        ref: ticketRef,
         labels: (ticket.labels as TicketLabelWithLabel[]).map((tl: TicketLabelWithLabel) => tl.label),
       };
     }
 
-    return ticket || null;
+    return { ...ticket, ref: ticketRef };
   }
 
   async update(
@@ -218,7 +221,7 @@ export class TicketsService {
     // Find ticket by ref
     const ticket = await this.findByRef(projectSlug, ref);
     if (!ticket) {
-      throw new NotFoundException('Ticket not found');
+      throw new NotFoundAppException();
     }
 
     // Build update data - only allow updating mutable fields
@@ -236,7 +239,7 @@ export class TicketsService {
     }
 
     // Update the ticket
-    return this.prisma.ticket.update({
+    return this.db.ticket.update({
       where: { id: ticket.id },
       data: updateData,
     });
@@ -250,21 +253,21 @@ export class TicketsService {
   ) {
     // Check if user has ADMIN role (only applies to users)
     if (actorType === 'user' && currentUser.role && currentUser.role !== 'ADMIN') {
-      throw new ForbiddenException('Only admins can delete tickets');
+      throw new ForbiddenAppException();
     }
 
     if (actorType === 'agent') {
-      throw new ForbiddenException('Agents cannot delete tickets');
+      throw new ForbiddenAppException();
     }
 
     // Find ticket by ref
     const ticket = await this.findByRef(projectSlug, ref);
     if (!ticket) {
-      throw new NotFoundException('Ticket not found');
+      throw new NotFoundAppException();
     }
 
     // Soft delete by setting deletedAt
-    return this.prisma.ticket.update({
+    return this.db.ticket.update({
       where: { id: ticket.id },
       data: {
         deletedAt: new Date(),
@@ -275,22 +278,22 @@ export class TicketsService {
   async assign(projectSlug: string, ref: string, assignInput: AssignInput) {
     // Validate that we don't have both userId and agentId
     if (assignInput.userId && assignInput.agentId) {
-      throw new BadRequestException('Cannot assign to both user and agent');
+      throw new ValidationAppException();
     }
 
     // Find project
-    const project = await this.prisma.project.findUnique({
+    const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
 
     if (!project || project.deletedAt) {
-      throw new NotFoundException('Project not found');
+      throw new NotFoundAppException();
     }
 
     // Find ticket by ref
     const ticket = await this.findByRef(projectSlug, ref);
     if (!ticket) {
-      throw new NotFoundException('Ticket not found');
+      throw new NotFoundAppException();
     }
 
     // Update assignment
@@ -309,7 +312,7 @@ export class TicketsService {
       updateData.assignedToAgentId = null;
     }
 
-    return this.prisma.ticket.update({
+    return this.db.ticket.update({
       where: { id: ticket.id },
       data: updateData,
     });
