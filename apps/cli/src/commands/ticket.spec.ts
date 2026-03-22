@@ -1,8 +1,6 @@
 // Mock child_process to prevent real browser opens during tests
 jest.mock('child_process', () => ({
-  execFile: jest.fn((_cmd: string, _args: string[], _opts: unknown, cb: (err: null) => void) => {
-    if (typeof cb === 'function') cb(null);
-  }),
+  execFile: jest.fn(),
 }));
 
 // Mock chalk early to prevent ESM issues
