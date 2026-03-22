@@ -90,3 +90,5 @@
 {"timestamp":"2026-03-22T05:21:08.744Z","level":"info","stage":"exit-summary","message":"Run completed","data":{"totalCost":0,"iterations":1,"storiesCompleted":0,"durationMs":1279543,"exitedCleanly":true}}
 {"timestamp":"2026-03-22T05:21:08.744Z","level":"debug","stage":"crash-recovery","message":"Exit summary written"}
 {"timestamp":"2026-03-22T05:21:08.786Z","level":"warn","stage":"run.complete","message":"Agent did not commit after run-summary session — auto-committing","data":{"role":"run-summary","storyId":"cli-refactor","dirtyFiles":7}}
+{"timestamp":"2026-03-22T05:21:08.842Z","level":"debug","stage":"crash-recovery","message":"Signal handlers unregistered"}
+{"timestamp":"2026-03-22T05:21:08.844Z","level":"debug","stage":"interaction","message":"Interaction chain destroyed"}
