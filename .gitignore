@@ -66,4 +66,7 @@ apps/api/smoke-result.txt
 .nax/**/acceptance-meta.json
 .nax/**/acceptance.test.ts
 .nax/**/acceptance-refined.json
+.nax/**/*.bak
+.nax/**/acp-sessions.json
+apps/**/.nax/
 
