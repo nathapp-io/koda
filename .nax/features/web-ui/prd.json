@@ -1,0 +1,479 @@
+{
+  "project": "koda",
+  "feature": "web-ui",
+  "branchName": "feat/web-ui",
+  "createdAt": "2026-03-22T00:00:00.000Z",
+  "updatedAt": "2026-03-22T10:43:30.099Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Shadcn Components Install + Auth Foundation",
+      "description": "Install missing npm dependencies (vee-validate, @vee-validate/zod, vue-sonner), install all required Shadcn-nuxt components via CLI, create composables/useAuth.ts for JWT cookie management, modify composables/useApi.ts to inject Authorization header, create middleware/auth.ts for route protection, create layouts/auth.vue for centered login layout, rewrite pages/login.vue as a working VeeValidate+Zod form, and add <Toaster /> to app.vue. The useAuth composable stores the token in useCookie('koda_token') and exposes login(), logout(), isAuthenticated. The middleware redirects unauthenticated users to /login and authenticated users away from /login. The login form validates email format and min 8-char password, calls POST /auth/login, stores returned accessToken in cookie, and shows success/error toasts via vue-sonner.",
+      "acceptanceCriteria": [
+        "bun add vee-validate @vee-validate/zod vue-sonner executed in apps/web and packages saved to package.json",
+        "All required Shadcn components installed via bunx shadcn-vue@latest add: button card badge dialog input textarea select label form table separator avatar sonner dropdown-menu",
+        "components/ui/ directory populated with all installed component subdirectories",
+        "composables/useAuth.ts created with token in useCookie('koda_token'), user in useState, login(), logout(), isAuthenticated computed",
+        "composables/useApi.ts modified to import useAuth and inject Authorization: Bearer <token> header on every request when token exists",
+        "middleware/auth.ts created — redirects to /login if not authenticated, redirects to / if authenticated and on /login",
+        "layouts/auth.vue created with centered card layout",
+        "pages/login.vue rewritten: uses VeeValidate + toTypedSchema(zod), email z.string().email(), password z.string().min(8), definePageMeta layout auth, toast.success on success, toast.error on failure, no console.log",
+        "app.vue updated to include <Toaster /> from vue-sonner",
+        "bun run lint passes with 0 errors",
+        "bun run type-check passes"
+      ],
+      "tags": [
+        "feature",
+        "security",
+        "auth"
+      ],
+      "dependencies": [],
+      "status": "decomposed",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/composables/useApi.ts",
+        "apps/web/app.vue",
+        "apps/web/pages/login.vue",
+        "apps/web/nuxt.config.ts",
+        "apps/web/package.json"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-001-1",
+      "title": "Install npm dependencies and Shadcn components",
+      "description": "Run `bun add vee-validate @vee-validate/zod vue-sonner` in apps/web, then install all required Shadcn-nuxt components via `bunx shadcn-vue@latest add`: button card badge dialog input textarea select label form table separator avatar sonner dropdown-menu.",
+      "acceptanceCriteria": [
+        "bun add vee-validate @vee-validate/zod vue-sonner executed and packages appear in apps/web/package.json",
+        "All 14 Shadcn components installed via bunx shadcn-vue@latest add",
+        "components/ui/ directory populated with subdirectory for each installed component"
+      ],
+      "tags": [
+        "feature",
+        "setup"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "US-001",
+      "workdir": "apps/web",
+      "routing": {
+        "complexity": "simple",
+        "initialComplexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Straightforward dependency installation and component scaffolding with no code logic, testing, or architecture decisions required.",
+        "contentHash": "3ef264336e808e2f5ff834b375b1919a2b0eb3eb47eaa2c5dc87df22a9206025",
+        "modelTier": "balanced"
+      },
+      "priorErrors": [
+        "Attempt 1 failed with model tier: fast: Autofix exhausted: review still failing after fix attempts"
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "fast",
+          "stage": "escalation",
+          "summary": "Failed with tier fast, escalating to next tier",
+          "cost": 0.47241544999999985,
+          "timestamp": "2026-03-22T10:43:30.099Z"
+        }
+      ]
+    },
+    {
+      "id": "US-001-2",
+      "title": "Create useAuth composable",
+      "description": "Create composables/useAuth.ts that stores the JWT in useCookie('koda_token'), tracks the current user in useState, and exposes login(credentials), logout(), and a computed isAuthenticated. login() calls POST /auth/login, stores accessToken, and sets user state. logout() clears cookie and user state.",
+      "acceptanceCriteria": [
+        "composables/useAuth.ts created",
+        "Token stored exclusively via useCookie('koda_token')",
+        "User stored via useState",
+        "login() calls POST /auth/login and stores returned accessToken",
+        "logout() clears token cookie and user state",
+        "isAuthenticated is a computed ref derived from token existence"
+      ],
+      "tags": [
+        "feature",
+        "auth"
+      ],
+      "dependencies": [
+        "US-001-1"
+      ],
+      "status": "pending",
+      "passes": false,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "US-001",
+      "workdir": "apps/web"
+    },
+    {
+      "id": "US-001-3",
+      "title": "Inject auth header into useApi and create auth middleware",
+      "description": "Modify composables/useApi.ts to import useAuth and inject an Authorization: Bearer <token> header on every request when a token exists. Create middleware/auth.ts that redirects unauthenticated users to /login and redirects already-authenticated users away from /login to /.",
+      "acceptanceCriteria": [
+        "composables/useApi.ts imports useAuth and conditionally sets Authorization header on all requests",
+        "middleware/auth.ts created",
+        "Unauthenticated request to any protected route redirects to /login",
+        "Authenticated request to /login redirects to /"
+      ],
+      "tags": [
+        "feature",
+        "auth",
+        "security"
+      ],
+      "dependencies": [
+        "US-001-2"
+      ],
+      "status": "pending",
+      "passes": false,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "US-001",
+      "workdir": "apps/web"
+    },
+    {
+      "id": "US-001-4",
+      "title": "Create auth layout and rewrite login page",
+      "description": "Create layouts/auth.vue with a centered card layout for unauthenticated pages. Rewrite pages/login.vue to use VeeValidate + toTypedSchema(zod) with email (z.string().email()) and password (z.string().min(8)) fields, definePageMeta({ layout: 'auth' }), call useAuth().login() on submit, show toast.success on success, and toast.error on failure. No console.log.",
+      "acceptanceCriteria": [
+        "layouts/auth.vue created with centered card layout using Shadcn Card component",
+        "pages/login.vue uses VeeValidate with toTypedSchema wrapping a Zod schema",
+        "Email field validated as z.string().email()",
+        "Password field validated as z.string().min(8)",
+        "definePageMeta({ layout: 'auth' }) present",
+        "toast.success shown on successful login",
+        "toast.error shown on API failure",
+        "No console.log statements"
+      ],
+      "tags": [
+        "feature",
+        "auth",
+        "ui"
+      ],
+      "dependencies": [
+        "US-001-2",
+        "US-001-3"
+      ],
+      "status": "pending",
+      "passes": false,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "US-001",
+      "workdir": "apps/web"
+    },
+    {
+      "id": "US-001-5",
+      "title": "Wire Toaster and verify quality gates",
+      "description": "Add <Toaster /> from vue-sonner to app.vue so toast notifications are globally available. Verify that bun run lint exits with 0 errors and bun run type-check exits with 0 TypeScript errors across the apps/web package after all prior sub-stories are merged.",
+      "acceptanceCriteria": [
+        "app.vue updated to include <Toaster /> imported from vue-sonner",
+        "bun run lint exits 0 with 0 errors in apps/web",
+        "bun run type-check exits 0 with no TypeScript errors in apps/web"
+      ],
+      "tags": [
+        "feature",
+        "quality"
+      ],
+      "dependencies": [
+        "US-001-1",
+        "US-001-2",
+        "US-001-3",
+        "US-001-4"
+      ],
+      "status": "pending",
+      "passes": false,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "US-001",
+      "workdir": "apps/web"
+    },
+    {
+      "id": "US-002",
+      "title": "App Layout — Sidebar + Header",
+      "description": "Create layouts/default.vue with a fixed left sidebar (w-56) containing the Koda logo, Dashboard and Projects navigation links, and a bottom user display with logout. Top header contains a page title slot, dark mode toggle using useColorMode(), and user name/logout dropdown. Main content area renders <slot /> with px-6 py-4 padding. Mobile sidebar collapses via v-show with a toggle state variable. Update pages/index.vue to use the default layout via definePageMeta. Remove or refactor the inline nav in app.vue so it defers to the layout system.",
+      "acceptanceCriteria": [
+        "layouts/default.vue created with fixed sidebar (w-56), nav links (Dashboard, Projects), bottom user section",
+        "Top header renders dark mode toggle button using useColorMode() — sun/moon icon swap",
+        "Dark mode toggle correctly switches class-based dark mode via colorMode.preference",
+        "Sidebar shows current user name from useAuth().user",
+        "Logout button in sidebar/header calls useAuth().logout()",
+        "Mobile sidebar toggles visibility via v-show and a local ref, not CSS media breakpoints",
+        "pages/index.vue updated with definePageMeta({ layout: 'default' })",
+        "app.vue updated to not duplicate navigation (renders NuxtPage inside NuxtLayout)",
+        "bun run lint passes with 0 errors",
+        "bun run type-check passes"
+      ],
+      "tags": [
+        "feature",
+        "ui"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/app.vue",
+        "apps/web/pages/index.vue",
+        "apps/web/composables/useAuth.ts",
+        "apps/web/nuxt.config.ts",
+        "apps/web/CLAUDE.md"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-003",
+      "title": "Project List Dashboard",
+      "description": "Rewrite pages/index.vue as a functional project list dashboard. Uses useAsyncData to fetch GET /projects via useApi(). Renders a responsive grid (grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4) of Card components: each showing project name, key badge, truncated description, and a 'View Board' Button navigating to /${project.slug}. 'New Project' Button (admin only, top right) opens CreateProjectDialog. Shows empty state when no projects. Create components/CreateProjectDialog.vue: a Dialog form with VeeValidate+Zod fields for name, slug (auto-derived from name with toLowerCase/replace), and key (auto-uppercased, min 2 max 6 A-Z). On success emits 'created' and calls toast.success; on error toast.error.",
+      "acceptanceCriteria": [
+        "pages/index.vue fetches GET /projects via useApi() with useAsyncData",
+        "Projects rendered as Card grid (1/2/3 columns responsive) with name, key Badge, truncated description",
+        "'View Board' button on each card navigates to /${project.slug}",
+        "'New Project' button opens CreateProjectDialog",
+        "CreateProjectDialog has name, slug, key fields with VeeValidate+Zod validation",
+        "Slug auto-derives from name input: lowercase, spaces to hyphens, non-alphanumeric stripped",
+        "Key field auto-uppercases and validates /^[A-Z]+$/, min 2 max 6 chars",
+        "Successful create: toast.success, emits 'created', list refreshes",
+        "Failed create: toast.error with message",
+        "Empty state rendered when projects array is empty",
+        "bun run lint passes with 0 errors",
+        "bun run type-check passes"
+      ],
+      "tags": [
+        "feature",
+        "ui",
+        "api"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/pages/index.vue",
+        "apps/web/composables/useApi.ts",
+        "apps/web/composables/useAuth.ts",
+        "apps/web/layouts/default.vue",
+        "apps/web/CLAUDE.md"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-004",
+      "title": "Ticket Kanban Board",
+      "description": "Build the kanban board feature for a project. Create pages/[project]/index.vue which reads the project slug from useRoute().params.project, fetches GET /projects/${slug}/tickets, groups tickets by status, and renders TicketBoard. Create components/TicketBoard.vue: a horizontally scrollable (overflow-x-auto) container with 6 status columns (CREATED, VERIFIED, IN_PROGRESS, VERIFY_FIX, CLOSED, REJECTED). Each column has a header with status name and count badge, a 'New Ticket' button in the CREATED column header, and a list of TicketCard components. Create components/TicketCard.vue: shows ref in mono font, title, type Badge (BUG=red border, ENHANCEMENT=blue border), priority Badge (CRITICAL=red, HIGH=orange, MEDIUM=secondary, LOW=outline), assignee Avatar if assigned; emits 'open' on click. Create components/CreateTicketDialog.vue: VeeValidate+Zod form with title (min 3), type enum, priority enum with MEDIUM default, optional description; POSTs to /projects/${slug}/tickets; on success toast + board refresh.",
+      "acceptanceCriteria": [
+        "pages/[project]/index.vue reads slug from route params and fetches correct tickets endpoint",
+        "TicketBoard renders 6 columns in order: CREATED, VERIFIED, IN_PROGRESS, VERIFY_FIX, CLOSED, REJECTED",
+        "Each column shows correct ticket count badge",
+        "Tickets are grouped by status and each renders as TicketCard in its column",
+        "TicketCard shows ref (mono font), title, type Badge with correct border color, priority Badge with correct variant",
+        "TicketCard click emits 'open' and page navigates to /${slug}/tickets/${ref}",
+        "Assignee Avatar shown when ticket has assignee",
+        "'New Ticket' button in CREATED column opens CreateTicketDialog",
+        "CreateTicketDialog form has title, type, priority (default MEDIUM), description fields with VeeValidate+Zod",
+        "Successful ticket creation shows toast and refreshes board data",
+        "Board uses horizontal scroll for columns on narrow viewports",
+        "bun run lint passes with 0 errors",
+        "bun run type-check passes"
+      ],
+      "tags": [
+        "feature",
+        "ui",
+        "api"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/composables/useApi.ts",
+        "apps/web/composables/useAuth.ts",
+        "apps/web/pages/index.vue",
+        "apps/web/CLAUDE.md",
+        "apps/web/layouts/default.vue"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-005",
+      "title": "Ticket Detail Page with Actions and Comments",
+      "description": "Build the ticket detail page and supporting components. Create pages/[project]/tickets/[ref].vue: two-column layout (2/3 left, 1/3 right). Left: title, description (pre-wrap), status/priority/type badges, created info, CommentThread. Right: TicketActionPanel, metadata (assignee, created date). Fetches ticket via GET /projects/${slug}/tickets/${ref} and comments via GET /projects/${slug}/tickets/${ref}/comments using useAsyncData. Create components/TicketActionPanel.vue: renders action buttons based on ticket.status per the state machine (CREATED→Verify/Reject with comment, VERIFIED→Start, IN_PROGRESS→Submit Fix/Reject with comment, VERIFY_FIX→Approve Fix/Fail Fix, CLOSED/REJECTED→no actions). Each action requiring a comment opens a Dialog with a Textarea before the API call. API calls: verify (POST .../verify {body, type:'VERIFICATION'}), start (POST .../start), fix (POST .../fix {body, type:'FIX_REPORT'}), verify-fix (POST .../verify-fix?approve=true|false {body, type:'REVIEW'}), reject (POST .../reject {body, type:'GENERAL'}). Create components/CommentThread.vue: chronological comment list with type pill (VERIFICATION=blue, FIX_REPORT=orange, REVIEW=green, GENERAL=gray), add comment form with body (required) and type select.",
+      "acceptanceCriteria": [
+        "pages/[project]/tickets/[ref].vue two-column layout renders ticket data from API",
+        "Title, description (pre-wrap whitespace), status/priority/type badges all display correctly",
+        "TicketActionPanel shows Verify and Reject buttons for CREATED status",
+        "TicketActionPanel shows Start button for VERIFIED status",
+        "TicketActionPanel shows Submit Fix and Reject buttons for IN_PROGRESS status",
+        "TicketActionPanel shows Approve Fix and Fail Fix buttons for VERIFY_FIX status",
+        "TicketActionPanel shows no action buttons for CLOSED or REJECTED status",
+        "Actions requiring comment (Verify, Reject, Submit Fix, Fail Fix) open a Dialog with Textarea before API call",
+        "Successful transition shows toast and refreshes ticket data",
+        "CommentThread renders comments in chronological order",
+        "Each comment shows type as colored pill (VERIFICATION=blue, FIX_REPORT=orange, REVIEW=green, GENERAL=gray)",
+        "Add comment form has body (required) and type select, submits to correct endpoint",
+        "New comment appends without full page reload",
+        "bun run lint passes with 0 errors",
+        "bun run type-check passes"
+      ],
+      "tags": [
+        "feature",
+        "ui",
+        "api"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/composables/useApi.ts",
+        "apps/web/CLAUDE.md",
+        "apps/web/pages/[project]/index.vue",
+        "apps/web/components/TicketCard.vue",
+        "apps/web/components/TicketBoard.vue"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-006",
+      "title": "Agent List Page",
+      "description": "Create pages/[project]/agents.vue: a table-based agent management page. Fetches GET /agents via useApi() with useAsyncData. Renders a Table with columns: Name, Slug, Roles (Badge cells), Capabilities (Badge cells), Status, Actions. Status badges: ACTIVE=green (bg-green-100 text-green-800), PAUSED=yellow (bg-yellow-100 text-yellow-800), OFFLINE=gray (secondary variant). Roles and capabilities shown as small Badge components inside the cell. Actions column has a DropdownMenu for admin users to change agent status (ACTIVE/PAUSED/OFFLINE) via PATCH request. Status change shows toast on success or failure. Add 'Agents' navigation link in the sidebar under the current project context.",
+      "acceptanceCriteria": [
+        "pages/[project]/agents.vue fetches GET /agents and renders in Table",
+        "Each row shows Name, Slug, Roles as Badge list, Capabilities as Badge list, Status badge, Actions dropdown",
+        "ACTIVE status badge: green styling",
+        "PAUSED status badge: yellow styling",
+        "OFFLINE status badge: gray/secondary styling",
+        "Actions dropdown allows selecting ACTIVE, PAUSED, or OFFLINE",
+        "Status change triggers PATCH API call and shows toast.success on success",
+        "Status change shows toast.error on failure",
+        "Agents navigation link added to sidebar in layouts/default.vue",
+        "bun run lint passes with 0 errors",
+        "bun run type-check passes"
+      ],
+      "tags": [
+        "feature",
+        "ui",
+        "api"
+      ],
+      "dependencies": [
+        "US-005"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/composables/useApi.ts",
+        "apps/web/composables/useAuth.ts",
+        "apps/web/layouts/default.vue",
+        "apps/web/CLAUDE.md",
+        "apps/web/pages/index.vue"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-007",
+      "title": "Build and Quality Gate",
+      "description": "Ensure the full Nuxt 3 application passes all quality checks: ESLint with --max-warnings=0, TypeScript strict type-check via nuxt typecheck, and a successful SSR build. Fix any remaining lint errors (unused imports, missing types, implicit any), type errors (unresolved composable types, missing generics, incorrect prop types), or build failures (missing Nuxt auto-imports, unresolved modules). Verify components/ui/ is fully populated. Ensure no @ts-ignore in new files and no hardcoded color values (text-gray-* patterns replaced with Shadcn CSS variable equivalents). Ensure generated/ directory is excluded from all checks.",
+      "acceptanceCriteria": [
+        "bun run lint exits 0 with 0 errors and 0 warnings on all .ts files outside generated/",
+        "bun run type-check exits 0 with no TypeScript errors",
+        "bun run build exits 0 and output contains Build complete",
+        "No @ts-ignore comments in any new file under apps/web (except generated/)",
+        "No hardcoded Tailwind color classes (text-gray-*, bg-gray-*) in new files — Shadcn CSS variables used instead",
+        "components/ui/ directory contains all 13 required component groups: button card badge dialog input textarea select label form table separator avatar sonner dropdown-menu",
+        "All imports resolve correctly — no missing module errors"
+      ],
+      "tags": [
+        "quality",
+        "build"
+      ],
+      "dependencies": [
+        "US-006"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "no-test",
+        "reasoning": "validated from LLM output",
+        "noTestJustification": "This story's verification IS the build toolchain itself — lint, type-check, and Nuxt build are the acceptance tests. Writing Jest/Vitest unit tests for a quality gate story would be circular. All behavioral code is tested in US-001 through US-006."
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/package.json",
+        "apps/web/nuxt.config.ts",
+        "apps/web/tsconfig.json",
+        "apps/web/CLAUDE.md"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    }
+  ],
+  "analysis": "apps/web is a Nuxt 3 scaffold with nuxt.config.ts, shadcn-nuxt, @nuxtjs/tailwindcss, @nuxtjs/color-mode all configured correctly. runtimeConfig.public.apiBaseUrl is set. composables/useApi.ts exists but has NO auth header injection — it needs to be modified. app.vue is a basic inline nav layout with no <Toaster />. pages/login.vue is a raw v-model stub with console.log — must be rewritten. pages/index.vue is a stub with empty API call. pages/register.vue exists but is not in scope. No composables/useAuth.ts, no middleware/auth.ts, no layouts/. No components/ui/ directory — Shadcn components have NOT been installed yet. Critical missing npm dependencies: vee-validate, @vee-validate/zod, vue-sonner — these must be added before any form work. The generated/ client at apps/web/generated/ is produced by 'bun run generate' from the API OpenAPI spec and must not be hand-edited. API responses are shaped {ret: 0, data: T} so callers must unwrap .data. Auth token must live in useCookie('koda_token') — never localStorage. All pages except login.vue must be protected by middleware/auth.ts. Lint is configured with --max-warnings=0 on .ts files, generated/ already excluded. Type-check runs nuxt typecheck. Build runs nuxt build (SSR). Dependency order is strict: auth foundation → layout → project list → ticket board → ticket detail → agent list → quality gate."
+}
