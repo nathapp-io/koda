@@ -3,7 +3,7 @@
   "feature": "web-ui",
   "branchName": "feat/web-ui",
   "createdAt": "2026-03-22T00:00:00.000Z",
-  "updatedAt": "2026-03-22T12:10:09.474Z",
+  "updatedAt": "2026-03-22T13:54:37.855Z",
   "userStories": [
     {
       "id": "US-001",
@@ -28,8 +28,8 @@
         "auth"
       ],
       "dependencies": [],
-      "status": "decomposed",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -207,8 +207,8 @@
         "US-001-2",
         "US-001-3"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "escalations": [],
       "attempts": 0,
       "parentStoryId": "US-001",
@@ -243,15 +243,22 @@
         "US-001-3",
         "US-001-4"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "escalations": [],
       "attempts": 0,
       "parentStoryId": "US-001",
       "workdir": "apps/web",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "routing": {
+        "complexity": "simple",
+        "initialComplexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Single-file import and component addition with lint/typecheck verification is boilerplate work.",
+        "contentHash": "2e3699ad2625f5393f914d163fed1abb0ab3d66a02a12cdd609dad4f92e3c75b"
+      }
     },
     {
       "id": "US-002",
@@ -276,8 +283,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -323,8 +330,8 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -371,8 +378,8 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -391,6 +398,157 @@
       "priorErrors": [],
       "priorFailures": [],
       "storyPoints": 1
+    },
+    {
+      "id": "US-004-1",
+      "title": "TicketCard Component",
+      "description": "Create components/TicketCard.vue that accepts a ticket prop and renders: ref in mono font, title, type Badge (BUG=red border, ENHANCEMENT=blue border), priority Badge (CRITICAL=red, HIGH=orange, MEDIUM=secondary, LOW=outline), and an assignee Avatar when the ticket has an assignee. Emits an 'open' event on click.",
+      "acceptanceCriteria": [
+        "components/TicketCard.vue created and accepts a typed ticket prop",
+        "ref rendered in monospace font",
+        "type Badge uses red border for BUG and blue border for ENHANCEMENT",
+        "priority Badge uses correct variant: CRITICAL=red, HIGH=orange, MEDIUM=secondary, LOW=outline",
+        "Assignee Avatar rendered only when ticket.assignee is present",
+        "Component emits 'open' event when clicked"
+      ],
+      "tags": [
+        "feature",
+        "ui"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "US-004",
+      "workdir": "apps/web",
+      "routing": {
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Standard Vue component with conditional rendering and Badge variants; straightforward prop typing and event emission; 30-90 min work",
+        "contentHash": "a80cd5d462f98a1ebd2458d6ee29e9c974c6f039691a6fcb07c4e03fbd73783d"
+      },
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-004-2",
+      "title": "TicketBoard Component",
+      "description": "Create components/TicketBoard.vue: an overflow-x-auto container that accepts a tickets array prop and renders exactly 6 status columns in order: CREATED, VERIFIED, IN_PROGRESS, VERIFY_FIX, CLOSED, REJECTED. Each column has a header with the status name and a count badge. The CREATED column header includes a 'New Ticket' button that emits a 'create' event. Each column lists TicketCard components for its grouped tickets. Emits 'open-ticket' when a TicketCard fires 'open'.",
+      "acceptanceCriteria": [
+        "components/TicketBoard.vue created accepting a tickets array prop",
+        "Container uses overflow-x-auto for horizontal scroll on narrow viewports",
+        "Exactly 6 columns rendered in order: CREATED, VERIFIED, IN_PROGRESS, VERIFY_FIX, CLOSED, REJECTED",
+        "Each column header shows status name and correct ticket count badge",
+        "'New Ticket' button present only in CREATED column header and emits 'create' event",
+        "Tickets are grouped by status and each renders a TicketCard",
+        "TicketCard 'open' event bubbles up as 'open-ticket' from TicketBoard"
+      ],
+      "tags": [
+        "feature",
+        "ui"
+      ],
+      "dependencies": [
+        "US-004-1"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "US-004",
+      "workdir": "apps/web",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "routing": {
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Standard Vue component with moderate logic (grouping tickets by status, conditional rendering, event propagation), clear requirements, single file but requires thoughtful component composition.",
+        "contentHash": "c102c62dca9f9f3457bc4e6f6db130beb65acc8a3d83a27d27bfb233e909d9e0"
+      }
+    },
+    {
+      "id": "US-004-3",
+      "title": "CreateTicketDialog Component",
+      "description": "Create components/CreateTicketDialog.vue: a Dialog-wrapped VeeValidate+Zod form with fields: title (string, min 3 chars), type (enum: BUG | ENHANCEMENT), priority (enum, default MEDIUM), and optional description (textarea). Accepts a projectSlug prop. On submit, POSTs to /projects/${slug}/tickets via useApi(). On success emits 'created' and shows a vue-sonner toast. On API error shows an error toast.",
+      "acceptanceCriteria": [
+        "components/CreateTicketDialog.vue created with a v-model:open or open prop to control visibility",
+        "Form uses VeeValidate with toTypedSchema wrapping a Zod schema",
+        "title field validates as z.string().min(3)",
+        "type field is a Select with BUG and ENHANCEMENT options",
+        "priority field is a Select defaulting to MEDIUM",
+        "description field is an optional Textarea",
+        "Successful POST emits 'created' event and shows success toast via vue-sonner",
+        "API error shows an error toast"
+      ],
+      "tags": [
+        "feature",
+        "ui",
+        "api"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "US-004",
+      "workdir": "apps/web",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "routing": {
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Standard Vue 3 form component with VeeValidate/Zod validation, API integration, and toast handling — moderate logic and multiple integrations requiring careful implementation.",
+        "contentHash": "886257297af77d684ba3ba9667ffaf4e2c881ade9f1fd37a4090c9399fa6e42e"
+      }
+    },
+    {
+      "id": "US-004-4",
+      "title": "Project Board Page — Route, Data Fetch, and Wiring",
+      "description": "Create pages/[project]/index.vue. Read the project slug from useRoute().params.project. Fetch GET /projects/${slug}/tickets via useApi() wrapped in useAsyncData(). Pass tickets to TicketBoard. Handle the TicketBoard 'open-ticket' event by navigating to /${slug}/tickets/${ref}. Handle the TicketBoard 'create' event by opening CreateTicketDialog. Refresh board data (refresh from useAsyncData) when CreateTicketDialog emits 'created'.",
+      "acceptanceCriteria": [
+        "pages/[project]/index.vue created and reads slug from useRoute().params.project",
+        "Fetches GET /projects/${slug}/tickets and passes ticket array to TicketBoard",
+        "TicketBoard 'open-ticket' event navigates to /${slug}/tickets/${ref}",
+        "TicketBoard 'create' event opens CreateTicketDialog with correct projectSlug",
+        "CreateTicketDialog 'created' event triggers board data refresh",
+        "bun run lint passes with 0 errors",
+        "bun run type-check passes"
+      ],
+      "tags": [
+        "feature",
+        "ui",
+        "api"
+      ],
+      "dependencies": [
+        "US-004-2",
+        "US-004-3"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "US-004",
+      "workdir": "apps/web",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "routing": {
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Standard Nuxt feature with straightforward component wiring, event handling, and data fetching — no novel patterns or complex logic, but requires understanding multiple interactions and established conventions.",
+        "contentHash": "789a3f7f0e25380600e5f9f682df2e3879c5e87699316aa230935c9a00f714cc"
+      }
     },
     {
       "id": "US-005",
@@ -421,8 +579,8 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -441,6 +599,157 @@
       "priorErrors": [],
       "priorFailures": [],
       "storyPoints": 1
+    },
+    {
+      "id": "US-005-1",
+      "title": "Ticket Detail Page — Layout and Data Fetch",
+      "description": "Create pages/[project]/tickets/[ref].vue with a two-column layout (2/3 left, 1/3 right). Fetch ticket via GET /projects/${slug}/tickets/${ref} using useAsyncData. Render title, description (pre-wrap whitespace), status/priority/type badges, and right-column metadata (assignee, created date). Leave slots for TicketActionPanel and CommentThread components (render placeholders).",
+      "acceptanceCriteria": [
+        "pages/[project]/tickets/[ref].vue exists and reads slug + ref from useRoute() params",
+        "useAsyncData fetches GET /projects/${slug}/tickets/${ref} via useApi()",
+        "Two-column layout: left col is 2/3 width, right col is 1/3 width",
+        "Title and description (white-space: pre-wrap) render from API response",
+        "Status, priority, and type display as styled Badge components",
+        "Right column shows assignee and created date metadata",
+        "Placeholder <div> slots exist for TicketActionPanel and CommentThread"
+      ],
+      "tags": [
+        "feature",
+        "ui"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "US-005",
+      "workdir": "apps/web",
+      "routing": {
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Standard UI feature: single Vue component with layout, data fetch integration, and conditional rendering—moderate scope, established patterns, no new subsystems.",
+        "contentHash": "1c44890da2f14bbfc354b35d1230f3394a0ece4ceb259ba807a89f1d32c32c24"
+      },
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-005-2",
+      "title": "TicketActionPanel Component — State Machine Buttons and Dialogs",
+      "description": "Create components/TicketActionPanel.vue. Accept a ticket prop and emit a 'transition' event on success. Render action buttons per status: CREATED→Verify+Reject, VERIFIED→Start, IN_PROGRESS→Submit Fix+Reject, VERIFY_FIX→Approve Fix+Fail Fix, CLOSED/REJECTED→no buttons. Actions requiring a comment (Verify, Reject, Submit Fix, Fail Fix) open a Shadcn Dialog with a Textarea before making the API call. API endpoints: verify (POST .../verify), start (POST .../start), fix (POST .../fix), verify-fix (POST .../verify-fix?approve=true|false), reject (POST .../reject). Emit 'transition' after a successful response.",
+      "acceptanceCriteria": [
+        "components/TicketActionPanel.vue accepts a ticket prop typed to the generated Ticket schema",
+        "CREATED status renders Verify and Reject buttons only",
+        "VERIFIED status renders Start button only",
+        "IN_PROGRESS status renders Submit Fix and Reject buttons only",
+        "VERIFY_FIX status renders Approve Fix and Fail Fix buttons only",
+        "CLOSED and REJECTED statuses render no action buttons",
+        "Verify, Reject, Submit Fix, and Fail Fix open a Dialog containing a Textarea before the API call",
+        "Start, Approve Fix call their endpoints immediately without a dialog",
+        "Component emits a 'transition' event after each successful API response"
+      ],
+      "tags": [
+        "feature",
+        "ui"
+      ],
+      "dependencies": [
+        "US-005-1"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "US-005",
+      "workdir": "apps/web",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "routing": {
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Single Vue component with conditional state-based rendering, dialog integration, and API calls; standard Shadcn-nuxt patterns requiring moderate logic but no multi-file refactoring or new subsystems.",
+        "contentHash": "46b8464d30291a7cdd42e14a391aaf95c71b6c5c5d36811c3e7d11e361a7a409"
+      }
+    },
+    {
+      "id": "US-005-3",
+      "title": "CommentThread Component — List and Add-Comment Form",
+      "description": "Create components/CommentThread.vue. Accept projectSlug and ticketRef props. Fetch comments via GET /projects/${slug}/tickets/${ref}/comments using useAsyncData and render them in chronological order. Display a type pill per comment: VERIFICATION=blue, FIX_REPORT=orange, REVIEW=green, GENERAL=gray. Below the list, render an add-comment form with a required body Textarea and a type Select (options: GENERAL, VERIFICATION, FIX_REPORT, REVIEW). On submit, POST to /projects/${slug}/tickets/${ref}/comments; on success append the new comment to the list without a full page reload.",
+      "acceptanceCriteria": [
+        "components/CommentThread.vue accepts projectSlug and ticketRef props",
+        "Comments are fetched via useAsyncData and rendered in chronological order",
+        "Each comment displays a colored type pill: VERIFICATION=blue, FIX_REPORT=orange, REVIEW=green, GENERAL=gray",
+        "Add-comment form has a required body Textarea and a type Select with all four options",
+        "Submitting the form POSTs to the correct endpoint and appends the new comment reactively without full reload",
+        "Body field shows a validation error if submitted empty"
+      ],
+      "tags": [
+        "feature",
+        "ui"
+      ],
+      "dependencies": [
+        "US-005-1"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "US-005",
+      "workdir": "apps/web",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "routing": {
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Standard Vue component with data fetching, form handling, validation, and reactive list updates — typical feature implementation",
+        "contentHash": "94c0d2a8f17130d857e3fcc050e182e8ed9d17089df2dfca4895b0b42892b588"
+      }
+    },
+    {
+      "id": "US-005-4",
+      "title": "Wire Components, Toast Feedback, and Quality Gates",
+      "description": "Integrate TicketActionPanel and CommentThread into the ticket detail page, replacing the placeholder slots. On the 'transition' event from TicketActionPanel, show a success toast (vue-sonner) and call refresh() to reload ticket data. On comment-added, show a brief success toast. Ensure bun run lint and bun run type-check both pass with zero errors.",
+      "acceptanceCriteria": [
+        "TicketActionPanel is wired into the right column of pages/[project]/tickets/[ref].vue",
+        "CommentThread is wired into the left column below the ticket body",
+        "A success toast appears after each successful ticket transition",
+        "Ticket data refreshes automatically after a transition (useAsyncData refresh())",
+        "A success toast appears after a comment is added",
+        "bun run lint exits 0 with no errors in apps/web",
+        "bun run type-check exits 0 with no TypeScript errors in apps/web"
+      ],
+      "tags": [
+        "feature",
+        "ui",
+        "quality"
+      ],
+      "dependencies": [
+        "US-005-2",
+        "US-005-3"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "US-005",
+      "workdir": "apps/web",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "routing": {
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Integration work wiring two existing tested components into a page with event handlers and toast feedback—straightforward patterns but multiple touch-points requiring careful coordination to pass quality gates.",
+        "contentHash": "4bb71ccf4c6f2262690eb4a45b4631a874e72f9281430f6b8f46c0f3fb1cfc66"
+      }
     },
     {
       "id": "US-006",
@@ -467,8 +776,8 @@
       "dependencies": [
         "US-005"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -508,8 +817,8 @@
       "dependencies": [
         "US-006"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
