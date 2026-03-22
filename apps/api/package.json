@@ -67,7 +67,8 @@
     "rootDir": "src",
     "roots": [
       "<rootDir>",
-      "<rootDir>/../test/e2e"
+      "<rootDir>/../test/e2e",
+      "<rootDir>/../test/integration"
     ],
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {

@@ -1,21 +1,56 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { IsString, IsOptional, IsNumber, IsArray, MinLength } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { authConfig } from '../config/auth.config';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { createHmac, randomBytes } from 'crypto';
 import type { PrismaClient } from '@prisma/client';
 import { AgentRole } from '../common/enums';
 
-export interface CreateAgentDto {
-  name: string;
-  slug: string;
+export class CreateAgentDto {
+  @ApiProperty({ example: 'Subrina Coder' })
+  @IsString()
+  @MinLength(1)
+  name!: string;
+
+  @ApiProperty({ example: 'subrina-coder' })
+  @IsString()
+  @MinLength(1)
+  slug!: string;
+
+  @ApiProperty({ required: false, minimum: 1 })
+  @IsOptional()
+  @IsNumber()
+  maxConcurrentTickets?: number;
+
+  @ApiProperty({ required: false, example: ['DEVELOPER', 'REVIEWER'] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  roles?: string[];
+
+  @ApiProperty({ required: false, example: ['typescript', 'nestjs'] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  capabilities?: string[];
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export interface UpdateAgentDto {
+export class UpdateAgentDto {
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
   name?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
   status?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsNumber()
   maxConcurrentTickets?: number;
 }
 
@@ -24,15 +59,30 @@ export interface UpdateRolesDto {
   roles: string[];
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface UpdateCapabilitiesDto {
   capabilities: string[];
+}
+
+class UpdateRolesDto {
+  @ApiProperty({ example: ['DEVELOPER', 'REVIEWER'] })
+  @IsArray()
+  @IsString({ each: true })
+  roles!: string[];
+}
+
+export class UpdateCapabilitiesDto {
+  @ApiProperty({ example: ['typescript', 'nestjs'] })
+  @IsArray()
+  @IsString({ each: true })
+  capabilities!: string[];
 }
 
 @Injectable()
 export class AgentsService {
   constructor(
     private prisma: PrismaService<PrismaClient>,
-    private configService: ConfigService<ReturnType<typeof authConfig>>,
+    private configService: ConfigService,
   ) {}
   private get db() { return this.prisma.client; }
 
@@ -46,7 +96,8 @@ export class AgentsService {
     const rawKey = randomBytes(32).toString('hex');
 
     // Compute HMAC-SHA256 hash with API_KEY_SECRET
-    const apiKeySecret = this.configService.get('apiKeySecret', { infer: true });
+    const authCfg = this.configService.get<{ apiKeySecret?: string }>('auth');
+    const apiKeySecret = authCfg?.apiKeySecret;
     if (!apiKeySecret) {
       throw new Error('API_KEY_SECRET is not configured');
     }
@@ -54,7 +105,8 @@ export class AgentsService {
     const apiKeyHash = createHmac('sha256', apiKeySecret).update(rawKey).digest('hex');
 
     // Determine if this is an update (string) or create (object)
-    let agent;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let agent: any;
     if (typeof agentIdOrDto === 'string') {
       // Update existing agent
       agent = await this.db.agent.update({
@@ -62,13 +114,30 @@ export class AgentsService {
         data: { apiKeyHash },
       });
     } else {
-      // Create new agent
+      // Separate scalar fields from relational fields
+      const { roles, capabilities, ...scalarFields } = agentIdOrDto;
       agent = await this.db.agent.create({
         data: {
-          ...agentIdOrDto,
+          ...scalarFields,
           apiKeyHash,
         },
       });
+      // Create role entries (sequential create — createMany not reliable on SQLite for junction tables)
+      if (roles?.length) {
+        for (const role of roles) {
+          await this.db.agentRoleEntry.create({
+            data: { agentId: agent.id, role: role as AgentRole },
+          });
+        }
+      }
+      // Create capability entries
+      if (capabilities?.length) {
+        for (const capability of capabilities) {
+          await this.db.agentCapabilityEntry.create({
+            data: { agentId: agent.id, capability },
+          });
+        }
+      }
     }
 
     // Return raw key ONCE to client (never return the hash)
