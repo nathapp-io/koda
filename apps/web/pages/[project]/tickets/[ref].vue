@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { toast } from 'vue-sonner'
+
 interface Assignee {
   id: string
   name: string
@@ -15,6 +17,7 @@ interface Ticket {
   status: 'CREATED' | 'VERIFIED' | 'IN_PROGRESS' | 'VERIFY_FIX' | 'CLOSED' | 'REJECTED'
   assignee?: Assignee | null
   createdAt: string
+  [key: string]: unknown
 }
 
 const route = useRoute()
@@ -69,6 +72,15 @@ function formatDate(dateStr: string) {
     day: 'numeric',
   })
 }
+
+async function onTransition() {
+  toast.success('Ticket updated successfully')
+  await refresh()
+}
+
+function onCommentAdded() {
+  toast.success('Comment added successfully')
+}
 </script>
 
 <template>
@@ -103,10 +115,11 @@ function formatDate(dateStr: string) {
           <p class="whitespace-pre-wrap text-sm">{{ ticket.description }}</p>
         </div>
 
-        <!-- Placeholder for CommentThread -->
-        <div data-slot="comment-thread">
-          <!-- CommentThread will be rendered here -->
-        </div>
+        <CommentThread
+          :project-slug="slug"
+          :ticket-ref="ref"
+          @comment-added="onCommentAdded"
+        />
       </div>
 
       <!-- Right column: 1/3 width -->
@@ -138,10 +151,11 @@ function formatDate(dateStr: string) {
           </CardContent>
         </Card>
 
-        <!-- Placeholder for TicketActionPanel -->
-        <div data-slot="ticket-action-panel">
-          <!-- TicketActionPanel will be rendered here -->
-        </div>
+        <TicketActionPanel
+          :ticket="ticket"
+          :project-slug="slug"
+          @transition="onTransition"
+        />
       </div>
     </div>
 

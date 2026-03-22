@@ -17,6 +17,10 @@ const props = defineProps<{
   ticketRef: string
 }>()
 
+const emit = defineEmits<{
+  (e: 'comment-added'): void
+}>()
+
 const { $api } = useApi()
 
 const commentsEndpoint = `/projects/${props.projectSlug}/tickets/${props.ticketRef}/comments`
@@ -57,6 +61,7 @@ const onSubmit = handleSubmit(async (values) => {
     }) as Comment
     comments.value.push(newComment)
     resetForm()
+    emit('comment-added')
     toast.success('Comment added')
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to add comment'
