@@ -74,16 +74,7 @@
     "/api/auth/refresh": {
       "post": {
         "operationId": "AuthController_refresh",
-        "parameters": [
-          {
-            "name": "authorization",
-            "required": true,
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
+        "parameters": [],
         "responses": {
           "200": {
             "description": "",
@@ -144,6 +135,16 @@
       "post": {
         "operationId": "AgentsController_generateApiKey",
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAgentDto"
+              }
+            }
+          }
+        },
         "responses": {
           "201": {
             "description": "Agent created with API key"
@@ -397,9 +398,6 @@
         "responses": {
           "200": {
             "description": "API key rotated successfully"
-          },
-          "201": {
-            "description": ""
           },
           "401": {
             "description": "Unauthorized"
@@ -718,7 +716,9 @@
             "schema": {
               "enum": [
                 "BUG",
-                "ENHANCEMENT"
+                "ENHANCEMENT",
+                "TASK",
+                "QUESTION"
               ],
               "type": "string"
             }
@@ -1408,7 +1408,7 @@
           }
         ],
         "responses": {
-          "204": {
+          "200": {
             "description": "Comment deleted"
           },
           "403": {
@@ -1764,6 +1764,47 @@
           "password"
         ]
       },
+      "CreateAgentDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Subrina Coder"
+          },
+          "slug": {
+            "type": "string",
+            "example": "subrina-coder"
+          },
+          "maxConcurrentTickets": {
+            "type": "number",
+            "minimum": 1
+          },
+          "roles": {
+            "example": [
+              "DEVELOPER",
+              "REVIEWER"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "capabilities": {
+            "example": [
+              "typescript",
+              "nestjs"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "slug"
+        ]
+      },
       "UpdateAgentDto": {
         "type": "object",
         "properties": {
@@ -1917,7 +1958,9 @@
             "description": "Ticket type",
             "enum": [
               "BUG",
-              "ENHANCEMENT"
+              "ENHANCEMENT",
+              "TASK",
+              "QUESTION"
             ],
             "example": "BUG"
           },
@@ -1970,7 +2013,9 @@
             "description": "Ticket type",
             "enum": [
               "BUG",
-              "ENHANCEMENT"
+              "ENHANCEMENT",
+              "TASK",
+              "QUESTION"
             ]
           },
           "title": {
@@ -2108,10 +2153,7 @@
             "description": "Comment body explaining the transition",
             "example": "This ticket has been verified and is ready to work on"
           }
-        },
-        "required": [
-          "body"
-        ]
+        }
       },
       "CreateCommentDto": {
         "type": "object",
@@ -2125,11 +2167,11 @@
           "type": {
             "type": "string",
             "enum": [
+              "GENERAL",
               "VERIFICATION",
               "FIX_REPORT",
               "REVIEW",
-              "STATUS_CHANGE",
-              "GENERAL"
+              "STATUS_CHANGE"
             ],
             "description": "Comment type",
             "example": "GENERAL"
@@ -2145,10 +2187,7 @@
             "description": "Comment body",
             "example": "Updated comment body"
           }
-        },
-        "required": [
-          "body"
-        ]
+        }
       },
       "CreateLabelDto": {
         "type": "object",
