@@ -109,6 +109,7 @@ describe('commentCommand', () => {
 
       expect(CommentsService.add).toHaveBeenCalledWith(
         expect.any(Object),
+        'koda',
         'KODA-42',
         expect.objectContaining({
           body: 'Test comment',
@@ -146,6 +147,7 @@ describe('commentCommand', () => {
 
       expect(CommentsService.add).toHaveBeenCalledWith(
         expect.any(Object),
+        'koda',
         'KODA-42',
         expect.objectContaining({
           body: 'Fix report',
@@ -194,6 +196,7 @@ describe('commentCommand', () => {
 
         expect(CommentsService.add).toHaveBeenCalledWith(
           expect.any(Object),
+          'koda',
           'KODA-42',
           expect.objectContaining({
             type,

@@ -576,4 +576,32 @@ export function ticketCommand(program: Command): void {
         handleApiError(err, { notFoundMessage: `Ticket or label not found` });
       }
     });
+
+  ticketLabel
+    .command('remove <ref>')
+    .description('Detach a label from a ticket')
+    .option('--project <slug>', 'Project slug')
+    .requiredOption('--label <id>', 'Label ID')
+    .option('--json', 'Output as JSON')
+    .action(async (ref: string, options) => {
+      try {
+        const auth = resolveAuth({});
+
+        if (!auth.apiKey || !auth.apiUrl) {
+          error('API key or URL not configured. Run: koda login --api-key <key>');
+          process.exit(2);
+          return;
+        }
+
+        const client = configureClient(auth.apiUrl, auth.apiKey);
+        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+
+        await LabelsService.removeFromTicket(client, projectSlug, ref, options.label);
+
+        console.log(`✓ Label detached from ticket ${ref}`);
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err, { notFoundMessage: `Ticket or label not found` });
+      }
+    });
 }

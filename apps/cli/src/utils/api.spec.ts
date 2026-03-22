@@ -32,7 +32,7 @@ describe('unwrap', () => {
 
     it('throws on non-zero ret with a message', () => {
       const response = { data: { ret: 42, data: null } };
-      expect(() => unwrap(response)).toThrow(/ret=42/);
+      expect(() => unwrap(response)).toThrow(/exception\.42/);
     });
 
     it('throws on negative ret', () => {

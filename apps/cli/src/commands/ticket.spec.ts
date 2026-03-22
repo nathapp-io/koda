@@ -158,7 +158,6 @@ describe('ticketCommand', () => {
         'verify-fix',
         'close',
         'reject',
-        'open',
         'update',
         'delete',
       ];
@@ -202,8 +201,8 @@ describe('ticketCommand', () => {
 
       expect(TicketsService.create).toHaveBeenCalledWith(
         expect.any(Object),
+        'test-project',
         expect.objectContaining({
-          projectSlug: 'test-project',
           type: 'BUG',
           title: 'Test bug',
         })
@@ -246,8 +245,8 @@ describe('ticketCommand', () => {
 
       expect(TicketsService.create).toHaveBeenCalledWith(
         expect.any(Object),
+        'test-project',
         expect.objectContaining({
-          projectSlug: 'test-project',
           type: 'ENHANCEMENT',
           title: 'New feature',
           description: 'Feature description',
@@ -289,6 +288,7 @@ describe('ticketCommand', () => {
 
       expect(TicketsService.create).toHaveBeenCalledWith(
         expect.any(Object),
+        'test-project',
         expect.objectContaining({
           priority: 'CRITICAL',
         })
@@ -417,6 +417,7 @@ describe('ticketCommand', () => {
 
       expect(TicketsService.create).toHaveBeenCalledWith(
         expect.any(Object),
+        'proj',
         expect.objectContaining({ type: 'BUG' })
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
@@ -445,6 +446,7 @@ describe('ticketCommand', () => {
 
       expect(TicketsService.create).toHaveBeenCalledWith(
         expect.any(Object),
+        'proj',
         expect.objectContaining({ priority: 'HIGH' })
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
@@ -942,6 +944,7 @@ describe('ticketCommand', () => {
 
       expect(TicketsService.show).toHaveBeenCalledWith(
         expect.any(Object),
+        'koda',
         'KODA-42'
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
@@ -971,6 +974,7 @@ describe('ticketCommand', () => {
 
       expect(TicketsService.show).toHaveBeenCalledWith(
         expect.any(Object),
+        'koda',
         'cuid123456'
       );
     });
@@ -1126,6 +1130,7 @@ describe('ticketCommand', () => {
 
       expect(TicketsService.verify).toHaveBeenCalledWith(
         expect.any(Object),
+        'koda',
         'KODA-1',
         expect.objectContaining({
           body: 'Verified this bug',
@@ -1175,6 +1180,7 @@ describe('ticketCommand', () => {
 
       expect(TicketsService.verify).toHaveBeenCalledWith(
         expect.any(Object),
+        'koda',
         'KODA-1',
         expect.objectContaining({
           type: 'VERIFICATION',
@@ -1239,6 +1245,7 @@ describe('ticketCommand', () => {
 
       expect(TicketsService.assign).toHaveBeenCalledWith(
         expect.any(Object),
+        'koda',
         'KODA-1',
         expect.objectContaining({
           agentSlug: 'agent-123',
@@ -1269,6 +1276,7 @@ describe('ticketCommand', () => {
 
       expect(TicketsService.assign).toHaveBeenCalledWith(
         expect.any(Object),
+        'koda',
         'KODA-1',
         expect.objectContaining({
           agentSlug: 'self',
@@ -1299,6 +1307,7 @@ describe('ticketCommand', () => {
 
       expect(TicketsService.start).toHaveBeenCalledWith(
         expect.any(Object),
+        'koda',
         'KODA-1'
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
@@ -1354,6 +1363,7 @@ describe('ticketCommand', () => {
 
       expect(TicketsService.fix).toHaveBeenCalledWith(
         expect.any(Object),
+        'koda',
         'KODA-1',
         expect.objectContaining({
           body: 'Fixed the bug',
@@ -1392,6 +1402,7 @@ describe('ticketCommand', () => {
 
       expect(TicketsService.fix).toHaveBeenCalledWith(
         expect.any(Object),
+        'koda',
         'KODA-1',
         expect.objectContaining({
           gitRef: 'v1.0:src/auth.ts:42',
@@ -1440,6 +1451,7 @@ describe('ticketCommand', () => {
 
       expect(TicketsService.fix).toHaveBeenCalledWith(
         expect.any(Object),
+        'koda',
         'KODA-1',
         expect.objectContaining({
           type: 'FIX_REPORT',
@@ -1477,6 +1489,7 @@ describe('ticketCommand', () => {
 
       expect(TicketsService.verifyFix as jest.Mock).toHaveBeenCalledWith(
         expect.any(Object),
+        'koda',
         'KODA-1',
         expect.objectContaining({
           body: 'Looks good',
@@ -1515,6 +1528,7 @@ describe('ticketCommand', () => {
 
       expect(TicketsService.verifyFix as jest.Mock).toHaveBeenCalledWith(
         expect.any(Object),
+        'koda',
         'KODA-1',
         expect.objectContaining({
           body: 'Need more work',
@@ -1565,6 +1579,7 @@ describe('ticketCommand', () => {
 
       expect(TicketsService.verifyFix as jest.Mock).toHaveBeenCalledWith(
         expect.any(Object),
+        'koda',
         'KODA-1',
         expect.objectContaining({
           type: 'REVIEW',
@@ -1595,6 +1610,7 @@ describe('ticketCommand', () => {
 
       expect(TicketsService.close).toHaveBeenCalledWith(
         expect.any(Object),
+        'koda',
         'KODA-1'
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
@@ -1648,8 +1664,9 @@ describe('ticketCommand', () => {
         'Not reproducible',
       ]);
 
-      expect(TicketsService.reject as jest.Mock).toHaveBeenCalledWith(
+      expect(TicketsService.reject).toHaveBeenCalledWith(
         expect.any(Object),
+        'koda',
         'KODA-1',
         expect.objectContaining({
           body: 'Not reproducible',
@@ -1697,8 +1714,9 @@ describe('ticketCommand', () => {
         'Rejected',
       ]);
 
-      expect(TicketsService.reject as jest.Mock).toHaveBeenCalledWith(
+      expect(TicketsService.reject).toHaveBeenCalledWith(
         expect.any(Object),
+        'koda',
         'KODA-1',
         expect.objectContaining({
           type: 'GENERAL',
@@ -1761,113 +1779,6 @@ describe('ticketCommand', () => {
     });
   });
 
-  describe('ticket open', () => {
-    it('opens ticket with correct URL', async () => {
-      const mockTicket = {
-        id: 'ticket-1',
-        number: 42,
-        projectId: 'proj-1',
-        type: 'BUG',
-        title: 'Test bug',
-        status: 'CREATED',
-      };
-
-      (TicketsService.show as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockTicket },
-      });
-
-      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
-      const openCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'open');
-
-      try {
-        await openCmd?.parse(['node', 'test', 'KODA-42']);
-      } catch {
-        // Expected
-      }
-
-      expect(consoleLogSpy).toHaveBeenCalledWith('✓ Opening ticket in browser');
-      expect(processExitSpy).toHaveBeenCalledWith(0);
-    });
-
-    it('opens ticket with project option', async () => {
-      const mockTicket = {
-        id: 'ticket-1',
-        number: 42,
-        projectId: 'proj-1',
-        type: 'BUG',
-        title: 'Test bug',
-        status: 'CREATED',
-      };
-
-      (TicketsService.show as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockTicket },
-      });
-
-      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
-      const openCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'open');
-
-      try {
-        await openCmd?.parse(['node', 'test', 'KODA-42', '--project', 'my-project']);
-      } catch {
-        // Expected
-      }
-
-      expect(consoleLogSpy).toHaveBeenCalledWith('✓ Opening ticket in browser');
-      expect(processExitSpy).toHaveBeenCalledWith(0);
-    });
-
-    it('exits with code 2 when API key is not configured', async () => {
-      mockData.apiKey = '';
-      mockData.apiUrl = '';
-
-      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
-      const openCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'open');
-
-      try {
-        await openCmd?.parse(['node', 'test', 'KODA-42']);
-      } catch {
-        // Expected
-      }
-
-      expect(processExitSpy).toHaveBeenCalledWith(2);
-    });
-
-    it('handles ticket not found error', async () => {
-      const mockError = new Error('Not found');
-      (mockError as any).response = { status: 404 };
-
-      (TicketsService.show as jest.Mock).mockRejectedValue(mockError);
-
-      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
-      const openCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'open');
-
-      try {
-        await openCmd?.parse(['node', 'test', 'KODA-999']);
-      } catch {
-        // Expected
-      }
-
-      expect(processExitSpy).toHaveBeenCalledWith(1);
-    });
-
-    it('handles authorization error', async () => {
-      const mockError = new Error('Unauthorized');
-      (mockError as any).response = { status: 403 };
-
-      (TicketsService.show as jest.Mock).mockRejectedValue(mockError);
-
-      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
-      const openCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'open');
-
-      try {
-        await openCmd?.parse(['node', 'test', 'KODA-42']);
-      } catch {
-        // Expected
-      }
-
-      expect(processExitSpy).toHaveBeenCalledWith(2);
-    });
-  });
 
   describe('ticket update', () => {
     it('updates ticket title and exits 0 (AC1)', async () => {
@@ -1894,6 +1805,7 @@ describe('ticketCommand', () => {
 
       expect(TicketsService.update).toHaveBeenCalledWith(
         expect.any(Object),
+        'koda',
         'KODA-1',
         expect.objectContaining({ title: 'New title' })
       );
@@ -1924,6 +1836,7 @@ describe('ticketCommand', () => {
 
       expect(TicketsService.update).toHaveBeenCalledWith(
         expect.any(Object),
+        'koda',
         'KODA-1',
         expect.objectContaining({ priority: 'HIGH' })
       );
@@ -1976,7 +1889,7 @@ describe('ticketCommand', () => {
 
       await deleteCmd?.parseAsync(['node', 'test', 'KODA-1', '--project', 'koda', '--force']);
 
-      expect(TicketsService.delete).toHaveBeenCalledWith(expect.any(Object), 'KODA-1');
+      expect(TicketsService.delete).toHaveBeenCalledWith(expect.any(Object), 'koda', 'KODA-1');
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });
 
@@ -2016,6 +1929,7 @@ describe('ticketCommand', () => {
 
       expect(TicketsService.assign).toHaveBeenCalledWith(
         expect.any(Object),
+        'koda',
         'KODA-1',
         expect.objectContaining({ agentSlug: 'subrina-coder' })
       );
@@ -2157,6 +2071,7 @@ describe('ticketCommand', () => {
 
       expect(TicketsService.fix).toHaveBeenCalledWith(
         expect.any(Object),
+        'koda',
         'KODA-1',
         expect.objectContaining({ body: 'Fixed null ref' })
       );
@@ -2180,6 +2095,7 @@ describe('ticketCommand', () => {
 
         expect(LabelsService.addToTicket).toHaveBeenCalledWith(
           expect.anything(),
+          'koda',
           'KODA-1',
           'lbl-1'
         );
@@ -2218,6 +2134,7 @@ describe('ticketCommand', () => {
 
         expect(LabelsService.removeFromTicket).toHaveBeenCalledWith(
           expect.anything(),
+          'koda',
           'KODA-1',
           'lbl-1'
         );
