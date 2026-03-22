@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "run": {
+    "id": "run-2026-03-22T04-59-49-197Z",
+    "feature": "cli-refactor",
+    "startedAt": "2026-03-22T04:59:49.197Z",
+    "status": "failed",
+    "dryRun": false,
+    "pid": 21304
+  },
+  "progress": {
+    "total": 8,
+    "passed": 0,
+    "failed": 1,
+    "paused": 0,
+    "blocked": 0,
+    "pending": 7
+  },
+  "cost": {
+    "spent": 0,
+    "limit": 50
+  },
+  "current": null,
+  "iterations": 1,
+  "updatedAt": "2026-03-22T05:21:08.743Z",
+  "durationMs": 1279546
+}

@@ -1,0 +1,14 @@
+[
+  {
+    "runId": "run-2026-03-22T04-59-49-197Z",
+    "feature": "cli-refactor",
+    "startedAt": "2026-03-22T04:59:49.197Z",
+    "completedAt": "2026-03-22T05:21:08.740Z",
+    "totalCost": 0,
+    "totalStories": 0,
+    "storiesCompleted": 0,
+    "storiesFailed": 1,
+    "totalDurationMs": 1279543,
+    "stories": []
+  }
+]

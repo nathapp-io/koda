@@ -3,7 +3,7 @@
   "feature": "cli-refactor",
   "branchName": "feat/phase4r-cli-refactor",
   "createdAt": "2026-03-22T04:54:00Z",
-  "updatedAt": "2026-03-22T04:54:00Z",
+  "updatedAt": "2026-03-22T05:21:08.734Z",
   "description": "Refactor CLI (apps/cli) to match Phase 2R API. All responses are now wrapped in JsonResponse.Ok({ ret, data }), enum values are uppercase, and new endpoints exist for labels, ticket assign/update/delete, and project create/delete. Full spec: projects/koda/memory/NAX-PHASE4R-CLI-REFACTOR.md",
   "userStories": [
     {
@@ -19,15 +19,24 @@
         "Zero direct .data accesses on API responses remain in command files",
         "All list commands use const { items } = unwrap(response)"
       ],
-      "tags": ["refactor", "api", "core"],
+      "tags": [
+        "refactor",
+        "api",
+        "core"
+      ],
       "dependencies": [],
-      "status": "pending",
+      "status": "failed",
       "workdir": "apps/cli",
       "routing": {
         "complexity": "simple",
         "testStrategy": "tdd-simple",
         "modelTier": "powerful"
-      }
+      },
+      "attempts": 1,
+      "priorErrors": [],
+      "priorFailures": [],
+      "escalations": [],
+      "storyPoints": 1
     },
     {
       "id": "US-002",
@@ -43,15 +52,26 @@
         "koda project show nonexistent-slug → exits 4 with clear message",
         "No inline error handling remains in command files"
       ],
-      "tags": ["refactor", "error-handling", "dx"],
-      "dependencies": ["US-001"],
+      "tags": [
+        "refactor",
+        "error-handling",
+        "dx"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
       "status": "pending",
       "workdir": "apps/cli",
       "routing": {
         "complexity": "simple",
         "testStrategy": "tdd-simple",
         "modelTier": "powerful"
-      }
+      },
+      "attempts": 0,
+      "priorErrors": [],
+      "priorFailures": [],
+      "escalations": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -68,15 +88,26 @@
         "ticket verify-fix hardcoded comment type is REVIEW (was review)",
         "comment add --type GENERAL succeeds; lowercase --type general → exit 3"
       ],
-      "tags": ["bugfix", "enum", "api"],
-      "dependencies": ["US-001"],
+      "tags": [
+        "bugfix",
+        "enum",
+        "api"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
       "status": "pending",
       "workdir": "apps/cli",
       "routing": {
         "complexity": "simple",
         "testStrategy": "tdd-simple",
         "modelTier": "powerful"
-      }
+      },
+      "attempts": 0,
+      "priorErrors": [],
+      "priorFailures": [],
+      "escalations": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -90,15 +121,27 @@
         "koda ticket reject KODA-1 --project koda --comment 'Out of scope' succeeds",
         "ticket start help text shows 'CREATED or VERIFIED → IN_PROGRESS'"
       ],
-      "tags": ["bugfix", "ticket", "api"],
-      "dependencies": ["US-001", "US-003"],
+      "tags": [
+        "bugfix",
+        "ticket",
+        "api"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-003"
+      ],
       "status": "pending",
       "workdir": "apps/cli",
       "routing": {
         "complexity": "simple",
         "testStrategy": "tdd-simple",
         "modelTier": "powerful"
-      }
+      },
+      "attempts": 0,
+      "priorErrors": [],
+      "priorFailures": [],
+      "escalations": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -113,15 +156,27 @@
         "koda project delete test (no --force) → exits 1 'Use --force to confirm deletion'",
         "koda project show <slug> displays key and description fields in table"
       ],
-      "tags": ["feature", "project", "crud"],
-      "dependencies": ["US-001", "US-002"],
+      "tags": [
+        "feature",
+        "project",
+        "crud"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002"
+      ],
       "status": "pending",
       "workdir": "apps/cli",
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
         "modelTier": "powerful"
-      }
+      },
+      "attempts": 0,
+      "priorErrors": [],
+      "priorFailures": [],
+      "escalations": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -136,15 +191,28 @@
         "koda ticket assign KODA-1 --project koda --agent nonexistent → exits 4 'Agent not found'",
         "koda ticket show KODA-1 displays ref from API response ticket.ref field"
       ],
-      "tags": ["feature", "ticket", "crud"],
-      "dependencies": ["US-001", "US-002", "US-003"],
+      "tags": [
+        "feature",
+        "ticket",
+        "crud"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002",
+        "US-003"
+      ],
       "status": "pending",
       "workdir": "apps/cli",
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
         "modelTier": "powerful"
-      }
+      },
+      "attempts": 0,
+      "priorErrors": [],
+      "priorFailures": [],
+      "escalations": [],
+      "storyPoints": 1
     },
     {
       "id": "US-007",
@@ -160,15 +228,27 @@
         "labelCommand registered in src/index.ts (accessible as 'koda label')",
         "'koda ticket label' subcommand accessible via ticket command group"
       ],
-      "tags": ["feature", "labels", "new"],
-      "dependencies": ["US-001", "US-002"],
+      "tags": [
+        "feature",
+        "labels",
+        "new"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002"
+      ],
       "status": "pending",
       "workdir": "apps/cli",
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
         "modelTier": "powerful"
-      }
+      },
+      "attempts": 0,
+      "priorErrors": [],
+      "priorFailures": [],
+      "escalations": [],
+      "storyPoints": 1
     },
     {
       "id": "US-008",
@@ -184,15 +264,32 @@
         "Missing --force on delete → exit 1 before API call",
         "Generated client mocked via jest.mock('../generated') — no real HTTP calls"
       ],
-      "tags": ["testing", "coverage", "tdd"],
-      "dependencies": ["US-001", "US-002", "US-003", "US-004", "US-005", "US-006", "US-007"],
+      "tags": [
+        "testing",
+        "coverage",
+        "tdd"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002",
+        "US-003",
+        "US-004",
+        "US-005",
+        "US-006",
+        "US-007"
+      ],
       "status": "pending",
       "workdir": "apps/cli",
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
         "modelTier": "powerful"
-      }
+      },
+      "attempts": 0,
+      "priorErrors": [],
+      "priorFailures": [],
+      "escalations": [],
+      "storyPoints": 1
     }
   ]
 }
