@@ -409,7 +409,7 @@ describe('TicketsService', () => {
 
       const result = await service.findByRef('koda', 'KODA-1');
 
-      expect(result).toEqual(mockTicket);
+      expect(result).toEqual({ ...mockTicket, ref: 'KODA-1' });
       expect(prismaService.client.ticket.findUnique).toHaveBeenCalledWith({
         where: {
           projectId_number: {
@@ -427,7 +427,7 @@ describe('TicketsService', () => {
 
       const result = await service.findByRef('koda', 'ticket-123');
 
-      expect(result).toEqual(mockTicket);
+      expect(result).toEqual({ ...mockTicket, ref: 'KODA-1' });
       expect(prismaService.client.ticket.findUnique).toHaveBeenCalledWith({
         where: { id: 'ticket-123' },
         include: { labels: { include: { label: true } } },

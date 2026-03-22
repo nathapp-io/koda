@@ -70,7 +70,12 @@ describe('AgentsService', () => {
     prismaService = module.get<PrismaService<PrismaClient>>(PrismaService);
     _configService = module.get<ConfigService>(ConfigService);
 
-    mockConfigService.get.mockReturnValue('test-secret');
+    mockConfigService.get.mockImplementation((key: string) => {
+      if (key === 'auth') {
+        return { apiKeySecret: 'test-secret' };
+      }
+      return null;
+    });
   });
 
   afterEach(() => {
@@ -81,7 +86,7 @@ describe('AgentsService', () => {
     describe('for new agent creation', () => {
       it('should generate random 32-byte hex key', async () => {
         mockPrismaService.client.agent.create.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue('test-secret');
+        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey({
           name: 'Test Agent',
@@ -96,7 +101,7 @@ describe('AgentsService', () => {
 
       it('should compute HMAC-SHA256 hash with API_KEY_SECRET', async () => {
         mockPrismaService.client.agent.create.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue('test-secret');
+        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey({
           name: 'Test Agent',
@@ -112,7 +117,7 @@ describe('AgentsService', () => {
 
       it('should return raw key ONCE to client (not stored)', async () => {
         mockPrismaService.client.agent.create.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue('test-secret');
+        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey({
           name: 'Test Agent',
@@ -126,7 +131,7 @@ describe('AgentsService', () => {
 
       it('should store only hash in database', async () => {
         mockPrismaService.client.agent.create.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue('test-secret');
+        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey({
           name: 'Test Agent',
@@ -142,7 +147,7 @@ describe('AgentsService', () => {
 
       it('should include agent name and slug in creation', async () => {
         mockPrismaService.client.agent.create.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue('test-secret');
+        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         await service.generateApiKey({
           name: 'Test Agent',
@@ -158,7 +163,7 @@ describe('AgentsService', () => {
       it('should use correct API_KEY_SECRET from config', async () => {
         const secret = 'my-custom-secret';
         mockPrismaService.client.agent.create.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue(secret);
+        mockConfigService.get.mockReturnValue({ apiKeySecret: secret });
 
         const result = await service.generateApiKey({
           name: 'Test Agent',
@@ -172,7 +177,7 @@ describe('AgentsService', () => {
       });
 
       it('should throw error when API_KEY_SECRET is not configured', async () => {
-        mockConfigService.get.mockReturnValue(null);
+        mockConfigService.get.mockReturnValue({});
 
         await expect(service.generateApiKey({
           name: 'Test Agent',
@@ -182,7 +187,7 @@ describe('AgentsService', () => {
 
       it('should return created agent in response', async () => {
         mockPrismaService.client.agent.create.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue('test-secret');
+        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey({
           name: 'Test Agent',
@@ -197,7 +202,7 @@ describe('AgentsService', () => {
     describe('for rotating existing agent key', () => {
       it('should generate new random API key', async () => {
         mockPrismaService.client.agent.update.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue('test-secret');
+        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey('agent-123');
 
@@ -210,7 +215,7 @@ describe('AgentsService', () => {
         const agentWithOldHash = { ...mockAgent, apiKeyHash: oldHash };
 
         mockPrismaService.client.agent.update.mockResolvedValue(agentWithOldHash);
-        mockConfigService.get.mockReturnValue('test-secret');
+        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey('agent-123');
 
@@ -228,7 +233,7 @@ describe('AgentsService', () => {
 
         const agentWithOldKey = { ...mockAgent, apiKeyHash: oldHash };
         mockPrismaService.client.agent.update.mockResolvedValue(agentWithOldKey);
-        mockConfigService.get.mockReturnValue('test-secret');
+        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey('agent-123');
 
@@ -239,7 +244,7 @@ describe('AgentsService', () => {
 
       it('should return new raw key ONCE', async () => {
         mockPrismaService.client.agent.update.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue('test-secret');
+        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey('agent-123');
 
@@ -588,7 +593,7 @@ describe('AgentsService', () => {
   describe('rotateApiKey', () => {
     it('should generate new API key for agent', async () => {
       mockPrismaService.client.agent.update.mockResolvedValue(mockAgent);
-      mockConfigService.get.mockReturnValue('test-secret');
+      mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
       const result = await service.rotateApiKey('agent-123');
 
@@ -600,7 +605,7 @@ describe('AgentsService', () => {
       const agentWithOldHash = { ...mockAgent, apiKeyHash: oldHash };
 
       mockPrismaService.client.agent.update.mockResolvedValue(agentWithOldHash);
-      mockConfigService.get.mockReturnValue('test-secret');
+      mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
       const result = await service.rotateApiKey('agent-123');
 
@@ -610,7 +615,7 @@ describe('AgentsService', () => {
 
     it('should return raw key ONCE', async () => {
       mockPrismaService.client.agent.update.mockResolvedValue(mockAgent);
-      mockConfigService.get.mockReturnValue('test-secret');
+      mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
       const result = await service.rotateApiKey('agent-123');
 
@@ -620,7 +625,7 @@ describe('AgentsService', () => {
 
     it('should throw error when agent not found', async () => {
       mockPrismaService.client.agent.update.mockRejectedValue(new Error('Agent not found'));
-      mockConfigService.get.mockReturnValue('test-secret');
+      mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
       await expect(service.rotateApiKey('nonexistent')).rejects.toThrow();
     });
@@ -629,7 +634,7 @@ describe('AgentsService', () => {
   describe('API Key Validation', () => {
     it('should generate unique API keys on multiple calls', async () => {
       mockPrismaService.client.agent.create.mockResolvedValue(mockAgent);
-      mockConfigService.get.mockReturnValue('test-secret');
+      mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
       const result1 = await service.generateApiKey({
         name: 'Agent 1',
