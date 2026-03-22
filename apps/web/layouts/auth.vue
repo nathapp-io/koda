@@ -9,5 +9,6 @@
 </template>
 
 <script setup lang="ts">
-import { Card, CardContent } from '~/components/ui/card'
+import Card from '~/components/ui/Card.vue'
+import CardContent from '~/components/ui/CardContent.vue'
 </script>

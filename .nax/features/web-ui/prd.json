@@ -3,7 +3,7 @@
   "feature": "web-ui",
   "branchName": "feat/web-ui",
   "createdAt": "2026-03-22T00:00:00.000Z",
-  "updatedAt": "2026-03-22T11:45:10.619Z",
+  "updatedAt": "2026-03-22T12:10:09.474Z",
   "userStories": [
     {
       "id": "US-001",
@@ -167,15 +167,22 @@
       "dependencies": [
         "US-001-2"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "escalations": [],
       "attempts": 0,
       "parentStoryId": "US-001",
       "workdir": "apps/web",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "routing": {
+        "complexity": "simple",
+        "initialComplexity": "simple",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Two straightforward files: header injection in useApi and basic redirect logic in middleware. No form validation or complex patterns.",
+        "contentHash": "9cd2d1de25eeccda59eb40bb2ae5ef977503ee6c28cb2d283806044e5aa40c01"
+      }
     },
     {
       "id": "US-001-4",
@@ -208,7 +215,14 @@
       "workdir": "apps/web",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "routing": {
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Single layout + page rewrite with form validation and API integration. Auth flows require careful handling of edge cases and error states.",
+        "contentHash": "72a853f3c1818d95ac1371f72d26bc90f766662c495563fad30e68cabac523b7"
+      }
     },
     {
       "id": "US-001-5",
