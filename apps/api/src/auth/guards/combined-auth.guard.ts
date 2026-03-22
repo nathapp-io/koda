@@ -67,9 +67,10 @@ export class CombinedAuthGuard extends JwtAuthGuard {
     // JWTs always have exactly 3 dot-separated parts; skip them
     if (rawKey.split('.').length === 3) return false;
 
-    const secret = this.config.get<string>('API_KEY_SECRET');
+    const authCfg = this.config.get<{ apiKeySecret?: string }>('auth');
+    const secret = authCfg?.apiKeySecret;
     if (!secret) {
-      this.combinedLogger.error('API_KEY_SECRET not configured');
+      this.combinedLogger.error('auth.apiKeySecret not configured');
       return false;
     }
 
@@ -83,10 +84,9 @@ export class CombinedAuthGuard extends JwtAuthGuard {
 
     request['agent'] = agent;
     request['actorType'] = 'agent';
-    request['user'] = {
-      id: (agent as Record<string, unknown>)['id'],
-      extra: { actorType: 'agent', ...(agent as Record<string, unknown>) },
-    };
+    // Don't set req.user for API key auth — controller checks req.user to detect
+    // JWT auth. Setting it here would make actorType = 'user' even for agents.
+    delete request['user'];
 
     return true;
   }

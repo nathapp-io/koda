@@ -97,7 +97,10 @@ cd "$REPO_ROOT"
 log "Waiting for API..."
 READY=false
 for i in $(seq 1 15); do
-  if curl -sf "$API_URL/projects" > /dev/null 2>&1; then
+  # Use --max-time 5 and check HTTP code directly - don't use -f since protected
+  # endpoints return 401/400 without auth, which is expected during startup
+  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$API_URL/projects" 2>/dev/null)
+  if [[ "$HTTP_CODE" == "200" ]] || [[ "$HTTP_CODE" == "401" ]] || [[ "$HTTP_CODE" == "400" ]]; then
     READY=true; break
   fi
   sleep 1
@@ -125,18 +128,18 @@ else
   fail "Register: $REGISTER"; exit 1
 fi
 
-JWT=$(echo "$REGISTER" | python3 -c "import json,sys; print(json.load(sys.stdin)['accessToken'])" 2>/dev/null)
-USER_ID=$(echo "$REGISTER" | python3 -c "import json,sys; print(json.load(sys.stdin)['user']['id'])" 2>/dev/null)
+JWT=$(echo "$REGISTER" | python3 -c "import json,sys; print(json.load(sys.stdin)['data']['accessToken'])" 2>/dev/null)
+USER_ID=$(echo "$REGISTER" | python3 -c "import json,sys; print(json.load(sys.stdin)['data']['user']['id'])" 2>/dev/null)
 
 # Promote user to ADMIN (first user is MEMBER by default)
-(cd "$API_DIR" && DATABASE_URL="file:${TEST_DB}" npx prisma db execute --stdin <<< \
+(cd "$API_DIR" && DATABASE_URL="file:${TEST_DB}" npx prisma db execute --schema prisma/schema.prisma --stdin <<< \
   "UPDATE \"User\" SET \"role\" = 'ADMIN' WHERE \"id\" = '${USER_ID}';" > /dev/null 2>&1) || true
 
 # Re-login to get a fresh JWT with ADMIN role
 LOGIN=$(curl -sf -X POST "$API_URL/auth/login" \
   -H "Content-Type: application/json" \
   -d '{"email":"smoke@koda.test","password":"Smoke1234!"}' 2>&1)
-JWT=$(echo "$LOGIN" | python3 -c "import json,sys; print(json.load(sys.stdin)['accessToken'])" 2>/dev/null)
+JWT=$(echo "$LOGIN" | python3 -c "import json,sys; print(json.load(sys.stdin)['data']['accessToken'])" 2>/dev/null)
 ok "Promoted user to ADMIN"
 
 PROJECT=$(curl -sf -X POST "$API_URL/projects" \
@@ -153,7 +156,7 @@ AGENT=$(curl -sf -X POST "$API_URL/agents" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $JWT" \
   -d '{"name":"Smoke Agent","slug":"smoke-agent"}' 2>&1)
-RAW_KEY=$(echo "$AGENT" | python3 -c "import json,sys; print(json.load(sys.stdin).get('rawApiKey',''))" 2>/dev/null)
+RAW_KEY=$(echo "$AGENT" | python3 -c "import json,sys; print(json.load(sys.stdin).get('data',{}).get('apiKey',''))" 2>/dev/null)
 if [[ -n "$RAW_KEY" ]]; then
   ok "Create agent (API key captured)"
 else
@@ -186,7 +189,7 @@ assert "koda project show --json"  '"slug"'             "$(koda project show kod
 # STEP 7: Ticket lifecycle
 # =============================================================================
 log "Step 7: Ticket lifecycle..."
-CREATE_OUT=$(koda ticket create --project koda --type bug --title "Smoke test ticket")
+CREATE_OUT=$(koda ticket create --project koda --type BUG --title "Smoke test ticket")
 assert "koda ticket create" "KODA-\|created\|success\|ticket\|smoke" "$CREATE_OUT"
 
 assert "koda ticket list"       "KODA-\|Smoke"    "$(koda ticket list --project koda)"
@@ -199,14 +202,14 @@ assert "koda ticket start"     "start\|success\|IN_PROGRESS" "$(koda ticket star
 assert "koda ticket fix"       "fix\|success\|VERIFY_FIX"   "$(koda ticket fix KODA-1 --comment 'Fixed it')"
 assert "koda ticket verify-fix" "pass\|CLOSED\|success"     "$(koda ticket verify-fix KODA-1 --comment 'Good fix' --pass)"
 
-koda ticket create --project koda --type bug --title "Reject ticket" > /dev/null
+koda ticket create --project koda --type BUG --title "Reject ticket" > /dev/null
 assert "koda ticket reject"    "reject\|REJECTED\|success"  "$(koda ticket reject KODA-2 --comment 'Not a bug')"
 
 # =============================================================================
 # STEP 8: Comment + agent
 # =============================================================================
 log "Step 8: Comment & agent..."
-koda ticket create --project koda --type enhancement --title "Comment ticket" > /dev/null
+koda ticket create --project koda --type ENHANCEMENT --title "Comment ticket" > /dev/null
 assert "koda comment add"   "success\|comment\|added\|Comment"  "$(koda comment add KODA-3 --body 'Great ticket')"
 assert "koda agent me"      "smoke-agent\|Smoke Agent"          "$(koda agent me)"
 assert "koda agent me --json" '"slug"\|"name"'                  "$(koda agent me --json)"
