@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import Badge from '~/components/ui/Badge.vue'
 import TicketCard from '~/components/TicketCard.vue'
 
 interface Assignee {

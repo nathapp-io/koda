@@ -1,1 +1,1 @@
-export const component = true
+export { default as Separator } from './Separator.vue'

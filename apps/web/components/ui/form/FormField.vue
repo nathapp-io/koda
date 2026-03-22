@@ -1,11 +1,9 @@
 <template>
-  <slot
-    :componentField="componentField"
-  />
+  <slot :componentField="componentField" />
 </template>
 
 <script setup lang="ts">
-import { provide } from 'vue'
+import { computed, provide } from 'vue'
 import { useField } from 'vee-validate'
 
 interface Props {
@@ -14,14 +12,13 @@ interface Props {
 
 const props = defineProps<Props>()
 
-const { value, errorMessage, handleChange, handleBlur } = useField(() => props.name)
+const { value, errorMessage, handleChange, handleBlur } = useField<string>(() => props.name)
 
-// Provide error message to FormMessage component
 provide('errorMessage', errorMessage)
 
-const componentField = {
-  modelValue: value,
+const componentField = computed(() => ({
+  modelValue: value.value,
   'onUpdate:modelValue': handleChange,
   onBlur: handleBlur,
-}
+}))
 </script>

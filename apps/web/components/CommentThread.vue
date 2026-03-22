@@ -37,7 +37,7 @@ const typePillClass: Record<Comment['type'], string> = {
   VERIFICATION: 'bg-blue-100 text-blue-800',
   FIX_REPORT: 'bg-orange-100 text-orange-800',
   REVIEW: 'bg-green-100 text-green-800',
-  GENERAL: 'bg-gray-100 text-gray-800',
+  GENERAL: 'bg-muted text-muted-foreground',
 }
 
 const commentSchema = z.object({

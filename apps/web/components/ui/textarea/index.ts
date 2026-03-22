@@ -1,1 +1,1 @@
-export const component = true
+export { default as Textarea } from './Textarea.vue'

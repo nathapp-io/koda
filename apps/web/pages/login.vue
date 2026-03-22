@@ -55,13 +55,6 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { toast } from 'vue-sonner'
-import Button from '~/components/ui/Button.vue'
-import Input from '~/components/ui/Input.vue'
-import FormControl from '~/components/ui/FormControl.vue'
-import FormField from '~/components/ui/FormField.vue'
-import FormItem from '~/components/ui/FormItem.vue'
-import FormLabel from '~/components/ui/FormLabel.vue'
-import FormMessage from '~/components/ui/FormMessage.vue'
 
 definePageMeta({ layout: 'auth' })
 

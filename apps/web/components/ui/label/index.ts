@@ -1,1 +1,1 @@
-export const component = true
+export { default as Label } from './Label.vue'

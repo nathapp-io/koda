@@ -13,7 +13,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { cva, type VariantProps } from 'class-variance-authority'
+import { cva } from 'class-variance-authority'
 import { cn } from '~/lib/utils'
 
 const buttonVariants = cva(
@@ -42,18 +42,16 @@ const buttonVariants = cva(
   }
 )
 
-interface Props extends VariantProps<typeof buttonVariants> {}
-
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<{
+  variant?: 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link'
+  size?: 'default' | 'sm' | 'lg' | 'icon'
+}>(), {
   variant: 'default',
   size: 'default',
 })
 
-const variantStyles = computed(() => {
-  const props = defineProps<Props>()
-  return buttonVariants({
-    variant: props.variant,
-    size: props.size,
-  })
-})
+const variantStyles = computed(() => buttonVariants({
+  variant: props.variant,
+  size: props.size,
+}))
 </script>
