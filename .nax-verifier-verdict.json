@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "approved": true,
+  "tests": {
+    "allPassing": true,
+    "passCount": 35,
+    "failCount": 0
+  },
+  "testModifications": {
+    "detected": true,
+    "files": [
+      "apps/web/test/pages/agents.spec.ts"
+    ],
+    "legitimate": true,
+    "reasoning": "Removed unused layoutPath variable that was causing lint error. This variable was defined but never used in the test file, violating ESLint rules."
+  },
+  "acceptanceCriteria": {
+    "allMet": true,
+    "criteria": [
+      {
+        "criterion": "pages/[project]/agents.vue fetches GET /agents and renders in Table",
+        "met": true
+      },
+      {
+        "criterion": "Each row shows Name, Slug, Roles as Badge list, Capabilities as Badge list, Status badge, Actions dropdown",
+        "met": true
+      },
+      {
+        "criterion": "ACTIVE status badge: green styling (bg-green-100 text-green-800)",
+        "met": true
+      },
+      {
+        "criterion": "PAUSED status badge: yellow styling (bg-yellow-100 text-yellow-800)",
+        "met": true
+      },
+      {
+        "criterion": "OFFLINE status badge: gray/secondary styling",
+        "met": true
+      },
+      {
+        "criterion": "Actions dropdown allows selecting ACTIVE, PAUSED, or OFFLINE",
+        "met": true
+      },
+      {
+        "criterion": "Status change triggers PATCH API call and shows toast.success on success",
+        "met": true
+      },
+      {
+        "criterion": "Status change shows toast.error on failure",
+        "met": true
+      },
+      {
+        "criterion": "Agents navigation link added to sidebar in layouts/default.vue",
+        "met": true
+      },
+      {
+        "criterion": "bun run lint passes with 0 errors",
+        "met": true
+      },
+      {
+        "criterion": "bun run type-check passes",
+        "met": true
+      }
+    ]
+  },
+  "quality": {
+    "rating": "good",
+    "issues": []
+  },
+  "fixes": [
+    "Removed unused layoutPath variable from apps/web/test/pages/agents.spec.ts that was causing lint error"
+  ],
+  "reasoning": "All 35 tests pass. Implementation is clean and follows project conventions. All acceptance criteria are met. The agent page correctly fetches agents via useApi/useAsyncData, renders a proper Table with all required columns, applies correct status badge styling (green/yellow/secondary), implements dropdown status changes with API calls and toast feedback, and the sidebar was properly updated with an Agents navigation link. Lint and type-check pass. One legitimate test modification was made to fix an unused variable lint error."
+}

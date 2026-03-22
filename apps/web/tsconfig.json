@@ -1,6 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "module": "esnext",
     "baseUrl": ".",
     "paths": {
       "~": ["."],
@@ -13,5 +14,11 @@
     "**/*.ts",
     "**/*.tsx",
     "**/*.vue"
+  ],
+  "exclude": [
+    "node_modules",
+    "tailwind.config.ts",
+    "**/*.spec.ts",
+    "**/*.test.ts"
   ]
 }

@@ -7,38 +7,72 @@
           View and manage your development projects
         </p>
       </div>
-      <button
-        class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-      >
+      <Button @click="showCreateDialog = true">
         New Project
-      </button>
+      </Button>
     </div>
 
-    <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-      <!-- Empty state -->
-      <div class="col-span-full flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-background/50 py-12">
-        <svg
-          class="h-12 w-12 text-muted-foreground"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-          />
-        </svg>
-        <h3 class="mt-4 text-lg font-medium">No projects yet</h3>
-        <p class="mt-1 text-sm text-muted-foreground">
-          Create your first project to get started
-        </p>
-      </div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <template v-if="projects && projects.length > 0">
+        <Card v-for="project in projects" :key="project.id">
+          <CardHeader>
+            <div class="flex items-center justify-between">
+              <CardTitle class="text-lg">{{ project.name }}</CardTitle>
+              <Badge variant="outline">{{ project.key }}</Badge>
+            </div>
+            <CardDescription class="line-clamp-2 overflow-hidden">
+              {{ project.description }}
+            </CardDescription>
+          </CardHeader>
+          <CardFooter>
+            <NuxtLink :to="`/${project.slug}`" class="w-full">
+              <Button variant="outline" class="w-full">View Board</Button>
+            </NuxtLink>
+          </CardFooter>
+        </Card>
+      </template>
+      <template v-else>
+        <div class="col-span-full flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-background/50 py-12">
+          <h3 class="mt-4 text-lg font-medium">No projects yet</h3>
+          <p class="mt-1 text-sm text-muted-foreground">
+            Create your first project to get started
+          </p>
+        </div>
+      </template>
     </div>
+
+    <CreateProjectDialog
+      v-if="showCreateDialog"
+      :open="showCreateDialog"
+      @update:open="showCreateDialog = $event"
+      @created="onProjectCreated"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-// TODO: Load projects from API
+definePageMeta({ layout: 'default' })
+
+interface Project {
+  id: number
+  name: string
+  key: string
+  slug: string
+  description?: string
+}
+
+const showCreateDialog = ref(false)
+
+const { $api } = useApi()
+
+const { data: projectsData, refresh } = useAsyncData('projects', () =>
+  $api.get('/projects') as Promise<Project[]>
+)
+
+const projects = computed(() => projectsData.value ?? [])
+
+function onProjectCreated() {
+  showCreateDialog.value = false
+  refresh()
+}
 </script>
