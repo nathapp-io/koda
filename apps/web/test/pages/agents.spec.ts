@@ -4,7 +4,6 @@ import { join } from 'path'
 
 const webDir = join(__dirname, '../..')
 const pagePath = join(webDir, 'pages', '[project]', 'agents.vue')
-const layoutPath = join(webDir, 'layouts', 'default.vue')
 
 // ──────────────────────────────────────────────────────────────────────────────
 // File existence
