@@ -34,6 +34,13 @@ function toggleDarkMode() {
         >
           Projects
         </NuxtLink>
+        <NuxtLink
+          v-if="$route.params.project"
+          :to="`/${$route.params.project}/agents`"
+          class="flex items-center rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+        >
+          Agents
+        </NuxtLink>
       </nav>
 
       <!-- Bottom user section -->
