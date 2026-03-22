@@ -3,7 +3,7 @@
   "feature": "web-ui",
   "branchName": "feat/web-ui",
   "createdAt": "2026-03-22T00:00:00.000Z",
-  "updatedAt": "2026-03-22T10:46:16.737Z",
+  "updatedAt": "2026-03-22T11:11:38.397Z",
   "userStories": [
     {
       "id": "US-001",
@@ -63,8 +63,8 @@
         "setup"
       ],
       "dependencies": [],
-      "status": "failed",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "escalations": [],
       "attempts": 1,
       "parentStoryId": "US-001",
@@ -126,9 +126,28 @@
       "attempts": 0,
       "parentStoryId": "US-001",
       "workdir": "apps/web",
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1
+      "priorErrors": [
+        "Attempt 1 failed with model tier: balanced: Autofix exhausted: review still failing after fix attempts"
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "balanced",
+          "stage": "escalation",
+          "summary": "Failed with tier balanced, escalating to next tier",
+          "cost": 0.8044528999999999,
+          "timestamp": "2026-03-22T11:11:38.397Z"
+        }
+      ],
+      "storyPoints": 1,
+      "routing": {
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Single-file composable creation with straightforward state/token management and API integration—standard feature work with clear requirements.",
+        "contentHash": "396b5775f2e07a7e72ad1ddad13cb45970b3630ec50db738f3de6e91d8652093",
+        "modelTier": "powerful"
+      }
     },
     {
       "id": "US-001-3",
