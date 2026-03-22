@@ -64,6 +64,7 @@ export class CommentsService {
 export interface Ticket {
   id: string;
   number: number;
+  ref?: string;
   projectId?: string;
   projectKey?: string;
   type: 'bug' | 'enhancement';
@@ -148,6 +149,18 @@ export class TicketsService {
     data: { body: string; type: string }
   ): Promise<Wrapped<Ticket>> {
     return client.patch(`/tickets/${ref}/reject`, data);
+  }
+
+  static async update(
+    client: AxiosInstance,
+    ref: string,
+    data: { title?: string; description?: string; priority?: string }
+  ): Promise<Wrapped<Ticket>> {
+    return client.patch(`/tickets/${ref}`, data);
+  }
+
+  static async delete(client: AxiosInstance, ref: string): Promise<Wrapped<null>> {
+    return client.delete(`/tickets/${ref}`);
   }
 }
 

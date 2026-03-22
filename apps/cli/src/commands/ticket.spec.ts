@@ -50,6 +50,8 @@ jest.mock('../generated', () => ({
     verifyFix: jest.fn(),
     close: jest.fn(),
     reject: jest.fn(),
+    update: jest.fn(),
+    delete: jest.fn(),
   },
 }));
 
@@ -120,6 +122,8 @@ describe('ticketCommand', () => {
         'close',
         'reject',
         'open',
+        'update',
+        'delete',
       ];
 
       expectedSubcommands.forEach((cmd) => {
@@ -1182,7 +1186,7 @@ describe('ticketCommand', () => {
       };
 
       (TicketsService.assign as jest.Mock).mockResolvedValue({
-        data: mockTicket,
+        data: { ret: 0, data: mockTicket },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -1218,7 +1222,7 @@ describe('ticketCommand', () => {
       };
 
       (TicketsService.assign as jest.Mock).mockResolvedValue({
-        data: mockTicket,
+        data: { ret: 0, data: mockTicket },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -1825,6 +1829,228 @@ describe('ticketCommand', () => {
       }
 
       expect(processExitSpy).toHaveBeenCalledWith(2);
+    });
+  });
+
+  describe('ticket update', () => {
+    it('updates ticket title and exits 0 (AC1)', async () => {
+      const mockTicket = {
+        id: 'ticket-1',
+        number: 1,
+        ref: 'KODA-1',
+        type: 'BUG',
+        title: 'New title',
+        status: 'CREATED',
+        priority: 'MEDIUM',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      (TicketsService.update as jest.Mock).mockResolvedValue({
+        data: { ret: 0, data: mockTicket },
+      });
+
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const updateCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'update');
+
+      await updateCmd?.parseAsync(['node', 'test', 'KODA-1', '--project', 'koda', '--title', 'New title']);
+
+      expect(TicketsService.update).toHaveBeenCalledWith(
+        expect.any(Object),
+        'KODA-1',
+        expect.objectContaining({ title: 'New title' })
+      );
+      expect(processExitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('sends uppercase priority to API (AC2)', async () => {
+      const mockTicket = {
+        id: 'ticket-1',
+        number: 1,
+        ref: 'KODA-1',
+        type: 'BUG',
+        title: 'Test',
+        status: 'CREATED',
+        priority: 'HIGH',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      (TicketsService.update as jest.Mock).mockResolvedValue({
+        data: { ret: 0, data: mockTicket },
+      });
+
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const updateCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'update');
+
+      await updateCmd?.parseAsync(['node', 'test', 'KODA-1', '--project', 'koda', '--priority', 'HIGH']);
+
+      expect(TicketsService.update).toHaveBeenCalledWith(
+        expect.any(Object),
+        'KODA-1',
+        expect.objectContaining({ priority: 'HIGH' })
+      );
+    });
+
+    it('returns JSON with --json flag', async () => {
+      const mockTicket = {
+        id: 'ticket-1',
+        number: 1,
+        ref: 'KODA-1',
+        type: 'BUG',
+        title: 'New title',
+        status: 'CREATED',
+        createdAt: new Date().toISOString(),
+      };
+
+      (TicketsService.update as jest.Mock).mockResolvedValue({
+        data: { ret: 0, data: mockTicket },
+      });
+
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const updateCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'update');
+
+      await updateCmd?.parseAsync(['node', 'test', 'KODA-1', '--project', 'koda', '--title', 'New title', '--json']);
+
+      expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('ticket-1'));
+    });
+
+    it('exits 2 when API key not configured', async () => {
+      mockData.apiKey = '';
+      mockData.apiUrl = '';
+
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const updateCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'update');
+
+      await updateCmd?.parseAsync(['node', 'test', 'KODA-1', '--project', 'koda', '--title', 'x']);
+
+      expect(processExitSpy).toHaveBeenCalledWith(2);
+    });
+  });
+
+  describe('ticket delete', () => {
+    it('soft-deletes ticket with --force and exits 0 (AC3)', async () => {
+      (TicketsService.delete as jest.Mock).mockResolvedValue({
+        data: { ret: 0, data: null },
+      });
+
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const deleteCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'delete');
+
+      await deleteCmd?.parseAsync(['node', 'test', 'KODA-1', '--project', 'koda', '--force']);
+
+      expect(TicketsService.delete).toHaveBeenCalledWith(expect.any(Object), 'KODA-1');
+      expect(processExitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('exits 1 with hint when --force is omitted (AC4)', async () => {
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const deleteCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'delete');
+
+      await deleteCmd?.parseAsync(['node', 'test', 'KODA-1', '--project', 'koda']);
+
+      expect(processExitSpy).toHaveBeenCalledWith(1);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('--force'));
+    });
+
+    it('exits 2 when API key not configured', async () => {
+      mockData.apiKey = '';
+      mockData.apiUrl = '';
+
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const deleteCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'delete');
+
+      await deleteCmd?.parseAsync(['node', 'test', 'KODA-1', '--project', 'koda', '--force']);
+
+      expect(processExitSpy).toHaveBeenCalledWith(2);
+    });
+  });
+
+  describe('ticket assign with --agent option', () => {
+    it('assigns ticket to agent via --agent slug (AC5)', async () => {
+      (TicketsService.assign as jest.Mock).mockResolvedValue({
+        data: { ret: 0, data: { id: 'ticket-1', number: 1, type: 'BUG', title: 'Test', status: 'VERIFIED' } },
+      });
+
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const assignCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'assign');
+
+      await assignCmd?.parseAsync(['node', 'test', 'KODA-1', '--project', 'koda', '--agent', 'subrina-coder']);
+
+      expect(TicketsService.assign).toHaveBeenCalledWith(
+        expect.any(Object),
+        'KODA-1',
+        expect.objectContaining({ agentSlug: 'subrina-coder' })
+      );
+      expect(processExitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('exits 4 with "Agent not found" when agent slug is not found (AC6)', async () => {
+      const mockError = new Error('Not found');
+      (mockError as any).response = { status: 404, data: { message: 'Agent not found' } };
+
+      (TicketsService.assign as jest.Mock).mockRejectedValue(mockError);
+
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const assignCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'assign');
+
+      await assignCmd?.parseAsync(['node', 'test', 'KODA-1', '--project', 'koda', '--agent', 'nonexistent']);
+
+      expect(processExitSpy).toHaveBeenCalledWith(4);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Agent not found'));
+    });
+  });
+
+  describe('ticket show ref from API response', () => {
+    it('displays ticket.ref from API response (AC7)', async () => {
+      const mockTicket = {
+        id: 'ticket-1',
+        number: 1,
+        ref: 'KODA-1',
+        type: 'BUG',
+        title: 'Test bug',
+        status: 'CREATED',
+        priority: 'MEDIUM',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        comments: [],
+      };
+
+      (TicketsService.show as jest.Mock).mockResolvedValue({
+        data: { ret: 0, data: mockTicket },
+      });
+
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const showCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'show');
+
+      await showCmd?.parseAsync(['node', 'test', 'KODA-1']);
+
+      expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('KODA-1'));
+    });
+
+    it('falls back to KODA-<number> when ref field is absent', async () => {
+      const mockTicket = {
+        id: 'ticket-1',
+        number: 42,
+        type: 'BUG',
+        title: 'Test bug',
+        status: 'CREATED',
+        priority: 'MEDIUM',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        comments: [],
+      };
+
+      (TicketsService.show as jest.Mock).mockResolvedValue({
+        data: { ret: 0, data: mockTicket },
+      });
+
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const showCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'show');
+
+      await showCmd?.parseAsync(['node', 'test', 'KODA-42']);
+
+      expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('KODA-42'));
     });
   });
 

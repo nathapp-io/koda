@@ -188,7 +188,7 @@ export function ticketCommand(program: Command): void {
         } else {
           console.log(`\n${'Ticket Details'}:`);
           console.log(`ID: ${ticketData.id}`);
-          console.log(`Reference: KODA-${ticketData.number}`);
+          console.log(`Reference: ${ticketData.ref ?? `KODA-${ticketData.number}`}`);
           console.log(`Type: ${ticketData.type}`);
           console.log(`Title: ${ticketData.title}`);
           if (ticketData.description) {
@@ -252,7 +252,10 @@ export function ticketCommand(program: Command): void {
   ticket
     .command('assign <ref>')
     .description('Assign a ticket')
+    .option('--project <slug>', 'Project slug')
+    .option('--agent <agent-slug>', 'Agent to assign to')
     .option('--to <agent-slug>', 'Agent to assign to (omit for self-assign)')
+    .option('--json', 'Output as JSON')
     .action(async (ref: string, options) => {
       try {
         const auth = resolveAuth({});
@@ -263,14 +266,19 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        await TicketsService.assign(client, ref, {
-          agentSlug: options.to || 'self',
-        });
+        const agentSlug = options.agent ?? options.to ?? 'self';
+        const response = await TicketsService.assign(client, ref, { agentSlug });
+        const ticketData = unwrap(response);
 
-        console.log(`✓ Ticket assigned successfully`);
+        if (options.json) {
+          console.log(JSON.stringify(ticketData, null, 2));
+        } else {
+          console.log(`✓ Ticket assigned successfully`);
+        }
+
         process.exit(0);
       } catch (err: unknown) {
-        handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
+        handleApiError(err, { notFoundMessage: `Agent not found` });
       }
     });
 
@@ -419,6 +427,73 @@ export function ticketCommand(program: Command): void {
         });
 
         console.log(`✓ Ticket rejected successfully`);
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
+      }
+    });
+
+  ticket
+    .command('update <ref>')
+    .description('Update a ticket')
+    .requiredOption('--project <slug>', 'Project slug')
+    .option('--title <title>', 'New title')
+    .option('--desc <description>', 'New description')
+    .option('--priority <priority>', 'New priority (LOW|MEDIUM|HIGH|CRITICAL)')
+    .option('--json', 'Output as JSON')
+    .action(async (ref: string, options) => {
+      try {
+        const auth = resolveAuth({});
+
+        if (!auth.apiKey || !auth.apiUrl) {
+          error('API key or URL not configured. Run: koda login --api-key <key>');
+          process.exit(2);
+        }
+
+        const client = configureClient(auth.apiUrl, auth.apiKey);
+        const payload: { title?: string; description?: string; priority?: string } = {};
+        if (options.title) payload.title = options.title;
+        if (options.desc) payload.description = options.desc;
+        if (options.priority) payload.priority = options.priority;
+
+        const response = await TicketsService.update(client, ref, payload);
+        const ticketData = unwrap(response);
+
+        if (options.json) {
+          console.log(JSON.stringify(ticketData, null, 2));
+        } else {
+          console.log(`✓ Ticket updated successfully`);
+        }
+
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
+      }
+    });
+
+  ticket
+    .command('delete <ref>')
+    .description('Delete a ticket')
+    .requiredOption('--project <slug>', 'Project slug')
+    .option('--force', 'Confirm deletion')
+    .action(async (ref: string, options) => {
+      try {
+        if (!options.force) {
+          error(`Deletion requires --force flag. Run: koda ticket delete ${ref} --project ${options.project} --force`);
+          process.exit(1);
+        }
+
+        const auth = resolveAuth({});
+
+        if (!auth.apiKey || !auth.apiUrl) {
+          error('API key or URL not configured. Run: koda login --api-key <key>');
+          process.exit(2);
+        }
+
+        const client = configureClient(auth.apiUrl, auth.apiKey);
+        await TicketsService.delete(client, ref);
+
+        console.log(`✓ Ticket deleted successfully`);
         process.exit(0);
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
