@@ -49,38 +49,17 @@ Turborepo monorepo with NestJS 11 + Fastify API, Nuxt 3 + Shadcn-nuxt web UI, an
 - **Never push to remote** — the human reviews and pushes.
 - **State machine is the law** — all ticket transitions must go through `validateTransition()`. Never update ticket status directly.
 
-## Quality Gates — Run Before Completing Any Story
-
-After writing or editing any file in `apps/api/`, **always run these two commands** and fix all errors before considering the story done:
-
-```bash
-# Lint (zero warnings allowed)
-bun run --cwd apps/api lint
-
-# TypeScript typecheck (zero errors allowed)
-bun run --cwd apps/api type-check
-```
-
-**Common lint fixes:**
-- Unused imports → remove them or rename with `_` prefix
-- Unused variables → prefix with `_`
-- `any` types in production code → use proper types
-- `any` types in test files → allowed (configured in `.eslintrc.js` overrides)
-
 ## Test Organization Rules
 
-| Type | Location | Naming | Purpose |
-|:-----|:---------|:-------|:--------|
-| Unit | `src/**/*.spec.ts` | Co-located next to source file | Test individual services/controllers |
-| Integration | `src/**/*.integration.spec.ts` | Co-located next to source file | Test module interactions, DB queries |
-| E2E | `test/e2e/*.e2e.spec.ts` | Grouped in `test/e2e/` | Full API lifecycle tests |
+| Type | Location | Naming |
+|:-----|:---------|:-------|
+| Unit | `src/**/*.spec.ts` | Co-located with source |
+| Integration | `test/integration/**/*.integration.spec.ts` | Grouped in `test/integration/` |
+| E2E | `test/e2e/**/*.e2e.spec.ts` | Grouped in `test/e2e/` |
 
 **Rules:**
-1. Unit and integration tests are **co-located** with the source files they test
-2. E2E tests live in `test/e2e/` — they bootstrap the full app and make HTTP requests
-3. **No `us-XXX` or user-story folders** — nax acceptance tests go in `nax/features/<feature>/acceptance.test.ts`, NOT in `apps/api/test/`
-4. Test file naming: `<name>.spec.ts` (unit), `<name>.integration.spec.ts` (integration), `<name>.e2e.spec.ts` (e2e)
-5. Use `test-setup.ts` for global test configuration (env loading, custom matchers)
+- No `us-XXX` folders in `test/` — nax acceptance tests go in `.nax/features/<feature>/`
+- See `apps/api/CLAUDE.md` for the full API endpoint test rule (supertest, mandatory on every endpoint change)
 
 ## Repository Structure
 
@@ -131,93 +110,23 @@ koda/                              ← monorepo root
 └── openapi.json                  ← Generated OpenAPI spec
 ```
 
-## Enums — Local TypeScript Types (NOT Prisma)
-
-SQLite doesn't support Prisma enums. All enums are defined in `apps/api/src/common/enums.ts` as const objects with matching type aliases:
-
-```typescript
-export const TicketStatus = { CREATED: 'CREATED', VERIFIED: 'VERIFIED', ... } as const;
-export type TicketStatus = (typeof TicketStatus)[keyof typeof TicketStatus];
-```
-
-Available enums: `TicketStatus`, `TicketType`, `Priority`, `CommentType`, `ActivityType`, `AgentRole`
-
-**Never import enums from `@prisma/client`** — they don't exist for SQLite schemas.
-
-## Response & Exception Patterns
-
-### Controller responses — `JsonResponse.Ok<T>(data)`
-
-```typescript
-// ✅ Correct
-return JsonResponse.Ok<AgentResponseDto>(data);
-
-// ❌ Wrong — do NOT double-cast
-return JsonResponse.Ok(data as unknown as Dto) as unknown as JsonResponse<Dto>;
-```
-
-### Exceptions — `AppException(code, args?, prefix?, httpStatus?)`
-
-```typescript
-// ✅ Correct — numeric code + httpStatus
-throw new AppException(CommonExceptionCode.NOT_FOUND, {}, 'tickets', HttpStatus.NOT_FOUND);
-
-// ❌ Wrong — no string i18n keys
-throw new AppException('tickets.notFound', HttpStatus.NOT_FOUND);
-```
-
-### Convenience exception classes
-```typescript
-throw new NotFoundAppException();     // 404
-throw new ForbiddenAppException();    // 403
-throw new AuthException();            // 401
-throw new ValidationAppException();   // 400
-```
-
-## Ticket State Machine
+## Ticket State Machine (Overview)
 
 ```
-Bug / Enhancement:
-  CREATED ──→ VERIFIED ──→ IN_PROGRESS ──→ VERIFY_FIX ──→ CLOSED
-     │            │              │               │
-     └→ REJECTED  └→ REJECTED   └→ VERIFIED     └→ IN_PROGRESS
-                                (sent back)      (fix failed)
+CREATED → VERIFIED → IN_PROGRESS → VERIFY_FIX → CLOSED
+   └→ REJECTED        └→ REJECTED    └→ IN_PROGRESS (fix failed)
 ```
 
-**Transition rules — all enforced in `tickets/state-machine/`:**
+All transitions enforced in `apps/api/src/tickets/state-machine/`. See `apps/api/CLAUDE.md` for the full transition rules table.
 
-| Transition | Required comment type |
-|:-----------|:---------------------|
-| CREATED → VERIFIED | `VERIFICATION` |
-| IN_PROGRESS → VERIFY_FIX | `FIX_REPORT` |
-| VERIFY_FIX → CLOSED | `REVIEW` |
-| VERIFY_FIX → IN_PROGRESS | `REVIEW` |
-| Any → REJECTED | `GENERAL` |
+## Auth Model (Overview)
 
-## Auth Model
+| Actor | Auth method |
+|:------|:------------|
+| Human | Email + password → JWT Bearer token |
+| Agent | Raw API key → HMAC-SHA256 lookup |
 
-| Actor | Method | How |
-|:------|:-------|:----|
-| Human (web) | Email + password → JWT | `@nathapp/nestjs-auth` global guard |
-| Agent (CLI/API) | API key → Bearer token | API key guard (HMAC-SHA256 hash) |
-| Protected routes | Either JWT or API key | Global guard; open routes use `@Public()` |
-| Current user | `@Principal()` decorator | Injects JWT payload or agent into handler |
-
-- API keys: `crypto.randomBytes(32).toString('hex')` — shown once, stored as HMAC-SHA256 hash
-- No custom guards — `@nathapp/nestjs-auth` handles everything via `useAppGlobalGuards()`
-
-## Prisma & Database
-
-- **Schema at:** `apps/api/prisma/schema.prisma` (NOT monorepo root)
-- `DATABASE_URL` env: connection string (default: `file:./koda.db` for SQLite)
-- `@nathapp/nestjs-prisma` PrismaService — registered as global module
-- Access via `this.prisma.client` (PrismaClient instance)
-- Ticket `number` is auto-incremented per project (not global) — use a transaction to safely get `MAX(number)+1`
-
-### Key schema notes
-- `Comment` uses `authorUserId` / `authorAgentId` (not `userId` / `agentId`)
-- `TicketActivity` uses `actorUserId` / `actorAgentId` (not `actorId` / `actorType`)
-- `AgentCapabilityEntry` (not `AgentCapability`) — note the full model name
+See `apps/api/CLAUDE.md` for full auth model details.
 
 ## OpenAPI Spec & Client Generation
 
@@ -233,19 +142,6 @@ apps/api (NestJS + @nestjs/swagger)
 - Run `bun run generate` after ANY API endpoint change before touching CLI or web code
 - Never manually edit files inside `*/generated/`
 - `openapi.json` is committed so CI can regenerate clients without booting the API
-
-## Environment Variables
-
-See `apps/api/.env.example`. Key vars:
-
-| Variable | Purpose | Default |
-|:---------|:--------|:--------|
-| `DATABASE_URL` | DB connection string | `file:./koda.db` |
-| `JWT_SECRET` | JWT signing secret | *(required)* |
-| `JWT_EXPIRES_IN` | JWT expiry | `7d` |
-| `JWT_REFRESH_SECRET` | Refresh token secret | *(required)* |
-| `API_KEY_SECRET` | HMAC secret for agent API keys | *(required)* |
-| `API_PORT` | API server port | `3100` |
 
 ## NestJS Development — Mandatory Skill
 
