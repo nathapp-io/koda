@@ -183,6 +183,9 @@ export class AgentsService {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async update(slug: string, updateData: UpdateAgentDto): Promise<any> {
+    const agent = await this.db.agent.findUnique({ where: { slug } });
+    if (!agent) throw new NotFoundAppException();
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data: any = {};
     if (updateData.name !== undefined) data.name = updateData.name;

@@ -3,6 +3,7 @@ import { AppFactory } from '@nathapp/nestjs-app';
 import { Logger } from '@nathapp/nestjs-logging';
 import { HttpAdapterHost } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { CombinedAuthGuard } from './auth/guards/combined-auth.guard';
 
 async function bootstrap() {
   const app = await AppFactory.createFastifyApp(AppModule, {
@@ -35,6 +36,12 @@ async function bootstrap() {
   });
 
   const apiPort = parseInt(process.env.API_PORT || '3100', 10);
+
+  // DI container is ready right after createFastifyApp() — get the guard before
+  // setting up global handlers. Global guards MUST be registered before init()
+  // because NestJS compiles route handlers (capturing guards) during init().
+  const combinedGuard = app.get(CombinedAuthGuard);
+  app.setJwtAuthGuard(combinedGuard);
 
   app
     .useAppGlobalPrefix()
