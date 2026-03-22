@@ -6,13 +6,18 @@
       "~": ["."],
       "~/*": ["./*"]
     },
-    "skipLibCheck": true,
-    "types": ["@types/bun", "tailwindcss"]
+    "skipLibCheck": true
   },
   "include": [
     ".nuxt/nuxt.d.ts",
     "**/*.ts",
     "**/*.tsx",
     "**/*.vue"
+  ],
+  "exclude": [
+    "node_modules",
+    "tailwind.config.ts",
+    "**/*.spec.ts",
+    "**/*.test.ts"
   ]
 }
