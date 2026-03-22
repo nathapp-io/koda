@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useForm } from 'vee-validate'
-import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { toast } from 'vue-sonner'
 
@@ -37,14 +36,18 @@ const typePillClass: Record<Comment['type'], string> = {
   GENERAL: 'bg-gray-100 text-gray-800',
 }
 
-const formSchema = toTypedSchema(
-  z.object({
-    body: z.string().min(1, 'Comment body is required'),
-    type: z.enum(['GENERAL', 'VERIFICATION', 'FIX_REPORT', 'REVIEW']).default('GENERAL'),
-  })
-)
+const commentSchema = z.object({
+  body: z.string().min(1, 'Comment body is required'),
+  type: z.enum(['GENERAL', 'VERIFICATION', 'FIX_REPORT', 'REVIEW']),
+})
 
-const { handleSubmit, resetForm } = useForm({ validationSchema: formSchema })
+const { handleSubmit, resetForm } = useForm({
+  validationSchema: commentSchema,
+  initialValues: {
+    body: '',
+    type: 'GENERAL',
+  },
+})
 
 const onSubmit = handleSubmit(async (values) => {
   try {
