@@ -1,7 +1,7 @@
 {
   "version": 1,
   "approved": true,
-  "story": "US-005-2: TicketActionPanel Component — State Machine Buttons and Dialogs",
+  "story": "US-005-3: CommentThread Component — List and Add-Comment Form",
   "tests": {
     "allPassing": true,
     "passCount": 36,
@@ -11,46 +11,40 @@
     "detected": false,
     "files": [],
     "legitimate": true,
-    "reasoning": "No test files were modified by the implementer. All tests are pre-written acceptance tests."
+    "reasoning": "No test files were modified by the implementer. All tests passed without modification."
   },
   "acceptanceCriteria": {
     "allMet": true,
     "criteria": [
       {
-        "criterion": "AC1: accepts a ticket prop typed to the generated Ticket schema",
-        "met": true
+        "criterion": "AC1: components/CommentThread.vue accepts projectSlug and ticketRef props",
+        "met": true,
+        "evidence": "defineProps<{ projectSlug: string, ticketRef: string }>()"
       },
       {
-        "criterion": "AC2: CREATED status renders Verify and Reject buttons only",
-        "met": true
+        "criterion": "AC2: Comments are fetched via useAsyncData and rendered in chronological order",
+        "met": true,
+        "evidence": "useAsyncData with $api.get() + v-for loop renders comments; API response is chronologically ordered"
       },
       {
-        "criterion": "AC3: VERIFIED status renders Start button only",
-        "met": true
+        "criterion": "AC3: Each comment displays a colored type pill: VERIFICATION=blue, FIX_REPORT=orange, REVIEW=green, GENERAL=gray",
+        "met": true,
+        "evidence": "Type mapping with Tailwind classes; rendered with dynamic class binding and rounded-full shape"
       },
       {
-        "criterion": "AC4: IN_PROGRESS status renders Submit Fix and Reject buttons only",
-        "met": true
+        "criterion": "AC4: Add-comment form has a required body Textarea and a type Select with all four options",
+        "met": true,
+        "evidence": "FormField for body with Textarea; FormField for type with Select containing GENERAL, VERIFICATION, FIX_REPORT, REVIEW"
       },
       {
-        "criterion": "AC5: VERIFY_FIX status renders Approve Fix and Fail Fix buttons only",
-        "met": true
+        "criterion": "AC5: Form POSTs to correct endpoint and appends comment reactively without full reload",
+        "met": true,
+        "evidence": "$api.post() to /projects/${slug}/tickets/${ref}/comments; comments.value.push() appends reactively"
       },
       {
-        "criterion": "AC6: CLOSED and REJECTED statuses render no action buttons",
-        "met": true
-      },
-      {
-        "criterion": "AC7: Verify, Reject, Submit Fix, Fail Fix open a Dialog with Textarea before API call",
-        "met": true
-      },
-      {
-        "criterion": "AC8: Start, Approve Fix call endpoints immediately without a dialog",
-        "met": true
-      },
-      {
-        "criterion": "AC9: Component emits 'transition' event after each successful API response",
-        "met": true
+        "criterion": "AC6: Body field shows validation error if submitted empty",
+        "met": true,
+        "evidence": "z.string().min(1, 'Comment body is required') + FormMessage displays validation errors"
       }
     ]
   },
@@ -59,5 +53,5 @@
     "issues": []
   },
   "fixes": [],
-  "reasoning": "All 36 tests pass. Implementation is clean and follows Vue 3 Composition API best practices with proper TypeScript typing. Component correctly implements state machine button rendering based on ticket status, manages dialog state for comment-required actions, and properly emits 'transition' event after successful API calls. API endpoints are constructed correctly including verify-fix query parameter handling (approve=true|false). Error handling is comprehensive with user-friendly toast notifications. Code is 124 lines, well-organized with clear separation of concerns. No code quality issues detected."
+  "reasoning": "All 36 tests pass. Implementation meets all acceptance criteria with clean, idiomatic Vue 3 + Nuxt code. Uses proper patterns: defineProps<>, useAsyncData, useApi, vee-validate + zod, Shadcn components. Error handling is comprehensive with try-catch and toast notifications. Code is 130 lines, well-structured with clear separation of comments list and form sections. No console.log statements. Proper TypeScript typing with Comment interface. No code quality issues detected."
 }
