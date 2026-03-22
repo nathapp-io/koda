@@ -3,6 +3,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
 import { ValidationAppException, NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { CreateLabelDto } from './dto/create-label.dto';
+import { UpdateLabelDto } from './dto/update-label.dto';
 import { AssignLabelDto } from './dto/assign-label.dto';
 
 interface CurrentUser {
@@ -121,6 +122,39 @@ export class LabelsService {
     await this.db.label.delete({
       where: { id: labelId },
     });
+  }
+
+  async update(
+    projectSlug: string,
+    labelId: string,
+    updateLabelDto: UpdateLabelDto,
+    currentUser: CurrentUser,
+    actorType: 'user' | 'agent',
+  ) {
+    if (actorType !== 'user' || currentUser.role === 'MEMBER') {
+      throw new ForbiddenAppException();
+    }
+
+    const project = await this.db.project.findUnique({ where: { slug: projectSlug } });
+    if (!project || project.deletedAt) throw new NotFoundAppException();
+
+    const label = await this.db.label.findUnique({ where: { id: labelId } });
+    if (!label || label.projectId !== project.id) throw new NotFoundAppException();
+
+    try {
+      return await this.db.label.update({
+        where: { id: labelId },
+        data: {
+          ...(updateLabelDto.name !== undefined ? { name: updateLabelDto.name } : {}),
+          ...(updateLabelDto.color !== undefined ? { color: updateLabelDto.color } : {}),
+        },
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Unique constraint')) {
+        throw new ValidationAppException();
+      }
+      throw error;
+    }
   }
 
   async assignToTicket(

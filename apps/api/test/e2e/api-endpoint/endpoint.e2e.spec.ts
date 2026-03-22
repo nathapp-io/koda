@@ -806,6 +806,96 @@ describeIntegration('API Integration Tests', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────
+  // 15b. Agent Delete
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('15b. Agent Delete', () => {
+    let deleteAgentSlug: string;
+
+    beforeAll(async () => {
+      const res = await request(httpServer)
+        .post('/api/agents')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: 'Temp Agent', slug: 'temp-agent' })
+        .expect(201);
+      deleteAgentSlug = body<{ agent: { slug: string } }>(res).agent.slug;
+    });
+
+    it('DELETE /api/agents/:slug — deletes agent, returns 200', async () => {
+      const res = await request(httpServer)
+        .delete(`/api/agents/${deleteAgentSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const data = body<{ slug: string }>(res);
+      expect(data.slug).toBe(deleteAgentSlug);
+    });
+
+    it('GET /api/agents/:slug — 404 after delete', async () => {
+      await request(httpServer)
+        .get(`/api/agents/${deleteAgentSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(404);
+    });
+
+    it('DELETE /api/agents/:slug — 404 for nonexistent agent', async () => {
+      await request(httpServer)
+        .delete('/api/agents/nonexistent-agent')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(404);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // 15c. Label Update (PATCH)
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('15c. Label Update', () => {
+    let patchLabelId: string;
+
+    beforeAll(async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/labels`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: 'patch-me', color: '#ff0000' })
+        .expect(201);
+      patchLabelId = body<{ id: string }>(res).id;
+    });
+
+    it('PATCH /api/projects/:slug/labels/:id — renames label', async () => {
+      const res = await request(httpServer)
+        .patch(`/api/projects/${projectSlug}/labels/${patchLabelId}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: 'patched-label' })
+        .expect(200);
+
+      const data = body<{ name: string; color: string }>(res);
+      expect(data.name).toBe('patched-label');
+      expect(data.color).toBe('#ff0000'); // color unchanged
+    });
+
+    it('PATCH /api/projects/:slug/labels/:id — updates color only', async () => {
+      const res = await request(httpServer)
+        .patch(`/api/projects/${projectSlug}/labels/${patchLabelId}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ color: '#00ff00' })
+        .expect(200);
+
+      const data = body<{ name: string; color: string }>(res);
+      expect(data.name).toBe('patched-label'); // name unchanged
+      expect(data.color).toBe('#00ff00');
+    });
+
+    it('PATCH /api/projects/:slug/labels/:id — 404 for nonexistent label', async () => {
+      await request(httpServer)
+        .patch(`/api/projects/${projectSlug}/labels/nonexistent-id`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: 'ghost' })
+        .expect(404);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
   // 16. Project Label Delete
   // ─────────────────────────────────────────────────────────────────
 

@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Get,
+  Patch,
   Delete,
   Body,
   Param,
@@ -16,6 +17,7 @@ import {
 } from '@nestjs/swagger';
 import { LabelsService } from './labels.service';
 import { CreateLabelDto } from './dto/create-label.dto';
+import { UpdateLabelDto } from './dto/update-label.dto';
 import { AssignLabelDto } from './dto/assign-label.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
 
@@ -43,6 +45,16 @@ export class LabelsController {
 
   async findByProject(slug: string) {
     return this.labelsService.findByProject(slug);
+  }
+
+  async update(
+    slug: string,
+    labelId: string,
+    updateLabelDto: UpdateLabelDto,
+    currentUser: CurrentUser,
+    actorType: 'user' | 'agent',
+  ) {
+    return this.labelsService.update(slug, labelId, updateLabelDto, currentUser, actorType);
   }
 
   async delete(
@@ -103,6 +115,25 @@ export class LabelsController {
   async findByProjectFromHttp(@Param('slug') slug: string) {
     const data = await this.findByProject(slug);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return JsonResponse.Ok(data);
+  }
+
+  @Patch('projects/:slug/labels/:id')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Update a label' })
+  @ApiResponse({ status: 200, description: 'Label updated' })
+  @ApiResponse({ status: 400, description: 'Invalid request data' })
+  @ApiResponse({ status: 403, description: 'Unauthorized - admin only' })
+  @ApiResponse({ status: 404, description: 'Label or project not found' })
+  async updateFromHttp(
+    @Param('slug') slug: string,
+    @Param('id') id: string,
+    @Body() updateLabelDto: UpdateLabelDto,
+    @Req() req: RequestWithUser,
+  ) {
+    const currentUser = req.user || req.agent;
+    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
+    const data = await this.update(slug, id, updateLabelDto, currentUser, actorType);
     return JsonResponse.Ok(data);
   }
 

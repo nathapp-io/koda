@@ -254,6 +254,17 @@ export class AgentsService {
     });
   }
 
+  async remove(slug: string): Promise<any> {
+    const agent = await this.db.agent.findUnique({
+      where: { slug },
+      include: { roles: true, capabilities: true },
+    });
+    if (!agent) throw new NotFoundAppException();
+
+    await this.db.agent.delete({ where: { slug } });
+    return agent;
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async rotateApiKey(slug: string): Promise<{ apiKey: string; agent: any }> {
     // Find agent by slug to get the id

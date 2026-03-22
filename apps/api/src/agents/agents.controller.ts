@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Patch, Body, Param, Req, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Delete, Body, Param, Req, HttpCode, HttpStatus } from '@nestjs/common';
 import { AgentsService, CreateAgentDto } from './agents.service';
 import { UpdateAgentDto } from './dto/update-agent.dto';
 import { UpdateRolesDto } from './dto/update-roles.dto';
@@ -106,6 +106,22 @@ export class AgentsController {
     }
     const agent = await this.agentsService.findBySlug(slug);
     const data = await this.agentsService.updateCapabilities(agent.id, updateCapabilitiesDto);
+    return JsonResponse.Ok(data);
+  }
+
+  @Delete(':slug')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete (soft-delete) an agent' })
+  @ApiResponse({ status: 200, description: 'Agent deleted successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
+  @ApiResponse({ status: 404, description: 'Agent not found' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async remove(@Param('slug') slug: string, @Req() req: any) {
+    if (req.user?.extra?.role !== 'ADMIN') {
+      throw new ForbiddenAppException();
+    }
+    const data = await this.agentsService.remove(slug);
     return JsonResponse.Ok(data);
   }
 
