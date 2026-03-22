@@ -20,6 +20,7 @@ import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
 import { execSync } from 'child_process';
+import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = DATABASE_URL ? describe : describe.skip;
@@ -56,15 +57,24 @@ describeIntegration('API Integration Tests', () => {
     });
 
     // Use AppFactory to get NathApplication with useAppGlobal* methods
+    // IMPORTANT: DI container is ready right after create() (no init() needed).
+    // Global guards MUST be registered BEFORE init() — NestJS compiles route
+    // handlers during init() and captures guards at that point. Guards set after
+    // init() are invisible to the compiled handlers.
     app = await AppFactory.create(AppModule);
 
-    // Mirror main.ts global setup (prefix, pipes, filters, guards)
+    // Get CombinedAuthGuard from DI before init() — DI container is ready
+    const combinedGuard = app.get(CombinedAuthGuard);
+    app.setJwtAuthGuard(combinedGuard);
+
+    // Register global handlers BEFORE init() so they are compiled into routes
     app
       .useAppGlobalPrefix()
       .useAppGlobalPipes()
       .useAppGlobalFilters()
       .useAppGlobalGuards();
 
+    // NOW init — compiles route handlers with the guards registered above
     await app.init();
     httpServer = app.getHttpServer();
   }, 30_000);
@@ -193,10 +203,10 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(200);
 
-      const data = body<{ slug: string; roles: string[]; capabilities: string[] }>(res);
+      const data = body<{ slug: string; roles: { role: string }[]; capabilities: { capability: string }[] }>(res);
       expect(data.slug).toBe(agentSlug);
-      expect(data.roles).toEqual(expect.arrayContaining(['DEVELOPER', 'REVIEWER']));
-      expect(data.capabilities).toEqual(expect.arrayContaining(['typescript', 'nestjs']));
+      expect(data.roles.map((r) => r.role)).toEqual(expect.arrayContaining(['DEVELOPER', 'REVIEWER']));
+      expect(data.capabilities.map((c) => c.capability)).toEqual(expect.arrayContaining(['typescript', 'nestjs']));
     });
 
     it('POST /api/agents/:slug/rotate-key — rotates API key', async () => {
@@ -724,6 +734,193 @@ describeIntegration('API Integration Tests', () => {
       await request(httpServer)
         .get(`/api/projects/${deleteProjectSlug}`)
         .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(404);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // 15. Agent Management — List, Update, Roles, Capabilities
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('15. Agent Management', () => {
+    it('GET /api/agents — lists all agents', async () => {
+      const res = await request(httpServer)
+        .get('/api/agents')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const data = body<unknown[]>(res);
+      expect(Array.isArray(data)).toBe(true);
+      expect(data.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('PATCH /api/agents/:slug — updates agent name and maxConcurrentTickets', async () => {
+      const res = await request(httpServer)
+        .patch(`/api/agents/${agentSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: 'Subrina Coder v2', maxConcurrentTickets: 5 })
+        .expect(200);
+
+      const data = body<{ name: string; maxConcurrentTickets: number }>(res);
+      expect(data.name).toBe('Subrina Coder v2');
+      expect(data.maxConcurrentTickets).toBe(5);
+    });
+
+    it('PATCH /api/agents/:slug/update-roles — replaces agent roles', async () => {
+      const res = await request(httpServer)
+        .patch(`/api/agents/${agentSlug}/update-roles`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ roles: ['REVIEWER'] })
+        .expect(200);
+
+      const data = body<{ roles: { role: string }[] }>(res);
+      const roleNames = data.roles.map((r) => r.role);
+      expect(roleNames).toContain('REVIEWER');
+    });
+
+    it('PATCH /api/agents/:slug/update-capabilities — replaces agent capabilities', async () => {
+      const res = await request(httpServer)
+        .patch(`/api/agents/${agentSlug}/update-capabilities`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ capabilities: ['nestjs', 'prisma'] })
+        .expect(200);
+
+      const data = body<{ capabilities: { capability: string }[] }>(res);
+      const caps = data.capabilities.map((c) => c.capability);
+      expect(caps).toContain('nestjs');
+      expect(caps).toContain('prisma');
+    });
+
+    it('PATCH /api/agents/:slug — 404 for nonexistent agent', async () => {
+      await request(httpServer)
+        .patch('/api/agents/nonexistent-agent')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: 'Ghost' })
+        .expect(404);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // 16. Project Label Delete
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('16. Project Label Delete', () => {
+    let deleteLabelId: string;
+
+    beforeAll(async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/labels`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: 'to-delete', color: '#ff0000' })
+        .expect(201);
+
+      deleteLabelId = body<{ id: string }>(res).id;
+    });
+
+    it('DELETE /api/projects/:slug/labels/:id — removes label', async () => {
+      await request(httpServer)
+        .delete(`/api/projects/${projectSlug}/labels/${deleteLabelId}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(204);
+    });
+
+    it('GET .../labels — deleted label no longer appears', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/labels`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const labels = body<{ id: string }[]>(res);
+      const ids = labels.map((l) => l.id);
+      expect(ids).not.toContain(deleteLabelId);
+    });
+
+    it('DELETE /api/projects/:slug/labels/:id — 404 for nonexistent label', async () => {
+      await request(httpServer)
+        .delete(`/api/projects/${projectSlug}/labels/nonexistent-id`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(404);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // 17. Ticket Close (valid: IN_PROGRESS → CLOSED)
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('17. Ticket Close — Valid Transition', () => {
+    let closeTicketRef: string;
+
+    beforeAll(async () => {
+      // Create and start a ticket so it reaches IN_PROGRESS
+      let res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ type: 'TASK', title: 'Close me', priority: 'LOW' })
+        .expect(201);
+
+      closeTicketRef = body<{ ref: string }>(res).ref;
+
+      // CREATED → IN_PROGRESS (direct start)
+      await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets/${closeTicketRef}/start`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+    });
+
+    it('POST .../close — IN_PROGRESS → CLOSED', async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets/${closeTicketRef}/close`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const data = body<{ ticket: { status: string } }>(res);
+      expect(data.ticket.status).toBe('CLOSED');
+    });
+
+    it('GET closed ticket — status is CLOSED', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/tickets/${closeTicketRef}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const data = body<{ status: string }>(res);
+      expect(data.status).toBe('CLOSED');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // 18. Ticket Assign
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('18. Ticket Assign', () => {
+    let assignTicketRef: string;
+
+    beforeAll(async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ type: 'BUG', title: 'Assign me', priority: 'MEDIUM' })
+        .expect(201);
+
+      assignTicketRef = body<{ ref: string }>(res).ref;
+    });
+
+    it('POST .../assign — assigns ticket to agent', async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets/${assignTicketRef}/assign`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ agentSlug })
+        .expect(200);
+
+      const data = body<{ assignedAgentId: string | null }>(res);
+      expect(data.assignedAgentId).not.toBeNull();
+    });
+
+    it('POST .../assign — 404 for nonexistent ticket', async () => {
+      await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets/NONEXIST-999/assign`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ agentSlug })
         .expect(404);
     });
   });

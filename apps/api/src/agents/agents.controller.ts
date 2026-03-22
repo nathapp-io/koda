@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Patch, Body, Param, Req } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Body, Param, Req, HttpCode, HttpStatus } from '@nestjs/common';
 import { AgentsService, CreateAgentDto } from './agents.service';
 import { UpdateAgentDto } from './dto/update-agent.dto';
 import { UpdateRolesDto } from './dto/update-roles.dto';
@@ -107,6 +107,7 @@ export class AgentsController {
   }
 
   @Post(':slug/rotate-key')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Rotate agent API key (admin only)' })
   @ApiResponse({ status: 200, description: 'API key rotated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
