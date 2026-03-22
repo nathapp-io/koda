@@ -1,5 +1,5 @@
 /**
- * API Integration Tests — Full lifecycle via supertest + real SQLite DB
+ * API E2E Tests — Full lifecycle via supertest + real SQLite DB
  *
  * Exercises:
  *   Human auth → Agent auth → Project CRUD → Label CRUD →
@@ -11,6 +11,7 @@
  * Use `body(res)` helper to unwrap.
  *
  * Run:  DATABASE_URL=file:./koda-test.db bun run test:integration
+ * File: test/integration/api-e2e/api-e2e.integration.spec.ts
  */
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
