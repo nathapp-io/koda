@@ -225,7 +225,7 @@ export function ticketCommand(program: Command): void {
       try {
         // Validate required options
         if (!options.comment) {
-          error('Missing required option: --comment is required');
+          error('Comment is required');
           process.exit(3);
         }
 
@@ -276,7 +276,7 @@ export function ticketCommand(program: Command): void {
 
   ticket
     .command('start <ref>')
-    .description('Start a ticket (VERIFIED → IN_PROGRESS)')
+    .description('Start a ticket (CREATED or VERIFIED → IN_PROGRESS)')
     .action(async (ref: string) => {
       try {
         const auth = resolveAuth({});
@@ -305,7 +305,7 @@ export function ticketCommand(program: Command): void {
       try {
         // Validate required options
         if (!options.comment) {
-          error('Missing required option: --comment is required');
+          error('Comment is required');
           process.exit(3);
         }
 
@@ -345,7 +345,7 @@ export function ticketCommand(program: Command): void {
       try {
         // Validate required options
         if (!options.comment) {
-          error('Missing required option: --comment is required');
+          error('Comment is required');
           process.exit(3);
         }
 
@@ -401,7 +401,7 @@ export function ticketCommand(program: Command): void {
       try {
         // Validate required options
         if (!options.comment) {
-          error('Missing required option: --comment is required');
+          error('Comment is required');
           process.exit(3);
         }
 

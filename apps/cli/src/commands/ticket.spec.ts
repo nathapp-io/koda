@@ -1827,4 +1827,76 @@ describe('ticketCommand', () => {
       expect(processExitSpy).toHaveBeenCalledWith(2);
     });
   });
+
+  describe('US-004: comment required and start help text', () => {
+    it('ticket fix exits 3 with "Comment is required" when --comment is omitted', async () => {
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const fixCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'fix');
+
+      try {
+        await fixCmd?.parse(['node', 'test', 'KODA-1']);
+      } catch {
+        // Expected
+      }
+
+      expect(processExitSpy).toHaveBeenCalledWith(3);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Comment is required')
+      );
+    });
+
+    it('ticket verify exits 3 with "Comment is required" when --comment is omitted', async () => {
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const verifyCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'verify');
+
+      try {
+        await verifyCmd?.parse(['node', 'test', 'KODA-1']);
+      } catch {
+        // Expected
+      }
+
+      expect(processExitSpy).toHaveBeenCalledWith(3);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Comment is required')
+      );
+    });
+
+    it('ticket reject exits 3 with "Comment is required" when --comment is omitted', async () => {
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const rejectCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'reject');
+
+      try {
+        await rejectCmd?.parse(['node', 'test', 'KODA-1']);
+      } catch {
+        // Expected
+      }
+
+      expect(processExitSpy).toHaveBeenCalledWith(3);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Comment is required')
+      );
+    });
+
+    it('ticket start description includes "CREATED or VERIFIED → IN_PROGRESS"', () => {
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const startCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'start');
+
+      expect(startCmd?.description()).toContain('CREATED or VERIFIED');
+    });
+
+    it('ticket fix sends { body: comment } to the API', async () => {
+      (TicketsService.fix as jest.Mock).mockResolvedValue({ data: {} });
+
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const fixCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'fix');
+
+      await fixCmd?.parse(['node', 'test', 'KODA-1', '--comment', 'Fixed null ref']);
+
+      expect(TicketsService.fix).toHaveBeenCalledWith(
+        expect.any(Object),
+        'KODA-1',
+        expect.objectContaining({ body: 'Fixed null ref' })
+      );
+    });
+  });
 });
