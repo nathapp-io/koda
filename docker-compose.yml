@@ -32,7 +32,8 @@ services:
     ports:
       - "${WEB_PORT:-3101}:3101"
     environment:
-      NUXT_PUBLIC_API_BASE_URL: ${NUXT_PUBLIC_API_BASE_URL:-http://localhost:3100/api}
+      # Internal URL: Nuxt server → API container via Docker service name
+      NUXT_API_INTERNAL_URL: http://api:3100
       PORT: 3101
     depends_on:
       api:
