@@ -10,18 +10,22 @@ interface ApiErrorResponse {
   message?: string;
 }
 
+interface HandleApiErrorOpts {
+  notFoundMessage?: string;
+}
+
 /**
  * Handle API errors and exit with appropriate code.
  * Exit codes:
- *   - 1: API error (5xx, unknown)
- *   - 2: Config/auth error (401, 403)
- *   - 3: Validation error (400)
+ *   - 1: general API error (5xx, unknown)
+ *   - 2: auth error (401, 403)
+ *   - 3: validation error (400)
+ *   - 4: not found (404)
  */
-export function handleApiError(err: unknown): never {
+export function handleApiError(err: unknown, opts?: HandleApiErrorOpts): never {
   const apiError = err as ApiErrorResponse;
   const status = apiError.response?.status;
 
-  // Determine error message
   let errorMessage = '';
   if (apiError.response?.data?.message) {
     errorMessage = apiError.response.data.message;
@@ -31,17 +35,22 @@ export function handleApiError(err: unknown): never {
     errorMessage = 'Unknown error';
   }
 
-  // Log error to stderr
-  printError(errorMessage);
-
-  // Determine exit code based on HTTP status
-  let exitCode = 1; // Default: API error
-
-  if (status === 400) {
-    exitCode = 3; // Validation error
-  } else if (status === 401 || status === 403) {
-    exitCode = 2; // Config/auth error
+  if (status === 401 || status === 403) {
+    printError(errorMessage);
+    printError('Check your API key: koda config set apiKey <key>');
+    process.exit(2);
   }
 
-  process.exit(exitCode);
+  if (status === 400) {
+    printError(errorMessage);
+    process.exit(3);
+  }
+
+  if (status === 404) {
+    printError(opts?.notFoundMessage ?? 'Not found');
+    process.exit(4);
+  }
+
+  printError(errorMessage);
+  process.exit(1);
 }

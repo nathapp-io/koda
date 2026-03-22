@@ -4,6 +4,7 @@ import { configureClient } from '../client';
 import { ProjectsService } from '../generated';
 import { table, error } from '../utils/output';
 import { unwrap } from '../utils/api';
+import { handleApiError } from '../utils/error';
 
 export function projectCommand(program: Command): void {
   const project = program.command('project');
@@ -33,14 +34,7 @@ export function projectCommand(program: Command): void {
 
         process.exit(0);
       } catch (err: unknown) {
-        const apiError = err as { response?: { status?: number }; message?: string };
-        const statusCode = apiError.response?.status;
-        if (statusCode === 401 || statusCode === 403) {
-          error('Unauthorized. Please check your API key.');
-          process.exit(2);
-        }
-        error(apiError.message || 'Failed to fetch projects');
-        process.exit(1);
+        handleApiError(err);
       }
     });
 
@@ -69,18 +63,7 @@ export function projectCommand(program: Command): void {
 
         process.exit(0);
       } catch (err: unknown) {
-        const apiError = err as { response?: { status?: number }; message?: string };
-        const statusCode = apiError.response?.status;
-        if (statusCode === 401 || statusCode === 403) {
-          error('Unauthorized. Please check your API key.');
-          process.exit(2);
-        }
-        if (statusCode === 404) {
-          error(`Project not found: ${slug}`);
-          process.exit(1);
-        }
-        error(apiError.message || 'Failed to fetch project');
-        process.exit(1);
+        handleApiError(err, { notFoundMessage: `Project not found: ${slug}` });
       }
     });
 }

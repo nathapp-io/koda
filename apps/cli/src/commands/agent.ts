@@ -4,6 +4,7 @@ import { configureClient } from '../client';
 import { AgentService } from '../generated';
 import { error } from '../utils/output';
 import { unwrap } from '../utils/api';
+import { handleApiError } from '../utils/error';
 
 function maskApiKey(apiKey: string): string {
   if (apiKey.length <= 8) {
@@ -41,16 +42,8 @@ export function agentCommand(program: Command): void {
         }
 
         process.exit(0);
-      } catch (err) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const error_ = err as any;
-        const statusCode = error_.response?.status;
-        if (statusCode === 401 || statusCode === 403) {
-          error('Unauthorized. Please check your API key.');
-          process.exit(2);
-        }
-        error(error_.message || 'Failed to fetch agent profile');
-        process.exit(1);
+      } catch (err: unknown) {
+        handleApiError(err);
       }
     });
 }

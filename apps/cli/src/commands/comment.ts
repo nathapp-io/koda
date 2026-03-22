@@ -4,6 +4,7 @@ import { configureClient } from '../client';
 import { CommentsService } from '../generated';
 import { success, error } from '../utils/output';
 import { unwrap } from '../utils/api';
+import { handleApiError } from '../utils/error';
 
 export function commentCommand(program: Command): void {
   const comment = program.command('comment');
@@ -47,24 +48,8 @@ export function commentCommand(program: Command): void {
         }
 
         process.exit(0);
-      } catch (err) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const error_ = err as any;
-        const statusCode = error_.response?.status;
-        if (statusCode === 401 || statusCode === 403) {
-          error('Unauthorized. Please check your API key.');
-          process.exit(2);
-        }
-        if (statusCode === 404) {
-          error(`Ticket not found: ${ref}`);
-          process.exit(1);
-        }
-        if (statusCode === 400) {
-          error(`Bad request: ${error_.response?.data?.message || error_.message}`);
-          process.exit(3);
-        }
-        error(error_.message || 'Failed to add comment');
-        process.exit(1);
+      } catch (err: unknown) {
+        handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
     });
 }

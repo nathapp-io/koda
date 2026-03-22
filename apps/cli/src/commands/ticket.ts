@@ -4,6 +4,7 @@ import { configureClient } from '../client';
 import { TicketsService } from '../generated';
 import { table, error } from '../utils/output';
 import { unwrap } from '../utils/api';
+import { handleApiError } from '../utils/error';
 
 export function ticketCommand(program: Command): void {
   const ticket = program.command('ticket');
@@ -52,14 +53,7 @@ export function ticketCommand(program: Command): void {
 
         process.exit(0);
       } catch (err: unknown) {
-        const apiError = err as { response?: { status?: number }; message?: string };
-        const statusCode = apiError.response?.status;
-        if (statusCode === 401 || statusCode === 403) {
-          error('Unauthorized. Please check your API key.');
-          process.exit(2);
-        }
-        error(apiError.message || 'Failed to create ticket');
-        process.exit(1);
+        handleApiError(err);
       }
     });
 
@@ -113,14 +107,7 @@ export function ticketCommand(program: Command): void {
 
         process.exit(0);
       } catch (err: unknown) {
-        const apiError = err as { response?: { status?: number }; message?: string };
-        const statusCode = apiError.response?.status;
-        if (statusCode === 401 || statusCode === 403) {
-          error('Unauthorized. Please check your API key.');
-          process.exit(2);
-        }
-        error(apiError.message || 'Failed to list tickets');
-        process.exit(1);
+        handleApiError(err);
       }
     });
 
@@ -163,14 +150,7 @@ export function ticketCommand(program: Command): void {
 
         process.exit(0);
       } catch (err: unknown) {
-        const apiError = err as { response?: { status?: number }; message?: string };
-        const statusCode = apiError.response?.status;
-        if (statusCode === 401 || statusCode === 403) {
-          error('Unauthorized. Please check your API key.');
-          process.exit(2);
-        }
-        error(apiError.message || 'Failed to list tickets');
-        process.exit(1);
+        handleApiError(err);
       }
     });
 
@@ -221,18 +201,7 @@ export function ticketCommand(program: Command): void {
 
         process.exit(0);
       } catch (err: unknown) {
-        const apiError = err as { response?: { status?: number }; message?: string };
-        const statusCode = apiError.response?.status;
-        if (statusCode === 401 || statusCode === 403) {
-          error('Unauthorized. Please check your API key.');
-          process.exit(2);
-        }
-        if (statusCode === 404) {
-          error(`Ticket not found: ${ref}`);
-          process.exit(1);
-        }
-        error(apiError.message || 'Failed to fetch ticket');
-        process.exit(1);
+        handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
     });
 
@@ -264,14 +233,7 @@ export function ticketCommand(program: Command): void {
         console.log(`✓ Ticket verified successfully`);
         process.exit(0);
       } catch (err: unknown) {
-        const apiError = err as { response?: { status?: number }; message?: string };
-        const statusCode = apiError.response?.status;
-        if (statusCode === 401 || statusCode === 403) {
-          error('Unauthorized. Please check your API key.');
-          process.exit(2);
-        }
-        error(apiError.message || 'Failed to verify ticket');
-        process.exit(1);
+        handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
     });
 
@@ -296,14 +258,7 @@ export function ticketCommand(program: Command): void {
         console.log(`✓ Ticket assigned successfully`);
         process.exit(0);
       } catch (err: unknown) {
-        const apiError = err as { response?: { status?: number }; message?: string };
-        const statusCode = apiError.response?.status;
-        if (statusCode === 401 || statusCode === 403) {
-          error('Unauthorized. Please check your API key.');
-          process.exit(2);
-        }
-        error(apiError.message || 'Failed to assign ticket');
-        process.exit(1);
+        handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
     });
 
@@ -325,14 +280,7 @@ export function ticketCommand(program: Command): void {
         console.log(`✓ Ticket started successfully`);
         process.exit(0);
       } catch (err: unknown) {
-        const apiError = err as { response?: { status?: number }; message?: string };
-        const statusCode = apiError.response?.status;
-        if (statusCode === 401 || statusCode === 403) {
-          error('Unauthorized. Please check your API key.');
-          process.exit(2);
-        }
-        error(apiError.message || 'Failed to start ticket');
-        process.exit(1);
+        handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
     });
 
@@ -371,14 +319,7 @@ export function ticketCommand(program: Command): void {
         console.log(`✓ Fix submitted successfully`);
         process.exit(0);
       } catch (err: unknown) {
-        const apiError = err as { response?: { status?: number }; message?: string };
-        const statusCode = apiError.response?.status;
-        if (statusCode === 401 || statusCode === 403) {
-          error('Unauthorized. Please check your API key.');
-          process.exit(2);
-        }
-        error(apiError.message || 'Failed to submit fix');
-        process.exit(1);
+        handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
     });
 
@@ -414,14 +355,7 @@ export function ticketCommand(program: Command): void {
         console.log(`✓ Fix verification submitted successfully`);
         process.exit(0);
       } catch (err: unknown) {
-        const apiError = err as { response?: { status?: number }; message?: string };
-        const statusCode = apiError.response?.status;
-        if (statusCode === 401 || statusCode === 403) {
-          error('Unauthorized. Please check your API key.');
-          process.exit(2);
-        }
-        error(apiError.message || 'Failed to verify fix');
-        process.exit(1);
+        handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
     });
 
@@ -443,14 +377,7 @@ export function ticketCommand(program: Command): void {
         console.log(`✓ Ticket closed successfully`);
         process.exit(0);
       } catch (err: unknown) {
-        const apiError = err as { response?: { status?: number }; message?: string };
-        const statusCode = apiError.response?.status;
-        if (statusCode === 401 || statusCode === 403) {
-          error('Unauthorized. Please check your API key.');
-          process.exit(2);
-        }
-        error(apiError.message || 'Failed to close ticket');
-        process.exit(1);
+        handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
     });
 
@@ -482,14 +409,7 @@ export function ticketCommand(program: Command): void {
         console.log(`✓ Ticket rejected successfully`);
         process.exit(0);
       } catch (err: unknown) {
-        const apiError = err as { response?: { status?: number }; message?: string };
-        const statusCode = apiError.response?.status;
-        if (statusCode === 401 || statusCode === 403) {
-          error('Unauthorized. Please check your API key.');
-          process.exit(2);
-        }
-        error(apiError.message || 'Failed to reject ticket');
-        process.exit(1);
+        handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
     });
 
@@ -535,18 +455,7 @@ export function ticketCommand(program: Command): void {
         console.log(`✓ Opening ticket in browser`);
         process.exit(0);
       } catch (err: unknown) {
-        const apiError = err as { response?: { status?: number }; message?: string };
-        const statusCode = apiError.response?.status;
-        if (statusCode === 401 || statusCode === 403) {
-          error('Unauthorized. Please check your API key.');
-          process.exit(2);
-        }
-        if (statusCode === 404) {
-          error(`Ticket not found: ${ref}`);
-          process.exit(1);
-        }
-        error(apiError.message || 'Failed to open ticket');
-        process.exit(1);
+        handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
     });
 }

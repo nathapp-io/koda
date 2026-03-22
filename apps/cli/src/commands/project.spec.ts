@@ -293,7 +293,7 @@ describe('projectCommand', () => {
         // Expected
       }
 
-      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(exitSpy).toHaveBeenCalledWith(4);
     });
 
     it('exits with code 2 when API key is not configured', async () => {
