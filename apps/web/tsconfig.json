@@ -6,7 +6,8 @@
       "~": ["."],
       "~/*": ["./*"]
     },
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "types": ["@types/bun", "tailwindcss"]
   },
   "include": [
     ".nuxt/nuxt.d.ts",
