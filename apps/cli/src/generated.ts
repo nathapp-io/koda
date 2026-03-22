@@ -169,3 +169,50 @@ export class AgentService {
     return client.get('/agents/me');
   }
 }
+
+export interface Label {
+  id: string;
+  name: string;
+  color?: string;
+  projectId: string;
+}
+
+export class LabelsService {
+  static async create(
+    client: AxiosInstance,
+    data: { projectSlug: string; name: string; color?: string }
+  ): Promise<Wrapped<Label>> {
+    return client.post(`/projects/${data.projectSlug}/labels`, { name: data.name, color: data.color });
+  }
+
+  static async list(
+    client: AxiosInstance,
+    projectSlug: string
+  ): Promise<Wrapped<{ items: Label[]; total: number }>> {
+    return client.get(`/projects/${projectSlug}/labels`);
+  }
+
+  static async delete(
+    client: AxiosInstance,
+    projectSlug: string,
+    id: string
+  ): Promise<Wrapped<null>> {
+    return client.delete(`/projects/${projectSlug}/labels/${id}`);
+  }
+
+  static async addToTicket(
+    client: AxiosInstance,
+    ref: string,
+    labelId: string
+  ): Promise<Wrapped<null>> {
+    return client.post(`/tickets/${ref}/labels`, { labelId });
+  }
+
+  static async removeFromTicket(
+    client: AxiosInstance,
+    ref: string,
+    labelId: string
+  ): Promise<Wrapped<null>> {
+    return client.delete(`/tickets/${ref}/labels/${labelId}`);
+  }
+}

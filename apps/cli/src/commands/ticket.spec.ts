@@ -53,11 +53,15 @@ jest.mock('../generated', () => ({
     update: jest.fn(),
     delete: jest.fn(),
   },
+  LabelsService: {
+    addToTicket: jest.fn(),
+    removeFromTicket: jest.fn(),
+  },
 }));
 
 import { Command } from 'commander';
 import { ticketCommand } from './ticket';
-import { TicketsService } from '../generated';
+import { TicketsService, LabelsService } from '../generated';
 
 describe('ticketCommand', () => {
   let program: Command;
@@ -2123,6 +2127,84 @@ describe('ticketCommand', () => {
         'KODA-1',
         expect.objectContaining({ body: 'Fixed null ref' })
       );
+    });
+  });
+
+  describe('ticket label', () => {
+    describe('ticket label add', () => {
+      it('attaches a label to a ticket and exits 0', async () => {
+        (LabelsService.addToTicket as jest.Mock).mockResolvedValue({
+          data: { ret: 0, data: null },
+        });
+
+        const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+        const labelCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'label');
+        const addCmd = labelCmd?.commands.find((cmd) => cmd.name() === 'add');
+
+        await addCmd?.parseAsync([
+          'node', 'test', 'KODA-1', '--project', 'koda', '--label', 'lbl-1',
+        ]);
+
+        expect(LabelsService.addToTicket).toHaveBeenCalledWith(
+          expect.anything(),
+          'KODA-1',
+          'lbl-1'
+        );
+        expect(processExitSpy).toHaveBeenCalledWith(0);
+      });
+
+      it('exits 2 when API key is not configured', async () => {
+        mockData.apiKey = '';
+        mockData.apiUrl = '';
+
+        const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+        const labelCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'label');
+        const addCmd = labelCmd?.commands.find((cmd) => cmd.name() === 'add');
+
+        await addCmd?.parseAsync([
+          'node', 'test', 'KODA-1', '--project', 'koda', '--label', 'lbl-1',
+        ]);
+
+        expect(processExitSpy).toHaveBeenCalledWith(2);
+      });
+    });
+
+    describe('ticket label remove', () => {
+      it('detaches a label from a ticket and exits 0', async () => {
+        (LabelsService.removeFromTicket as jest.Mock).mockResolvedValue({
+          data: { ret: 0, data: null },
+        });
+
+        const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+        const labelCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'label');
+        const removeCmd = labelCmd?.commands.find((cmd) => cmd.name() === 'remove');
+
+        await removeCmd?.parseAsync([
+          'node', 'test', 'KODA-1', '--project', 'koda', '--label', 'lbl-1',
+        ]);
+
+        expect(LabelsService.removeFromTicket).toHaveBeenCalledWith(
+          expect.anything(),
+          'KODA-1',
+          'lbl-1'
+        );
+        expect(processExitSpy).toHaveBeenCalledWith(0);
+      });
+
+      it('exits 2 when API key is not configured', async () => {
+        mockData.apiKey = '';
+        mockData.apiUrl = '';
+
+        const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+        const labelCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'label');
+        const removeCmd = labelCmd?.commands.find((cmd) => cmd.name() === 'remove');
+
+        await removeCmd?.parseAsync([
+          'node', 'test', 'KODA-1', '--project', 'koda', '--label', 'lbl-1',
+        ]);
+
+        expect(processExitSpy).toHaveBeenCalledWith(2);
+      });
     });
   });
 });

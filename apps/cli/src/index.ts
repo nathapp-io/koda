@@ -9,6 +9,7 @@ import { projectCommand } from './commands/project';
 import { ticketCommand } from './commands/ticket';
 import { commentCommand } from './commands/comment';
 import { agentCommand } from './commands/agent';
+import { labelCommand } from './commands/label';
 
 // Read package.json to get version
 let version = '0.1.0';
@@ -113,6 +114,9 @@ commentCommand(program);
 
 // Agent command
 agentCommand(program);
+
+// Label command
+labelCommand(program);
 
 // Global error handling for uncaught exceptions
 process.on('uncaughtException', (error: Error) => {

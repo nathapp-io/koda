@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { resolveAuth } from '../utils/auth';
 import { configureClient } from '../client';
-import { TicketsService } from '../generated';
+import { TicketsService, LabelsService } from '../generated';
 import { table, error } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
@@ -497,6 +497,56 @@ export function ticketCommand(program: Command): void {
         process.exit(0);
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
+      }
+    });
+
+  const ticketLabel = ticket.command('label').description('Manage labels on a ticket');
+
+  ticketLabel
+    .command('add <ref>')
+    .description('Attach a label to a ticket')
+    .requiredOption('--project <slug>', 'Project slug')
+    .requiredOption('--label <id>', 'Label ID')
+    .action(async (ref: string, options) => {
+      try {
+        const auth = resolveAuth({});
+
+        if (!auth.apiKey || !auth.apiUrl) {
+          error('API key or URL not configured. Run: koda login --api-key <key>');
+          process.exit(2);
+        }
+
+        const client = configureClient(auth.apiUrl, auth.apiKey);
+        await LabelsService.addToTicket(client, ref, options.label);
+
+        console.log(`✓ Label attached to ticket ${ref}`);
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err, { notFoundMessage: `Ticket or label not found` });
+      }
+    });
+
+  ticketLabel
+    .command('remove <ref>')
+    .description('Detach a label from a ticket')
+    .requiredOption('--project <slug>', 'Project slug')
+    .requiredOption('--label <id>', 'Label ID')
+    .action(async (ref: string, options) => {
+      try {
+        const auth = resolveAuth({});
+
+        if (!auth.apiKey || !auth.apiUrl) {
+          error('API key or URL not configured. Run: koda login --api-key <key>');
+          process.exit(2);
+        }
+
+        const client = configureClient(auth.apiUrl, auth.apiKey);
+        await LabelsService.removeFromTicket(client, ref, options.label);
+
+        console.log(`✓ Label detached from ticket ${ref}`);
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err, { notFoundMessage: `Ticket or label not found` });
       }
     });
 
