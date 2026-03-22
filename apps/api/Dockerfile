@@ -1,28 +1,34 @@
 FROM node:22-alpine AS base
-RUN npm install -g bun
+RUN npm install -g bun turbo
 
+# ── Prune: extract only what @nathapp/koda-api needs ──────────────────────────
+FROM base AS pruner
+WORKDIR /app
+COPY . .
+RUN turbo prune @nathapp/koda-api --docker
+
+# ── Install dependencies (uses pruned lockfile for better caching) ────────────
 FROM base AS deps
 WORKDIR /app
-COPY package.json bun.lock ./
-COPY apps/api/package.json ./apps/api/
-COPY prisma ./prisma/
+COPY --from=pruner /app/out/json/ .
 RUN bun install --frozen-lockfile
 
+# ── Build ─────────────────────────────────────────────────────────────────────
 FROM base AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY --from=pruner /app/out/full/ .
 RUN cd apps/api && bunx prisma generate
-RUN bun run build --filter=@nathapp/koda-api
+RUN turbo run build --filter=@nathapp/koda-api
 
+# ── Runner ────────────────────────────────────────────────────────────────────
 FROM node:22-alpine AS runner
 WORKDIR /app
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nestjs
 COPY --from=build --chown=nestjs:nodejs /app/apps/api/dist ./dist
 COPY --from=build --chown=nestjs:nodejs /app/node_modules ./node_modules
-COPY --from=build --chown=nestjs:nodejs /app/apps/api/node_modules ./apps/api/node_modules
-COPY --from=build --chown=nestjs:nodejs /app/prisma ./prisma
+COPY --from=build --chown=nestjs:nodejs /app/apps/api/prisma ./prisma
 USER nestjs
 EXPOSE 3100
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
