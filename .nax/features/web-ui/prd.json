@@ -3,7 +3,7 @@
   "feature": "web-ui",
   "branchName": "feat/web-ui",
   "createdAt": "2026-03-22T00:00:00.000Z",
-  "updatedAt": "2026-03-22T11:11:38.397Z",
+  "updatedAt": "2026-03-22T11:43:11.248Z",
   "userStories": [
     {
       "id": "US-001",
@@ -120,10 +120,10 @@
       "dependencies": [
         "US-001-1"
       ],
-      "status": "pending",
+      "status": "paused",
       "passes": false,
       "escalations": [],
-      "attempts": 0,
+      "attempts": 1,
       "parentStoryId": "US-001",
       "workdir": "apps/web",
       "priorErrors": [

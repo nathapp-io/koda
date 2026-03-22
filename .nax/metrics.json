@@ -171,5 +171,17 @@
     "storiesFailed": 1,
     "totalDurationMs": 1461265,
     "stories": []
+  },
+  {
+    "runId": "run-2026-03-22T11-41-45-956Z",
+    "feature": "web-ui",
+    "startedAt": "2026-03-22T11:41:45.956Z",
+    "completedAt": "2026-03-22T11:43:13.865Z",
+    "totalCost": 0.22434915,
+    "totalStories": 0,
+    "storiesCompleted": 0,
+    "storiesFailed": 0,
+    "totalDurationMs": 87909,
+    "stories": []
   }
 ]
