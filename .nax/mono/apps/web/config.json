@@ -6,8 +6,5 @@
       "lint": "bun run lint",
       "lintFix": "bun run lint:fix"
     }
-  },
-  "execution": {
-    "strategy": "simple"
   }
 }
