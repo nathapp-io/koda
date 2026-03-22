@@ -1,4 +1,4 @@
-export default defineNuxtRouteMiddleware((to, from) => {
+export default defineNuxtRouteMiddleware((to, _from) => {
   const auth = useAuth()
 
   // Guest-only routes where authenticated users should be redirected

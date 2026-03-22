@@ -1,5 +1,5 @@
 import { describe, test, expect, mock, beforeEach } from 'bun:test'
-import { existsSync, readFileSync } from 'fs'
+import { readFileSync } from 'fs'
 import { join } from 'path'
 import { ref, computed } from 'vue'
 
@@ -53,7 +53,7 @@ describe('AC1b: Authorization header injected when token exists', () => {
 
   test('GET request includes Authorization: Bearer header when token is set', async () => {
     const fetchMock = makeFetchMock()
-    const { tokenRef, fakeUseAuth, fakeRuntimeConfig } = makeAuthEnv('test-jwt-token')
+    const { tokenRef: _tokenRef, fakeUseAuth, fakeRuntimeConfig } = makeAuthEnv('test-jwt-token')
 
     ;(globalThis as Record<string, unknown>).useRuntimeConfig = fakeRuntimeConfig
     ;(globalThis as Record<string, unknown>).useAuth = fakeUseAuth

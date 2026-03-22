@@ -61,7 +61,7 @@ describe('AC3: unauthenticated request to protected route redirects to /login', 
 
     ;(globalThis as Record<string, unknown>).useAuth = () => ({ token: tokenRef, isAuthenticated })
     ;(globalThis as Record<string, unknown>).navigateTo = navigateToMock
-    ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: Function) => fn
+    ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: (to: unknown, from: unknown) => unknown) => fn
 
     const mod = await import(`${middlewarePath}?v=${Date.now()}`)
     const middleware = mod.default
@@ -80,7 +80,7 @@ describe('AC3: unauthenticated request to protected route redirects to /login', 
 
     ;(globalThis as Record<string, unknown>).useAuth = () => ({ token: tokenRef, isAuthenticated })
     ;(globalThis as Record<string, unknown>).navigateTo = navigateToMock
-    ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: Function) => fn
+    ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: (to: unknown, from: unknown) => unknown) => fn
 
     const mod = await import(`${middlewarePath}?v=${Date.now()}`)
     const middleware = mod.default
@@ -99,7 +99,7 @@ describe('AC3: unauthenticated request to protected route redirects to /login', 
 
     ;(globalThis as Record<string, unknown>).useAuth = () => ({ token: tokenRef, isAuthenticated })
     ;(globalThis as Record<string, unknown>).navigateTo = navigateToMock
-    ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: Function) => fn
+    ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: (to: unknown, from: unknown) => unknown) => fn
 
     const mod = await import(`${middlewarePath}?v=${Date.now()}`)
     const middleware = mod.default
@@ -127,7 +127,7 @@ describe('AC4: authenticated request to /login redirects to /', () => {
 
     ;(globalThis as Record<string, unknown>).useAuth = () => ({ token: tokenRef, isAuthenticated })
     ;(globalThis as Record<string, unknown>).navigateTo = navigateToMock
-    ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: Function) => fn
+    ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: (to: unknown, from: unknown) => unknown) => fn
 
     const mod = await import(`${middlewarePath}?v=${Date.now()}`)
     const middleware = mod.default
@@ -146,7 +146,7 @@ describe('AC4: authenticated request to /login redirects to /', () => {
 
     ;(globalThis as Record<string, unknown>).useAuth = () => ({ token: tokenRef, isAuthenticated })
     ;(globalThis as Record<string, unknown>).navigateTo = navigateToMock
-    ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: Function) => fn
+    ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: (to: unknown, from: unknown) => unknown) => fn
 
     const mod = await import(`${middlewarePath}?v=${Date.now()}`)
     const middleware = mod.default
@@ -165,7 +165,7 @@ describe('AC4: authenticated request to /login redirects to /', () => {
 
     ;(globalThis as Record<string, unknown>).useAuth = () => ({ token: tokenRef, isAuthenticated })
     ;(globalThis as Record<string, unknown>).navigateTo = navigateToMock
-    ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: Function) => fn
+    ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: (to: unknown, from: unknown) => unknown) => fn
 
     const mod = await import(`${middlewarePath}?v=${Date.now()}`)
     const middleware = mod.default

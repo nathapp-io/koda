@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from 'bun:test'
+import { describe, test, expect, mock } from 'bun:test'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { ref, computed } from 'vue'
@@ -83,7 +83,7 @@ describe('AC4: login() calls POST /auth/login and stores accessToken', () => {
   })
 
   test('login() stores the returned accessToken into the cookie ref', async () => {
-    const { tokenRef, userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
+    const { tokenRef, userRef: _userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
 
     // Inject Nuxt globals before importing the composable
     ;(globalThis as Record<string, unknown>).useCookie = fakeCookie
@@ -108,7 +108,7 @@ describe('AC4: login() calls POST /auth/login and stores accessToken', () => {
   })
 
   test('login() sets user state from the response', async () => {
-    const { tokenRef, userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
+    const { tokenRef: _tokenRef, userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
 
     ;(globalThis as Record<string, unknown>).useCookie = fakeCookie
     ;(globalThis as Record<string, unknown>).useState = fakeState
@@ -135,10 +135,10 @@ describe('AC5: logout() clears token and user state', () => {
   })
 
   test('logout() sets token ref to null', async () => {
-    const { tokenRef, userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
+    const { tokenRef, userRef: _userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
 
     tokenRef.value = 'existing-jwt'
-    userRef.value = { id: 1, email: 'a@b.com' }
+    _userRef.value = { id: 1, email: 'a@b.com' }
 
     ;(globalThis as Record<string, unknown>).useCookie = fakeCookie
     ;(globalThis as Record<string, unknown>).useState = fakeState
@@ -154,9 +154,9 @@ describe('AC5: logout() clears token and user state', () => {
   })
 
   test('logout() sets user ref to null', async () => {
-    const { tokenRef, userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
+    const { tokenRef: _tokenRef, userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
 
-    tokenRef.value = 'existing-jwt'
+    _tokenRef.value = 'existing-jwt'
     userRef.value = { id: 1, email: 'a@b.com' }
 
     ;(globalThis as Record<string, unknown>).useCookie = fakeCookie
@@ -185,7 +185,7 @@ describe('AC6: isAuthenticated is a computed ref', () => {
   })
 
   test('isAuthenticated is false when token is null', async () => {
-    const { tokenRef, userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
+    const { tokenRef, userRef: _userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
 
     tokenRef.value = null
 
@@ -201,7 +201,7 @@ describe('AC6: isAuthenticated is a computed ref', () => {
   })
 
   test('isAuthenticated is true when token has a value', async () => {
-    const { tokenRef, userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
+    const { tokenRef, userRef: _userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
 
     tokenRef.value = 'some-jwt'
 
@@ -217,7 +217,7 @@ describe('AC6: isAuthenticated is a computed ref', () => {
   })
 
   test('isAuthenticated updates reactively after login()', async () => {
-    const { tokenRef, userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
+    const { tokenRef: _tokenRef, userRef: _userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
 
     ;(globalThis as Record<string, unknown>).useCookie = fakeCookie
     ;(globalThis as Record<string, unknown>).useState = fakeState
@@ -233,7 +233,7 @@ describe('AC6: isAuthenticated is a computed ref', () => {
   })
 
   test('isAuthenticated updates reactively after logout()', async () => {
-    const { tokenRef, userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
+    const { tokenRef, userRef: _userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
 
     tokenRef.value = 'some-jwt'
 
