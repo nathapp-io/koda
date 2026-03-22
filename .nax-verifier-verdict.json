@@ -1,50 +1,54 @@
 {
   "version": 1,
   "approved": true,
-  "story": "US-005-3: CommentThread Component — List and Add-Comment Form",
   "tests": {
     "allPassing": true,
-    "passCount": 36,
+    "passCount": 114,
     "failCount": 0
   },
   "testModifications": {
     "detected": false,
     "files": [],
     "legitimate": true,
-    "reasoning": "No test files were modified by the implementer. All tests passed without modification."
+    "reasoning": "No test files were modified by the implementer. Only implementation files changed: CommentThread.vue and pages/[project]/tickets/[ref].vue"
   },
   "acceptanceCriteria": {
     "allMet": true,
     "criteria": [
       {
-        "criterion": "AC1: components/CommentThread.vue accepts projectSlug and ticketRef props",
+        "criterion": "TicketActionPanel is wired into the right column of pages/[project]/tickets/[ref].vue",
         "met": true,
-        "evidence": "defineProps<{ projectSlug: string, ticketRef: string }>()"
+        "evidence": "TicketActionPanel component placed at line 154-158 in right column (col-span-1) with :ticket and :project-slug props"
       },
       {
-        "criterion": "AC2: Comments are fetched via useAsyncData and rendered in chronological order",
+        "criterion": "CommentThread is wired into the left column below the ticket body",
         "met": true,
-        "evidence": "useAsyncData with $api.get() + v-for loop renders comments; API response is chronologically ordered"
+        "evidence": "CommentThread component placed at line 118-122 in left column (col-span-2), after ticket description"
       },
       {
-        "criterion": "AC3: Each comment displays a colored type pill: VERIFICATION=blue, FIX_REPORT=orange, REVIEW=green, GENERAL=gray",
+        "criterion": "A success toast appears after each successful ticket transition",
         "met": true,
-        "evidence": "Type mapping with Tailwind classes; rendered with dynamic class binding and rounded-full shape"
+        "evidence": "onTransition() function (line 76-79) calls toast.success('Ticket updated successfully'), triggered via @transition handler"
       },
       {
-        "criterion": "AC4: Add-comment form has a required body Textarea and a type Select with all four options",
+        "criterion": "Ticket data refreshes automatically after a transition (useAsyncData refresh())",
         "met": true,
-        "evidence": "FormField for body with Textarea; FormField for type with Select containing GENERAL, VERIFICATION, FIX_REPORT, REVIEW"
+        "evidence": "refresh() destructured from useAsyncData (line 30), called in onTransition() at line 78"
       },
       {
-        "criterion": "AC5: Form POSTs to correct endpoint and appends comment reactively without full reload",
+        "criterion": "A success toast appears after a comment is added",
         "met": true,
-        "evidence": "$api.post() to /projects/${slug}/tickets/${ref}/comments; comments.value.push() appends reactively"
+        "evidence": "onCommentAdded() function (line 81-83) calls toast.success('Comment added successfully'), triggered via @comment-added handler on CommentThread"
       },
       {
-        "criterion": "AC6: Body field shows validation error if submitted empty",
+        "criterion": "bun run lint exits 0 with no errors in apps/web",
         "met": true,
-        "evidence": "z.string().min(1, 'Comment body is required') + FormMessage displays validation errors"
+        "evidence": "ESLint ran successfully with no output (zero errors, zero warnings)"
+      },
+      {
+        "criterion": "bun run type-check exits 0 with no TypeScript errors in apps/web",
+        "met": true,
+        "evidence": "Nuxt typecheck passed with no error TS lines (pre-existing module resolution WARNs are unrelated)"
       }
     ]
   },
@@ -53,5 +57,5 @@
     "issues": []
   },
   "fixes": [],
-  "reasoning": "All 36 tests pass. Implementation meets all acceptance criteria with clean, idiomatic Vue 3 + Nuxt code. Uses proper patterns: defineProps<>, useAsyncData, useApi, vee-validate + zod, Shadcn components. Error handling is comprehensive with try-catch and toast notifications. Code is 130 lines, well-structured with clear separation of comments list and form sections. No console.log statements. Proper TypeScript typing with Comment interface. No code quality issues detected."
+  "reasoning": "All 114 tests pass (19 US-005-4 new tests + 95 existing tests). Implementation is clean and follows conventions. All 7 acceptance criteria are fully met. Code changes are minimal and focused: (1) wire components with proper props and event handlers, (2) add toast/refresh logic in handlers, (3) add comment-added emit to CommentThread. No test files were modified. No security issues. TypeScript types are properly compatible (Ticket interface includes [key: string]: unknown). The implementation is production-ready."
 }
