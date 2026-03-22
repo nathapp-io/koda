@@ -8,11 +8,13 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { AuthService, JwtPayload } from './auth.service';
+import { AuthService } from './auth.service';
+import type { JwtPayload } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto, UserResponseDto } from './dto/auth-response.dto';
-import { Public, Principal, JwtRefreshGuard, IPrincipal } from '@nathapp/nestjs-auth';
+import { Public, Principal, JwtRefreshGuard } from '@nathapp/nestjs-auth';
+import type { IPrincipal } from './types';
 import { Throttle } from '@nathapp/nestjs-throttler';
 import { AuthException, JsonResponse } from '@nathapp/nestjs-common';
 

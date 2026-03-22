@@ -1,11 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
-import { JwtStrategyProvider, JwtRefreshStrategyProvider, IPrincipal } from '@nathapp/nestjs-auth';
+import { JwtStrategyProvider, JwtRefreshStrategyProvider } from '@nathapp/nestjs-auth';
 import { AuthException } from '@nathapp/nestjs-common';
 import * as bcrypt from 'bcrypt';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import type { IPrincipal } from './types';
 
 export interface JwtPayload {
   sub: string;

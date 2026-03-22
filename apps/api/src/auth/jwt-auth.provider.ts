@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { AuthProvider, IPrincipal } from '@nathapp/nestjs-auth';
+import { AuthProvider } from '@nathapp/nestjs-auth';
+import type { IPrincipal } from './types';
 
 /**
  * Custom AuthProvider that preserves JWT claims (role, email) in the principal.
