@@ -1,18 +1,4 @@
 <script setup lang="ts">
-const route = useRoute()
-const router = useRouter()
-
-const slug = route.params.project as string
-
-const { $api } = useApi()
-
-const { data: tickets, refresh } = await useAsyncData(
-  `tickets-${slug}`,
-  () => $api.get<Ticket[]>(`/projects/${slug}/tickets`),
-)
-
-const showCreateDialog = ref(false)
-
 interface Assignee {
   name: string
   email?: string
@@ -28,6 +14,21 @@ interface Ticket {
   assignee?: Assignee | null
 }
 
+const route = useRoute()
+const router = useRouter()
+
+const slug = route.params.project as string
+
+const { $api } = useApi()
+
+const { data: ticketsData, refresh } = useAsyncData(
+  `tickets-${slug}`,
+  () => $api.get(`/projects/${slug}/tickets`) as Promise<Ticket[]>,
+)
+
+const tickets = computed(() => ticketsData.value ?? [])
+const showCreateDialog = ref(false)
+
 function handleOpenTicket(ticket: Ticket) {
   router.push(`/${slug}/tickets/${ticket.ref}`)
 }
@@ -36,16 +37,16 @@ function handleCreate() {
   showCreateDialog.value = true
 }
 
-async function handleCreated() {
+function handleCreated() {
   showCreateDialog.value = false
-  await refresh()
+  refresh()
 }
 </script>
 
 <template>
   <div>
     <TicketBoard
-      :tickets="tickets ?? []"
+      :tickets="tickets"
       @open-ticket="handleOpenTicket"
       @create="handleCreate"
     />
