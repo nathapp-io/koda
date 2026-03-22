@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { Badge } from '~/components/ui/badge'
-import { Avatar, AvatarFallback } from '~/components/ui/avatar'
-import { Card, CardContent } from '~/components/ui/card'
+import Badge from '~/components/ui/Badge.vue'
+import Avatar from '~/components/ui/Avatar.vue'
+import AvatarFallback from '~/components/ui/AvatarFallback.vue'
+import Card from '~/components/ui/Card.vue'
+import CardContent from '~/components/ui/CardContent.vue'
 
 interface Assignee {
   name: string
