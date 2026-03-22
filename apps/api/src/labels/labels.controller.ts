@@ -89,7 +89,7 @@ export class LabelsController {
     @Req() req: RequestWithUser,
   ) {
     const currentUser = req.user || req.agent;
-    const actorType = req.user ? 'user' : 'agent';
+    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
     const data = await this.create(slug, createLabelDto, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data);
@@ -118,7 +118,7 @@ export class LabelsController {
     @Req() req: RequestWithUser,
   ) {
     const currentUser = req.user || req.agent;
-    const actorType = req.user ? 'user' : 'agent';
+    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
     return this.delete(slug, id, currentUser, actorType);
   }
 
@@ -136,7 +136,7 @@ export class LabelsController {
     @Req() req: RequestWithUser,
   ) {
     const currentUser = req.user || req.agent;
-    const actorType = req.user ? 'user' : 'agent';
+    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
     const data = await this.assignLabel(slug, ref, assignLabelDto, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data);
@@ -154,7 +154,7 @@ export class LabelsController {
     @Req() req: RequestWithUser,
   ) {
     const currentUser = req.user || req.agent;
-    const actorType = req.user ? 'user' : 'agent';
+    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
     return this.removeLabel(slug, ref, labelId, currentUser, actorType);
   }
 }

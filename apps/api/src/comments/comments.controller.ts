@@ -82,7 +82,7 @@ export class CommentsController {
     @Req() req: RequestWithUser,
   ) {
     const currentUser = req.user || req.agent;
-    const actorType = req.user ? 'user' : 'agent';
+    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
     const data = await this.create(slug, ref, createCommentDto, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data);
@@ -114,7 +114,7 @@ export class CommentsController {
     @Req() req: RequestWithUser,
   ) {
     const currentUser = req.user || req.agent;
-    const actorType = req.user ? 'user' : 'agent';
+    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
     const data = await this.update(id, updateCommentDto, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data);
@@ -131,7 +131,7 @@ export class CommentsController {
     @Req() req: RequestWithUser,
   ) {
     const currentUser = req.user || req.agent;
-    const actorType = req.user ? 'user' : 'agent';
+    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
     await this.delete(id, currentUser, actorType);
     return JsonResponse.Ok(null);
   }

@@ -12,6 +12,7 @@ export function commentCommand(program: Command): void {
   comment
     .command('add <ref>')
     .description('Add a comment to a ticket')
+    .option('--project <slug>', 'Project slug')
     .requiredOption('--body <text>', 'Comment body text')
     .option('--type <type>', 'Comment type (GENERAL|VERIFICATION|FIX_REPORT|REVIEW)', 'GENERAL')
     .option('--json', 'Output as JSON')
@@ -33,8 +34,9 @@ export function commentCommand(program: Command): void {
           return;
         }
 
+        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        const response = await CommentsService.add(client, ref, {
+        const response = await CommentsService.add(client, projectSlug, ref, {
           body: options.body,
           type: options.type,
         });

@@ -1,5 +1,4 @@
 import { Command } from 'commander';
-import { execFile } from 'child_process';
 import { resolveAuth } from '../utils/auth';
 import { configureClient } from '../client';
 import { TicketsService, LabelsService } from '../generated';
@@ -23,8 +22,10 @@ export function ticketCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
+        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+
         // Validate required options
-        if (!options.project || !options.type || !options.title) {
+        if (!projectSlug || !options.type || !options.title) {
           error('Missing required options: --project, --type, and --title are required');
           process.exit(3);
         }
@@ -52,8 +53,7 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        const response = await TicketsService.create(client, {
-          projectSlug: options.project,
+        const response = await TicketsService.create(client, projectSlug, {
           type: options.type,
           title: options.title,
           description: options.desc,
@@ -63,11 +63,11 @@ export function ticketCommand(program: Command): void {
 
         if (options.json) {
           console.log(JSON.stringify(ticketData, null, 2));
+          process.exit(0);
         } else {
-          console.log(`✓ Ticket created successfully`);
+          console.log(`✓ Ticket created successfully: ${ticketData.ref || `KODA-${ticketData.number}`}`);
+          process.exit(0);
         }
-
-        process.exit(0);
       } catch (err: unknown) {
         handleApiError(err);
       }
@@ -76,7 +76,7 @@ export function ticketCommand(program: Command): void {
   ticket
     .command('list')
     .description('List tickets')
-    .requiredOption('--project <slug>', 'Project slug')
+    .option('--project <slug>', 'Project slug')
     .option('--status <status>', 'Filter by status')
     .option('--type <type>', 'Filter by type')
     .option('--priority <priority>', 'Filter by priority')
@@ -96,8 +96,10 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
+        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+
         const response = await TicketsService.list(client, {
-          projectSlug: options.project,
+          projectSlug,
           status: options.status,
           type: options.type,
           priority: options.priority,
@@ -106,12 +108,13 @@ export function ticketCommand(program: Command): void {
           limit: parseInt(options.limit, 10),
           page: parseInt(options.page, 10),
         });
-        const { items } = unwrap(response);
+        const data = unwrap(response);
+        const items = Array.isArray(data) ? data : (data as any).items || [];
 
         if (options.json) {
           console.log(JSON.stringify(items, null, 2));
         } else {
-          const rows = items.map((t) => [
+          const rows = items.map((t: any) => [
             `KODA-${t.number}`,
             t.type,
             t.priority || '',
@@ -145,17 +148,20 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
+        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+
         const response = await TicketsService.list(client, {
-          projectSlug: options.project,
+          projectSlug,
           status: options.status,
           assignedTo: 'self',
         });
-        const { items } = unwrap(response);
+        const data = unwrap(response);
+        const items = Array.isArray(data) ? data : (data as any).items || [];
 
         if (options.json) {
           console.log(JSON.stringify(items, null, 2));
         } else {
-          const rows = items.map((t) => [
+          const rows = items.map((t: any) => [
             `KODA-${t.number}`,
             t.type,
             t.priority || '',
@@ -175,6 +181,7 @@ export function ticketCommand(program: Command): void {
   ticket
     .command('show <ref>')
     .description('Show ticket details')
+    .option('--project <slug>', 'Project slug')
     .option('--json', 'Output as JSON')
     .action(async (ref: string, options) => {
       try {
@@ -187,7 +194,9 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        const response = await TicketsService.show(client, ref);
+        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+
+        const response = await TicketsService.show(client, projectSlug, ref);
         const ticketData = unwrap(response);
 
         if (options.json) {
@@ -227,10 +236,10 @@ export function ticketCommand(program: Command): void {
   ticket
     .command('verify <ref>')
     .description('Verify a ticket (CREATED → VERIFIED)')
+    .option('--project <slug>', 'Project slug')
     .option('--comment <text>', 'Verification comment')
     .action(async (ref: string, options) => {
       try {
-        // Validate required options
         if (!options.comment) {
           error('Comment is required');
           process.exit(3);
@@ -246,7 +255,9 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        await TicketsService.verify(client, ref, {
+        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+
+        await TicketsService.verify(client, projectSlug, ref, {
           body: options.comment,
           type: 'VERIFICATION',
         });
@@ -277,7 +288,9 @@ export function ticketCommand(program: Command): void {
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
         const agentSlug = options.agent ?? options.to ?? 'self';
-        const response = await TicketsService.assign(client, ref, { agentSlug });
+        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+
+        const response = await TicketsService.assign(client, projectSlug, ref, { agentSlug });
         const ticketData = unwrap(response);
 
         if (options.json) {
@@ -288,14 +301,15 @@ export function ticketCommand(program: Command): void {
 
         process.exit(0);
       } catch (err: unknown) {
-        handleApiError(err, { notFoundMessage: `Agent not found` });
+        handleApiError(err, { notFoundMessage: `Agent or ticket not found` });
       }
     });
 
   ticket
     .command('start <ref>')
     .description('Start a ticket (CREATED or VERIFIED → IN_PROGRESS)')
-    .action(async (ref: string) => {
+    .option('--project <slug>', 'Project slug')
+    .action(async (ref: string, options) => {
       try {
         const auth = resolveAuth({});
 
@@ -306,7 +320,9 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        await TicketsService.start(client, ref);
+        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+
+        await TicketsService.start(client, projectSlug, ref);
 
         console.log(`✓ Ticket started successfully`);
         process.exit(0);
@@ -318,11 +334,11 @@ export function ticketCommand(program: Command): void {
   ticket
     .command('fix <ref>')
     .description('Submit a fix for a ticket (IN_PROGRESS → VERIFY_FIX)')
+    .option('--project <slug>', 'Project slug')
     .option('--comment <text>', 'Fix report comment')
-    .option('--git-ref <ref>', 'Git reference (e.g. v1.0:src/auth.ts:42)')
+    .option('--git-ref <ref>', 'Git reference (e.g. branch or commit)')
     .action(async (ref: string, options) => {
       try {
-        // Validate required options
         if (!options.comment) {
           error('Comment is required');
           process.exit(3);
@@ -338,7 +354,8 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+
         const payload: any = {
           body: options.comment,
           type: 'FIX_REPORT',
@@ -346,8 +363,8 @@ export function ticketCommand(program: Command): void {
         if (options.gitRef) {
           payload.gitRef = options.gitRef;
         }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await TicketsService.fix(client, ref, payload as any);
+
+        await TicketsService.fix(client, projectSlug, ref, payload);
 
         console.log(`✓ Fix submitted successfully`);
         process.exit(0);
@@ -359,12 +376,12 @@ export function ticketCommand(program: Command): void {
   ticket
     .command('verify-fix <ref>')
     .description('Verify a fix (VERIFY_FIX → CLOSED or → IN_PROGRESS)')
+    .option('--project <slug>', 'Project slug')
     .option('--comment <text>', 'Review comment')
     .option('--pass', 'Mark fix as passing (closes ticket)')
     .option('--fail', 'Mark fix as failing (returns to IN_PROGRESS)')
     .action(async (ref: string, options) => {
       try {
-        // Validate required options
         if (!options.comment) {
           error('Comment is required');
           process.exit(3);
@@ -380,8 +397,10 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
+        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+
         const status = options.pass ? 'closed' : 'in_progress';
-        await TicketsService.verifyFix(client, ref, {
+        await TicketsService.verifyFix(client, projectSlug, ref, {
           body: options.comment,
           type: 'REVIEW',
           status,
@@ -397,7 +416,8 @@ export function ticketCommand(program: Command): void {
   ticket
     .command('close <ref>')
     .description('Close a ticket')
-    .action(async (ref: string) => {
+    .option('--project <slug>', 'Project slug')
+    .action(async (ref: string, options) => {
       try {
         const auth = resolveAuth({});
 
@@ -408,7 +428,9 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        await TicketsService.close(client, ref);
+        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+
+        await TicketsService.close(client, projectSlug, ref);
 
         console.log(`✓ Ticket closed successfully`);
         process.exit(0);
@@ -420,10 +442,10 @@ export function ticketCommand(program: Command): void {
   ticket
     .command('reject <ref>')
     .description('Reject a ticket')
+    .option('--project <slug>', 'Project slug')
     .option('--comment <text>', 'Rejection reason')
     .action(async (ref: string, options) => {
       try {
-        // Validate required options
         if (!options.comment) {
           error('Comment is required');
           process.exit(3);
@@ -439,7 +461,9 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        await TicketsService.reject(client, ref, {
+        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+
+        await TicketsService.reject(client, projectSlug, ref, {
           body: options.comment,
           type: 'GENERAL',
         });
@@ -454,7 +478,7 @@ export function ticketCommand(program: Command): void {
   ticket
     .command('update <ref>')
     .description('Update a ticket')
-    .requiredOption('--project <slug>', 'Project slug')
+    .option('--project <slug>', 'Project slug')
     .option('--title <title>', 'New title')
     .option('--desc <description>', 'New description')
     .option('--priority <priority>', 'New priority (LOW|MEDIUM|HIGH|CRITICAL)')
@@ -470,12 +494,14 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
+        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+
         const payload: { title?: string; description?: string; priority?: string } = {};
         if (options.title) payload.title = options.title;
         if (options.desc) payload.description = options.desc;
         if (options.priority) payload.priority = options.priority;
 
-        const response = await TicketsService.update(client, ref, payload);
+        const response = await TicketsService.update(client, projectSlug, ref, payload);
         const ticketData = unwrap(response);
 
         if (options.json) {
@@ -493,12 +519,12 @@ export function ticketCommand(program: Command): void {
   ticket
     .command('delete <ref>')
     .description('Delete a ticket')
-    .requiredOption('--project <slug>', 'Project slug')
+    .option('--project <slug>', 'Project slug')
     .option('--force', 'Confirm deletion')
     .action(async (ref: string, options) => {
       try {
         if (!options.force) {
-          error(`Deletion requires --force flag. Run: koda ticket delete ${ref} --project ${options.project} --force`);
+          error(`Deletion requires --force flag.`);
           process.exit(1);
         }
 
@@ -511,7 +537,9 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        await TicketsService.delete(client, ref);
+        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+
+        await TicketsService.delete(client, projectSlug, ref);
 
         console.log(`✓ Ticket deleted successfully`);
         process.exit(0);
@@ -525,7 +553,7 @@ export function ticketCommand(program: Command): void {
   ticketLabel
     .command('add <ref>')
     .description('Attach a label to a ticket')
-    .requiredOption('--project <slug>', 'Project slug')
+    .option('--project <slug>', 'Project slug')
     .requiredOption('--label <id>', 'Label ID')
     .action(async (ref: string, options) => {
       try {
@@ -538,81 +566,14 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        await LabelsService.addToTicket(client, ref, options.label);
+        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+
+        await LabelsService.addToTicket(client, projectSlug, ref, options.label);
 
         console.log(`✓ Label attached to ticket ${ref}`);
         process.exit(0);
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket or label not found` });
-      }
-    });
-
-  ticketLabel
-    .command('remove <ref>')
-    .description('Detach a label from a ticket')
-    .requiredOption('--project <slug>', 'Project slug')
-    .requiredOption('--label <id>', 'Label ID')
-    .action(async (ref: string, options) => {
-      try {
-        const auth = resolveAuth({});
-
-        if (!auth.apiKey || !auth.apiUrl) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
-          process.exit(2);
-          return;
-        }
-
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        await LabelsService.removeFromTicket(client, ref, options.label);
-
-        console.log(`✓ Label detached from ticket ${ref}`);
-        process.exit(0);
-      } catch (err: unknown) {
-        handleApiError(err, { notFoundMessage: `Ticket or label not found` });
-      }
-    });
-
-  ticket
-    .command('open <ref>')
-    .description('Open ticket in browser')
-    .option('--project <slug>', 'Project slug (optional, inferred from ticket if available)')
-    .action(async (ref: string, options) => {
-      try {
-        const auth = resolveAuth({});
-
-        if (!auth.apiKey || !auth.apiUrl) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
-          process.exit(2);
-          return;
-        }
-
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        const response = await TicketsService.show(client, ref);
-        const ticketData = unwrap(response);
-
-        // Extract base URL from API URL (e.g., http://localhost:3100/api -> http://localhost:3100)
-        const baseUrl = auth.apiUrl.replace(/\/api\/?$/, '');
-        // Use project slug if provided, otherwise use a placeholder or projectId
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const projectIdentifier = options.project || (ticketData as any).project?.slug || (ticketData as any).projectId;
-        const ticketUrl = `${baseUrl}/projects/${projectIdentifier}/tickets/${ticketData.number}`;
-
-        // Use system command to open URL in default browser
-        execFile(
-          process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open',
-          process.platform === 'win32' ? ['/c', `start ${ticketUrl}`] : [ticketUrl],
-          (error: unknown) => {
-            if (error) {
-              // If system command fails, just print the URL
-              console.log(`Open this URL in your browser: ${ticketUrl}`);
-            }
-          }
-        );
-
-        console.log(`✓ Opening ticket in browser`);
-        process.exit(0);
-      } catch (err: unknown) {
-        handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
     });
 }

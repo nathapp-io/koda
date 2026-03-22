@@ -51,7 +51,7 @@ export class TicketsController {
     @Req() req: RequestWithUser,
   ) {
     const currentUser = req.user || req.agent;
-    const actorType = req.user ? 'user' : 'agent';
+    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
 
     const data = await this.ticketsService.create(slug, createTicketDto, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -118,7 +118,7 @@ export class TicketsController {
     @Req() req: RequestWithUser,
   ) {
     const currentUser = req.user || req.agent;
-    const actorType = req.user ? 'user' : 'agent';
+    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
 
     const data = await this.ticketsService.update(slug, ref, updateTicketDto, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -137,7 +137,7 @@ export class TicketsController {
     @Req() req: RequestWithUser,
   ) {
     const currentUser = req.user || req.agent;
-    const actorType = req.user ? 'user' : 'agent';
+    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
 
     const data = await this.ticketsService.softDelete(slug, ref, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -175,7 +175,7 @@ export class TicketsController {
     @Req() req: RequestWithUser,
   ) {
     const currentUser = req.user || req.agent;
-    const actorType = req.user ? 'user' : 'agent';
+    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
     const data = await this.transitionsService.verify(slug, ref, dto.body ?? '', currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data);
@@ -193,7 +193,7 @@ export class TicketsController {
     @Req() req: RequestWithUser,
   ) {
     const currentUser = req.user || req.agent;
-    const actorType = req.user ? 'user' : 'agent';
+    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
     const data = await this.transitionsService.start(slug, ref, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data);
@@ -212,7 +212,7 @@ export class TicketsController {
     @Req() req: RequestWithUser,
   ) {
     const currentUser = req.user || req.agent;
-    const actorType = req.user ? 'user' : 'agent';
+    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
     const data = await this.transitionsService.fix(slug, ref, dto.body ?? '', currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data);
@@ -232,7 +232,7 @@ export class TicketsController {
     @Req() req: RequestWithUser,
   ) {
     const currentUser = req.user || req.agent;
-    const actorType = req.user ? 'user' : 'agent';
+    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
     const isApproved = approve === 'true' || approve === true;
     const data = await this.transitionsService.verifyFix(slug, ref, dto.body ?? '', isApproved, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -251,7 +251,7 @@ export class TicketsController {
     @Req() req: RequestWithUser,
   ) {
     const currentUser = req.user || req.agent;
-    const actorType = req.user ? 'user' : 'agent';
+    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
     const data = await this.transitionsService.close(slug, ref, currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data);
@@ -270,7 +270,7 @@ export class TicketsController {
     @Req() req: RequestWithUser,
   ) {
     const currentUser = req.user || req.agent;
-    const actorType = req.user ? 'user' : 'agent';
+    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
     const data = await this.transitionsService.reject(slug, ref, dto.body ?? '', currentUser, actorType);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data);

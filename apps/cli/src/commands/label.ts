@@ -70,12 +70,13 @@ export function labelCommand(program: Command): void {
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
         const response = await LabelsService.list(client, options.project);
-        const { items } = unwrap(response);
+        const data = unwrap(response);
+        const items = Array.isArray(data) ? data : (data as any).items || [];
 
         if (options.json) {
           console.log(JSON.stringify(items, null, 2));
         } else {
-          const rows = items.map((l) => [l.id, l.name, l.color ?? '']);
+          const rows = items.map((l: any) => [l.id, l.name, l.color ?? '']);
           table(['ID', 'Name', 'Color'], rows);
         }
 

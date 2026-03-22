@@ -54,10 +54,11 @@ export class ProjectsService {
 export class CommentsService {
   static async add(
     client: AxiosInstance,
+    projectSlug: string,
     ref: string,
     data: { body: string; type?: 'verification' | 'fix_report' | 'review' | 'general' }
   ): Promise<Wrapped<Comment>> {
-    return client.post(`/tickets/${ref}/comments`, data);
+    return client.post(`/projects/${projectSlug}/tickets/${ref}/comments`, data);
   }
 }
 
@@ -81,86 +82,103 @@ export interface Ticket {
 export class TicketsService {
   static async create(
     client: AxiosInstance,
+    projectSlug: string,
     data: {
-      projectSlug: string;
       type: string;
       title: string;
       description?: string;
       priority?: string;
     }
   ): Promise<Wrapped<Ticket>> {
-    return client.post('/tickets', data);
+    return client.post(`/projects/${projectSlug}/tickets`, data);
   }
 
   static async list(
     client: AxiosInstance,
-    params: Record<string, any>
+    params: {
+      projectSlug: string;
+      status?: string;
+      type?: string;
+      priority?: string;
+      assignedTo?: string;
+      unassigned?: boolean;
+      limit?: number;
+      page?: number;
+    }
   ): Promise<Wrapped<{ items: Ticket[]; total: number }>> {
-    return client.get('/tickets', { params });
+    const { projectSlug, ...rest } = params;
+    return client.get(`/projects/${projectSlug}/tickets`, { params: rest });
   }
 
-  static async show(client: AxiosInstance, ref: string): Promise<Wrapped<Ticket>> {
-    return client.get(`/tickets/${ref}`);
+  static async show(client: AxiosInstance, projectSlug: string, ref: string): Promise<Wrapped<Ticket>> {
+    return client.get(`/projects/${projectSlug}/tickets/${ref}`);
   }
 
   static async verify(
     client: AxiosInstance,
+    projectSlug: string,
     ref: string,
-    data: { body: string; type: string }
+    data: { body: string; type?: string }
   ): Promise<Wrapped<Ticket>> {
-    return client.patch(`/tickets/${ref}/verify`, data);
+    return client.post(`/projects/${projectSlug}/tickets/${ref}/verify`, data);
   }
 
   static async assign(
     client: AxiosInstance,
+    projectSlug: string,
     ref: string,
     data: { agentSlug: string }
   ): Promise<Wrapped<Ticket>> {
-    return client.patch(`/tickets/${ref}/assign`, data);
+    return client.post(`/projects/${projectSlug}/tickets/${ref}/assign`, data);
   }
 
-  static async start(client: AxiosInstance, ref: string): Promise<Wrapped<Ticket>> {
-    return client.patch(`/tickets/${ref}/start`);
+  static async start(client: AxiosInstance, projectSlug: string, ref: string): Promise<Wrapped<Ticket>> {
+    return client.post(`/projects/${projectSlug}/tickets/${ref}/start`);
   }
 
   static async fix(
     client: AxiosInstance,
+    projectSlug: string,
     ref: string,
-    data: { body: string; type: string; gitRef?: string }
+    data: { body: string; type?: string; gitRef?: string }
   ): Promise<Wrapped<Ticket>> {
-    return client.patch(`/tickets/${ref}/fix`, data);
+    return client.post(`/projects/${projectSlug}/tickets/${ref}/fix`, data);
   }
 
   static async verifyFix(
     client: AxiosInstance,
+    projectSlug: string,
     ref: string,
-    data: { body: string; type: string; status: string }
+    data: { body: string; type?: string; status: string }
   ): Promise<Wrapped<Ticket>> {
-    return client.patch(`/tickets/${ref}/verify-fix`, data);
+    const approve = data.status === 'closed';
+    return client.post(`/projects/${projectSlug}/tickets/${ref}/verify-fix?approve=${approve}`, data);
   }
 
-  static async close(client: AxiosInstance, ref: string): Promise<Wrapped<Ticket>> {
-    return client.patch(`/tickets/${ref}/close`);
+  static async close(client: AxiosInstance, projectSlug: string, ref: string): Promise<Wrapped<Ticket>> {
+    return client.post(`/projects/${projectSlug}/tickets/${ref}/close`);
   }
 
   static async reject(
     client: AxiosInstance,
+    projectSlug: string,
     ref: string,
-    data: { body: string; type: string }
+    data: { body: string; type?: string }
   ): Promise<Wrapped<Ticket>> {
-    return client.patch(`/tickets/${ref}/reject`, data);
+    return client.post(`/projects/${projectSlug}/tickets/${ref}/reject`, data);
   }
 
   static async update(
     client: AxiosInstance,
+    projectSlug: string,
     ref: string,
     data: { title?: string; description?: string; priority?: string }
   ): Promise<Wrapped<Ticket>> {
-    return client.patch(`/tickets/${ref}`, data);
+    return client.patch(`/projects/${projectSlug}/tickets/${ref}`, data);
   }
 
-  static async delete(client: AxiosInstance, ref: string): Promise<Wrapped<null>> {
-    return client.delete(`/tickets/${ref}`);
+  static async delete(client: AxiosInstance, projectSlug: string, ref: string): Promise<Wrapped<null>> {
+    return client.delete(`/projects/${projectSlug}/tickets/${ref}`);
   }
 }
 
@@ -202,17 +220,19 @@ export class LabelsService {
 
   static async addToTicket(
     client: AxiosInstance,
+    projectSlug: string,
     ref: string,
     labelId: string
   ): Promise<Wrapped<null>> {
-    return client.post(`/tickets/${ref}/labels`, { labelId });
+    return client.post(`/projects/${projectSlug}/tickets/${ref}/labels`, { labelId });
   }
 
   static async removeFromTicket(
     client: AxiosInstance,
+    projectSlug: string,
     ref: string,
     labelId: string
   ): Promise<Wrapped<null>> {
-    return client.delete(`/tickets/${ref}/labels/${labelId}`);
+    return client.delete(`/projects/${projectSlug}/tickets/${ref}/labels/${labelId}`);
   }
 }

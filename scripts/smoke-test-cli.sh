@@ -90,14 +90,17 @@ JWT_EXPIRES_IN="1h" \
 JWT_REFRESH_EXPIRES_IN="7d" \
 API_KEY_SECRET="smoke-api-key-secret" \
 API_PORT=$API_PORT \
+GLOBAL_PROJECT_SLUG="koda" \
 node dist/main > "$API_LOG" 2>&1 &
 API_PID=$!
 cd "$REPO_ROOT"
 
 log "Waiting for API..."
 READY=false
-for i in $(seq 1 15); do
-  if curl -sf "$API_URL/projects" > /dev/null 2>&1; then
+for i in $(seq 1 20); do
+  # Accept any HTTP response (including 401) — means server is up
+  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/projects" 2>/dev/null || true)
+  if [[ "$HTTP_CODE" =~ ^[1-9][0-9]{2}$ ]]; then
     READY=true; break
   fi
   sleep 1
@@ -125,18 +128,22 @@ else
   fail "Register: $REGISTER"; exit 1
 fi
 
-JWT=$(echo "$REGISTER" | python3 -c "import json,sys; print(json.load(sys.stdin)['accessToken'])" 2>/dev/null)
-USER_ID=$(echo "$REGISTER" | python3 -c "import json,sys; print(json.load(sys.stdin)['user']['id'])" 2>/dev/null)
+JWT=$(echo "$REGISTER" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',d)['accessToken'])" 2>/dev/null)
+USER_ID=$(echo "$REGISTER" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',d)['user']['id'])" 2>/dev/null)
 
 # Promote user to ADMIN (first user is MEMBER by default)
-(cd "$API_DIR" && DATABASE_URL="file:${TEST_DB}" npx prisma db execute --stdin <<< \
-  "UPDATE \"User\" SET \"role\" = 'ADMIN' WHERE \"id\" = '${USER_ID}';" > /dev/null 2>&1) || true
+PROMOTE_OUT=$(cd "$API_DIR" && DATABASE_URL="file:${TEST_DB}" npx prisma db execute \
+  --schema prisma/schema.prisma --stdin <<< \
+  "UPDATE \"User\" SET \"role\" = 'ADMIN' WHERE \"id\" = '${USER_ID}';" 2>&1) || true
+if ! echo "$PROMOTE_OUT" | grep -qi "success\|executed"; then
+  fail "ADMIN promotion failed: $PROMOTE_OUT"; exit 1
+fi
 
 # Re-login to get a fresh JWT with ADMIN role
 LOGIN=$(curl -sf -X POST "$API_URL/auth/login" \
   -H "Content-Type: application/json" \
   -d '{"email":"smoke@koda.test","password":"Smoke1234!"}' 2>&1)
-JWT=$(echo "$LOGIN" | python3 -c "import json,sys; print(json.load(sys.stdin)['accessToken'])" 2>/dev/null)
+JWT=$(echo "$LOGIN" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',d)['accessToken'])" 2>/dev/null)
 ok "Promoted user to ADMIN"
 
 PROJECT=$(curl -sf -X POST "$API_URL/projects" \
@@ -149,11 +156,12 @@ else
   fail "Create project: $PROJECT"; exit 1
 fi
 
-AGENT=$(curl -sf -X POST "$API_URL/agents" \
+AGENT=$(curl -s -X POST "$API_URL/agents" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $JWT" \
   -d '{"name":"Smoke Agent","slug":"smoke-agent"}' 2>&1)
-RAW_KEY=$(echo "$AGENT" | python3 -c "import json,sys; print(json.load(sys.stdin).get('rawApiKey',''))" 2>/dev/null)
+# API returns { ret:0, data: { apiKey: "...", agent: {...} } }
+RAW_KEY=$(echo "$AGENT" | python3 -c "import json,sys; d=json.load(sys.stdin); inner=d.get('data',d); print(inner.get('apiKey',inner.get('rawApiKey','')))" 2>/dev/null)
 if [[ -n "$RAW_KEY" ]]; then
   ok "Create agent (API key captured)"
 else
@@ -186,7 +194,7 @@ assert "koda project show --json"  '"slug"'             "$(koda project show kod
 # STEP 7: Ticket lifecycle
 # =============================================================================
 log "Step 7: Ticket lifecycle..."
-CREATE_OUT=$(koda ticket create --project koda --type bug --title "Smoke test ticket")
+CREATE_OUT=$(koda ticket create --project koda --type BUG --title "Smoke test ticket")
 assert "koda ticket create" "KODA-\|created\|success\|ticket\|smoke" "$CREATE_OUT"
 
 assert "koda ticket list"       "KODA-\|Smoke"    "$(koda ticket list --project koda)"
@@ -199,14 +207,14 @@ assert "koda ticket start"     "start\|success\|IN_PROGRESS" "$(koda ticket star
 assert "koda ticket fix"       "fix\|success\|VERIFY_FIX"   "$(koda ticket fix KODA-1 --comment 'Fixed it')"
 assert "koda ticket verify-fix" "pass\|CLOSED\|success"     "$(koda ticket verify-fix KODA-1 --comment 'Good fix' --pass)"
 
-koda ticket create --project koda --type bug --title "Reject ticket" > /dev/null
+koda ticket create --project koda --type BUG --title "Reject ticket" > /dev/null
 assert "koda ticket reject"    "reject\|REJECTED\|success"  "$(koda ticket reject KODA-2 --comment 'Not a bug')"
 
 # =============================================================================
 # STEP 8: Comment + agent
 # =============================================================================
 log "Step 8: Comment & agent..."
-koda ticket create --project koda --type enhancement --title "Comment ticket" > /dev/null
+koda ticket create --project koda --type ENHANCEMENT --title "Comment ticket" > /dev/null
 assert "koda comment add"   "success\|comment\|added\|Comment"  "$(koda comment add KODA-3 --body 'Great ticket')"
 assert "koda agent me"      "smoke-agent\|Smoke Agent"          "$(koda agent me)"
 assert "koda agent me --json" '"slug"\|"name"'                  "$(koda agent me --json)"

@@ -147,7 +147,7 @@ export class TicketsService {
     ]);
 
     return {
-      tickets,
+      items: tickets,
       total,
       page,
       limit,
