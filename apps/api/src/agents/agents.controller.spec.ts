@@ -254,13 +254,13 @@ describe('AgentsController', () => {
     it('should return authenticated agent profile with API key auth', async () => {
       mockAgentsService.findMe.mockResolvedValue(mockAgent);
 
-      const req: any = { user: mockAgentUser, agent: mockAgent };
+      const req: any = { user: mockAgentUser, agent: mockAgent, actorType: 'agent' };
 
       const result = await controller.findMe(req);
 
       expect(result).toBeInstanceOf(JsonResponse);
       expect(result.data).toEqual(mockAgent);
-      expect(service.findMe).toHaveBeenCalledWith('agent-456');
+      expect(service.findMe).toHaveBeenCalledWith('agent-123');
     });
 
     it('should include roles and capabilities in profile', async () => {
@@ -279,7 +279,7 @@ describe('AgentsController', () => {
 
       mockAgentsService.findMe.mockResolvedValue(agentProfile);
 
-      const req: any = { user: mockAgentUser };
+      const req: any = { user: mockAgentUser, actorType: 'user' };
 
       const result = await controller.findMe(req);
 
@@ -292,7 +292,7 @@ describe('AgentsController', () => {
     it('should NOT include raw API key in response', async () => {
       mockAgentsService.findMe.mockResolvedValue(mockAgent);
 
-      const req: any = { user: mockAgentUser };
+      const req: any = { user: mockAgentUser, actorType: 'user' };
 
       const result = await controller.findMe(req);
 
@@ -705,7 +705,7 @@ describe('AgentsController', () => {
     it('GET /agents/me requires API key auth', async () => {
       mockAgentsService.findMe.mockResolvedValue(mockAgent);
 
-      const req: any = { user: mockAgentUser };
+      const req: any = { user: mockAgentUser, actorType: 'user' };
       const result = await controller.findMe(req);
 
       expect(result).toBeDefined();

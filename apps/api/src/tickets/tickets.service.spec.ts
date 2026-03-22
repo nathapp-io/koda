@@ -255,7 +255,7 @@ describe('TicketsService', () => {
       const result = await service.findAll('koda', {});
 
       expect(result).toEqual(expect.objectContaining({
-        tickets: [mockTicket],
+        items: [mockTicket],
         total: 1,
       }));
       expect(prismaService.client.ticket.findMany).toHaveBeenCalledWith(
@@ -381,7 +381,7 @@ describe('TicketsService', () => {
 
       const result = await service.findAll('koda', {});
 
-      expect(result.tickets).toEqual([]);
+      expect(result.items).toEqual([]);
       expect(result.total).toBe(0);
     });
 
