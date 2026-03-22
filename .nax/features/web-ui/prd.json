@@ -3,7 +3,7 @@
   "feature": "web-ui",
   "branchName": "feat/web-ui",
   "createdAt": "2026-03-22T00:00:00.000Z",
-  "updatedAt": "2026-03-22T10:43:30.099Z",
+  "updatedAt": "2026-03-22T10:46:16.737Z",
   "userStories": [
     {
       "id": "US-001",
@@ -63,10 +63,10 @@
         "setup"
       ],
       "dependencies": [],
-      "status": "pending",
+      "status": "failed",
       "passes": false,
       "escalations": [],
-      "attempts": 0,
+      "attempts": 1,
       "parentStoryId": "US-001",
       "workdir": "apps/web",
       "routing": {
@@ -75,10 +75,11 @@
         "testStrategy": "tdd-simple",
         "reasoning": "Straightforward dependency installation and component scaffolding with no code logic, testing, or architecture decisions required.",
         "contentHash": "3ef264336e808e2f5ff834b375b1919a2b0eb3eb47eaa2c5dc87df22a9206025",
-        "modelTier": "balanced"
+        "modelTier": "powerful"
       },
       "priorErrors": [
-        "Attempt 1 failed with model tier: fast: Autofix exhausted: review still failing after fix attempts"
+        "Attempt 1 failed with model tier: fast: Autofix exhausted: review still failing after fix attempts",
+        "Attempt 1 failed with model tier: balanced: Autofix exhausted: review still failing after fix attempts"
       ],
       "priorFailures": [
         {
@@ -88,8 +89,17 @@
           "summary": "Failed with tier fast, escalating to next tier",
           "cost": 0.47241544999999985,
           "timestamp": "2026-03-22T10:43:30.099Z"
+        },
+        {
+          "attempt": 1,
+          "modelTier": "balanced",
+          "stage": "escalation",
+          "summary": "Failed with tier balanced, escalating to next tier",
+          "cost": 0.37377959999999993,
+          "timestamp": "2026-03-22T10:45:15.846Z"
         }
-      ]
+      ],
+      "storyPoints": 1
     },
     {
       "id": "US-001-2",
@@ -115,7 +125,10 @@
       "escalations": [],
       "attempts": 0,
       "parentStoryId": "US-001",
-      "workdir": "apps/web"
+      "workdir": "apps/web",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-001-3",
@@ -140,7 +153,10 @@
       "escalations": [],
       "attempts": 0,
       "parentStoryId": "US-001",
-      "workdir": "apps/web"
+      "workdir": "apps/web",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-001-4",
@@ -170,7 +186,10 @@
       "escalations": [],
       "attempts": 0,
       "parentStoryId": "US-001",
-      "workdir": "apps/web"
+      "workdir": "apps/web",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-001-5",
@@ -196,7 +215,10 @@
       "escalations": [],
       "attempts": 0,
       "parentStoryId": "US-001",
-      "workdir": "apps/web"
+      "workdir": "apps/web",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-002",

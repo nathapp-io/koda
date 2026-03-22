@@ -159,5 +159,17 @@
         "runtimeCrashes": 0
       }
     ]
+  },
+  {
+    "runId": "run-2026-03-22T10-21-57-485Z",
+    "feature": "web-ui",
+    "startedAt": "2026-03-22T10:21:57.485Z",
+    "completedAt": "2026-03-22T10:46:18.750Z",
+    "totalCost": 1.0330953499999997,
+    "totalStories": 0,
+    "storiesCompleted": 0,
+    "storiesFailed": 1,
+    "totalDurationMs": 1461265,
+    "stories": []
   }
 ]
