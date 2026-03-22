@@ -28,15 +28,15 @@ export interface Agent {
   apiKey: string;
 }
 
+type Wrapped<T> = { data: { ret: number; data: T } };
+
 export class ProjectsService {
-  static async list(client: AxiosInstance): Promise<{ data: Project[] }> {
-    const response = await client.get('/projects');
-    return response.data;
+  static async list(client: AxiosInstance): Promise<Wrapped<{ items: Project[]; total: number }>> {
+    return client.get('/projects');
   }
 
-  static async show(client: AxiosInstance, slug: string): Promise<{ data: Project }> {
-    const response = await client.get(`/projects/${slug}`);
-    return response.data;
+  static async show(client: AxiosInstance, slug: string): Promise<Wrapped<Project>> {
+    return client.get(`/projects/${slug}`);
   }
 }
 
@@ -45,9 +45,8 @@ export class CommentsService {
     client: AxiosInstance,
     ref: string,
     data: { body: string; type?: 'verification' | 'fix_report' | 'review' | 'general' }
-  ): Promise<{ data: Comment }> {
-    const response = await client.post(`/tickets/${ref}/comments`, data);
-    return response.data;
+  ): Promise<Wrapped<Comment>> {
+    return client.post(`/tickets/${ref}/comments`, data);
   }
 }
 
@@ -77,83 +76,72 @@ export class TicketsService {
       description?: string;
       priority?: string;
     }
-  ): Promise<{ data: Ticket }> {
-    const response = await client.post('/tickets', data);
-    return response.data;
+  ): Promise<Wrapped<Ticket>> {
+    return client.post('/tickets', data);
   }
 
   static async list(
     client: AxiosInstance,
     params: Record<string, any>
-  ): Promise<{ data: Ticket[]; meta: { total: number; page: number; limit: number } }> {
-    const response = await client.get('/tickets', { params });
-    return response.data;
+  ): Promise<Wrapped<{ items: Ticket[]; total: number }>> {
+    return client.get('/tickets', { params });
   }
 
-  static async show(client: AxiosInstance, ref: string): Promise<{ data: Ticket }> {
-    const response = await client.get(`/tickets/${ref}`);
-    return response.data;
+  static async show(client: AxiosInstance, ref: string): Promise<Wrapped<Ticket>> {
+    return client.get(`/tickets/${ref}`);
   }
 
   static async verify(
     client: AxiosInstance,
     ref: string,
     data: { body: string; type: string }
-  ): Promise<{ data: Ticket }> {
-    const response = await client.patch(`/tickets/${ref}/verify`, data);
-    return response.data;
+  ): Promise<Wrapped<Ticket>> {
+    return client.patch(`/tickets/${ref}/verify`, data);
   }
 
   static async assign(
     client: AxiosInstance,
     ref: string,
     data: { agentSlug: string }
-  ): Promise<{ data: Ticket }> {
-    const response = await client.patch(`/tickets/${ref}/assign`, data);
-    return response.data;
+  ): Promise<Wrapped<Ticket>> {
+    return client.patch(`/tickets/${ref}/assign`, data);
   }
 
-  static async start(client: AxiosInstance, ref: string): Promise<{ data: Ticket }> {
-    const response = await client.patch(`/tickets/${ref}/start`);
-    return response.data;
+  static async start(client: AxiosInstance, ref: string): Promise<Wrapped<Ticket>> {
+    return client.patch(`/tickets/${ref}/start`);
   }
 
   static async fix(
     client: AxiosInstance,
     ref: string,
     data: { body: string; type: string; gitRef?: string }
-  ): Promise<{ data: Ticket }> {
-    const response = await client.patch(`/tickets/${ref}/fix`, data);
-    return response.data;
+  ): Promise<Wrapped<Ticket>> {
+    return client.patch(`/tickets/${ref}/fix`, data);
   }
 
   static async verifyFix(
     client: AxiosInstance,
     ref: string,
     data: { body: string; type: string; status: string }
-  ): Promise<{ data: Ticket }> {
-    const response = await client.patch(`/tickets/${ref}/verify-fix`, data);
-    return response.data;
+  ): Promise<Wrapped<Ticket>> {
+    return client.patch(`/tickets/${ref}/verify-fix`, data);
   }
 
-  static async close(client: AxiosInstance, ref: string): Promise<{ data: Ticket }> {
-    const response = await client.patch(`/tickets/${ref}/close`);
-    return response.data;
+  static async close(client: AxiosInstance, ref: string): Promise<Wrapped<Ticket>> {
+    return client.patch(`/tickets/${ref}/close`);
   }
 
   static async reject(
     client: AxiosInstance,
     ref: string,
     data: { body: string; type: string }
-  ): Promise<{ data: Ticket }> {
-    const response = await client.patch(`/tickets/${ref}/reject`, data);
-    return response.data;
+  ): Promise<Wrapped<Ticket>> {
+    return client.patch(`/tickets/${ref}/reject`, data);
   }
 }
 
 export class AgentService {
-  static async me(client: AxiosInstance): Promise<{ data: Agent }> {
-    const response = await client.get('/agents/me');
-    return response.data;
+  static async me(client: AxiosInstance): Promise<Wrapped<Agent>> {
+    return client.get('/agents/me');
   }
 }

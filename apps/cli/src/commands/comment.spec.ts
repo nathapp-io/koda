@@ -84,7 +84,7 @@ describe('commentCommand', () => {
       };
 
       (CommentsService.add as jest.Mock).mockResolvedValue({
-        data: mockComment,
+        data: { ret: 0, data: mockComment },
       });
 
       const commentCmd = program.commands.find((cmd) => cmd.name() === 'comment');
@@ -113,7 +113,7 @@ describe('commentCommand', () => {
       };
 
       (CommentsService.add as jest.Mock).mockResolvedValue({
-        data: mockComment,
+        data: { ret: 0, data: mockComment },
       });
 
       const commentCmd = program.commands.find((cmd) => cmd.name() === 'comment');
@@ -188,7 +188,7 @@ describe('commentCommand', () => {
       };
 
       (CommentsService.add as jest.Mock).mockResolvedValue({
-        data: mockComment,
+        data: { ret: 0, data: mockComment },
       });
 
       const commentCmd = program.commands.find((cmd) => cmd.name() === 'comment');

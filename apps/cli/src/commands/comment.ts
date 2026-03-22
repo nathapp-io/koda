@@ -3,6 +3,7 @@ import { resolveAuth } from '../utils/auth';
 import { configureClient } from '../client';
 import { CommentsService } from '../generated';
 import { success, error } from '../utils/output';
+import { unwrap } from '../utils/api';
 
 export function commentCommand(program: Command): void {
   const comment = program.command('comment');
@@ -34,14 +35,15 @@ export function commentCommand(program: Command): void {
           body: options.body,
           type: options.type,
         });
+        const commentData = unwrap(response);
 
         if (options.json) {
-          console.log(JSON.stringify(response.data, null, 2));
+          console.log(JSON.stringify(commentData, null, 2));
         } else {
           success(`Comment added to ${ref}`);
-          console.log(`ID: ${response.data.id}`);
-          console.log(`Type: ${response.data.type}`);
-          console.log(`Body: ${response.data.body}`);
+          console.log(`ID: ${commentData.id}`);
+          console.log(`Type: ${commentData.type}`);
+          console.log(`Body: ${commentData.body}`);
         }
 
         process.exit(0);

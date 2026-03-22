@@ -3,6 +3,7 @@ import { resolveAuth } from '../utils/auth';
 import { configureClient } from '../client';
 import { TicketsService } from '../generated';
 import { table, error } from '../utils/output';
+import { unwrap } from '../utils/api';
 
 export function ticketCommand(program: Command): void {
   const ticket = program.command('ticket');
@@ -41,9 +42,10 @@ export function ticketCommand(program: Command): void {
           description: options.desc,
           priority: options.priority,
         });
+        const ticketData = unwrap(response);
 
         if (options.json) {
-          console.log(JSON.stringify(response.data, null, 2));
+          console.log(JSON.stringify(ticketData, null, 2));
         } else {
           console.log(`✓ Ticket created successfully`);
         }
@@ -93,11 +95,12 @@ export function ticketCommand(program: Command): void {
           limit: parseInt(options.limit, 10),
           page: parseInt(options.page, 10),
         });
+        const { items } = unwrap(response);
 
         if (options.json) {
-          console.log(JSON.stringify(response.data, null, 2));
+          console.log(JSON.stringify(items, null, 2));
         } else {
-          const rows = response.data.map((t) => [
+          const rows = items.map((t) => [
             `KODA-${t.number}`,
             t.type,
             t.priority || '',
@@ -142,11 +145,12 @@ export function ticketCommand(program: Command): void {
           status: options.status,
           assignedTo: 'self',
         });
+        const { items } = unwrap(response);
 
         if (options.json) {
-          console.log(JSON.stringify(response.data, null, 2));
+          console.log(JSON.stringify(items, null, 2));
         } else {
-          const rows = response.data.map((t) => [
+          const rows = items.map((t) => [
             `KODA-${t.number}`,
             t.type,
             t.priority || '',
@@ -185,28 +189,28 @@ export function ticketCommand(program: Command): void {
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
         const response = await TicketsService.show(client, ref);
+        const ticketData = unwrap(response);
 
         if (options.json) {
-          console.log(JSON.stringify(response.data, null, 2));
+          console.log(JSON.stringify(ticketData, null, 2));
         } else {
-          const ticket = response.data;
           console.log(`\n${'Ticket Details'}:`);
-          console.log(`ID: ${ticket.id}`);
-          console.log(`Reference: KODA-${ticket.number}`);
-          console.log(`Type: ${ticket.type}`);
-          console.log(`Title: ${ticket.title}`);
-          if (ticket.description) {
-            console.log(`Description: ${ticket.description}`);
+          console.log(`ID: ${ticketData.id}`);
+          console.log(`Reference: KODA-${ticketData.number}`);
+          console.log(`Type: ${ticketData.type}`);
+          console.log(`Title: ${ticketData.title}`);
+          if (ticketData.description) {
+            console.log(`Description: ${ticketData.description}`);
           }
-          console.log(`Status: ${ticket.status}`);
-          console.log(`Priority: ${ticket.priority || 'N/A'}`);
-          console.log(`Assignee: ${ticket.assignee?.name || 'Unassigned'}`);
-          console.log(`Created: ${ticket.createdAt}`);
-          console.log(`Updated: ${ticket.updatedAt}`);
+          console.log(`Status: ${ticketData.status}`);
+          console.log(`Priority: ${ticketData.priority || 'N/A'}`);
+          console.log(`Assignee: ${ticketData.assignee?.name || 'Unassigned'}`);
+          console.log(`Created: ${ticketData.createdAt}`);
+          console.log(`Updated: ${ticketData.updatedAt}`);
 
-          if (ticket.comments && ticket.comments.length > 0) {
+          if (ticketData.comments && ticketData.comments.length > 0) {
             console.log(`\nComments:`);
-            for (const comment of ticket.comments) {
+            for (const comment of ticketData.comments) {
               const author = comment.author?.name || 'Unknown';
               console.log(
                 `  - ${author} (${comment.type}): ${comment.body}`
@@ -504,14 +508,14 @@ export function ticketCommand(program: Command): void {
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
         const response = await TicketsService.show(client, ref);
-        const ticket = response.data;
+        const ticketData = unwrap(response);
 
         // Extract base URL from API URL (e.g., http://localhost:3100/api -> http://localhost:3100)
         const baseUrl = auth.apiUrl.replace(/\/api\/?$/, '');
         // Use project slug if provided, otherwise use a placeholder or projectId
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const projectIdentifier = options.project || (ticket as any).project?.slug || (ticket as any).projectId;
-        const ticketUrl = `${baseUrl}/projects/${projectIdentifier}/tickets/${ticket.number}`;
+        const projectIdentifier = options.project || (ticketData as any).project?.slug || (ticketData as any).projectId;
+        const ticketUrl = `${baseUrl}/projects/${projectIdentifier}/tickets/${ticketData.number}`;
 
         // Use system command to open URL in default browser
         // eslint-disable-next-line @typescript-eslint/no-require-imports

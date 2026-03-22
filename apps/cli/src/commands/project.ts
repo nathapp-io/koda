@@ -3,6 +3,7 @@ import { resolveAuth } from '../utils/auth';
 import { configureClient } from '../client';
 import { ProjectsService } from '../generated';
 import { table, error } from '../utils/output';
+import { unwrap } from '../utils/api';
 
 export function projectCommand(program: Command): void {
   const project = program.command('project');
@@ -21,11 +22,12 @@ export function projectCommand(program: Command): void {
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
         const response = await ProjectsService.list(client);
+        const { items } = unwrap(response);
 
         if (options.json) {
-          console.log(JSON.stringify(response.data, null, 2));
+          console.log(JSON.stringify(items, null, 2));
         } else {
-          const rows = response.data.map((p) => [p.name, p.key, p.slug]);
+          const rows = items.map((p) => [p.name, p.key, p.slug]);
           table(['Name', 'Key', 'Slug'], rows);
         }
 
@@ -56,11 +58,12 @@ export function projectCommand(program: Command): void {
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
         const response = await ProjectsService.show(client, slug);
+        const project = unwrap(response);
 
         if (options.json) {
-          console.log(JSON.stringify(response.data, null, 2));
+          console.log(JSON.stringify(project, null, 2));
         } else {
-          const rows = [[response.data.name, response.data.key, response.data.slug]];
+          const rows = [[project.name, project.key, project.slug]];
           table(['Name', 'Key', 'Slug'], rows);
         }
 

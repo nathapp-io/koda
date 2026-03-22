@@ -85,7 +85,7 @@ describe('projectCommand', () => {
       ];
 
       (ProjectsService.list as jest.Mock).mockResolvedValue({
-        data: mockProjects,
+        data: { ret: 0, data: { items: mockProjects, total: 2 } },
       });
 
       const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
@@ -102,7 +102,7 @@ describe('projectCommand', () => {
       ];
 
       (ProjectsService.list as jest.Mock).mockResolvedValue({
-        data: mockProjects,
+        data: { ret: 0, data: { items: mockProjects, total: 1 } },
       });
 
       const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
@@ -146,7 +146,7 @@ describe('projectCommand', () => {
       ];
 
       (ProjectsService.list as jest.Mock).mockResolvedValue({
-        data: mockProjects,
+        data: { ret: 0, data: { items: mockProjects, total: 1 } },
       });
 
       const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
@@ -173,7 +173,7 @@ describe('projectCommand', () => {
       ];
 
       (ProjectsService.list as jest.Mock).mockResolvedValue({
-        data: mockProjects,
+        data: { ret: 0, data: { items: mockProjects, total: 1 } },
       });
 
       const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
@@ -237,7 +237,7 @@ describe('projectCommand', () => {
       };
 
       (ProjectsService.show as jest.Mock).mockResolvedValue({
-        data: mockProject,
+        data: { ret: 0, data: mockProject },
       });
 
       const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
@@ -261,7 +261,7 @@ describe('projectCommand', () => {
       };
 
       (ProjectsService.show as jest.Mock).mockResolvedValue({
-        data: mockProject,
+        data: { ret: 0, data: mockProject },
       });
 
       const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');

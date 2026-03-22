@@ -82,7 +82,7 @@ describe('agentCommand', () => {
       };
 
       (AgentService.me as jest.Mock).mockResolvedValue({
-        data: mockAgent,
+        data: { ret: 0, data: mockAgent },
       });
 
       const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
@@ -103,7 +103,7 @@ describe('agentCommand', () => {
       };
 
       (AgentService.me as jest.Mock).mockResolvedValue({
-        data: mockAgent,
+        data: { ret: 0, data: mockAgent },
       });
 
       const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
@@ -126,7 +126,7 @@ describe('agentCommand', () => {
       };
 
       (AgentService.me as jest.Mock).mockResolvedValue({
-        data: mockAgent,
+        data: { ret: 0, data: mockAgent },
       });
 
       const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
@@ -204,7 +204,7 @@ describe('agentCommand', () => {
       };
 
       (AgentService.me as jest.Mock).mockResolvedValue({
-        data: mockAgent,
+        data: { ret: 0, data: mockAgent },
       });
 
       const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');

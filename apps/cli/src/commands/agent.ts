@@ -3,6 +3,7 @@ import { resolveAuth } from '../utils/auth';
 import { configureClient } from '../client';
 import { AgentService } from '../generated';
 import { error } from '../utils/output';
+import { unwrap } from '../utils/api';
 
 function maskApiKey(apiKey: string): string {
   if (apiKey.length <= 8) {
@@ -29,13 +30,14 @@ export function agentCommand(program: Command): void {
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
         const response = await AgentService.me(client);
+        const agentData = unwrap(response);
 
         if (options.json) {
-          console.log(JSON.stringify(response.data, null, 2));
+          console.log(JSON.stringify(agentData, null, 2));
         } else {
-          console.log(`Name: ${response.data.name}`);
-          console.log(`Slug: ${response.data.slug}`);
-          console.log(`API Key: ${maskApiKey(response.data.apiKey)}`);
+          console.log(`Name: ${agentData.name}`);
+          console.log(`Slug: ${agentData.slug}`);
+          console.log(`API Key: ${maskApiKey(agentData.apiKey)}`);
         }
 
         process.exit(0);
