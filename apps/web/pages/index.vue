@@ -40,5 +40,5 @@
 </template>
 
 <script setup lang="ts">
-// TODO: Load projects from API
+definePageMeta({ layout: 'default' })
 </script>
