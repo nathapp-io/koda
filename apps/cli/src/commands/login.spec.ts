@@ -29,6 +29,24 @@ jest.mock('../client', () => ({
   }),
 }));
 
+// Mock config module
+jest.mock('../config', () => ({
+  setConfig: jest.fn((partial: any) => {
+    if (partial.apiKey) {
+      mockData.apiKey = partial.apiKey;
+      mockStore.set('apiKey', partial.apiKey);
+    }
+    if (partial.apiUrl) {
+      mockData.apiUrl = partial.apiUrl;
+      mockStore.set('apiUrl', partial.apiUrl);
+    }
+  }),
+  getConfig: jest.fn(() => ({
+    apiKey: mockData.apiKey || '',
+    apiUrl: mockData.apiUrl || '',
+  })),
+}));
+
 import { loginCommand } from './login';
 
 describe('login command', () => {

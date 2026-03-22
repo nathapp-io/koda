@@ -22,6 +22,7 @@ export function commentCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         // Validate comment type
@@ -29,6 +30,7 @@ export function commentCommand(program: Command): void {
         if (!validTypes.includes(options.type)) {
           error(`Invalid type ${options.type}. Valid values: ${validTypes.join(', ')}`);
           process.exit(3);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);

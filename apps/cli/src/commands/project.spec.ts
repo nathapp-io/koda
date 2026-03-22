@@ -45,6 +45,20 @@ jest.mock('../generated', () => ({
   },
 }));
 
+// Mock config module to use mockData instead of real filesystem
+jest.mock('../config', () => ({
+  getConfig: jest.fn(() => ({
+    apiKey: mockData.apiKey || '',
+    apiUrl: mockData.apiUrl || '',
+  })),
+  setConfig: jest.fn(),
+  validateApiKey: jest.fn((key: string) => key && key.length >= 10),
+  maskApiKey: jest.fn((key: string) => {
+    if (key.length <= 8) return '****';
+    return key.substring(0, 4) + '*'.repeat(key.length - 8) + key.substring(key.length - 4);
+  }),
+}));
+
 import { Command } from 'commander';
 import { projectCommand } from './project';
 import { ProjectsService } from '../generated';
@@ -73,6 +87,10 @@ describe('projectCommand', () => {
     logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
 
     jest.clearAllMocks();
+    (ProjectsService.list as jest.Mock).mockReset();
+    (ProjectsService.show as jest.Mock).mockReset();
+    (ProjectsService.create as jest.Mock).mockReset();
+    (ProjectsService.delete as jest.Mock).mockReset();
   });
 
   afterEach(() => {

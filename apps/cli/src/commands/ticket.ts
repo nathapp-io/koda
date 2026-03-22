@@ -32,12 +32,14 @@ export function ticketCommand(program: Command): void {
         if (!validTypes.includes(options.type)) {
           error(`Invalid type ${options.type}. Valid values: ${validTypes.join(', ')}`);
           process.exit(3);
+          return;
         }
 
         const validPriorities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
         if (options.priority && !validPriorities.includes(options.priority)) {
           error(`Invalid priority ${options.priority}. Valid values: ${validPriorities.join(', ')}`);
           process.exit(3);
+          return;
         }
 
         const auth = resolveAuth({});
@@ -45,6 +47,7 @@ export function ticketCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
@@ -88,6 +91,7 @@ export function ticketCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
@@ -136,6 +140,7 @@ export function ticketCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
@@ -177,6 +182,7 @@ export function ticketCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
@@ -227,6 +233,7 @@ export function ticketCommand(program: Command): void {
         if (!options.comment) {
           error('Comment is required');
           process.exit(3);
+          return;
         }
 
         const auth = resolveAuth({});
@@ -234,6 +241,7 @@ export function ticketCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
@@ -263,6 +271,7 @@ export function ticketCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
@@ -292,6 +301,7 @@ export function ticketCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
@@ -315,6 +325,7 @@ export function ticketCommand(program: Command): void {
         if (!options.comment) {
           error('Comment is required');
           process.exit(3);
+          return;
         }
 
         const auth = resolveAuth({});
@@ -322,6 +333,7 @@ export function ticketCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
@@ -355,6 +367,7 @@ export function ticketCommand(program: Command): void {
         if (!options.comment) {
           error('Comment is required');
           process.exit(3);
+          return;
         }
 
         const auth = resolveAuth({});
@@ -362,6 +375,7 @@ export function ticketCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
@@ -389,6 +403,7 @@ export function ticketCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
@@ -411,6 +426,7 @@ export function ticketCommand(program: Command): void {
         if (!options.comment) {
           error('Comment is required');
           process.exit(3);
+          return;
         }
 
         const auth = resolveAuth({});
@@ -418,6 +434,7 @@ export function ticketCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
@@ -448,6 +465,7 @@ export function ticketCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
@@ -488,6 +506,7 @@ export function ticketCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
@@ -514,6 +533,7 @@ export function ticketCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
@@ -538,6 +558,7 @@ export function ticketCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
@@ -561,6 +582,7 @@ export function ticketCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);

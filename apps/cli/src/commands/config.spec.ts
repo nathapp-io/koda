@@ -12,6 +12,41 @@ jest.mock('conf', () => {
   return jest.fn(() => mockStore);
 });
 
+// Mock config module to use mockData
+jest.mock('../config', () => ({
+  getConfig: jest.fn(() => ({
+    apiKey: mockData.apiKey || '',
+    apiUrl: mockData.apiUrl || '',
+  })),
+  setConfig: jest.fn((partial: any) => {
+    if (partial.apiKey !== undefined) {
+      if (!partial.apiKey || typeof partial.apiKey !== 'string' || partial.apiKey.length < 10) {
+        throw new Error('Invalid API key: must be at least 10 characters');
+      }
+      mockData.apiKey = partial.apiKey;
+      mockStore.set('apiKey', partial.apiKey);
+    }
+    if (partial.apiUrl !== undefined) {
+      mockData.apiUrl = partial.apiUrl;
+      mockStore.set('apiUrl', partial.apiUrl);
+    }
+  }),
+  validateApiKey: jest.fn((key: string) => key && key.length >= 10),
+  maskApiKey: jest.fn((key: string) => {
+    if (!key || key.length < 4) {
+      return '****';
+    }
+    if (key.startsWith('sk-proj-')) {
+      const prefix = 'sk-proj-';
+      const rest = key.slice(prefix.length);
+      const masked = '*'.repeat(Math.max(4, rest.length));
+      return `${prefix}${masked}`;
+    }
+    const visible = key.slice(-6);
+    return `***${visible}`;
+  }),
+}));
+
 import { configShow, configSet } from './config';
 
 describe('config command', () => {

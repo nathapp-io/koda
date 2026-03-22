@@ -12,7 +12,10 @@ jest.mock('conf', () => {
   return jest.fn(() => mockStore);
 });
 
-jest.mock('../config');
+jest.mock('../config', () => ({
+  getConfig: jest.fn(() => ({ apiKey: '', apiUrl: '' })),
+  setConfig: jest.fn(),
+}));
 
 import { resolveAuth } from './auth';
 import * as config from '../config';

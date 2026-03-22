@@ -35,7 +35,7 @@ describe('AgentsService', () => {
   };
 
   const mockPrismaService = {
-  client: {
+    client: {
       agent: {
         create: jest.fn(),
         update: jest.fn(),
@@ -51,7 +51,7 @@ describe('AgentsService', () => {
         createMany: jest.fn(),
       },
     },
-};
+  };
 
   const mockConfigService = {
     get: jest.fn(),

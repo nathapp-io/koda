@@ -43,6 +43,20 @@ jest.mock('../generated', () => ({
   },
 }));
 
+// Mock config module to use mockData instead of real filesystem
+jest.mock('../config', () => ({
+  getConfig: jest.fn(() => ({
+    apiKey: mockData.apiKey || '',
+    apiUrl: mockData.apiUrl || '',
+  })),
+  setConfig: jest.fn(),
+  validateApiKey: jest.fn((key: string) => key && key.length >= 10),
+  maskApiKey: jest.fn((key: string) => {
+    if (key.length <= 8) return '****';
+    return key.substring(0, 4) + '*'.repeat(key.length - 8) + key.substring(key.length - 4);
+  }),
+}));
+
 import { Command } from 'commander';
 import { commentCommand } from './comment';
 import { CommentsService } from '../generated';
@@ -67,6 +81,7 @@ describe('commentCommand', () => {
     logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
 
     jest.clearAllMocks();
+    (CommentsService.add as jest.Mock).mockReset();
   });
 
   afterEach(() => {
@@ -161,7 +176,7 @@ describe('commentCommand', () => {
         };
 
         (CommentsService.add as jest.Mock).mockResolvedValue({
-          data: mockComment,
+          data: { ret: 0, data: mockComment },
         });
 
         const commentCmd = program.commands.find((cmd) => cmd.name() === 'comment');

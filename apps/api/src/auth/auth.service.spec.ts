@@ -22,13 +22,13 @@ describe('AuthService', () => {
   };
 
   const mockPrismaService = {
-  client: {
+    client: {
       user: {
         create: jest.fn(),
         findUnique: jest.fn(),
       },
     },
-};
+  };
 
   const mockConfigService = {
     get: jest.fn(),

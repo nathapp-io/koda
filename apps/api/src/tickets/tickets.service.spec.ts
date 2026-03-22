@@ -56,7 +56,7 @@ describe('TicketsService', () => {
   };
 
   const mockPrismaService = {
-  client: {
+    client: {
       project: {
         findUnique: jest.fn(),
         findMany: jest.fn(),
@@ -70,7 +70,7 @@ describe('TicketsService', () => {
       },
       $transaction: jest.fn(),
     },
-};
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({

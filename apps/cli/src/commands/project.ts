@@ -19,6 +19,7 @@ export function projectCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
@@ -48,6 +49,7 @@ export function projectCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
@@ -83,11 +85,13 @@ export function projectCommand(program: Command): void {
       if (!/^[A-Z]{2,6}$/.test(options.key)) {
         error('Invalid key format. Must be 2-6 uppercase letters (e.g. KODA)');
         process.exit(3);
+        return;
       }
 
       if (!/^[a-z0-9-]+$/.test(options.slug)) {
         error('Invalid slug format. Must be lowercase alphanumeric and hyphens only');
         process.exit(3);
+        return;
       }
 
       try {
@@ -96,6 +100,7 @@ export function projectCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
@@ -140,6 +145,7 @@ export function projectCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);

@@ -25,6 +25,7 @@ export function labelCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
@@ -64,6 +65,7 @@ export function labelCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
@@ -95,6 +97,7 @@ export function labelCommand(program: Command): void {
         if (!auth.apiKey || !auth.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
+          return;
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);

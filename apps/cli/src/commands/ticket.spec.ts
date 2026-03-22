@@ -59,6 +59,20 @@ jest.mock('../generated', () => ({
   },
 }));
 
+// Mock config module to use mockData instead of real filesystem
+jest.mock('../config', () => ({
+  getConfig: jest.fn(() => ({
+    apiKey: mockData.apiKey || '',
+    apiUrl: mockData.apiUrl || '',
+  })),
+  setConfig: jest.fn(),
+  validateApiKey: jest.fn((key: string) => key && key.length >= 10),
+  maskApiKey: jest.fn((key: string) => {
+    if (key.length <= 8) return '****';
+    return key.substring(0, 4) + '*'.repeat(key.length - 8) + key.substring(key.length - 4);
+  }),
+}));
+
 import { Command } from 'commander';
 import { ticketCommand } from './ticket';
 import { TicketsService, LabelsService } from '../generated';
@@ -88,6 +102,20 @@ describe('ticketCommand', () => {
     }) as any);
 
     jest.clearAllMocks();
+    (TicketsService.create as jest.Mock).mockReset();
+    (TicketsService.list as jest.Mock).mockReset();
+    (TicketsService.show as jest.Mock).mockReset();
+    (TicketsService.verify as jest.Mock).mockReset();
+    (TicketsService.assign as jest.Mock).mockReset();
+    (TicketsService.start as jest.Mock).mockReset();
+    (TicketsService.fix as jest.Mock).mockReset();
+    (TicketsService.verifyFix as jest.Mock).mockReset();
+    (TicketsService.close as jest.Mock).mockReset();
+    (TicketsService.reject as jest.Mock).mockReset();
+    (TicketsService.update as jest.Mock).mockReset();
+    (TicketsService.delete as jest.Mock).mockReset();
+    (LabelsService.addToTicket as jest.Mock).mockReset();
+    (LabelsService.removeFromTicket as jest.Mock).mockReset();
   });
 
   afterEach(() => {
@@ -142,10 +170,10 @@ describe('ticketCommand', () => {
         id: 'ticket-1',
         number: 1,
         projectId: 'proj-1',
-        type: 'bug',
+        type: 'BUG',
         title: 'Test bug',
-        status: 'created',
-        priority: 'medium',
+        status: 'CREATED',
+        priority: 'MEDIUM',
         createdAt: new Date().toISOString(),
       };
 
@@ -162,7 +190,7 @@ describe('ticketCommand', () => {
         '--project',
         'test-project',
         '--type',
-        'bug',
+        'BUG',
         '--title',
         'Test bug',
       ]);
@@ -171,7 +199,7 @@ describe('ticketCommand', () => {
         expect.any(Object),
         expect.objectContaining({
           projectSlug: 'test-project',
-          type: 'bug',
+          type: 'BUG',
           title: 'Test bug',
         })
       );
@@ -183,11 +211,11 @@ describe('ticketCommand', () => {
         id: 'ticket-1',
         number: 1,
         projectId: 'proj-1',
-        type: 'enhancement',
+        type: 'ENHANCEMENT',
         title: 'New feature',
         description: 'Feature description',
-        status: 'created',
-        priority: 'high',
+        status: 'CREATED',
+        priority: 'HIGH',
         createdAt: new Date().toISOString(),
       };
 
@@ -204,7 +232,7 @@ describe('ticketCommand', () => {
         '--project',
         'test-project',
         '--type',
-        'enhancement',
+        'ENHANCEMENT',
         '--title',
         'New feature',
         '--desc',
@@ -215,7 +243,7 @@ describe('ticketCommand', () => {
         expect.any(Object),
         expect.objectContaining({
           projectSlug: 'test-project',
-          type: 'enhancement',
+          type: 'ENHANCEMENT',
           title: 'New feature',
           description: 'Feature description',
         })
@@ -227,10 +255,10 @@ describe('ticketCommand', () => {
         id: 'ticket-1',
         number: 1,
         projectId: 'proj-1',
-        type: 'bug',
+        type: 'BUG',
         title: 'Critical bug',
-        status: 'created',
-        priority: 'critical',
+        status: 'CREATED',
+        priority: 'CRITICAL',
         createdAt: new Date().toISOString(),
       };
 
@@ -247,17 +275,17 @@ describe('ticketCommand', () => {
         '--project',
         'test-project',
         '--type',
-        'bug',
+        'BUG',
         '--title',
         'Critical bug',
         '--priority',
-        'critical',
+        'CRITICAL',
       ]);
 
       expect(TicketsService.create).toHaveBeenCalledWith(
         expect.any(Object),
         expect.objectContaining({
-          priority: 'critical',
+          priority: 'CRITICAL',
         })
       );
     });
@@ -267,10 +295,10 @@ describe('ticketCommand', () => {
         id: 'ticket-1',
         number: 1,
         projectId: 'proj-1',
-        type: 'bug',
+        type: 'BUG',
         title: 'Test bug',
-        status: 'created',
-        priority: 'medium',
+        status: 'CREATED',
+        priority: 'MEDIUM',
         createdAt: new Date().toISOString(),
       };
 
@@ -288,7 +316,7 @@ describe('ticketCommand', () => {
           '--project',
           'test-project',
           '--type',
-          'bug',
+          'BUG',
           '--title',
           'Test bug',
           '--json',
@@ -311,7 +339,7 @@ describe('ticketCommand', () => {
           '--project',
           'test-project',
           '--type',
-          'bug',
+          'BUG',
           // Missing --title
         ]);
       } catch {
@@ -335,7 +363,7 @@ describe('ticketCommand', () => {
           '--project',
           'test-project',
           '--type',
-          'bug',
+          'BUG',
           '--title',
           'Test bug',
         ]);
@@ -362,7 +390,7 @@ describe('ticketCommand', () => {
           '--project',
           'test-project',
           '--type',
-          'bug',
+          'BUG',
           '--title',
           'Test bug',
         ]);
@@ -374,7 +402,7 @@ describe('ticketCommand', () => {
     });
 
     it('accepts uppercase --type BUG and calls API', async () => {
-      const mockTicket = { id: 'ticket-1', number: 1, type: 'BUG', title: 'Test', status: 'created' };
+      const mockTicket = { id: 'ticket-1', number: 1, type: 'BUG', title: 'Test', status: 'CREATED' };
       (TicketsService.create as jest.Mock).mockResolvedValue({ data: { ret: 0, data: mockTicket } });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -402,7 +430,7 @@ describe('ticketCommand', () => {
     });
 
     it('accepts uppercase --priority HIGH and calls API', async () => {
-      const mockTicket = { id: 'ticket-1', number: 1, type: 'BUG', title: 'Test', status: 'created', priority: 'HIGH' };
+      const mockTicket = { id: 'ticket-1', number: 1, type: 'BUG', title: 'Test', status: 'CREATED', priority: 'HIGH' };
       (TicketsService.create as jest.Mock).mockResolvedValue({ data: { ret: 0, data: mockTicket } });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -436,19 +464,19 @@ describe('ticketCommand', () => {
         {
           id: 'ticket-1',
           number: 1,
-          type: 'bug',
+          type: 'BUG',
           title: 'Bug 1',
           status: 'verified',
-          priority: 'high',
+          priority: 'HIGH',
           assignee: { slug: 'agent-1', name: 'Agent 1' },
         },
         {
           id: 'ticket-2',
           number: 2,
-          type: 'enhancement',
+          type: 'ENHANCEMENT',
           title: 'Feature 1',
-          status: 'created',
-          priority: 'medium',
+          status: 'CREATED',
+          priority: 'MEDIUM',
           assignee: null,
         },
       ];
@@ -476,10 +504,10 @@ describe('ticketCommand', () => {
         {
           id: 'ticket-1',
           number: 1,
-          type: 'bug',
+          type: 'BUG',
           title: 'Verified bug',
           status: 'verified',
-          priority: 'high',
+          priority: 'HIGH',
           assignee: null,
         },
       ];
@@ -513,10 +541,10 @@ describe('ticketCommand', () => {
         {
           id: 'ticket-1',
           number: 1,
-          type: 'bug',
+          type: 'BUG',
           title: 'Bug 1',
-          status: 'created',
-          priority: 'high',
+          status: 'CREATED',
+          priority: 'HIGH',
           assignee: null,
         },
       ];
@@ -534,13 +562,13 @@ describe('ticketCommand', () => {
         '--project',
         'test-project',
         '--type',
-        'bug',
+        'BUG',
       ]);
 
       expect(TicketsService.list).toHaveBeenCalledWith(
         expect.any(Object),
         expect.objectContaining({
-          type: 'bug',
+          type: 'BUG',
         })
       );
     });
@@ -550,10 +578,10 @@ describe('ticketCommand', () => {
         {
           id: 'ticket-1',
           number: 1,
-          type: 'bug',
+          type: 'BUG',
           title: 'Critical bug',
-          status: 'created',
-          priority: 'critical',
+          status: 'CREATED',
+          priority: 'CRITICAL',
           assignee: null,
         },
       ];
@@ -571,13 +599,13 @@ describe('ticketCommand', () => {
         '--project',
         'test-project',
         '--priority',
-        'critical',
+        'CRITICAL',
       ]);
 
       expect(TicketsService.list).toHaveBeenCalledWith(
         expect.any(Object),
         expect.objectContaining({
-          priority: 'critical',
+          priority: 'CRITICAL',
         })
       );
     });
@@ -587,10 +615,10 @@ describe('ticketCommand', () => {
         {
           id: 'ticket-1',
           number: 1,
-          type: 'bug',
+          type: 'BUG',
           title: 'Assigned bug',
           status: 'in_progress',
-          priority: 'high',
+          priority: 'HIGH',
           assignee: { slug: 'agent-1', name: 'Agent 1' },
         },
       ];
@@ -624,10 +652,10 @@ describe('ticketCommand', () => {
         {
           id: 'ticket-1',
           number: 1,
-          type: 'bug',
+          type: 'BUG',
           title: 'Unassigned bug',
           status: 'verified',
-          priority: 'high',
+          priority: 'HIGH',
           assignee: null,
         },
       ];
@@ -715,10 +743,10 @@ describe('ticketCommand', () => {
         {
           id: 'ticket-1',
           number: 1,
-          type: 'bug',
+          type: 'BUG',
           title: 'Test bug',
           status: 'verified',
-          priority: 'high',
+          priority: 'HIGH',
           assignee: { slug: 'agent-1', name: 'Agent 1' },
         },
       ];
@@ -745,10 +773,10 @@ describe('ticketCommand', () => {
         {
           id: 'ticket-1',
           number: 1,
-          type: 'bug',
+          type: 'BUG',
           title: 'Test bug',
           status: 'verified',
-          priority: 'high',
+          priority: 'HIGH',
           assignee: null,
         },
       ];
@@ -776,10 +804,10 @@ describe('ticketCommand', () => {
         {
           id: 'ticket-1',
           number: 1,
-          type: 'bug',
+          type: 'BUG',
           title: 'My bug',
           status: 'in_progress',
-          priority: 'high',
+          priority: 'HIGH',
           assignee: { slug: 'me', name: 'Me' },
         },
       ];
@@ -879,11 +907,11 @@ describe('ticketCommand', () => {
         id: 'ticket-1',
         number: 42,
         projectKey: 'KODA',
-        type: 'bug',
+        type: 'BUG',
         title: 'Test bug',
         description: 'A description',
         status: 'verified',
-        priority: 'high',
+        priority: 'HIGH',
         assignee: { slug: 'agent-1', name: 'Agent 1' },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -919,10 +947,10 @@ describe('ticketCommand', () => {
         id: 'cuid123456',
         number: 1,
         projectKey: 'TEST',
-        type: 'enhancement',
+        type: 'ENHANCEMENT',
         title: 'New feature',
-        status: 'created',
-        priority: 'medium',
+        status: 'CREATED',
+        priority: 'MEDIUM',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -948,11 +976,11 @@ describe('ticketCommand', () => {
         id: 'ticket-1',
         number: 42,
         projectKey: 'KODA',
-        type: 'bug',
+        type: 'BUG',
         title: 'Test bug',
         description: 'A description',
         status: 'verified',
-        priority: 'high',
+        priority: 'HIGH',
         assignee: { slug: 'agent-1', name: 'Agent 1' },
         createdAt: now,
         updatedAt: now,
@@ -979,10 +1007,10 @@ describe('ticketCommand', () => {
         id: 'ticket-1',
         number: 42,
         projectKey: 'KODA',
-        type: 'bug',
+        type: 'BUG',
         title: 'Test bug',
         status: 'verified',
-        priority: 'high',
+        priority: 'HIGH',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         comments: [
@@ -1021,10 +1049,10 @@ describe('ticketCommand', () => {
         id: 'ticket-1',
         number: 42,
         projectKey: 'KODA',
-        type: 'bug',
+        type: 'BUG',
         title: 'Test bug',
         status: 'verified',
-        priority: 'high',
+        priority: 'HIGH',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -1069,10 +1097,10 @@ describe('ticketCommand', () => {
       const mockTicket = {
         id: 'ticket-1',
         number: 1,
-        type: 'bug',
+        type: 'BUG',
         title: 'Test bug',
         status: 'verified',
-        priority: 'high',
+        priority: 'HIGH',
         createdAt: new Date().toISOString(),
       };
 
@@ -1119,10 +1147,10 @@ describe('ticketCommand', () => {
       const mockTicket = {
         id: 'ticket-1',
         number: 1,
-        type: 'bug',
+        type: 'BUG',
         title: 'Test bug',
         status: 'verified',
-        priority: 'high',
+        priority: 'HIGH',
       };
 
       (TicketsService.verify as jest.Mock).mockResolvedValue({
@@ -1182,10 +1210,10 @@ describe('ticketCommand', () => {
       const mockTicket = {
         id: 'ticket-1',
         number: 1,
-        type: 'bug',
+        type: 'BUG',
         title: 'Test bug',
         status: 'verified',
-        priority: 'high',
+        priority: 'HIGH',
         assignee: { slug: 'agent-123', name: 'Agent Name' },
       };
 
@@ -1218,10 +1246,10 @@ describe('ticketCommand', () => {
       const mockTicket = {
         id: 'ticket-1',
         number: 1,
-        type: 'bug',
+        type: 'BUG',
         title: 'Test bug',
         status: 'verified',
-        priority: 'high',
+        priority: 'HIGH',
         assignee: { slug: 'me', name: 'Me' },
       };
 
@@ -1249,10 +1277,10 @@ describe('ticketCommand', () => {
       const mockTicket = {
         id: 'ticket-1',
         number: 1,
-        type: 'bug',
+        type: 'BUG',
         title: 'Test bug',
         status: 'in_progress',
-        priority: 'high',
+        priority: 'HIGH',
       };
 
       (TicketsService.start as jest.Mock).mockResolvedValue({
@@ -1298,10 +1326,10 @@ describe('ticketCommand', () => {
       const mockTicket = {
         id: 'ticket-1',
         number: 1,
-        type: 'bug',
+        type: 'BUG',
         title: 'Test bug',
         status: 'verify_fix',
-        priority: 'high',
+        priority: 'HIGH',
       };
 
       (TicketsService.fix as jest.Mock).mockResolvedValue({
@@ -1334,10 +1362,10 @@ describe('ticketCommand', () => {
       const mockTicket = {
         id: 'ticket-1',
         number: 1,
-        type: 'bug',
+        type: 'BUG',
         title: 'Test bug',
         status: 'verify_fix',
-        priority: 'high',
+        priority: 'HIGH',
       };
 
       (TicketsService.fix as jest.Mock).mockResolvedValue({
@@ -1384,10 +1412,10 @@ describe('ticketCommand', () => {
       const mockTicket = {
         id: 'ticket-1',
         number: 1,
-        type: 'bug',
+        type: 'BUG',
         title: 'Test bug',
         status: 'verify_fix',
-        priority: 'high',
+        priority: 'HIGH',
       };
 
       (TicketsService.fix as jest.Mock).mockResolvedValue({
@@ -1420,10 +1448,10 @@ describe('ticketCommand', () => {
       const mockTicket = {
         id: 'ticket-1',
         number: 1,
-        type: 'bug',
+        type: 'BUG',
         title: 'Test bug',
         status: 'closed',
-        priority: 'high',
+        priority: 'HIGH',
       };
 
       (TicketsService.verifyFix as jest.Mock).mockResolvedValue({
@@ -1458,10 +1486,10 @@ describe('ticketCommand', () => {
       const mockTicket = {
         id: 'ticket-1',
         number: 1,
-        type: 'bug',
+        type: 'BUG',
         title: 'Test bug',
         status: 'in_progress',
-        priority: 'high',
+        priority: 'HIGH',
       };
 
       (TicketsService.verifyFix as jest.Mock).mockResolvedValue({
@@ -1508,10 +1536,10 @@ describe('ticketCommand', () => {
       const mockTicket = {
         id: 'ticket-1',
         number: 1,
-        type: 'bug',
+        type: 'BUG',
         title: 'Test bug',
         status: 'closed',
-        priority: 'high',
+        priority: 'HIGH',
       };
 
       (TicketsService.verifyFix as jest.Mock).mockResolvedValue({
@@ -1545,10 +1573,10 @@ describe('ticketCommand', () => {
       const mockTicket = {
         id: 'ticket-1',
         number: 1,
-        type: 'bug',
+        type: 'BUG',
         title: 'Test bug',
         status: 'closed',
-        priority: 'high',
+        priority: 'HIGH',
       };
 
       (TicketsService.close as jest.Mock).mockResolvedValue({
@@ -1594,10 +1622,10 @@ describe('ticketCommand', () => {
       const mockTicket = {
         id: 'ticket-1',
         number: 1,
-        type: 'bug',
+        type: 'BUG',
         title: 'Test bug',
         status: 'rejected',
-        priority: 'high',
+        priority: 'HIGH',
       };
 
       (TicketsService.reject as jest.Mock).mockResolvedValue({
@@ -1643,10 +1671,10 @@ describe('ticketCommand', () => {
       const mockTicket = {
         id: 'ticket-1',
         number: 1,
-        type: 'bug',
+        type: 'BUG',
         title: 'Test bug',
         status: 'rejected',
-        priority: 'high',
+        priority: 'HIGH',
       };
 
       (TicketsService.reject as jest.Mock).mockResolvedValue({
@@ -1734,9 +1762,9 @@ describe('ticketCommand', () => {
         id: 'ticket-1',
         number: 42,
         projectId: 'proj-1',
-        type: 'bug',
+        type: 'BUG',
         title: 'Test bug',
-        status: 'created',
+        status: 'CREATED',
       };
 
       (TicketsService.show as jest.Mock).mockResolvedValue({
@@ -1761,9 +1789,9 @@ describe('ticketCommand', () => {
         id: 'ticket-1',
         number: 42,
         projectId: 'proj-1',
-        type: 'bug',
+        type: 'BUG',
         title: 'Test bug',
-        status: 'created',
+        status: 'CREATED',
       };
 
       (TicketsService.show as jest.Mock).mockResolvedValue({

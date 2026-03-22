@@ -78,7 +78,7 @@ describe('CommentsService', () => {
   };
 
   const mockPrismaService = {
-  client: {
+    client: {
       project: {
         findUnique: jest.fn(),
       },
@@ -94,7 +94,7 @@ describe('CommentsService', () => {
         count: jest.fn(),
       },
     },
-};
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
