@@ -74,11 +74,11 @@ describe('commentCommand', () => {
   });
 
   describe('comment add', () => {
-    it('posts comment with required fields', async () => {
+    it('posts comment with required fields using default GENERAL type', async () => {
       const mockComment = {
         id: 'comment-1',
         body: 'Test comment',
-        type: 'general',
+        type: 'GENERAL',
         ticketId: 'ticket-1',
         createdAt: new Date().toISOString(),
       };
@@ -97,17 +97,17 @@ describe('commentCommand', () => {
         'KODA-42',
         expect.objectContaining({
           body: 'Test comment',
-          type: 'general',
+          type: 'GENERAL',
         })
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
-    it('posts comment with explicit type', async () => {
+    it('posts comment with explicit uppercase type FIX_REPORT', async () => {
       const mockComment = {
         id: 'comment-1',
         body: 'Fix report',
-        type: 'fix_report',
+        type: 'FIX_REPORT',
         ticketId: 'ticket-1',
         createdAt: new Date().toISOString(),
       };
@@ -126,7 +126,7 @@ describe('commentCommand', () => {
         '--body',
         'Fix report',
         '--type',
-        'fix_report',
+        'FIX_REPORT',
       ]);
 
       expect(CommentsService.add).toHaveBeenCalledWith(
@@ -134,13 +134,22 @@ describe('commentCommand', () => {
         'KODA-42',
         expect.objectContaining({
           body: 'Fix report',
-          type: 'fix_report',
+          type: 'FIX_REPORT',
         })
       );
     });
 
-    it('supports all comment types', async () => {
-      const types = ['verification', 'fix_report', 'review', 'general'];
+    it('exits with code 3 when --type is lowercase general', async () => {
+      const commentCmd = program.commands.find((cmd) => cmd.name() === 'comment');
+      const addCmd = commentCmd?.commands.find((cmd) => cmd.name() === 'add');
+
+      await addCmd?.parse(['node', 'test', 'KODA-42', '--body', 'Test comment', '--type', 'general']);
+
+      expect(exitSpy).toHaveBeenCalledWith(3);
+    });
+
+    it('supports all uppercase comment types', async () => {
+      const types = ['VERIFICATION', 'FIX_REPORT', 'REVIEW', 'GENERAL'];
 
       for (const type of types) {
         const mockComment = {

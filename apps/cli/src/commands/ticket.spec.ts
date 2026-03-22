@@ -364,6 +364,62 @@ describe('ticketCommand', () => {
 
       expect(processExitSpy).toHaveBeenCalledWith(1);
     });
+
+    it('accepts uppercase --type BUG and calls API', async () => {
+      const mockTicket = { id: 'ticket-1', number: 1, type: 'BUG', title: 'Test', status: 'created' };
+      (TicketsService.create as jest.Mock).mockResolvedValue({ data: { ret: 0, data: mockTicket } });
+
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const createCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'create');
+
+      await createCmd?.parse(['node', 'test', '--project', 'proj', '--type', 'BUG', '--title', 'Test']);
+
+      expect(TicketsService.create).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({ type: 'BUG' })
+      );
+      expect(processExitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('exits with code 3 and error message when --type is lowercase bug', async () => {
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const createCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'create');
+
+      await createCmd?.parse(['node', 'test', '--project', 'proj', '--type', 'bug', '--title', 'Test']);
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Invalid type bug. Valid values: BUG, ENHANCEMENT, TASK, QUESTION')
+      );
+      expect(processExitSpy).toHaveBeenCalledWith(3);
+    });
+
+    it('accepts uppercase --priority HIGH and calls API', async () => {
+      const mockTicket = { id: 'ticket-1', number: 1, type: 'BUG', title: 'Test', status: 'created', priority: 'HIGH' };
+      (TicketsService.create as jest.Mock).mockResolvedValue({ data: { ret: 0, data: mockTicket } });
+
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const createCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'create');
+
+      await createCmd?.parse(['node', 'test', '--project', 'proj', '--type', 'BUG', '--title', 'Test', '--priority', 'HIGH']);
+
+      expect(TicketsService.create).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({ priority: 'HIGH' })
+      );
+      expect(processExitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('exits with code 3 and error message when --priority is lowercase high', async () => {
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const createCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'create');
+
+      await createCmd?.parse(['node', 'test', '--project', 'proj', '--type', 'BUG', '--title', 'Test', '--priority', 'high']);
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Invalid priority high. Valid values: LOW, MEDIUM, HIGH, CRITICAL')
+      );
+      expect(processExitSpy).toHaveBeenCalledWith(3);
+    });
   });
 
   describe('ticket list', () => {
@@ -1032,7 +1088,7 @@ describe('ticketCommand', () => {
         'KODA-1',
         expect.objectContaining({
           body: 'Verified this bug',
-          type: 'verification',
+          type: 'VERIFICATION',
         })
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
@@ -1080,7 +1136,7 @@ describe('ticketCommand', () => {
         expect.any(Object),
         'KODA-1',
         expect.objectContaining({
-          type: 'verification',
+          type: 'VERIFICATION',
         })
       );
     });
@@ -1260,7 +1316,7 @@ describe('ticketCommand', () => {
         'KODA-1',
         expect.objectContaining({
           body: 'Fixed the bug',
-          type: 'fix_report',
+          type: 'FIX_REPORT',
         })
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
@@ -1298,7 +1354,7 @@ describe('ticketCommand', () => {
         'KODA-1',
         expect.objectContaining({
           gitRef: 'v1.0:src/auth.ts:42',
-          type: 'fix_report',
+          type: 'FIX_REPORT',
         })
       );
     });
@@ -1345,7 +1401,7 @@ describe('ticketCommand', () => {
         expect.any(Object),
         'KODA-1',
         expect.objectContaining({
-          type: 'fix_report',
+          type: 'FIX_REPORT',
         })
       );
     });
@@ -1383,7 +1439,7 @@ describe('ticketCommand', () => {
         'KODA-1',
         expect.objectContaining({
           body: 'Looks good',
-          type: 'review',
+          type: 'REVIEW',
           status: 'closed',
         })
       );
@@ -1421,7 +1477,7 @@ describe('ticketCommand', () => {
         'KODA-1',
         expect.objectContaining({
           body: 'Need more work',
-          type: 'review',
+          type: 'REVIEW',
           status: 'in_progress',
         })
       );
@@ -1470,7 +1526,7 @@ describe('ticketCommand', () => {
         expect.any(Object),
         'KODA-1',
         expect.objectContaining({
-          type: 'review',
+          type: 'REVIEW',
         })
       );
     });
@@ -1556,7 +1612,7 @@ describe('ticketCommand', () => {
         'KODA-1',
         expect.objectContaining({
           body: 'Not reproducible',
-          type: 'general',
+          type: 'GENERAL',
         })
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
@@ -1604,7 +1660,7 @@ describe('ticketCommand', () => {
         expect.any(Object),
         'KODA-1',
         expect.objectContaining({
-          type: 'general',
+          type: 'GENERAL',
         })
       );
     });

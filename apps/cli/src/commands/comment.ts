@@ -13,7 +13,7 @@ export function commentCommand(program: Command): void {
     .command('add <ref>')
     .description('Add a comment to a ticket')
     .requiredOption('--body <text>', 'Comment body text')
-    .option('--type <type>', 'Comment type (verification, fix_report, review, general)', 'general')
+    .option('--type <type>', 'Comment type (GENERAL|VERIFICATION|FIX_REPORT|REVIEW)', 'GENERAL')
     .option('--json', 'Output as JSON')
     .action(async (ref: string, options) => {
       try {
@@ -25,9 +25,9 @@ export function commentCommand(program: Command): void {
         }
 
         // Validate comment type
-        const validTypes = ['verification', 'fix_report', 'review', 'general'];
+        const validTypes = ['GENERAL', 'VERIFICATION', 'FIX_REPORT', 'REVIEW'];
         if (!validTypes.includes(options.type)) {
-          error(`Invalid comment type: ${options.type}. Must be one of: ${validTypes.join(', ')}`);
+          error(`Invalid type ${options.type}. Valid values: ${validTypes.join(', ')}`);
           process.exit(3);
         }
 

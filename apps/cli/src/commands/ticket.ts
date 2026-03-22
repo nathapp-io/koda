@@ -15,16 +15,28 @@ export function ticketCommand(program: Command): void {
     .command('create')
     .description('Create a new ticket')
     .option('--project <slug>', 'Project slug')
-    .option('--type <type>', 'Ticket type (bug|enhancement)')
+    .option('--type <type>', 'Ticket type (BUG|ENHANCEMENT|TASK|QUESTION)')
     .option('--title <title>', 'Ticket title')
     .option('--desc <description>', 'Ticket description')
-    .option('--priority <priority>', 'Priority (low|medium|high|critical)')
+    .option('--priority <priority>', 'Priority (LOW|MEDIUM|HIGH|CRITICAL)')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
         // Validate required options
         if (!options.project || !options.type || !options.title) {
           error('Missing required options: --project, --type, and --title are required');
+          process.exit(3);
+        }
+
+        const validTypes = ['BUG', 'ENHANCEMENT', 'TASK', 'QUESTION'];
+        if (!validTypes.includes(options.type)) {
+          error(`Invalid type ${options.type}. Valid values: ${validTypes.join(', ')}`);
+          process.exit(3);
+        }
+
+        const validPriorities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+        if (options.priority && !validPriorities.includes(options.priority)) {
+          error(`Invalid priority ${options.priority}. Valid values: ${validPriorities.join(', ')}`);
           process.exit(3);
         }
 
@@ -227,7 +239,7 @@ export function ticketCommand(program: Command): void {
         const client = configureClient(auth.apiUrl, auth.apiKey);
         await TicketsService.verify(client, ref, {
           body: options.comment,
-          type: 'verification',
+          type: 'VERIFICATION',
         });
 
         console.log(`✓ Ticket verified successfully`);
@@ -308,7 +320,7 @@ export function ticketCommand(program: Command): void {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const payload: any = {
           body: options.comment,
-          type: 'fix_report',
+          type: 'FIX_REPORT',
         };
         if (options.gitRef) {
           payload.gitRef = options.gitRef;
@@ -348,7 +360,7 @@ export function ticketCommand(program: Command): void {
         const status = options.pass ? 'closed' : 'in_progress';
         await TicketsService.verifyFix(client, ref, {
           body: options.comment,
-          type: 'review',
+          type: 'REVIEW',
           status,
         });
 
@@ -403,7 +415,7 @@ export function ticketCommand(program: Command): void {
         const client = configureClient(auth.apiUrl, auth.apiKey);
         await TicketsService.reject(client, ref, {
           body: options.comment,
-          type: 'general',
+          type: 'GENERAL',
         });
 
         console.log(`✓ Ticket rejected successfully`);
