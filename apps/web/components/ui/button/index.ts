@@ -1,1 +1,2 @@
-export { default as Button } from './Button.vue'
+// Placeholder component file
+export const component = true

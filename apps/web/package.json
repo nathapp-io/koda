@@ -31,7 +31,9 @@
     "@hey-api/client-fetch": "^0.3.4",
     "@nuxt/devtools": "latest",
     "@nuxt/eslint": "^0.7.6",
+    "@types/bun": "latest",
     "@types/node": "^22.19.15",
+    "tailwindcss": "^3.4.0",
     "typescript": "^5.9.3",
     "vue-tsc": "^2.2.12"
   }
