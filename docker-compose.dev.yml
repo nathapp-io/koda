@@ -1,0 +1,54 @@
+services:
+  api:
+    image: node:22-alpine
+    working_dir: /app
+    ports:
+      - "${API_PORT:-3100}:3100"
+    environment:
+      DATABASE_PROVIDER: sqlite
+      DATABASE_URL: file:/data/koda.db
+      JWT_SECRET: ${JWT_SECRET:-change-me-dev}
+      JWT_EXPIRES_IN: 7d
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-dev-refresh}
+      JWT_REFRESH_EXPIRES_IN: 30d
+      API_KEY_SECRET: ${API_KEY_SECRET:-dev-api-key-secret-min-32-chars}
+      API_PORT: 3100
+      API_PREFIX: api
+      NODE_ENV: development
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/apps/api/node_modules
+      - /app/apps/api/dist
+      - koda_data_dev:/data
+    command: bun run dev --filter=@nathapp/koda-api
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3100/api/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    restart: no
+
+  web:
+    image: node:22-alpine
+    working_dir: /app
+    ports:
+      - "${WEB_PORT:-3101}:3101"
+    environment:
+      NUXT_PUBLIC_API_BASE_URL: ${NUXT_PUBLIC_API_BASE_URL:-http://localhost:3100/api}
+      PORT: 3101
+      NODE_ENV: development
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/apps/web/node_modules
+      - /app/apps/web/.nuxt
+    command: bun run dev --filter=@nathapp/koda-web
+    depends_on:
+      api:
+        condition: service_started
+    restart: no
+
+volumes:
+  koda_data_dev:
+    driver: local
