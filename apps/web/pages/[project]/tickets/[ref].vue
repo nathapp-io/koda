@@ -1,0 +1,152 @@
+<script setup lang="ts">
+interface Assignee {
+  id: string
+  name: string
+  email?: string
+}
+
+interface Ticket {
+  id: string
+  ref: string
+  title: string
+  description?: string | null
+  type: 'BUG' | 'ENHANCEMENT'
+  priority: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
+  status: 'CREATED' | 'VERIFIED' | 'IN_PROGRESS' | 'VERIFY_FIX' | 'CLOSED' | 'REJECTED'
+  assignee?: Assignee | null
+  createdAt: string
+}
+
+const route = useRoute()
+
+const slug = route.params.project as string
+const ref = route.params.ref as string
+
+const { $api } = useApi()
+
+const { data: ticketData, refresh } = useAsyncData(
+  `ticket-${slug}-${ref}`,
+  () => $api.get(`/projects/${slug}/tickets/${ref}`) as Promise<Ticket>,
+)
+
+const ticket = computed(() => ticketData.value ?? null)
+
+function statusClass(status: string) {
+  switch (status) {
+    case 'VERIFIED': return 'bg-blue-100 text-blue-800'
+    case 'IN_PROGRESS': return 'bg-yellow-100 text-yellow-800'
+    case 'VERIFY_FIX': return 'bg-purple-100 text-purple-800'
+    case 'CLOSED': return 'bg-green-100 text-green-800'
+    case 'REJECTED': return ''
+    default: return ''
+  }
+}
+
+function priorityVariant(priority: string): 'destructive' | 'secondary' | 'outline' | 'default' {
+  switch (priority) {
+    case 'CRITICAL': return 'destructive'
+    case 'MEDIUM': return 'secondary'
+    case 'LOW': return 'outline'
+    default: return 'default'
+  }
+}
+
+function priorityClass(priority: string) {
+  if (priority === 'HIGH') return 'bg-orange-100 text-orange-800'
+  return ''
+}
+
+function typeClass(type: string) {
+  if (type === 'BUG') return 'border-red-300 text-red-700'
+  if (type === 'ENHANCEMENT') return 'border-blue-300 text-blue-700'
+  return ''
+}
+
+function formatDate(dateStr: string) {
+  return new Date(dateStr).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+</script>
+
+<template>
+  <div class="p-6">
+    <div v-if="ticket" class="grid grid-cols-3 gap-6">
+      <!-- Left column: 2/3 width -->
+      <div class="col-span-2 space-y-6">
+        <div>
+          <h1 class="text-2xl font-bold">{{ ticket.title }}</h1>
+        </div>
+
+        <div class="flex gap-2">
+          <Badge
+            :variant="ticket.status === 'REJECTED' ? 'destructive' : 'outline'"
+            :class="statusClass(ticket.status)"
+          >
+            {{ ticket.status }}
+          </Badge>
+          <Badge
+            :variant="priorityVariant(ticket.priority)"
+            :class="priorityClass(ticket.priority)"
+          >
+            {{ ticket.priority }}
+          </Badge>
+          <Badge variant="outline" :class="typeClass(ticket.type)">
+            {{ ticket.type }}
+          </Badge>
+        </div>
+
+        <div v-if="ticket.description">
+          <p class="text-sm text-muted-foreground mb-1">Description</p>
+          <p class="whitespace-pre-wrap text-sm">{{ ticket.description }}</p>
+        </div>
+
+        <!-- Placeholder for CommentThread -->
+        <div data-slot="comment-thread">
+          <!-- CommentThread will be rendered here -->
+        </div>
+      </div>
+
+      <!-- Right column: 1/3 width -->
+      <div class="col-span-1 space-y-4">
+        <Card>
+          <CardHeader>
+            <CardTitle class="text-sm font-medium">Details</CardTitle>
+          </CardHeader>
+          <CardContent class="space-y-3">
+            <div>
+              <p class="text-xs text-muted-foreground mb-1">Assignee</p>
+              <div v-if="ticket.assignee" class="flex items-center gap-2">
+                <Avatar class="h-6 w-6">
+                  <AvatarFallback class="text-xs">
+                    {{ ticket.assignee.name.charAt(0).toUpperCase() }}
+                  </AvatarFallback>
+                </Avatar>
+                <span class="text-sm">{{ ticket.assignee.name }}</span>
+              </div>
+              <p v-else class="text-sm text-muted-foreground">Unassigned</p>
+            </div>
+
+            <Separator />
+
+            <div>
+              <p class="text-xs text-muted-foreground mb-1">Created</p>
+              <p class="text-sm">{{ formatDate(ticket.createdAt) }}</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <!-- Placeholder for TicketActionPanel -->
+        <div data-slot="ticket-action-panel">
+          <!-- TicketActionPanel will be rendered here -->
+        </div>
+      </div>
+    </div>
+
+    <div v-else class="flex items-center justify-center py-12">
+      <p class="text-muted-foreground">Loading ticket...</p>
+    </div>
+  </div>
+</template>
