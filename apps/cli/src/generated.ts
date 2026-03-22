@@ -38,6 +38,17 @@ export class ProjectsService {
   static async show(client: AxiosInstance, slug: string): Promise<Wrapped<Project>> {
     return client.get(`/projects/${slug}`);
   }
+
+  static async create(
+    client: AxiosInstance,
+    data: { name: string; slug: string; key: string; description?: string }
+  ): Promise<Wrapped<Project>> {
+    return client.post('/projects', data);
+  }
+
+  static async delete(client: AxiosInstance, slug: string): Promise<Wrapped<null>> {
+    return client.delete(`/projects/${slug}`);
+  }
 }
 
 export class CommentsService {

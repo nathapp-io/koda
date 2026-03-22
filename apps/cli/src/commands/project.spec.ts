@@ -40,6 +40,8 @@ jest.mock('../generated', () => ({
   ProjectsService: {
     list: jest.fn(),
     show: jest.fn(),
+    create: jest.fn(),
+    delete: jest.fn(),
   },
 }));
 
@@ -226,6 +228,152 @@ describe('projectCommand', () => {
     });
   });
 
+  describe('project create', () => {
+    it('creates project and displays it in table format', async () => {
+      const mockProject = {
+        id: '1',
+        name: 'Test',
+        key: 'TEST',
+        slug: 'test',
+        description: 'A test project',
+      };
+
+      (ProjectsService.create as jest.Mock).mockResolvedValue({
+        data: { ret: 0, data: mockProject },
+      });
+
+      const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
+      const createCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'create');
+
+      await createCmd?.parseAsync(['node', 'test', '--name', 'Test', '--slug', 'test', '--key', 'TEST']);
+
+      expect(ProjectsService.create).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ name: 'Test', slug: 'test', key: 'TEST' })
+      );
+    });
+
+    it('exits 3 with invalid key format (lowercase)', async () => {
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+      const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
+      const createCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'create');
+
+      await createCmd?.parseAsync([
+        'node', 'test', '--name', 'Test', '--slug', 'test', '--key', 'my-key',
+      ]);
+
+      expect(exitSpy).toHaveBeenCalledWith(3);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Invalid key format')
+      );
+
+      errorSpy.mockRestore();
+    });
+
+    it('exits 3 with invalid slug format (uppercase)', async () => {
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+      const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
+      const createCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'create');
+
+      await createCmd?.parseAsync([
+        'node', 'test', '--name', 'Test', '--slug', 'My_App', '--key', 'TEST',
+      ]);
+
+      expect(exitSpy).toHaveBeenCalledWith(3);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Invalid slug format')
+      );
+
+      errorSpy.mockRestore();
+    });
+
+    it('outputs unwrapped project JSON with --json flag', async () => {
+      const mockProject = {
+        id: '1',
+        name: 'Test',
+        key: 'TEST',
+        slug: 'test',
+      };
+
+      (ProjectsService.create as jest.Mock).mockResolvedValue({
+        data: { ret: 0, data: mockProject },
+      });
+
+      const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
+      const createCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'create');
+
+      await createCmd?.parseAsync([
+        'node', 'test', '--name', 'Test', '--slug', 'test', '--key', 'TEST', '--json',
+      ]);
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('"key": "TEST"')
+      );
+    });
+
+    it('exits with code 2 when API key is not configured', async () => {
+      mockData.apiKey = '';
+      mockData.apiUrl = '';
+
+      const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
+      const createCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'create');
+
+      await createCmd?.parseAsync([
+        'node', 'test', '--name', 'Test', '--slug', 'test', '--key', 'TEST',
+      ]);
+
+      expect(exitSpy).toHaveBeenCalledWith(2);
+    });
+  });
+
+  describe('project delete', () => {
+    it('deletes project when --force flag is provided', async () => {
+      (ProjectsService.delete as jest.Mock).mockResolvedValue({
+        data: { ret: 0, data: null },
+      });
+
+      const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
+      const deleteCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'delete');
+
+      await deleteCmd?.parseAsync(['node', 'test', 'test', '--force']);
+
+      expect(ProjectsService.delete).toHaveBeenCalledWith(
+        expect.anything(),
+        'test'
+      );
+    });
+
+    it('exits 1 with message when --force is not provided', async () => {
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+      const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
+      const deleteCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'delete');
+
+      await deleteCmd?.parseAsync(['node', 'test', 'test']);
+
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Use --force to confirm deletion')
+      );
+
+      errorSpy.mockRestore();
+    });
+
+    it('exits with code 2 when API key is not configured', async () => {
+      mockData.apiKey = '';
+      mockData.apiUrl = '';
+
+      const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
+      const deleteCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'delete');
+
+      await deleteCmd?.parseAsync(['node', 'test', 'test', '--force']);
+
+      expect(exitSpy).toHaveBeenCalledWith(2);
+    });
+  });
+
   describe('project show', () => {
     it('fetches and displays project details', async () => {
       const mockProject = {
@@ -309,6 +457,34 @@ describe('projectCommand', () => {
       }
 
       expect(exitSpy).toHaveBeenCalledWith(2);
+    });
+
+    it('displays key and description fields in table', async () => {
+      const mockProject = {
+        id: '1',
+        name: 'Project A',
+        key: 'PA',
+        slug: 'project-a',
+        description: 'A nice project description',
+      };
+
+      (ProjectsService.show as jest.Mock).mockResolvedValue({
+        data: { ret: 0, data: mockProject },
+      });
+
+      const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
+      const showCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'show');
+
+      try {
+        await showCmd?.parse(['node', 'test', 'project-a']);
+      } catch {
+        // Expected
+      }
+
+      // Should call console.log with a string that contains description
+      const allCalls = logSpy.mock.calls.flat().join(' ');
+      expect(allCalls).toContain('Description');
+      expect(allCalls).toContain('A nice project description');
     });
   });
 });
