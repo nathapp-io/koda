@@ -2,15 +2,15 @@
   <Dialog :open="open" @update:open="$emit('update:open', $event)">
     <DialogContent class="sm:max-w-[500px]">
       <DialogHeader>
-        <DialogTitle>Create Ticket</DialogTitle>
+        <DialogTitle>{{ t('tickets.form.title') }}</DialogTitle>
       </DialogHeader>
 
       <form @submit="onSubmit" class="space-y-4">
         <FormField name="title" v-slot="{ componentField }">
           <FormItem>
-            <FormLabel>Title</FormLabel>
+            <FormLabel>{{ t('tickets.form.titleLabel') }}</FormLabel>
             <FormControl>
-              <Input placeholder="Short description of the issue" v-bind="componentField" />
+              <Input :placeholder="t('tickets.form.titlePlaceholder')" v-bind="componentField" />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -18,16 +18,16 @@
 
         <FormField name="type" v-slot="{ componentField }">
           <FormItem>
-            <FormLabel>Type</FormLabel>
+            <FormLabel>{{ t('tickets.form.type') }}</FormLabel>
             <Select v-bind="componentField">
               <FormControl>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select type" />
+                  <SelectValue :placeholder="t('tickets.form.typePlaceholder')" />
                 </SelectTrigger>
               </FormControl>
               <SelectContent>
-                <SelectItem value="BUG">Bug</SelectItem>
-                <SelectItem value="ENHANCEMENT">Enhancement</SelectItem>
+                <SelectItem value="BUG">{{ t('tickets.type.BUG') }}</SelectItem>
+                <SelectItem value="ENHANCEMENT">{{ t('tickets.type.ENHANCEMENT') }}</SelectItem>
               </SelectContent>
             </Select>
             <FormMessage />
@@ -36,18 +36,18 @@
 
         <FormField name="priority" v-slot="{ componentField }">
           <FormItem>
-            <FormLabel>Priority</FormLabel>
+            <FormLabel>{{ t('tickets.form.priority') }}</FormLabel>
             <Select v-bind="componentField">
               <FormControl>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select priority" />
+                  <SelectValue :placeholder="t('tickets.form.priorityPlaceholder')" />
                 </SelectTrigger>
               </FormControl>
               <SelectContent>
-                <SelectItem value="LOW">Low</SelectItem>
-                <SelectItem value="MEDIUM">Medium</SelectItem>
-                <SelectItem value="HIGH">High</SelectItem>
-                <SelectItem value="CRITICAL">Critical</SelectItem>
+                <SelectItem value="LOW">{{ t('tickets.priority.LOW') }}</SelectItem>
+                <SelectItem value="MEDIUM">{{ t('tickets.priority.MEDIUM') }}</SelectItem>
+                <SelectItem value="HIGH">{{ t('tickets.priority.HIGH') }}</SelectItem>
+                <SelectItem value="CRITICAL">{{ t('tickets.priority.CRITICAL') }}</SelectItem>
               </SelectContent>
             </Select>
             <FormMessage />
@@ -56,9 +56,9 @@
 
         <FormField name="description" v-slot="{ componentField }">
           <FormItem>
-            <FormLabel>Description</FormLabel>
+            <FormLabel>{{ t('tickets.form.description') }}</FormLabel>
             <FormControl>
-              <Textarea placeholder="Optional details about the ticket" v-bind="componentField" />
+              <Textarea :placeholder="t('tickets.form.descriptionPlaceholder')" v-bind="componentField" />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -66,10 +66,10 @@
 
         <div class="flex justify-end gap-2">
           <Button type="button" variant="outline" @click="$emit('update:open', false)">
-            Cancel
+            {{ t('common.cancel') }}
           </Button>
           <Button type="submit" :disabled="isSubmitting">
-            {{ isSubmitting ? 'Creating...' : 'Create Ticket' }}
+            {{ isSubmitting ? t('tickets.form.creating') : t('tickets.form.create') }}
           </Button>
         </div>
       </form>
@@ -93,12 +93,14 @@ const emit = defineEmits<{
   (e: 'created'): void
 }>()
 
+const { t } = useI18n()
+
 const formSchema = toTypedSchema(
   z.object({
-    title: z.string({ required_error: 'Title is required' }).min(3, 'Title must be at least 3 characters'),
-    type: z.string({ required_error: 'Please select a type' })
-      .min(1, 'Please select a type')
-      .refine((v) => ['BUG', 'ENHANCEMENT'].includes(v), 'Please select a type'),
+    title: z.string({ required_error: t('tickets.validation.titleRequired') }).min(3, t('tickets.validation.titleMin')),
+    type: z.string({ required_error: t('tickets.validation.typeRequired') })
+      .min(1, t('tickets.validation.typeRequired'))
+      .refine((v) => ['BUG', 'ENHANCEMENT'].includes(v), t('tickets.validation.typeRequired')),
     priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).default('MEDIUM'),
     description: z.string().optional(),
   }) as any
@@ -119,11 +121,11 @@ const { $api } = useApi()
 const onSubmit = handleSubmit(async (formValues) => {
   try {
     await $api.post(`/projects/${props.projectSlug}/tickets`, formValues as Record<string, unknown>)
-    toast.success('Ticket created successfully')
+    toast.success(t('tickets.toast.created'))
     emit('created')
     emit('update:open', false)
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Failed to create ticket'
+    const message = error instanceof Error ? error.message : t('tickets.toast.createFailed')
     toast.error(message)
   }
 })

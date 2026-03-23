@@ -21,6 +21,7 @@ interface Ticket {
 }
 
 const route = useRoute()
+const { t } = useI18n()
 
 const slug = route.params.project as string
 const ref = route.params.ref as string
@@ -74,12 +75,12 @@ function formatDate(dateStr: string) {
 }
 
 async function onTransition() {
-  toast.success('Ticket updated successfully')
+  toast.success(t('tickets.toast.updated'))
   await refresh()
 }
 
 function onCommentAdded() {
-  toast.success('Comment added successfully')
+  toast.success(t('comments.toast.added'))
 }
 </script>
 
@@ -97,21 +98,21 @@ function onCommentAdded() {
             :variant="ticket.status === 'REJECTED' ? 'destructive' : 'outline'"
             :class="statusClass(ticket.status)"
           >
-            {{ ticket.status }}
+            {{ t(`tickets.status.${ticket.status}`) }}
           </Badge>
           <Badge
             :variant="priorityVariant(ticket.priority)"
             :class="priorityClass(ticket.priority)"
           >
-            {{ ticket.priority }}
+            {{ t(`tickets.priority.${ticket.priority}`) }}
           </Badge>
           <Badge variant="outline" :class="typeClass(ticket.type)">
-            {{ ticket.type }}
+            {{ t(`tickets.type.${ticket.type}`) }}
           </Badge>
         </div>
 
         <div v-if="ticket.description">
-          <p class="text-sm text-muted-foreground mb-1">Description</p>
+          <p class="text-sm text-muted-foreground mb-1">{{ t('tickets.detail.description') }}</p>
           <p class="whitespace-pre-wrap text-sm">{{ ticket.description }}</p>
         </div>
 
@@ -126,11 +127,11 @@ function onCommentAdded() {
       <div class="col-span-1 space-y-4">
         <Card>
           <CardHeader>
-            <CardTitle class="text-sm font-medium">Details</CardTitle>
+            <CardTitle class="text-sm font-medium">{{ t('common.details') }}</CardTitle>
           </CardHeader>
           <CardContent class="space-y-3">
             <div>
-              <p class="text-xs text-muted-foreground mb-1">Assignee</p>
+              <p class="text-xs text-muted-foreground mb-1">{{ t('tickets.detail.assignee') }}</p>
               <div v-if="ticket.assignee" class="flex items-center gap-2">
                 <Avatar class="h-6 w-6">
                   <AvatarFallback class="text-xs">
@@ -139,13 +140,13 @@ function onCommentAdded() {
                 </Avatar>
                 <span class="text-sm">{{ ticket.assignee.name }}</span>
               </div>
-              <p v-else class="text-sm text-muted-foreground">Unassigned</p>
+              <p v-else class="text-sm text-muted-foreground">{{ t('common.unassigned') }}</p>
             </div>
 
             <Separator />
 
             <div>
-              <p class="text-xs text-muted-foreground mb-1">Created</p>
+              <p class="text-xs text-muted-foreground mb-1">{{ t('tickets.detail.created') }}</p>
               <p class="text-sm">{{ formatDate(ticket.createdAt) }}</p>
             </div>
           </CardContent>
@@ -160,7 +161,7 @@ function onCommentAdded() {
     </div>
 
     <div v-else class="flex items-center justify-center py-12">
-      <p class="text-muted-foreground">Loading ticket...</p>
+      <p class="text-muted-foreground">{{ t('common.loadingTicket') }}</p>
     </div>
   </div>
 </template>

@@ -1,0 +1,187 @@
+{
+  "common": {
+    "logout": "Logout",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "loading": "Loading...",
+    "unassigned": "Unassigned",
+    "viewBoard": "View Board",
+    "details": "Details",
+    "noCommentsYet": "No comments yet.",
+    "loadingComments": "Loading comments...",
+    "failedLoadComments": "Failed to load comments.",
+    "loadingTicket": "Loading ticket...",
+    "changeStatus": "Change Status",
+    "addComment": "Add a comment",
+    "commentPlaceholder": "Enter a comment or reason..."
+  },
+  "auth": {
+    "login": {
+      "title": "Koda",
+      "subtitle": "Dev Ticket Tracker",
+      "email": "Email",
+      "emailPlaceholder": "you@example.com",
+      "password": "Password",
+      "passwordPlaceholder": "••••••••",
+      "signIn": "Sign in",
+      "noAccount": "No account?",
+      "createOne": "Create one"
+    },
+    "register": {
+      "title": "Koda",
+      "subtitle": "Create your account",
+      "name": "Full Name",
+      "namePlaceholder": "John Doe",
+      "email": "Email",
+      "emailPlaceholder": "you@example.com",
+      "password": "Password",
+      "passwordPlaceholder": "••••••••",
+      "signUp": "Create account",
+      "hasAccount": "Already have an account?",
+      "signIn": "Sign in"
+    },
+    "validation": {
+      "emailRequired": "Email is required",
+      "emailInvalid": "Enter a valid email",
+      "passwordRequired": "Password is required",
+      "passwordMin": "Password must be at least 8 characters"
+    }
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "projects": "Projects",
+    "agents": "Agents",
+    "toggleSidebar": "Toggle sidebar"
+  },
+  "projects": {
+    "title": "Projects",
+    "subtitle": "View and manage your development projects",
+    "newProject": "New Project",
+    "noProjects": "No projects yet",
+    "noProjectsHint": "Create your first project to get started",
+    "form": {
+      "title": "Create Project",
+      "name": "Name",
+      "namePlaceholder": "My Awesome Project",
+      "slug": "Slug",
+      "slugPlaceholder": "my-awesome-project",
+      "key": "Key",
+      "keyPlaceholder": "MAP",
+      "creating": "Creating...",
+      "create": "Create Project"
+    },
+    "validation": {
+      "nameRequired": "Name is required",
+      "slugRequired": "Slug is required",
+      "slugFormat": "Slug must be lowercase alphanumeric with hyphens",
+      "keyRequired": "Key is required",
+      "keyMin": "Key must be at least 2 characters",
+      "keyMax": "Key must be at most 6 characters",
+      "keyFormat": "Key must contain only uppercase letters A-Z"
+    },
+    "toast": {
+      "created": "Project created successfully",
+      "createFailed": "Failed to create project"
+    }
+  },
+  "tickets": {
+    "newTicket": "New Ticket",
+    "status": {
+      "CREATED": "CREATED",
+      "VERIFIED": "VERIFIED",
+      "IN_PROGRESS": "IN_PROGRESS",
+      "VERIFY_FIX": "VERIFY_FIX",
+      "CLOSED": "CLOSED",
+      "REJECTED": "REJECTED"
+    },
+    "priority": {
+      "CRITICAL": "Critical",
+      "HIGH": "High",
+      "MEDIUM": "Medium",
+      "LOW": "Low"
+    },
+    "type": {
+      "BUG": "Bug",
+      "ENHANCEMENT": "Enhancement"
+    },
+    "form": {
+      "title": "Create Ticket",
+      "titleLabel": "Title",
+      "titlePlaceholder": "Short description of the issue",
+      "type": "Type",
+      "typePlaceholder": "Select type",
+      "priority": "Priority",
+      "priorityPlaceholder": "Select priority",
+      "description": "Description",
+      "descriptionPlaceholder": "Optional details about the ticket",
+      "creating": "Creating...",
+      "create": "Create Ticket"
+    },
+    "validation": {
+      "titleRequired": "Title is required",
+      "titleMin": "Title must be at least 3 characters",
+      "typeRequired": "Please select a type"
+    },
+    "detail": {
+      "description": "Description",
+      "assignee": "Assignee",
+      "created": "Created"
+    },
+    "actions": {
+      "verify": "Verify",
+      "reject": "Reject",
+      "start": "Start",
+      "submitFix": "Submit Fix",
+      "approveFix": "Approve Fix",
+      "failFix": "Fail Fix"
+    },
+    "toast": {
+      "created": "Ticket created successfully",
+      "createFailed": "Failed to create ticket",
+      "updated": "Ticket updated successfully",
+      "actionFailed": "Action failed"
+    }
+  },
+  "comments": {
+    "label": "Comment",
+    "placeholder": "Write a comment...",
+    "type": "Type",
+    "types": {
+      "GENERAL": "General",
+      "VERIFICATION": "Verification",
+      "FIX_REPORT": "Fix Report",
+      "REVIEW": "Review"
+    },
+    "add": "Add Comment",
+    "toast": {
+      "added": "Comment added",
+      "addFailed": "Failed to add comment"
+    },
+    "validation": {
+      "bodyRequired": "Comment body is required"
+    }
+  },
+  "agents": {
+    "title": "Agents",
+    "columns": {
+      "name": "Name",
+      "slug": "Slug",
+      "roles": "Roles",
+      "capabilities": "Capabilities",
+      "status": "Status",
+      "actions": "Actions"
+    },
+    "status": {
+      "ACTIVE": "ACTIVE",
+      "PAUSED": "PAUSED",
+      "OFFLINE": "OFFLINE"
+    },
+    "toast": {
+      "statusUpdated": "Agent status updated to {status}",
+      "statusFailed": "Failed to update agent status"
+    }
+  },
+  "toast": {
+    "loggedIn": "Logged in successfully"
+  }
+}

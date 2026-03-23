@@ -89,8 +89,12 @@ export const useApi = () => {
   const baseURL = config.public.apiBaseUrl
   const auth = useAuth()
 
+  const { locale } = useI18n()
+
   const getHeaders = () => {
-    const headers: Record<string, string> = {}
+    const headers: Record<string, string> = {
+      'Accept-Language': locale.value,
+    }
     if (auth.token && auth.token.value) {
       headers['Authorization'] = `Bearer ${auth.token.value}`
     }

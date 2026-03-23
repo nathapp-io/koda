@@ -2,9 +2,9 @@
   <div class="flex min-h-screen items-center justify-center bg-background">
     <div class="w-full max-w-md space-y-8">
       <div class="text-center">
-        <h2 class="mt-6 text-3xl font-bold tracking-tight">Koda</h2>
+        <h2 class="mt-6 text-3xl font-bold tracking-tight">{{ t('auth.register.title') }}</h2>
         <p class="mt-2 text-sm text-muted-foreground">
-          Create your account
+          {{ t('auth.register.subtitle') }}
         </p>
       </div>
 
@@ -15,7 +15,7 @@
       <form class="space-y-4" @submit.prevent="handleRegister">
         <div>
           <label for="name" class="block text-sm font-medium">
-            Full Name
+            {{ t('auth.register.name') }}
           </label>
           <input
             id="name"
@@ -23,13 +23,13 @@
             type="text"
             required
             class="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            placeholder="John Doe"
+            :placeholder="t('auth.register.namePlaceholder')"
           />
         </div>
 
         <div>
           <label for="email" class="block text-sm font-medium">
-            Email
+            {{ t('auth.register.email') }}
           </label>
           <input
             id="email"
@@ -37,13 +37,13 @@
             type="email"
             required
             class="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            placeholder="you@example.com"
+            :placeholder="t('auth.register.emailPlaceholder')"
           />
         </div>
 
         <div>
           <label for="password" class="block text-sm font-medium">
-            Password
+            {{ t('auth.register.password') }}
           </label>
           <input
             id="password"
@@ -51,7 +51,7 @@
             type="password"
             required
             class="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            placeholder="••••••••"
+            :placeholder="t('auth.register.passwordPlaceholder')"
           />
         </div>
 
@@ -59,14 +59,14 @@
           type="submit"
           class="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
         >
-          Create account
+          {{ t('auth.register.signUp') }}
         </button>
       </form>
 
       <p class="text-center text-sm text-muted-foreground">
-        Already have an account?
+        {{ t('auth.register.hasAccount') }}
         <NuxtLink to="/login" class="font-medium text-primary hover:underline">
-          Sign in
+          {{ t('auth.register.signIn') }}
         </NuxtLink>
       </p>
     </div>
@@ -78,6 +78,8 @@ import { ref } from 'vue'
 import { extractApiError } from '~/composables/useApi'
 
 definePageMeta({ layout: 'auth' })
+
+const { t } = useI18n()
 
 const name = ref('')
 const email = ref('')

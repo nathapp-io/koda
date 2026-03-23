@@ -18,6 +18,8 @@ const props = defineProps<{ ticket: Ticket }>()
 
 const emit = defineEmits<{ (e: 'open'): void }>()
 
+const { t } = useI18n()
+
 function typeBadgeClass(type: string): string {
   if (type === 'BUG') return 'border-red-300 text-red-700'
   if (type === 'ENHANCEMENT') return 'border-blue-300 text-blue-700'
@@ -58,13 +60,13 @@ function assigneeInitials(assignee: Assignee): string {
               variant="outline"
               :class="typeBadgeClass(ticket.type)"
             >
-              {{ ticket.type }}
+              {{ t(`tickets.type.${ticket.type}`) }}
             </Badge>
             <Badge
               :variant="priorityVariant(ticket.priority) as 'destructive' | 'secondary' | 'outline' | 'default'"
               :class="priorityClass(ticket.priority)"
             >
-              {{ ticket.priority }}
+              {{ t(`tickets.priority.${ticket.priority}`) }}
             </Badge>
           </div>
         </div>

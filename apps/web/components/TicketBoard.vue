@@ -23,6 +23,8 @@ const emit = defineEmits<{
   (e: 'open-ticket', ticket: Ticket): void
 }>()
 
+const { t } = useI18n()
+
 const COLUMNS: Ticket['status'][] = [
   'CREATED',
   'VERIFIED',
@@ -47,7 +49,7 @@ function ticketsForStatus(status: string): Ticket[] {
       >
         <div class="flex items-center justify-between mb-2">
           <div class="flex items-center gap-2">
-            <span class="text-sm font-semibold">{{ status }}</span>
+            <span class="text-sm font-semibold">{{ t(`tickets.status.${status}`) }}</span>
             <Badge variant="secondary">{{ ticketsForStatus(status).length }}</Badge>
           </div>
           <button
@@ -55,7 +57,7 @@ function ticketsForStatus(status: string): Ticket[] {
             class="text-xs text-primary hover:underline"
             @click="emit('create')"
           >
-            New Ticket
+            {{ t('tickets.newTicket') }}
           </button>
         </div>
         <TicketCard

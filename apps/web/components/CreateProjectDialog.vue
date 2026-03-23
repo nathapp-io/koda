@@ -2,15 +2,15 @@
   <Dialog :open="open" @update:open="$emit('update:open', $event)">
     <DialogContent class="sm:max-w-[500px]">
       <DialogHeader>
-        <DialogTitle>Create Project</DialogTitle>
+        <DialogTitle>{{ t('projects.form.title') }}</DialogTitle>
       </DialogHeader>
 
       <form @submit="onSubmit" class="space-y-4">
         <FormField name="name" v-slot="{ componentField }">
           <FormItem>
-            <FormLabel>Name</FormLabel>
+            <FormLabel>{{ t('projects.form.name') }}</FormLabel>
             <FormControl>
-              <Input placeholder="My Awesome Project" v-bind="componentField" />
+              <Input :placeholder="t('projects.form.namePlaceholder')" v-bind="componentField" />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -18,9 +18,9 @@
 
         <FormField name="slug" v-slot="{ componentField }">
           <FormItem>
-            <FormLabel>Slug</FormLabel>
+            <FormLabel>{{ t('projects.form.slug') }}</FormLabel>
             <FormControl>
-              <Input placeholder="my-awesome-project" v-bind="componentField" />
+              <Input :placeholder="t('projects.form.slugPlaceholder')" v-bind="componentField" />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -28,9 +28,9 @@
 
         <FormField name="key" v-slot="{ componentField }">
           <FormItem>
-            <FormLabel>Key</FormLabel>
+            <FormLabel>{{ t('projects.form.key') }}</FormLabel>
             <FormControl>
-              <Input placeholder="MAP" v-bind="componentField" />
+              <Input :placeholder="t('projects.form.keyPlaceholder')" v-bind="componentField" />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -38,10 +38,10 @@
 
         <div class="flex justify-end gap-2">
           <Button type="button" variant="outline" @click="$emit('update:open', false)">
-            Cancel
+            {{ t('common.cancel') }}
           </Button>
           <Button type="submit" :disabled="isSubmitting">
-            {{ isSubmitting ? 'Creating...' : 'Create Project' }}
+            {{ isSubmitting ? t('projects.form.creating') : t('projects.form.create') }}
           </Button>
         </div>
       </form>
@@ -64,15 +64,17 @@ const emit = defineEmits<{
   (e: 'created'): void
 }>()
 
+const { t } = useI18n()
+
 const formSchema = toTypedSchema(
   z.object({
-    name: z.string({ required_error: 'Name is required' }).min(1, 'Name is required'),
-    slug: z.string({ required_error: 'Slug is required' }).min(1, 'Slug is required').regex(/^[a-z0-9-]+$/, 'Slug must be lowercase alphanumeric with hyphens'),
+    name: z.string({ required_error: t('projects.validation.nameRequired') }).min(1, t('projects.validation.nameRequired')),
+    slug: z.string({ required_error: t('projects.validation.slugRequired') }).min(1, t('projects.validation.slugRequired')).regex(/^[a-z0-9-]+$/, t('projects.validation.slugFormat')),
     key: z
-      .string({ required_error: 'Key is required' })
-      .min(2, 'Key must be at least 2 characters')
-      .max(6, 'Key must be at most 6 characters')
-      .regex(/^[A-Z]+$/, 'Key must contain only uppercase letters A-Z'),
+      .string({ required_error: t('projects.validation.keyRequired') })
+      .min(2, t('projects.validation.keyMin'))
+      .max(6, t('projects.validation.keyMax'))
+      .regex(/^[A-Z]+$/, t('projects.validation.keyFormat')),
   }) as any
 )
 
@@ -108,11 +110,11 @@ const { $api } = useApi()
 const onSubmit = handleSubmit(async (formValues) => {
   try {
     await $api.post('/projects', formValues as Record<string, unknown>)
-    toast.success('Project created successfully')
+    toast.success(t('projects.toast.created'))
     emit('created')
     emit('update:open', false)
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Failed to create project'
+    const message = error instanceof Error ? error.message : t('projects.toast.createFailed')
     toast.error(message)
   }
 })

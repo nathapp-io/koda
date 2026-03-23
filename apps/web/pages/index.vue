@@ -2,13 +2,13 @@
   <div class="space-y-8">
     <div class="flex items-center justify-between">
       <div>
-        <h1 class="text-3xl font-bold tracking-tight">Projects</h1>
+        <h1 class="text-3xl font-bold tracking-tight">{{ t('projects.title') }}</h1>
         <p class="mt-2 text-muted-foreground">
-          View and manage your development projects
+          {{ t('projects.subtitle') }}
         </p>
       </div>
       <Button @click="showCreateDialog = true">
-        New Project
+        {{ t('projects.newProject') }}
       </Button>
     </div>
 
@@ -26,16 +26,16 @@
           </CardHeader>
           <CardFooter>
             <NuxtLink :to="`/${project.slug}`" class="w-full">
-              <Button variant="outline" class="w-full">View Board</Button>
+              <Button variant="outline" class="w-full">{{ t('common.viewBoard') }}</Button>
             </NuxtLink>
           </CardFooter>
         </Card>
       </template>
       <template v-else>
         <div class="col-span-full flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-background/50 py-12">
-          <h3 class="mt-4 text-lg font-medium">No projects yet</h3>
+          <h3 class="mt-4 text-lg font-medium">{{ t('projects.noProjects') }}</h3>
           <p class="mt-1 text-sm text-muted-foreground">
-            Create your first project to get started
+            {{ t('projects.noProjectsHint') }}
           </p>
         </div>
       </template>
@@ -52,6 +52,8 @@
 
 <script setup lang="ts">
 definePageMeta({ layout: 'default' })
+
+const { t } = useI18n()
 
 interface Project {
   id: number
