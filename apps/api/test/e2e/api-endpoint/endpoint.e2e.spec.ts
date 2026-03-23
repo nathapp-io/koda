@@ -947,7 +947,7 @@ describeIntegration('API Integration Tests', () => {
 
     beforeAll(async () => {
       // Create and start a ticket so it reaches IN_PROGRESS
-      let res = await request(httpServer)
+      const res = await request(httpServer)
         .post(`/api/projects/${projectSlug}/tickets`)
         .set('Authorization', `Bearer ${userAccessToken}`)
         .send({ type: 'TASK', title: 'Close me', priority: 'LOW' })
