@@ -188,6 +188,57 @@ export class AgentService {
   }
 }
 
+export interface KbSearchResult {
+  score: number;
+  ticketRef: string;
+  type: 'bug' | 'enhancement';
+  status: string;
+  labels: string[];
+}
+
+export interface KbSearchResponse {
+  verdict: 'RELEVANT' | 'PARTIAL' | 'NOT_FOUND';
+  confidence: number;
+  results: KbSearchResult[];
+}
+
+export interface KbDocument {
+  id: string;
+  source: string;
+  createdAt: string;
+}
+
+export interface KbAddResponse {
+  id: string;
+  source: string;
+  docCount: number;
+}
+
+export class KbService {
+  static async search(
+    client: AxiosInstance,
+    projectSlug: string,
+    query: string
+  ): Promise<Wrapped<KbSearchResponse>> {
+    return client.get(`/projects/${projectSlug}/kb/search`, { params: { query } });
+  }
+
+  static async list(
+    client: AxiosInstance,
+    projectSlug: string
+  ): Promise<Wrapped<{ items: KbDocument[]; total: number }>> {
+    return client.get(`/projects/${projectSlug}/kb`);
+  }
+
+  static async add(
+    client: AxiosInstance,
+    projectSlug: string,
+    data: { content: string; source: string }
+  ): Promise<Wrapped<KbAddResponse>> {
+    return client.post(`/projects/${projectSlug}/kb`, data);
+  }
+}
+
 export interface Label {
   id: string;
   name: string;
