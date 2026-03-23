@@ -3,6 +3,11 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+      args:
+        BUN_VERSION: 1.3.11
+        TURBO_VERSION: 2.8.17
+        BUILD_APP: api
+        BUILD_APP_PACKAGE: "@nathapp/koda-api"
     ports:
       - "${API_PORT:-3100}:3100"
     environment:
@@ -29,6 +34,11 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        BUN_VERSION: 1.3.11
+        TURBO_VERSION: 2.8.17
+        BUILD_APP: web
+        BUILD_APP_PACKAGE: "@nathapp/koda-web"
     ports:
       - "${WEB_PORT:-3101}:3101"
     environment:
