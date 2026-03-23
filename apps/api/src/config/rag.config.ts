@@ -1,0 +1,13 @@
+import { registerAs } from '@nestjs/config';
+
+export const ragConfig = registerAs('rag', () => ({
+  embeddingProvider: process.env['EMBEDDING_PROVIDER'] ?? 'ollama',
+  embeddingModel: process.env['EMBEDDING_MODEL'] ?? 'nomic-embed-text',
+  ollamaBaseUrl: process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434',
+  openaiApiKey: process.env['OPENAI_API_KEY'] ?? '',
+  lancedbPath: process.env['LANCEDB_PATH'] ?? './lancedb',
+  ftsIndexMode: process.env['FTS_INDEX_MODE'] ?? 'simple',
+  similarityHigh: parseFloat(process.env['SIMILARITY_HIGH'] ?? '0.85'),
+  similarityMedium: parseFloat(process.env['SIMILARITY_MEDIUM'] ?? '0.70'),
+  similarityLow: parseFloat(process.env['SIMILARITY_LOW'] ?? '0.50'),
+}));

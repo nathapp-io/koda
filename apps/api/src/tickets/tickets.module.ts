@@ -4,8 +4,10 @@ import { PrismaClient } from '@prisma/client';
 import { TicketsController } from './tickets.controller';
 import { TicketsService } from './tickets.service';
 import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
+import { RagModule } from '../rag/rag.module';
 
 @Module({
+  imports: [RagModule],
   controllers: [TicketsController],
   providers: [
     TicketsService,

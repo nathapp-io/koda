@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import {
@@ -9,6 +9,7 @@ import {
 } from '@prisma/client';
 import { TicketStatus, CommentType, ActivityType } from '../../common/enums';
 import { validateTransition } from './ticket-transitions';
+import { RagService } from '../../rag/rag.service';
 
 export interface CurrentUser {
   id: string;
@@ -30,9 +31,51 @@ export type TransitionResult = TransitionResultWithComment | TransitionResultWit
 
 @Injectable()
 export class TicketTransitionsService {
-  constructor(@Inject('PrismaService') private prisma: PrismaService<PrismaClient>) {}
+  constructor(
+    @Inject('PrismaService') private prisma: PrismaService<PrismaClient>,
+    @Optional() private readonly ragService?: RagService,
+  ) {}
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private get db() { return this.prisma.client; }
+
+  /**
+   * Fire-and-forget: index a closed ticket in the RAG knowledge base.
+   * Only runs when project.autoIndexOnClose is true and RagService is available.
+   */
+  private autoIndexTicket(
+    project: { id: string; key: string; autoIndexOnClose: boolean },
+    ticket: Ticket,
+  ): void {
+    if (!this.ragService || !project.autoIndexOnClose) return;
+
+    const ragService = this.ragService;
+    const projectId = project.id;
+
+    this.db.ticket
+      .findUnique({ where: { id: ticket.id }, include: { comments: true } })
+      .then((ticketFull) => {
+        if (!ticketFull) return;
+        const content = [
+          `Title: ${ticketFull.title}`,
+          `Type: ${ticketFull.type}`,
+          `Description: ${ticketFull.description ?? ''}`,
+          ...ticketFull.comments.map((c) => `[${c.type}] ${c.body}`),
+        ].join('\n\n');
+        return ragService.indexDocument(projectId, {
+          source: 'ticket',
+          sourceId: ticketFull.id,
+          content,
+          metadata: {
+            ref: `${project.key}-${ticketFull.number}`,
+            type: ticketFull.type,
+            status: 'CLOSED',
+          },
+        });
+      })
+      .catch(() => {
+        // suppress RAG indexing errors — ticket close must always succeed
+      });
+  }
 
 
   /**
@@ -198,6 +241,8 @@ export class TicketTransitionsService {
       };
     });
 
+    this.autoIndexTicket(project, transaction.ticket);
+
     return transaction;
   }
 
@@ -302,6 +347,12 @@ export class TicketTransitionsService {
         ticket: updatedTicket,
         activity,
       } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    }).then((result: TransitionResult) => {
+      // Auto-index when a ticket transitions to CLOSED via normal state machine
+      if (toStatus === TicketStatus.CLOSED) {
+        this.autoIndexTicket(project, result.ticket);
+      }
+      return result;
     });
   }
 

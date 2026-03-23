@@ -13,9 +13,11 @@ import { TicketsModule } from './tickets/tickets.module';
 import { CommentsModule } from './comments/comments.module';
 import { LabelsModule } from './labels/labels.module';
 import { HealthModule } from './health/health.module';
+import { RagModule } from './rag/rag.module';
 import { appConfig } from './config/app.config';
 import { authConfig } from './config/auth.config';
 import { databaseConfig } from './config/database.config';
+import { ragConfig } from './config/rag.config';
 import { validate } from './config/env.validation';
 
 @Module({
@@ -23,7 +25,7 @@ import { validate } from './config/env.validation';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
-      load: [appConfig, authConfig, databaseConfig],
+      load: [appConfig, authConfig, databaseConfig, ragConfig],
       validate: validate,
     }),
     I18nCoreModule.forRoot({
@@ -49,6 +51,7 @@ import { validate } from './config/env.validation';
     CommentsModule,
     LabelsModule,
     HealthModule,
+    RagModule,
   ],
 })
 export class AppModule {}
