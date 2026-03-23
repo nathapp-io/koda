@@ -1,11 +1,11 @@
 {
   "common": {
-    "logout": "Logout",
-    "cancel": "Cancel",
-    "confirm": "Confirm",
-    "loading": "Loading...",
+    "logout": "退出",
+    "cancel": "取消",
+    "confirm": "确认",
+    "loading": "加载中...",
     "unassigned": "Unassigned",
-    "viewBoard": "View Board",
+    "viewBoard": "查看看板",
     "details": "Details",
     "noCommentsYet": "No comments yet.",
     "loadingComments": "Loading comments...",
@@ -18,19 +18,19 @@
   "auth": {
     "login": {
       "title": "Koda",
-      "subtitle": "Dev Ticket Tracker",
-      "email": "Email",
+      "subtitle": "开发工单追踪器",
+      "email": "邮箱",
       "emailPlaceholder": "you{'@'}example.com",
-      "password": "Password",
+      "password": "密码",
       "passwordPlaceholder": "••••••••",
-      "signIn": "Sign in",
-      "noAccount": "No account?",
-      "createOne": "Create one"
+      "signIn": "登录",
+      "noAccount": "没有账户？",
+      "createOne": "注册"
     },
     "register": {
       "title": "Koda",
-      "subtitle": "Create your account",
-      "name": "Full Name",
+      "subtitle": "创建账户",
+      "name": "姓名",
       "namePlaceholder": "John Doe",
       "email": "Email",
       "emailPlaceholder": "you{'@'}example.com",
@@ -48,17 +48,17 @@
     }
   },
   "nav": {
-    "dashboard": "Dashboard",
-    "projects": "Projects",
-    "agents": "Agents",
-    "toggleSidebar": "Toggle sidebar"
+    "dashboard": "仪表盘",
+    "projects": "项目",
+    "agents": "代理",
+    "toggleSidebar": "切换侧栏"
   },
   "projects": {
-    "title": "Projects",
-    "subtitle": "View and manage your development projects",
-    "newProject": "New Project",
-    "noProjects": "No projects yet",
-    "noProjectsHint": "Create your first project to get started",
+    "title": "项目",
+    "subtitle": "查看和管理您的开发项目",
+    "newProject": "新建项目",
+    "noProjects": "暂无项目",
+    "noProjectsHint": "创建您的第一个项目以开始",
     "form": {
       "title": "Create Project",
       "name": "Name",
