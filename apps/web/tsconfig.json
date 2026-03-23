@@ -1,7 +1,6 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "@nathapp/typescript-config/vue.json",
   "compilerOptions": {
-    "module": "esnext",
     "baseUrl": ".",
     "paths": {
       "~": ["."],

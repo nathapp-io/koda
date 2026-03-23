@@ -27,7 +27,7 @@ RUN bun install -g turbo@$TURBO_VERSION
 
 COPY turbo.json bun.lock ./ 
 COPY --link apps/ ./apps/
-#COPY --link packages/ ./packages/
+COPY --link packages/ ./packages/
 COPY --from=deps /tmp/deps.json ./package.json
 COPY --from=deps /tmp/app-deps.json ./apps/${BUILD_APP}/package.json
 
@@ -59,6 +59,7 @@ COPY --from=prune /app/out/full .
 
 RUN --mount=type=secret,id=TURBO_TOKEN \
     TURBO_TOKEN=$(cat /run/secrets/TURBO_TOKEN) \
+    bun run db:generate && \
     bun run build
 
 # Final image
@@ -69,14 +70,14 @@ ARG BUILD_APP=api
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/apps/${BUILD_APP}/package.json ./apps/${BUILD_APP}/package.json
 COPY --from=builder /app/bun.lock ./bun.lock
-#COPY --from=prune /app/out/json/packages ./packages
+COPY --from=prune /app/out/json/packages ./packages
 
 # Install only production dependencies
 RUN --mount=type=cache,id=bun-install,target=/root/.bun/install/cache \
     bun install --frozen-lockfile --production && \
     mv /app/apps/${BUILD_APP} ./apps/runtime
 
-#COPY --from=builder /app/packages ./packages
+COPY --from=builder /app/packages ./packages
 COPY --from=builder /app/apps/${BUILD_APP}/dist ./apps/runtime/dist
 
 ENV ENV_NAME=production

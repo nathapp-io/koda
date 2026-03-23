@@ -5,7 +5,7 @@ const project = resolve(process.cwd(), "tsconfig.json");
 /** @type {import("eslint").Linter.Config} */
 module.exports = {
   extends: ["eslint:recommended", "prettier", "turbo",'plugin:@typescript-eslint/recommended'],
-  plugins: ['@typescript-eslint/eslint-plugin'],
+  plugins: ['@typescript-eslint'],
   globals: {
     // React: true,
     // JSX: true,
@@ -28,6 +28,7 @@ module.exports = {
     "node_modules/",
     "dist/",
     '.eslintrc.js',
+    '.eslintrc.cjs',
   ],
   rules: {
     '@typescript-eslint/interface-name-prefix': 'off',

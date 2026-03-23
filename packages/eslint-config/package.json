@@ -3,8 +3,21 @@
   "version": "1.0.1",
   "private": true,
   "files": [
-    "library.js"
+    "base.js",
+    "library.js",
+    "nest.js",
+    "vue.js"
   ],
+  "exports": {
+    "./base": "./base.js",
+    "./base.js": "./base.js",
+    "./library": "./library.js",
+    "./library.js": "./library.js",
+    "./nest": "./nest.js",
+    "./nest.js": "./nest.js",
+    "./vue": "./vue.js",
+    "./vue.js": "./vue.js"
+  },
   "devDependencies": {
     "eslint-config-turbo": "^2.0.0",
     "eslint-config-prettier": "^8.3.0",
