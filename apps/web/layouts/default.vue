@@ -1,12 +1,7 @@
 <script setup lang="ts">
 const { t } = useI18n()
 const auth = useAuth()
-const colorMode = useColorMode()
 const sidebarOpen = ref(true)
-
-function toggleDarkMode() {
-  colorMode.preference = colorMode.value === 'dark' ? 'light' : 'dark'
-}
 </script>
 
 <template>
@@ -76,14 +71,8 @@ function toggleDarkMode() {
           <!-- Language switcher -->
           <LanguageSwitcher />
 
-          <!-- Dark mode toggle -->
-          <button
-            class="rounded-md p-2 hover:bg-accent"
-            @click="toggleDarkMode"
-          >
-            <LucideSun v-if="colorMode.value === 'dark'" class="h-4 w-4" />
-            <LucideMoon v-else class="h-4 w-4" />
-          </button>
+          <!-- Theme switcher -->
+          <ThemeSwitcher />
 
           <!-- User dropdown -->
           <span class="text-sm font-medium text-foreground">
