@@ -1,0 +1,15 @@
+.git
+.gitignore
+.turbo
+node_modules
+**/node_modules
+dist
+**/dist
+coverage
+**/coverage
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+apps/web/.nuxt

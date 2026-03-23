@@ -6,7 +6,8 @@
   "scripts": {
     "build": "nest build",
     "dev": "nest start --watch",
-    "start": "node dist/main",
+    "start": "bun dist/main",
+    "start:prod-runtime": "ENV_NAME=production bun /app/apps/runtime/dist/main",
     "test": "jest --forceExit --passWithNoTests --testPathIgnorePatterns=integration",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage --forceExit",
