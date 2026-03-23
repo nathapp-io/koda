@@ -96,10 +96,9 @@ const emit = defineEmits<{
 const formSchema = toTypedSchema(
   z.object({
     title: z.string({ required_error: 'Title is required' }).min(3, 'Title must be at least 3 characters'),
-    type: z.preprocess(
-      (val) => (val === '' ? undefined : val),
-      z.enum(['BUG', 'ENHANCEMENT'], { required_error: 'Please select a type' })
-    ),
+    type: z.string({ required_error: 'Please select a type' })
+      .min(1, 'Please select a type')
+      .refine((v) => ['BUG', 'ENHANCEMENT'].includes(v), 'Please select a type'),
     priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).default('MEDIUM'),
     description: z.string().optional(),
   }) as any
