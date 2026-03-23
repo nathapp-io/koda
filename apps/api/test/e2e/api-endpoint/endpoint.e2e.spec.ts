@@ -113,7 +113,8 @@ describeIntegration('API Integration Tests', () => {
       const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
       const user = await prisma.client.user.findUnique({ where: { email: 'admin@koda.test' } });
       expect(user).toBeTruthy();
-      await prisma.client.user.update({ where: { id: user!.id }, data: { role: 'ADMIN' } });
+      const safeUser = user as NonNullable<typeof user>;
+      await prisma.client.user.update({ where: { id: safeUser.id }, data: { role: 'ADMIN' } });
     });
 
     it('POST /api/auth/login — returns tokens (now as ADMIN)', async () => {
@@ -1055,9 +1056,10 @@ describeIntegration('API Integration Tests', () => {
       const data = body<{ ticket: { ref: string }; matchScore: number; matchedCapabilities: string[] } | null>(res);
       // At least one VERIFIED unassigned ticket exists
       expect(data).not.toBeNull();
-      expect(data!.ticket).toBeDefined();
-      expect(typeof data!.matchScore).toBe('number');
-      expect(Array.isArray(data!.matchedCapabilities)).toBe(true);
+      const safeData = data as NonNullable<typeof data>;
+      expect(safeData.ticket).toBeDefined();
+      expect(typeof safeData.matchScore).toBe('number');
+      expect(Array.isArray(safeData.matchedCapabilities)).toBe(true);
     });
 
     it('GET /api/agents/:slug/pickup — 400 when project query param is missing', async () => {

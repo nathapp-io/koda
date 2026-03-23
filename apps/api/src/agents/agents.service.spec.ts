@@ -676,10 +676,11 @@ describe('AgentsService', () => {
       const result = await service.suggestTicket('test-agent', 'koda');
 
       expect(result).not.toBeNull();
-      expect(result!.ticket.id).toBe('ticket-1');
-      expect(result!.matchScore).toBe(2);
-      expect(result!.matchedCapabilities).toContain('nestjs');
-      expect(result!.matchedCapabilities).toContain('prisma');
+      const safeResult = result as NonNullable<typeof result>;
+      expect(safeResult.ticket.id).toBe('ticket-1');
+      expect(safeResult.matchScore).toBe(2);
+      expect(safeResult.matchedCapabilities).toContain('nestjs');
+      expect(safeResult.matchedCapabilities).toContain('prisma');
     });
 
     it('should return null when no VERIFIED unassigned tickets exist in project', async () => {
@@ -711,8 +712,9 @@ describe('AgentsService', () => {
       const result = await service.suggestTicket('test-agent', 'koda');
 
       expect(result).not.toBeNull();
-      expect(result!.ticket.id).toBe('ticket-critical');
-      expect(result!.matchScore).toBe(0);
+      const safeResult = result as NonNullable<typeof result>;
+      expect(safeResult.ticket.id).toBe('ticket-critical');
+      expect(safeResult.matchScore).toBe(0);
     });
 
     it('should break ties in score by priority order CRITICAL > HIGH > MEDIUM > LOW', async () => {
@@ -727,8 +729,9 @@ describe('AgentsService', () => {
       const result = await service.suggestTicket('test-agent', 'koda');
 
       expect(result).not.toBeNull();
-      expect(result!.ticket.id).toBe('ticket-critical');
-      expect(result!.matchScore).toBe(1);
+      const safeResult = result as NonNullable<typeof result>;
+      expect(safeResult.ticket.id).toBe('ticket-critical');
+      expect(safeResult.matchScore).toBe(1);
     });
 
     it('should only consider tickets where both assignedToAgentId and assignedToUserId are null', async () => {
@@ -743,7 +746,8 @@ describe('AgentsService', () => {
       const result = await service.suggestTicket('test-agent', 'koda');
 
       expect(result).not.toBeNull();
-      expect(result!.ticket.id).toBe('unassigned-ticket');
+      const safeResult = result as NonNullable<typeof result>;
+      expect(safeResult.ticket.id).toBe('unassigned-ticket');
       // Verify the query includes the right filters
       expect(mockPrismaService.client.ticket.findMany).toHaveBeenCalledWith(
         expect.objectContaining({

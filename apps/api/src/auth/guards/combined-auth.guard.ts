@@ -26,7 +26,6 @@ export class CombinedAuthGuard extends JwtAuthGuard {
     if (isPublic) return true;
 
     const request = context.switchToHttp().getRequest<Record<string, unknown>>();
-    const authHeader = ((request['headers'] as Record<string, string>)?.['authorization']) ?? '';
     this.combinedLogger.debug(`canActivate: handler=${handler.name}, class=${clazz.name}`);
 
     // Try API Key first (deterministic: no JWT structure = potential API key)
@@ -37,8 +36,9 @@ export class CombinedAuthGuard extends JwtAuthGuard {
         this.combinedLogger.debug(`API key auth succeeded, req.user=${JSON.stringify(request['user'])}`);
         return true;
       }
-    } catch (e: any) {
-      this.combinedLogger.error(`API key error: ${e.message}`);
+    } catch (e: unknown) {
+      const error = e instanceof Error ? e.message : String(e);
+      this.combinedLogger.error(`API key error: ${error}`);
     }
 
     // Fall back to JWT
@@ -47,10 +47,12 @@ export class CombinedAuthGuard extends JwtAuthGuard {
       const result = await super.canActivate(context);
       this.combinedLogger.debug(`JWT canActivate result: ${result}, req.user set: ${request['user'] !== undefined}`);
       return result as boolean;
-    } catch (e: any) {
-      this.combinedLogger.debug(`JWT auth threw: ${e.message} (status: ${e.status})`);
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      const status = (error as Record<string, unknown>)?.status ?? 'unknown';
+      this.combinedLogger.debug(`JWT auth threw: ${err.message} (status: ${status})`);
       // Re-throw so the original 401/403 exception propagates correctly
-      throw e;
+      throw error;
     }
   }
 

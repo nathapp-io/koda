@@ -95,6 +95,7 @@ export class AuthService {
 
   async validateUser(payload: JwtPayload) {
     const user = await this.db.user.findUnique({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       where: { id: payload.sub ?? (payload as any).id },
     });
 

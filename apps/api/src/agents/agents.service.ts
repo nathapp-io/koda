@@ -254,6 +254,7 @@ export class AgentsService {
     });
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async remove(slug: string): Promise<any> {
     const agent = await this.db.agent.findUnique({
       where: { slug },
