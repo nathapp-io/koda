@@ -66,10 +66,10 @@ const emit = defineEmits<{
 
 const formSchema = toTypedSchema(
   z.object({
-    name: z.string().min(1, 'Name is required'),
-    slug: z.string().min(1, 'Slug is required').regex(/^[a-z0-9-]+$/, 'Slug must be lowercase alphanumeric with hyphens'),
+    name: z.string({ required_error: 'Name is required' }).min(1, 'Name is required'),
+    slug: z.string({ required_error: 'Slug is required' }).min(1, 'Slug is required').regex(/^[a-z0-9-]+$/, 'Slug must be lowercase alphanumeric with hyphens'),
     key: z
-      .string()
+      .string({ required_error: 'Key is required' })
       .min(2, 'Key must be at least 2 characters')
       .max(6, 'Key must be at most 6 characters')
       .regex(/^[A-Z]+$/, 'Key must contain only uppercase letters A-Z'),
@@ -78,6 +78,7 @@ const formSchema = toTypedSchema(
 
 const { handleSubmit, setFieldValue, isSubmitting, values } = useForm({
   validationSchema: formSchema,
+  initialValues: { name: '', slug: '', key: '' },
 })
 
 function deriveSlug(name: string): string {

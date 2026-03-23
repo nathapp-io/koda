@@ -55,17 +55,21 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { toast } from 'vue-sonner'
+import { extractApiError } from '~/composables/useApi'
 
 definePageMeta({ layout: 'auth' })
 
 const formSchema = toTypedSchema(
   z.object({
-    email: z.string().email(),
-    password: z.string().min(8),
+    email: z.string({ required_error: 'Email is required' }).email('Enter a valid email'),
+    password: z.string({ required_error: 'Password is required' }).min(8, 'Password must be at least 8 characters'),
   }) as any
 )
 
-const { handleSubmit } = useForm({ validationSchema: formSchema })
+const { handleSubmit } = useForm({
+  validationSchema: formSchema,
+  initialValues: { email: '', password: '' },
+})
 
 const auth = useAuth()
 
@@ -73,8 +77,9 @@ const onSubmit = handleSubmit(async (values) => {
   try {
     await auth.login(values)
     toast.success('Logged in successfully')
-  } catch {
-    toast.error('Login failed. Please check your credentials.')
+    navigateTo('/')
+  } catch (err: unknown) {
+    toast.error(extractApiError(err))
   }
 })
 </script>

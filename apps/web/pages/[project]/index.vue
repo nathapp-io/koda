@@ -21,12 +21,19 @@ const slug = route.params.project as string
 
 const { $api } = useApi()
 
+interface TicketPage {
+  items: Ticket[]
+  total: number
+  page: number
+  limit: number
+}
+
 const { data: ticketsData, refresh } = useAsyncData(
   `tickets-${slug}`,
-  () => $api.get(`/projects/${slug}/tickets`) as Promise<Ticket[]>,
+  () => $api.get<TicketPage>(`/projects/${slug}/tickets`),
 )
 
-const tickets = computed(() => ticketsData.value ?? [])
+const tickets = computed(() => ticketsData.value?.items ?? [])
 const showCreateDialog = ref(false)
 
 function handleOpenTicket(ticket: Ticket) {

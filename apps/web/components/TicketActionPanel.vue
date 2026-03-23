@@ -65,7 +65,7 @@ async function handleApproveFix() {
 async function handleDialogSubmit() {
   const action = pendingAction.value
   if (!action) return
-  const body = comment.value ? { comment: comment.value } : {}
+  const body = comment.value ? { body: comment.value } : {}
   closeDialog()
   await performAction(action, body)
 }
