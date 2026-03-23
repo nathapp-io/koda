@@ -207,7 +207,8 @@ describe('kbCommand', () => {
       });
       expect(jsonCall).toBeDefined();
 
-      const parsed = JSON.parse(jsonCall![0]);
+      if (!jsonCall) throw new Error('Expected jsonCall to be defined');
+      const parsed = JSON.parse(jsonCall[0]);
       expect(parsed).toHaveProperty('verdict');
       expect(parsed).toHaveProperty('confidence');
       expect(parsed).toHaveProperty('results');
@@ -372,7 +373,8 @@ describe('kbCommand', () => {
       });
       expect(jsonCall).toBeDefined();
 
-      const parsed = JSON.parse(jsonCall![0]);
+      if (!jsonCall) throw new Error('Expected jsonCall to be defined');
+      const parsed = JSON.parse(jsonCall[0]);
       expect(parsed).toHaveProperty('items');
       expect(Array.isArray(parsed.items)).toBe(true);
     });
@@ -503,7 +505,8 @@ describe('kbCommand', () => {
       });
       expect(jsonCall).toBeDefined();
 
-      const parsed = JSON.parse(jsonCall![0]);
+      if (!jsonCall) throw new Error('Expected jsonCall to be defined');
+      const parsed = JSON.parse(jsonCall[0]);
       expect(parsed).toHaveProperty('id');
       expect(parsed).toHaveProperty('source');
       expect(parsed).toHaveProperty('docCount');

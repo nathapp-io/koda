@@ -109,18 +109,18 @@ export function ticketCommand(program: Command): void {
           page: parseInt(options.page, 10),
         });
         const data = unwrap(response);
-        const items = Array.isArray(data) ? data : (data as any).items || [];
+        const items: Record<string, unknown>[] = Array.isArray(data) ? data : ((data as Record<string, unknown>).items as Record<string, unknown>[]) || [];
 
         if (options.json) {
           console.log(JSON.stringify(items, null, 2));
         } else {
-          const rows = items.map((t: any) => [
+          const rows = items.map((t) => [
             `KODA-${t.number}`,
-            t.type,
-            t.priority || '',
-            t.status,
-            t.assignee?.name || '—',
-            t.title,
+            String(t.type),
+            String(t.priority || ''),
+            String(t.status),
+            String((t.assignee as Record<string, unknown> | undefined)?.name || '—'),
+            String(t.title),
           ]);
           table(['#', 'Type', 'Priority', 'Status', 'Assignee', 'Title'], rows);
         }
@@ -156,18 +156,18 @@ export function ticketCommand(program: Command): void {
           assignedTo: 'self',
         });
         const data = unwrap(response);
-        const items = Array.isArray(data) ? data : (data as any).items || [];
+        const items: Record<string, unknown>[] = Array.isArray(data) ? data : ((data as Record<string, unknown>).items as Record<string, unknown>[]) || [];
 
         if (options.json) {
           console.log(JSON.stringify(items, null, 2));
         } else {
-          const rows = items.map((t: any) => [
+          const rows = items.map((t) => [
             `KODA-${t.number}`,
-            t.type,
-            t.priority || '',
-            t.status,
-            t.assignee?.name || '—',
-            t.title,
+            String(t.type),
+            String(t.priority || ''),
+            String(t.status),
+            String((t.assignee as Record<string, unknown> | undefined)?.name || '—'),
+            String(t.title),
           ]);
           table(['#', 'Type', 'Priority', 'Status', 'Assignee', 'Title'], rows);
         }
@@ -356,7 +356,7 @@ export function ticketCommand(program: Command): void {
         const client = configureClient(auth.apiUrl, auth.apiKey);
         const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
 
-        const payload: any = {
+        const payload: { body: string; type: string; gitRef?: string } = {
           body: options.comment,
           type: 'FIX_REPORT',
         };

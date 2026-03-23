@@ -25,12 +25,12 @@ export function projectCommand(program: Command): void {
         const client = configureClient(auth.apiUrl, auth.apiKey);
         const response = await ProjectsService.list(client);
         const data = unwrap(response);
-        const items = Array.isArray(data) ? data : (data as any).items || [];
+        const items: Record<string, unknown>[] = Array.isArray(data) ? data : ((data as Record<string, unknown>).items as Record<string, unknown>[]) || [];
 
         if (options.json) {
           console.log(JSON.stringify(items, null, 2));
         } else {
-          const rows = items.map((p: any) => [p.name, p.key, p.slug]);
+          const rows = items.map((p) => [String(p.name), String(p.key), String(p.slug)]);
           table(['Name', 'Key', 'Slug'], rows);
         }
 
