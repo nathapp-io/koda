@@ -19,6 +19,7 @@ const emit = defineEmits<{
 }>()
 
 const { $api } = useApi()
+const { t } = useI18n()
 
 const isOpen = ref(false)
 const comment = ref('')
@@ -49,7 +50,7 @@ async function performAction(action: string, body: Record<string, unknown> = {})
     }
     emit('transition')
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Action failed'
+    const message = error instanceof Error ? error.message : t('tickets.toast.actionFailed')
     toast.error(message)
   }
 }
@@ -75,25 +76,25 @@ async function handleDialogSubmit() {
   <div class="space-y-2">
     <!-- CREATED: Verify + Reject -->
     <template v-if="ticket.status === 'CREATED'">
-      <Button class="w-full" @click="openDialog('verify')">Verify</Button>
-      <Button class="w-full" variant="destructive" @click="openDialog('reject')">Reject</Button>
+      <Button class="w-full" @click="openDialog('verify')">{{ t('tickets.actions.verify') }}</Button>
+      <Button class="w-full" variant="destructive" @click="openDialog('reject')">{{ t('tickets.actions.reject') }}</Button>
     </template>
 
     <!-- VERIFIED: Start -->
     <template v-else-if="ticket.status === 'VERIFIED'">
-      <Button class="w-full" @click="handleStart">Start</Button>
+      <Button class="w-full" @click="handleStart">{{ t('tickets.actions.start') }}</Button>
     </template>
 
     <!-- IN_PROGRESS: Submit Fix + Reject -->
     <template v-else-if="ticket.status === 'IN_PROGRESS'">
-      <Button class="w-full" @click="openDialog('fix')">Submit Fix</Button>
-      <Button class="w-full" variant="destructive" @click="openDialog('reject')">Reject</Button>
+      <Button class="w-full" @click="openDialog('fix')">{{ t('tickets.actions.submitFix') }}</Button>
+      <Button class="w-full" variant="destructive" @click="openDialog('reject')">{{ t('tickets.actions.reject') }}</Button>
     </template>
 
     <!-- VERIFY_FIX: Approve Fix + Fail Fix -->
     <template v-else-if="ticket.status === 'VERIFY_FIX'">
-      <Button class="w-full" @click="handleApproveFix">Approve Fix</Button>
-      <Button class="w-full" variant="outline" @click="openDialog('verify-fix-fail')">Fail Fix</Button>
+      <Button class="w-full" @click="handleApproveFix">{{ t('tickets.actions.approveFix') }}</Button>
+      <Button class="w-full" variant="outline" @click="openDialog('verify-fix-fail')">{{ t('tickets.actions.failFix') }}</Button>
     </template>
 
     <!-- CLOSED / REJECTED: no buttons -->
@@ -105,17 +106,17 @@ async function handleDialogSubmit() {
     <Dialog :open="isOpen" @update:open="isOpen = $event">
       <DialogContent class="sm:max-w-[400px]">
         <DialogHeader>
-          <DialogTitle>Add a comment</DialogTitle>
+          <DialogTitle>{{ t('common.addComment') }}</DialogTitle>
         </DialogHeader>
         <div class="space-y-4">
           <Textarea
             v-model="comment"
-            placeholder="Enter a comment or reason..."
+            :placeholder="t('common.commentPlaceholder')"
             rows="4"
           />
           <div class="flex justify-end gap-2">
-            <Button variant="outline" @click="closeDialog">Cancel</Button>
-            <Button @click="handleDialogSubmit">Confirm</Button>
+            <Button variant="outline" @click="closeDialog">{{ t('common.cancel') }}</Button>
+            <Button @click="handleDialogSubmit">{{ t('common.confirm') }}</Button>
           </div>
         </div>
       </DialogContent>

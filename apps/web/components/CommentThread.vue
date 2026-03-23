@@ -22,6 +22,7 @@ const emit = defineEmits<{
 }>()
 
 const { $api } = useApi()
+const { t } = useI18n()
 
 const commentsEndpoint = `/projects/${props.projectSlug}/tickets/${props.ticketRef}/comments`
 
@@ -41,7 +42,7 @@ const typePillClass: Record<Comment['type'], string> = {
 }
 
 const commentSchema = z.object({
-  body: z.string().min(1, 'Comment body is required'),
+  body: z.string().min(1, t('comments.validation.bodyRequired')),
   type: z.enum(['GENERAL', 'VERIFICATION', 'FIX_REPORT', 'REVIEW']),
 })
 
@@ -62,9 +63,9 @@ const onSubmit = handleSubmit(async (values) => {
     comments.value.push(newComment)
     resetForm()
     emit('comment-added')
-    toast.success('Comment added')
+    toast.success(t('comments.toast.added'))
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to add comment'
+    const message = err instanceof Error ? err.message : t('comments.toast.addFailed')
     toast.error(message)
   }
 })
@@ -73,8 +74,8 @@ const onSubmit = handleSubmit(async (values) => {
 <template>
   <div class="space-y-6">
     <!-- Comments list -->
-    <div v-if="pending" class="text-muted-foreground text-sm">Loading comments...</div>
-    <div v-else-if="error" class="text-destructive text-sm">Failed to load comments.</div>
+    <div v-if="pending" class="text-muted-foreground text-sm">{{ t('common.loadingComments') }}</div>
+    <div v-else-if="error" class="text-destructive text-sm">{{ t('common.failedLoadComments') }}</div>
     <div v-else class="space-y-4">
       <div
         v-for="comment in comments"
@@ -86,23 +87,23 @@ const onSubmit = handleSubmit(async (values) => {
             class="rounded-full px-2 py-0.5 text-xs font-medium"
             :class="typePillClass[comment.type]"
           >
-            {{ comment.type }}
+            {{ t(`comments.types.${comment.type}`) }}
           </span>
           <span class="text-xs text-muted-foreground">{{ comment.createdAt }}</span>
         </div>
         <p class="text-sm whitespace-pre-wrap">{{ comment.body }}</p>
       </div>
-      <p v-if="comments.length === 0" class="text-muted-foreground text-sm">No comments yet.</p>
+      <p v-if="comments.length === 0" class="text-muted-foreground text-sm">{{ t('common.noCommentsYet') }}</p>
     </div>
 
     <!-- Add comment form -->
     <form class="space-y-4" @submit="onSubmit">
       <FormField name="body" v-slot="{ componentField }">
         <FormItem>
-          <FormLabel>Comment</FormLabel>
+          <FormLabel>{{ t('comments.label') }}</FormLabel>
           <FormControl>
             <Textarea
-              placeholder="Write a comment..."
+              :placeholder="t('comments.placeholder')"
               rows="3"
               v-bind="componentField"
             />
@@ -113,25 +114,25 @@ const onSubmit = handleSubmit(async (values) => {
 
       <FormField name="type" v-slot="{ componentField }">
         <FormItem>
-          <FormLabel>Type</FormLabel>
+          <FormLabel>{{ t('comments.type') }}</FormLabel>
           <Select v-bind="componentField">
             <FormControl>
               <SelectTrigger>
-                <SelectValue placeholder="Select type" />
+                <SelectValue :placeholder="t('comments.type')" />
               </SelectTrigger>
             </FormControl>
             <SelectContent>
-              <SelectItem value="GENERAL">General</SelectItem>
-              <SelectItem value="VERIFICATION">Verification</SelectItem>
-              <SelectItem value="FIX_REPORT">Fix Report</SelectItem>
-              <SelectItem value="REVIEW">Review</SelectItem>
+              <SelectItem value="GENERAL">{{ t('comments.types.GENERAL') }}</SelectItem>
+              <SelectItem value="VERIFICATION">{{ t('comments.types.VERIFICATION') }}</SelectItem>
+              <SelectItem value="FIX_REPORT">{{ t('comments.types.FIX_REPORT') }}</SelectItem>
+              <SelectItem value="REVIEW">{{ t('comments.types.REVIEW') }}</SelectItem>
             </SelectContent>
           </Select>
           <FormMessage />
         </FormItem>
       </FormField>
 
-      <Button type="submit">Add Comment</Button>
+      <Button type="submit">{{ t('comments.add') }}</Button>
     </form>
   </div>
 </template>

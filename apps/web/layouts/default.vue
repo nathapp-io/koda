@@ -1,11 +1,7 @@
 <script setup lang="ts">
+const { t } = useI18n()
 const auth = useAuth()
-const colorMode = useColorMode()
 const sidebarOpen = ref(true)
-
-function toggleDarkMode() {
-  colorMode.preference = colorMode.value === 'dark' ? 'light' : 'dark'
-}
 </script>
 
 <template>
@@ -26,20 +22,20 @@ function toggleDarkMode() {
           to="/"
           class="flex items-center rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
         >
-          Dashboard
+          {{ t('nav.dashboard') }}
         </NuxtLink>
         <NuxtLink
           to="/projects"
           class="flex items-center rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
         >
-          Projects
+          {{ t('nav.projects') }}
         </NuxtLink>
         <NuxtLink
           v-if="$route.params.project"
           :to="`/${$route.params.project}/agents`"
           class="flex items-center rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
         >
-          Agents
+          {{ t('nav.agents') }}
         </NuxtLink>
       </nav>
 
@@ -52,7 +48,7 @@ function toggleDarkMode() {
           class="mt-2 w-full rounded-md px-3 py-2 text-left text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
           @click="auth.logout()"
         >
-          Logout
+          {{ t('common.logout') }}
         </button>
       </div>
     </aside>
@@ -65,21 +61,18 @@ function toggleDarkMode() {
           class="rounded-md p-2 hover:bg-accent"
           @click="sidebarOpen = !sidebarOpen"
         >
-          <span class="sr-only">Toggle sidebar</span>
+          <span class="sr-only">{{ t('nav.toggleSidebar') }}</span>
           <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
           </svg>
         </button>
 
         <div class="flex items-center gap-4">
-          <!-- Dark mode toggle -->
-          <button
-            class="rounded-md p-2 hover:bg-accent"
-            @click="toggleDarkMode"
-          >
-            <LucideSun v-if="colorMode.value === 'dark'" class="h-4 w-4" />
-            <LucideMoon v-else class="h-4 w-4" />
-          </button>
+          <!-- Language switcher -->
+          <LanguageSwitcher />
+
+          <!-- Theme switcher -->
+          <ThemeSwitcher />
 
           <!-- User dropdown -->
           <span class="text-sm font-medium text-foreground">
@@ -89,7 +82,7 @@ function toggleDarkMode() {
             class="rounded-md px-3 py-2 text-sm font-medium hover:bg-accent"
             @click="auth.logout()"
           >
-            Logout
+            {{ t('common.logout') }}
           </button>
         </div>
       </header>

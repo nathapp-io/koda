@@ -13,6 +13,7 @@ interface Agent {
 const route = useRoute()
 const slug = route.params.project as string
 const { $api } = useApi()
+const { t } = useI18n()
 
 const { data: agentsData, refresh } = useAsyncData(
   `agents-${slug}`,
@@ -30,27 +31,27 @@ function statusClass(status: string) {
 async function changeStatus(agent: Agent, newStatus: 'ACTIVE' | 'PAUSED' | 'OFFLINE') {
   try {
     await $api.patch(`/agents/${agent.id}`, { status: newStatus })
-    toast.success(`Agent status updated to ${newStatus}`)
+    toast.success(t('agents.toast.statusUpdated', { status: newStatus }))
     refresh()
   } catch (err) {
-    toast.error('Failed to update agent status')
+    toast.error(t('agents.toast.statusFailed'))
   }
 }
 </script>
 
 <template>
   <div class="space-y-4">
-    <h1 class="text-2xl font-bold">Agents</h1>
+    <h1 class="text-2xl font-bold">{{ t('agents.title') }}</h1>
 
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>Name</TableHead>
-          <TableHead>Slug</TableHead>
-          <TableHead>Roles</TableHead>
-          <TableHead>Capabilities</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Actions</TableHead>
+          <TableHead>{{ t('agents.columns.name') }}</TableHead>
+          <TableHead>{{ t('agents.columns.slug') }}</TableHead>
+          <TableHead>{{ t('agents.columns.roles') }}</TableHead>
+          <TableHead>{{ t('agents.columns.capabilities') }}</TableHead>
+          <TableHead>{{ t('agents.columns.status') }}</TableHead>
+          <TableHead>{{ t('agents.columns.actions') }}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -86,23 +87,23 @@ async function changeStatus(agent: Agent, newStatus: 'ACTIVE' | 'PAUSED' | 'OFFL
               :variant="agent.status === 'OFFLINE' ? 'secondary' : 'outline'"
               :class="statusClass(agent.status)"
             >
-              {{ agent.status }}
+              {{ t(`agents.status.${agent.status}`) }}
             </Badge>
           </TableCell>
           <TableCell>
             <DropdownMenu>
               <DropdownMenuTrigger as-child>
-                <Button variant="ghost" size="sm">Change Status</Button>
+                <Button variant="ghost" size="sm">{{ t('common.changeStatus') }}</Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent>
                 <DropdownMenuItem @click="changeStatus(agent, 'ACTIVE')">
-                  ACTIVE
+                  {{ t('agents.status.ACTIVE') }}
                 </DropdownMenuItem>
                 <DropdownMenuItem @click="changeStatus(agent, 'PAUSED')">
-                  PAUSED
+                  {{ t('agents.status.PAUSED') }}
                 </DropdownMenuItem>
                 <DropdownMenuItem @click="changeStatus(agent, 'OFFLINE')">
-                  OFFLINE
+                  {{ t('agents.status.OFFLINE') }}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

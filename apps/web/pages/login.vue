@@ -1,20 +1,20 @@
 <template>
   <div class="space-y-6">
     <div class="text-center">
-      <h2 class="text-3xl font-bold tracking-tight">Koda</h2>
+      <h2 class="text-3xl font-bold tracking-tight">{{ t('auth.login.title') }}</h2>
       <p class="mt-2 text-sm text-muted-foreground">
-        Dev Ticket Tracker
+        {{ t('auth.login.subtitle') }}
       </p>
     </div>
 
     <form class="space-y-4" @submit="onSubmit">
       <FormField name="email" v-slot="{ componentField }">
         <FormItem>
-          <FormLabel>Email</FormLabel>
+          <FormLabel>{{ t('auth.login.email') }}</FormLabel>
           <FormControl>
             <Input
               type="email"
-              placeholder="you@example.com"
+              :placeholder="t('auth.login.emailPlaceholder')"
               v-bind="componentField"
             />
           </FormControl>
@@ -24,11 +24,11 @@
 
       <FormField name="password" v-slot="{ componentField }">
         <FormItem>
-          <FormLabel>Password</FormLabel>
+          <FormLabel>{{ t('auth.login.password') }}</FormLabel>
           <FormControl>
             <Input
               type="password"
-              placeholder="••••••••"
+              :placeholder="t('auth.login.passwordPlaceholder')"
               v-bind="componentField"
             />
           </FormControl>
@@ -37,14 +37,14 @@
       </FormField>
 
       <Button type="submit" class="w-full">
-        Sign in
+        {{ t('auth.login.signIn') }}
       </Button>
     </form>
 
     <p class="text-center text-sm text-muted-foreground">
-      No account?
+      {{ t('auth.login.noAccount') }}
       <NuxtLink to="/register" class="font-medium text-primary hover:underline">
-        Create one
+        {{ t('auth.login.createOne') }}
       </NuxtLink>
     </p>
   </div>
@@ -59,10 +59,12 @@ import { extractApiError } from '~/composables/useApi'
 
 definePageMeta({ layout: 'auth' })
 
+const { t } = useI18n()
+
 const formSchema = toTypedSchema(
   z.object({
-    email: z.string({ required_error: 'Email is required' }).email('Enter a valid email'),
-    password: z.string({ required_error: 'Password is required' }).min(8, 'Password must be at least 8 characters'),
+    email: z.string({ required_error: t('auth.validation.emailRequired') }).email(t('auth.validation.emailInvalid')),
+    password: z.string({ required_error: t('auth.validation.passwordRequired') }).min(8, t('auth.validation.passwordMin')),
   }) as any
 )
 
@@ -76,7 +78,7 @@ const auth = useAuth()
 const onSubmit = handleSubmit(async (values) => {
   try {
     await auth.login(values)
-    toast.success('Logged in successfully')
+    toast.success(t('toast.loggedIn'))
     navigateTo('/')
   } catch (err: unknown) {
     toast.error(extractApiError(err))
