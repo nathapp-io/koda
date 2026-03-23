@@ -3,6 +3,8 @@
 export default defineNuxtConfig({
   devtools: { enabled: true },
 
+  css: ['~/assets/css/globals.css'],
+
   modules: [
     '@nuxtjs/tailwindcss',
     '@nuxtjs/color-mode',
