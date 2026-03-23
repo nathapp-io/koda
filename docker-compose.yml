@@ -1,0 +1,55 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      args:
+        BUN_VERSION: 1.3.11
+        TURBO_VERSION: 2.8.17
+        BUILD_APP: api
+        BUILD_APP_PACKAGE: "@nathapp/koda-api"
+    ports:
+      - "${API_PORT:-3100}:3100"
+    environment:
+      DATABASE_PROVIDER: sqlite
+      DATABASE_URL: file:/data/koda.db
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-30d}
+      API_KEY_SECRET: ${API_KEY_SECRET}
+      API_PORT: 3100
+      API_PREFIX: api
+    volumes:
+      - koda_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3100/api/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        BUN_VERSION: 1.3.11
+        TURBO_VERSION: 2.8.17
+        BUILD_APP: web
+        BUILD_APP_PACKAGE: "@nathapp/koda-web"
+    ports:
+      - "${WEB_PORT:-3101}:3101"
+    environment:
+      # Internal URL: Nuxt server → API container via Docker service name
+      NUXT_API_INTERNAL_URL: http://api:3100
+      PORT: 3101
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  koda_data:
+    driver: local

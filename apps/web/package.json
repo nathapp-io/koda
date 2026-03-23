@@ -28,6 +28,8 @@
     "vue-sonner": "^2.0.9"
   },
   "devDependencies": {
+    "@nathapp/eslint-config": "workspace:*",
+    "@nathapp/typescript-config": "workspace:*",
     "@hey-api/client-fetch": "^0.3.4",
     "@nuxt/devtools": "latest",
     "@nuxt/eslint": "^0.7.6",

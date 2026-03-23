@@ -70,3 +70,4 @@ apps/api/smoke-result.txt
 .nax/**/acp-sessions.json
 apps/**/.nax/
 
+out/

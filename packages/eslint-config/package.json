@@ -1,0 +1,30 @@
+{
+  "name": "@nathapp/eslint-config",
+  "version": "1.0.1",
+  "private": true,
+  "files": [
+    "base.js",
+    "library.js",
+    "nest.js",
+    "vue.js"
+  ],
+  "exports": {
+    "./base": "./base.js",
+    "./base.js": "./base.js",
+    "./library": "./library.js",
+    "./library.js": "./library.js",
+    "./nest": "./nest.js",
+    "./nest.js": "./nest.js",
+    "./vue": "./vue.js",
+    "./vue.js": "./vue.js"
+  },
+  "devDependencies": {
+    "eslint-config-turbo": "^2.0.0",
+    "eslint-config-prettier": "^8.3.0",
+    "eslint-plugin-prettier": "^4.0.0",
+    "eslint-plugin-only-warn": "^1.1.0",
+    "@typescript-eslint/parser": "^7.1.0",
+    "@typescript-eslint/eslint-plugin": "^7.1.0",
+    "typescript": "5.8.3"
+  }
+}
