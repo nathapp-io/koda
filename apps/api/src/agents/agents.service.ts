@@ -265,9 +265,59 @@ export class AgentsService {
     return agent;
   }
 
+  private static readonly PRIORITY_RANK: Record<string, number> = {
+    CRITICAL: 4,
+    HIGH: 3,
+    MEDIUM: 2,
+    LOW: 1,
+  };
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async suggestTicket(_agentSlug: string, _projectSlug: string): Promise<{ ticket: any; matchScore: number; matchedCapabilities: string[] } | null> {
-    throw new Error('not implemented');
+  async suggestTicket(agentSlug: string, projectSlug: string): Promise<{ ticket: any; matchScore: number; matchedCapabilities: string[] } | null> {
+    const agent = await this.db.agent.findUnique({
+      where: { slug: agentSlug },
+      include: { capabilities: true },
+    });
+    if (!agent) throw new NotFoundAppException();
+
+    const project = await this.db.project.findUnique({ where: { slug: projectSlug } });
+    if (!project) return null;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tickets: any[] = await this.db.ticket.findMany({
+      where: {
+        projectId: project.id,
+        status: 'VERIFIED',
+        assignedToAgentId: null,
+        assignedToUserId: null,
+        deletedAt: null,
+      },
+      include: {
+        labels: { include: { label: true } },
+      },
+    });
+
+    if (tickets.length === 0) return null;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const capabilityNames: string[] = agent.capabilities.map((c: any) => c.capability as string);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const scored = tickets.map((ticket: any) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const labelNames: string[] = ticket.labels.map((tl: any) => tl.label.name as string);
+      const matched = capabilityNames.filter((cap) => labelNames.includes(cap));
+      return { ticket, matchScore: matched.length, matchedCapabilities: matched };
+    });
+
+    scored.sort((a, b) => {
+      if (b.matchScore !== a.matchScore) return b.matchScore - a.matchScore;
+      const rankA = AgentsService.PRIORITY_RANK[a.ticket.priority] ?? 0;
+      const rankB = AgentsService.PRIORITY_RANK[b.ticket.priority] ?? 0;
+      return rankB - rankA;
+    });
+
+    return scored[0];
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

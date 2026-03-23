@@ -1,10 +1,10 @@
-import { Controller, Post, Get, Patch, Delete, Body, Param, Req, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Delete, Body, Param, Query, Req, HttpCode, HttpStatus } from '@nestjs/common';
 import { AgentsService, CreateAgentDto } from './agents.service';
 import { UpdateAgentDto } from './dto/update-agent.dto';
 import { UpdateRolesDto } from './dto/update-roles.dto';
 import { UpdateCapabilitiesDto } from './dto/update-capabilities.dto';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
-import { ForbiddenAppException, JsonResponse } from '@nathapp/nestjs-common';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
+import { ForbiddenAppException, JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
 
 @ApiTags('agents')
 @ApiBearerAuth()
@@ -59,6 +59,20 @@ export class AgentsController {
   @ApiResponse({ status: 404, description: 'Agent not found' })
   async findBySlug(@Param('slug') slug: string) {
     const data = await this.agentsService.findBySlug(slug);
+    return JsonResponse.Ok(data);
+  }
+
+  @Get(':slug/pickup')
+  @ApiOperation({ summary: 'Suggest a ticket for the agent to pick up' })
+  @ApiQuery({ name: 'project', required: true, description: 'Project slug' })
+  @ApiResponse({ status: 200, description: 'Suggested ticket or null' })
+  @ApiResponse({ status: 400, description: 'Missing project query param' })
+  @ApiResponse({ status: 404, description: 'Agent not found' })
+  async suggestTicket(@Param('slug') slug: string, @Query('project') project: string) {
+    if (!project) {
+      throw new ValidationAppException();
+    }
+    const data = await this.agentsService.suggestTicket(slug, project);
     return JsonResponse.Ok(data);
   }
 
