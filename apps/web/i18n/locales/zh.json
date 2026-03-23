@@ -4,16 +4,16 @@
     "cancel": "取消",
     "confirm": "确认",
     "loading": "加载中...",
-    "unassigned": "Unassigned",
+    "unassigned": "未指派",
     "viewBoard": "查看看板",
-    "details": "Details",
-    "noCommentsYet": "No comments yet.",
-    "loadingComments": "Loading comments...",
-    "failedLoadComments": "Failed to load comments.",
-    "loadingTicket": "Loading ticket...",
-    "changeStatus": "Change Status",
-    "addComment": "Add a comment",
-    "commentPlaceholder": "Enter a comment or reason..."
+    "details": "详情",
+    "noCommentsYet": "暂无评论。",
+    "loadingComments": "正在加载评论...",
+    "failedLoadComments": "加载评论失败。",
+    "loadingTicket": "正在加载工单...",
+    "changeStatus": "修改状态",
+    "addComment": "添加评论",
+    "commentPlaceholder": "输入评论或原因..."
   },
   "auth": {
     "login": {
@@ -31,20 +31,20 @@
       "title": "Koda",
       "subtitle": "创建账户",
       "name": "姓名",
-      "namePlaceholder": "John Doe",
-      "email": "Email",
+      "namePlaceholder": "张三",
+      "email": "邮箱",
       "emailPlaceholder": "you{'@'}example.com",
-      "password": "Password",
+      "password": "密码",
       "passwordPlaceholder": "••••••••",
-      "signUp": "Create account",
-      "hasAccount": "Already have an account?",
-      "signIn": "Sign in"
+      "signUp": "创建账户",
+      "hasAccount": "已有账户？",
+      "signIn": "登录"
     },
     "validation": {
-      "emailRequired": "Email is required",
-      "emailInvalid": "Enter a valid email",
-      "passwordRequired": "Password is required",
-      "passwordMin": "Password must be at least 8 characters"
+      "emailRequired": "请输入邮箱",
+      "emailInvalid": "请输入有效的邮箱地址",
+      "passwordRequired": "请输入密码",
+      "passwordMin": "密码长度至少为 8 个字符"
     }
   },
   "nav": {
@@ -60,32 +60,32 @@
     "noProjects": "暂无项目",
     "noProjectsHint": "创建您的第一个项目以开始",
     "form": {
-      "title": "Create Project",
-      "name": "Name",
-      "namePlaceholder": "My Awesome Project",
-      "slug": "Slug",
+      "title": "创建项目",
+      "name": "名称",
+      "namePlaceholder": "我的项目",
+      "slug": "标识符",
       "slugPlaceholder": "my-awesome-project",
-      "key": "Key",
+      "key": "代码",
       "keyPlaceholder": "MAP",
-      "creating": "Creating...",
-      "create": "Create Project"
+      "creating": "正在创建...",
+      "create": "创建项目"
     },
     "validation": {
-      "nameRequired": "Name is required",
-      "slugRequired": "Slug is required",
-      "slugFormat": "Slug must be lowercase alphanumeric with hyphens",
-      "keyRequired": "Key is required",
-      "keyMin": "Key must be at least 2 characters",
-      "keyMax": "Key must be at most 6 characters",
-      "keyFormat": "Key must contain only uppercase letters A-Z"
+      "nameRequired": "请输入项目名称",
+      "slugRequired": "请输入标识符",
+      "slugFormat": "标识符必须是由小写字母、数字和连字符组成的字符串",
+      "keyRequired": "请输入代码",
+      "keyMin": "代码至少需要 2 个字符",
+      "keyMax": "代码最多包含 6 个字符",
+      "keyFormat": "代码必须仅包含大写字母 A-Z"
     },
     "toast": {
-      "created": "Project created successfully",
-      "createFailed": "Failed to create project"
+      "created": "项目创建成功",
+      "createFailed": "创建项目失败"
     }
   },
   "tickets": {
-    "newTicket": "New Ticket",
+    "newTicket": "新建工单",
     "status": {
       "CREATED": "CREATED",
       "VERIFIED": "VERIFIED",
@@ -95,81 +95,81 @@
       "REJECTED": "REJECTED"
     },
     "priority": {
-      "CRITICAL": "Critical",
-      "HIGH": "High",
-      "MEDIUM": "Medium",
-      "LOW": "Low"
+      "CRITICAL": "紧急",
+      "HIGH": "高",
+      "MEDIUM": "中",
+      "LOW": "低"
     },
     "type": {
-      "BUG": "Bug",
-      "ENHANCEMENT": "Enhancement"
+      "BUG": "缺陷",
+      "ENHANCEMENT": "增强"
     },
     "form": {
-      "title": "Create Ticket",
-      "titleLabel": "Title",
-      "titlePlaceholder": "Short description of the issue",
-      "type": "Type",
-      "typePlaceholder": "Select type",
-      "priority": "Priority",
-      "priorityPlaceholder": "Select priority",
-      "description": "Description",
-      "descriptionPlaceholder": "Optional details about the ticket",
-      "creating": "Creating...",
-      "create": "Create Ticket"
+      "title": "创建工单",
+      "titleLabel": "标题",
+      "titlePlaceholder": "问题的简短描述",
+      "type": "类型",
+      "typePlaceholder": "选择类型",
+      "priority": "优先级",
+      "priorityPlaceholder": "选择优先级",
+      "description": "描述",
+      "descriptionPlaceholder": "关于工单的可选详细信息",
+      "creating": "正在创建...",
+      "create": "创建工单"
     },
     "validation": {
-      "titleRequired": "Title is required",
-      "titleMin": "Title must be at least 3 characters",
-      "typeRequired": "Please select a type"
+      "titleRequired": "请输入标题",
+      "titleMin": "标题长度至少为 3 个字符",
+      "typeRequired": "请选择一个类型"
     },
     "detail": {
-      "description": "Description",
-      "assignee": "Assignee",
-      "created": "Created"
+      "description": "描述",
+      "assignee": "负责人",
+      "created": "创建于"
     },
     "actions": {
-      "verify": "Verify",
-      "reject": "Reject",
-      "start": "Start",
-      "submitFix": "Submit Fix",
-      "approveFix": "Approve Fix",
-      "failFix": "Fail Fix"
+      "verify": "验证",
+      "reject": "拒绝",
+      "start": "开始",
+      "submitFix": "提交修复",
+      "approveFix": "批准修复",
+      "failFix": "修复失败"
     },
     "toast": {
-      "created": "Ticket created successfully",
-      "createFailed": "Failed to create ticket",
-      "updated": "Ticket updated successfully",
-      "actionFailed": "Action failed"
+      "created": "工单创建成功",
+      "createFailed": "创建工单失败",
+      "updated": "工单更新成功",
+      "actionFailed": "操作失败"
     }
   },
   "comments": {
-    "label": "Comment",
-    "placeholder": "Write a comment...",
-    "type": "Type",
+    "label": "评论",
+    "placeholder": "写点评论...",
+    "type": "类型",
     "types": {
-      "GENERAL": "General",
-      "VERIFICATION": "Verification",
-      "FIX_REPORT": "Fix Report",
-      "REVIEW": "Review"
+      "GENERAL": "普通",
+      "VERIFICATION": "验证",
+      "FIX_REPORT": "修复报告",
+      "REVIEW": "审核"
     },
-    "add": "Add Comment",
+    "add": "添加评论",
     "toast": {
-      "added": "Comment added",
-      "addFailed": "Failed to add comment"
+      "added": "评论已添加",
+      "addFailed": "添加评论失败"
     },
     "validation": {
-      "bodyRequired": "Comment body is required"
+      "bodyRequired": "评论内容不能为空"
     }
   },
   "agents": {
-    "title": "Agents",
+    "title": "代理",
     "columns": {
-      "name": "Name",
-      "slug": "Slug",
-      "roles": "Roles",
-      "capabilities": "Capabilities",
-      "status": "Status",
-      "actions": "Actions"
+      "name": "名称",
+      "slug": "标识符",
+      "roles": "角色",
+      "capabilities": "能力",
+      "status": "状态",
+      "actions": "操作"
     },
     "status": {
       "ACTIVE": "ACTIVE",
@@ -177,11 +177,11 @@
       "OFFLINE": "OFFLINE"
     },
     "toast": {
-      "statusUpdated": "Agent status updated to {status}",
-      "statusFailed": "Failed to update agent status"
+      "statusUpdated": "代理状态已更新为 {status}",
+      "statusFailed": "更新代理状态失败"
     }
   },
   "toast": {
-    "loggedIn": "Logged in successfully"
+    "loggedIn": "登录成功"
   }
 }
