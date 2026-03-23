@@ -80,6 +80,9 @@ RUN --mount=type=cache,id=bun-install,target=/root/.bun/install/cache \
 COPY --from=builder /app/packages ./packages
 COPY --from=builder /app/apps/${BUILD_APP}/dist ./apps/runtime/dist
 
+# Copy Prisma generated client (generated in builder via db:generate, not reproduced by bun install)
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+
 ENV ENV_NAME=production
 
 # Replace root package.json with runtime one for version metadata
