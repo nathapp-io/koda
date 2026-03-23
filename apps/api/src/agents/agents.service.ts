@@ -266,6 +266,11 @@ export class AgentsService {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async suggestTicket(_agentSlug: string, _projectSlug: string): Promise<{ ticket: any; matchScore: number; matchedCapabilities: string[] } | null> {
+    throw new Error('not implemented');
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async rotateApiKey(slug: string): Promise<{ apiKey: string; agent: any }> {
     // Find agent by slug to get the id
     const agent = await this.db.agent.findUnique({
