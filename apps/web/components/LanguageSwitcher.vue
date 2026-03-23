@@ -7,6 +7,11 @@ const availableLocales = computed(() =>
   )
 )
 
+const currentLocaleName = computed(() => {
+  const current = availableLocales.value.find((l) => l.code === locale.value)
+  return current?.name ?? locale.value
+})
+
 function switchLocale(code: string) {
   setLocale(code)
 }
@@ -14,8 +19,8 @@ function switchLocale(code: string) {
 
 <template>
   <Select :model-value="locale" @update:model-value="switchLocale">
-    <SelectTrigger class="w-[100px] h-8 text-xs">
-      <SelectValue />
+    <SelectTrigger class="w-[110px] h-8 text-xs">
+      <span>{{ currentLocaleName }}</span>
     </SelectTrigger>
     <SelectContent>
       <SelectItem
