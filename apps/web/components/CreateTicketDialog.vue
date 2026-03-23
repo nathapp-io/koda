@@ -95,8 +95,8 @@ const emit = defineEmits<{
 
 const formSchema = toTypedSchema(
   z.object({
-    title: z.string().min(3, 'Title must be at least 3 characters'),
-    type: z.enum(['BUG', 'ENHANCEMENT']),
+    title: z.string({ required_error: 'Title is required' }).min(3, 'Title must be at least 3 characters'),
+    type: z.enum(['BUG', 'ENHANCEMENT'], { errorMap: () => ({ message: 'Please select a type' }) }),
     priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).default('MEDIUM'),
     description: z.string().optional(),
   }) as any
@@ -105,7 +105,10 @@ const formSchema = toTypedSchema(
 const { handleSubmit, isSubmitting } = useForm({
   validationSchema: formSchema,
   initialValues: {
+    title: '',
+    type: '',
     priority: 'MEDIUM',
+    description: '',
   },
 })
 
