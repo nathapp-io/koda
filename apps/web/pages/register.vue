@@ -8,6 +8,10 @@
         </p>
       </div>
 
+      <div v-if="error" class="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+        {{ error }}
+      </div>
+
       <form class="space-y-4" @submit.prevent="handleRegister">
         <div>
           <label for="name" class="block text-sm font-medium">
@@ -71,13 +75,24 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { extractApiError } from '~/composables/useApi'
+
+definePageMeta({ layout: 'auth' })
 
 const name = ref('')
 const email = ref('')
 const password = ref('')
+const error = ref('')
+
+const auth = useAuth()
 
 const handleRegister = async () => {
-  // TODO: Implement registration logic
-  console.log('Register:', { name: name.value, email: email.value, password: password.value })
+  error.value = ''
+  try {
+    await auth.register({ name: name.value, email: email.value, password: password.value })
+    navigateTo('/')
+  } catch (err: unknown) {
+    error.value = extractApiError(err)
+  }
 }
 </script>

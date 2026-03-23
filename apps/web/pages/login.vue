@@ -55,6 +55,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { toast } from 'vue-sonner'
+import { extractApiError } from '~/composables/useApi'
 
 definePageMeta({ layout: 'auth' })
 
@@ -73,8 +74,9 @@ const onSubmit = handleSubmit(async (values) => {
   try {
     await auth.login(values)
     toast.success('Logged in successfully')
-  } catch {
-    toast.error('Login failed. Please check your credentials.')
+    navigateTo('/')
+  } catch (err: unknown) {
+    toast.error(extractApiError(err))
   }
 })
 </script>
