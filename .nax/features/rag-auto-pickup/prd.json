@@ -1,0 +1,144 @@
+{
+  "project": "koda",
+  "feature": "rag-auto-pickup",
+  "branchName": "feat/rag-auto-pickup",
+  "createdAt": "2026-03-23T00:00:00.000Z",
+  "updatedAt": "2026-03-23T13:47:58.506Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "KB CLI commands — koda kb add/search/list",
+      "description": "Create `apps/cli/src/commands/kb.ts` with three Commander.js sub-commands under the `kb` parent command: `koda kb search`, `koda kb list`, and `koda kb add`. Register `kbCommand(program)` in `apps/cli/src/index.ts`. Each command must follow the standard CLI pattern: `resolveAuth({})` → `configureClient()` → generated service call → `unwrap()` → formatted output. The `search` command renders a verdict line plus ranked results with score labels (HIGH/MED/LOW), confidence score, ticket ref, type, status, and labels. The `list` command renders a table with columns ID, Source, Created. The `add` command reads a file from disk and POSTs it as a manual document, printing a success confirmation. All three must support `--json` for machine-readable output and use `handleApiError(err)` for error handling. Missing required flags exit with code 3; missing auth exits with code 2. Co-locate unit tests in `apps/cli/src/commands/kb.spec.ts` that mock the generated service and assert output shape and exit codes.",
+      "acceptanceCriteria": [
+        "koda kb search --project koda --query 'auth error' exits 0 and prints verdict + ranked results",
+        "koda kb search --json outputs raw JSON matching API response shape",
+        "koda kb list --project koda exits 0 and prints document table with ID, Source, Created columns",
+        "koda kb add --project koda --file ./README.md exits 0 and prints success confirmation with file name and doc count",
+        "Missing --project or --query causes exit code 3 (Commander required option enforcement)",
+        "Missing auth config (no apiKey or apiUrl) causes exit code 2",
+        "API errors are handled via handleApiError(err)",
+        "kbCommand(program) is registered in apps/cli/src/index.ts after existing command registrations",
+        "Unit tests in kb.spec.ts cover search verdict output, list table format, add confirmation, and auth-missing path",
+        "bun run test passes in apps/cli"
+      ],
+      "tags": [
+        "feature",
+        "cli"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/cli",
+      "contextFiles": [
+        "apps/cli/src/commands/label.ts",
+        "apps/cli/src/commands/agent.ts",
+        "apps/cli/src/index.ts",
+        "apps/cli/src/utils/output.ts",
+        "apps/cli/src/utils/error.ts"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-002",
+      "title": "Agent auto-pickup API endpoint — GET /api/agents/:slug/pickup",
+      "description": "Add `suggestTicket(agentSlug: string, projectSlug: string)` to `AgentsService` and a corresponding `GET :slug/pickup?project=<projectSlug>` endpoint to `AgentsController`. The algorithm loads the agent with its capabilities, queries all VERIFIED unassigned tickets in the project (status='VERIFIED', assignedToAgentId=null, assignedToUserId=null, deletedAt=null), scores each ticket by the count of capability names that appear in the ticket's label names, sorts descending by score then priority order (CRITICAL > HIGH > MEDIUM > LOW), and returns the top candidate with `{ ticket, matchScore, matchedCapabilities }` or null if no candidates exist. The endpoint returns `JsonResponse.Ok(result)` with a 404 `AppException` if the agent slug is not found and a 400 `AppException` if the `project` query param is missing. Add supertest E2E coverage and unit tests in `agents.service.spec.ts` covering: highest-scored ticket selected, null when no VERIFIED unassigned tickets, 404 for unknown agent, score-0 returns highest-priority ticket as fallback.",
+      "acceptanceCriteria": [
+        "GET /api/agents/:slug/pickup?project=koda returns { ret: 0, data: { ticket, matchScore, matchedCapabilities } } for a matching agent with candidates",
+        "Response data is null (ret still 0) when no VERIFIED unassigned tickets exist in the project",
+        "Only VERIFIED tickets with both assignedToAgentId=null and assignedToUserId=null are considered candidates",
+        "Ties in score are broken by priority order: CRITICAL > HIGH > MEDIUM > LOW",
+        "Returns 404 AppException if agent slug is not found",
+        "Returns 400 AppException if project query param is missing",
+        "Endpoint is decorated with Swagger @ApiOperation, @ApiQuery, @ApiResponse decorators",
+        "Unit tests cover happy path, no-match null, unknown agent 404, and score-0 priority fallback",
+        "Supertest E2E test covers the pickup endpoint",
+        "bun run test passes in apps/api"
+      ],
+      "tags": [
+        "feature",
+        "api"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/agents/agents.service.ts",
+        "apps/api/src/agents/agents.controller.ts",
+        "apps/api/src/common/enums.ts",
+        "apps/api/src/agents/agents.service.spec.ts",
+        "apps/api/src/agents/agents.controller.spec.ts"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-003",
+      "title": "Auto-assign config on Project + koda agent pickup CLI command",
+      "description": "Three coordinated changes: (1) API schema — add `autoAssign String @default(\"OFF\")` to the Project model in `apps/api/prisma/schema.prisma`, run `npx prisma migrate dev --name add_auto_assign`, add `AutoAssignMode` const enum to `apps/api/src/common/enums.ts`, add optional `@IsIn(['OFF','SUGGEST','AUTO'])` `autoAssign` field to `create-project.dto.ts` and `update-project.dto.ts`, and expose `autoAssign` in project service responses. (2) API regeneration — run `bun run generate` from monorepo root so the CLI generated client reflects the updated Project type and new pickup endpoint. (3) CLI extension — add `pickup` sub-command to the existing `koda agent` command in `apps/cli/src/commands/agent.ts`: `koda agent pickup --project <slug> [--json]`. The pickup command calls the `GET /api/agents/:slug/pickup` endpoint using the current agent's slug (from auth config), formats a human-readable suggestion or 'no match' message, and supports `--json` for raw output. Unit tests cover the DTO validation (invalid autoAssign → 400), project create default, project update persistence, and CLI pickup command output.",
+      "acceptanceCriteria": [
+        "autoAssign field added to Prisma Project model with @default(\"OFF\")",
+        "Migration created and applied without errors via prisma migrate dev",
+        "AutoAssignMode const enum (OFF, SUGGEST, AUTO) added to apps/api/src/common/enums.ts",
+        "create-project.dto.ts and update-project.dto.ts accept optional autoAssign field validated as one of OFF|SUGGEST|AUTO",
+        "Invalid autoAssign value (e.g. 'INVALID') returns 400 validation error",
+        "autoAssign is returned in project list and show API responses",
+        "Creating a project without autoAssign results in autoAssign='OFF' in the response",
+        "koda agent pickup --project koda exits 0 and prints suggested ticket details or 'No suitable tickets found for pickup.'",
+        "koda agent pickup --json outputs raw JSON from the pickup endpoint",
+        "bun run test passes in both apps/api and apps/cli"
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "cli",
+        "schema"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 1,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output",
+        "modelTier": "powerful"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/common/enums.ts",
+        "apps/api/src/projects/dto/create-project.dto.ts",
+        "apps/cli/src/commands/agent.ts",
+        "apps/api/src/projects/projects.service.ts"
+      ],
+      "priorErrors": [
+        "Attempt 1 failed with model tier: balanced: Stage requested escalation to higher tier"
+      ],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "failureCategory": null
+    }
+  ],
+  "analysis": "## Codebase Analysis\n\n### Entry Point Correction\nThe spec references `apps/cli/src/main.ts` but the actual CLI entry point is `apps/cli/src/index.ts` (152 lines). All story implementations must register commands in `apps/cli/src/index.ts`, not `main.ts`.\n\n### Generated Client\nThe `apps/cli/src/generated/` directory does NOT exist yet. It is produced by `bun run generate:cli` from the monorepo root. Implementation agents for US-001 and US-003 CLI work must first read `openapi.json` at the monorepo root to identify the correct service class name(s) for KB and pickup endpoints. The spec names `KnowledgeBaseService` — confirm the actual class name after generation.\n\n### CLI Command Pattern (from `label.ts` and `agent.ts`)\nAll commands follow: `resolveAuth({})` → check `auth.apiKey && auth.apiUrl` → `configureClient(auth.apiUrl, auth.apiKey)` → call generated service → `unwrap(response)` → format output. Exit codes: 0=success, 1=API error, 2=auth (401/403), 3=validation (400), 4=not found (404). `handleApiError(err)` covers API errors. `success()`, `error()`, `table()` from `utils/output.ts` for output. `--json` flag routes to `console.log(JSON.stringify(data, null, 2))`.\n\n### CLI Output Utilities\n`apps/cli/src/utils/output.ts` exports `output()`, `table(headers, rows)`, `success(msg)`, `error(msg)`, `warn(msg)`. Use `success()` for add confirmations, `table()` for list output, custom format for search results with verdict.\n\n### API: agents.service.ts\nCurrently 283 lines. Uses `@Inject('PrismaService')` pattern with `(this.prisma as any).client` to access Prisma client. `suggestTicket()` must follow the same PrismaService injection pattern. Throws `AppException` subclasses — use `NotFoundAppException` for unknown agent slug, standard `AppException` with HTTP 400 for missing query param.\n\n### API: agents.controller.ts\n144 lines. All endpoints return `JsonResponse.Ok(data)`. Uses `@ApiOperation`, `@ApiResponse`, `@ApiBearerAuth` Swagger decorators consistently. The new `GET :slug/pickup` endpoint should follow the same Swagger decoration pattern and accept both JWT and API key auth (use existing `CombinedAuthGuard`).\n\n### enums.ts\n56 lines with 6 existing const enums. `AutoAssignMode` must be added as a 7th following the exact same pattern: `export const AutoAssignMode = { OFF: 'OFF', SUGGEST: 'SUGGEST', AUTO: 'AUTO' } as const; export type AutoAssignMode = typeof AutoAssignMode[keyof typeof AutoAssignMode];`\n\n### schema.prisma\n175 lines. Project model currently has: id, name, slug, key, description, gitRemoteUrl, autoIndexOnClose, createdAt, updatedAt, deletedAt. Add `autoAssign String @default(\"OFF\")` before closing brace. SQLite migration via `npx prisma migrate dev --name add_auto_assign`.\n\n### Project DTOs\n`create-project.dto.ts` (64 lines) uses class-validator with i18n keys. `autoAssign` should be `@IsOptional()`, `@IsString()`, `@IsIn(['OFF', 'SUGGEST', 'AUTO'])` following the same i18n error key pattern as existing fields.\n\n### Dependency Order\nUS-001 (KB CLI) and US-002 (pickup API) are independent and can run in parallel. US-003 depends on US-002 being deployed/testable and also extends the CLI agent command from US-001's pattern.\n\n### Test Patterns\nCLI: Jest unit tests mock generated services and `resolveAuth`. API: Jest unit tests in `*.service.spec.ts` mock PrismaService. E2E tests use supertest against real NestJS app. Every new API endpoint MUST have supertest E2E coverage per project rules."
+}

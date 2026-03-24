@@ -50,6 +50,12 @@ describe('AgentsService', () => {
         deleteMany: jest.fn(),
         createMany: jest.fn(),
       },
+      project: {
+        findUnique: jest.fn(),
+      },
+      ticket: {
+        findMany: jest.fn(),
+      },
     },
   };
 
@@ -630,6 +636,129 @@ describe('AgentsService', () => {
       mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
       await expect(service.rotateApiKey('nonexistent')).rejects.toThrow();
+    });
+  });
+
+  describe('suggestTicket', () => {
+    const mockProject = { id: 'project-1', slug: 'koda', key: 'KT' };
+
+    const mockAgentForPickup = {
+      id: 'agent-123',
+      slug: 'test-agent',
+      capabilities: [
+        { id: 'cap-1', agentId: 'agent-123', capability: 'nestjs' },
+        { id: 'cap-2', agentId: 'agent-123', capability: 'prisma' },
+      ],
+    };
+
+    const makeTicket = (id: string, priority: string, labelNames: string[]) => ({
+      id,
+      priority,
+      status: 'VERIFIED',
+      assignedToAgentId: null,
+      assignedToUserId: null,
+      deletedAt: null,
+      labels: labelNames.map((name) => ({ label: { name } })),
+    });
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+    });
+
+    it('should return highest-scored ticket with matchScore and matchedCapabilities', async () => {
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(mockAgentForPickup);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.ticket.findMany.mockResolvedValue([
+        makeTicket('ticket-1', 'HIGH', ['nestjs', 'prisma']),
+        makeTicket('ticket-2', 'CRITICAL', ['nestjs']),
+      ]);
+
+      const result = await service.suggestTicket('test-agent', 'koda');
+
+      expect(result).not.toBeNull();
+      const safeResult = result as NonNullable<typeof result>;
+      expect(safeResult.ticket.id).toBe('ticket-1');
+      expect(safeResult.matchScore).toBe(2);
+      expect(safeResult.matchedCapabilities).toContain('nestjs');
+      expect(safeResult.matchedCapabilities).toContain('prisma');
+    });
+
+    it('should return null when no VERIFIED unassigned tickets exist in project', async () => {
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(mockAgentForPickup);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.ticket.findMany.mockResolvedValue([]);
+
+      const result = await service.suggestTicket('test-agent', 'koda');
+
+      expect(result).toBeNull();
+    });
+
+    it('should throw NotFoundAppException when agent slug is not found', async () => {
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(null);
+
+      await expect(service.suggestTicket('nonexistent', 'koda')).rejects.toThrow();
+    });
+
+    it('should return highest-priority ticket when all scores are 0 (score-0 fallback)', async () => {
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(mockAgentForPickup);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.ticket.findMany.mockResolvedValue([
+        makeTicket('ticket-low', 'LOW', ['unrelated']),
+        makeTicket('ticket-critical', 'CRITICAL', ['also-unrelated']),
+        makeTicket('ticket-medium', 'MEDIUM', []),
+        makeTicket('ticket-high', 'HIGH', ['unknown']),
+      ]);
+
+      const result = await service.suggestTicket('test-agent', 'koda');
+
+      expect(result).not.toBeNull();
+      const safeResult = result as NonNullable<typeof result>;
+      expect(safeResult.ticket.id).toBe('ticket-critical');
+      expect(safeResult.matchScore).toBe(0);
+    });
+
+    it('should break ties in score by priority order CRITICAL > HIGH > MEDIUM > LOW', async () => {
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(mockAgentForPickup);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.ticket.findMany.mockResolvedValue([
+        makeTicket('ticket-medium', 'MEDIUM', ['nestjs']),
+        makeTicket('ticket-critical', 'CRITICAL', ['nestjs']),
+        makeTicket('ticket-low', 'LOW', ['nestjs']),
+      ]);
+
+      const result = await service.suggestTicket('test-agent', 'koda');
+
+      expect(result).not.toBeNull();
+      const safeResult = result as NonNullable<typeof result>;
+      expect(safeResult.ticket.id).toBe('ticket-critical');
+      expect(safeResult.matchScore).toBe(1);
+    });
+
+    it('should only consider tickets where both assignedToAgentId and assignedToUserId are null', async () => {
+      const unassignedTicket = makeTicket('unassigned-ticket', 'LOW', ['nestjs']);
+
+      mockPrismaService.client.agent.findUnique.mockResolvedValue(mockAgentForPickup);
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      // The service should query with assignedToAgentId=null, assignedToUserId=null
+      // Mock returns only unassigned (as if DB filtered them)
+      mockPrismaService.client.ticket.findMany.mockResolvedValue([unassignedTicket]);
+
+      const result = await service.suggestTicket('test-agent', 'koda');
+
+      expect(result).not.toBeNull();
+      const safeResult = result as NonNullable<typeof result>;
+      expect(safeResult.ticket.id).toBe('unassigned-ticket');
+      // Verify the query includes the right filters
+      expect(mockPrismaService.client.ticket.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            status: 'VERIFIED',
+            assignedToAgentId: null,
+            assignedToUserId: null,
+            deletedAt: null,
+          }),
+        }),
+      );
     });
   });
 

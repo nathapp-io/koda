@@ -434,5 +434,52 @@
         "runtimeCrashes": 0
       }
     ]
+  },
+  {
+    "runId": "run-2026-03-23T13-04-14-551Z",
+    "feature": "rag-auto-pickup",
+    "startedAt": "2026-03-23T13:04:14.551Z",
+    "completedAt": "2026-03-23T13:47:58.510Z",
+    "totalCost": 5.0846826499999995,
+    "totalStories": 2,
+    "storiesCompleted": 2,
+    "storiesFailed": 1,
+    "totalDurationMs": 2623959,
+    "stories": [
+      {
+        "storyId": "US-001",
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "modelUsed": "sonnet",
+        "attempts": 1,
+        "finalTier": "balanced",
+        "success": true,
+        "cost": 2.0639048499999992,
+        "durationMs": 0,
+        "firstPassSuccess": true,
+        "startedAt": "2026-03-23T13:12:24.008Z",
+        "completedAt": "2026-03-23T13:23:13.538Z",
+        "fullSuiteGatePassed": true,
+        "runtimeCrashes": 0
+      },
+      {
+        "storyId": "US-002",
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "modelUsed": "sonnet",
+        "attempts": 1,
+        "finalTier": "balanced",
+        "success": true,
+        "cost": 3.0207778000000003,
+        "durationMs": 0,
+        "firstPassSuccess": true,
+        "startedAt": "2026-03-23T13:23:15.606Z",
+        "completedAt": "2026-03-23T13:42:07.607Z",
+        "fullSuiteGatePassed": true,
+        "runtimeCrashes": 0
+      }
+    ]
   }
 ]

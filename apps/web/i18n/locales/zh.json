@@ -51,6 +51,7 @@
     "dashboard": "仪表盘",
     "projects": "项目",
     "agents": "代理",
+    "kb": "知识库",
     "toggleSidebar": "切换侧栏"
   },
   "projects": {
@@ -179,6 +180,43 @@
     "toast": {
       "statusUpdated": "代理状态已更新为 {status}",
       "statusFailed": "更新代理状态失败"
+    }
+  },
+  "kb": {
+    "tabs": {
+      "search": "搜索",
+      "documents": "文档"
+    },
+    "search": {
+      "placeholder": "搜索知识库...",
+      "button": "搜索",
+      "noResults": "未找到结果。"
+    },
+    "documents": {
+      "addButton": "添加文档",
+      "addTitle": "添加文档",
+      "empty": "暂无文档。",
+      "columns": {
+        "source": "来源",
+        "content": "内容",
+        "created": "创建时间"
+      },
+      "fields": {
+        "sourceId": "来源 ID",
+        "sourceIdPlaceholder": "例如 DOC-123",
+        "source": "来源类型",
+        "sourcePlaceholder": "选择来源类型",
+        "sourceManual": "手动",
+        "sourceDoc": "文档",
+        "sourceTicket": "工单",
+        "content": "内容",
+        "contentPlaceholder": "输入文档内容..."
+      }
+    },
+    "toast": {
+      "searchFailed": "搜索失败",
+      "docAdded": "文档已添加",
+      "addFailed": "添加文档失败"
     }
   },
   "toast": {

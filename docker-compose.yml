@@ -20,6 +20,8 @@ services:
       API_KEY_SECRET: ${API_KEY_SECRET}
       API_PORT: 3100
       API_PREFIX: api
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      LANCEDB_PATH: /data/lancedb
     volumes:
       - koda_data:/data
     healthcheck:

@@ -3,62 +3,56 @@
   "approved": true,
   "tests": {
     "allPassing": true,
-    "passCount": 35,
+    "passCount": 166,
     "failCount": 0
   },
   "testModifications": {
-    "detected": true,
-    "files": [
-      "apps/web/test/pages/agents.spec.ts"
-    ],
+    "detected": false,
+    "files": [],
     "legitimate": true,
-    "reasoning": "Removed unused layoutPath variable that was causing lint error. This variable was defined but never used in the test file, violating ESLint rules."
+    "reasoning": "No test files were modified by the implementer. All tests were pre-written and passing upon implementation completion."
   },
   "acceptanceCriteria": {
     "allMet": true,
     "criteria": [
       {
-        "criterion": "pages/[project]/agents.vue fetches GET /agents and renders in Table",
+        "criterion": "GET /api/agents/:slug/pickup?project=koda returns { ret: 0, data: { ticket, matchScore, matchedCapabilities } } for a matching agent with candidates",
         "met": true
       },
       {
-        "criterion": "Each row shows Name, Slug, Roles as Badge list, Capabilities as Badge list, Status badge, Actions dropdown",
+        "criterion": "Response data is null (ret still 0) when no VERIFIED unassigned tickets exist in the project",
         "met": true
       },
       {
-        "criterion": "ACTIVE status badge: green styling (bg-green-100 text-green-800)",
+        "criterion": "Only VERIFIED tickets with both assignedToAgentId=null and assignedToUserId=null are considered candidates",
         "met": true
       },
       {
-        "criterion": "PAUSED status badge: yellow styling (bg-yellow-100 text-yellow-800)",
+        "criterion": "Ties in score are broken by priority order: CRITICAL > HIGH > MEDIUM > LOW",
         "met": true
       },
       {
-        "criterion": "OFFLINE status badge: gray/secondary styling",
+        "criterion": "Returns 404 AppException if agent slug is not found",
         "met": true
       },
       {
-        "criterion": "Actions dropdown allows selecting ACTIVE, PAUSED, or OFFLINE",
+        "criterion": "Returns 400 AppException if project query param is missing",
         "met": true
       },
       {
-        "criterion": "Status change triggers PATCH API call and shows toast.success on success",
+        "criterion": "Endpoint is decorated with Swagger @ApiOperation, @ApiQuery, @ApiResponse decorators",
         "met": true
       },
       {
-        "criterion": "Status change shows toast.error on failure",
+        "criterion": "Unit tests cover happy path, no-match null, unknown agent 404, and score-0 priority fallback",
         "met": true
       },
       {
-        "criterion": "Agents navigation link added to sidebar in layouts/default.vue",
+        "criterion": "Supertest E2E test covers the pickup endpoint",
         "met": true
       },
       {
-        "criterion": "bun run lint passes with 0 errors",
-        "met": true
-      },
-      {
-        "criterion": "bun run type-check passes",
+        "criterion": "bun run test passes in apps/api",
         "met": true
       }
     ]
@@ -67,8 +61,6 @@
     "rating": "good",
     "issues": []
   },
-  "fixes": [
-    "Removed unused layoutPath variable from apps/web/test/pages/agents.spec.ts that was causing lint error"
-  ],
-  "reasoning": "All 35 tests pass. Implementation is clean and follows project conventions. All acceptance criteria are met. The agent page correctly fetches agents via useApi/useAsyncData, renders a proper Table with all required columns, applies correct status badge styling (green/yellow/secondary), implements dropdown status changes with API calls and toast feedback, and the sidebar was properly updated with an Agents navigation link. Lint and type-check pass. One legitimate test modification was made to fix an unused variable lint error."
+  "fixes": [],
+  "reasoning": "Implementation is complete and correct. All 166 tests pass (48 service + 46 controller + 72 E2E). The suggestTicket() method correctly loads agents with capabilities, filters VERIFIED unassigned tickets, scores by capability/label match, and sorts by score then priority. The controller endpoint validates the project query parameter and properly delegates to the service. All Swagger decorators are in place. No code quality issues detected."
 }

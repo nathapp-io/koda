@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@fastify/static": "^9.0.0",
+    "@lancedb/lancedb": "0.17.0",
     "@nathapp/nestjs-app": "^3.0.0",
     "@nathapp/nestjs-auth": "^3.0.0",
     "@nathapp/nestjs-common": "^3.0.0",

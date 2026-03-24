@@ -54,6 +54,7 @@ export class ProjectsService {
         description: createProjectDto.description,
         gitRemoteUrl: createProjectDto.gitRemoteUrl,
         autoIndexOnClose: createProjectDto.autoIndexOnClose ?? true,
+        autoAssign: createProjectDto.autoAssign ?? 'OFF'
       },
     });
   }
@@ -140,6 +141,7 @@ export class ProjectsService {
         description: updateProjectDto.description,
         gitRemoteUrl: updateProjectDto.gitRemoteUrl,
         autoIndexOnClose: updateProjectDto.autoIndexOnClose,
+        autoAssign: updateProjectDto.autoAssign,
       },
     });
   }

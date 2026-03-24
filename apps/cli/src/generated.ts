@@ -182,9 +182,81 @@ export class TicketsService {
   }
 }
 
+export interface PickupResult {
+  ticket: Ticket;
+  matchScore: number;
+  matchedCapabilities: string[];
+}
+
 export class AgentService {
   static async me(client: AxiosInstance): Promise<Wrapped<Agent>> {
     return client.get('/agents/me');
+  }
+
+  static async pickup(client: AxiosInstance, agentSlug: string, projectSlug: string): Promise<Wrapped<PickupResult | null>> {
+    return client.get(`/agents/${agentSlug}/pickup`, { params: { project: projectSlug } });
+  }
+}
+
+export interface KbSearchResult {
+  score: number;
+  ticketRef: string;
+  type: 'bug' | 'enhancement';
+  status: string;
+  labels: string[];
+}
+
+export interface KbSearchResponse {
+  verdict: 'RELEVANT' | 'PARTIAL' | 'NOT_FOUND';
+  confidence: number;
+  results: KbSearchResult[];
+}
+
+export interface KbDocument {
+  id: string;
+  source: string;
+  createdAt: string;
+}
+
+export interface KbAddResponse {
+  id: string;
+  source: string;
+  docCount: number;
+}
+
+export class KbService {
+  static async search(
+    client: AxiosInstance,
+    projectSlug: string,
+    query: string
+  ): Promise<Wrapped<KbSearchResponse>> {
+    // API: POST /api/projects/{slug}/kb/search with { query }
+    const resp = await (client as any).post(`/projects/${projectSlug}/kb/search`, { query });
+    return { ret: 0, data: resp };
+  }
+
+  static async list(
+    client: AxiosInstance,
+    projectSlug: string
+  ): Promise<Wrapped<{ items: KbDocument[]; total: number }>> {
+    // API: GET /api/projects/{slug}/kb/documents
+    const resp = await (client as any).get(`/projects/${projectSlug}/kb/documents`);
+    return { ret: 0, data: resp };
+  }
+
+  static async add(
+    client: AxiosInstance,
+    projectSlug: string,
+    data: { content: string; source: string }
+  ): Promise<Wrapped<KbAddResponse>> {
+    // API: POST /api/projects/{slug}/kb/documents with { source, sourceId, content }
+    const sourceId = data.source; // use filename as sourceId
+    const resp = await (client as any).post(`/projects/${projectSlug}/kb/documents`, {
+      source: data.source,
+      sourceId,
+      content: data.content,
+    });
+    return { ret: 0, data: resp };
   }
 }
 

@@ -1,4 +1,4 @@
-import { IsString, MinLength, Matches, IsOptional, IsUrl, IsBoolean } from 'class-validator';
+import { IsString, MinLength, Matches, IsOptional, IsUrl, IsBoolean, IsIn } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateProjectDto {
@@ -60,4 +60,16 @@ export class CreateProjectDto {
   @IsOptional()
   @IsBoolean({ message: '$t(common.validation.isBoolean)' })
   autoIndexOnClose?: boolean;
+
+  @ApiProperty({
+    description: 'Auto-assign mode for tickets: OFF, SUGGEST, or AUTO',
+    example: 'OFF',
+    required: false,
+    default: 'OFF',
+    enum: ['OFF', 'SUGGEST', 'AUTO'],
+  })
+  @IsOptional()
+  @IsString({ message: '$t(common.validation.isString)' })
+  @IsIn(['OFF', 'SUGGEST', 'AUTO'], { message: '$t(common.validation.isIn)' })
+  autoAssign?: string;
 }
