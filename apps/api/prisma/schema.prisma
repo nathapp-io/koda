@@ -90,6 +90,7 @@ model Project {
 
   tickets Ticket[]
   labels  Label[]
+  webhooks Webhook[]
 }
 
 model Ticket {
@@ -172,4 +173,16 @@ model TicketActivity {
   createdAt    DateTime @default(now())
 
   ticket Ticket @relation(fields: [ticketId], references: [id])
+}
+
+model Webhook {
+  id        String   @id @default(cuid())
+  projectId String
+  url       String
+  secret    String
+  events    String   // JSON array stored as string e.g. '["STATUS_CHANGE"]'
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
