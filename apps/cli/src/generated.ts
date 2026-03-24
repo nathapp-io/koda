@@ -230,14 +230,18 @@ export class KbService {
     projectSlug: string,
     query: string
   ): Promise<Wrapped<KbSearchResponse>> {
-    return client.get(`/projects/${projectSlug}/kb/search`, { params: { query } });
+    // API: POST /api/projects/{slug}/kb/search with { query }
+    const resp = await (client as any).post(`/projects/${projectSlug}/kb/search`, { query });
+    return { ret: 0, data: resp };
   }
 
   static async list(
     client: AxiosInstance,
     projectSlug: string
   ): Promise<Wrapped<{ items: KbDocument[]; total: number }>> {
-    return client.get(`/projects/${projectSlug}/kb`);
+    // API: GET /api/projects/{slug}/kb/documents
+    const resp = await (client as any).get(`/projects/${projectSlug}/kb/documents`);
+    return { ret: 0, data: resp };
   }
 
   static async add(
@@ -245,7 +249,14 @@ export class KbService {
     projectSlug: string,
     data: { content: string; source: string }
   ): Promise<Wrapped<KbAddResponse>> {
-    return client.post(`/projects/${projectSlug}/kb`, data);
+    // API: POST /api/projects/{slug}/kb/documents with { source, sourceId, content }
+    const sourceId = data.source; // use filename as sourceId
+    const resp = await (client as any).post(`/projects/${projectSlug}/kb/documents`, {
+      source: data.source,
+      sourceId,
+      content: data.content,
+    });
+    return { ret: 0, data: resp };
   }
 }
 

@@ -2217,6 +2217,17 @@
             "description": "Automatically index commits on ticket close",
             "example": true,
             "default": true
+          },
+          "autoAssign": {
+            "type": "string",
+            "enum": [
+              "OFF",
+              "SUGGEST",
+              "AUTO"
+            ],
+            "description": "Auto-assign mode for tickets: OFF, SUGGEST, or AUTO",
+            "example": "OFF",
+            "default": "OFF"
           }
         },
         "required": [
@@ -2261,6 +2272,16 @@
             "type": "boolean",
             "description": "Automatically index commits on ticket close",
             "example": false
+          },
+          "autoAssign": {
+            "type": "string",
+            "enum": [
+              "OFF",
+              "SUGGEST",
+              "AUTO"
+            ],
+            "description": "Auto-assign mode for tickets: OFF, SUGGEST, or AUTO",
+            "example": "SUGGEST"
           }
         }
       },
