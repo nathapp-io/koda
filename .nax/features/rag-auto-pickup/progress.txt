@@ -1,0 +1,6 @@
+[2026-03-23T13:23:13.538Z] US-001 — PASSED — KB CLI commands — koda kb add/search/list — Cost: $2.0639
+[2026-03-23T13:42:07.608Z] US-002 — PASSED — Agent auto-pickup API endpoint — GET /api/agents/:slug/pickup — Cost: $3.0208
+[2026-03-23T13:47:58.507Z] US-003 — FAILED — Auto-assign config on Project + koda agent pickup CLI command — Execution failed
+[2026-03-24T05:43:00.000Z] INFRA — RESOLVED — LanceDB AVX-512 fix — Downgraded @lancedb/lancedb 0.27.1→0.17.0 (AVX2-compatible musl binary). Both Mac01 and clawdbot lack AVX-512.
+[2026-03-24T05:43:00.000Z] INFRA — RESOLVED — Ollama embeddings — Started ollama, pulled nomic-embed-text, set OLLAMA_BASE_URL=http://host.docker.internal:11434 in docker-compose.yml.
+[2026-03-24T05:43:00.000Z] SMOKE — PASSED — Full RAG pipeline — kb_add (real embeddings), kb_search verdict:likely_duplicate score=0.884, pickup flow confirmed.
