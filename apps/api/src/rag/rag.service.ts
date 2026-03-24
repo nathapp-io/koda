@@ -1,4 +1,5 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { mkdirSync } from 'node:fs';
 import { ConfigService } from '@nestjs/config';
 import { EmbeddingService } from './embedding.service';
 import type { KbResultDto, SearchKbResponseDto } from './dto/kb-result.dto';
@@ -106,7 +107,7 @@ class InMemoryTable {
 }
 
 @Injectable()
-export class RagService {
+export class RagService implements OnModuleInit {
   private readonly logger = new Logger(RagService.name);
   private db: LanceConnection = null;
   private readonly tableCache = new Map<string, LanceTable>();
@@ -124,6 +125,15 @@ export class RagService {
     this.similarityHigh = configService.get<number>('rag.similarityHigh') ?? 0.85;
     this.similarityMedium = configService.get<number>('rag.similarityMedium') ?? 0.70;
     this.similarityLow = configService.get<number>('rag.similarityLow') ?? 0.50;
+  }
+
+  onModuleInit(): void {
+    try {
+      mkdirSync(this.lancedbPath, { recursive: true });
+      this.logger.log(`LanceDB storage directory ensured: ${this.lancedbPath}`);
+    } catch (err) {
+      this.logger.warn(`Could not create LanceDB directory ${this.lancedbPath}: ${(err as Error).message}`);
+    }
   }
 
   private async connect(): Promise<LanceConnection | null> {
