@@ -9,7 +9,10 @@
     "preview": "nuxt preview",
     "lint": "eslint \"./**/*.ts\" --ignore-pattern \".nuxt/**\" --ignore-pattern \".output/**\" --ignore-pattern \"generated/**\" --max-warnings=0",
     "lint:fix": "eslint \"./**/*.ts\" --ignore-pattern \".nuxt/**\" --ignore-pattern \".output/**\" --ignore-pattern \"generated/**\" --fix",
-    "type-check": "nuxt typecheck"
+    "type-check": "nuxt typecheck",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed"
   },
   "dependencies": {
     "@nuxtjs/color-mode": "^3.5.2",
@@ -29,6 +32,7 @@
     "vue-sonner": "^2.0.9"
   },
   "devDependencies": {
+    "@playwright/test": "^1.51.0",
     "@nathapp/eslint-config": "workspace:*",
     "@nathapp/typescript-config": "workspace:*",
     "@hey-api/client-fetch": "^0.3.4",
