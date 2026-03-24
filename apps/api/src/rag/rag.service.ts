@@ -191,21 +191,37 @@ export class RagService {
     }
 
     const table = await this.getOrCreateTable(projectId);
-    const vector = await this.embeddingService.embed(doc.content);
-
-    const record: LanceRecord = {
-      id: generateId(),
-      source: doc.source,
-      source_id: doc.sourceId,
-      content: doc.content,
-      vector,
-      metadata: JSON.stringify(doc.metadata),
-      created_at: new Date().toISOString(),
-      provider: this.embeddingService.providerName,
-      model: this.embeddingService.modelName,
-    };
-
-    await table.add([record]);
+    try {
+      const vector = await this.embeddingService.embed(doc.content);
+      const record: LanceRecord = {
+        id: generateId(),
+        source: doc.source,
+        source_id: doc.sourceId,
+        content: doc.content,
+        vector,
+        metadata: JSON.stringify(doc.metadata),
+        created_at: new Date().toISOString(),
+        provider: this.embeddingService.providerName,
+        model: this.embeddingService.modelName,
+      };
+      await table.add([record]);
+    } catch (err) {
+      // Embedding service unreachable — store content-only with zero vector for FTS
+      this.logger.warn(`Embedding failed (${(err as Error).message}) — storing with zero vector`);
+      const dims = this.embeddingService?.dimensions ?? 768;
+      const record: LanceRecord = {
+        id: generateId(),
+        source: doc.source,
+        source_id: doc.sourceId,
+        content: doc.content,
+        vector: Array(dims).fill(0) as number[],
+        metadata: JSON.stringify(doc.metadata ?? {}),
+        created_at: new Date().toISOString(),
+        provider: this.embeddingService?.providerName ?? 'unknown',
+        model: this.embeddingService?.modelName ?? 'unknown',
+      };
+      await table.add([record]);
+    }
   }
 
   async search(
