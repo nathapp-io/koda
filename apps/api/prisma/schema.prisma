@@ -83,6 +83,7 @@ model Project {
   description      String?
   gitRemoteUrl     String?
   autoIndexOnClose Boolean   @default(true)
+  autoAssign       String    @default("OFF")
   deletedAt        DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt

@@ -53,3 +53,6 @@ export const AgentRole = {
   REVIEWER: 'REVIEWER',
 } as const;
 export type AgentRole = (typeof AgentRole)[keyof typeof AgentRole];
+
+export const AutoAssignMode = { OFF: 'OFF', SUGGEST: 'SUGGEST', AUTO: 'AUTO' } as const;
+export type AutoAssignMode = typeof AutoAssignMode[keyof typeof AutoAssignMode];
