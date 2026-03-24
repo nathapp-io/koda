@@ -6,8 +6,16 @@ import {
 } from './rag.service';
 
 describe('simpleFtsScore', () => {
+  it('returns 0 for empty query', () => {
+    expect(simpleFtsScore('some content here', '')).toBe(0);
+  });
+
   it('returns 0 when query has no terms longer than 2 chars', () => {
     expect(simpleFtsScore('some content here', 'a b')).toBe(0);
+  });
+
+  it('returns 1 for single term full match', () => {
+    expect(simpleFtsScore('authentication service error', 'auth')).toBe(1);
   });
 
   it('returns 1 when all query terms are in content', () => {
