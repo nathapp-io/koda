@@ -17,6 +17,9 @@ interface Ticket {
   status: 'CREATED' | 'VERIFIED' | 'IN_PROGRESS' | 'VERIFY_FIX' | 'CLOSED' | 'REJECTED'
   assignee?: Assignee | null
   createdAt: string
+  gitRefFile?: string | null
+  gitRefLine?: number | null
+  gitRefUrl?: string | null
   [key: string]: unknown
 }
 
@@ -148,6 +151,24 @@ function onCommentAdded() {
             <div>
               <p class="text-xs text-muted-foreground mb-1">{{ t('tickets.detail.created') }}</p>
               <p class="text-sm">{{ formatDate(ticket.createdAt) }}</p>
+            </div>
+
+            <Separator />
+
+            <div v-if="ticket.gitRefFile">
+              <p class="text-xs text-muted-foreground mb-1">{{ t('tickets.detail.gitRef') }}</p>
+              <a
+                v-if="ticket.gitRefUrl"
+                :href="ticket.gitRefUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-blue-500 hover:underline font-mono text-sm"
+              >
+                {{ ticket.gitRefFile }}<span v-if="ticket.gitRefLine">:{{ ticket.gitRefLine }}</span>
+              </a>
+              <span v-else class="font-mono text-sm text-muted-foreground">
+                {{ ticket.gitRefFile }}<span v-if="ticket.gitRefLine">:{{ ticket.gitRefLine }}</span>
+              </span>
             </div>
           </CardContent>
         </Card>
