@@ -182,9 +182,19 @@ export class TicketsService {
   }
 }
 
+export interface PickupResult {
+  ticket: Ticket;
+  matchScore: number;
+  matchedCapabilities: string[];
+}
+
 export class AgentService {
   static async me(client: AxiosInstance): Promise<Wrapped<Agent>> {
     return client.get('/agents/me');
+  }
+
+  static async pickup(client: AxiosInstance, agentSlug: string, projectSlug: string): Promise<Wrapped<PickupResult | null>> {
+    return client.get(`/agents/${agentSlug}/pickup`, { params: { project: projectSlug } });
   }
 }
 

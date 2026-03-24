@@ -284,6 +284,86 @@
         "tags": [
           "agents"
         ]
+      },
+      "delete": {
+        "operationId": "AgentsController_remove",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent deleted successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - admin role required"
+          },
+          "404": {
+            "description": "Agent not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete (soft-delete) an agent",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/agents/{slug}/pickup": {
+      "get": {
+        "operationId": "AgentsController_suggestTicket",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project",
+            "required": true,
+            "in": "query",
+            "description": "Project slug",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Suggested ticket or null"
+          },
+          "400": {
+            "description": "Missing project query param"
+          },
+          "404": {
+            "description": "Agent not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Suggest a ticket for the agent to pick up",
+        "tags": [
+          "agents"
+        ]
       }
     },
     "/api/agents/{slug}/update-roles": {
@@ -1260,6 +1340,171 @@
         ]
       }
     },
+    "/api/projects/{slug}/kb/documents": {
+      "post": {
+        "operationId": "RagController_addDocument",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddDocumentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Document indexed"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add a document to the project knowledge base",
+        "tags": [
+          "knowledge-base"
+        ]
+      },
+      "get": {
+        "operationId": "RagController_listDocuments",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Documents listed"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List indexed documents in the project knowledge base",
+        "tags": [
+          "knowledge-base"
+        ]
+      }
+    },
+    "/api/projects/{slug}/kb/documents/{sourceId}": {
+      "delete": {
+        "operationId": "RagController_deleteDocument",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sourceId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Delete documents by sourceId"
+          },
+          "403": {
+            "description": "Forbidden - admin role required"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete documents by sourceId from the knowledge base (admin only)",
+        "tags": [
+          "knowledge-base"
+        ]
+      }
+    },
+    "/api/projects/{slug}/kb/search": {
+      "post": {
+        "operationId": "RagController_search",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchKbDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Search results with RRF merge and similarity tiers"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Hybrid search the project knowledge base",
+        "tags": [
+          "knowledge-base"
+        ]
+      }
+    },
     "/api/projects/{slug}/tickets/{ref}/comments": {
       "post": {
         "operationId": "CommentsController_createFromHttp",
@@ -1508,6 +1753,60 @@
       }
     },
     "/api/projects/{slug}/labels/{id}": {
+      "patch": {
+        "operationId": "LabelsController_updateFromHttp",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateLabelDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Label updated"
+          },
+          "400": {
+            "description": "Invalid request data"
+          },
+          "403": {
+            "description": "Unauthorized - admin only"
+          },
+          "404": {
+            "description": "Label or project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update a label",
+        "tags": [
+          "labels"
+        ]
+      },
       "delete": {
         "operationId": "LabelsController_deleteFromHttp",
         "parameters": [
@@ -1648,6 +1947,21 @@
         "summary": "Remove a label from a ticket",
         "tags": [
           "labels"
+        ]
+      }
+    },
+    "/api/health": {
+      "get": {
+        "operationId": "HealthController_check",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Service is healthy"
+          }
+        },
+        "summary": "Health check",
+        "tags": [
+          "health"
         ]
       }
     }
@@ -2155,6 +2469,58 @@
           }
         }
       },
+      "AddDocumentDto": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "ticket",
+              "doc",
+              "manual"
+            ],
+            "description": "Source type"
+          },
+          "sourceId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Source record ID (e.g. ticket CUID)"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Full text content to embed and index"
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Arbitrary metadata stored with the document"
+          }
+        },
+        "required": [
+          "source",
+          "sourceId",
+          "content"
+        ]
+      },
+      "SearchKbDto": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Natural language search query"
+          },
+          "limit": {
+            "type": "number",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
       "CreateCommentDto": {
         "type": "object",
         "properties": {
@@ -2204,6 +2570,19 @@
         "required": [
           "name"
         ]
+      },
+      "UpdateLabelDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "typescript"
+          },
+          "color": {
+            "type": "string",
+            "example": "#0066CC"
+          }
+        }
       },
       "AssignLabelDto": {
         "type": "object",

@@ -47,4 +47,54 @@ export function agentCommand(program: Command): void {
         handleApiError(err);
       }
     });
+
+  agent
+    .command('pickup')
+    .description('Suggest the best ticket for this agent to pick up')
+    .option('--project <slug>', 'Project slug')
+    .option('--json', 'Output as JSON')
+    .action(async (options) => {
+      try {
+        if (!options.project) {
+          error('--project <slug> is required');
+          process.exit(3);
+          return;
+        }
+
+        const auth = resolveAuth({});
+
+        if (!auth.apiKey || !auth.apiUrl) {
+          error('API key or URL not configured. Run: koda login --api-key <key>');
+          process.exit(2);
+          return;
+        }
+
+        const client = configureClient(auth.apiUrl, auth.apiKey);
+        const meResponse = await AgentService.me(client);
+        const agentData = unwrap(meResponse);
+
+        const pickupResponse = await AgentService.pickup(client, agentData.slug, options.project);
+        const result = unwrap(pickupResponse);
+
+        if (options.json) {
+          console.log(JSON.stringify(result, null, 2));
+          process.exit(0);
+          return;
+        }
+
+        if (result === null) {
+          console.log('No suitable tickets found for pickup.');
+          process.exit(0);
+          return;
+        }
+
+        const { ticket, matchScore, matchedCapabilities } = result;
+        console.log(`Suggested ticket: #${ticket.number} — ${ticket.title}`);
+        console.log(`Priority: ${ticket.priority} | Status: ${ticket.status}`);
+        console.log(`Match score: ${matchScore} | Matched capabilities: ${matchedCapabilities.join(', ')}`);
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err);
+      }
+    });
 }

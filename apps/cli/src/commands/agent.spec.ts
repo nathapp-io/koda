@@ -39,6 +39,7 @@ jest.mock('axios', () => {
 jest.mock('../generated', () => ({
   AgentService: {
     me: jest.fn(),
+    pickup: jest.fn(),
   },
 }));
 
@@ -81,6 +82,7 @@ describe('agentCommand', () => {
 
     jest.clearAllMocks();
     (AgentService.me as jest.Mock).mockReset();
+    (AgentService.pickup as jest.Mock).mockReset();
   });
 
   afterEach(() => {
@@ -240,6 +242,116 @@ describe('agentCommand', () => {
       expect(logSpy).toHaveBeenCalledWith(
         expect.stringContaining('"slug"')
       );
+    });
+  });
+
+  describe('agent pickup', () => {
+    const mockAgent = {
+      id: 'agent-1',
+      name: 'Test Agent',
+      slug: 'test-agent',
+      apiKey: 'sk-test-key123',
+    };
+
+    const mockPickupResult = {
+      ticket: {
+        id: 'ticket-1',
+        number: 42,
+        title: 'Fix the login bug',
+        status: 'VERIFIED',
+        priority: 'HIGH',
+      },
+      matchScore: 2,
+      matchedCapabilities: ['nestjs', 'prisma'],
+    };
+
+    beforeEach(() => {
+      mockData.apiKey = 'sk-test-key123';
+      mockData.apiUrl = 'http://localhost:3100/api';
+      (AgentService.me as jest.Mock).mockResolvedValue({
+        data: { ret: 0, data: mockAgent },
+      });
+    });
+
+    it('prints formatted output when a matching ticket is found', async () => {
+      (AgentService.pickup as jest.Mock).mockResolvedValue({
+        data: { ret: 0, data: mockPickupResult },
+      });
+
+      const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
+      const pickupCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'pickup');
+
+      await pickupCmd?.parseAsync(['node', 'test', '--project', 'koda']);
+
+      expect(AgentService.me).toHaveBeenCalled();
+      expect(AgentService.pickup).toHaveBeenCalled();
+      expect(logSpy).toHaveBeenCalledWith('Suggested ticket: #42 — Fix the login bug');
+      expect(logSpy).toHaveBeenCalledWith('Priority: HIGH | Status: VERIFIED');
+      expect(logSpy).toHaveBeenCalledWith('Match score: 2 | Matched capabilities: nestjs, prisma');
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('prints no-tickets message when result is null', async () => {
+      (AgentService.pickup as jest.Mock).mockResolvedValue({
+        data: { ret: 0, data: null },
+      });
+
+      const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
+      const pickupCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'pickup');
+
+      await pickupCmd?.parseAsync(['node', 'test', '--project', 'koda']);
+
+      expect(logSpy).toHaveBeenCalledWith('No suitable tickets found for pickup.');
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('exits with code 3 when --project flag is missing', async () => {
+      const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
+      const pickupCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'pickup');
+
+      try {
+        await pickupCmd?.parseAsync(['node', 'test']);
+      } catch {
+        // Expected
+      }
+
+      expect(exitSpy).toHaveBeenCalledWith(3);
+    });
+
+    it('exits with code 2 when auth is not configured', async () => {
+      mockData.apiKey = '';
+      mockData.apiUrl = '';
+
+      const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
+      const pickupCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'pickup');
+
+      try {
+        await pickupCmd?.parseAsync(['node', 'test', '--project', 'koda']);
+      } catch {
+        // Expected
+      }
+
+      expect(exitSpy).toHaveBeenCalledWith(2);
+    });
+
+    it('outputs JSON with --json flag', async () => {
+      (AgentService.pickup as jest.Mock).mockResolvedValue({
+        data: { ret: 0, data: mockPickupResult },
+      });
+
+      const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
+      const pickupCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'pickup');
+
+      try {
+        await pickupCmd?.parseAsync(['node', 'test', '--project', 'koda', '--json']);
+      } catch {
+        // Expected
+      }
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('"matchScore"')
+      );
+      expect(exitSpy).toHaveBeenCalledWith(0);
     });
   });
 });
