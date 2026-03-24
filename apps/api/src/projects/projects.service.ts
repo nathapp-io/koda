@@ -142,6 +142,7 @@ export class ProjectsService {
         gitRemoteUrl: updateProjectDto.gitRemoteUrl,
         autoIndexOnClose: updateProjectDto.autoIndexOnClose,
         autoAssign: updateProjectDto.autoAssign,
+        ciWebhookToken: updateProjectDto.ciWebhookToken,
       },
     });
   }

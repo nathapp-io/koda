@@ -91,6 +91,7 @@ model Project {
   tickets Ticket[]
   labels  Label[]
   webhooks Webhook[]
+  ciWebhookToken String?
 }
 
 model Ticket {
