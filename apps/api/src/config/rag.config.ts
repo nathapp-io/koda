@@ -7,6 +7,10 @@ export const ragConfig = registerAs('rag', () => ({
   openaiApiKey: process.env['OPENAI_API_KEY'] ?? '',
   lancedbPath: process.env['LANCEDB_PATH'] ?? './lancedb',
   ftsIndexMode: process.env['FTS_INDEX_MODE'] ?? 'simple',
+  // Similarity thresholds for RRF + verdict tiers.
+  // SIMILARITY_HIGH: score >= this → 'high' tier / 'likely_duplicate' verdict.
+  // SIMILARITY_MEDIUM: score >= this → 'medium' tier / 'possibly_related' verdict.
+  // SIMILARITY_LOW: score >= this → 'low' tier; below all three → 'none'.
   similarityHigh: parseFloat(process.env['SIMILARITY_HIGH'] ?? '0.85'),
   similarityMedium: parseFloat(process.env['SIMILARITY_MEDIUM'] ?? '0.70'),
   similarityLow: parseFloat(process.env['SIMILARITY_LOW'] ?? '0.50'),

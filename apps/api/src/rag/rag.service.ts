@@ -116,6 +116,7 @@ export class RagService implements OnModuleInit {
   private readonly similarityHigh: number;
   private readonly similarityMedium: number;
   private readonly similarityLow: number;
+  private readonly ftsIndexMode: string;
 
   constructor(
     private readonly configService: ConfigService,
@@ -125,6 +126,7 @@ export class RagService implements OnModuleInit {
     this.similarityHigh = configService.get<number>('rag.similarityHigh') ?? 0.85;
     this.similarityMedium = configService.get<number>('rag.similarityMedium') ?? 0.70;
     this.similarityLow = configService.get<number>('rag.similarityLow') ?? 0.50;
+    this.ftsIndexMode = configService.get<string>('rag.ftsIndexMode') ?? 'simple';
   }
 
   onModuleInit(): void {
@@ -153,6 +155,10 @@ export class RagService implements OnModuleInit {
   }
 
   async getOrCreateTable(projectId: string): Promise<LanceTable> {
+    if (this.ftsIndexMode === 'eager') {
+      this.logger.warn('FTS_INDEX_MODE=eager is not yet implemented — using in-memory FTS fallback');
+    }
+
     const cached = this.tableCache.get(projectId);
     if (cached) return cached;
 
