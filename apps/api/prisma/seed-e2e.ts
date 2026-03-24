@@ -20,7 +20,7 @@ async function main() {
     create: {
       email: 'admin@koda.e2e',
       name: 'E2E Admin',
-      password: passwordHash,
+      passwordHash,
       role: 'ADMIN',
     },
   });
