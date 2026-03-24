@@ -28,7 +28,7 @@ export interface Agent {
   apiKey: string;
 }
 
-type Wrapped<T> = { data: { ret: number; data: T } };
+type Wrapped<T> = { ret: number; data: T };
 
 export class ProjectsService {
   static async list(client: AxiosInstance): Promise<Wrapped<{ items: Project[]; total: number }>> {

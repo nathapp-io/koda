@@ -5,14 +5,14 @@ interface ApiErrorWithResponse extends Error {
   };
 }
 
-export function unwrap<T>(response: { data: { ret: number; data: T } }): T {
-  if (response.data.ret !== 0) {
-    const err = new Error(`exception.${response.data.ret}`) as ApiErrorWithResponse;
+export function unwrap<T>(response: { ret: number; data: T }): T {
+  if (response.ret !== 0) {
+    const err = new Error(`exception.${response.ret}`) as ApiErrorWithResponse;
     err.response = {
       status: 400, // Treat as validation/business error
-      data: { message: `exception.${response.data.ret}` }
+      data: { message: `exception.${response.ret}` }
     };
     throw err;
   }
-  return response.data.data;
+  return response.data;
 }
