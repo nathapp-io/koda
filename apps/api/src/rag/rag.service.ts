@@ -239,17 +239,7 @@ export class RagService {
       return { results: [], verdict: 'no_match' };
     }
 
-    const queryVector = await this.embeddingService.embed(query);
     const fetchLimit = Math.min(rowCount, limit * 4);
-
-    // Vector search
-    const vectorRows: LanceRecord[] = await table
-      .vectorSearch(queryVector)
-      .distanceType('cosine')
-      .limit(fetchLimit)
-      .toArray();
-
-    // Simple FTS over all records (capped at 500 for performance)
     const scanLimit = Math.min(rowCount, 500);
     const allRows: LanceRecord[] = await table.query().limit(scanLimit).toArray();
 
@@ -259,11 +249,28 @@ export class RagService {
       .sort((a, b) => b.score - a.score)
       .slice(0, fetchLimit);
 
-    // RRF merge
-    const merged = reciprocalRankFusion(
-      vectorRows.map((r) => ({ id: r.id as string })),
-      ftsRanked.map((r) => ({ id: r.id })),
-    );
+    // Skip vector search when LanceDB is unavailable — use pure FTS
+    let vectorRows: LanceRecord[] = [];
+    if (this.lanceAvailable) {
+      try {
+        const queryVector = await this.embeddingService.embed(query);
+        vectorRows = await table
+          .vectorSearch(queryVector)
+          .distanceType('cosine')
+          .limit(fetchLimit)
+          .toArray();
+      } catch (err) {
+        this.logger.warn(`Vector search failed (${(err as Error).message}) — using FTS only`);
+      }
+    }
+
+    // RRF merge (or pure FTS when vector unavailable)
+    const merged = vectorRows.length > 0
+      ? reciprocalRankFusion(
+          vectorRows.map((r) => ({ id: r.id as string })),
+          ftsRanked.map((r) => ({ id: r.id })),
+        )
+      : ftsRanked.slice(0, limit).map((r) => ({ id: r.id, score: r.score }));
 
     // Build id → record lookup
     const recordMap = new Map<string, LanceRecord>();
