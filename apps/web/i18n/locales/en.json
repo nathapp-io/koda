@@ -51,6 +51,7 @@
     "dashboard": "Dashboard",
     "projects": "Projects",
     "agents": "Agents",
+    "kb": "Knowledge Base",
     "toggleSidebar": "Toggle sidebar"
   },
   "projects": {
@@ -179,6 +180,43 @@
     "toast": {
       "statusUpdated": "Agent status updated to {status}",
       "statusFailed": "Failed to update agent status"
+    }
+  },
+  "kb": {
+    "tabs": {
+      "search": "Search",
+      "documents": "Documents"
+    },
+    "search": {
+      "placeholder": "Search the knowledge base...",
+      "button": "Search",
+      "noResults": "No results found."
+    },
+    "documents": {
+      "addButton": "Add Document",
+      "addTitle": "Add Document",
+      "empty": "No documents yet.",
+      "columns": {
+        "source": "Source",
+        "content": "Content",
+        "created": "Created"
+      },
+      "fields": {
+        "sourceId": "Source ID",
+        "sourceIdPlaceholder": "e.g. DOC-123",
+        "source": "Source Type",
+        "sourcePlaceholder": "Select source type",
+        "sourceManual": "Manual",
+        "sourceDoc": "Documentation",
+        "sourceTicket": "Ticket",
+        "content": "Content",
+        "contentPlaceholder": "Enter document content..."
+      }
+    },
+    "toast": {
+      "searchFailed": "Search failed",
+      "docAdded": "Document added",
+      "addFailed": "Failed to add document"
     }
   },
   "toast": {

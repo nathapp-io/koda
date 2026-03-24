@@ -37,6 +37,13 @@ const sidebarOpen = ref(true)
         >
           {{ t('nav.agents') }}
         </NuxtLink>
+        <NuxtLink
+          v-if="$route.params.project"
+          :to="`/${$route.params.project}/kb`"
+          class="flex items-center rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+        >
+          {{ t('nav.kb') }}
+        </NuxtLink>
       </nav>
 
       <!-- Bottom user section -->
