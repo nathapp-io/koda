@@ -6,6 +6,10 @@ const WEB_PORT = process.env['E2E_WEB_PORT'] ?? '3101';
 const API_URL = `http://localhost:${API_PORT}`;
 const WEB_URL = `http://localhost:${WEB_PORT}`;
 
+// Propagate resolved URLs to test processes (used by api-client.ts fixture)
+process.env['E2E_API_URL'] = API_URL;
+process.env['E2E_WEB_URL'] = WEB_URL;
+
 /**
  * Koda E2E Playwright Config
  *
@@ -13,7 +17,7 @@ const WEB_URL = `http://localhost:${WEB_PORT}`;
  *   cd apps/web && bun run test:e2e
  *
  * The API starts with DATABASE_URL=file:./prisma/koda-e2e.db (isolated from dev DB).
- * Use a different port to avoid conflicts with a running dev server:
+ * Use different ports to avoid conflicts with a running dev server:
  *   E2E_API_PORT=3102 E2E_WEB_PORT=3103 bun run test:e2e
  */
 export default defineConfig({
@@ -33,8 +37,8 @@ export default defineConfig({
 
   webServer: [
     {
-      // API — starts on E2E_API_PORT (default 3100) with isolated e2e database
-      command: `DATABASE_URL=file:./prisma/koda-e2e.db API_PORT=${API_PORT} bun run dev`,
+      // API — NestJS dev server with isolated e2e database
+      command: 'bun run dev',
       url: `${API_URL}/api/health`,
       cwd: path.resolve(__dirname, '../api'),
       reuseExistingServer: !process.env['CI'],
@@ -45,12 +49,16 @@ export default defineConfig({
       },
     },
     {
-      // Web — Nuxt dev server
-      command: `bun run dev -- --port ${WEB_PORT}`,
+      // Web — Nuxt dev server; call nuxt directly to set port cleanly
+      // NUXT_API_INTERNAL_URL points the proxy to the correct API port
+      command: `bunx nuxt dev --port ${WEB_PORT}`,
       url: WEB_URL,
       cwd: path.resolve(__dirname),
       reuseExistingServer: !process.env['CI'],
       timeout: 90_000,
+      env: {
+        NUXT_API_INTERNAL_URL: API_URL,
+      },
     },
   ],
 
