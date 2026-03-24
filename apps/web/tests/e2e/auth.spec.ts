@@ -1,35 +1,33 @@
 import { test, expect } from '@playwright/test';
 import { E2E_ADMIN } from './fixtures/api-client';
+import { webLogin } from './fixtures/page-helpers';
 
 test.describe('Authentication', () => {
   test('login page is accessible', async ({ page }) => {
     await page.goto('/login');
     await expect(page).toHaveURL('/login');
-    await expect(page.getByPlaceholder(/email/i)).toBeVisible();
-    await expect(page.getByPlaceholder(/password/i)).toBeVisible();
-    await expect(page.getByRole('button', { name: /login|sign in/i })).toBeVisible();
+    await expect(page.locator('input[type="email"]')).toBeVisible();
+    await expect(page.locator('input[type="password"]')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
   });
 
   test('successful login redirects to dashboard', async ({ page }) => {
-    await page.goto('/login');
-    await page.getByPlaceholder(/email/i).fill(E2E_ADMIN.email);
-    await page.getByPlaceholder(/password/i).fill(E2E_ADMIN.password);
-    await page.getByRole('button', { name: /login|sign in/i }).click();
-
-    await expect(page).not.toHaveURL('/login', { timeout: 5000 });
+    await webLogin(page);
     await expect(page).toHaveURL('/');
   });
 
   test('invalid credentials shows error', async ({ page }) => {
     await page.goto('/login');
-    await page.getByPlaceholder(/email/i).fill('wrong@example.com');
-    await page.getByPlaceholder(/password/i).fill('wrongpassword');
-    await page.getByRole('button', { name: /login|sign in/i }).click();
+    await page.locator('input[type="email"]').fill('wrong@example.com');
+    await page.locator('input[type="password"]').fill('wrongpassword');
+    await page.getByRole('button', { name: 'Sign in' }).click();
 
-    // Should stay on login page and show error
+    // Should stay on login page
     await expect(page).toHaveURL('/login');
-    // Error toast or form error should appear
-    await expect(page.locator('[role="alert"], .text-destructive, [data-sonner-toast]')).toBeVisible({ timeout: 3000 });
+    // Error toast or form validation message
+    await expect(
+      page.locator('[data-sonner-toast], .text-destructive, [role="alert"]').first(),
+    ).toBeVisible({ timeout: 4000 });
   });
 
   test('protected routes redirect unauthenticated users to login', async ({ page }) => {
@@ -38,18 +36,14 @@ test.describe('Authentication', () => {
   });
 
   test('logout clears session and redirects to login', async ({ page }) => {
-    // Login first
-    await page.goto('/login');
-    await page.getByPlaceholder(/email/i).fill(E2E_ADMIN.email);
-    await page.getByPlaceholder(/password/i).fill(E2E_ADMIN.password);
-    await page.getByRole('button', { name: /login|sign in/i }).click();
+    await webLogin(page);
     await expect(page).toHaveURL('/');
 
-    // Find and click logout
-    await page.getByRole('button', { name: /logout|sign out/i }).click();
+    // Logout button is in the sidebar
+    await page.getByRole('button', { name: 'Logout' }).click();
     await expect(page).toHaveURL('/login', { timeout: 5000 });
 
-    // Verify session is cleared — navigating to / should redirect
+    // Verify session cleared — navigating to / should redirect again
     await page.goto('/');
     await expect(page).toHaveURL('/login', { timeout: 3000 });
   });
