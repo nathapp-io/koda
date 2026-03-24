@@ -106,6 +106,9 @@ model Ticket {
   assignedToAgentId String?
   createdByUserId   String?
   createdByAgentId  String?
+  gitRefVersion     String?   // e.g. 'v1.0', 'main'
+  gitRefFile        String?   // e.g. 'apps/api/src/auth.ts'
+  gitRefLine        Int?      // e.g. 42
   deletedAt         DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt

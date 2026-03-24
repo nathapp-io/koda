@@ -5,6 +5,7 @@ import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { PrismaClient } from '@prisma/client';
 import { TicketType, TicketStatus, Priority } from '../common/enums';
+import { buildGitUrl } from '../common/utils/git-url.util';
 
 interface FindAllFilters {
   status?: TicketStatus;
@@ -32,6 +33,16 @@ export class TicketsService {
   constructor(private prisma: PrismaService<PrismaClient>) {}
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private get db() { return this.prisma.client; }
+
+  private computeGitRefUrl(
+    gitRemoteUrl: string | null | undefined,
+    gitRefVersion: string | null | undefined,
+    gitRefFile: string | null | undefined,
+    gitRefLine: number | null | undefined,
+  ): string | null {
+    if (!gitRefFile) return null;
+    return buildGitUrl(gitRemoteUrl, gitRefVersion ?? 'main', gitRefFile, gitRefLine ?? undefined);
+  }
 
 
   async create(
@@ -147,7 +158,15 @@ export class TicketsService {
     ]);
 
     return {
-      items: tickets,
+      items: tickets.map((ticket) => ({
+        ...ticket,
+        gitRefUrl: this.computeGitRefUrl(
+          project.gitRemoteUrl,
+          ticket.gitRefVersion,
+          ticket.gitRefFile,
+          ticket.gitRefLine,
+        ),
+      })),
       total,
       page,
       limit,
@@ -197,6 +216,12 @@ export class TicketsService {
 
     // Compute ref (e.g. KT-1) and transform labels from nested structure to flat array
     const ticketRef = `${project.key}-${ticket.number}`;
+    const gitRefUrl = this.computeGitRefUrl(
+      project.gitRemoteUrl,
+      ticket.gitRefVersion,
+      ticket.gitRefFile,
+      ticket.gitRefLine,
+    );
     if (ticket.labels) {
       interface TicketLabelWithLabel {
         label: { id: string; projectId: string; name: string; color: string | null };
@@ -204,11 +229,12 @@ export class TicketsService {
       return {
         ...ticket,
         ref: ticketRef,
+        gitRefUrl,
         labels: (ticket.labels as TicketLabelWithLabel[]).map((tl: TicketLabelWithLabel) => tl.label),
       };
     }
 
-    return { ...ticket, ref: ticketRef };
+    return { ...ticket, ref: ticketRef, gitRefUrl };
   }
 
   async update(
