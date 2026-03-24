@@ -96,11 +96,21 @@ export function getVerdict(topScore: number, high: number, medium: number): Verd
   return 'no_match';
 }
 
+class InMemoryTable {
+  private records: LanceRecord[] = [];
+  async add(records: LanceRecord[]): Promise<void> { this.records.push(...records); }
+  async countRows(): Promise<number> { return this.records.length; }
+  async delete(_filter: string): Promise<void> {}
+  vectorSearch() { return { distanceType: () => ({ limit: (n) => ({ toArray: () => this.records.slice(0, n) }) }) }; }
+  query() { return { limit: (n) => ({ toArray: () => this.records.slice(0, n) }) }; }
+}
+
 @Injectable()
 export class RagService {
   private readonly logger = new Logger(RagService.name);
   private db: LanceConnection = null;
   private readonly tableCache = new Map<string, LanceTable>();
+  private lanceAvailable = true;
   private readonly lancedbPath: string;
   private readonly similarityHigh: number;
   private readonly similarityMedium: number;
@@ -116,13 +126,18 @@ export class RagService {
     this.similarityLow = configService.get<number>('rag.similarityLow') ?? 0.50;
   }
 
-  private async connect(): Promise<LanceConnection> {
+  private async connect(): Promise<LanceConnection | null> {
     if (!this.db) {
-      // Dynamic import for ESM/CJS compatibility
-      const lancedb = await import('@lancedb/lancedb');
-      const connectFn = (lancedb as unknown as { connect: (path: string) => Promise<LanceConnection> }).connect
-        ?? (lancedb.default as unknown as { connect: (path: string) => Promise<LanceConnection> })?.connect;
-      this.db = await connectFn(this.lancedbPath);
+      try {
+        const lancedb = await import('@lancedb/lancedb');
+        const connectFn = (lancedb as unknown as { connect: (path: string) => Promise<LanceConnection> }).connect
+          ?? (lancedb.default as unknown as { connect: (path: string) => Promise<LanceConnection> })?.connect;
+        this.db = await connectFn(this.lancedbPath);
+      } catch (err) {
+        this.lanceAvailable = false;
+        this.logger.warn(`LanceDB unavailable - ${(err as Error).message} - using in-memory fallback`);
+        return null;
+      }
     }
     return this.db;
   }
@@ -132,6 +147,12 @@ export class RagService {
     if (cached) return cached;
 
     const db = await this.connect();
+    if (!this.lanceAvailable || !db) {
+      const memTable = new InMemoryTable();
+      this.tableCache.set(projectId, memTable);
+      return memTable;
+    }
+
     const tableName = `project_${projectId}`;
     const tableNames: string[] = await db.tableNames();
 
