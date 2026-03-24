@@ -71,3 +71,5 @@ apps/api/smoke-result.txt
 apps/**/.nax/
 
 out/
+apps/web/playwright-report/
+apps/web/test-results/
