@@ -1,15 +1,15 @@
 import { execSync } from 'child_process';
-import { createConnection } from 'net';
 import path from 'path';
 
 /**
  * Global setup — runs once before all E2E tests.
  * Resets + migrates the e2e SQLite DB, then seeds the admin user.
  *
- * CRITICAL: Playwright's webServer starts the API/Nuxt servers BEFORE this runs.
- * The API connects to the DB before migrations run, leaving Prisma with a stale
- * connection. After migrations we must kill the API so Playwright restarts it
- * with the correctly-migrated DB.
+ * CRITICAL: Playwright starts the API/Nuxt servers BEFORE this runs (via webServer).
+ * Those servers connect to the DB before migrations run — Prisma sees a stale schema.
+ * After migrations + seed, we must kill ALL servers on E2E ports (including any stale
+ * leftovers on 3100 from previous runs) so Playwright restarts them with the
+ * correctly-migrated DB.
  */
 export default async function globalSetup() {
   console.log('\n🎭 E2E Global Setup — resetting test database...');
@@ -33,32 +33,33 @@ export default async function globalSetup() {
   });
   console.log('✅ Test data seeded — admin@koda-e2e.test ready');
 
-  // Kill the API server (started by Playwright's webServer before globalSetup).
-  // Playwright will restart it automatically when tests begin, now with the
-  // correctly-migrated DB.  We also kill Nuxt to ensure a clean proxy state.
-  const apiPort = process.env['E2E_API_PORT'] ?? '3100';
-  const webPort = process.env['E2E_WEB_PORT'] ?? '3103';
-  for (const port of [apiPort, webPort]) {
+  // Kill ALL processes on E2E ports — current run ports AND any stale 3100/3103
+  // from previous runs.  nest start forks a child (node dist/main) that survives
+  // parent death, so we use pkill -f on the full command + port-based kill.
+  for (const port of [3100, 3102, 3103]) {
     try {
-      const socket = createConnection({ port: Number(port), host: 'localhost' });
-      socket.setTimeout(500);
-      socket.on('connect', () => {
-        const pid = execSync(
-          `lsof -ti :${port} 2>/dev/null | head -1`,
-          { encoding: 'utf8' }
-        ).trim();
-        if (pid) {
-          try { execSync(`kill ${pid}`, { stdio: 'ignore' }); }
-          catch { /* ignore */ }
-          console.log(`✅ Killed stale server on port ${port} (PID ${pid})`);
+      // First try port-based kill (covers the actual server child process)
+      const pids = execSync(`lsof -ti :${port} 2>/dev/null`, {
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'ignore'],
+      }).trim();
+      if (pids) {
+        for (const pid of pids.split('\n').filter(Boolean)) {
+          try { execSync(`kill -9 ${pid}`, { stdio: 'ignore' }); } catch { /* ignore */ }
         }
-        socket.destroy();
-      });
-      socket.on('error', () => socket.destroy());
+        console.log(`✅ Killed processes on port ${port}: ${pids}`);
+      }
     } catch { /* port not in use — skip */ }
+
+    // Also kill any orphaned nest start / nuxt processes for this project
+    for (const cmd of [`node.*nest start.*310${port === 3103 ? '' : '2'}`, `nuxt.*310${port}`]) {
+      try {
+        execSync(`pkill -f "${cmd}" 2>/dev/null`, { stdio: 'ignore' });
+      } catch { /* ignore */ }
+    }
   }
 
-  // Give the OS a moment to release the ports
-  await new Promise((r) => setTimeout(r, 1000));
-  console.log('✅ Stale servers killed — Playwright will restart them with migrated DB');
+  // Give the OS a moment to release ports
+  await new Promise((r) => setTimeout(r, 2000));
+  console.log('✅ All servers killed — Playwright will restart with migrated DB');
 }
