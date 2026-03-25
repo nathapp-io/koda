@@ -1,18 +1,32 @@
 import { execSync } from 'child_process';
-import path from 'path';
+
+const API_PORT = process.env['E2E_API_PORT'] ?? '3102';
+const WEB_PORT = process.env['E2E_WEB_PORT'] ?? '3103';
 
 /**
- * Global setup — runs once before all E2E tests.
- *
- * NOTE: The API startup command in playwright.config.ts now runs
- * `bunx prisma migrate deploy && bun run seed:e2e` BEFORE starting the server.
- * This means the DB is seeded BEFORE the health check passes and tests run.
- *
- * This globalSetup is now a no-op placeholder retained for Playwright compatibility.
- * The heavy lifting is done by the webServer command script.
+ * Kill any process occupying the E2E ports before Playwright starts.
+ * This ensures reuseExistingServer:false works correctly — no stale servers
+ * can block the port and cause Playwright to skip server startup entirely.
  */
 export default async function globalSetup() {
-  // DB init is handled by the webServer startup script.
-  // This function is intentionally minimal.
-  console.log('\n🎭 E2E Global Setup — DB init handled by webServer startup script.');
+  console.log('\n🎭 E2E Global Setup — clearing ports ' + API_PORT + '/' + WEB_PORT);
+
+  for (const port of [API_PORT, WEB_PORT]) {
+    try {
+      const output = execSync(`lsof -ti :${port} 2>/dev/null`, { encoding: 'utf8' });
+      const pids = output.trim().split('\n').filter(Boolean);
+      for (const pid of pids) {
+        console.log(`  Killing PID ${pid} on port ${port}`);
+        try { execSync(`kill -9 ${pid}`, { stdio: 'ignore' }); } catch {}
+      }
+    } catch {
+      // No process on port — OK
+    }
+  }
+
+  // Also kill any stray Nest/Nuxt dev servers that might not be on the port
+  try { execSync('pkill -9 -f "nest start" 2>/dev/null', { stdio: 'ignore' }); } catch {}
+  try { execSync('pkill -9 -f "nuxt dev" 2>/dev/null', { stdio: 'ignore' }); } catch {}
+
+  console.log('  Ports clear. Playwright will start fresh servers with migrated+seeded DB.');
 }
