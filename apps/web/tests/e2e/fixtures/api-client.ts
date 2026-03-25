@@ -79,6 +79,6 @@ export async function deleteProject(token: string, slug: string): Promise<void> 
 
 /** Credentials for the seeded E2E admin user */
 export const E2E_ADMIN = {
-  email: 'admin@koda.e2e',
+  email: 'admin@koda-e2e.test',
   password: 'E2ePassword1!',
 };

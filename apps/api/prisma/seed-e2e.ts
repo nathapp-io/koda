@@ -15,17 +15,17 @@ async function main() {
   const passwordHash = await bcrypt.hash('E2ePassword1!', 10);
 
   await prisma.user.upsert({
-    where: { email: 'admin@koda.e2e' },
+    where: { email: 'admin@koda-e2e.test' },
     update: {},
     create: {
-      email: 'admin@koda.e2e',
+      email: 'admin@koda-e2e.test',
       name: 'E2E Admin',
       passwordHash,
       role: 'ADMIN',
     },
   });
 
-  console.log('✅ E2E seed complete — admin@koda.e2e / E2ePassword1!');
+  console.log('✅ E2E seed complete — admin@koda-e2e.test / E2ePassword1!');
 }
 
 main()

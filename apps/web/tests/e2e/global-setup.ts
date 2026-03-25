@@ -27,5 +27,5 @@ export default async function globalSetup() {
     env: e2eEnv,
     stdio: 'inherit',
   });
-  console.log('✅ Test data seeded — admin@koda.e2e ready');
+  console.log('✅ Test data seeded — admin@koda-e2e.test ready');
 }
