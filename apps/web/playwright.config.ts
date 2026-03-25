@@ -1,31 +1,46 @@
 import { defineConfig, devices } from '@playwright/test';
 import path from 'path';
+import { execSync } from 'child_process';
 
-const API_PORT = process.env['E2E_API_PORT'] ?? '3100';
-const WEB_PORT = process.env['E2E_WEB_PORT'] ?? '3101';
+/**
+ * Find a free TCP port by asking the OS to bind on :0, then releasing it.
+ * Called at config-evaluation time so ports are known before any server starts.
+ */
+function getFreePort(): number {
+  const result = execSync(
+    `node -e "const net=require('net');const s=net.createServer();s.listen(0,()=>{process.stdout.write(String(s.address().port));s.close()})"`,
+    { encoding: 'utf8', timeout: 5000 },
+  );
+  return parseInt(result.trim(), 10);
+}
+
+const API_PORT = getFreePort();
+const WEB_PORT = getFreePort();
 const API_URL = `http://localhost:${API_PORT}`;
 const WEB_URL = `http://localhost:${WEB_PORT}`;
 
-// Propagate resolved URLs to test processes (used by api-client.ts fixture)
+// Absolute path — avoids prisma/prisma/ nesting when cwd differs between commands
+const E2E_DB = path.resolve(__dirname, '../api/prisma/koda-e2e.db');
+
+// Propagate resolved URLs to test worker processes (used by api-client.ts fixture)
 process.env['E2E_API_URL'] = API_URL;
 process.env['E2E_WEB_URL'] = WEB_URL;
 
 /**
- * Koda E2E Playwright Config
+ * Koda E2E Playwright Config — portless mode
  *
- * Playwright auto-starts both servers. Just run:
+ * Ports are assigned by the OS at config-evaluation time (no hardcoded ports).
+ * Just run:
  *   cd apps/web && bun run test:e2e
  *
- * The API starts with DATABASE_URL=file:./prisma/koda-e2e.db (isolated from dev DB).
- * Use different ports to avoid conflicts with a running dev server:
- *   E2E_API_PORT=3102 E2E_WEB_PORT=3103 bun run test:e2e
+ * The API starts with an isolated E2E database (separate from dev DB).
  */
 export default defineConfig({
   testDir: './tests/e2e',
-  fullyParallel: false,       // SQLite writes — keep sequential to avoid contention
+  fullyParallel: false,     // SQLite writes — keep sequential to avoid contention
   forbidOnly: !!process.env['CI'],
   retries: process.env['CI'] ? 2 : 0,
-  workers: 1,                 // Single worker — fresh DB per run, shared state
+  workers: 1,               // Single worker — fresh DB per run, shared state
   reporter: [['html', { outputFolder: 'playwright-report' }], ['list']],
 
   use: {
@@ -37,9 +52,9 @@ export default defineConfig({
 
   webServer: [
     {
-      // API — NestJS server with isolated e2e database (no --watch to avoid
-      // watcher restarts when SQLite WAL/journal files change during tests)
-      command: 'bash -c "rm -f ./prisma/koda-e2e.db ./prisma/koda-e2e.db-shm ./prisma/koda-e2e.db-wal && bunx prisma migrate deploy && bun run seed:e2e && bunx nest start"',
+      // API — NestJS with isolated E2E database.
+      // DB is deleted + re-migrated + re-seeded on every run for a clean slate.
+      command: `bash -c "rm -f '${E2E_DB}' '${E2E_DB}-shm' '${E2E_DB}-wal' && bunx prisma migrate deploy && bun prisma/seed-e2e.ts && bunx nest start"`,
       url: `${API_URL}/api/health`,
       cwd: path.resolve(__dirname, '../api'),
       reuseExistingServer: false,
@@ -47,13 +62,12 @@ export default defineConfig({
       stdout: 'pipe',
       stderr: 'pipe',
       env: {
-        DATABASE_URL: 'file:./prisma/koda-e2e.db',
+        DATABASE_URL: `file:${E2E_DB}`,
         API_PORT: String(API_PORT),
       },
     },
     {
-      // Web — Nuxt dev server; call nuxt directly to set port cleanly
-      // NUXT_API_INTERNAL_URL points the proxy to the correct API port
+      // Web — Nuxt dev server; NUXT_API_INTERNAL_URL proxies to the API port
       command: `bunx nuxt dev --port ${WEB_PORT}`,
       url: WEB_URL,
       cwd: path.resolve(__dirname),

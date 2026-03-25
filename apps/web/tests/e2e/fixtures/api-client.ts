@@ -3,8 +3,7 @@
  * Used in beforeAll/afterAll to create and clean up test data.
  */
 
-const API_PORT = process.env['E2E_API_PORT'] ?? '3102';
-const API_URL = process.env['E2E_API_URL'] ?? `http://localhost:${API_PORT}`;
+const API_URL = process.env["E2E_API_URL"] ?? "http://localhost:3100";
 
 export interface LoginResult {
   token: string;
