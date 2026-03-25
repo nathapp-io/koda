@@ -39,7 +39,7 @@ export default defineConfig({
     {
       // API — NestJS server with isolated e2e database (no --watch to avoid
       // watcher restarts when SQLite WAL/journal files change during tests)
-      command: 'nest start',
+      command: 'bunx nest start',
       url: `${API_URL}/api/health`,
       cwd: path.resolve(__dirname, '../api'),
       reuseExistingServer: !process.env['CI'],
