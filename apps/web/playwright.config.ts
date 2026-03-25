@@ -1,21 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 import path from 'path';
-import { execSync } from 'child_process';
 
-/**
- * Find a free TCP port by asking the OS to bind on :0, then releasing it.
- * Called at config-evaluation time so ports are known before any server starts.
- */
-function getFreePort(): number {
-  const result = execSync(
-    `node -e "const net=require('net');const s=net.createServer();s.listen(0,()=>{process.stdout.write(String(s.address().port));s.close()})"`,
-    { encoding: 'utf8', timeout: 5000 },
-  );
-  return parseInt(result.trim(), 10);
-}
-
-const API_PORT = getFreePort();
-const WEB_PORT = getFreePort();
+const API_PORT = process.env['E2E_API_PORT'] ?? '3102';
+const WEB_PORT = process.env['E2E_WEB_PORT'] ?? '3103';
 const API_URL = `http://localhost:${API_PORT}`;
 const WEB_URL = `http://localhost:${WEB_PORT}`;
 
@@ -26,15 +13,6 @@ const E2E_DB = path.resolve(__dirname, '../api/prisma/koda-e2e.db');
 process.env['E2E_API_URL'] = API_URL;
 process.env['E2E_WEB_URL'] = WEB_URL;
 
-/**
- * Koda E2E Playwright Config — portless mode
- *
- * Ports are assigned by the OS at config-evaluation time (no hardcoded ports).
- * Just run:
- *   cd apps/web && bun run test:e2e
- *
- * The API starts with an isolated E2E database (separate from dev DB).
- */
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: false,
@@ -52,13 +30,12 @@ export default defineConfig({
 
   webServer: [
     {
-      // API — NestJS with isolated E2E database.
-      // DB is deleted + re-migrated + re-seeded on every run for a clean slate.
+      // API
       command: `bash -c "rm -f '${E2E_DB}' '${E2E_DB}-shm' '${E2E_DB}-wal' && bunx prisma migrate deploy && bun prisma/seed-e2e.ts && bunx nest start"`,
       url: `${API_URL}/api/health`,
       cwd: path.resolve(__dirname, '../api'),
       reuseExistingServer: false,
-      timeout: 120_000,
+      timeout: 180_000,
       stdout: 'pipe',
       stderr: 'pipe',
       env: {
@@ -67,17 +44,15 @@ export default defineConfig({
       },
     },
     {
-      // Web — Nuxt dev server.
-      // bun run dev uses package.json dev script which respects PORT env var.
-      command: 'bun run dev',
+      // Web
+      command: `bunx nuxt dev --port ${WEB_PORT}`,
       url: WEB_URL,
       cwd: path.resolve(__dirname),
       reuseExistingServer: false,
-      timeout: 120_000,
+      timeout: 180_000,
       stdout: 'pipe',
       stderr: 'pipe',
       env: {
-        PORT: String(WEB_PORT),
         NUXT_API_INTERNAL_URL: API_URL,
       },
     },
