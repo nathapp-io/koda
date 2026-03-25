@@ -39,8 +39,8 @@ test.describe('Authentication', () => {
     await webLogin(page);
     await expect(page).toHaveURL('/');
 
-    // Logout button is in the sidebar
-    await page.getByRole('button', { name: 'Logout' }).click();
+    // Logout button is in the sidebar — target the sidebar specifically (header also has one)
+    await page.locator('aside').getByRole('button', { name: 'Logout' }).click();
     await expect(page).toHaveURL('/login', { timeout: 5000 });
 
     // Verify session cleared — navigating to / should redirect again

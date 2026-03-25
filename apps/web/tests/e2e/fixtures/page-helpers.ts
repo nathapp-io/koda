@@ -5,16 +5,18 @@ import { E2E_ADMIN } from './api-client';
  * Performs login by calling the API directly, then injecting the auth cookie
  * into the Playwright browser context.
  *
- * This is more reliable than UI-based login because it avoids timing issues
- * with Vue/vee-validate reactive bindings and network redirects.
+ * After injecting the cookie, we navigate to '/' and wait for the page to
+ * fully hydrate so auth middleware has resolved the cookie on both SSR and
+ * client side before proceeding.
  */
 export async function webLogin(
   page: Page,
   email = E2E_ADMIN.email,
   password = E2E_ADMIN.password,
 ) {
-  // 1. Call the API directly to get an access token
   const apiUrl = process.env['E2E_API_URL'] ?? 'http://localhost:3102';
+
+  // 1. Call the API directly to get an access token
   const response = await page.request.post(`${apiUrl}/api/auth/login`, {
     data: { email, password },
   });
@@ -25,8 +27,14 @@ export async function webLogin(
     );
   }
 
-  const body = (await response.json()) as { ret: number; data: { accessToken: string; refreshToken: string } };
-  const { accessToken, refreshToken } = body.data ?? body as unknown as { accessToken: string; refreshToken: string };
+  const body = (await response.json()) as {
+    ret: number;
+    data: { accessToken: string; refreshToken: string };
+  };
+  const { accessToken, refreshToken } = body.data ?? body as unknown as {
+    accessToken: string;
+    refreshToken: string;
+  };
 
   if (!accessToken) {
     throw new Error('No accessToken in login response');
@@ -53,8 +61,16 @@ export async function webLogin(
     },
   ]);
 
-  // 3. Navigate to the app — auth middleware will see the cookie
-  await page.goto('/');
+  // 3. Navigate to the app and wait for full hydration
+  // Use networkidle to ensure SSR auth middleware resolves before continuing
+  await page.goto(`${url.protocol}//${url.host}/`, { waitUntil: 'networkidle' });
+
+  // 4. If we ended up on /login (auth middleware rejected the cookie),
+  //    wait a moment and retry once
+  if (page.url().endsWith('/login')) {
+    await page.waitForTimeout(500);
+    await page.goto(`${url.protocol}//${url.host}/`, { waitUntil: 'networkidle' });
+  }
 }
 
 /**
