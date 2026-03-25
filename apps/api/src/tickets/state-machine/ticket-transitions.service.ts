@@ -10,6 +10,7 @@ import {
 import { TicketStatus, CommentType, ActivityType } from '../../common/enums';
 import { validateTransition } from './ticket-transitions';
 import { RagService } from '../../rag/rag.service';
+import { WebhookDispatcherService } from '../../webhook/webhook-dispatcher.service';
 
 export interface CurrentUser {
   id: string;
@@ -34,9 +35,35 @@ export class TicketTransitionsService {
   constructor(
     @Inject('PrismaService') private prisma: PrismaService<PrismaClient>,
     @Optional() private readonly ragService?: RagService,
+    @Optional() private readonly webhookDispatcher?: WebhookDispatcherService,
   ) {}
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private get db() { return this.prisma.client; }
+
+  /**
+   * Fire-and-forget: dispatch STATUS_CHANGE webhook for a ticket.
+   */
+  private dispatchStatusChangeWebhook(
+    projectId: string,
+    ticket: Ticket,
+    fromStatus: string,
+    toStatus: string,
+  ): void {
+    if (!this.webhookDispatcher) return;
+
+    const dispatcher = this.webhookDispatcher;
+    dispatcher
+      .dispatch(projectId, 'STATUS_CHANGE', {
+        event: 'STATUS_CHANGE',
+        timestamp: new Date().toISOString(),
+        ticket: { id: ticket.id, ref: ticket.id, status: toStatus },
+        from: fromStatus,
+        to: toStatus,
+      })
+      .catch(() => {
+        // suppress webhook errors — transition must always succeed
+      });
+  }
 
   /**
    * Fire-and-forget: index a closed ticket in the RAG knowledge base.
@@ -242,6 +269,7 @@ export class TicketTransitionsService {
     });
 
     this.autoIndexTicket(project, transaction.ticket);
+    this.dispatchStatusChangeWebhook(project.id, transaction.ticket, ticket.status, TicketStatus.CLOSED);
 
     return transaction;
   }
@@ -352,6 +380,8 @@ export class TicketTransitionsService {
       if (toStatus === TicketStatus.CLOSED) {
         this.autoIndexTicket(project, result.ticket);
       }
+      // Dispatch webhook for status change
+      this.dispatchStatusChangeWebhook(project.id, result.ticket, ticket.status, toStatus);
       return result;
     });
   }

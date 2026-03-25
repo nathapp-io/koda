@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class ProjectResponseDto {
   @ApiProperty({
@@ -60,4 +60,10 @@ export class ProjectResponseDto {
     required: false,
   })
   deletedAt?: Date | null;
+
+  @ApiPropertyOptional({
+    description: 'CI webhook token for authentication',
+    required: false,
+  })
+  ciWebhookToken?: string | null;
 }

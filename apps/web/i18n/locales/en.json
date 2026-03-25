@@ -126,7 +126,8 @@
     "detail": {
       "description": "Description",
       "assignee": "Assignee",
-      "created": "Created"
+      "created": "Created",
+      "gitRef": "Source Reference"
     },
     "actions": {
       "verify": "Verify",

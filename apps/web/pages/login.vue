@@ -63,8 +63,8 @@ const { t } = useI18n()
 
 const formSchema = toTypedSchema(
   z.object({
-    email: z.string({ required_error: t('auth.validation.emailRequired') }).email(t('auth.validation.emailInvalid')),
-    password: z.string({ required_error: t('auth.validation.passwordRequired') }).min(8, t('auth.validation.passwordMin')),
+    email: z.string().min(1, t('auth.validation.emailRequired')).email(t('auth.validation.emailInvalid')),
+    password: z.string().min(8, t('auth.validation.passwordMin')),
   }) as any
 )
 

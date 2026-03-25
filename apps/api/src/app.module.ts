@@ -14,6 +14,8 @@ import { CommentsModule } from './comments/comments.module';
 import { LabelsModule } from './labels/labels.module';
 import { HealthModule } from './health/health.module';
 import { RagModule } from './rag/rag.module';
+import { WebhookModule } from './webhook/webhook.module';
+import { CiWebhookModule } from './ci-webhook/ci-webhook.module';
 import { appConfig } from './config/app.config';
 import { authConfig } from './config/auth.config';
 import { databaseConfig } from './config/database.config';
@@ -52,6 +54,8 @@ import { validate } from './config/env.validation';
     LabelsModule,
     HealthModule,
     RagModule,
+    WebhookModule,
+    CiWebhookModule,
   ],
 })
 export class AppModule {}

@@ -20,7 +20,9 @@ services:
       API_KEY_SECRET: ${API_KEY_SECRET}
       API_PORT: 3100
       API_PREFIX: api
-      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      # When --profile rag is active, point at the bundled Ollama container;
+      # otherwise falls back to host.docker.internal for BYO Ollama installs.
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       LANCEDB_PATH: /data/lancedb
     volumes:
       - koda_data:/data
@@ -52,6 +54,25 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["rag"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      OLLAMA_HOST: 0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:11434/api/tags"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
 volumes:
   koda_data:
+    driver: local
+  ollama_data:
     driver: local

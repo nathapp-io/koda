@@ -1,5 +1,5 @@
 import { IsString, MinLength, Matches, IsOptional, IsUrl, IsBoolean, IsIn } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateProjectDto {
   @ApiProperty({
@@ -75,4 +75,13 @@ export class UpdateProjectDto {
   @IsString({ message: '$t(common.validation.isString)' })
   @IsIn(['OFF', 'SUGGEST', 'AUTO'], { message: '$t(common.validation.isIn)' })
   autoAssign?: string;
+
+  @ApiPropertyOptional({
+    description: 'CI webhook token for authentication',
+    example: 'ci_webhook_token_123',
+    required: false,
+  })
+  @IsOptional()
+  @IsString({ message: '$t(common.validation.isString)' })
+  ciWebhookToken?: string;
 }

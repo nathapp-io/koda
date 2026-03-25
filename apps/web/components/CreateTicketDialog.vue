@@ -97,8 +97,8 @@ const { t } = useI18n()
 
 const formSchema = toTypedSchema(
   z.object({
-    title: z.string({ required_error: t('tickets.validation.titleRequired') }).min(3, t('tickets.validation.titleMin')),
-    type: z.string({ required_error: t('tickets.validation.typeRequired') })
+    title: z.string().min(3, t('tickets.validation.titleMin')),
+    type: z.string()
       .min(1, t('tickets.validation.typeRequired'))
       .refine((v) => ['BUG', 'ENHANCEMENT'].includes(v), t('tickets.validation.typeRequired')),
     priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).default('MEDIUM'),

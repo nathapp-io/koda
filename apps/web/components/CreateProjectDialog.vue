@@ -68,10 +68,10 @@ const { t } = useI18n()
 
 const formSchema = toTypedSchema(
   z.object({
-    name: z.string({ required_error: t('projects.validation.nameRequired') }).min(1, t('projects.validation.nameRequired')),
-    slug: z.string({ required_error: t('projects.validation.slugRequired') }).min(1, t('projects.validation.slugRequired')).regex(/^[a-z0-9-]+$/, t('projects.validation.slugFormat')),
+    name: z.string().min(1, t('projects.validation.nameRequired')),
+    slug: z.string().min(1, t('projects.validation.slugRequired')).regex(/^[a-z0-9-]+$/, t('projects.validation.slugFormat')),
     key: z
-      .string({ required_error: t('projects.validation.keyRequired') })
+      .string()
       .min(2, t('projects.validation.keyMin'))
       .max(6, t('projects.validation.keyMax'))
       .regex(/^[A-Z]+$/, t('projects.validation.keyFormat')),
