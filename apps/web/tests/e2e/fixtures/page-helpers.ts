@@ -15,6 +15,7 @@ export async function webLogin(
   password = E2E_ADMIN.password,
 ) {
   const apiUrl = process.env['E2E_API_URL'] ?? 'http://localhost:3102';
+  const webUrl = process.env['E2E_WEB_URL'] ?? 'http://localhost:3103';
 
   // 1. Call the API directly to get an access token
   const response = await page.request.post(`${apiUrl}/api/auth/login`, {
@@ -28,33 +29,32 @@ export async function webLogin(
   }
 
   const body = (await response.json()) as {
-    ret: number;
-    data: { accessToken: string; refreshToken: string };
+    data?: { accessToken?: string; refreshToken?: string };
+    accessToken?: string;
+    refreshToken?: string;
   };
-  const { accessToken, refreshToken } = body.data ?? body as unknown as {
-    accessToken: string;
-    refreshToken: string;
-  };
+  const accessToken = body.data?.accessToken ?? body.accessToken;
+  const refreshToken = body.data?.refreshToken ?? body.refreshToken;
 
   if (!accessToken) {
     throw new Error('No accessToken in login response');
   }
 
   // 2. Inject auth cookies so the browser session is authenticated
-  const url = new URL(apiUrl);
+  const webAppUrl = new URL(webUrl);
   await page.context().addCookies([
     {
       name: 'koda_token',
       value: accessToken,
-      domain: url.hostname,
+      domain: webAppUrl.hostname,
       path: '/',
       httpOnly: false,
       secure: false,
     },
     {
       name: 'koda_refresh_token',
-      value: refreshToken,
-      domain: url.hostname,
+      value: refreshToken ?? '',
+      domain: webAppUrl.hostname,
       path: '/',
       httpOnly: false,
       secure: false,
@@ -63,13 +63,16 @@ export async function webLogin(
 
   // 3. Navigate to the app and wait for full hydration
   // Use networkidle to ensure SSR auth middleware resolves before continuing
-  await page.goto(`${url.protocol}//${url.host}/`, { waitUntil: 'networkidle' });
+  await page.goto(webUrl, { waitUntil: 'networkidle' });
 
-  // 4. If we ended up on /login (auth middleware rejected the cookie),
-  //    wait a moment and retry once
+  // 4. Retry a few times if middleware still routes to /login while hydrating
+  for (let attempt = 0; attempt < 3 && page.url().endsWith('/login'); attempt += 1) {
+    await page.waitForTimeout(300 * (attempt + 1));
+    await page.goto(webUrl, { waitUntil: 'networkidle' });
+  }
+
   if (page.url().endsWith('/login')) {
-    await page.waitForTimeout(500);
-    await page.goto(`${url.protocol}//${url.host}/`, { waitUntil: 'networkidle' });
+    throw new Error('Web login helper failed to establish authenticated session');
   }
 }
 

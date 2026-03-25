@@ -1,7 +1,16 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 
+const isE2E = process.env['E2E_RUN'] === '1'
+
 export default defineNuxtConfig({
-  devtools: { enabled: true },
+  devtools: { enabled: !isE2E },
+
+  components: [
+    {
+      path: '~/components',
+      extensions: ['vue'],
+    },
+  ],
 
   css: ['~/assets/css/globals.css'],
 
