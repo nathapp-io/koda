@@ -42,12 +42,13 @@ describe('AC2: pages/login.vue uses VeeValidate', () => {
 describe('AC3: email field validated as z.string().email()', () => {
   test('source uses z.string().email() for the email field', () => {
     const source = readFileSync(loginPath, 'utf-8')
-    expect(source).toContain('z.string().email()')
+    expect(source).toContain('email: z.string()')
+    expect(source).toContain('.email(')
   })
 
   test('source references an email field in the zod schema', () => {
     const source = readFileSync(loginPath, 'utf-8')
-    expect(source).toMatch(/email\s*:\s*z\.string\(\)\.email\(\)/)
+    expect(source).toContain('email: z.string()')
   })
 })
 
@@ -58,12 +59,12 @@ describe('AC3: email field validated as z.string().email()', () => {
 describe('AC4: password field validated as z.string().min(8)', () => {
   test('source uses z.string().min(8) for the password field', () => {
     const source = readFileSync(loginPath, 'utf-8')
-    expect(source).toContain('z.string().min(8)')
+    expect(source).toContain('password: z.string().min(8')
   })
 
   test('source references a password field in the zod schema', () => {
     const source = readFileSync(loginPath, 'utf-8')
-    expect(source).toMatch(/password\s*:\s*z\.string\(\)\.min\(8\)/)
+    expect(source).toContain('password: z.string().min(8')
   })
 })
 

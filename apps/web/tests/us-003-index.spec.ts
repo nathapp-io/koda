@@ -82,9 +82,9 @@ describe('US-003 AC2: responsive project grid', () => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('US-003 AC3: View Board button navigates to project slug', () => {
-  test("source contains 'View Board' text", () => {
+  test('source contains i18n key for view board text', () => {
     const source = readFileSync(indexPath, 'utf-8')
-    expect(source).toContain('View Board')
+    expect(source).toContain("t('common.viewBoard')")
   })
 
   test('source navigates to project slug route', () => {
@@ -105,9 +105,9 @@ describe('US-003 AC3: View Board button navigates to project slug', () => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('US-003 AC4: New Project button opens CreateProjectDialog', () => {
-  test("source contains 'New Project' text", () => {
+  test('source contains i18n key for new project text', () => {
     const source = readFileSync(indexPath, 'utf-8')
-    expect(source).toContain('New Project')
+    expect(source).toContain("t('projects.newProject')")
   })
 
   test('source uses CreateProjectDialog component', () => {
@@ -136,8 +136,8 @@ describe('US-003 AC10: empty state rendered when no projects', () => {
   test('source renders an empty state message', () => {
     const source = readFileSync(indexPath, 'utf-8')
     const hasEmptyMessage =
-      source.includes('No projects') ||
-      source.includes('no projects') ||
+      source.includes("t('projects.noProjects')") ||
+      source.includes("t('projects.noProjectsHint')") ||
       source.includes('empty') ||
       source.includes('get started')
     expect(hasEmptyMessage).toBe(true)

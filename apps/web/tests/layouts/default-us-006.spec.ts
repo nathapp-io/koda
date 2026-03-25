@@ -12,14 +12,14 @@ const layoutPath = join(webDir, 'layouts', 'default.vue')
 describe('US-006 AC9: Agents navigation link exists in layouts/default.vue sidebar', () => {
   test('source contains Agents navigation link text', () => {
     const source = readFileSync(layoutPath, 'utf-8')
-    expect(source).toContain('Agents')
+    expect(source).toContain("t('nav.agents')")
   })
 
   test('Agents link uses NuxtLink component', () => {
     const source = readFileSync(layoutPath, 'utf-8')
     // Both NuxtLink and Agents must appear together
     expect(source).toContain('NuxtLink')
-    expect(source).toContain('Agents')
+    expect(source).toContain("t('nav.agents')")
   })
 
   test('Agents link navigates to the agents page under project context', () => {

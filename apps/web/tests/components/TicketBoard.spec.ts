@@ -141,9 +141,9 @@ describe('US-004-2 AC4: Each column header shows status name and ticket count ba
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe("US-004-2 AC5: 'New Ticket' button present only in CREATED column and emits 'create'", () => {
-  test("source contains 'New Ticket' text", () => {
+  test("source contains i18n key for 'New Ticket' label", () => {
     const source = readFileSync(boardPath, 'utf-8')
-    expect(source).toContain('New Ticket')
+    expect(source).toContain("t('tickets.newTicket')")
   })
 
   test("source defines 'create' in defineEmits", () => {

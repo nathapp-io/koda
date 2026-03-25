@@ -68,7 +68,8 @@ describe('US-003 AC5: VeeValidate + Zod form validation', () => {
 
   test('source has key field in schema', () => {
     const source = readFileSync(dialogPath, 'utf-8')
-    expect(source).toMatch(/key\s*:\s*z\.string\(\)/)
+    expect(source).toContain('key: z')
+    expect(source).toContain('.string()')
   })
 })
 

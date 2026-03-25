@@ -17,6 +17,12 @@ beforeEach(() => {
 function makeFakeEnv() {
   const tokenRef = ref<string | null>(null)
   const userRef = ref<unknown>(null)
+  const navigateToMock = jest.fn()
+  const fakeRuntimeConfig = () => ({
+    public: {
+      apiBaseUrl: 'http://localhost:3000',
+    },
+  })
   const fetchMock = jest.fn((_url: string, _opts?: Record<string, unknown>) =>
     Promise.resolve({ accessToken: 'mock-jwt', user: { id: 1, email: 'a@b.com' } })
   )
@@ -31,7 +37,24 @@ function makeFakeEnv() {
     return ref(typeof init === 'function' ? init() : null)
   }
 
-  return { tokenRef, userRef, fetchMock, fakeCookie, fakeState }
+  return {
+    tokenRef,
+    userRef,
+    fetchMock,
+    fakeCookie,
+    fakeState,
+    fakeRuntimeConfig,
+    navigateToMock,
+  }
+}
+
+function applyNuxtGlobals(env: ReturnType<typeof makeFakeEnv>) {
+  ;(globalThis as Record<string, unknown>).useCookie = env.fakeCookie
+  ;(globalThis as Record<string, unknown>).useState = env.fakeState
+  ;(globalThis as Record<string, unknown>).computed = computed
+  ;(globalThis as Record<string, unknown>).$fetch = env.fetchMock
+  ;(globalThis as Record<string, unknown>).useRuntimeConfig = env.fakeRuntimeConfig
+  ;(globalThis as Record<string, unknown>).navigateTo = env.navigateToMock
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -87,13 +110,11 @@ describe('AC4: login() calls POST /auth/login and stores accessToken', () => {
   })
 
   test('login() stores the returned accessToken into the cookie ref', async () => {
-    const { tokenRef, userRef: _userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
+    const env = makeFakeEnv()
+    const { tokenRef, fetchMock } = env
 
     // Inject Nuxt globals before importing the composable
-    ;(globalThis as Record<string, unknown>).useCookie = fakeCookie
-    ;(globalThis as Record<string, unknown>).useState = fakeState
-    ;(globalThis as Record<string, unknown>).computed = computed
-    ;(globalThis as Record<string, unknown>).$fetch = fetchMock
+    applyNuxtGlobals(env)
 
     // Fresh import to pick up global mocks
     const mod = await import(`${composablePath}`)
@@ -112,12 +133,10 @@ describe('AC4: login() calls POST /auth/login and stores accessToken', () => {
   })
 
   test('login() sets user state from the response', async () => {
-    const { tokenRef: _tokenRef, userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
+    const env = makeFakeEnv()
+    const { userRef } = env
 
-    ;(globalThis as Record<string, unknown>).useCookie = fakeCookie
-    ;(globalThis as Record<string, unknown>).useState = fakeState
-    ;(globalThis as Record<string, unknown>).computed = computed
-    ;(globalThis as Record<string, unknown>).$fetch = fetchMock
+    applyNuxtGlobals(env)
 
     const mod = await import(`${composablePath}`)
     const auth = mod.useAuth()
@@ -139,15 +158,13 @@ describe('AC5: logout() clears token and user state', () => {
   })
 
   test('logout() sets token ref to null', async () => {
-    const { tokenRef, userRef: _userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
+    const env = makeFakeEnv()
+    const { tokenRef, userRef } = env
 
     tokenRef.value = 'existing-jwt'
-    _userRef.value = { id: 1, email: 'a@b.com' }
+    userRef.value = { id: 1, email: 'a@b.com' }
 
-    ;(globalThis as Record<string, unknown>).useCookie = fakeCookie
-    ;(globalThis as Record<string, unknown>).useState = fakeState
-    ;(globalThis as Record<string, unknown>).computed = computed
-    ;(globalThis as Record<string, unknown>).$fetch = fetchMock
+    applyNuxtGlobals(env)
 
     const mod = await import(`${composablePath}`)
     const auth = mod.useAuth()
@@ -158,15 +175,13 @@ describe('AC5: logout() clears token and user state', () => {
   })
 
   test('logout() sets user ref to null', async () => {
-    const { tokenRef: _tokenRef, userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
+    const env = makeFakeEnv()
+    const { tokenRef, userRef } = env
 
-    _tokenRef.value = 'existing-jwt'
+    tokenRef.value = 'existing-jwt'
     userRef.value = { id: 1, email: 'a@b.com' }
 
-    ;(globalThis as Record<string, unknown>).useCookie = fakeCookie
-    ;(globalThis as Record<string, unknown>).useState = fakeState
-    ;(globalThis as Record<string, unknown>).computed = computed
-    ;(globalThis as Record<string, unknown>).$fetch = fetchMock
+    applyNuxtGlobals(env)
 
     const mod = await import(`${composablePath}`)
     const auth = mod.useAuth()
@@ -189,14 +204,12 @@ describe('AC6: isAuthenticated is a computed ref', () => {
   })
 
   test('isAuthenticated is false when token is null', async () => {
-    const { tokenRef, userRef: _userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
+    const env = makeFakeEnv()
+    const { tokenRef } = env
 
     tokenRef.value = null
 
-    ;(globalThis as Record<string, unknown>).useCookie = fakeCookie
-    ;(globalThis as Record<string, unknown>).useState = fakeState
-    ;(globalThis as Record<string, unknown>).computed = computed
-    ;(globalThis as Record<string, unknown>).$fetch = fetchMock
+    applyNuxtGlobals(env)
 
     const mod = await import(`${composablePath}`)
     const auth = mod.useAuth()
@@ -205,14 +218,12 @@ describe('AC6: isAuthenticated is a computed ref', () => {
   })
 
   test('isAuthenticated is true when token has a value', async () => {
-    const { tokenRef, userRef: _userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
+    const env = makeFakeEnv()
+    const { tokenRef } = env
 
     tokenRef.value = 'some-jwt'
 
-    ;(globalThis as Record<string, unknown>).useCookie = fakeCookie
-    ;(globalThis as Record<string, unknown>).useState = fakeState
-    ;(globalThis as Record<string, unknown>).computed = computed
-    ;(globalThis as Record<string, unknown>).$fetch = fetchMock
+    applyNuxtGlobals(env)
 
     const mod = await import(`${composablePath}`)
     const auth = mod.useAuth()
@@ -221,12 +232,9 @@ describe('AC6: isAuthenticated is a computed ref', () => {
   })
 
   test('isAuthenticated updates reactively after login()', async () => {
-    const { tokenRef: _tokenRef, userRef: _userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
+    const env = makeFakeEnv()
 
-    ;(globalThis as Record<string, unknown>).useCookie = fakeCookie
-    ;(globalThis as Record<string, unknown>).useState = fakeState
-    ;(globalThis as Record<string, unknown>).computed = computed
-    ;(globalThis as Record<string, unknown>).$fetch = fetchMock
+    applyNuxtGlobals(env)
 
     const mod = await import(`${composablePath}`)
     const auth = mod.useAuth()
@@ -237,14 +245,12 @@ describe('AC6: isAuthenticated is a computed ref', () => {
   })
 
   test('isAuthenticated updates reactively after logout()', async () => {
-    const { tokenRef, userRef: _userRef, fetchMock, fakeCookie, fakeState } = makeFakeEnv()
+    const env = makeFakeEnv()
+    const { tokenRef } = env
 
     tokenRef.value = 'some-jwt'
 
-    ;(globalThis as Record<string, unknown>).useCookie = fakeCookie
-    ;(globalThis as Record<string, unknown>).useState = fakeState
-    ;(globalThis as Record<string, unknown>).computed = computed
-    ;(globalThis as Record<string, unknown>).$fetch = fetchMock
+    applyNuxtGlobals(env)
 
     const mod = await import(`${composablePath}`)
     const auth = mod.useAuth()

@@ -54,32 +54,32 @@ describe('US-006 AC1: fetches GET /agents via useApi() with useAsyncData', () =>
 describe('US-006 AC2: table columns — Name, Slug, Roles, Capabilities, Status, Actions', () => {
   test('source has Name column header', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('Name')
+    expect(source).toContain("t('agents.columns.name')")
   })
 
   test('source has Slug column header', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('Slug')
+    expect(source).toContain("t('agents.columns.slug')")
   })
 
   test('source has Roles column header', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('Roles')
+    expect(source).toContain("t('agents.columns.roles')")
   })
 
   test('source has Capabilities column header', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('Capabilities')
+    expect(source).toContain("t('agents.columns.capabilities')")
   })
 
   test('source has Status column header', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('Status')
+    expect(source).toContain("t('agents.columns.status')")
   })
 
   test('source has Actions column header', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('Actions')
+    expect(source).toContain("t('agents.columns.actions')")
   })
 
   test('source renders agent name in table rows', () => {
