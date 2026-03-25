@@ -37,12 +37,15 @@ export default defineConfig({
 
   webServer: [
     {
-      // API — NestJS dev server with isolated e2e database
-      command: 'bun run dev',
+      // API — NestJS server with isolated e2e database (no --watch to avoid
+      // watcher restarts when SQLite WAL/journal files change during tests)
+      command: 'nest start',
       url: `${API_URL}/api/health`,
       cwd: path.resolve(__dirname, '../api'),
       reuseExistingServer: !process.env['CI'],
-      timeout: 90_000,
+      timeout: 120_000,
+      stdout: 'pipe',
+      stderr: 'pipe',
       env: {
         DATABASE_URL: 'file:./prisma/koda-e2e.db',
         API_PORT: String(API_PORT),
@@ -55,7 +58,9 @@ export default defineConfig({
       url: WEB_URL,
       cwd: path.resolve(__dirname),
       reuseExistingServer: !process.env['CI'],
-      timeout: 90_000,
+      timeout: 120_000,
+      stdout: 'pipe',
+      stderr: 'pipe',
       env: {
         NUXT_API_INTERNAL_URL: API_URL,
       },
