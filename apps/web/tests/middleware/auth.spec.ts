@@ -1,10 +1,14 @@
-import { describe, test, expect, mock } from 'bun:test'
+import { describe, test, expect, beforeEach } from '@jest/globals'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { ref, computed } from 'vue'
 
 const webDir = join(__dirname, '../..')
 const middlewarePath = join(webDir, 'middleware', 'auth.ts')
+
+beforeEach(() => {
+  jest.resetModules()
+})
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -57,13 +61,13 @@ describe('AC2: middleware/auth.ts exists', () => {
 describe('AC3: unauthenticated request to protected route redirects to /login', () => {
   test('navigateTo("/login") is returned when token is null and route is /', async () => {
     const { tokenRef, isAuthenticated } = makeAuthEnv(null)
-    const navigateToMock = mock((path: string) => ({ redirect: path }))
+    const navigateToMock = jest.fn((path: string) => ({ redirect: path }))
 
     ;(globalThis as Record<string, unknown>).useAuth = () => ({ token: tokenRef, isAuthenticated })
     ;(globalThis as Record<string, unknown>).navigateTo = navigateToMock
     ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: (to: unknown, from: unknown) => unknown) => fn
 
-    const mod = await import(`${middlewarePath}?v=${Date.now()}`)
+    const mod = await import(`${middlewarePath}`)
     const middleware = mod.default
 
     const to = makeRoute('/')
@@ -76,13 +80,13 @@ describe('AC3: unauthenticated request to protected route redirects to /login', 
 
   test('navigateTo("/login") is returned when token is null and route is /projects', async () => {
     const { tokenRef, isAuthenticated } = makeAuthEnv(null)
-    const navigateToMock = mock((path: string) => ({ redirect: path }))
+    const navigateToMock = jest.fn((path: string) => ({ redirect: path }))
 
     ;(globalThis as Record<string, unknown>).useAuth = () => ({ token: tokenRef, isAuthenticated })
     ;(globalThis as Record<string, unknown>).navigateTo = navigateToMock
     ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: (to: unknown, from: unknown) => unknown) => fn
 
-    const mod = await import(`${middlewarePath}?v=${Date.now()}`)
+    const mod = await import(`${middlewarePath}`)
     const middleware = mod.default
 
     const to = makeRoute('/projects')
@@ -95,13 +99,13 @@ describe('AC3: unauthenticated request to protected route redirects to /login', 
 
   test('no redirect when token is null and route is /login itself', async () => {
     const { tokenRef, isAuthenticated } = makeAuthEnv(null)
-    const navigateToMock = mock((path: string) => ({ redirect: path }))
+    const navigateToMock = jest.fn((path: string) => ({ redirect: path }))
 
     ;(globalThis as Record<string, unknown>).useAuth = () => ({ token: tokenRef, isAuthenticated })
     ;(globalThis as Record<string, unknown>).navigateTo = navigateToMock
     ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: (to: unknown, from: unknown) => unknown) => fn
 
-    const mod = await import(`${middlewarePath}?v=${Date.now()}`)
+    const mod = await import(`${middlewarePath}`)
     const middleware = mod.default
 
     const to = makeRoute('/login')
@@ -123,13 +127,13 @@ describe('AC3: unauthenticated request to protected route redirects to /login', 
 describe('AC4: authenticated request to /login redirects to /', () => {
   test('navigateTo("/") is returned when token is set and route is /login', async () => {
     const { tokenRef, isAuthenticated } = makeAuthEnv('valid-jwt')
-    const navigateToMock = mock((path: string) => ({ redirect: path }))
+    const navigateToMock = jest.fn((path: string) => ({ redirect: path }))
 
     ;(globalThis as Record<string, unknown>).useAuth = () => ({ token: tokenRef, isAuthenticated })
     ;(globalThis as Record<string, unknown>).navigateTo = navigateToMock
     ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: (to: unknown, from: unknown) => unknown) => fn
 
-    const mod = await import(`${middlewarePath}?v=${Date.now()}`)
+    const mod = await import(`${middlewarePath}`)
     const middleware = mod.default
 
     const to = makeRoute('/login')
@@ -142,13 +146,13 @@ describe('AC4: authenticated request to /login redirects to /', () => {
 
   test('no redirect to / when token is set and route is /projects', async () => {
     const { tokenRef, isAuthenticated } = makeAuthEnv('valid-jwt')
-    const navigateToMock = mock((path: string) => ({ redirect: path }))
+    const navigateToMock = jest.fn((path: string) => ({ redirect: path }))
 
     ;(globalThis as Record<string, unknown>).useAuth = () => ({ token: tokenRef, isAuthenticated })
     ;(globalThis as Record<string, unknown>).navigateTo = navigateToMock
     ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: (to: unknown, from: unknown) => unknown) => fn
 
-    const mod = await import(`${middlewarePath}?v=${Date.now()}`)
+    const mod = await import(`${middlewarePath}`)
     const middleware = mod.default
 
     const to = makeRoute('/projects')
@@ -161,13 +165,13 @@ describe('AC4: authenticated request to /login redirects to /', () => {
 
   test('navigateTo("/") is returned when token is set and route is /register', async () => {
     const { tokenRef, isAuthenticated } = makeAuthEnv('valid-jwt')
-    const navigateToMock = mock((path: string) => ({ redirect: path }))
+    const navigateToMock = jest.fn((path: string) => ({ redirect: path }))
 
     ;(globalThis as Record<string, unknown>).useAuth = () => ({ token: tokenRef, isAuthenticated })
     ;(globalThis as Record<string, unknown>).navigateTo = navigateToMock
     ;(globalThis as Record<string, unknown>).defineNuxtRouteMiddleware = (fn: (to: unknown, from: unknown) => unknown) => fn
 
-    const mod = await import(`${middlewarePath}?v=${Date.now()}`)
+    const mod = await import(`${middlewarePath}`)
     const middleware = mod.default
 
     const to = makeRoute('/register')

@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'bun:test'
+import { describe, test, expect } from '@jest/globals'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 

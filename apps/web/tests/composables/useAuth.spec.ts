@@ -1,10 +1,14 @@
-import { describe, test, expect, mock } from 'bun:test'
+import { describe, test, expect, beforeEach } from '@jest/globals'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { ref, computed } from 'vue'
 
 const webDir = join(__dirname, '../..')
 const composablePath = join(webDir, 'composables', 'useAuth.ts')
+
+beforeEach(() => {
+  jest.resetModules()
+})
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Helpers to build a controllable fake Nuxt cookie/state environment
@@ -13,7 +17,7 @@ const composablePath = join(webDir, 'composables', 'useAuth.ts')
 function makeFakeEnv() {
   const tokenRef = ref<string | null>(null)
   const userRef = ref<unknown>(null)
-  const fetchMock = mock((_url: string, _opts?: Record<string, unknown>) =>
+  const fetchMock = jest.fn((_url: string, _opts?: Record<string, unknown>) =>
     Promise.resolve({ accessToken: 'mock-jwt', user: { id: 1, email: 'a@b.com' } })
   )
 
@@ -92,7 +96,7 @@ describe('AC4: login() calls POST /auth/login and stores accessToken', () => {
     ;(globalThis as Record<string, unknown>).$fetch = fetchMock
 
     // Fresh import to pick up global mocks
-    const mod = await import(`${composablePath}?v=${Date.now()}`)
+    const mod = await import(`${composablePath}`)
     const { useAuth } = mod
 
     const auth = useAuth()
@@ -115,7 +119,7 @@ describe('AC4: login() calls POST /auth/login and stores accessToken', () => {
     ;(globalThis as Record<string, unknown>).computed = computed
     ;(globalThis as Record<string, unknown>).$fetch = fetchMock
 
-    const mod = await import(`${composablePath}?v=${Date.now()}`)
+    const mod = await import(`${composablePath}`)
     const auth = mod.useAuth()
 
     await auth.login({ email: 'test@example.com', password: 'secret' })
@@ -145,7 +149,7 @@ describe('AC5: logout() clears token and user state', () => {
     ;(globalThis as Record<string, unknown>).computed = computed
     ;(globalThis as Record<string, unknown>).$fetch = fetchMock
 
-    const mod = await import(`${composablePath}?v=${Date.now()}`)
+    const mod = await import(`${composablePath}`)
     const auth = mod.useAuth()
 
     auth.logout()
@@ -164,7 +168,7 @@ describe('AC5: logout() clears token and user state', () => {
     ;(globalThis as Record<string, unknown>).computed = computed
     ;(globalThis as Record<string, unknown>).$fetch = fetchMock
 
-    const mod = await import(`${composablePath}?v=${Date.now()}`)
+    const mod = await import(`${composablePath}`)
     const auth = mod.useAuth()
 
     auth.logout()
@@ -194,7 +198,7 @@ describe('AC6: isAuthenticated is a computed ref', () => {
     ;(globalThis as Record<string, unknown>).computed = computed
     ;(globalThis as Record<string, unknown>).$fetch = fetchMock
 
-    const mod = await import(`${composablePath}?v=${Date.now()}`)
+    const mod = await import(`${composablePath}`)
     const auth = mod.useAuth()
 
     expect(auth.isAuthenticated.value).toBe(false)
@@ -210,7 +214,7 @@ describe('AC6: isAuthenticated is a computed ref', () => {
     ;(globalThis as Record<string, unknown>).computed = computed
     ;(globalThis as Record<string, unknown>).$fetch = fetchMock
 
-    const mod = await import(`${composablePath}?v=${Date.now()}`)
+    const mod = await import(`${composablePath}`)
     const auth = mod.useAuth()
 
     expect(auth.isAuthenticated.value).toBe(true)
@@ -224,7 +228,7 @@ describe('AC6: isAuthenticated is a computed ref', () => {
     ;(globalThis as Record<string, unknown>).computed = computed
     ;(globalThis as Record<string, unknown>).$fetch = fetchMock
 
-    const mod = await import(`${composablePath}?v=${Date.now()}`)
+    const mod = await import(`${composablePath}`)
     const auth = mod.useAuth()
 
     expect(auth.isAuthenticated.value).toBe(false)
@@ -242,7 +246,7 @@ describe('AC6: isAuthenticated is a computed ref', () => {
     ;(globalThis as Record<string, unknown>).computed = computed
     ;(globalThis as Record<string, unknown>).$fetch = fetchMock
 
-    const mod = await import(`${composablePath}?v=${Date.now()}`)
+    const mod = await import(`${composablePath}`)
     const auth = mod.useAuth()
 
     expect(auth.isAuthenticated.value).toBe(true)

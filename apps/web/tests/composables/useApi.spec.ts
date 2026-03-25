@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from 'bun:test'
+import { describe, test, expect, beforeEach } from '@jest/globals'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { ref, computed } from 'vue'
@@ -11,7 +11,7 @@ const composablePath = join(webDir, 'composables', 'useApi.ts')
 // ──────────────────────────────────────────────────────────────────────────────
 
 function makeFetchMock() {
-  return mock((_url: string, _opts?: Record<string, unknown>) =>
+  return jest.fn((_url: string, _opts?: Record<string, unknown>) =>
     Promise.resolve({ data: 'ok' })
   )
 }
@@ -26,6 +26,12 @@ function makeAuthEnv(token: string | null = null) {
   })
 
   return { tokenRef, fakeUseAuth, fakeRuntimeConfig }
+}
+
+function fakeUseI18n() {
+  return {
+    locale: ref('en'),
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -45,9 +51,12 @@ describe('AC1: composables/useApi.ts imports useAuth', () => {
 
 describe('AC1b: Authorization header injected when token exists', () => {
   beforeEach(() => {
+    jest.resetModules()
+
     // Reset globals to a clean state before each test
-    (globalThis as Record<string, unknown>).useRuntimeConfig = undefined
+    ;(globalThis as Record<string, unknown>).useRuntimeConfig = undefined
     ;(globalThis as Record<string, unknown>).useAuth = undefined
+    ;(globalThis as Record<string, unknown>).useI18n = undefined
     ;(globalThis as Record<string, unknown>).$fetch = undefined
   })
 
@@ -57,9 +66,10 @@ describe('AC1b: Authorization header injected when token exists', () => {
 
     ;(globalThis as Record<string, unknown>).useRuntimeConfig = fakeRuntimeConfig
     ;(globalThis as Record<string, unknown>).useAuth = fakeUseAuth
+    ;(globalThis as Record<string, unknown>).useI18n = fakeUseI18n
     ;(globalThis as Record<string, unknown>).$fetch = fetchMock
 
-    const mod = await import(`${composablePath}?v=${Date.now()}`)
+    const mod = await import(`${composablePath}`)
     const { $api } = mod.useApi()
 
     await $api.get('/projects')
@@ -77,9 +87,10 @@ describe('AC1b: Authorization header injected when token exists', () => {
 
     ;(globalThis as Record<string, unknown>).useRuntimeConfig = fakeRuntimeConfig
     ;(globalThis as Record<string, unknown>).useAuth = fakeUseAuth
+    ;(globalThis as Record<string, unknown>).useI18n = fakeUseI18n
     ;(globalThis as Record<string, unknown>).$fetch = fetchMock
 
-    const mod = await import(`${composablePath}?v=${Date.now()}`)
+    const mod = await import(`${composablePath}`)
     const { $api } = mod.useApi()
 
     await $api.post('/tickets', { title: 'test' })
@@ -96,9 +107,10 @@ describe('AC1b: Authorization header injected when token exists', () => {
 
     ;(globalThis as Record<string, unknown>).useRuntimeConfig = fakeRuntimeConfig
     ;(globalThis as Record<string, unknown>).useAuth = fakeUseAuth
+    ;(globalThis as Record<string, unknown>).useI18n = fakeUseI18n
     ;(globalThis as Record<string, unknown>).$fetch = fetchMock
 
-    const mod = await import(`${composablePath}?v=${Date.now()}`)
+    const mod = await import(`${composablePath}`)
     const { $api } = mod.useApi()
 
     await $api.patch('/tickets/1', { status: 'VERIFIED' })
@@ -115,9 +127,10 @@ describe('AC1b: Authorization header injected when token exists', () => {
 
     ;(globalThis as Record<string, unknown>).useRuntimeConfig = fakeRuntimeConfig
     ;(globalThis as Record<string, unknown>).useAuth = fakeUseAuth
+    ;(globalThis as Record<string, unknown>).useI18n = fakeUseI18n
     ;(globalThis as Record<string, unknown>).$fetch = fetchMock
 
-    const mod = await import(`${composablePath}?v=${Date.now()}`)
+    const mod = await import(`${composablePath}`)
     const { $api } = mod.useApi()
 
     await $api.delete('/tickets/1')
@@ -134,9 +147,10 @@ describe('AC1b: Authorization header injected when token exists', () => {
 
     ;(globalThis as Record<string, unknown>).useRuntimeConfig = fakeRuntimeConfig
     ;(globalThis as Record<string, unknown>).useAuth = fakeUseAuth
+    ;(globalThis as Record<string, unknown>).useI18n = fakeUseI18n
     ;(globalThis as Record<string, unknown>).$fetch = fetchMock
 
-    const mod = await import(`${composablePath}?v=${Date.now()}`)
+    const mod = await import(`${composablePath}`)
     const { $api } = mod.useApi()
 
     await $api.get('/projects')
@@ -153,9 +167,10 @@ describe('AC1b: Authorization header injected when token exists', () => {
 
     ;(globalThis as Record<string, unknown>).useRuntimeConfig = fakeRuntimeConfig
     ;(globalThis as Record<string, unknown>).useAuth = fakeUseAuth
+    ;(globalThis as Record<string, unknown>).useI18n = fakeUseI18n
     ;(globalThis as Record<string, unknown>).$fetch = fetchMock
 
-    const mod = await import(`${composablePath}?v=${Date.now()}`)
+    const mod = await import(`${composablePath}`)
     const { $api } = mod.useApi()
 
     await $api.post('/auth/login', { email: 'a@b.com', password: 'secret' })
