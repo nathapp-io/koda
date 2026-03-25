@@ -1,6 +1,18 @@
 import { unwrap } from './api';
 
 describe('unwrap', () => {
+  describe('supports flat envelope shape', () => {
+    it('unwraps a single object from flat envelope', () => {
+      const response = { ret: 0, data: { id: '1', name: 'Test' } };
+      expect(unwrap(response)).toEqual({ id: '1', name: 'Test' });
+    });
+
+    it('throws for non-zero ret from flat envelope', () => {
+      const response = { ret: 7, data: null };
+      expect(() => unwrap(response)).toThrow(/exception\.7/);
+    });
+  });
+
   describe('returns inner data when ret === 0', () => {
     it('unwraps a single object', () => {
       const response = { data: { ret: 0, data: { id: '1', name: 'Test' } } };
@@ -38,6 +50,11 @@ describe('unwrap', () => {
     it('throws on negative ret', () => {
       const response = { data: { ret: -1, data: null } };
       expect(() => unwrap(response)).toThrow();
+    });
+
+    it('throws fallback exception for malformed payloads', () => {
+      const response = { data: { bad: true } } as unknown as { data: { ret: number; data: null } };
+      expect(() => unwrap(response)).toThrow(/exception\.-1/);
     });
   });
 });
