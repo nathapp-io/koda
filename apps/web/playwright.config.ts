@@ -37,10 +37,10 @@ process.env['E2E_WEB_URL'] = WEB_URL;
  */
 export default defineConfig({
   testDir: './tests/e2e',
-  fullyParallel: false,     // SQLite writes — keep sequential to avoid contention
+  fullyParallel: false,
   forbidOnly: !!process.env['CI'],
   retries: process.env['CI'] ? 2 : 0,
-  workers: 1,               // Single worker — fresh DB per run, shared state
+  workers: 1,
   reporter: [['html', { outputFolder: 'playwright-report' }], ['list']],
 
   use: {
@@ -67,8 +67,9 @@ export default defineConfig({
       },
     },
     {
-      // Web — Nuxt dev server; NUXT_API_INTERNAL_URL proxies to the API port
-      command: `bunx nuxt dev --port ${WEB_PORT}`,
+      // Web — Nuxt dev server.
+      // bun run dev uses package.json dev script which respects PORT env var.
+      command: 'bun run dev',
       url: WEB_URL,
       cwd: path.resolve(__dirname),
       reuseExistingServer: false,
@@ -76,6 +77,7 @@ export default defineConfig({
       stdout: 'pipe',
       stderr: 'pipe',
       env: {
+        PORT: String(WEB_PORT),
         NUXT_API_INTERNAL_URL: API_URL,
       },
     },
