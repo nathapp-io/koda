@@ -115,11 +115,33 @@ export const _defaultResolveContextDeps: ResolveContextDeps = {
   getConfig,
 };
 
+const DEFAULT_API_URL = 'http://localhost:3100/api';
+
 export async function resolveContext(
-  _flags: ResolveContextFlags,
-  _deps: ResolveContextDeps = _defaultResolveContextDeps,
+  flags: ResolveContextFlags,
+  deps: ResolveContextDeps = _defaultResolveContextDeps,
 ): Promise<ResolvedContext> {
-  throw new Error('resolveContext: not implemented');
+  const projectConfig = await deps.findProjectConfig();
+  const globalConfig = deps.getConfig();
+
+  const profileName = projectConfig?.profile;
+  const profile = profileName ? globalConfig.profiles[profileName] : undefined;
+
+  const apiUrl =
+    flags.apiUrl ??
+    projectConfig?.apiUrl ??
+    profile?.apiUrl ??
+    (globalConfig.apiUrl || DEFAULT_API_URL);
+
+  const apiKey =
+    flags.apiKey ??
+    profile?.apiKey ??
+    globalConfig.apiKey ??
+    '';
+
+  const projectSlug = flags.projectSlug ?? projectConfig?.projectSlug;
+
+  return { projectSlug, apiKey, apiUrl };
 }
 
 export function maskApiKey(apiKey: string): string {
