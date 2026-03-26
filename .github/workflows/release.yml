@@ -102,7 +102,7 @@ jobs:
         run: bun run db:generate
 
       - name: Build CLI
-        run: bun run build --filter=koda-cli
+        run: bunx turbo run build --filter=@nathapp/koda-cli
 
       - name: Publish to npm
         working-directory: apps/cli
