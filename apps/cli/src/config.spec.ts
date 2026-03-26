@@ -22,6 +22,9 @@ import {
   maskApiKey,
   findProjectConfig,
   resolveContext,
+  setProfile,
+  getProfiles,
+  removeProfile,
   _configDeps,
   type Profile,
   type ProjectConfig,
@@ -251,6 +254,103 @@ describe('config', () => {
 
       const result = await findProjectConfig('/a/b/c', { readFile: mockReadFile, exists: mockExists });
       expect(result?.projectSlug).toBe('my-project');
+    });
+  });
+
+  describe('setProfile', () => {
+    it('AC1: writes { apiUrl, apiKey } under profiles.<name> in the global config store', () => {
+      setProfile('staging', { apiUrl: 'https://staging.koda.io/api', apiKey: 'stg-xxx' });
+      const storedProfiles = mockStore.get('profiles') as Record<string, Profile>;
+      expect(storedProfiles).toHaveProperty('staging');
+      expect(storedProfiles.staging).toEqual({
+        apiUrl: 'https://staging.koda.io/api',
+        apiKey: 'stg-xxx',
+      });
+    });
+
+    it('AC6: calling setProfile twice with different apiKey stores only the second value', () => {
+      setProfile('staging', { apiUrl: 'https://staging.koda.io/api', apiKey: 'old-key' });
+      setProfile('staging', { apiUrl: 'https://staging.koda.io/api', apiKey: 'new-key' });
+      const storedProfiles = mockStore.get('profiles') as Record<string, Profile>;
+      expect(storedProfiles.staging.apiKey).toBe('new-key');
+    });
+
+    it('does not overwrite other profiles when adding a new one', () => {
+      mockData.profiles = { prod: { apiUrl: 'https://prod.koda.io/api', apiKey: 'prod-key' } };
+      setProfile('staging', { apiUrl: 'https://staging.koda.io/api', apiKey: 'stg-key' });
+      const storedProfiles = mockStore.get('profiles') as Record<string, Profile>;
+      expect(storedProfiles).toHaveProperty('prod');
+      expect(storedProfiles).toHaveProperty('staging');
+    });
+  });
+
+  describe('getProfiles', () => {
+    it('AC2: returns array of { name, apiUrl } entries for each stored profile', () => {
+      mockData.profiles = {
+        staging: { apiUrl: 'https://staging.koda.io/api', apiKey: 'stg-xxx' },
+        prod: { apiUrl: 'https://prod.koda.io/api', apiKey: 'prod-yyy' },
+      };
+      const result = getProfiles();
+      expect(result).toHaveLength(2);
+      expect(result).toEqual(
+        expect.arrayContaining([
+          { name: 'staging', apiUrl: 'https://staging.koda.io/api' },
+          { name: 'prod', apiUrl: 'https://prod.koda.io/api' },
+        ]),
+      );
+    });
+
+    it('AC3: returns empty array when profiles is empty', () => {
+      mockData.profiles = {};
+      const result = getProfiles();
+      expect(result).toEqual([]);
+    });
+
+    it('AC3: returns empty array when profiles key is absent', () => {
+      // no mockData.profiles set — mockStore.get returns {} for 'profiles'
+      const result = getProfiles();
+      expect(result).toEqual([]);
+    });
+
+    it('does not include apiKey in returned entries', () => {
+      mockData.profiles = {
+        staging: { apiUrl: 'https://staging.koda.io/api', apiKey: 'secret-key' },
+      };
+      const result = getProfiles();
+      expect(result[0]).not.toHaveProperty('apiKey');
+    });
+  });
+
+  describe('removeProfile', () => {
+    it('AC4: removes profiles.<name> from the global config store', () => {
+      mockData.profiles = {
+        staging: { apiUrl: 'https://staging.koda.io/api', apiKey: 'stg-xxx' },
+      };
+      removeProfile('staging');
+      const storedProfiles = mockStore.get('profiles') as Record<string, Profile>;
+      expect(storedProfiles).not.toHaveProperty('staging');
+    });
+
+    it('AC4: returns without error when profile exists', () => {
+      mockData.profiles = {
+        staging: { apiUrl: 'https://staging.koda.io/api', apiKey: 'stg-xxx' },
+      };
+      expect(() => removeProfile('staging')).not.toThrow();
+    });
+
+    it('AC5: throws error containing "Profile not found: nonexistent" for missing profile', () => {
+      mockData.profiles = {};
+      expect(() => removeProfile('nonexistent')).toThrow('Profile not found: nonexistent');
+    });
+
+    it('does not affect other profiles when removing one', () => {
+      mockData.profiles = {
+        staging: { apiUrl: 'https://staging.koda.io/api', apiKey: 'stg-xxx' },
+        prod: { apiUrl: 'https://prod.koda.io/api', apiKey: 'prod-yyy' },
+      };
+      removeProfile('staging');
+      const storedProfiles = mockStore.get('profiles') as Record<string, Profile>;
+      expect(storedProfiles).toHaveProperty('prod');
     });
   });
 

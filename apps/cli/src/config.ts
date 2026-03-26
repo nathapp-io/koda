@@ -164,6 +164,19 @@ export function maskApiKey(apiKey: string): string {
   return `***${visible}`;
 }
 
+export function setProfile(_name: string, _profile: Profile): void {
+  // stub — not yet implemented
+}
+
+export function getProfiles(): Array<{ name: string; apiUrl: string }> {
+  // stub — not yet implemented
+  return [];
+}
+
+export function removeProfile(_name: string): void {
+  // stub — not yet implemented
+}
+
 export async function findProjectConfig(dir?: string, deps: ConfigDeps = _configDeps): Promise<ProjectConfig | null> {
   let currentDir = dir || process.cwd();
   let parentDir = dirname(currentDir);

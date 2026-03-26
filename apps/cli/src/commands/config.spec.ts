@@ -12,6 +12,9 @@ jest.mock('conf', () => {
   return jest.fn(() => mockStore);
 });
 
+// Shared mock profiles store for profile tests
+const mockProfiles: Record<string, { apiUrl: string; apiKey: string }> = {};
+
 // Mock config module to use mockData
 jest.mock('../config', () => ({
   getConfig: jest.fn(() => ({
@@ -45,9 +48,28 @@ jest.mock('../config', () => ({
     const visible = key.slice(-6);
     return `***${visible}`;
   }),
+  getProfiles: jest.fn(() =>
+    Object.entries(mockProfiles).map(([name, p]) => ({ name, apiUrl: p.apiUrl })),
+  ),
+  setProfile: jest.fn((name: string, profile: { apiUrl: string; apiKey: string }) => {
+    mockProfiles[name] = profile;
+  }),
+  removeProfile: jest.fn((name: string) => {
+    if (!(name in mockProfiles)) {
+      throw new Error(`Profile not found: ${name}`);
+    }
+    delete mockProfiles[name];
+  }),
 }));
 
-import { configShow, configSet } from './config';
+import {
+  configShow,
+  configSet,
+  configProfileList,
+  configProfileListAction,
+  configProfileRemoveAction,
+  type ConfigProfileActionDeps,
+} from './config';
 
 describe('config command', () => {
   beforeEach(() => {
@@ -119,5 +141,101 @@ describe('config command', () => {
       const result = configSet({ apiKey: 'sk-proj-newkey123456' });
       expect(result).toEqual(expect.objectContaining({ success: true }));
     });
+  });
+});
+
+describe('configProfileList', () => {
+  beforeEach(() => {
+    Object.keys(mockProfiles).forEach((k) => delete mockProfiles[k]);
+    jest.clearAllMocks();
+  });
+
+  it('AC2: returns array of { name, apiUrl } entries for each stored profile', () => {
+    mockProfiles.staging = { apiUrl: 'https://staging.koda.io/api', apiKey: 'stg-xxx' };
+    mockProfiles.prod = { apiUrl: 'https://prod.koda.io/api', apiKey: 'prod-yyy' };
+    const result = configProfileList();
+    expect(result).toHaveLength(2);
+    expect(result).toEqual(
+      expect.arrayContaining([
+        { name: 'staging', apiUrl: 'https://staging.koda.io/api' },
+        { name: 'prod', apiUrl: 'https://prod.koda.io/api' },
+      ]),
+    );
+  });
+
+  it('AC3: returns empty array when profiles is empty', () => {
+    const result = configProfileList();
+    expect(result).toEqual([]);
+  });
+});
+
+describe('configProfileListAction', () => {
+  let exitSpy: jest.SpyInstance;
+  let logSpy: jest.SpyInstance;
+
+  function makeDeps(profiles: Array<{ name: string; apiUrl: string }>): ConfigProfileActionDeps {
+    return {
+      getProfiles: jest.fn(() => profiles),
+      setProfile: jest.fn(),
+      removeProfile: jest.fn(),
+    };
+  }
+
+  beforeEach(() => {
+    exitSpy = jest.spyOn(process, 'exit').mockImplementation((() => {}) as any);
+    logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('AC7: prints Name and ApiUrl for each profile and exits with code 0', () => {
+    const deps = makeDeps([{ name: 'staging', apiUrl: 'https://staging.koda.io/api' }]);
+    configProfileListAction(deps);
+    expect(exitSpy).toHaveBeenCalledWith(0);
+    const output = logSpy.mock.calls.flat().join('\n');
+    expect(output).toContain('staging');
+    expect(output).toContain('https://staging.koda.io/api');
+  });
+
+  it('AC8: prints "No profiles configured" and exits with code 0 when no profiles exist', () => {
+    const deps = makeDeps([]);
+    configProfileListAction(deps);
+    expect(exitSpy).toHaveBeenCalledWith(0);
+    const output = logSpy.mock.calls.flat().join('\n');
+    expect(output).toContain('No profiles configured');
+  });
+});
+
+describe('configProfileRemoveAction', () => {
+  let exitSpy: jest.SpyInstance;
+  let errorSpy: jest.SpyInstance;
+
+  function makeDeps(removeImpl: (name: string) => void): ConfigProfileActionDeps {
+    return {
+      getProfiles: jest.fn(() => []),
+      setProfile: jest.fn(),
+      removeProfile: jest.fn(removeImpl),
+    };
+  }
+
+  beforeEach(() => {
+    exitSpy = jest.spyOn(process, 'exit').mockImplementation((() => {}) as any);
+    errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('AC9: exits with code 1 and prints "Profile not found: nonexistent" for missing profile', () => {
+    const deps = makeDeps(() => {
+      throw new Error('Profile not found: nonexistent');
+    });
+    configProfileRemoveAction('nonexistent', deps);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    const output = errorSpy.mock.calls.flat().join('\n');
+    expect(output).toContain('Profile not found: nonexistent');
   });
 });
