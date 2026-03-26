@@ -1,4 +1,5 @@
 <script setup lang="ts">
+// @ts-expect-error - locales and setLocale are added by @nuxtjs/i18n ComposerCustomProperties
 const { locale, locales, setLocale } = useI18n()
 
 const allLocales = computed(() =>
