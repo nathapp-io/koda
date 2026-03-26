@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { resolveAuth } from '../utils/auth';
+import { resolveContext } from '../config';
 import { configureClient } from '../client';
 import { TicketsService, TicketLinksService, LabelsService, TicketLink } from '../generated';
 import { table, error } from '../utils/output';
@@ -22,7 +23,7 @@ export function ticketCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const projectSlug = options.project || 'koda';
 
         // Validate required options
         if (!projectSlug || !options.type || !options.title) {
@@ -87,19 +88,24 @@ export function ticketCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
 
         const response = await TicketsService.list(client, {
-          projectSlug,
+          projectSlug: ctx.projectSlug,
           status: options.status,
           type: options.type,
           priority: options.priority,
@@ -148,7 +154,7 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const projectSlug = options.project || 'koda';
 
         const response = await TicketsService.list(client, {
           projectSlug,
@@ -194,7 +200,7 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const projectSlug = options.project || 'koda';
 
         const response = await TicketsService.show(client, projectSlug, ref);
         const ticketData = unwrap(response);
@@ -255,7 +261,7 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const projectSlug = options.project || 'koda';
 
         await TicketsService.verify(client, projectSlug, ref, {
           body: options.comment,
@@ -288,7 +294,7 @@ export function ticketCommand(program: Command): void {
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
         const agentSlug = options.agent ?? options.to ?? 'self';
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const projectSlug = options.project || 'koda';
 
         const response = await TicketsService.assign(client, projectSlug, ref, { agentSlug });
         const ticketData = unwrap(response);
@@ -320,7 +326,7 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const projectSlug = options.project || 'koda';
 
         await TicketsService.start(client, projectSlug, ref);
 
@@ -354,7 +360,7 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const projectSlug = options.project || 'koda';
 
         const payload: { body: string; type: string; gitRef?: string } = {
           body: options.comment,
@@ -397,7 +403,7 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const projectSlug = options.project || 'koda';
 
         const status = options.pass ? 'closed' : 'in_progress';
         await TicketsService.verifyFix(client, projectSlug, ref, {
@@ -428,7 +434,7 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const projectSlug = options.project || 'koda';
 
         await TicketsService.close(client, projectSlug, ref);
 
@@ -461,7 +467,7 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const projectSlug = options.project || 'koda';
 
         await TicketsService.reject(client, projectSlug, ref, {
           body: options.comment,
@@ -494,7 +500,7 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const projectSlug = options.project || 'koda';
 
         const payload: { title?: string; description?: string; priority?: string } = {};
         if (options.title) payload.title = options.title;
@@ -537,7 +543,7 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const projectSlug = options.project || 'koda';
 
         await TicketsService.delete(client, projectSlug, ref);
 
@@ -565,7 +571,7 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const projectSlug = options.project || 'koda';
 
         const response = await TicketLinksService.create(client, projectSlug, ref, { url: options.url });
         const linkData = unwrap(response) as TicketLink;
@@ -599,7 +605,7 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const projectSlug = options.project || 'koda';
 
         const listResponse = await TicketLinksService.list(client, projectSlug, ref);
         const links = unwrap(listResponse) as TicketLink[];
@@ -636,7 +642,7 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const projectSlug = options.project || 'koda';
 
         await LabelsService.addToTicket(client, projectSlug, ref, options.label);
 
@@ -664,7 +670,7 @@ export function ticketCommand(program: Command): void {
         }
 
         const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const projectSlug = options.project || 'koda';
 
         await LabelsService.removeFromTicket(client, projectSlug, ref, options.label);
 

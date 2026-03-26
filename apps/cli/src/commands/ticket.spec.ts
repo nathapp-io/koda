@@ -76,11 +76,13 @@ jest.mock('../config', () => ({
     if (key.length <= 8) return '****';
     return key.substring(0, 4) + '*'.repeat(key.length - 8) + key.substring(key.length - 4);
   }),
+  resolveContext: jest.fn(),
 }));
 
 import { Command } from 'commander';
 import { ticketCommand } from './ticket';
 import { TicketsService, LabelsService } from '../generated';
+import { resolveContext } from '../config';
 
 describe('ticketCommand', () => {
   let program: Command;
@@ -107,6 +109,11 @@ describe('ticketCommand', () => {
     }) as any);
 
     jest.clearAllMocks();
+    (resolveContext as jest.Mock).mockImplementation(async (flags: { projectSlug?: string }) => ({
+      projectSlug: flags.projectSlug,
+      apiKey: mockData.apiKey || '',
+      apiUrl: mockData.apiUrl || '',
+    }));
     (TicketsService.create as jest.Mock).mockReset();
     (TicketsService.list as jest.Mock).mockReset();
     (TicketsService.show as jest.Mock).mockReset();
@@ -495,7 +502,7 @@ describe('ticketCommand', () => {
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
       const listCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'list');
 
-      await listCmd?.parse(['node', 'test', '--project', 'test-project']);
+      await listCmd?.parseAsync(['node', 'test', '--project', 'test-project']);
 
       expect(TicketsService.list).toHaveBeenCalledWith(
         expect.any(Object),
@@ -526,7 +533,7 @@ describe('ticketCommand', () => {
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
       const listCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'list');
 
-      await listCmd?.parse([
+      await listCmd?.parseAsync([
         'node',
         'test',
         '--project',
@@ -563,7 +570,7 @@ describe('ticketCommand', () => {
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
       const listCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'list');
 
-      await listCmd?.parse([
+      await listCmd?.parseAsync([
         'node',
         'test',
         '--project',
@@ -600,7 +607,7 @@ describe('ticketCommand', () => {
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
       const listCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'list');
 
-      await listCmd?.parse([
+      await listCmd?.parseAsync([
         'node',
         'test',
         '--project',
@@ -637,7 +644,7 @@ describe('ticketCommand', () => {
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
       const listCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'list');
 
-      await listCmd?.parse([
+      await listCmd?.parseAsync([
         'node',
         'test',
         '--project',
@@ -674,7 +681,7 @@ describe('ticketCommand', () => {
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
       const listCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'list');
 
-      await listCmd?.parse([
+      await listCmd?.parseAsync([
         'node',
         'test',
         '--project',
@@ -701,7 +708,7 @@ describe('ticketCommand', () => {
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
       const listCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'list');
 
-      await listCmd?.parse([
+      await listCmd?.parseAsync([
         'node',
         'test',
         '--project',
@@ -728,7 +735,7 @@ describe('ticketCommand', () => {
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
       const listCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'list');
 
-      await listCmd?.parse([
+      await listCmd?.parseAsync([
         'node',
         'test',
         '--project',
@@ -765,7 +772,7 @@ describe('ticketCommand', () => {
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
       const listCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'list');
 
-      await listCmd?.parse(['node', 'test', '--project', 'test-project']);
+      await listCmd?.parseAsync(['node', 'test', '--project', 'test-project']);
 
       expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('#'));
       expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('Type'));
@@ -796,7 +803,7 @@ describe('ticketCommand', () => {
       const listCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'list');
 
       try {
-        await listCmd?.parse(['node', 'test', '--project', 'test-project', '--json']);
+        await listCmd?.parseAsync(['node', 'test', '--project', 'test-project', '--json']);
       } catch {
         // Expected
       }
@@ -1734,7 +1741,7 @@ describe('ticketCommand', () => {
       const listCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'list');
 
       try {
-        await listCmd?.parse(['node', 'test', '--project', 'test-project']);
+        await listCmd?.parseAsync(['node', 'test', '--project', 'test-project']);
       } catch {
         // Expected
       }
@@ -1752,7 +1759,7 @@ describe('ticketCommand', () => {
       const listCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'list');
 
       try {
-        await listCmd?.parse(['node', 'test', '--project', 'test-project']);
+        await listCmd?.parseAsync(['node', 'test', '--project', 'test-project']);
       } catch {
         // Expected
       }
@@ -1770,7 +1777,7 @@ describe('ticketCommand', () => {
       const listCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'list');
 
       try {
-        await listCmd?.parse(['node', 'test', '--project', 'test-project']);
+        await listCmd?.parseAsync(['node', 'test', '--project', 'test-project']);
       } catch {
         // Expected
       }
