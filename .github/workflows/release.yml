@@ -1,0 +1,239 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+      - "v*.*.*-canary.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to re-publish (e.g. v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+# ─── Shared info ──────────────────────────────────────────────────────────────
+
+jobs:
+  info:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.info.outputs.tag }}
+      version: ${{ steps.info.outputs.version }}
+      npm_tag: ${{ steps.info.outputs.npm_tag }}
+      prerelease: ${{ steps.info.outputs.prerelease }}
+      notify: ${{ steps.info.outputs.notify }}
+      docker_tags_api: ${{ steps.docker.outputs.tags_api }}
+      docker_tags_web: ${{ steps.docker.outputs.tags_web }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set release info
+        id: info
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          if [[ "$TAG" == *"-canary."* ]]; then
+            echo "npm_tag=canary" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "notify=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "npm_tag=latest" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "notify=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate version
+        run: |
+          TAG="${{ steps.info.outputs.tag }}"
+          PKG_VERSION="v$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG_VERSION" ]; then
+            echo "❌ Tag $TAG does not match package.json version $PKG_VERSION"
+            exit 1
+          fi
+          echo "✅ Version match: $TAG"
+
+      - name: Compute Docker tags
+        id: docker
+        run: |
+          TAG="${{ steps.info.outputs.tag }}"
+          VERSION="${{ steps.info.outputs.version }}"
+
+          if [[ "$TAG" == *"-canary."* ]]; then
+            echo "tags_api=nathapp/koda-api:canary" >> "$GITHUB_OUTPUT"
+            echo "tags_web=nathapp/koda-web:canary" >> "$GITHUB_OUTPUT"
+          else
+            MAJOR_MINOR=$(echo "$VERSION" | cut -d. -f1-2)
+            echo "tags_api=nathapp/koda-api:${TAG},nathapp/koda-api:${MAJOR_MINOR},nathapp/koda-api:latest" >> "$GITHUB_OUTPUT"
+            echo "tags_web=nathapp/koda-web:${TAG},nathapp/koda-web:${MAJOR_MINOR},nathapp/koda-web:latest" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ─── CLI: npm publish ─────────────────────────────────────────────────────────
+
+  cli:
+    needs: info
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: npm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: bun run db:generate
+
+      - name: Build CLI
+        run: bun run build --filter=koda-cli
+
+      - name: Publish to npm
+        working-directory: apps/cli
+        run: npm publish --access public --tag ${{ needs.info.outputs.npm_tag }} --provenance
+        env:
+          NPM_CONFIG_PROVENANCE: "true"
+
+  # ─── Docker: API ──────────────────────────────────────────────────────────────
+
+  docker-api:
+    needs: info
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push API
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ needs.info.outputs.docker_tags_api }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ─── Docker: Web ──────────────────────────────────────────────────────────────
+
+  docker-web:
+    needs: info
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ needs.info.outputs.docker_tags_web }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ─── GitHub Release ───────────────────────────────────────────────────────────
+
+  release:
+    needs: [info, cli, docker-api, docker-web]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract release notes
+        id: notes
+        run: |
+          VERSION="${{ needs.info.outputs.version }}"
+          NOTES=$(awk "/^## \[${VERSION}\]/{found=1; next} /^## \[/{if(found) exit} found{print}" CHANGELOG.md 2>/dev/null || true)
+          if [ -n "$NOTES" ]; then
+            echo "$NOTES" > /tmp/release-notes.md
+            echo "has_notes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_notes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release (with changelog)
+        if: steps.notes.outputs.has_notes == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.info.outputs.tag }}
+          name: ${{ needs.info.outputs.tag }}
+          body_path: /tmp/release-notes.md
+          prerelease: ${{ needs.info.outputs.prerelease }}
+
+      - name: Create GitHub Release (auto-generated)
+        if: steps.notes.outputs.has_notes != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.info.outputs.tag }}
+          name: ${{ needs.info.outputs.tag }}
+          prerelease: ${{ needs.info.outputs.prerelease }}
+          generate_release_notes: true
+
+  # ─── Notify ───────────────────────────────────────────────────────────────────
+
+  notify:
+    needs: [info, release]
+    if: needs.info.outputs.notify == 'true' && vars.TELEGRAM_CHAT_ID != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Send Telegram notification
+        run: |
+          VERSION="${{ needs.info.outputs.tag }}"
+          NOTES=""
+          if [ -f CHANGELOG.md ]; then
+            NOTES=$(awk "/^## \[${VERSION#v}\]/{found=1; next} /^## \[/{if(found) exit} found{print}" CHANGELOG.md | head -20)
+          fi
+
+          MSG="🚀 *Koda ${VERSION} released*
+
+          \`\`\`
+          npm install -g koda-cli
+          docker pull nathapp/koda-api:${VERSION}
+          docker pull nathapp/koda-web:${VERSION}
+          \`\`\`
+
+          ${NOTES}"
+
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ vars.TELEGRAM_CHAT_ID }}" \
+            -d parse_mode="Markdown" \
+            -d text="$MSG" || true
