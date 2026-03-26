@@ -1,10 +1,6 @@
 <script setup lang="ts">
-const i18n = useI18n()
-const locale = i18n.locale
-// @ts-ignore
-const locales = i18n.locales
-// @ts-ignore
-const setLocale = i18n.setLocale
+// @ts-expect-error - locales and setLocale are added by @nuxtjs/i18n ComposerCustomProperties
+const { locale, locales, setLocale } = useI18n()
 
 const allLocales = computed(() =>
   (locales.value as Array<{ code: string; name: string }>).filter(
