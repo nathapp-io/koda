@@ -12,6 +12,7 @@ import { ProjectsModule } from './projects/projects.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { CommentsModule } from './comments/comments.module';
 import { LabelsModule } from './labels/labels.module';
+import { TicketLinksModule } from './ticket-links/ticket-links.module';
 import { HealthModule } from './health/health.module';
 import { RagModule } from './rag/rag.module';
 import { WebhookModule } from './webhook/webhook.module';
@@ -52,6 +53,7 @@ import { validate } from './config/env.validation';
     TicketsModule,
     CommentsModule,
     LabelsModule,
+    TicketLinksModule,
     HealthModule,
     RagModule,
     WebhookModule,
