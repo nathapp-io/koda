@@ -45,7 +45,7 @@ export default defineConfig({
     },
     {
       // Web
-      command: `bash -lc "bunx nuxt dev --port ${WEB_PORT} 2>&1 | grep -Ev 'Two component files resolving to the same name|/components/ui/.*/index.ts|/components/ui/.*/[A-Za-z]+\\.vue|MODULE_TYPELESS_PACKAGE_JSON|Reparsing as ES module because module syntax was detected|To eliminate this warning, add \"type\": \"module\"'"`,
+      command: `bash -lc "bunx nuxt dev --port ${WEB_PORT} 2>&1 | grep -Ev 'Two component files resolving to the same name|/components/ui/.*/index.ts|/components/ui/.*/[A-Za-z]+\\.vue|MODULE_TYPELESS_PACKAGE_JSON|Reparsing as ES module because module syntax was detected|To eliminate this warning, add "type": "module"'"`,
       url: WEB_URL,
       cwd: path.resolve(__dirname),
       reuseExistingServer: false,

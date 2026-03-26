@@ -1,5 +1,4 @@
 import { test, expect } from '@playwright/test';
-import { E2E_ADMIN } from './fixtures/api-client';
 import { webLogin } from './fixtures/page-helpers';
 
 test.describe('Authentication', () => {

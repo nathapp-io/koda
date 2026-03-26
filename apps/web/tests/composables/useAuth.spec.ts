@@ -49,7 +49,7 @@ function makeFakeEnv() {
 }
 
 function applyNuxtGlobals(env: ReturnType<typeof makeFakeEnv>) {
-  ;(globalThis as Record<string, unknown>).useCookie = env.fakeCookie
+  (globalThis as Record<string, unknown>).useCookie = env.fakeCookie
   ;(globalThis as Record<string, unknown>).useState = env.fakeState
   ;(globalThis as Record<string, unknown>).computed = computed
   ;(globalThis as Record<string, unknown>).$fetch = env.fetchMock
