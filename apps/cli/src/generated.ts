@@ -62,6 +62,14 @@ export class CommentsService {
   }
 }
 
+export interface TicketLink {
+  id: string;
+  url: string;
+  provider: string;
+  externalRef: string;
+  createdAt: string;
+}
+
 export interface Ticket {
   id: string;
   number: number;
@@ -77,6 +85,7 @@ export interface Ticket {
   createdAt: string;
   updatedAt?: string;
   comments?: Comment[];
+  links?: TicketLink[];
 }
 
 export class TicketsService {
@@ -179,6 +188,34 @@ export class TicketsService {
 
   static async delete(client: AxiosInstance, projectSlug: string, ref: string): Promise<Wrapped<null>> {
     return client.delete(`/projects/${projectSlug}/tickets/${ref}`);
+  }
+}
+
+export class TicketLinksService {
+  static async create(
+    client: AxiosInstance,
+    projectSlug: string,
+    ref: string,
+    data: { url: string }
+  ): Promise<Wrapped<TicketLink>> {
+    return client.post(`/projects/${projectSlug}/tickets/${ref}/links`, data);
+  }
+
+  static async list(
+    client: AxiosInstance,
+    projectSlug: string,
+    ref: string
+  ): Promise<Wrapped<TicketLink[]>> {
+    return client.get(`/projects/${projectSlug}/tickets/${ref}/links`);
+  }
+
+  static async delete(
+    client: AxiosInstance,
+    projectSlug: string,
+    ref: string,
+    linkId: string
+  ): Promise<Wrapped<null>> {
+    return client.delete(`/projects/${projectSlug}/tickets/${ref}/links/${linkId}`);
   }
 }
 
