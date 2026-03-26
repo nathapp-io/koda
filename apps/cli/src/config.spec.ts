@@ -1,9 +1,12 @@
 // Mock conf before importing config module
-const mockData: Record<string, string> = {};
+const mockData: Record<string, unknown> = {};
 
 const mockStore = {
-  get: jest.fn((key: string) => mockData[key] || ''),
-  set: jest.fn((key: string, value: string) => {
+  get: jest.fn((key: string) => {
+    if (key in mockData) return mockData[key];
+    return key === 'profiles' ? {} : '';
+  }),
+  set: jest.fn((key: string, value: unknown) => {
     mockData[key] = value;
   }),
 };
@@ -12,7 +15,18 @@ jest.mock('conf', () => {
   return jest.fn(() => mockStore);
 });
 
-import { getConfig, setConfig, validateApiKey, maskApiKey, findProjectConfig, _configDeps } from './config';
+import {
+  getConfig,
+  setConfig,
+  validateApiKey,
+  maskApiKey,
+  findProjectConfig,
+  resolveContext,
+  _configDeps,
+  type Profile,
+  type ProjectConfig,
+  type ResolveContextDeps,
+} from './config';
 
 describe('config', () => {
   beforeEach(() => {
@@ -237,6 +251,77 @@ describe('config', () => {
 
       const result = await findProjectConfig('/a/b/c', { readFile: mockReadFile, exists: mockExists });
       expect(result?.projectSlug).toBe('my-project');
+    });
+  });
+
+  describe('resolveContext', () => {
+    function makeProjectConfigDep(config: ProjectConfig | null): ResolveContextDeps['findProjectConfig'] {
+      return jest.fn(async () => config);
+    }
+
+    function makeGlobalConfig(overrides: Partial<{ apiKey: string; apiUrl: string; profiles: Record<string, Profile> }>): ResolveContextDeps['getConfig'] {
+      return jest.fn(() => ({
+        apiKey: overrides.apiKey ?? '',
+        apiUrl: overrides.apiUrl ?? '',
+        profiles: overrides.profiles ?? {},
+      }));
+    }
+
+    it('AC1: flag projectSlug overrides project config', async () => {
+      const deps: ResolveContextDeps = {
+        findProjectConfig: makeProjectConfigDep({ projectSlug: 'from-config' }),
+        getConfig: makeGlobalConfig({}),
+      };
+      const result = await resolveContext({ projectSlug: 'override' }, deps);
+      expect(result.projectSlug).toBe('override');
+    });
+
+    it('AC2: projectSlug comes from .koda/config.json when no flag provided', async () => {
+      const deps: ResolveContextDeps = {
+        findProjectConfig: makeProjectConfigDep({ projectSlug: 'from-project-config' }),
+        getConfig: makeGlobalConfig({}),
+      };
+      const result = await resolveContext({}, deps);
+      expect(result.projectSlug).toBe('from-project-config');
+    });
+
+    it('AC3: apiUrl and apiKey come from named profile when .koda/config.json has profile field', async () => {
+      const stagingProfile: Profile = { apiKey: 'staging-key-abcdef', apiUrl: 'https://staging.example.com' };
+      const deps: ResolveContextDeps = {
+        findProjectConfig: makeProjectConfigDep({ projectSlug: 'my-project', profile: 'staging' }),
+        getConfig: makeGlobalConfig({ profiles: { staging: stagingProfile } }),
+      };
+      const result = await resolveContext({}, deps);
+      expect(result.apiUrl).toBe('https://staging.example.com');
+      expect(result.apiKey).toBe('staging-key-abcdef');
+    });
+
+    it('AC4: apiUrl comes from .koda/config.json when specified and no CLI flag overrides it', async () => {
+      const deps: ResolveContextDeps = {
+        findProjectConfig: makeProjectConfigDep({ projectSlug: 'my-project', apiUrl: 'https://project-level.example.com' }),
+        getConfig: makeGlobalConfig({ apiUrl: 'https://global.example.com' }),
+      };
+      const result = await resolveContext({}, deps);
+      expect(result.apiUrl).toBe('https://project-level.example.com');
+    });
+
+    it('AC5: apiKey comes from global conf store when .koda/config.json has no profile field', async () => {
+      const deps: ResolveContextDeps = {
+        findProjectConfig: makeProjectConfigDep({ projectSlug: 'my-project' }),
+        getConfig: makeGlobalConfig({ apiKey: 'global-key-abcdefghij' }),
+      };
+      const result = await resolveContext({}, deps);
+      expect(result.apiKey).toBe('global-key-abcdefghij');
+    });
+
+    it('AC6: returns built-in defaults when no .koda/config.json and global conf store is empty', async () => {
+      const deps: ResolveContextDeps = {
+        findProjectConfig: makeProjectConfigDep(null),
+        getConfig: makeGlobalConfig({}),
+      };
+      const result = await resolveContext({}, deps);
+      expect(result.apiUrl).toBe('http://localhost:3100/api');
+      expect(result.apiKey).toBe('');
     });
   });
 });

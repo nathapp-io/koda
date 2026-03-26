@@ -12,6 +12,10 @@ const schema = {
     type: 'string',
     default: '',
   },
+  profiles: {
+    type: 'object',
+    default: {},
+  },
 };
 
 const store = new Conf({
@@ -20,14 +24,40 @@ const store = new Conf({
   schema,
 });
 
-export interface Config {
+export interface Profile {
   apiKey: string;
   apiUrl: string;
 }
 
+export interface Config {
+  apiKey: string;
+  apiUrl: string;
+  profiles: Record<string, Profile>;
+}
+
 export interface ProjectConfig {
-  projectSlug: string;
+  projectSlug?: string;
+  apiUrl?: string;
+  apiKey?: string;
+  profile?: string;
   [key: string]: unknown;
+}
+
+export interface ResolvedContext {
+  projectSlug: string | undefined;
+  apiKey: string;
+  apiUrl: string;
+}
+
+export interface ResolveContextFlags {
+  projectSlug?: string;
+  apiKey?: string;
+  apiUrl?: string;
+}
+
+export interface ResolveContextDeps {
+  findProjectConfig: (dir?: string) => Promise<ProjectConfig | null>;
+  getConfig: () => Config;
 }
 
 export interface ConfigDeps {
@@ -59,6 +89,7 @@ export function getConfig(): Config {
   return {
     apiKey: (store.get('apiKey') as string) || '',
     apiUrl: (store.get('apiUrl') as string) || '',
+    profiles: (store.get('profiles') as Record<string, Profile>) || {},
   };
 }
 
@@ -73,6 +104,22 @@ export function setConfig(partial: Partial<Config>): void {
   if (partial.apiUrl !== undefined) {
     store.set('apiUrl', partial.apiUrl);
   }
+
+  if (partial.profiles !== undefined) {
+    store.set('profiles', partial.profiles);
+  }
+}
+
+export const _defaultResolveContextDeps: ResolveContextDeps = {
+  findProjectConfig: (dir?: string) => findProjectConfig(dir),
+  getConfig,
+};
+
+export async function resolveContext(
+  _flags: ResolveContextFlags,
+  _deps: ResolveContextDeps = _defaultResolveContextDeps,
+): Promise<ResolvedContext> {
+  throw new Error('resolveContext: not implemented');
 }
 
 export function maskApiKey(apiKey: string): string {
