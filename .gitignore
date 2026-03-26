@@ -74,3 +74,14 @@ out/
 apps/web/playwright-report/
 apps/web/test-results/
 apps/api/lancedb/
+
+# nax runtime (top-level)
+nax.lock
+nax/**/runs/
+nax/metrics.json
+nax/**/status.json
+nax/**/plan/
+nax/**/acceptance-refined.json
+nax/**/interactions/
+.nax-pids
+.nax-wt/
