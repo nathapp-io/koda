@@ -141,8 +141,7 @@
       "SLACK_WEBHOOK_URL",
       "SENTRY_AUTH_TOKEN",
       "DATADOG_API_KEY"
-    ],
-    "environmentalEscalationDivisor": 2
+    ]
   },
   "tdd": {
     "maxRetries": 2,
@@ -166,7 +165,7 @@
     "maxTokens": 2000
   },
   "analyze": {
-    "llmEnhanced": true,
+    "llmEnhanced": false,
     "model": "balanced",
     "fallbackToKeywords": true,
     "maxCodebaseSummaryTokens": 5000
@@ -175,15 +174,21 @@
     "enabled": true,
     "checks": [
       "typecheck",
-      "lint"
+      "lint",
+      "semantic"
     ],
     "commands": {
+      "build": "bun run build",
       "typecheck": "bunx turbo type-check",
       "lint": "bunx turbo lint",
       "lintFix": "bunx turbo lint:fix",
       "formatFix": "bunx turbo lint:fix"
     },
-    "pluginMode": "deferred"
+    "pluginMode": "deferred",
+    "semantic": {
+      "modelTier": "fast",
+      "rules": []
+    }    
   },
   "plan": {
     "model": "balanced",
@@ -233,5 +238,5 @@
     "maxRetries": 2,
     "model": "balanced"
   },
-  "costLimit": 75.0
+  "costLimit": 50.0
 }

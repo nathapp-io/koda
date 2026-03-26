@@ -1,6 +1,7 @@
 {
     "quality": {
         "commands": {
+            "build": "bun run build",            
             "test": "bun run test",
             "testScoped": "bunx jest {{files}} --forceExit --passWithNoTests --testPathIgnorePatterns=integration",
             "typecheck": "bun run type-check",

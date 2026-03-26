@@ -1,7 +1,7 @@
 {
   "quality": {
-    "requireTests": false,
     "commands": {
+      "build": "bun run build",         
       "typecheck": "bun run type-check",
       "lint": "bun run lint",
       "lintFix": "bun run lint:fix"
