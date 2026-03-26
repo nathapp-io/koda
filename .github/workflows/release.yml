@@ -174,31 +174,7 @@ jobs:
     needs: [info, cli, docker-api, docker-web]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Extract release notes
-        id: notes
-        run: |
-          VERSION="${{ needs.info.outputs.version }}"
-          NOTES=$(awk "/^## \[${VERSION}\]/{found=1; next} /^## \[/{if(found) exit} found{print}" CHANGELOG.md 2>/dev/null || true)
-          if [ -n "$NOTES" ]; then
-            echo "$NOTES" > /tmp/release-notes.md
-            echo "has_notes=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_notes=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Create GitHub Release (with changelog)
-        if: steps.notes.outputs.has_notes == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.info.outputs.tag }}
-          name: ${{ needs.info.outputs.tag }}
-          body_path: /tmp/release-notes.md
-          prerelease: ${{ needs.info.outputs.prerelease }}
-
-      - name: Create GitHub Release (auto-generated)
-        if: steps.notes.outputs.has_notes != 'true'
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.info.outputs.tag }}
@@ -218,20 +194,15 @@ jobs:
       - name: Send Telegram notification
         run: |
           VERSION="${{ needs.info.outputs.tag }}"
-          NOTES=""
-          if [ -f CHANGELOG.md ]; then
-            NOTES=$(awk "/^## \[${VERSION#v}\]/{found=1; next} /^## \[/{if(found) exit} found{print}" CHANGELOG.md | head -20)
-          fi
-
           MSG="🚀 *Koda ${VERSION} released*
 
           \`\`\`
-          npm install -g koda-cli
+          npm install -g @nathapp/koda-cli
           docker pull nathapp/koda-api:${VERSION}
           docker pull nathapp/koda-web:${VERSION}
           \`\`\`
 
-          ${NOTES}"
+          https://github.com/nathapp-io/koda/releases/tag/${VERSION}"
 
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             -d chat_id="${{ vars.TELEGRAM_CHAT_ID }}" \
