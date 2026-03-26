@@ -46,6 +46,7 @@ describeIntegration('API Integration Tests', () => {
   let enhancementTicketRef: string;
   let labelId: string;
   let commentId: string;
+  let ticketLinkId: string;
 
   beforeAll(async () => {
     if (!DATABASE_URL) return;
@@ -1076,6 +1077,111 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(404);
     });
+
+  // ─────────────────────────────────────────────────────────────────
+  // 18. Ticket Links
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('18. Ticket Links', () => {
+    it('POST .../links — creates link with 201 and auto-populated provider/externalRef for GitHub URL', async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets/${bugTicketRef}/links`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ url: 'https://github.com/owner/repo/pull/1' })
+        .expect(201);
+
+      const data = body<{
+        id: string;
+        url: string;
+        provider: string;
+        externalRef: string | null;
+      }>(res);
+      expect(data.provider).toBe('github');
+      expect(data.externalRef).toBe('owner/repo#1');
+      expect(data.url).toBe('https://github.com/owner/repo/pull/1');
+      expect(data.id).toBeDefined();
+      ticketLinkId = data.id;
+    });
+
+    it('POST .../links — returns 200 and existing link when URL already linked (deduplication)', async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets/${bugTicketRef}/links`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ url: 'https://github.com/owner/repo/pull/1' })
+        .expect(200);
+
+      const data = body<{ id: string; provider: string; externalRef: string }>(
+        res,
+      );
+      expect(data.id).toBe(ticketLinkId);
+      expect(data.provider).toBe('github');
+    });
+
+    it('POST .../links — returns 400 for invalid URL', async () => {
+      await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets/${bugTicketRef}/links`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ url: 'not-a-url' })
+        .expect(400);
+    });
+
+    it('POST .../links — returns 404 for non-existent ticket ref', async () => {
+      await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets/NONEXISTENT-9999/links`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ url: 'https://github.com/owner/repo/pull/2' })
+        .expect(404);
+    });
+
+    it('GET .../links — returns 200 with array containing the created link', async () => {
+      // Add a second link so we have two
+      await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets/${bugTicketRef}/links`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ url: 'https://gitlab.com/owner/repo/-/merge_requests/7' })
+        .expect(201);
+
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/tickets/${bugTicketRef}/links`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const data = body<{ id: string; provider: string }[]>(res);
+      expect(Array.isArray(data)).toBe(true);
+      expect(data.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('GET .../links — returns 200 with empty array for ticket with no links', async () => {
+      const res = await request(httpServer)
+        .get(
+          `/api/projects/${projectSlug}/tickets/${enhancementTicketRef}/links`,
+        )
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const data = body<unknown[]>(res);
+      expect(Array.isArray(data)).toBe(true);
+      expect(data).toHaveLength(0);
+    });
+
+    it('DELETE .../links/:linkId — returns 204 with no body on valid deletion', async () => {
+      await request(httpServer)
+        .delete(
+          `/api/projects/${projectSlug}/tickets/${bugTicketRef}/links/${ticketLinkId}`,
+        )
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(204);
+    });
+
+    it('DELETE .../links/:linkId — returns 404 when linkId does not exist on that ticket', async () => {
+      await request(httpServer)
+        .delete(
+          `/api/projects/${projectSlug}/tickets/${bugTicketRef}/links/nonexistent-link-id`,
+        )
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(404);
+    });
+  });
 
     it('GET /api/agents/:slug/pickup — returns null data when no VERIFIED unassigned tickets remain', async () => {
       // Create an agent with no matching tickets in a non-existent project
