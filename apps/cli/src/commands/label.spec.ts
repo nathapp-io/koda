@@ -54,6 +54,7 @@ jest.mock('../config', () => ({
     apiKey: mockData.apiKey || '',
     apiUrl: mockData.apiUrl || '',
   })),
+  resolveContext: jest.fn(),
   setConfig: jest.fn(),
   validateApiKey: jest.fn((key: string) => key && key.length >= 10),
   maskApiKey: jest.fn((key: string) => {
@@ -65,6 +66,7 @@ jest.mock('../config', () => ({
 import { Command } from 'commander';
 import { labelCommand } from './label';
 import { LabelsService } from '../generated';
+import { resolveContext } from '../config';
 
 describe('labelCommand', () => {
   let program: Command;
@@ -85,6 +87,11 @@ describe('labelCommand', () => {
     logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
 
     jest.clearAllMocks();
+    (resolveContext as jest.Mock).mockResolvedValue({
+      projectSlug: 'koda',
+      apiKey: 'sk-test-key123',
+      apiUrl: 'http://localhost:3100/api',
+    });
     (LabelsService.create as jest.Mock).mockReset();
     (LabelsService.list as jest.Mock).mockReset();
     (LabelsService.delete as jest.Mock).mockReset();
@@ -139,8 +146,11 @@ describe('labelCommand', () => {
     });
 
     it('exits 2 when API key is not configured', async () => {
-      mockData.apiKey = '';
-      mockData.apiUrl = '';
+      (resolveContext as jest.Mock).mockResolvedValue({
+        projectSlug: 'koda',
+        apiKey: '',
+        apiUrl: '',
+      });
 
       const labelCmd = program.commands.find((cmd) => cmd.name() === 'label');
       const createCmd = labelCmd?.commands.find((cmd) => cmd.name() === 'create');
@@ -211,8 +221,11 @@ describe('labelCommand', () => {
     });
 
     it('exits 2 when API key is not configured', async () => {
-      mockData.apiKey = '';
-      mockData.apiUrl = '';
+      (resolveContext as jest.Mock).mockResolvedValue({
+        projectSlug: 'koda',
+        apiKey: '',
+        apiUrl: '',
+      });
 
       const labelCmd = program.commands.find((cmd) => cmd.name() === 'label');
       const listCmd = labelCmd?.commands.find((cmd) => cmd.name() === 'list');
@@ -245,8 +258,11 @@ describe('labelCommand', () => {
     });
 
     it('exits 2 when API key is not configured', async () => {
-      mockData.apiKey = '';
-      mockData.apiUrl = '';
+      (resolveContext as jest.Mock).mockResolvedValue({
+        projectSlug: 'koda',
+        apiKey: '',
+        apiUrl: '',
+      });
 
       const labelCmd = program.commands.find((cmd) => cmd.name() === 'label');
       const deleteCmd = labelCmd?.commands.find((cmd) => cmd.name() === 'delete');

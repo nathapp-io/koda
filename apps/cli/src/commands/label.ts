@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { resolveAuth } from '../utils/auth';
+import { resolveContext } from '../config';
 import { configureClient } from '../client';
 import { LabelsService } from '../generated';
 import { table, error } from '../utils/output';
@@ -14,23 +14,29 @@ export function labelCommand(program: Command): void {
   label
     .command('create')
     .description('Create a label in a project')
-    .requiredOption('--project <slug>', 'Project slug')
+    .option('--project <slug>', 'Project slug')
     .requiredOption('--name <name>', 'Label name')
     .option('--color <hex>', 'Label color (hex, e.g. #ff0000)')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey || !ctx.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
         const response = await LabelsService.create(client, {
-          projectSlug: options.project,
+          projectSlug: ctx.projectSlug,
           name: options.name,
           color: options.color,
         });
@@ -56,20 +62,26 @@ export function labelCommand(program: Command): void {
   label
     .command('list')
     .description('List labels in a project')
-    .requiredOption('--project <slug>', 'Project slug')
+    .option('--project <slug>', 'Project slug')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey || !ctx.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        const response = await LabelsService.list(client, options.project);
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
+        const response = await LabelsService.list(client, ctx.projectSlug);
         const data = unwrap(response);
         const items: Record<string, unknown>[] = Array.isArray(data) ? data : ((data as Record<string, unknown>).items as Record<string, unknown>[]) || [];
 
@@ -89,20 +101,26 @@ export function labelCommand(program: Command): void {
   label
     .command('delete')
     .description('Delete a label from a project')
-    .requiredOption('--project <slug>', 'Project slug')
+    .option('--project <slug>', 'Project slug')
     .requiredOption('--id <id>', 'Label ID')
     .action(async (options) => {
       try {
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey || !ctx.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        await LabelsService.delete(client, options.project, options.id);
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
+        await LabelsService.delete(client, ctx.projectSlug, options.id);
 
         console.log(`Label '${options.id}' deleted.`);
         process.exit(0);
