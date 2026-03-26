@@ -1,5 +1,4 @@
 import { Command } from 'commander';
-import { resolveAuth } from '../utils/auth';
 import { resolveContext } from '../config';
 import { configureClient } from '../client';
 import { AgentService } from '../generated';
@@ -23,15 +22,15 @@ export function agentCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({});
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.apiKey || !ctx.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
         const response = await AgentService.me(client);
         const agentData = unwrap(response);
 
