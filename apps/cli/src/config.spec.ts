@@ -12,7 +12,7 @@ jest.mock('conf', () => {
   return jest.fn(() => mockStore);
 });
 
-import { getConfig, setConfig, validateApiKey, maskApiKey } from './config';
+import { getConfig, setConfig, validateApiKey, maskApiKey, findProjectConfig, _configDeps } from './config';
 
 describe('config', () => {
   beforeEach(() => {
@@ -141,6 +141,102 @@ describe('config', () => {
       expect(() => {
         setConfig({ apiKey: '' });
       }).toThrow();
+    });
+  });
+
+  describe('findProjectConfig', () => {
+    it('returns ProjectConfig when .koda/config.json exists in starting directory', async () => {
+      const mockReadFile = jest.fn(async (path: string) => {
+        if (path === '/a/b/c/.koda/config.json') {
+          return JSON.stringify({ projectSlug: 'my-project' });
+        }
+        throw new Error('ENOENT');
+      });
+
+      const mockExists = jest.fn(async (path: string) => {
+        return path === '/a/b/c/.koda/config.json';
+      });
+
+      const result = await findProjectConfig('/a/b/c', { readFile: mockReadFile, exists: mockExists });
+      expect(result).toEqual({ projectSlug: 'my-project' });
+    });
+
+    it('returns ProjectConfig by walking up to ancestor directory', async () => {
+      const mockReadFile = jest.fn(async (path: string) => {
+        if (path === '/a/.koda/config.json') {
+          return JSON.stringify({ projectSlug: 'ancestor-project' });
+        }
+        throw new Error('ENOENT');
+      });
+
+      const mockExists = jest.fn(async (path: string) => {
+        return path === '/a/.koda/config.json';
+      });
+
+      const result = await findProjectConfig('/a/b/c', { readFile: mockReadFile, exists: mockExists });
+      expect(result).toEqual({ projectSlug: 'ancestor-project' });
+    });
+
+    it('returns null when no .koda/config.json exists at any ancestor', async () => {
+      const mockReadFile = jest.fn(async (path: string) => {
+        throw new Error('ENOENT');
+      });
+
+      const mockExists = jest.fn(async (path: string) => {
+        return false;
+      });
+
+      const result = await findProjectConfig('/a/b/c', { readFile: mockReadFile, exists: mockExists });
+      expect(result).toBeNull();
+    });
+
+    it('uses process.cwd() when no directory argument provided', async () => {
+      const originalCwd = process.cwd();
+      const mockReadFile = jest.fn(async (path: string) => {
+        if (path.endsWith('.koda/config.json')) {
+          return JSON.stringify({ projectSlug: 'test-project' });
+        }
+        throw new Error('ENOENT');
+      });
+
+      const mockExists = jest.fn(async (path: string) => {
+        return path.endsWith('.koda/config.json');
+      });
+
+      const result = await findProjectConfig(undefined, { readFile: mockReadFile, exists: mockExists });
+      expect(result).toEqual({ projectSlug: 'test-project' });
+    });
+
+    it('returns null when .koda/config.json contains invalid JSON', async () => {
+      const mockReadFile = jest.fn(async (path: string) => {
+        if (path === '/a/b/c/.koda/config.json') {
+          return 'invalid json {';
+        }
+        throw new Error('ENOENT');
+      });
+
+      const mockExists = jest.fn(async (path: string) => {
+        return path === '/a/b/c/.koda/config.json';
+      });
+
+      const result = await findProjectConfig('/a/b/c', { readFile: mockReadFile, exists: mockExists });
+      expect(result).toBeNull();
+    });
+
+    it('returns ProjectConfig with projectSlug field', async () => {
+      const mockReadFile = jest.fn(async (path: string) => {
+        if (path === '/a/b/c/.koda/config.json') {
+          return JSON.stringify({ projectSlug: 'my-project', otherField: 'value' });
+        }
+        throw new Error('ENOENT');
+      });
+
+      const mockExists = jest.fn(async (path: string) => {
+        return path === '/a/b/c/.koda/config.json';
+      });
+
+      const result = await findProjectConfig('/a/b/c', { readFile: mockReadFile, exists: mockExists });
+      expect(result?.projectSlug).toBe('my-project');
     });
   });
 });
