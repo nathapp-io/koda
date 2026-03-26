@@ -49,6 +49,13 @@ jest.mock('../config', () => ({
     apiKey: mockData.apiKey || '',
     apiUrl: mockData.apiUrl || '',
   })),
+  resolveContext: jest.fn((flags: { projectSlug?: string }) =>
+    Promise.resolve({
+      projectSlug: flags.projectSlug || 'koda',
+      apiKey: mockData.apiKey || '',
+      apiUrl: mockData.apiUrl || '',
+    })
+  ),
   setConfig: jest.fn(),
   validateApiKey: jest.fn((key: string) => key && key.length >= 10),
   maskApiKey: jest.fn((key: string) => {
@@ -105,7 +112,7 @@ describe('commentCommand', () => {
       const commentCmd = program.commands.find((cmd) => cmd.name() === 'comment');
       const addCmd = commentCmd?.commands.find((cmd) => cmd.name() === 'add');
 
-      await addCmd?.parse(['node', 'test', 'KODA-42', '--body', 'Test comment']);
+      await addCmd?.parseAsync(['node', 'test', 'KODA-42', '--body', 'Test comment']).catch(() => undefined);
 
       expect(CommentsService.add).toHaveBeenCalledWith(
         expect.any(Object),
@@ -135,7 +142,7 @@ describe('commentCommand', () => {
       const commentCmd = program.commands.find((cmd) => cmd.name() === 'comment');
       const addCmd = commentCmd?.commands.find((cmd) => cmd.name() === 'add');
 
-      await addCmd?.parse([
+      await addCmd?.parseAsync([
         'node',
         'test',
         'KODA-42',
@@ -143,7 +150,7 @@ describe('commentCommand', () => {
         'Fix report',
         '--type',
         'FIX_REPORT',
-      ]);
+      ]).catch(() => undefined);
 
       expect(CommentsService.add).toHaveBeenCalledWith(
         expect.any(Object),
@@ -160,7 +167,7 @@ describe('commentCommand', () => {
       const commentCmd = program.commands.find((cmd) => cmd.name() === 'comment');
       const addCmd = commentCmd?.commands.find((cmd) => cmd.name() === 'add');
 
-      await addCmd?.parse(['node', 'test', 'KODA-42', '--body', 'Test comment', '--type', 'general']);
+      await addCmd?.parseAsync(['node', 'test', 'KODA-42', '--body', 'Test comment', '--type', 'general']).catch(() => undefined);
 
       expect(exitSpy).toHaveBeenCalledWith(3);
     });
@@ -184,7 +191,7 @@ describe('commentCommand', () => {
         const commentCmd = program.commands.find((cmd) => cmd.name() === 'comment');
         const addCmd = commentCmd?.commands.find((cmd) => cmd.name() === 'add');
 
-        await addCmd?.parse([
+        await addCmd?.parseAsync([
           'node',
           'test',
           'KODA-42',
@@ -192,7 +199,7 @@ describe('commentCommand', () => {
           `${type} comment`,
           '--type',
           type,
-        ]);
+        ]).catch(() => undefined);
 
         expect(CommentsService.add).toHaveBeenCalledWith(
           expect.any(Object),
@@ -222,14 +229,14 @@ describe('commentCommand', () => {
       const addCmd = commentCmd?.commands.find((cmd) => cmd.name() === 'add');
 
       try {
-        await addCmd?.parse([
+        await addCmd?.parseAsync([
           'node',
           'test',
           'KODA-42',
           '--body',
           'Test comment',
           '--json',
-        ]);
+        ]).catch(() => undefined);
       } catch {
         // Expected
       }
@@ -245,7 +252,7 @@ describe('commentCommand', () => {
       const addCmd = commentCmd?.commands.find((cmd) => cmd.name() === 'add');
 
       try {
-        await addCmd?.parse(['node', 'test', 'KODA-42', '--body', 'Test comment']);
+        await addCmd?.parseAsync(['node', 'test', 'KODA-42', '--body', 'Test comment']).catch(() => undefined);
       } catch {
         // Expected
       }
@@ -263,7 +270,7 @@ describe('commentCommand', () => {
       const addCmd = commentCmd?.commands.find((cmd) => cmd.name() === 'add');
 
       try {
-        await addCmd?.parse(['node', 'test', 'KODA-42', '--body', 'Test comment']);
+        await addCmd?.parseAsync(['node', 'test', 'KODA-42', '--body', 'Test comment']).catch(() => undefined);
       } catch {
         // Expected
       }
@@ -281,7 +288,7 @@ describe('commentCommand', () => {
       const addCmd = commentCmd?.commands.find((cmd) => cmd.name() === 'add');
 
       try {
-        await addCmd?.parse(['node', 'test', 'KODA-42', '--body', 'Test comment']);
+        await addCmd?.parseAsync(['node', 'test', 'KODA-42', '--body', 'Test comment']).catch(() => undefined);
       } catch {
         // Expected
       }
