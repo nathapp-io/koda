@@ -108,6 +108,7 @@ jobs:
         working-directory: apps/cli
         run: npm publish --access public --tag ${{ needs.info.outputs.npm_tag }} --provenance
         env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
 
   # ─── Docker: API ──────────────────────────────────────────────────────────────
