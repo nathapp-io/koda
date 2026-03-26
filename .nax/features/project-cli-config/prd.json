@@ -4,7 +4,7 @@
   "analysis": "The CLI app lives at apps/cli/src/. The core config module (config.ts) already implements both findProjectConfig and resolveContext — confirmed by reading the source and by git history (US-001 and US-002 are complete as of the last three commits on feat/project-cli-config). Both functions are fully tested in config.spec.ts.\n\nKey existing patterns:\n- All commands use `resolveAuth({})` from utils/auth.ts for apiKey/apiUrl — this does NOT handle projectSlug or project-level config.\n- Project slug in every command is resolved as: `options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda'` — hardcoded fallback, no auto-detection.\n- commands/config.ts exposes configShow/configSet; it has no `profile` sub-commands.\n- index.ts wires the `config` command inline using Commander addCommand — profile sub-commands must be added here or via a refactored configCommand helper.\n- The generated HTTP client is used via TicketsService, ProjectsService etc. from src/generated (not manually written). The init command will need ProjectsService to validate the slug against the API.\n- Exit codes are strict: 0 success, 1 API error, 2 config/auth error, 3 validation error.\n\nRisks:\n- ticket.ts is 22KB with 15+ sub-commands; every action block must become async if not already (they already are). Replacing resolveAuth with resolveContext changes auth+url resolution to also handle projectSlug — ensure apiKey check still gates all API calls.\n- Removing GLOBAL_PROJECT_SLUG must be a complete removal (the env var is a fallback in every command file: ticket.ts, comment.ts, label.ts, kb.ts, agent.ts).\n- koda init writes .koda/config.json in cwd — the directory must be created (mkdir -p .koda) before writing.\n- Profile management in config.ts must use setConfig with a profiles patch; the Conf store already supports a profiles object.\n- index.ts currently registers `config` inline; adding `profile` sub-commands requires either extending the inline block or moving to a configCommand() function pattern matching other commands.\n\nDependency order: US-001 → US-002 → US-003 → US-004/US-005 (US-004 and US-005 are independent of each other).",
   "branchName": "feat/project-cli-config",
   "createdAt": "2026-03-26T00:00:00.000Z",
-  "updatedAt": "2026-03-26T12:52:43.968Z",
+  "updatedAt": "2026-03-26T12:59:51.026Z",
   "userStories": [
     {
       "id": "US-001",
@@ -243,8 +243,8 @@
       "dependencies": [
         "US-003-1"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "escalations": [],
       "attempts": 0,
       "parentStoryId": "US-003",
@@ -287,7 +287,14 @@
       "workdir": "apps/cli",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "routing": {
+        "complexity": "simple",
+        "initialComplexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Pure refactoring applying established resolveContext pattern to kb.ts plus grep verification; no new logic or edge cases",
+        "modelTier": "fast"
+      }
     },
     {
       "id": "US-004",
