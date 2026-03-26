@@ -1,4 +1,4 @@
-import { getConfig, maskApiKey, setConfig, type Profile } from '../config';
+import { getConfig, getProfiles, maskApiKey, setConfig, type Profile } from '../config';
 
 export interface ConfigShowResult {
   apiKey: string;
@@ -36,26 +36,44 @@ export function configSet(partial: {
 }
 
 export function configProfileList(): Array<{ name: string; apiUrl: string }> {
-  // stub — not yet implemented
-  return [];
+  return getProfiles();
 }
 
-export function configProfileListAction(_deps?: ConfigProfileActionDeps): void {
-  // stub — not yet implemented
+export function configProfileListAction(deps?: ConfigProfileActionDeps): void {
+  const profiles = deps ? deps.getProfiles() : getProfiles();
+  if (profiles.length === 0) {
+    console.log('No profiles configured');
+  } else {
+    console.log('Name\tApiUrl');
+    for (const p of profiles) {
+      console.log(`${p.name}\t${p.apiUrl}`);
+    }
+  }
+  process.exit(0);
 }
 
 export function configProfileAddAction(
-  _name: string,
-  _apiUrl: string,
-  _apiKey: string,
-  _deps?: ConfigProfileActionDeps,
+  name: string,
+  apiUrl: string,
+  apiKey: string,
+  deps?: ConfigProfileActionDeps,
 ): void {
-  // stub — not yet implemented
+  if (deps) {
+    deps.setProfile(name, { apiUrl, apiKey });
+  }
 }
 
 export function configProfileRemoveAction(
-  _name: string,
-  _deps?: ConfigProfileActionDeps,
+  name: string,
+  deps?: ConfigProfileActionDeps,
 ): void {
-  // stub — not yet implemented
+  try {
+    if (deps) {
+      deps.removeProfile(name);
+    }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(message);
+    process.exit(1);
+  }
 }

@@ -164,17 +164,23 @@ export function maskApiKey(apiKey: string): string {
   return `***${visible}`;
 }
 
-export function setProfile(_name: string, _profile: Profile): void {
-  // stub — not yet implemented
+export function setProfile(name: string, profile: Profile): void {
+  const profiles = (store.get('profiles') as Record<string, Profile>) || {};
+  store.set('profiles', { ...profiles, [name]: profile });
 }
 
 export function getProfiles(): Array<{ name: string; apiUrl: string }> {
-  // stub — not yet implemented
-  return [];
+  const profiles = (store.get('profiles') as Record<string, Profile>) || {};
+  return Object.entries(profiles).map(([name, p]) => ({ name, apiUrl: p.apiUrl }));
 }
 
-export function removeProfile(_name: string): void {
-  // stub — not yet implemented
+export function removeProfile(name: string): void {
+  const profiles = (store.get('profiles') as Record<string, Profile>) || {};
+  if (!(name in profiles)) {
+    throw new Error(`Profile not found: ${name}`);
+  }
+  const { [name]: _removed, ...remaining } = profiles;
+  store.set('profiles', remaining);
 }
 
 export async function findProjectConfig(dir?: string, deps: ConfigDeps = _configDeps): Promise<ProjectConfig | null> {
