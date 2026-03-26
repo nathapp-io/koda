@@ -55,11 +55,13 @@ jest.mock('../config', () => ({
     if (key.length <= 8) return '****';
     return key.substring(0, 4) + '*'.repeat(key.length - 8) + key.substring(key.length - 4);
   }),
+  resolveContext: jest.fn(),
 }));
 
 import { Command } from 'commander';
 import { agentCommand } from './agent';
 import { AgentService } from '../generated';
+import { resolveContext } from '../config';
 
 describe('agentCommand', () => {
   let program: Command;
@@ -271,6 +273,11 @@ describe('agentCommand', () => {
       (AgentService.me as jest.Mock).mockResolvedValue({
         data: { ret: 0, data: mockAgent },
       });
+      (resolveContext as jest.Mock).mockResolvedValue({
+        projectSlug: 'koda',
+        apiKey: 'sk-test-key123',
+        apiUrl: 'http://localhost:3100/api',
+      });
     });
 
     it('prints formatted output when a matching ticket is found', async () => {
@@ -305,7 +312,13 @@ describe('agentCommand', () => {
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
-    it('exits with code 3 when --project flag is missing', async () => {
+    it('exits with code 2 when projectSlug is not configured', async () => {
+      (resolveContext as jest.Mock).mockResolvedValue({
+        projectSlug: undefined,
+        apiKey: 'sk-test-key123',
+        apiUrl: 'http://localhost:3100/api',
+      });
+
       const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
       const pickupCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'pickup');
 
@@ -315,18 +328,21 @@ describe('agentCommand', () => {
         // Expected
       }
 
-      expect(exitSpy).toHaveBeenCalledWith(3);
+      expect(exitSpy).toHaveBeenCalledWith(2);
     });
 
     it('exits with code 2 when auth is not configured', async () => {
-      mockData.apiKey = '';
-      mockData.apiUrl = '';
+      (resolveContext as jest.Mock).mockResolvedValue({
+        projectSlug: 'koda',
+        apiKey: '',
+        apiUrl: '',
+      });
 
       const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
       const pickupCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'pickup');
 
       try {
-        await pickupCmd?.parseAsync(['node', 'test', '--project', 'koda']);
+        await pickupCmd?.parseAsync(['node', 'test']);
       } catch {
         // Expected
       }

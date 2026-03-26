@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { resolveAuth } from '../utils/auth';
+import { resolveContext } from '../config';
 import { configureClient } from '../client';
 import { AgentService } from '../generated';
 import { error } from '../utils/output';
@@ -55,25 +56,25 @@ export function agentCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        if (!options.project) {
-          error('--project <slug> is required');
-          process.exit(3);
+        const ctx = await resolveContext({ projectSlug: options.project });
+
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
           return;
         }
 
-        const auth = resolveAuth({});
-
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.apiKey || !ctx.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
         const meResponse = await AgentService.me(client);
         const agentData = unwrap(meResponse);
 
-        const pickupResponse = await AgentService.pickup(client, agentData.slug, options.project);
+        const pickupResponse = await AgentService.pickup(client, agentData.slug, ctx.projectSlug);
         const result = unwrap(pickupResponse);
 
         if (options.json) {
