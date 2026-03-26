@@ -135,6 +135,7 @@ export async function resolveContext(
 
   const apiKey =
     flags.apiKey ??
+    projectConfig?.apiKey ??
     profile?.apiKey ??
     globalConfig.apiKey ??
     '';
