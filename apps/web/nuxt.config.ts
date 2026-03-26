@@ -1,6 +1,24 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 
 const isE2E = process.env['E2E_RUN'] === '1'
+const SHADCN_COMPONENT_DIR_SUFFIX = '/components/ui'
+
+const shadcnComponentsDirFilterModule = (
+  _options: unknown,
+  nuxt: {
+    hook: (name: 'components:dirs', cb: (dirs: Array<string | { path?: string }>) => void) => void
+  },
+) => {
+  nuxt.hook('components:dirs', (dirs) => {
+    for (let i = dirs.length - 1; i >= 0; i--) {
+      const dir = dirs[i]
+      const dirPath = typeof dir === 'string' ? dir : dir.path
+      if (typeof dirPath === 'string' && dirPath.replace(/\\/g, '/').endsWith(SHADCN_COMPONENT_DIR_SUFFIX)) {
+        dirs.splice(i, 1)
+      }
+    }
+  })
+}
 
 export default defineNuxtConfig({
   devtools: { enabled: !isE2E },
@@ -18,6 +36,7 @@ export default defineNuxtConfig({
     '@nuxtjs/tailwindcss',
     '@nuxtjs/color-mode',
     'shadcn-nuxt',
+    shadcnComponentsDirFilterModule,
     '@nuxtjs/i18n',
   ],
 

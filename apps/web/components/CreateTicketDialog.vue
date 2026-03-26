@@ -100,7 +100,7 @@ const formSchema = toTypedSchema(
     title: z.string().min(3, t('tickets.validation.titleMin')),
     type: z.string()
       .min(1, t('tickets.validation.typeRequired'))
-      .refine((v) => ['BUG', 'ENHANCEMENT'].includes(v), t('tickets.validation.typeRequired')),
+      .refine((v: string) => ['BUG', 'ENHANCEMENT'].includes(v), t('tickets.validation.typeRequired')),
     priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).default('MEDIUM'),
     description: z.string().optional(),
   }) as any

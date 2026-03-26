@@ -102,6 +102,7 @@
         "vue": "^3.5.30",
         "vue-router": "^4.6.4",
         "vue-sonner": "^2.0.9",
+        "zod": "^3.24.0",
       },
       "devDependencies": {
         "@hey-api/client-fetch": "^0.3.4",
