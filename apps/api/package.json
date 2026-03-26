@@ -5,6 +5,7 @@
   "packageManager": "bun@1.3.7",
   "scripts": {
     "build": "nest build",
+    "build:generate": "prisma generate && nest build",
     "dev": "nest start --watch",
     "start": "bun dist/main",
     "start:prod-runtime": "ENV_NAME=production bun /app/apps/runtime/dist/main",
