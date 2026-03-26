@@ -1,5 +1,10 @@
 <script setup lang="ts">
-const { locale, locales, setLocale } = useI18n()
+const i18n = useI18n()
+const locale = i18n.locale
+// @ts-ignore
+const locales = i18n.locales
+// @ts-ignore
+const setLocale = i18n.setLocale
 
 const allLocales = computed(() =>
   (locales.value as Array<{ code: string; name: string }>).filter(
