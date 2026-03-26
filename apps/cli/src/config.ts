@@ -96,8 +96,9 @@ export function maskApiKey(apiKey: string): string {
 
 export async function findProjectConfig(dir?: string, deps: ConfigDeps = _configDeps): Promise<ProjectConfig | null> {
   let currentDir = dir || process.cwd();
+  let parentDir = dirname(currentDir);
 
-  while (true) {
+  while (parentDir !== currentDir) {
     const configPath = join(currentDir, '.koda', 'config.json');
 
     const fileExists = await deps.exists(configPath);
@@ -112,13 +113,9 @@ export async function findProjectConfig(dir?: string, deps: ConfigDeps = _config
       }
     }
 
-    // Check if we've reached the root directory
-    const parentDir = dirname(currentDir);
-    if (parentDir === currentDir) {
-      // We're at the root
-      return null;
-    }
-
     currentDir = parentDir;
+    parentDir = dirname(currentDir);
   }
+
+  return null;
 }
