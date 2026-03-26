@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { resolveAuth } from '../utils/auth';
 import { configureClient } from '../client';
-import { TicketsService, LabelsService } from '../generated';
+import { TicketsService, TicketLinksService, LabelsService, TicketLink } from '../generated';
 import { table, error } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
@@ -545,6 +545,76 @@ export function ticketCommand(program: Command): void {
         process.exit(0);
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
+      }
+    });
+
+  ticket
+    .command('link <ref>')
+    .description('Link an external URL to a ticket')
+    .option('--project <slug>', 'Project slug')
+    .requiredOption('--url <url>', 'External URL to link')
+    .option('--json', 'Output as JSON')
+    .action(async (ref: string, options) => {
+      try {
+        const auth = resolveAuth({});
+
+        if (!auth.apiKey || !auth.apiUrl) {
+          error('API key or URL not configured. Run: koda login --api-key <key>');
+          process.exit(2);
+          return;
+        }
+
+        const client = configureClient(auth.apiUrl, auth.apiKey);
+        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+
+        const response = await TicketLinksService.create(client, projectSlug, ref, { url: options.url });
+        const linkData = unwrap(response) as TicketLink;
+
+        if (options.json) {
+          console.log(JSON.stringify(linkData, null, 2));
+        } else {
+          console.log(`provider: ${linkData.provider}`);
+          console.log(`externalRef: ${linkData.externalRef}`);
+        }
+
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err);
+      }
+    });
+
+  ticket
+    .command('unlink <ref>')
+    .description('Remove an external URL link from a ticket')
+    .option('--project <slug>', 'Project slug')
+    .requiredOption('--url <url>', 'External URL to unlink')
+    .action(async (ref: string, options) => {
+      try {
+        const auth = resolveAuth({});
+
+        if (!auth.apiKey || !auth.apiUrl) {
+          error('API key or URL not configured. Run: koda login --api-key <key>');
+          process.exit(2);
+          return;
+        }
+
+        const client = configureClient(auth.apiUrl, auth.apiKey);
+        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+
+        const listResponse = await TicketLinksService.list(client, projectSlug, ref);
+        const links = unwrap(listResponse) as TicketLink[];
+        const match = links.find((l) => l.url === options.url);
+
+        if (!match) {
+          console.log(`No link found for ${options.url}`);
+          process.exit(1);
+          return;
+        }
+
+        await TicketLinksService.delete(client, projectSlug, ref, match.id);
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err);
       }
     });
 
