@@ -481,5 +481,86 @@
         "runtimeCrashes": 0
       }
     ]
+  },
+  {
+    "runId": "run-2026-03-26T07-12-59-034Z",
+    "feature": "vcs-integration",
+    "startedAt": "2026-03-26T07:12:59.034Z",
+    "completedAt": "2026-03-26T09:27:48.834Z",
+    "totalCost": 8.912981349999997,
+    "totalStories": 4,
+    "storiesCompleted": 4,
+    "storiesFailed": 0,
+    "totalDurationMs": 8089800,
+    "stories": [
+      {
+        "storyId": "VCS-001",
+        "complexity": "simple",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "modelUsed": "haiku",
+        "attempts": 1,
+        "finalTier": "fast",
+        "success": true,
+        "cost": 0.17922140000000003,
+        "durationMs": 122745,
+        "firstPassSuccess": true,
+        "startedAt": "2026-03-26T07:26:00.850Z",
+        "completedAt": "2026-03-26T07:29:11.578Z",
+        "fullSuiteGatePassed": false,
+        "runtimeCrashes": 0
+      },
+      {
+        "storyId": "VCS-002",
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "modelUsed": "sonnet",
+        "attempts": 1,
+        "finalTier": "balanced",
+        "success": true,
+        "cost": 6.016396399999998,
+        "durationMs": 0,
+        "firstPassSuccess": true,
+        "startedAt": "2026-03-26T07:29:13.642Z",
+        "completedAt": "2026-03-26T07:52:58.160Z",
+        "fullSuiteGatePassed": true,
+        "runtimeCrashes": 0
+      },
+      {
+        "storyId": "VCS-003",
+        "complexity": "simple",
+        "initialComplexity": "simple",
+        "modelTier": "balanced",
+        "modelUsed": "sonnet",
+        "attempts": 2,
+        "finalTier": "balanced",
+        "success": true,
+        "cost": 0.7094972499999999,
+        "durationMs": 81603,
+        "firstPassSuccess": false,
+        "startedAt": "2026-03-26T08:01:41.874Z",
+        "completedAt": "2026-03-26T08:03:36.863Z",
+        "fullSuiteGatePassed": false,
+        "runtimeCrashes": 0
+      },
+      {
+        "storyId": "VCS-004",
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "modelUsed": "sonnet",
+        "attempts": 1,
+        "finalTier": "balanced",
+        "success": true,
+        "cost": 2.0078663,
+        "durationMs": 0,
+        "firstPassSuccess": true,
+        "startedAt": "2026-03-26T08:03:38.920Z",
+        "completedAt": "2026-03-26T08:12:12.705Z",
+        "fullSuiteGatePassed": true,
+        "runtimeCrashes": 0
+      }
+    ]
   }
 ]
