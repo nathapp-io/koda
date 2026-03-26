@@ -187,7 +187,8 @@ export class TicketsService {
     const refPattern = /^([A-Z]+)-(\d+)$/;
     const match = ref.match(refPattern);
 
-    let ticket;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let ticket: any = null;
 
     if (match) {
       // Resolve by composite unique key (projectId, number)
@@ -199,13 +200,19 @@ export class TicketsService {
             number,
           },
         },
-        include: { labels: { include: { label: true } } },
+        include: {
+          labels: { include: { label: true } },
+          links: true,
+        },
       });
     } else {
       // Treat as CUID
       ticket = await this.db.ticket.findUnique({
         where: { id: ref },
-        include: { labels: { include: { label: true } } },
+        include: {
+          labels: { include: { label: true } },
+          links: true,
+        },
       });
     }
 
@@ -231,10 +238,11 @@ export class TicketsService {
         ref: ticketRef,
         gitRefUrl,
         labels: (ticket.labels as TicketLabelWithLabel[]).map((tl: TicketLabelWithLabel) => tl.label),
+        links: ticket.links || [],
       };
     }
 
-    return { ...ticket, ref: ticketRef, gitRefUrl };
+    return { ...ticket, ref: ticketRef, gitRefUrl, links: ticket.links || [] };
   }
 
   async update(

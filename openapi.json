@@ -1505,6 +1505,98 @@
         ]
       }
     },
+    "/api/projects/{slug}/webhooks": {
+      "post": {
+        "operationId": "WebhookController_register",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWebhookDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Webhook registered"
+          },
+          "400": {
+            "description": "Invalid request data"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "summary": "Register a webhook for a project",
+        "tags": [
+          "webhooks"
+        ]
+      },
+      "get": {
+        "operationId": "WebhookController_list",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of webhooks"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "summary": "List all webhooks for a project",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
+    "/api/api/webhooks/{id}": {
+      "delete": {
+        "operationId": "WebhookController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Webhook deleted"
+          },
+          "404": {
+            "description": "Webhook not found"
+          }
+        },
+        "summary": "Remove a webhook",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
     "/api/projects/{slug}/tickets/{ref}/comments": {
       "post": {
         "operationId": "CommentsController_createFromHttp",
@@ -1950,6 +2042,172 @@
         ]
       }
     },
+    "/api/projects/{slug}/tickets/{ref}/links": {
+      "post": {
+        "operationId": "TicketLinksController_create",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTicketLinkDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketLinkResponseDto"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketLinkResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid URL"
+          },
+          "404": {
+            "description": "Ticket not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create or return existing link for a ticket",
+        "tags": [
+          "ticket-links"
+        ]
+      },
+      "get": {
+        "operationId": "TicketLinksController_findAll",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TicketLinkResponseDto"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Ticket not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List all links for a ticket",
+        "tags": [
+          "ticket-links"
+        ]
+      }
+    },
+    "/api/projects/{slug}/tickets/{ref}/links/{linkId}": {
+      "delete": {
+        "operationId": "TicketLinksController_remove",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "linkId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Link deleted"
+          },
+          "404": {
+            "description": "Link not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a ticket link by id",
+        "tags": [
+          "ticket-links"
+        ]
+      }
+    },
     "/api/health": {
       "get": {
         "operationId": "HealthController_check",
@@ -1962,6 +2220,53 @@
         "summary": "Health check",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/projects/{slug}/ci-webhook": {
+      "post": {
+        "operationId": "CiWebhookController_handleCiWebhook",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CiWebhookPayloadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook processed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CiWebhookResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request data"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "summary": "Receive CI pipeline failure webhook and auto-create ticket",
+        "tags": [
+          "ci-webhooks"
         ]
       }
     }
@@ -2282,6 +2587,11 @@
             ],
             "description": "Auto-assign mode for tickets: OFF, SUGGEST, or AUTO",
             "example": "SUGGEST"
+          },
+          "ciWebhookToken": {
+            "type": "string",
+            "description": "CI webhook token for authentication",
+            "example": "ci_webhook_token_123"
           }
         }
       },
@@ -2326,6 +2636,39 @@
         "required": [
           "type",
           "title"
+        ]
+      },
+      "TicketLinkResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "ticketId": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "externalRef": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "ticketId",
+          "url",
+          "provider",
+          "externalRef",
+          "createdAt"
         ]
       },
       "TicketResponseDto": {
@@ -2439,6 +2782,13 @@
             "type": "string",
             "nullable": true,
             "description": "Soft delete timestamp"
+          },
+          "links": {
+            "description": "Related ticket links",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TicketLinkResponseDto"
+            }
           }
         },
         "required": [
@@ -2450,7 +2800,8 @@
           "status",
           "priority",
           "createdAt",
-          "updatedAt"
+          "updatedAt",
+          "links"
         ]
       },
       "UpdateTicketDto": {
@@ -2542,6 +2893,29 @@
           "query"
         ]
       },
+      "CreateWebhookDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "secret": {
+            "type": "string"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "url",
+          "secret",
+          "events"
+        ]
+      },
       "CreateCommentDto": {
         "type": "object",
         "properties": {
@@ -2615,6 +2989,143 @@
         },
         "required": [
           "labelId"
+        ]
+      },
+      "CreateTicketLinkDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://github.com/owner/repo/pull/1"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      },
+      "CiPipelineDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Pipeline ID",
+            "example": "12345"
+          },
+          "url": {
+            "type": "string",
+            "description": "Pipeline URL",
+            "example": "https://github.com/org/repo/actions/runs/12345"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "CiCommitDto": {
+        "type": "object",
+        "properties": {
+          "sha": {
+            "type": "string",
+            "description": "Commit SHA",
+            "example": "abc123def456"
+          },
+          "message": {
+            "type": "string",
+            "description": "Commit message",
+            "example": "feat: add dark mode"
+          }
+        },
+        "required": [
+          "sha"
+        ]
+      },
+      "CiFailureDto": {
+        "type": "object",
+        "properties": {
+          "test": {
+            "type": "string",
+            "description": "Failed test or step name",
+            "example": "AuthService.validateToken"
+          },
+          "file": {
+            "type": "string",
+            "description": "File path where failure occurred",
+            "example": "apps/api/src/auth/auth.service.ts"
+          },
+          "line": {
+            "type": "number",
+            "description": "Line number where failure occurred",
+            "example": 87
+          }
+        },
+        "required": [
+          "test"
+        ]
+      },
+      "CiWebhookPayloadDto": {
+        "type": "object",
+        "properties": {
+          "event": {
+            "type": "string",
+            "enum": [
+              "pipeline_failed",
+              "pipeline_success"
+            ],
+            "description": "CI event type",
+            "example": "pipeline_failed"
+          },
+          "pipeline": {
+            "description": "Pipeline information",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CiPipelineDto"
+              }
+            ]
+          },
+          "commit": {
+            "description": "Commit information",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CiCommitDto"
+              }
+            ]
+          },
+          "failures": {
+            "description": "List of failures",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CiFailureDto"
+            }
+          }
+        },
+        "required": [
+          "event",
+          "pipeline",
+          "commit",
+          "failures"
+        ]
+      },
+      "CiWebhookResponseDto": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "Whether the webhook was processed successfully"
+          },
+          "ticketRef": {
+            "type": "string",
+            "description": "Created ticket reference",
+            "example": "KODA-42"
+          },
+          "message": {
+            "type": "string",
+            "description": "Message describing the result"
+          }
+        },
+        "required": [
+          "success",
+          "message"
         ]
       }
     }

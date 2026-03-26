@@ -363,15 +363,21 @@ describeIntegration('API Integration Tests', () => {
       expect(data.items.length).toBeGreaterThanOrEqual(1);
     });
 
-    it('GET .../tickets/:ref — returns ticket by ref', async () => {
+    it('GET .../tickets/:ref — returns ticket by ref with empty links array', async () => {
       const res = await request(httpServer)
         .get(`/api/projects/${projectSlug}/tickets/${bugTicketRef}`)
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(200);
 
-      const data = body<{ ref: string; status: string }>(res);
+      const data = body<{
+        ref: string;
+        status: string;
+        links: unknown[];
+      }>(res);
       expect(data.ref).toBe(bugTicketRef);
       expect(data.status).toBe('CREATED');
+      expect(Array.isArray(data.links)).toBe(true);
+      expect(data.links).toEqual([]);
     });
 
     it('POST .../verify — CREATED → VERIFIED', async () => {
@@ -1180,6 +1186,105 @@ describeIntegration('API Integration Tests', () => {
         )
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(404);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // 19. Ticket Show — Links in Response
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('19. Ticket Show — Links in Response', () => {
+    it('GET .../tickets/:ref — returns links array with created link after POST', async () => {
+      // The bugTicketRef already has a created link from the Ticket Links tests
+      // (the GitHub link was created but then deleted, so we need to create a fresh one)
+      const createLinkRes = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets/${bugTicketRef}/links`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ url: 'https://github.com/owner/repo/pull/123' })
+        .expect(201);
+
+      const createdLink = body<{
+        id: string;
+        url: string;
+        provider: string;
+        externalRef: string | null;
+        createdAt: string;
+      }>(createLinkRes);
+
+      // Now fetch the ticket and verify links array includes the created link
+      const ticketRes = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/tickets/${bugTicketRef}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const ticketData = body<{
+        ref: string;
+        links: Array<{
+          id: string;
+          url: string;
+          provider: string;
+          externalRef: string | null;
+          createdAt: string;
+        }>;
+      }>(ticketRes);
+
+      expect(Array.isArray(ticketData.links)).toBe(true);
+      expect(ticketData.links.length).toBeGreaterThanOrEqual(1);
+
+      // Verify the link we just created is in the array
+      const foundLink = ticketData.links.find(l => l.id === createdLink.id);
+      expect(foundLink).toBeDefined();
+      expect(foundLink?.url).toBe('https://github.com/owner/repo/pull/123');
+      expect(foundLink?.provider).toBe('github');
+      expect(foundLink?.externalRef).toBe('owner/repo#123');
+      expect(foundLink?.createdAt).toBeDefined();
+    });
+
+    it('GET .../tickets/:ref — returns empty links array for ticket with no links', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/tickets/${enhancementTicketRef}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const data = body<{
+        ref: string;
+        links: unknown[];
+      }>(res);
+
+      expect(Array.isArray(data.links)).toBe(true);
+      expect(data.links).toEqual([]);
+    });
+
+    it('GET .../tickets/:ref — response links array contains all required fields', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/tickets/${bugTicketRef}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const data = body<{
+        links: Array<{
+          id: string;
+          url: string;
+          provider: string;
+          externalRef: string | null;
+          createdAt: string;
+        }>;
+      }>(res);
+
+      // For each link, verify all required fields are present
+      data.links.forEach(link => {
+        expect(link).toHaveProperty('id');
+        expect(link).toHaveProperty('url');
+        expect(link).toHaveProperty('provider');
+        expect(link).toHaveProperty('externalRef');
+        expect(link).toHaveProperty('createdAt');
+
+        // Verify field types
+        expect(typeof link.id).toBe('string');
+        expect(typeof link.url).toBe('string');
+        expect(typeof link.provider).toBe('string');
+        expect(typeof link.createdAt).toBe('string');
+      });
     });
   });
 

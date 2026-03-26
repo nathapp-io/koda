@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { TicketType, TicketStatus, Priority } from '../../common/enums';
+import { TicketLinkResponseDto } from '../../ticket-links/dto/ticket-link-response.dto';
 
 export class TicketResponseDto {
   @ApiProperty({ description: 'Ticket ID (CUID)' })
@@ -58,4 +59,11 @@ export class TicketResponseDto {
 
   @ApiProperty({ description: 'Soft delete timestamp', nullable: true })
   deletedAt?: Date | null;
+
+  @ApiProperty({
+    description: 'Related ticket links',
+    isArray: true,
+    type: TicketLinkResponseDto,
+  })
+  links!: TicketLinkResponseDto[];
 }
