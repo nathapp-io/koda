@@ -42,6 +42,7 @@ describe('TicketsController', () => {
     createdAt: new Date(),
     updatedAt: new Date(),
     deletedAt: null,
+    links: [],
   };
 
   const mockAdminUser = {
