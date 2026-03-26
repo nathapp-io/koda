@@ -122,6 +122,7 @@ model Ticket {
   comments        Comment[]
   labels          TicketLabel[]
   activities      TicketActivity[]
+  links           TicketLink[]
 
   @@unique([projectId, number])
 }
@@ -189,4 +190,17 @@ model Webhook {
   createdAt DateTime @default(now())
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model TicketLink {
+  id          String   @id @default(cuid())
+  ticketId    String
+  url         String
+  provider    String   // github | gitlab | bitbucket | other
+  externalRef String?  // provider-specific reference e.g. 'owner/repo#42'
+  createdAt   DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@unique([ticketId, url])
 }
