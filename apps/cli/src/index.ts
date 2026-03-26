@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { loginCommand } from './commands/login';
+import { initCommand } from './commands/init';
 import { configShow, configSet } from './commands/config';
 import { projectCommand } from './commands/project';
 import { ticketCommand } from './commands/ticket';
@@ -49,6 +50,19 @@ program
       console.error(`Error: ${errorMessage}`);
       process.exit(2);
     }
+  });
+
+// Init command
+program
+  .command('init')
+  .description('Initialize .koda/config.json in current directory')
+  .option('--project <slug>', 'Project slug')
+  .option('--default-type <type>', 'Default ticket type')
+  .option('--default-priority <priority>', 'Default ticket priority')
+  .option('--api-key <key>', 'API key for authentication')
+  .option('--api-url <url>', 'API URL (default: http://localhost:3100/api)')
+  .action(async (options) => {
+    await initCommand(options);
   });
 
 // Config command
