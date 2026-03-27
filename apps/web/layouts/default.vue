@@ -44,6 +44,13 @@ const sidebarOpen = ref(true)
         >
           {{ t('nav.kb') }}
         </NuxtLink>
+        <NuxtLink
+          v-if="$route.params.project"
+          :to="`/${$route.params.project}/labels`"
+          class="flex items-center rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+        >
+          {{ t('nav.labels') }}
+        </NuxtLink>
       </nav>
 
       <!-- Bottom user section -->

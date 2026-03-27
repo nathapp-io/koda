@@ -52,6 +52,7 @@
     "projects": "项目",
     "agents": "代理",
     "kb": "知识库",
+    "labels": "标签",
     "toggleSidebar": "切换侧栏"
   },
   "projects": {
@@ -218,6 +219,31 @@
       "searchFailed": "搜索失败",
       "docAdded": "文档已添加",
       "addFailed": "添加文档失败"
+    }
+  },
+  "labels": {
+    "title": "标签",
+    "empty": "暂无标签。",
+    "columns": {
+      "color": "颜色",
+      "name": "名称",
+      "actions": "操作"
+    },
+    "form": {
+      "create": "创建标签",
+      "name": "名称",
+      "namePlaceholder": "标签名称",
+      "color": "颜色",
+      "submit": "创建标签"
+    },
+    "actions": {
+      "delete": "删除"
+    },
+    "toast": {
+      "created": "标签创建成功",
+      "createFailed": "创建标签失败",
+      "deleted": "标签删除成功",
+      "deleteFailed": "删除标签失败"
     }
   },
   "toast": {
