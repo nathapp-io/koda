@@ -1,0 +1,16 @@
+{
+  "isString": "{property}必须是字符串",
+  "isNotEmpty": "{property}是必填项",
+  "isBoolean": "{property}不是布尔值",
+  "isEmail": "{property}必须是有效的电子邮件",
+  "min": "{property}的值必须至少为{constraints.0}",
+  "max": "{property}的值必须小于或等于{constraints.0}",
+  "length": "{property}的长度必须大于或等于{constraints.0}个字符",
+  "minLength": "{property}的长度必须至少为{constraints.0}个字符",
+  "maxLength": "{property}的长度必须小于或等于{constraints.0}个字符",
+  "isInt": "{property}必须是整数",
+  "contains": "{property}必须包含{constraints.0}",
+  "isFQDN": "{property}不是有效的完全限定域名",
+  "isDate": "{property}不是有效的日期",
+  "isNotEmptyObject": "{property}是一个空对象"
+}

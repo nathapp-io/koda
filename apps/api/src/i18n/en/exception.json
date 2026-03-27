@@ -1,0 +1,12 @@
+{
+  "-1": "Unknown error occurred, Please try again later",
+  "-2": "Request Parameter Error: {param}",
+  "-3": "Bad Request",  
+  "404": "Resource not found",
+  "501": "Internal Server Error",
+  "20000": "User does not exist",
+  "40000": "Unauthorized",
+  "40001": "Forbidden",
+  "40002": "Forbidden",
+  "40003": "Forbidden"
+}
