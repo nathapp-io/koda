@@ -4,7 +4,7 @@
   "analysis": "Three independent bugs in apps/api targeting the tickets domain.\n\n**US-002 (Bug #20):** `tickets.service.ts` lines 73–75 guard against empty-string descriptions and throw `ValidationAppException`. However, line 94 already coerces `description || null`, so the guard is redundant and incorrectly blocks semantically valid empty-description payloads from agents. Fix: delete the three-line guard. No schema or DTO changes needed.\n\n**US-003 (Bug #21):** `UpdateTicketDto` (`dto/update-ticket.dto.ts`) has no `status` field so PATCH `/tickets/:ref` silently drops any `status` sent by clients. `TicketsService.update()` never calls `validateTransition()` either. Fix: (1) add `status?: TicketStatus` with `@IsOptional()` + `@IsEnum()` to the DTO; (2) add a block in `update()` that calls `validateTransition(ticket.status, updateTicketDto.status)` then sets `updateData.status`. Only 'NONE'-comment transitions (CREATED→IN_PROGRESS, VERIFIED→IN_PROGRESS) can be triggered here — comment-gated transitions still belong to dedicated endpoints. `validateTransition` is already exported from `./state-machine/ticket-transitions`.\n\n**US-004 (Bug #23):** `TicketResponseDto` (`dto/ticket-response.dto.ts`) has no `ref` field. `findAll()` in `tickets.service.ts` maps tickets without adding `ref`; `findByRef()` and `create()` already compute and return `ref`. Fix: (1) add `ref!: string` with `@ApiProperty` to `TicketResponseDto`; (2) add `ref: `${project.key}-${ticket.number}`` inside the `findAll()` items map — `project` is already in scope.\n\n**Test infrastructure:** Unit tests live in `src/tickets/tickets.service.spec.ts` using Jest mocks of `PrismaService`. E2E tests live in `test/e2e/api-endpoint/endpoint.e2e.spec.ts` using supertest. The `mockProject` fixture already has `key: 'KODA'`. All three stories are independent and can be implemented in any order.",
   "branchName": "fix/api-bugs",
   "createdAt": "2026-03-27T00:00:00.000Z",
-  "updatedAt": "2026-03-27T14:11:33.821Z",
+  "updatedAt": "2026-03-27T14:18:06.010Z",
   "userStories": [
     {
       "id": "US-002",
@@ -106,8 +106,8 @@
       ],
       "dependencies": [],
       "workdir": "apps/api",
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "routing": {
         "complexity": "simple",
         "testStrategy": "tdd-simple",

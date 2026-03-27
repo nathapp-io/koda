@@ -726,7 +726,7 @@ describeIntegration('API Integration Tests', () => {
   // ─────────────────────────────────────────────────────────────────
 
   describe('13b. Ticket PATCH — Status Transition', () => {
-    it('PATCH .../tickets/:ref — returns 200 with updated status when patching CREATED → VERIFIED', async () => {
+    it('PATCH .../tickets/:ref — returns 200 with updated status when patching CREATED → IN_PROGRESS', async () => {
       const createRes = await request(httpServer)
         .post(`/api/projects/${projectSlug}/tickets`)
         .set('Authorization', `Bearer ${userAccessToken}`)
@@ -738,11 +738,11 @@ describeIntegration('API Integration Tests', () => {
       const res = await request(httpServer)
         .patch(`/api/projects/${projectSlug}/tickets/${ticketRef}`)
         .set('Authorization', `Bearer ${userAccessToken}`)
-        .send({ status: 'VERIFIED' })
+        .send({ status: 'IN_PROGRESS' })
         .expect(200);
 
       const ticket = body<{ status: string }>(res);
-      expect(ticket.status).toBe('VERIFIED');
+      expect(ticket.status).toBe('IN_PROGRESS');
     });
 
     it('PATCH .../tickets/:ref — returns 400 for invalid transition (CREATED → CLOSED)', async () => {
