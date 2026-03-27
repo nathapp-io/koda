@@ -59,7 +59,7 @@ describeIntegration('API Integration Tests', () => {
       });
     } catch (error) {
       // Database reset may fail if schema is already in sync, which is OK for tests
-      console.log('Database reset encountered an issue (may be expected)');
+      // Silent catch - database reset may fail if schema is already in sync
     }
 
     // Use AppFactory to get NathApplication with useAppGlobal* methods

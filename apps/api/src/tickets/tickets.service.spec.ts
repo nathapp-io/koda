@@ -213,7 +213,6 @@ describe('TicketsService', () => {
       const invalidDtos = [
         { description: 'Missing type' },
         { type: 'BUG' }, // Missing title
-        { type: 'BUG', title: 'Test', description: '' }, // Empty description is ok
       ];
 
       for (const invalidDto of invalidDtos) {
@@ -223,6 +222,25 @@ describe('TicketsService', () => {
           service.create('koda', invalidDto as CreateTicketDto, { id: 'user-123', sub: 'user-123' }, 'user')
         ).rejects.toThrow();
       }
+    });
+
+    it('should allow empty description', async () => {
+      const createDto: CreateTicketDto = {
+        type: 'BUG',
+        title: 'Test',
+        description: '',
+      };
+
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      const expectedTicket = {
+        ...mockTicket,
+        description: null,
+      };
+      mockPrismaService.client.$transaction.mockResolvedValue(expectedTicket);
+
+      const result = await service.create('koda', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
+
+      expect(result.description).toBeNull();
     });
 
     it('should set default values for optional fields', async () => {
