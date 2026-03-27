@@ -810,6 +810,58 @@ describe('ticketCommand', () => {
 
       expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('ticket-1'));
     });
+
+    it('renders ticket with ref field as first column when ref is present', async () => {
+      const mockTickets = [
+        {
+          id: 'ticket-1',
+          number: 1,
+          ref: 'NAX-1',
+          type: 'BUG',
+          title: 'Test bug',
+          status: 'verified',
+          priority: 'HIGH',
+          assignee: { slug: 'agent-1', name: 'Agent 1' },
+        },
+      ];
+
+      (TicketsService.list as jest.Mock).mockResolvedValue({
+        data: { ret: 0, data: { items: mockTickets, total: 1 } },
+      });
+
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const listCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'list');
+
+      await listCmd?.parseAsync(['node', 'test', '--project', 'test-project']);
+
+      expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('NAX-1'));
+    });
+
+    it('renders ticket with fallback KODA- prefix as first column when ref is undefined', async () => {
+      const mockTickets = [
+        {
+          id: 'ticket-1',
+          number: 1,
+          ref: undefined,
+          type: 'BUG',
+          title: 'Test bug',
+          status: 'verified',
+          priority: 'HIGH',
+          assignee: { slug: 'agent-1', name: 'Agent 1' },
+        },
+      ];
+
+      (TicketsService.list as jest.Mock).mockResolvedValue({
+        data: { ret: 0, data: { items: mockTickets, total: 1 } },
+      });
+
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const listCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'list');
+
+      await listCmd?.parseAsync(['node', 'test', '--project', 'test-project']);
+
+      expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('KODA-1'));
+    });
   });
 
   describe('ticket mine', () => {
@@ -912,6 +964,58 @@ describe('ticketCommand', () => {
       }
 
       expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('['));
+    });
+
+    it('renders ticket with ref field as first column when ref is present', async () => {
+      const mockTickets = [
+        {
+          id: 'ticket-2',
+          number: 2,
+          ref: 'NAX-2',
+          type: 'ENHANCEMENT',
+          title: 'Test feature',
+          status: 'in_progress',
+          priority: 'MEDIUM',
+          assignee: { slug: 'me', name: 'Me' },
+        },
+      ];
+
+      (TicketsService.list as jest.Mock).mockResolvedValue({
+        data: { ret: 0, data: { items: mockTickets, total: 1 } },
+      });
+
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const mineCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'mine');
+
+      await mineCmd?.parseAsync(['node', 'test']);
+
+      expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('NAX-2'));
+    });
+
+    it('renders ticket with fallback KODA- prefix as first column when ref is undefined', async () => {
+      const mockTickets = [
+        {
+          id: 'ticket-2',
+          number: 2,
+          ref: undefined,
+          type: 'ENHANCEMENT',
+          title: 'Test feature',
+          status: 'in_progress',
+          priority: 'MEDIUM',
+          assignee: { slug: 'me', name: 'Me' },
+        },
+      ];
+
+      (TicketsService.list as jest.Mock).mockResolvedValue({
+        data: { ret: 0, data: { items: mockTickets, total: 1 } },
+      });
+
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const mineCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'mine');
+
+      await mineCmd?.parseAsync(['node', 'test']);
+
+      expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('KODA-2'));
     });
   });
 

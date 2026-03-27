@@ -1,0 +1,77 @@
+{
+  "project": "koda",
+  "feature": "cli-fixes",
+  "branchName": "feat/cli-fixes",
+  "createdAt": "2026-03-27T00:00:00.000Z",
+  "updatedAt": "2026-03-27T15:55:39.459Z",
+  "userStories": [
+    {
+      "id": "US-005",
+      "title": "Fix hardcoded KODA- prefix in ticket list/mine display",
+      "description": "Both `ticket list` and `ticket mine` table renderers in apps/cli/src/commands/ticket.ts hardcode `` `KODA-${t.number}` `` as the first column value. Since the API now returns a `ref` field (e.g. `NAX-1`), the CLI should use it directly, falling back to the hardcoded prefix only when `ref` is absent (backward compatibility).",
+      "acceptanceCriteria": [
+        "When TicketsService.list() returns a ticket with ref='NAX-1', the `ticket list` table renders the first column as 'NAX-1'",
+        "When TicketsService.list() returns a ticket with ref='NAX-2', the `ticket mine` table renders the first column as 'NAX-2'",
+        "When a ticket object has ref=undefined, the `ticket list` table renders the first column as 'KODA-1' (fallback to `` `KODA-${t.number}` ``)",
+        "When a ticket object has ref=undefined, the `ticket mine` table renders the first column as 'KODA-2' (fallback to `` `KODA-${t.number}` ``)"
+      ],
+      "tags": [
+        "fix",
+        "cli"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "simple",
+        "modelTier": "fast"
+      },
+      "workdir": "apps/cli",
+      "contextFiles": [
+        "apps/cli/src/commands/ticket.ts",
+        "apps/cli/src/commands/ticket.spec.ts"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-006",
+      "title": "Fix koda agent me crash on undefined apiKey",
+      "description": "`koda agent me` calls `maskApiKey(agentData.apiKey)` unconditionally. Because `GET /agents/me` returns a Prisma agent row that only stores the HMAC hash (`apiKeyHash`), `agentData.apiKey` is always `undefined` at runtime, causing an unhandled TypeError. A null-guard must be added before the `maskApiKey` call.",
+      "acceptanceCriteria": [
+        "When AgentService.me() returns an agent where apiKey is undefined, `koda agent me` exits with code 0 and does not throw",
+        "When agentData.apiKey is undefined, the output includes the line 'API Key: (stored as hash — not recoverable)'",
+        "When agentData.apiKey is 'abcd1234efgh5678', the output includes 'API Key: abcd****5678'"
+      ],
+      "tags": [
+        "fix",
+        "cli"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/cli",
+      "contextFiles": [
+        "apps/cli/src/commands/agent.ts",
+        "apps/cli/src/commands/agent.spec.ts"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    }
+  ],
+  "analysis": "Two isolated CLI bugs in apps/cli/src/commands/. No API changes needed.\n\n**Bug #17 — ticket.ts hardcoded KODA- prefix (lines 127 and 179):**\nBoth `ticket list` and `ticket mine` subcommands build table rows with `` `KODA-${t.number}` `` as the first column. The API already returns a `ref` field (added in US-004/PR #27). The fix is a one-liner in each location: `String(t.ref || \\`KODA-${t.number}\\`)`. The `ticket create` output at line 72 already uses this pattern correctly, so the fix simply aligns the two table renderers to match.\n\n**Bug #22 — agent.ts undefined apiKey crash (line 42):**\n`GET /agents/me` returns the Prisma agent row which stores `apiKeyHash` (one-way HMAC hash) — never the plain `apiKey`. So `agentData.apiKey` is always `undefined` at runtime. `maskApiKey(undefined)` throws `Cannot read properties of undefined (reading 'length')` on line 10 of agent.ts. The fix adds a null-guard: if `agentData.apiKey` is falsy, print `(stored as hash — not recoverable)` instead of calling `maskApiKey`.\n\n**Affected files:**\n- `apps/cli/src/commands/ticket.ts` — 2 occurrences of hardcoded prefix\n- `apps/cli/src/commands/ticket.spec.ts` — add tests for ref field rendering\n- `apps/cli/src/commands/agent.ts` — null-guard before maskApiKey call\n- `apps/cli/src/commands/agent.spec.ts` — add tests for undefined and defined apiKey cases\n\n**Test setup pattern (both spec files):** Jest with jest.mock for chalk, conf, axios, generated client, and config module. `resolveContext` is mocked from '../config'. `process.exit` is spied on and mocked to not throw. `console.log` is spied on to capture output. Both spec files follow this identical pattern — new tests must follow the same structure.\n\n**Risks:** Minimal. The fallback `KODA-${t.number}` guard in the ticket fix preserves full backward compatibility. The agent null-guard is purely additive — it cannot break the defined-apiKey path.\n\n**Dependencies:** None between the two stories. Both are independent."
+}

@@ -124,7 +124,7 @@ export function ticketCommand(program: Command): void {
           console.log(JSON.stringify(items, null, 2));
         } else {
           const rows = items.map((t) => [
-            `KODA-${t.number}`,
+            String(t.ref ?? `KODA-${t.number}`),
             String(t.type),
             String(t.priority || ''),
             String(t.status),
@@ -176,7 +176,7 @@ export function ticketCommand(program: Command): void {
           console.log(JSON.stringify(items, null, 2));
         } else {
           const rows = items.map((t) => [
-            `KODA-${t.number}`,
+            String(t.ref ?? `KODA-${t.number}`),
             String(t.type),
             String(t.priority || ''),
             String(t.status),
