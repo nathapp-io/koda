@@ -5,6 +5,7 @@ import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { PrismaClient } from '@prisma/client';
 import { TicketType, TicketStatus, Priority } from '../common/enums';
+import { validateTransition } from './state-machine/ticket-transitions';
 import { buildGitUrl } from '../common/utils/git-url.util';
 
 interface FindAllFilters {
@@ -181,7 +182,7 @@ export class TicketsService {
     }
 
     // Check if ref matches KODA-42 format (projectKey-number)
-    const refPattern = /^([A-Z]+)-(\d+)$/;
+    const refPattern = /^([A-Z0-9]+)-(\d+)$/;
     const match = ref.match(refPattern);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -267,6 +268,11 @@ export class TicketsService {
     }
     if (updateTicketDto.priority !== undefined) {
       updateData.priority = updateTicketDto.priority;
+    }
+
+    if (updateTicketDto.status !== undefined) {
+      validateTransition(ticket.status as TicketStatus, updateTicketDto.status);
+      updateData.status = updateTicketDto.status;
     }
 
     // Update the ticket
