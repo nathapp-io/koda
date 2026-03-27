@@ -70,9 +70,6 @@ export class TicketsService {
     if (typeof createTicketDto.title === 'string' && createTicketDto.title.trim().length === 0) {
       throw new ValidationAppException();
     }
-    if (createTicketDto.description !== undefined && typeof createTicketDto.description === 'string' && createTicketDto.description.trim().length === 0) {
-      throw new ValidationAppException();
-    }
 
     // Use transaction to safely auto-increment ticket number
     const ticket = await this.db.$transaction(async (tx) => {
