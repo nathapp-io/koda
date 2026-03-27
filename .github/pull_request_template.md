@@ -15,7 +15,7 @@ Closes #
 ## Testing
 
 - [ ] Tests added/updated
-- [ ] `bun test` passes
+- [ ] `bun run test` passes
 - [ ] `bun run type-check` passes
 - [ ] `bun run lint` passes
 

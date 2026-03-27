@@ -90,6 +90,7 @@ describe('RAG close-to-search integration', () => {
             get: (key: string) => {
               const config: Record<string, unknown> = {
                 'rag.lancedbPath': tmpDir,
+                'rag.inMemoryOnly': true,
                 'rag.similarityHigh': 0.85,
                 'rag.similarityMedium': 0.70,
                 'rag.similarityLow': 0.50,

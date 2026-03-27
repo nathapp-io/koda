@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { mkdirSync } from 'node:fs';
 import { ConfigService } from '@nestjs/config';
 import { EmbeddingService } from './embedding.service';
@@ -101,13 +101,19 @@ class InMemoryTable {
   private records: LanceRecord[] = [];
   async add(records: LanceRecord[]): Promise<void> { this.records.push(...records); }
   async countRows(): Promise<number> { return this.records.length; }
-  async delete(_filter: string): Promise<void> {}
+  async delete(filter: string): Promise<void> {
+    const sourceIdFilter = /^source_id\s*=\s*'([a-zA-Z0-9_-]+)'$/.exec(filter);
+    if (!sourceIdFilter) return;
+
+    const sourceId = sourceIdFilter[1];
+    this.records = this.records.filter((record) => record.source_id !== sourceId);
+  }
   vectorSearch() { return { distanceType: () => ({ limit: (n) => ({ toArray: () => this.records.slice(0, n) }) }) }; }
   query() { return { limit: (n) => ({ toArray: () => this.records.slice(0, n) }) }; }
 }
 
 @Injectable()
-export class RagService implements OnModuleInit {
+export class RagService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RagService.name);
   private db: LanceConnection = null;
   private readonly tableCache = new Map<string, LanceTable>();
@@ -117,6 +123,7 @@ export class RagService implements OnModuleInit {
   private readonly similarityMedium: number;
   private readonly similarityLow: number;
   private readonly ftsIndexMode: string;
+  private readonly inMemoryOnly: boolean;
 
   constructor(
     private readonly configService: ConfigService,
@@ -127,9 +134,19 @@ export class RagService implements OnModuleInit {
     this.similarityMedium = configService.get<number>('rag.similarityMedium') ?? 0.70;
     this.similarityLow = configService.get<number>('rag.similarityLow') ?? 0.50;
     this.ftsIndexMode = configService.get<string>('rag.ftsIndexMode') ?? 'simple';
+    this.inMemoryOnly = configService.get<boolean>('rag.inMemoryOnly') ?? false;
+
+    if (this.inMemoryOnly) {
+      this.lanceAvailable = false;
+      this.logger.log('RAG is running in in-memory mode; LanceDB native module will not be loaded');
+    }
   }
 
   onModuleInit(): void {
+    if (this.inMemoryOnly) {
+      return;
+    }
+
     try {
       mkdirSync(this.lancedbPath, { recursive: true });
       this.logger.log(`LanceDB storage directory ensured: ${this.lancedbPath}`);
@@ -138,7 +155,28 @@ export class RagService implements OnModuleInit {
     }
   }
 
+  async onModuleDestroy(): Promise<void> {
+    this.tableCache.clear();
+
+    if (this.db && typeof this.db.close === 'function') {
+      try {
+        const closeResult = this.db.close();
+        if (closeResult && typeof closeResult.then === 'function') {
+          await closeResult;
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to close LanceDB connection: ${(err as Error).message}`);
+      }
+    }
+
+    this.db = null;
+  }
+
   private async connect(): Promise<LanceConnection | null> {
+    if (this.inMemoryOnly) {
+      return null;
+    }
+
     if (!this.db) {
       try {
         const lancedb = await import('@lancedb/lancedb');
@@ -264,6 +302,7 @@ export class RagService implements OnModuleInit {
       .filter((r) => r.score > 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, fetchLimit);
+    const ftsScoreMap = new Map<string, number>(ftsRanked.map((r) => [r.id, r.score]));
 
     // Skip vector search when LanceDB is unavailable — use pure FTS
     let vectorRows: LanceRecord[] = [];
@@ -306,7 +345,7 @@ export class RagService implements OnModuleInit {
         const record = recordMap.get(id);
         if (!record) return null;
 
-        const score = simMap.get(id) ?? 0;
+        const score = simMap.get(id) ?? ftsScoreMap.get(id) ?? 0;
         const similarity = getSimilarityTier(
           score,
           this.similarityHigh,
@@ -372,6 +411,10 @@ export class RagService implements OnModuleInit {
     if (!this.embeddingService) return { valid: true };
 
     const db = await this.connect();
+    if (!db) {
+      return { valid: true };
+    }
+
     const tableName = `project_${projectId}`;
     const tableNames: string[] = await db.tableNames();
 

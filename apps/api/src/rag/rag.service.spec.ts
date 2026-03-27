@@ -1,4 +1,5 @@
 import {
+  RagService,
   reciprocalRankFusion,
   simpleFtsScore,
   getSimilarityTier,
@@ -130,5 +131,34 @@ describe('getVerdict', () => {
   it('returns "no_match" when top score < medium', () => {
     expect(getVerdict(0.69, high, medium)).toBe('no_match');
     expect(getVerdict(0, high, medium)).toBe('no_match');
+  });
+});
+
+describe('RagService lifecycle', () => {
+  it('closes LanceDB connection on module destroy', () => {
+    const configService = {
+      get: (key: string): unknown => {
+        const config: Record<string, unknown> = {
+          'rag.lancedbPath': './lancedb',
+          'rag.similarityHigh': 0.85,
+          'rag.similarityMedium': 0.70,
+          'rag.similarityLow': 0.50,
+          'rag.ftsIndexMode': 'simple',
+        };
+        return config[key];
+      },
+    };
+
+    const ragService = new RagService(configService as never);
+    const closeSpy = jest.fn();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).db = { close: closeSpy };
+
+    ragService.onModuleDestroy();
+
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((ragService as any).db).toBeNull();
   });
 });
