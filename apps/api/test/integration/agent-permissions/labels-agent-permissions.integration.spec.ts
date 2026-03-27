@@ -2,8 +2,7 @@
  * AC-1: LabelsService.create() with actorType='agent' returns label without throwing.
  * AC-2: LabelsService.create() with actorType='user' role='MEMBER' throws ForbiddenAppException.
  *
- * Tests must fail for unimplemented behavior (RED phase).
- * Currently: AC-1 passes, AC-2 passes (both already correct in labels.service.ts).
+ * Both ACs document and guard the already-correct permission logic for label creation in labels.service.ts.
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { LabelsService } from '../../../src/labels/labels.service';

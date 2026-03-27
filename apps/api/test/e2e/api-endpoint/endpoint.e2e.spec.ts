@@ -1353,8 +1353,7 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('AC-6: DELETE /api/projects/:slug/tickets/:ref — returns 200 with agent API key', async () => {
-      // Bug #19: tickets.service.ts lines 293-295 explicitly throw ForbiddenAppException
-      // for agents — this test FAILS until bug #19 is fixed (RED phase).
+      // Verifies that agents can soft-delete tickets (bug #19 fix: agent block removed from tickets.service.ts).
       const res = await request(httpServer)
         .delete(`/api/projects/${projectSlug}/tickets/${agentDeleteTicketRef}`)
         .set('Authorization', `Bearer ${agentApiKey}`)

@@ -2,9 +2,8 @@
  * AC-3: TicketsService.softDelete() with actorType='agent' soft-deletes without throwing.
  * AC-4: TicketsService.softDelete() with actorType='user' role='MEMBER' throws ForbiddenAppException.
  *
- * Tests must fail for unimplemented behavior (RED phase).
- * Currently: AC-3 FAILS (bug #19 — explicit agent block at lines 293-295 of tickets.service.ts).
- *            AC-4 passes (MEMBER guard already correct).
+ * AC-3: fixed — agent block removed from tickets.service.ts lines 293-295.
+ * AC-4: passes (MEMBER guard already correct).
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { TicketsService } from '../../../src/tickets/tickets.service';
