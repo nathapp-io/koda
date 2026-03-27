@@ -290,10 +290,6 @@ export class TicketsService {
       throw new ForbiddenAppException();
     }
 
-    if (actorType === 'agent') {
-      throw new ForbiddenAppException();
-    }
-
     // Find ticket by ref
     const ticket = await this.findByRef(projectSlug, ref);
     if (!ticket) {
