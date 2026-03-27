@@ -1,0 +1,7 @@
+{
+  "dateFormat": "YYYY-MM-DD",
+  "dateTimeFormat": "YYYY-MM-DD h:mm a",
+  "queryDateFormat": "YYYY-MM-DD",
+  "dateFormatWithDay": "ddd, DD MMM YYYY",
+  "dateTimeFromatWithDay": "ddd, DD MMM YYYY h:mm a"
+}

@@ -1,0 +1,16 @@
+{
+  "isString": "{property} must be a string",
+  "isNotEmpty": "{property} is required",
+  "isBoolean": "{property} is not a boolean",
+  "isEmail": "{property} must be a valid email",
+  "min": "{property} with value: \"{value}\" needs to be at least {constraints.0}",
+  "max": "{property} with value: \"{value}\" needs to be less than or equal {constraints.0}",
+  "length": "{property} must be longer than or equal to {constraints.0} characters",
+  "minLength": "{property} must be at least {constraints.0} characters long",
+  "maxLength": "{property} must be less than or equal to {constraints.0} characters long",
+  "isInt": "{property} must be an integer",
+  "contains": "{property} must contain {constraints.0}",
+  "isFQDN": "{property} is not a valid Fully Qualified Domain Name",
+  "isDate": "{property} is not a valid date",
+  "isNotEmptyObject": "{property} is an empty object"
+}
