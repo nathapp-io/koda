@@ -182,7 +182,7 @@ export class TicketsService {
     }
 
     // Check if ref matches KODA-42 format (projectKey-number)
-    const refPattern = /^([A-Z0-9]+)-(\d+)$/;
+    const refPattern = /^([A-Z]+)-(\d+)$/;
     const match = ref.match(refPattern);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

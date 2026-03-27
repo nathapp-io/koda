@@ -23,12 +23,12 @@ export class CreateProjectDto {
   slug!: string;
 
   @ApiProperty({
-    description: 'Project key - 2-6 uppercase alphanumeric characters for ticket references',
+    description: 'Project key - 2-6 uppercase letters for ticket references',
     example: 'KODA',
-    pattern: '^[A-Z0-9]{2,6}$',
+    pattern: '^[A-Z]{2,6}$',
   })
   @IsString({ message: '$t(common.validation.isString)' })
-  @Matches(/^[A-Z0-9]{2,6}$/, {
+  @Matches(/^[A-Z]{2,6}$/, {
     message: '$t(projects.keyInvalid)',
   })
   key!: string;

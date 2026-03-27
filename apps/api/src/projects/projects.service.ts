@@ -23,8 +23,8 @@ export class ProjectsService {
       throw new ValidationAppException();
     }
 
-    // Validate key format (2-6 uppercase alphanumeric characters only)
-    const keyPattern = /^[A-Z0-9]{2,6}$/;
+    // Validate key format (2-6 uppercase letters only)
+    const keyPattern = /^[A-Z]{2,6}$/;
     if (!keyPattern.test(createProjectDto.key)) {
       throw new ValidationAppException();
     }

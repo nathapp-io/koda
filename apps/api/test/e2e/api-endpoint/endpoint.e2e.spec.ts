@@ -717,6 +717,49 @@ describeIntegration('API Integration Tests', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────
+  // 13b. Ticket PATCH — Status Transition (US-003)
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('13b. Ticket PATCH — Status Transition', () => {
+    it('PATCH .../tickets/:ref — returns 200 with updated status when patching CREATED → IN_PROGRESS', async () => {
+      const createRes = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ type: 'BUG', title: 'Status patch test ticket' })
+        .expect(201);
+
+      const ticketRef = body<{ ref: string }>(createRes).ref;
+
+      const res = await request(httpServer)
+        .patch(`/api/projects/${projectSlug}/tickets/${ticketRef}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ status: 'IN_PROGRESS' })
+        .expect(200);
+
+      const ticket = body<{ status: string }>(res);
+      expect(ticket.status).toBe('IN_PROGRESS');
+    });
+
+    it('PATCH .../tickets/:ref — returns 4xx for invalid transition (CREATED → CLOSED)', async () => {
+      const createRes = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ type: 'BUG', title: 'Invalid transition test ticket' })
+        .expect(201);
+
+      const ticketRef = body<{ ref: string }>(createRes).ref;
+
+      const res = await request(httpServer)
+        .patch(`/api/projects/${projectSlug}/tickets/${ticketRef}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ status: 'CLOSED' });
+
+      expect(res.status).toBeGreaterThanOrEqual(400);
+      expect(res.status).toBeLessThan(500);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
   // 14. Project Delete
   // ─────────────────────────────────────────────────────────────────
 
