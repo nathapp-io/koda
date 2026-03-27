@@ -1,8 +1,67 @@
+// Mock chalk early to prevent ESM issues
+jest.mock('chalk', () => {
+  const mockChalk = {
+    cyan: { bold: (str: string) => str },
+    gray: (str: string) => str,
+    green: (str: string) => str,
+    red: (str: string) => str,
+    yellow: (str: string) => str,
+  };
+  return mockChalk;
+});
+
+// Mock conf before importing
+const mockData: Record<string, string> = {};
+
+const mockStore = {
+  get: jest.fn((key: string) => mockData[key] || ''),
+  set: jest.fn((key: string, value: string) => {
+    mockData[key] = value;
+  }),
+};
+
+jest.mock('conf', () => {
+  return jest.fn(() => mockStore);
+});
+
+// Mock axios client
+const mockAxios = {
+  get: jest.fn(),
+};
+
+jest.mock('axios', () => {
+  return {
+    create: () => mockAxios,
+  };
+});
+
+// Mock the generated clients
+jest.mock('../../../src/generated', () => ({
+  TicketsService: {
+    list: jest.fn(),
+  },
+  AgentService: {
+    me: jest.fn(),
+    pickup: jest.fn(),
+  },
+}));
+
+// Mock config module to use mockData instead of real filesystem
+jest.mock('../../../src/config', () => ({
+  getConfig: jest.fn(() => ({
+    apiKey: mockData.apiKey || '',
+    apiUrl: mockData.apiUrl || '',
+  })),
+  setConfig: jest.fn(),
+  validateApiKey: jest.fn((key: string) => key && key.length >= 10),
+  resolveContext: jest.fn(),
+}));
+
 import { Command } from 'commander';
-import { ticketCommand } from '../../../apps/cli/src/commands/ticket';
-import { agentCommand } from '../../../apps/cli/src/commands/agent';
-import { TicketsService, AgentService } from '../../../apps/cli/src/generated';
-import { resolveContext } from '../../../apps/cli/src/config';
+import { ticketCommand } from '../../../src/commands/ticket';
+import { agentCommand } from '../../../src/commands/agent';
+import { TicketsService, AgentService } from '../../../src/generated';
+import { resolveContext } from '../../../src/config';
 
 const DEFAULT_CTX = {
   projectSlug: 'test-project',
