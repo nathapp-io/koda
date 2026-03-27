@@ -1,0 +1,161 @@
+{
+  "project": "koda",
+  "feature": "api-fixes",
+  "branchName": "feat/api-fixes",
+  "createdAt": "2026-03-27T00:00:00.000Z",
+  "updatedAt": "2026-03-27T10:23:33.781Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Allow agent actors to create labels and delete tickets",
+      "description": "Bugs #18 and #19. Two separate permission guards incorrectly block agent actors. In `LabelsService.create()`, the guard must explicitly allow agents with MEMBER or ADMIN role. In `TicketsService.softDelete()`, an explicit `if (actorType === 'agent') throw ForbiddenAppException()` block must be removed so agents are treated the same as ADMIN users.",
+      "acceptanceCriteria": [
+        "When `LabelsService.create()` is called with actorType='agent' and a project-member agent, it returns the newly created label without throwing.",
+        "When `LabelsService.create()` is called with actorType='user' and role='MEMBER', it throws ForbiddenAppException.",
+        "When `TicketsService.softDelete()` is called with actorType='agent', it soft-deletes the ticket and does not throw ForbiddenAppException.",
+        "When `TicketsService.softDelete()` is called with actorType='user' and role='MEMBER', it throws ForbiddenAppException.",
+        "POST /api/projects/:slug/labels returns HTTP 201 when authenticated with a valid agent API key.",
+        "DELETE /api/projects/:slug/tickets/:ref returns HTTP 200 when authenticated with a valid agent API key."
+      ],
+      "tags": [
+        "bug",
+        "api",
+        "security",
+        "permissions"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/labels/labels.service.ts",
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/src/labels/labels.controller.ts",
+        "apps/api/src/tickets/tickets.controller.ts",
+        "apps/api/test/integration/labels/labels.integration.spec.ts"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-002",
+      "title": "Allow empty string description on ticket creation",
+      "description": "Bug #20. `TicketsService.create()` throws `ValidationAppException` when `description` is an empty string (`\"\"`), even though `CreateTicketDto.description` is `@IsOptional()` with no `@MinLength`. The fix is to remove (or relax) the early guard so the existing normalisation `description: createTicketDto.description || null` can coerce the empty string to null before the Prisma insert.",
+      "acceptanceCriteria": [
+        "When `TicketsService.create()` is called with createDto.description set to empty string '', it does not throw and returns a ticket with description set to null.",
+        "When `TicketsService.create()` is called with createDto.description set to undefined, it does not throw and returns a ticket with description set to null.",
+        "When `TicketsService.create()` is called with createDto.description set to a non-empty string, it returns a ticket with that description value preserved.",
+        "POST /api/projects/:slug/tickets with body { description: '' } returns HTTP 201 and the response ticket has description equal to null."
+      ],
+      "tags": [
+        "bug",
+        "api",
+        "validation"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/src/tickets/dto/create-ticket.dto.ts",
+        "apps/api/test/integration/tickets/tickets.integration.spec.ts"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-003",
+      "title": "Fix ticket status PATCH being a no-op",
+      "description": "Bug #21. `TicketsService.update()` validates the requested status transition via `validateTransition()` but does not include the `status` field in the `prisma.ticket.update({ data: { ... } })` payload. The database record is never modified, so the API returns the old status. The fix is to include `status: updateTicketDto.status` (after transition validation) in the Prisma update data object.",
+      "acceptanceCriteria": [
+        "When `TicketsService.update()` is called with updateDto.status='IN_PROGRESS' on a ticket in VERIFIED state, the returned ticket has status equal to 'IN_PROGRESS'.",
+        "When `TicketsService.update()` is called with updateDto.status='IN_PROGRESS' on a ticket in VERIFIED state, the database record is updated to status 'IN_PROGRESS'.",
+        "When `TicketsService.update()` is called with an invalid transition (e.g. status='CLOSED' from CREATED), it throws the appropriate state-machine exception and does not update the database.",
+        "PATCH /api/projects/:slug/tickets/:ref with body { status: 'IN_PROGRESS' } returns HTTP 200 with the updated status in the response body.",
+        "A subsequent GET /api/projects/:slug/tickets/:ref after the PATCH returns the updated status."
+      ],
+      "tags": [
+        "bug",
+        "api",
+        "state-machine"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/src/tickets/state-machine/validate-transition.ts",
+        "apps/api/src/tickets/dto/update-ticket.dto.ts",
+        "apps/api/test/integration/tickets/tickets.integration.spec.ts",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-004",
+      "title": "Add calculated 'ref' field to TicketResponseDto",
+      "description": "Bug #23. `TicketResponseDto` does not declare a `ref` field. The services already compute and return `ref` (e.g., `NAX-1`) in `create()` and `findByRef()`, but without an `@ApiProperty()` declaration the OpenAPI spec omits it and generated clients cannot type it. Add `@ApiProperty({ example: 'NAX-1', description: 'Ticket reference (projectKey-number)' }) ref: string` to `TicketResponseDto`.",
+      "acceptanceCriteria": [
+        "GET /api/projects/:slug/tickets returns an array where each object contains a 'ref' string field matching the pattern /^[A-Z]+-\\d+$/.",
+        "GET /api/projects/:slug/tickets/:ref returns a response object that includes a 'ref' string field matching the pattern /^[A-Z]+-\\d+$/.",
+        "POST /api/projects/:slug/tickets returns a response object that includes a 'ref' string field matching the pattern /^[A-Z]+-\\d+$/.",
+        "The OpenAPI spec exported by `bun run api:export-spec` includes 'ref' as a property of the ticket schema with type 'string'."
+      ],
+      "tags": [
+        "bug",
+        "api",
+        "dto",
+        "openapi"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/tickets/dto/ticket-response.dto.ts",
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    }
+  ],
+  "analysis": "Five bugs were identified across the NestJS API layer during early dogfooding. All changes are isolated to apps/api.\n\n**Bug #18 — Agent 403 on Label Creation (`LabelsService.create`):**\nThe permission guard reads `if (actorType === 'user' && currentUser.role === 'MEMBER') throw ForbiddenAppException()`. This was intended to block MEMBER users but allow ADMIN users and agents. However, the logic is unclear and tests only cover the `user` path. The agent path was never exercised; the commit history (fix/api: allow agents to create/update/delete labels) suggests the fix already landed for some label operations but integration tests still fail, implying the guard was later reverted or the controller is wrapping calls incorrectly.\n\n**Bug #19 — Agent 403 on Ticket Deletion (`TicketsService.softDelete`):**\nThe method contains an explicit `if (actorType === 'agent') throw new ForbiddenAppException()` block. This hard rejects all agents regardless of role. The fix is to remove that block and apply the same ADMIN-or-agent logic used elsewhere.\n\n**Bug #20 — Empty Description Causes Ticket Creation Failure (`TicketsService.create`):**\nLines 73-75 throw `ValidationAppException` when `description` is a non-undefined empty string. However, `CreateTicketDto.description` is `@IsOptional()` with no `@MinLength`, so clients are allowed to send `description: \"\"`. The service at line 94 already normalises with `description: createTicketDto.description || null`, but the early guard throws before reaching that line. Fix: remove the empty-string guard or coerce to null before the check.\n\n**Bug #21 — Ticket Status PATCH Is a No-op (`TicketsService.update`):**\nThe update method reads `status` from the DTO and calls `validateTransition()`, but the `prisma.ticket.update()` call does not include `status` in the `data` payload (only non-status fields are written). The status field must be added to the Prisma update call after the transition is validated.\n\n**Bug #23 — Missing `ref` in `TicketResponseDto`:**\nThe service already computes and returns `ref` (e.g., `NAX-1`) in both `create()` and `findByRef()`, but `TicketResponseDto` has no `@ApiProperty()` declaration for `ref`. This means the OpenAPI spec omits the field, generated clients don't type it, and strict response validation may strip it. Fix: add `@ApiProperty() ref: string` to `TicketResponseDto`.\n\n**Key files:**\n- `apps/api/src/labels/labels.service.ts` — permission guards for label operations\n- `apps/api/src/tickets/tickets.service.ts` — create, update, softDelete logic\n- `apps/api/src/tickets/dto/ticket-response.dto.ts` — missing ref field\n- `apps/api/src/tickets/state-machine/` — validateTransition() used in update\n- `apps/api/test/` — existing e2e tests that need agent-auth variants added\n\n**Risks:**\n- Changing `softDelete` permissions could allow agents to delete tickets they shouldn't; scope must be limited to MEMBER/ADMIN agents only.\n- Adding `ref` to the DTO is purely additive — no breaking change.\n- Status fix must pass through `validateTransition()` to preserve invariants.\n- Empty-description fix must not allow null descriptions where the DB schema requires non-null; verify Prisma schema nullable setting."
+}
