@@ -1,6 +1,6 @@
 {
   "name": "@nathapp/koda-cli",
-  "version": "0.11.0",
+  "version": "0.2.0",
   "description": "CLI for Koda — dev ticket tracker",
   "bin": {
     "koda": "./dist/index.js"

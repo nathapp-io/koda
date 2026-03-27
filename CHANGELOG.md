@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 0.11.0 — Phase 10: Project-Level CLI Config
+## 0.2.0 — Phase 10: Project-Level CLI Config
 
 **Released:** 2026-03-27
 
