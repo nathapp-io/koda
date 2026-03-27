@@ -173,7 +173,7 @@ describe('LabelsService', () => {
       ).rejects.toThrow();
     });
 
-    it('should reject label creation for agent', async () => {
+    it('should allow label creation for agent', async () => {
       const createDto: CreateLabelDto = {
         name: 'typescript',
         color: '#0066CC',
@@ -181,9 +181,12 @@ describe('LabelsService', () => {
 
       const agent = { id: 'agent-123', sub: 'agent-123', slug: 'test-agent' };
 
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.label.create.mockResolvedValue({ ...mockLabel, name: 'typescript', color: '#0066CC' });
+
       await expect(
         service.create('koda', createDto, agent, 'agent')
-      ).rejects.toThrow();
+      ).resolves.toMatchObject({ name: 'typescript', color: '#0066CC' });
     });
 
     it('should create label without color', async () => {
@@ -300,12 +303,15 @@ describe('LabelsService', () => {
       ).rejects.toThrow();
     });
 
-    it('should reject delete from agent', async () => {
+    it('should allow delete from agent', async () => {
       const agent = { id: 'agent-123', sub: 'agent-123', slug: 'test-agent' };
+
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.label.findUnique.mockResolvedValue(mockLabel);
 
       await expect(
         service.delete('koda', 'label-123', agent, 'agent')
-      ).rejects.toThrow();
+      ).resolves.toBeUndefined();
     });
 
     it('should throw NotFoundException if project not found', async () => {
