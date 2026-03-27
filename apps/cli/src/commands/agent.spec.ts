@@ -83,8 +83,12 @@ describe('agentCommand', () => {
     logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
 
     jest.clearAllMocks();
-    (AgentService.me as jest.Mock).mockReset();
-    (AgentService.pickup as jest.Mock).mockReset();
+
+    // Default resolveContext mock for all tests (after clearAllMocks)
+    (resolveContext as jest.Mock).mockResolvedValue({
+      apiKey: 'sk-test-key123',
+      apiUrl: 'http://localhost:3100/api',
+    });
   });
 
   afterEach(() => {
@@ -107,7 +111,7 @@ describe('agentCommand', () => {
       const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
       const meCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'me');
 
-      await meCmd?.parse(['node', 'test']);
+      await meCmd?.parseAsync(['node', 'test']);
 
       expect(AgentService.me).toHaveBeenCalled();
       expect(exitSpy).toHaveBeenCalledWith(0);
@@ -128,7 +132,7 @@ describe('agentCommand', () => {
       const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
       const meCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'me');
 
-      await meCmd?.parse(['node', 'test']);
+      await meCmd?.parseAsync(['node', 'test']);
 
       expect(logSpy).toHaveBeenCalled();
       // Check that the full API key was NOT logged (it should be masked)
@@ -152,7 +156,7 @@ describe('agentCommand', () => {
       const meCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'me');
 
       try {
-        await meCmd?.parse(['node', 'test', '--json']);
+        await meCmd?.parseAsync(['node', 'test', '--json']);
       } catch {
         // Expected
       }
@@ -163,14 +167,16 @@ describe('agentCommand', () => {
     });
 
     it('exits with code 2 when API key is not configured', async () => {
-      mockData.apiKey = '';
-      mockData.apiUrl = '';
+      (resolveContext as jest.Mock).mockResolvedValue({
+        apiKey: '',
+        apiUrl: '',
+      });
 
       const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
       const meCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'me');
 
       try {
-        await meCmd?.parse(['node', 'test']);
+        await meCmd?.parseAsync(['node', 'test']);
       } catch {
         // Expected
       }
@@ -188,7 +194,7 @@ describe('agentCommand', () => {
       const meCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'me');
 
       try {
-        await meCmd?.parse(['node', 'test']);
+        await meCmd?.parseAsync(['node', 'test']);
       } catch {
         // Expected
       }
@@ -206,7 +212,7 @@ describe('agentCommand', () => {
       const meCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'me');
 
       try {
-        await meCmd?.parse(['node', 'test']);
+        await meCmd?.parseAsync(['node', 'test']);
       } catch {
         // Expected
       }
@@ -230,7 +236,7 @@ describe('agentCommand', () => {
       const meCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'me');
 
       try {
-        await meCmd?.parse(['node', 'test', '--json']);
+        await meCmd?.parseAsync(['node', 'test', '--json']);
       } catch {
         // Expected
       }
