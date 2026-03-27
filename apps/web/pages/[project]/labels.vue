@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { toast } from 'vue-sonner'
+import { useForm } from 'vee-validate'
+import { toTypedSchema } from '@vee-validate/zod'
+import * as z from 'zod'
 
 interface Label {
   id: string
@@ -19,30 +22,38 @@ const { data: labelsData, refresh } = useAsyncData(
 
 const labels = computed(() => labelsData.value ?? [])
 
-const newName = ref('')
-const newColor = ref('#6366f1')
+const formSchema = toTypedSchema(z.object({
+  name: z.string().min(1, 'Name is required'),
+  color: z.string().optional(),
+}))
 
-async function createLabel() {
+const { handleSubmit, resetForm } = useForm({
+  validationSchema: formSchema,
+  initialValues: { name: '', color: '#6366f1' },
+})
+
+const onSubmit = handleSubmit(async (values) => {
   try {
     await $api.post(`/projects/${slug}/labels`, {
-      name: newName.value,
-      color: newColor.value || '#6366f1',
+      name: values.name,
+      color: values.color || '#6366f1',
     })
     toast.success(t('labels.toast.created'))
-    newName.value = ''
-    newColor.value = '#6366f1'
-    refresh()
-  } catch {
+    resetForm()
+    await refresh()
+  } catch (err) {
+    console.error('createLabel failed:', err)
     toast.error(t('labels.toast.createFailed'))
   }
-}
+})
 
 async function deleteLabel(labelId: string) {
   try {
     await $api.delete(`/projects/${slug}/labels/${labelId}`)
     toast.success(t('labels.toast.deleted'))
-    refresh()
-  } catch {
+    await refresh()
+  } catch (err) {
+    console.error('deleteLabel failed:', err)
     toast.error(t('labels.toast.deleteFailed'))
   }
 }
@@ -55,19 +66,31 @@ async function deleteLabel(labelId: string) {
     <!-- Create Label Form -->
     <div class="rounded-md border border-border p-4 space-y-4">
       <h2 class="text-lg font-semibold">{{ t('labels.form.create') }}</h2>
-      <div class="flex items-end gap-4">
-        <div class="flex-1 space-y-1">
-          <label class="text-sm font-medium">{{ t('labels.form.name') }}</label>
-          <Input v-model="newName" :placeholder="t('labels.form.namePlaceholder')" />
-        </div>
-        <div class="space-y-1">
-          <label class="text-sm font-medium">{{ t('labels.form.color') }}</label>
-          <Input v-model="newColor" placeholder="#6366f1" class="w-32" />
-        </div>
-        <Button @click="createLabel" :disabled="!newName.trim()">
+      <form @submit="onSubmit" class="flex items-end gap-4">
+        <FormField name="name" v-slot="{ componentField }">
+          <FormItem class="flex-1">
+            <FormLabel>{{ t('labels.form.name') }}</FormLabel>
+            <FormControl>
+              <Input :placeholder="t('labels.form.namePlaceholder')" v-bind="componentField" />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        </FormField>
+
+        <FormField name="color" v-slot="{ componentField }">
+          <FormItem>
+            <FormLabel>{{ t('labels.form.color') }}</FormLabel>
+            <FormControl>
+              <Input placeholder="#6366f1" class="w-32" v-bind="componentField" />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        </FormField>
+
+        <Button type="submit">
           {{ t('labels.form.submit') }}
         </Button>
-      </div>
+      </form>
     </div>
 
     <!-- Labels Table -->
