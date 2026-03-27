@@ -3,7 +3,7 @@
   "feature": "cli-fixes",
   "branchName": "feat/cli-fixes",
   "createdAt": "2026-03-27T00:00:00.000Z",
-  "updatedAt": "2026-03-27T16:04:11.081Z",
+  "updatedAt": "2026-03-27T16:09:33.115Z",
   "userStories": [
     {
       "id": "US-005",
@@ -54,8 +54,8 @@
         "cli"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
