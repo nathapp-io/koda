@@ -1317,4 +1317,51 @@ describeIntegration('API Integration Tests', () => {
       expect(responseBody).toHaveProperty('data');
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────
+  // Agent Permissions — Bug #18 (labels) & Bug #19 (ticket delete)
+  // AC-5: POST /api/projects/:slug/labels returns 201 with agent API key
+  // AC-6: DELETE /api/projects/:slug/tickets/:ref returns 200 with agent API key
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('Agent Permissions (AC-5 & AC-6)', () => {
+    let agentDeleteTicketRef: string;
+
+    beforeAll(async () => {
+      // Create a ticket that the agent will soft-delete (AC-6)
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ type: 'BUG', title: 'Agent delete test ticket', priority: 'LOW' })
+        .expect(201);
+
+      agentDeleteTicketRef = body<{ ref: string }>(res).ref;
+    });
+
+    it('AC-5: POST /api/projects/:slug/labels — returns 201 with agent API key', async () => {
+      // Bug #18: agents should be allowed to create labels.
+      // Current code in labels.service.ts only blocks MEMBER users, so agents pass through.
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/labels`)
+        .set('Authorization', `Bearer ${agentApiKey}`)
+        .send({ name: 'agent-created-label', color: '#00ccff' })
+        .expect(201);
+
+      const data = body<{ name: string; id: string }>(res);
+      expect(data.name).toBe('agent-created-label');
+      expect(data.id).toBeTruthy();
+    });
+
+    it('AC-6: DELETE /api/projects/:slug/tickets/:ref — returns 200 with agent API key', async () => {
+      // Bug #19: tickets.service.ts lines 293-295 explicitly throw ForbiddenAppException
+      // for agents — this test FAILS until bug #19 is fixed (RED phase).
+      const res = await request(httpServer)
+        .delete(`/api/projects/${projectSlug}/tickets/${agentDeleteTicketRef}`)
+        .set('Authorization', `Bearer ${agentApiKey}`)
+        .expect(200);
+
+      const data = body<{ deletedAt: string | null }>(res);
+      expect(data.deletedAt).not.toBeNull();
+    });
+  });
 });
