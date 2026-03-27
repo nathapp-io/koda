@@ -2,17 +2,17 @@
  * US-003: Fix ticket status PATCH no-op — Unit tests
  *
  * Acceptance Criteria (AC-1 through AC-4):
- * AC-1: update() with status 'IN_PROGRESS' on CREATED ticket calls validateTransition and returns updated ticket
- * AC-2: update() passes status: 'IN_PROGRESS' to db.ticket.update() data
+ * AC-1: update() with status 'VERIFIED' on CREATED ticket calls validateTransition and returns updated ticket
+ * AC-2: update() passes status: 'VERIFIED' to db.ticket.update() data
  * AC-3: update() with invalid transition throws ValidationAppException and never calls db.ticket.update()
  * AC-4: update() with no status in DTO does not include status key in updateData
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { TicketsService } from '../../src/tickets/tickets.service';
+import { TicketsService } from '../../../src/tickets/tickets.service';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { UpdateTicketDto } from '../../src/tickets/dto/update-ticket.dto';
-import { TicketStatus } from '../../src/common/enums';
-import * as ticketTransitions from '../../src/tickets/state-machine/ticket-transitions';
+import { UpdateTicketDto } from '../../../src/tickets/dto/update-ticket.dto';
+import { TicketStatus } from '../../../src/common/enums';
+import * as ticketTransitions from '../../../src/tickets/state-machine/ticket-transitions';
 
 describe('US-003: TicketsService.update() — status field', () => {
   let service: TicketsService;
@@ -82,16 +82,16 @@ describe('US-003: TicketsService.update() — status field', () => {
   });
 
   describe('AC-1: valid transition calls validateTransition and returns updated ticket with new status', () => {
-    it('calls validateTransition("CREATED", "IN_PROGRESS") without throwing and returns ticket with status IN_PROGRESS', async () => {
+    it('calls validateTransition("CREATED", "VERIFIED") without throwing and returns ticket with status VERIFIED', async () => {
       const updateDto: UpdateTicketDto = {
-        status: TicketStatus.IN_PROGRESS,
+        status: TicketStatus.VERIFIED,
       };
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockCreatedTicket);
       mockPrismaService.client.ticket.update.mockResolvedValue({
         ...mockCreatedTicket,
-        status: TicketStatus.IN_PROGRESS,
+        status: TicketStatus.VERIFIED,
       });
 
       const validateSpy = jest.spyOn(ticketTransitions, 'validateTransition');
@@ -104,22 +104,22 @@ describe('US-003: TicketsService.update() — status field', () => {
         'user',
       );
 
-      expect(validateSpy).toHaveBeenCalledWith(TicketStatus.CREATED, TicketStatus.IN_PROGRESS);
-      expect(result.status).toBe(TicketStatus.IN_PROGRESS);
+      expect(validateSpy).toHaveBeenCalledWith(TicketStatus.CREATED, TicketStatus.VERIFIED);
+      expect(result.status).toBe(TicketStatus.VERIFIED);
     });
   });
 
   describe('AC-2: valid transition passes status to db.ticket.update()', () => {
-    it('includes status: "IN_PROGRESS" in the data passed to db.ticket.update()', async () => {
+    it('includes status: "VERIFIED" in the data passed to db.ticket.update()', async () => {
       const updateDto: UpdateTicketDto = {
-        status: TicketStatus.IN_PROGRESS,
+        status: TicketStatus.VERIFIED,
       };
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockCreatedTicket);
       mockPrismaService.client.ticket.update.mockResolvedValue({
         ...mockCreatedTicket,
-        status: TicketStatus.IN_PROGRESS,
+        status: TicketStatus.VERIFIED,
       });
 
       await service.update(
@@ -132,7 +132,7 @@ describe('US-003: TicketsService.update() — status field', () => {
 
       expect(mockPrismaService.client.ticket.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ status: TicketStatus.IN_PROGRESS }),
+          data: expect.objectContaining({ status: TicketStatus.VERIFIED }),
         }),
       );
     });

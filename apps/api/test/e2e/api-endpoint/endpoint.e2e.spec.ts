@@ -721,7 +721,7 @@ describeIntegration('API Integration Tests', () => {
   // ─────────────────────────────────────────────────────────────────
 
   describe('13b. Ticket PATCH — Status Transition', () => {
-    it('PATCH .../tickets/:ref — returns 200 with updated status when patching CREATED → IN_PROGRESS', async () => {
+    it('PATCH .../tickets/:ref — returns 200 with updated status when patching CREATED → VERIFIED', async () => {
       const createRes = await request(httpServer)
         .post(`/api/projects/${projectSlug}/tickets`)
         .set('Authorization', `Bearer ${userAccessToken}`)
@@ -733,14 +733,14 @@ describeIntegration('API Integration Tests', () => {
       const res = await request(httpServer)
         .patch(`/api/projects/${projectSlug}/tickets/${ticketRef}`)
         .set('Authorization', `Bearer ${userAccessToken}`)
-        .send({ status: 'IN_PROGRESS' })
+        .send({ status: 'VERIFIED' })
         .expect(200);
 
       const ticket = body<{ status: string }>(res);
-      expect(ticket.status).toBe('IN_PROGRESS');
+      expect(ticket.status).toBe('VERIFIED');
     });
 
-    it('PATCH .../tickets/:ref — returns 4xx for invalid transition (CREATED → CLOSED)', async () => {
+    it('PATCH .../tickets/:ref — returns 400 for invalid transition (CREATED → CLOSED)', async () => {
       const createRes = await request(httpServer)
         .post(`/api/projects/${projectSlug}/tickets`)
         .set('Authorization', `Bearer ${userAccessToken}`)
@@ -749,13 +749,11 @@ describeIntegration('API Integration Tests', () => {
 
       const ticketRef = body<{ ref: string }>(createRes).ref;
 
-      const res = await request(httpServer)
+      await request(httpServer)
         .patch(`/api/projects/${projectSlug}/tickets/${ticketRef}`)
         .set('Authorization', `Bearer ${userAccessToken}`)
-        .send({ status: 'CLOSED' });
-
-      expect(res.status).toBeGreaterThanOrEqual(400);
-      expect(res.status).toBeLessThan(500);
+        .send({ status: 'CLOSED' })
+        .expect(400);
     });
   });
 
