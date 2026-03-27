@@ -48,7 +48,7 @@ export async function initCommand(options: InitOptions, deps: InitDeps = _initDe
 
   const slug = options.project;
   if (!slug) {
-    console.error('Not logged in. Run: koda login --api-key <key>');
+    console.error('Project slug required. Use: koda init --project <slug>');
     return void process.exit(2);
   }
 
