@@ -82,11 +82,13 @@ jest.mock('../config', () => ({
     if (key.length <= 8) return '****';
     return key.substring(0, 4) + '*'.repeat(key.length - 8) + key.substring(key.length - 4);
   }),
+  resolveContext: jest.fn(),
 }));
 
 import { Command } from 'commander';
 import { ticketCommand } from './ticket';
 import { TicketsService, TicketLinksService } from '../generated';
+import { resolveContext } from '../config';
 
 const TEST_URL = 'https://github.com/owner/repo/pull/1';
 const TEST_REF = 'KDA-42';
@@ -126,6 +128,11 @@ describe('ticket link subcommand', () => {
     (TicketLinksService.create as jest.Mock).mockReset();
     (TicketLinksService.list as jest.Mock).mockReset();
     (TicketLinksService.delete as jest.Mock).mockReset();
+    (resolveContext as jest.Mock).mockResolvedValue({
+      projectSlug: 'test-project',
+      apiKey: 'sk-test-key123',
+      apiUrl: 'http://localhost:3100/api',
+    });
   });
 
   afterEach(() => {
