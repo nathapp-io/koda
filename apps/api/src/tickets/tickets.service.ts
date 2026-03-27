@@ -5,6 +5,7 @@ import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { PrismaClient } from '@prisma/client';
 import { TicketType, TicketStatus, Priority } from '../common/enums';
+import { validateTransition } from './state-machine/ticket-transitions';
 import { buildGitUrl } from '../common/utils/git-url.util';
 
 interface FindAllFilters {
@@ -68,9 +69,6 @@ export class TicketsService {
       throw new ValidationAppException();
     }
     if (typeof createTicketDto.title === 'string' && createTicketDto.title.trim().length === 0) {
-      throw new ValidationAppException();
-    }
-    if (createTicketDto.description !== undefined && typeof createTicketDto.description === 'string' && createTicketDto.description.trim().length === 0) {
       throw new ValidationAppException();
     }
 
@@ -160,6 +158,7 @@ export class TicketsService {
     return {
       items: tickets.map((ticket) => ({
         ...ticket,
+        ref: `${project.key}-${ticket.number}`,
         gitRefUrl: this.computeGitRefUrl(
           project.gitRemoteUrl,
           ticket.gitRefVersion,
@@ -272,6 +271,11 @@ export class TicketsService {
       updateData.priority = updateTicketDto.priority;
     }
 
+    if (updateTicketDto.status !== undefined) {
+      validateTransition(ticket.status as TicketStatus, updateTicketDto.status);
+      updateData.status = updateTicketDto.status;
+    }
+
     // Update the ticket
     return this.db.ticket.update({
       where: { id: ticket.id },
@@ -287,10 +291,6 @@ export class TicketsService {
   ) {
     // Check if user has ADMIN role (only applies to users)
     if (actorType === 'user' && currentUser.role && currentUser.role !== 'ADMIN') {
-      throw new ForbiddenAppException();
-    }
-
-    if (actorType === 'agent') {
       throw new ForbiddenAppException();
     }
 

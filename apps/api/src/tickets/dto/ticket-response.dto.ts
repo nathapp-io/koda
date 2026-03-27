@@ -12,6 +12,9 @@ export class TicketResponseDto {
   @ApiProperty({ description: 'Sequential ticket number within project' })
   number!: number;
 
+  @ApiProperty({ description: 'Project-scoped ticket reference, e.g. NAX-1' })
+  ref!: string;
+
   @ApiProperty({ description: 'Ticket type', enum: TicketType })
   type!: TicketType;
 

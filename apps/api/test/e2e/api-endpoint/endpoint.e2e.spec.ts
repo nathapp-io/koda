@@ -59,7 +59,7 @@ describeIntegration('API Integration Tests', () => {
       });
     } catch (error) {
       // Database reset may fail if schema is already in sync, which is OK for tests
-      console.log('Database reset encountered an issue (may be expected)');
+      // Silent catch - database reset may fail if schema is already in sync
     }
 
     // Use AppFactory to get NathApplication with useAppGlobal* methods
@@ -353,14 +353,19 @@ describeIntegration('API Integration Tests', () => {
       bugTicketRef = data.ref;
     });
 
-    it('GET .../tickets — lists tickets', async () => {
+    it('GET .../tickets — lists tickets with ref field', async () => {
       const res = await request(httpServer)
         .get(`/api/projects/${projectSlug}/tickets`)
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(200);
 
-      const data = body<{ items: unknown[]; total: number }>(res);
+      const data = body<{ items: Array<{ ref: string; number: number }>; total: number }>(res);
       expect(data.items.length).toBeGreaterThanOrEqual(1);
+      // All items should have ref field matching pattern KT-1, KT-2, etc.
+      data.items.forEach((item) => {
+        expect(item.ref).toMatch(/^[A-Z0-9]+-[1-9][0-9]*$/);
+        expect(item.ref).toBe(`KT-${item.number}`);
+      });
     });
 
     it('GET .../tickets/:ref — returns ticket by ref with empty links array', async () => {
@@ -713,6 +718,47 @@ describeIntegration('API Integration Tests', () => {
         .get('/api/projects/nonexistent/tickets')
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(404);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // 13b. Ticket PATCH — Status Transition (US-003)
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('13b. Ticket PATCH — Status Transition', () => {
+    it('PATCH .../tickets/:ref — returns 200 with updated status when patching CREATED → IN_PROGRESS', async () => {
+      const createRes = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ type: 'BUG', title: 'Status patch test ticket' })
+        .expect(201);
+
+      const ticketRef = body<{ ref: string }>(createRes).ref;
+
+      const res = await request(httpServer)
+        .patch(`/api/projects/${projectSlug}/tickets/${ticketRef}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ status: 'IN_PROGRESS' })
+        .expect(200);
+
+      const ticket = body<{ status: string }>(res);
+      expect(ticket.status).toBe('IN_PROGRESS');
+    });
+
+    it('PATCH .../tickets/:ref — returns 400 for invalid transition (CREATED → CLOSED)', async () => {
+      const createRes = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ type: 'BUG', title: 'Invalid transition test ticket' })
+        .expect(201);
+
+      const ticketRef = body<{ ref: string }>(createRes).ref;
+
+      await request(httpServer)
+        .patch(`/api/projects/${projectSlug}/tickets/${ticketRef}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ status: 'CLOSED' })
+        .expect(400);
     });
   });
 
@@ -1315,6 +1361,52 @@ describeIntegration('API Integration Tests', () => {
       const { body: responseBody } = res;
       expect(responseBody).toHaveProperty('ret', 0);
       expect(responseBody).toHaveProperty('data');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // Agent Permissions — Bug #18 (labels) & Bug #19 (ticket delete)
+  // AC-5: POST /api/projects/:slug/labels returns 201 with agent API key
+  // AC-6: DELETE /api/projects/:slug/tickets/:ref returns 200 with agent API key
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('Agent Permissions (AC-5 & AC-6)', () => {
+    let agentDeleteTicketRef: string;
+
+    beforeAll(async () => {
+      // Create a ticket that the agent will soft-delete (AC-6)
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ type: 'BUG', title: 'Agent delete test ticket', priority: 'LOW' })
+        .expect(201);
+
+      agentDeleteTicketRef = body<{ ref: string }>(res).ref;
+    });
+
+    it('AC-5: POST /api/projects/:slug/labels — returns 201 with agent API key', async () => {
+      // Bug #18: agents should be allowed to create labels.
+      // Current code in labels.service.ts only blocks MEMBER users, so agents pass through.
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/labels`)
+        .set('Authorization', `Bearer ${agentApiKey}`)
+        .send({ name: 'agent-created-label', color: '#00ccff' })
+        .expect(201);
+
+      const data = body<{ name: string; id: string }>(res);
+      expect(data.name).toBe('agent-created-label');
+      expect(data.id).toBeTruthy();
+    });
+
+    it('AC-6: DELETE /api/projects/:slug/tickets/:ref — returns 200 with agent API key', async () => {
+      // Verifies that agents can soft-delete tickets (bug #19 fix: agent block removed from tickets.service.ts).
+      const res = await request(httpServer)
+        .delete(`/api/projects/${projectSlug}/tickets/${agentDeleteTicketRef}`)
+        .set('Authorization', `Bearer ${agentApiKey}`)
+        .expect(200);
+
+      const data = body<{ deletedAt: string | null }>(res);
+      expect(data.deletedAt).not.toBeNull();
     });
   });
 });

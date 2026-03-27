@@ -1,0 +1,123 @@
+{
+  "project": "koda",
+  "feature": "api-fixes",
+  "analysis": "Three independent bugs in apps/api targeting the tickets domain.\n\n**US-002 (Bug #20):** `tickets.service.ts` lines 73–75 guard against empty-string descriptions and throw `ValidationAppException`. However, line 94 already coerces `description || null`, so the guard is redundant and incorrectly blocks semantically valid empty-description payloads from agents. Fix: delete the three-line guard. No schema or DTO changes needed.\n\n**US-003 (Bug #21):** `UpdateTicketDto` (`dto/update-ticket.dto.ts`) has no `status` field so PATCH `/tickets/:ref` silently drops any `status` sent by clients. `TicketsService.update()` never calls `validateTransition()` either. Fix: (1) add `status?: TicketStatus` with `@IsOptional()` + `@IsEnum()` to the DTO; (2) add a block in `update()` that calls `validateTransition(ticket.status, updateTicketDto.status)` then sets `updateData.status`. Only 'NONE'-comment transitions (CREATED→IN_PROGRESS, VERIFIED→IN_PROGRESS) can be triggered here — comment-gated transitions still belong to dedicated endpoints. `validateTransition` is already exported from `./state-machine/ticket-transitions`.\n\n**US-004 (Bug #23):** `TicketResponseDto` (`dto/ticket-response.dto.ts`) has no `ref` field. `findAll()` in `tickets.service.ts` maps tickets without adding `ref`; `findByRef()` and `create()` already compute and return `ref`. Fix: (1) add `ref!: string` with `@ApiProperty` to `TicketResponseDto`; (2) add `ref: `${project.key}-${ticket.number}`` inside the `findAll()` items map — `project` is already in scope.\n\n**Test infrastructure:** Unit tests live in `src/tickets/tickets.service.spec.ts` using Jest mocks of `PrismaService`. E2E tests live in `test/e2e/api-endpoint/endpoint.e2e.spec.ts` using supertest. The `mockProject` fixture already has `key: 'KODA'`. All three stories are independent and can be implemented in any order.",
+  "branchName": "fix/api-bugs",
+  "createdAt": "2026-03-27T00:00:00.000Z",
+  "updatedAt": "2026-03-27T14:18:06.010Z",
+  "userStories": [
+    {
+      "id": "US-002",
+      "title": "Remove empty-description guard in ticket create",
+      "description": "TicketsService.create() throws ValidationAppException when description is an empty string, but this is semantically valid — the coercion on line 94 already converts empty string to null. Remove the three-line guard (lines 73–75 of tickets.service.ts) so agents can create tickets with description: ''.",
+      "acceptanceCriteria": [
+        "When TicketsService.create() is called with createTicketDto.description === '', it returns a ticket object where description === null",
+        "When TicketsService.create() is called with createTicketDto.description === undefined, it returns a ticket where description === null",
+        "When TicketsService.create() is called with createTicketDto.description === 'some text', it returns a ticket where description === 'some text'",
+        "When POST /api/projects/:slug/tickets is called with body { type: 'BUG', title: 'T', description: '' }, it returns HTTP 201 with response body data.description === null"
+      ],
+      "contextFiles": [
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/src/tickets/tickets.service.spec.ts",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts"
+      ],
+      "tags": [
+        "bug",
+        "api",
+        "tickets"
+      ],
+      "dependencies": [],
+      "workdir": "apps/api",
+      "status": "passed",
+      "passes": true,
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Single file change — delete 3 lines from tickets.service.ts. Unit tests and one E2E case cover all ACs. Well under 50 LOC.",
+        "initialComplexity": "simple",
+        "modelTier": "fast"
+      },
+      "escalations": [],
+      "attempts": 0,
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-003",
+      "title": "Fix ticket status PATCH no-op",
+      "description": "PATCH /tickets/:ref silently ignores any status field in the request body because UpdateTicketDto has no status property and TicketsService.update() never processes it. Add status?: TicketStatus to the DTO and add a validateTransition() call followed by updateData.status assignment inside update().",
+      "acceptanceCriteria": [
+        "When TicketsService.update() is called with updateTicketDto.status === 'IN_PROGRESS' on a ticket with status === 'CREATED', it calls validateTransition('CREATED', 'IN_PROGRESS') without throwing and returns an updated ticket where status === 'IN_PROGRESS'",
+        "When TicketsService.update() is called with updateTicketDto.status === 'IN_PROGRESS' on a CREATED ticket, the Prisma db.ticket.update() call receives data containing status: 'IN_PROGRESS'",
+        "When TicketsService.update() is called with an invalid transition (e.g. status === 'CLOSED' on a CREATED ticket), validateTransition throws ValidationAppException and db.ticket.update() is not called",
+        "When TicketsService.update() is called with no status field in updateTicketDto, updateData does not contain a status key",
+        "When PATCH /api/projects/:slug/tickets/:ref is called with body { status: 'IN_PROGRESS' } on a CREATED ticket, it returns HTTP 200 with response body data.status === 'IN_PROGRESS'"
+      ],
+      "contextFiles": [
+        "apps/api/src/tickets/dto/update-ticket.dto.ts",
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/src/tickets/state-machine/ticket-transitions.ts",
+        "apps/api/src/tickets/tickets.service.spec.ts",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts"
+      ],
+      "tags": [
+        "bug",
+        "api",
+        "tickets",
+        "state-machine"
+      ],
+      "dependencies": [],
+      "workdir": "apps/api",
+      "status": "passed",
+      "passes": true,
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Two files modified (DTO + service), introduces state-machine integration in a new code path, 4 distinct AC branches. 50–100 LOC total. Warrants three-session-tdd-lite for correct test isolation."
+      },
+      "escalations": [],
+      "attempts": 0,
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-004",
+      "title": "Add ref field to ticket API responses",
+      "description": "GET /tickets and GET /tickets/:ref do not include a ref field (e.g. NAX-1) in responses because TicketResponseDto has no ref property and findAll() does not compute it. Add ref!: string to the DTO and add ref computation in findAll(). create() and findByRef() already return ref — add E2E/unit assertions for those too.",
+      "acceptanceCriteria": [
+        "TicketResponseDto has a non-optional property ref of type string decorated with @ApiProperty({ description: 'Project-scoped ticket reference, e.g. NAX-1' })",
+        "When TicketsService.findAll() returns items, each item's ref equals '${project.key}-${ticket.number}' (e.g. 'KODA-1' for key 'KODA' and number 1)",
+        "When GET /api/projects/:slug/tickets is called, each item in the response data.items array contains a ref string matching the pattern /^[A-Z0-9]+-[1-9][0-9]*$/",
+        "When GET /api/projects/:slug/tickets/:ref is called for an existing ticket, the response data.ref equals '${projectKey}-${ticketNumber}'",
+        "When POST /api/projects/:slug/tickets is called to create the first ticket in a project with key 'KODA', the response data.ref equals 'KODA-1'"
+      ],
+      "contextFiles": [
+        "apps/api/src/tickets/dto/ticket-response.dto.ts",
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/src/tickets/tickets.service.spec.ts",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts"
+      ],
+      "tags": [
+        "bug",
+        "api",
+        "tickets"
+      ],
+      "dependencies": [],
+      "workdir": "apps/api",
+      "status": "passed",
+      "passes": true,
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Additive change: one new field in DTO, one line added to findAll() map. findByRef() and create() already produce ref. Under 50 LOC total across 2 files."
+      },
+      "escalations": [],
+      "attempts": 0,
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    }
+  ]
+}
