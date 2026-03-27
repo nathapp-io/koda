@@ -24,8 +24,8 @@ export class LabelsService {
     currentUser: CurrentUser,
     actorType: 'user' | 'agent',
   ) {
-    // Only ADMIN users can create labels
-    if (actorType !== 'user' || currentUser.role === 'MEMBER') {
+    // ADMIN users and agents can create labels; MEMBER users cannot
+    if (actorType === 'user' && currentUser.role === 'MEMBER') {
       throw new ForbiddenAppException();
     }
 
@@ -90,8 +90,8 @@ export class LabelsService {
     currentUser: CurrentUser,
     actorType: 'user' | 'agent',
   ) {
-    // Only ADMIN users can delete labels
-    if (actorType !== 'user' || currentUser.role === 'MEMBER') {
+    // ADMIN users and agents can delete labels; MEMBER users cannot
+    if (actorType === 'user' && currentUser.role === 'MEMBER') {
       throw new ForbiddenAppException();
     }
 
@@ -131,7 +131,8 @@ export class LabelsService {
     currentUser: CurrentUser,
     actorType: 'user' | 'agent',
   ) {
-    if (actorType !== 'user' || currentUser.role === 'MEMBER') {
+    // ADMIN users and agents can update labels; MEMBER users cannot
+    if (actorType === 'user' && currentUser.role === 'MEMBER') {
       throw new ForbiddenAppException();
     }
 
