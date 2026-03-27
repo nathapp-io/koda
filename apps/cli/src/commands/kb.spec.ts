@@ -53,9 +53,11 @@ jest.mock('../config', () => ({
   getConfig: jest.fn(() => ({
     apiKey: mockData.apiKey || '',
     apiUrl: mockData.apiUrl || '',
+    projectSlug: mockData.projectSlug || '',
   })),
   setConfig: jest.fn(),
   validateApiKey: jest.fn((key: string) => key && key.length >= 10),
+  resolveContext: jest.fn(),
 }));
 
 // Mock fs module for file reading
@@ -68,6 +70,7 @@ jest.mock('fs', () => ({
 import { Command } from 'commander';
 import { kbCommand } from './kb';
 import { KbService } from '../generated';
+import { resolveContext } from '../config';
 
 describe('kbCommand', () => {
   let program: Command;
@@ -82,6 +85,13 @@ describe('kbCommand', () => {
 
     mockData.apiKey = 'sk-test-key123';
     mockData.apiUrl = 'http://localhost:3100/api';
+    mockData.projectSlug = 'koda';
+
+    (resolveContext as jest.Mock).mockResolvedValue({
+      apiKey: 'sk-test-key123',
+      apiUrl: 'http://localhost:3100/api',
+      projectSlug: 'koda',
+    });
 
     exitSpy = jest.spyOn(process, 'exit').mockImplementation((() => {
       // Do not throw, just record the call
@@ -215,17 +225,23 @@ describe('kbCommand', () => {
       expect(Array.isArray(parsed.results)).toBe(true);
     });
 
-    it('exits with code 3 when --project is missing', async () => {
+    it('exits with code 2 when project is not configured', async () => {
+      (resolveContext as jest.Mock).mockResolvedValue({
+        apiKey: 'sk-test-key123',
+        apiUrl: 'http://localhost:3100/api',
+        projectSlug: undefined,
+      });
+
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const searchCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'search');
 
       try {
         await searchCmd?.parseAsync(['node', 'test', '--query', 'auth error']);
       } catch {
-        // Commander may throw for missing required option
+        // Expected
       }
 
-      expect(exitSpy).toHaveBeenCalledWith(3);
+      expect(exitSpy).toHaveBeenCalledWith(2);
     });
 
     it('exits with code 3 when --query is missing', async () => {
@@ -242,14 +258,17 @@ describe('kbCommand', () => {
     });
 
     it('exits with code 2 when API key is missing', async () => {
-      mockData.apiKey = '';
-      mockData.apiUrl = '';
+      (resolveContext as jest.Mock).mockResolvedValue({
+        apiKey: undefined,
+        apiUrl: 'http://localhost:3100/api',
+        projectSlug: 'koda',
+      });
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const searchCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'search');
 
       try {
-        await searchCmd?.parseAsync(['node', 'test', '--project', 'koda', '--query', 'auth error']);
+        await searchCmd?.parseAsync(['node', 'test', '--query', 'auth error']);
       } catch {
         // Expected
       }
@@ -379,28 +398,37 @@ describe('kbCommand', () => {
       expect(Array.isArray(parsed.items)).toBe(true);
     });
 
-    it('exits with code 3 when --project is missing', async () => {
+    it('exits with code 2 when project is not configured', async () => {
+      (resolveContext as jest.Mock).mockResolvedValue({
+        apiKey: 'sk-test-key123',
+        apiUrl: 'http://localhost:3100/api',
+        projectSlug: undefined,
+      });
+
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const listCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'list');
 
       try {
         await listCmd?.parseAsync(['node', 'test']);
       } catch {
-        // Commander may throw for missing required option
+        // Expected
       }
 
-      expect(exitSpy).toHaveBeenCalledWith(3);
+      expect(exitSpy).toHaveBeenCalledWith(2);
     });
 
     it('exits with code 2 when auth is missing', async () => {
-      mockData.apiKey = '';
-      mockData.apiUrl = '';
+      (resolveContext as jest.Mock).mockResolvedValue({
+        apiKey: undefined,
+        apiUrl: 'http://localhost:3100/api',
+        projectSlug: 'koda',
+      });
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const listCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'list');
 
       try {
-        await listCmd?.parseAsync(['node', 'test', '--project', 'koda']);
+        await listCmd?.parseAsync(['node', 'test']);
       } catch {
         // Expected
       }
@@ -512,17 +540,23 @@ describe('kbCommand', () => {
       expect(parsed).toHaveProperty('docCount');
     });
 
-    it('exits with code 3 when --project is missing', async () => {
+    it('exits with code 2 when project is not configured', async () => {
+      (resolveContext as jest.Mock).mockResolvedValue({
+        apiKey: 'sk-test-key123',
+        apiUrl: 'http://localhost:3100/api',
+        projectSlug: undefined,
+      });
+
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const addCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'add');
 
       try {
         await addCmd?.parseAsync(['node', 'test', '--file', './README.md']);
       } catch {
-        // Commander may throw for missing required option
+        // Expected
       }
 
-      expect(exitSpy).toHaveBeenCalledWith(3);
+      expect(exitSpy).toHaveBeenCalledWith(2);
     });
 
     it('exits with code 3 when --file is missing', async () => {
@@ -530,7 +564,7 @@ describe('kbCommand', () => {
       const addCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'add');
 
       try {
-        await addCmd?.parseAsync(['node', 'test', '--project', 'koda']);
+        await addCmd?.parseAsync(['node', 'test']);
       } catch {
         // Commander may throw for missing required option
       }
@@ -539,14 +573,17 @@ describe('kbCommand', () => {
     });
 
     it('exits with code 2 when auth is missing', async () => {
-      mockData.apiKey = '';
-      mockData.apiUrl = '';
+      (resolveContext as jest.Mock).mockResolvedValue({
+        apiKey: undefined,
+        apiUrl: 'http://localhost:3100/api',
+        projectSlug: 'koda',
+      });
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const addCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'add');
 
       try {
-        await addCmd?.parseAsync(['node', 'test', '--project', 'koda', '--file', './README.md']);
+        await addCmd?.parseAsync(['node', 'test', '--file', './README.md']);
       } catch {
         // Expected
       }
@@ -563,12 +600,12 @@ describe('kbCommand', () => {
       const addCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'add');
 
       try {
-        await addCmd?.parseAsync(['node', 'test', '--project', 'koda', '--file', './README.md']);
+        await addCmd?.parseAsync(['node', 'test', '--file', './README.md']);
       } catch {
         // Expected
       }
 
-      expect(exitSpy).toHaveBeenCalledWith(3);
+      expect(exitSpy).toHaveBeenCalledWith(1);
     });
   });
 

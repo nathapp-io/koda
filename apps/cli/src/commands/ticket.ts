@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { resolveAuth } from '../utils/auth';
+import { resolveContext } from '../config';
 import { configureClient } from '../client';
 import { TicketsService, TicketLinksService, LabelsService, TicketLink } from '../generated';
 import { table, error } from '../utils/output';
@@ -22,11 +22,23 @@ export function ticketCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const ctx = await resolveContext({ projectSlug: options.project });
+
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey) {
+          error('API key or URL not configured. Run: koda login --api-key <key>');
+          process.exit(2);
+          return;
+        }
 
         // Validate required options
-        if (!projectSlug || !options.type || !options.title) {
-          error('Missing required options: --project, --type, and --title are required');
+        if (!options.type || !options.title) {
+          error('Missing required options: --type and --title are required');
           process.exit(3);
         }
 
@@ -44,16 +56,8 @@ export function ticketCommand(program: Command): void {
           return;
         }
 
-        const auth = resolveAuth({});
-
-        if (!auth.apiKey || !auth.apiUrl) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
-          process.exit(2);
-          return;
-        }
-
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        const response = await TicketsService.create(client, projectSlug, {
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
+        const response = await TicketsService.create(client, ctx.projectSlug, {
           type: options.type,
           title: options.title,
           description: options.desc,
@@ -87,19 +91,24 @@ export function ticketCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
 
         const response = await TicketsService.list(client, {
-          projectSlug,
+          projectSlug: ctx.projectSlug,
           status: options.status,
           type: options.type,
           priority: options.priority,
@@ -139,19 +148,24 @@ export function ticketCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
 
         const response = await TicketsService.list(client, {
-          projectSlug,
+          projectSlug: ctx.projectSlug,
           status: options.status,
           assignedTo: 'self',
         });
@@ -185,18 +199,23 @@ export function ticketCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (ref: string, options) => {
       try {
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
 
-        const response = await TicketsService.show(client, projectSlug, ref);
+        const response = await TicketsService.show(client, ctx.projectSlug, ref);
         const ticketData = unwrap(response);
 
         if (options.json) {
@@ -246,18 +265,23 @@ export function ticketCommand(program: Command): void {
           return;
         }
 
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
 
-        await TicketsService.verify(client, projectSlug, ref, {
+        await TicketsService.verify(client, ctx.projectSlug, ref, {
           body: options.comment,
           type: 'VERIFICATION',
         });
@@ -278,19 +302,24 @@ export function ticketCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (ref: string, options) => {
       try {
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
         const agentSlug = options.agent ?? options.to ?? 'self';
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
 
-        const response = await TicketsService.assign(client, projectSlug, ref, { agentSlug });
+        const response = await TicketsService.assign(client, ctx.projectSlug, ref, { agentSlug });
         const ticketData = unwrap(response);
 
         if (options.json) {
@@ -311,18 +340,23 @@ export function ticketCommand(program: Command): void {
     .option('--project <slug>', 'Project slug')
     .action(async (ref: string, options) => {
       try {
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
 
-        await TicketsService.start(client, projectSlug, ref);
+        await TicketsService.start(client, ctx.projectSlug, ref);
 
         console.log(`✓ Ticket started successfully`);
         process.exit(0);
@@ -345,16 +379,21 @@ export function ticketCommand(program: Command): void {
           return;
         }
 
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
 
         const payload: { body: string; type: string; gitRef?: string } = {
           body: options.comment,
@@ -364,7 +403,7 @@ export function ticketCommand(program: Command): void {
           payload.gitRef = options.gitRef;
         }
 
-        await TicketsService.fix(client, projectSlug, ref, payload);
+        await TicketsService.fix(client, ctx.projectSlug, ref, payload);
 
         console.log(`✓ Fix submitted successfully`);
         process.exit(0);
@@ -388,19 +427,24 @@ export function ticketCommand(program: Command): void {
           return;
         }
 
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
 
         const status = options.pass ? 'closed' : 'in_progress';
-        await TicketsService.verifyFix(client, projectSlug, ref, {
+        await TicketsService.verifyFix(client, ctx.projectSlug, ref, {
           body: options.comment,
           type: 'REVIEW',
           status,
@@ -419,18 +463,23 @@ export function ticketCommand(program: Command): void {
     .option('--project <slug>', 'Project slug')
     .action(async (ref: string, options) => {
       try {
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
 
-        await TicketsService.close(client, projectSlug, ref);
+        await TicketsService.close(client, ctx.projectSlug, ref);
 
         console.log(`✓ Ticket closed successfully`);
         process.exit(0);
@@ -452,18 +501,23 @@ export function ticketCommand(program: Command): void {
           return;
         }
 
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
 
-        await TicketsService.reject(client, projectSlug, ref, {
+        await TicketsService.reject(client, ctx.projectSlug, ref, {
           body: options.comment,
           type: 'GENERAL',
         });
@@ -485,23 +539,28 @@ export function ticketCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (ref: string, options) => {
       try {
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
 
         const payload: { title?: string; description?: string; priority?: string } = {};
         if (options.title) payload.title = options.title;
         if (options.desc) payload.description = options.desc;
         if (options.priority) payload.priority = options.priority;
 
-        const response = await TicketsService.update(client, projectSlug, ref, payload);
+        const response = await TicketsService.update(client, ctx.projectSlug, ref, payload);
         const ticketData = unwrap(response);
 
         if (options.json) {
@@ -528,18 +587,23 @@ export function ticketCommand(program: Command): void {
           process.exit(1);
         }
 
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
 
-        await TicketsService.delete(client, projectSlug, ref);
+        await TicketsService.delete(client, ctx.projectSlug, ref);
 
         console.log(`✓ Ticket deleted successfully`);
         process.exit(0);
@@ -556,18 +620,23 @@ export function ticketCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (ref: string, options) => {
       try {
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
 
-        const response = await TicketLinksService.create(client, projectSlug, ref, { url: options.url });
+        const response = await TicketLinksService.create(client, ctx.projectSlug, ref, { url: options.url });
         const linkData = unwrap(response) as TicketLink;
 
         if (options.json) {
@@ -590,18 +659,23 @@ export function ticketCommand(program: Command): void {
     .requiredOption('--url <url>', 'External URL to unlink')
     .action(async (ref: string, options) => {
       try {
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
 
-        const listResponse = await TicketLinksService.list(client, projectSlug, ref);
+        const listResponse = await TicketLinksService.list(client, ctx.projectSlug, ref);
         const links = unwrap(listResponse) as TicketLink[];
         const match = links.find((l) => l.url === options.url);
 
@@ -611,7 +685,7 @@ export function ticketCommand(program: Command): void {
           return;
         }
 
-        await TicketLinksService.delete(client, projectSlug, ref, match.id);
+        await TicketLinksService.delete(client, ctx.projectSlug, ref, match.id);
         process.exit(0);
       } catch (err: unknown) {
         handleApiError(err);
@@ -627,18 +701,23 @@ export function ticketCommand(program: Command): void {
     .requiredOption('--label <id>', 'Label ID')
     .action(async (ref: string, options) => {
       try {
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
 
-        await LabelsService.addToTicket(client, projectSlug, ref, options.label);
+        await LabelsService.addToTicket(client, ctx.projectSlug, ref, options.label);
 
         console.log(`✓ Label attached to ticket ${ref}`);
         process.exit(0);
@@ -655,18 +734,23 @@ export function ticketCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (ref: string, options) => {
       try {
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
 
-        await LabelsService.removeFromTicket(client, projectSlug, ref, options.label);
+        await LabelsService.removeFromTicket(client, ctx.projectSlug, ref, options.label);
 
         console.log(`✓ Label detached from ticket ${ref}`);
         process.exit(0);

@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { resolveAuth } from '../utils/auth';
+import { resolveContext } from '../config';
 import { configureClient } from '../client';
 import { CommentsService } from '../generated';
 import { success, error } from '../utils/output';
@@ -18,12 +18,16 @@ export function commentCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (ref: string, options) => {
       try {
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+        }
+
+        if (!ctx.apiKey) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
-          return;
         }
 
         // Validate comment type
@@ -31,12 +35,10 @@ export function commentCommand(program: Command): void {
         if (!validTypes.includes(options.type)) {
           error(`Invalid type ${options.type}. Valid values: ${validTypes.join(', ')}`);
           process.exit(3);
-          return;
         }
 
-        const projectSlug = options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda';
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        const response = await CommentsService.add(client, projectSlug, ref, {
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
+        const response = await CommentsService.add(client, ctx.projectSlug, ref, {
           body: options.body,
           type: options.type,
         });

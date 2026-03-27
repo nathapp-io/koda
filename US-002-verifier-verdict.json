@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "story": "US-002: resolveContext merge logic",
+  "approved": true,
+  "tests": {
+    "allPassing": true,
+    "passCount": 31,
+    "failCount": 0
+  },
+  "testModifications": {
+    "detected": false,
+    "files": [],
+    "legitimate": true,
+    "reasoning": "No test files were modified by the implementer. All tests were pre-written in the test-writer session."
+  },
+  "acceptanceCriteria": {
+    "allMet": true,
+    "criteria": [
+      {
+        "criterion": "AC1: CLI flag projectSlug overrides project config",
+        "met": true,
+        "evidence": "Test passes: resolveContext({ projectSlug: 'override' }, ...) correctly returns projectSlug='override' even when projectConfig has different value. Implementation line 142 prioritizes flags first."
+      },
+      {
+        "criterion": "AC2: projectSlug comes from .koda/config.json when no flag provided",
+        "met": true,
+        "evidence": "Test passes: resolveContext({}, ...) with projectConfig from findProjectConfig returns projectSlug from config. Implementation correctly falls through to projectConfig?.projectSlug."
+      },
+      {
+        "criterion": "AC3: apiUrl and apiKey from named profile when .koda/config.json has profile field",
+        "met": true,
+        "evidence": "Test passes: resolveContext({}, ...) with profile='staging' correctly resolves both apiUrl and apiKey from globalConfig.profiles['staging']. Implementation lines 127-128 resolve profile, lines 133 and 138 use it."
+      },
+      {
+        "criterion": "AC4: apiUrl comes from .koda/config.json when specified and no CLI flag overrides it",
+        "met": true,
+        "evidence": "Test passes: projectConfig.apiUrl is correctly prioritized after CLI flags but before global config. Implementation line 132 uses nullish coalescing in correct order."
+      },
+      {
+        "criterion": "AC5: apiKey comes from global conf store when .koda/config.json has no profile field",
+        "met": true,
+        "evidence": "Test passes: apiKey correctly falls through to globalConfig.apiKey when no profile exists. Implementation line 139 uses nullish coalescing properly."
+      },
+      {
+        "criterion": "AC6: Built-in defaults when no .koda/config.json and global conf store empty",
+        "met": true,
+        "evidence": "Test passes: resolveContext returns apiUrl='http://localhost:3100/api' and apiKey='' when both projectConfig and globalConfig are empty. Implementation lines 118, 134, and 140 provide correct defaults."
+      }
+    ]
+  },
+  "quality": {
+    "rating": "good",
+    "issues": []
+  },
+  "codeReviewNotes": {
+    "typeSafety": "✅ All types properly defined. ResolvedContext, Profile, ProjectConfig, ResolveContextFlags, ResolveContextDeps all correctly typed. No `any` types.",
+    "dependencyInjection": "✅ Uses _deps pattern for testability. ResolveContextDeps allows tests to inject mock implementations of findProjectConfig and getConfig.",
+    "priorityOrder": "✅ Correctly implements priority: CLI flags > projectConfig > profile > globalConfig > built-in defaults",
+    "errorHandling": "✅ No errors thrown (correct for config merging). Parent function findProjectConfig handles errors gracefully.",
+    "functionLength": "✅ resolveContext is 25 lines, well within limits",
+    "nullishCoalescing": "✅ Correctly uses nullish coalescing (??) with proper parentheses for mixed ?? and || operators (line 134)"
+  },
+  "fixes": [],
+  "reasoning": "All 31 tests pass, including all 6 resolveContext acceptance criteria. Implementation is clean, follows project conventions, and properly merges configuration sources in the correct priority order: CLI flags > .koda/config.json > active named profile > global conf store > built-in defaults. Code quality is good with proper types, dependency injection, and no test modifications."
+}

@@ -1,0 +1,384 @@
+{
+  "project": "koda",
+  "feature": "project-cli-config",
+  "analysis": "The CLI app lives at apps/cli/src/. The core config module (config.ts) already implements both findProjectConfig and resolveContext — confirmed by reading the source and by git history (US-001 and US-002 are complete as of the last three commits on feat/project-cli-config). Both functions are fully tested in config.spec.ts.\n\nKey existing patterns:\n- All commands use `resolveAuth({})` from utils/auth.ts for apiKey/apiUrl — this does NOT handle projectSlug or project-level config.\n- Project slug in every command is resolved as: `options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda'` — hardcoded fallback, no auto-detection.\n- commands/config.ts exposes configShow/configSet; it has no `profile` sub-commands.\n- index.ts wires the `config` command inline using Commander addCommand — profile sub-commands must be added here or via a refactored configCommand helper.\n- The generated HTTP client is used via TicketsService, ProjectsService etc. from src/generated (not manually written). The init command will need ProjectsService to validate the slug against the API.\n- Exit codes are strict: 0 success, 1 API error, 2 config/auth error, 3 validation error.\n\nRisks:\n- ticket.ts is 22KB with 15+ sub-commands; every action block must become async if not already (they already are). Replacing resolveAuth with resolveContext changes auth+url resolution to also handle projectSlug — ensure apiKey check still gates all API calls.\n- Removing GLOBAL_PROJECT_SLUG must be a complete removal (the env var is a fallback in every command file: ticket.ts, comment.ts, label.ts, kb.ts, agent.ts).\n- koda init writes .koda/config.json in cwd — the directory must be created (mkdir -p .koda) before writing.\n- Profile management in config.ts must use setConfig with a profiles patch; the Conf store already supports a profiles object.\n- index.ts currently registers `config` inline; adding `profile` sub-commands requires either extending the inline block or moving to a configCommand() function pattern matching other commands.\n\nDependency order: US-001 → US-002 → US-003 → US-004/US-005 (US-004 and US-005 are independent of each other).",
+  "branchName": "feat/project-cli-config",
+  "createdAt": "2026-03-26T00:00:00.000Z",
+  "updatedAt": "2026-03-26T13:04:20.028Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "findProjectConfig walk-up utility",
+      "description": "Implement findProjectConfig(dir?) in src/config.ts. Walks up from dir (defaults to process.cwd()) looking for .koda/config.json. Returns parsed ProjectConfig or null if not found or JSON is invalid.",
+      "acceptanceCriteria": [
+        "findProjectConfig('/a/b/c') returns ProjectConfig when .koda/config.json exists at /a/b/c/.koda/config.json",
+        "findProjectConfig('/a/b/c') returns ProjectConfig when .koda/config.json exists at /a/.koda/config.json (walk-up finds ancestor)",
+        "findProjectConfig('/a/b/c') returns null when no .koda/config.json exists anywhere up to filesystem root",
+        "findProjectConfig() defaults dir to process.cwd() when called with no argument",
+        "findProjectConfig returns null and does not throw when .koda/config.json exists but contains invalid JSON"
+      ],
+      "contextFiles": [
+        "apps/cli/src/config.ts",
+        "apps/cli/src/config.spec.ts"
+      ],
+      "tags": [
+        "feature",
+        "cli",
+        "config"
+      ],
+      "dependencies": [],
+      "workdir": "apps/cli",
+      "status": "passed",
+      "passes": true,
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Single function, <50 LOC, additive change to config.ts. Already implemented and verified."
+      },
+      "escalations": [],
+      "attempts": 1,
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-002",
+      "title": "resolveContext merge logic",
+      "description": "Implement resolveContext(flags, deps?) in src/config.ts. Merges CLI flags, project config (.koda/config.json), active profile from global config, and global config according to resolution priority: flags > .koda/ > profile > global > defaults.",
+      "acceptanceCriteria": [
+        "resolveContext({ projectSlug: 'override' }) returns projectSlug: 'override' even when .koda/config.json has a different projectSlug",
+        "resolveContext({}) returns projectSlug from .koda/config.json when no flag is passed and project config exists",
+        "resolveContext({}) returns apiUrl and apiKey from the named profile when .koda/config.json has 'profile': 'staging' and that profile exists in global config",
+        "resolveContext({}) returns apiUrl from .koda/config.json when it overrides the global apiUrl and no CLI flag is passed",
+        "resolveContext({}) returns apiKey from global config when .koda/config.json has no profile field",
+        "resolveContext({}) returns apiUrl: 'http://localhost:3100/api' and apiKey: '' when no config files exist"
+      ],
+      "contextFiles": [
+        "apps/cli/src/config.ts",
+        "apps/cli/src/config.spec.ts"
+      ],
+      "tags": [
+        "feature",
+        "cli",
+        "config"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "workdir": "apps/cli",
+      "status": "passed",
+      "passes": true,
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Multi-level merge logic across 3 config sources with 6 acceptance criteria. Already implemented and verified."
+      },
+      "escalations": [],
+      "attempts": 1,
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-003",
+      "title": "Wire resolveContext into all commands",
+      "description": "Replace the `options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda'` pattern and `resolveAuth({})` calls in all commands (ticket.ts, comment.ts, label.ts, kb.ts, agent.ts) with resolveContext(options). Remove the GLOBAL_PROJECT_SLUG env var fallback entirely. When projectSlug is undefined after resolution, exit with code 2 and print 'Project not configured. Run: koda init'.",
+      "acceptanceCriteria": [
+        "ticketCommand('list') action calls TicketsService with the projectSlug from .koda/config.json when --project flag is omitted and .koda/config.json has projectSlug: 'koda'",
+        "ticketCommand('list') action calls TicketsService with projectSlug: 'foo' when --project foo is passed, regardless of what .koda/config.json contains",
+        "ticketCommand('list') action exits with code 2 and logs 'Project not configured. Run: koda init' when no .koda/config.json exists and --project flag is omitted",
+        "commentCommand action resolves projectSlug from .koda/config.json when --project flag is omitted",
+        "labelCommand action resolves projectSlug from .koda/config.json when --project flag is omitted",
+        "agentCommand action resolves projectSlug from .koda/config.json when --project flag is omitted",
+        "No reference to GLOBAL_PROJECT_SLUG exists in any command file after this change"
+      ],
+      "contextFiles": [
+        "apps/cli/src/commands/ticket.ts",
+        "apps/cli/src/commands/comment.ts",
+        "apps/cli/src/commands/label.ts",
+        "apps/cli/src/config.ts",
+        "apps/cli/src/utils/auth.ts"
+      ],
+      "tags": [
+        "feature",
+        "cli",
+        "refactor"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "workdir": "apps/cli",
+      "status": "passed",
+      "passes": true,
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Touches 5 command files including ticket.ts (22KB, 15+ sub-commands). All command actions must be updated; async behavior must be preserved. Missing projectSlug must produce correct exit code/message. High risk of regression — strict TDD isolation required.",
+        "initialComplexity": "complex",
+        "modelTier": "powerful"
+      },
+      "escalations": [],
+      "attempts": 0,
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-003-1",
+      "title": "Wire resolveContext into ticketCommand with undefined guard",
+      "description": "Replace the `options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda'` pattern and `resolveAuth({})` call in ticket.ts with `resolveContext(options)`. After resolution, if projectSlug is undefined, exit with code 2 and print 'Project not configured. Run: koda init'. This establishes the canonical pattern for all other command migrations.",
+      "acceptanceCriteria": [
+        "ticketCommand('list') action calls TicketsService with the projectSlug from .koda/config.json when --project flag is omitted and .koda/config.json has projectSlug: 'koda'",
+        "ticketCommand('list') action calls TicketsService with projectSlug: 'foo' when --project foo is passed, regardless of what .koda/config.json contains",
+        "ticketCommand('list') action exits with code 2 and logs 'Project not configured. Run: koda init' when no .koda/config.json exists and --project flag is omitted",
+        "ticket.ts contains no reference to GLOBAL_PROJECT_SLUG after this change"
+      ],
+      "tags": [
+        "feature",
+        "cli",
+        "refactor"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "US-003",
+      "workdir": "apps/cli",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "routing": {
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Refactoring one file with pattern replacement + new guard logic + 4 specific test cases to verify; straightforward but requires implementation verification.",
+        "modelTier": "balanced"
+      }
+    },
+    {
+      "id": "US-003-2",
+      "title": "Wire resolveContext into commentCommand",
+      "description": "Replace the project/auth resolution pattern in comment.ts with `resolveContext(options)`. Apply the same undefined-projectSlug guard established in US-003-1 (exit code 2, print error message).",
+      "acceptanceCriteria": [
+        "commentCommand action resolves projectSlug from .koda/config.json when --project flag is omitted",
+        "commentCommand action exits with code 2 and logs 'Project not configured. Run: koda init' when no .koda/config.json exists and --project flag is omitted",
+        "comment.ts contains no reference to GLOBAL_PROJECT_SLUG after this change"
+      ],
+      "tags": [
+        "feature",
+        "cli",
+        "refactor"
+      ],
+      "dependencies": [
+        "US-003-1"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "US-003",
+      "workdir": "apps/cli",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "routing": {
+        "complexity": "simple",
+        "initialComplexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Straightforward refactor applying established US-003-1 pattern to commentCommand; copy-paste across one file with no new behavior.",
+        "modelTier": "fast"
+      }
+    },
+    {
+      "id": "US-003-3",
+      "title": "Wire resolveContext into labelCommand",
+      "description": "Replace the project/auth resolution pattern in label.ts with `resolveContext(options)`. Apply the same undefined-projectSlug guard (exit code 2, print error message).",
+      "acceptanceCriteria": [
+        "labelCommand action resolves projectSlug from .koda/config.json when --project flag is omitted",
+        "labelCommand action exits with code 2 and logs 'Project not configured. Run: koda init' when no .koda/config.json exists and --project flag is omitted",
+        "label.ts contains no reference to GLOBAL_PROJECT_SLUG after this change"
+      ],
+      "tags": [
+        "feature",
+        "cli",
+        "refactor"
+      ],
+      "dependencies": [
+        "US-003-1"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "US-003",
+      "workdir": "apps/cli",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "routing": {
+        "complexity": "simple",
+        "initialComplexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Straightforward copy-paste refactoring following established pattern from ticketCommand/commentCommand; single-file change with no new behavior, guard logic already exists elsewhere.",
+        "modelTier": "fast"
+      }
+    },
+    {
+      "id": "US-003-4",
+      "title": "Wire resolveContext into agentCommand",
+      "description": "Replace the project/auth resolution pattern in agent.ts with `resolveContext(options)`. Apply the same undefined-projectSlug guard (exit code 2, print error message).",
+      "acceptanceCriteria": [
+        "agentCommand action resolves projectSlug from .koda/config.json when --project flag is omitted",
+        "agentCommand action exits with code 2 and logs 'Project not configured. Run: koda init' when no .koda/config.json exists and --project flag is omitted",
+        "agent.ts contains no reference to GLOBAL_PROJECT_SLUG after this change"
+      ],
+      "tags": [
+        "feature",
+        "cli",
+        "refactor"
+      ],
+      "dependencies": [
+        "US-003-1"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "US-003",
+      "workdir": "apps/cli",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "routing": {
+        "complexity": "simple",
+        "initialComplexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Pattern-matching refactor applying resolveContext established in 3 recent commits (ticketCommand, commentCommand, labelCommand); straightforward file edit with standard undefined guard",
+        "modelTier": "fast"
+      }
+    },
+    {
+      "id": "US-003-5",
+      "title": "Remove GLOBAL_PROJECT_SLUG from kb.ts and perform global audit",
+      "description": "Apply resolveContext to kb.ts (if it follows the same pattern) and perform a global grep audit across all command files to confirm zero remaining references to GLOBAL_PROJECT_SLUG. Fail the story if any reference survives after US-003-1 through US-003-4.",
+      "acceptanceCriteria": [
+        "kb.ts uses resolveContext(options) for project and auth resolution",
+        "No reference to GLOBAL_PROJECT_SLUG exists in any file under apps/cli/src/commands/ after this change",
+        "A grep for 'GLOBAL_PROJECT_SLUG' across the CLI source tree returns zero matches"
+      ],
+      "tags": [
+        "feature",
+        "cli",
+        "refactor"
+      ],
+      "dependencies": [
+        "US-003-2",
+        "US-003-3",
+        "US-003-4"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "US-003",
+      "workdir": "apps/cli",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "routing": {
+        "complexity": "simple",
+        "initialComplexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Pure refactoring applying established resolveContext pattern to kb.ts plus grep verification; no new logic or edge cases",
+        "modelTier": "fast"
+      }
+    },
+    {
+      "id": "US-004",
+      "title": "koda init command",
+      "description": "Implement `koda init` in src/commands/init.ts and register it in index.ts. Non-interactive: `koda init --project <slug>` fetches the project from the API to validate it exists, then writes .koda/config.json in cwd. Supports --default-type and --default-priority options. Idempotent (overwrites on second run). Prints a reminder that the file must not contain tokens.",
+      "acceptanceCriteria": [
+        "initCommand({ project: 'koda' }) writes { \"projectSlug\": \"koda\" } to .koda/config.json in the current working directory without prompting",
+        "initCommand({ project: 'koda' }) exits with code 0 and prints a line containing '✓ Created .koda/config.json'",
+        "initCommand({ project: 'koda' }) called a second time in the same directory overwrites .koda/config.json with updated values",
+        "initCommand({ project: 'nonexistent' }) exits with code 1 and prints 'Project not found: nonexistent' when the API returns 404",
+        "initCommand({ project: 'koda', defaultType: 'BUG', defaultPriority: 'HIGH' }) writes { \"projectSlug\": \"koda\", \"defaults\": { \"type\": \"BUG\", \"priority\": \"HIGH\" } } to .koda/config.json",
+        "initCommand({}) when no auth is configured exits with code 2 and prints 'Not logged in. Run: koda login --api-key <key>'"
+      ],
+      "contextFiles": [
+        "apps/cli/src/commands/login.ts",
+        "apps/cli/src/commands/ticket.ts",
+        "apps/cli/src/config.ts",
+        "apps/cli/src/index.ts",
+        "apps/cli/src/utils/error.ts"
+      ],
+      "tags": [
+        "feature",
+        "cli"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "workdir": "apps/cli",
+      "status": "passed",
+      "passes": true,
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "New command file (~100 LOC), API validation call, filesystem write with mkdir -p, 6 ACs covering success/error/idempotent paths. Clear requirements and standard command pattern.",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
+      },
+      "escalations": [],
+      "attempts": 0,
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-005",
+      "title": "koda config profile sub-commands",
+      "description": "Implement `koda config profile list`, `koda config profile add`, and `koda config profile remove` sub-commands. Add getProfiles, setProfile, removeProfile helpers to src/config.ts. Register the profile sub-command under the existing `config` command in index.ts.",
+      "acceptanceCriteria": [
+        "setProfile('staging', { apiUrl: 'https://staging.koda.io/api', apiKey: 'stg-xxx' }) writes { apiUrl, apiKey } under profiles.staging in the global config store",
+        "configProfileList() returns an array of { name, apiUrl } entries for each stored profile",
+        "configProfileList() returns an empty array when profiles is empty or absent in global config",
+        "removeProfile('staging') removes profiles.staging from the global config store and returns without error",
+        "removeProfile('nonexistent') throws an error with message containing 'Profile not found: nonexistent'",
+        "setProfile('staging', { apiUrl: '...', apiKey: 'new-key' }) called twice with different apiKey values stores only the second value under profiles.staging",
+        "The `koda config profile list` CLI action prints a row for each profile with Name and ApiUrl columns and exits with code 0",
+        "The `koda config profile list` CLI action prints 'No profiles configured' and exits with code 0 when no profiles exist",
+        "The `koda config profile remove nonexistent` CLI action exits with code 1 and prints 'Profile not found: nonexistent'"
+      ],
+      "contextFiles": [
+        "apps/cli/src/commands/config.ts",
+        "apps/cli/src/config.ts",
+        "apps/cli/src/index.ts"
+      ],
+      "tags": [
+        "feature",
+        "cli",
+        "config"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "workdir": "apps/cli",
+      "status": "passed",
+      "passes": true,
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "3 new sub-commands plus 3 helper functions in config.ts (~120 LOC total across 2-3 files). Standard CRUD pattern on the profiles object in the Conf store. No new dependencies required."
+      },
+      "escalations": [],
+      "attempts": 0,
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    }
+  ]
+}

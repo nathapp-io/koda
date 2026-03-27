@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { readFileSync } from 'fs';
 import { basename } from 'path';
-import { resolveAuth } from '../utils/auth';
+import { resolveContext } from '../config';
 import { configureClient } from '../client';
 import { KbService } from '../generated';
 import { error } from '../utils/output';
@@ -24,23 +24,29 @@ export function kbCommand(program: Command): void {
     .option('--query <text>', 'Search query')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
-      if (!options.project || !options.query) {
-        error('Missing required option: --project and --query are required');
+      if (!options.query) {
+        error('Missing required option: --query is required');
         process.exit(3);
         return;
       }
 
       try {
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        const response = await KbService.search(client, options.project, options.query);
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
+        const response = await KbService.search(client, ctx.projectSlug, options.query);
         const data = unwrap(response);
 
         if (options.json) {
@@ -69,23 +75,23 @@ export function kbCommand(program: Command): void {
     .option('--project <slug>', 'Project slug')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
-      if (!options.project) {
-        error('Missing required option: --project is required');
-        process.exit(3);
-        return;
-      }
-
       try {
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
         }
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        const response = await KbService.list(client, options.project);
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
+        const response = await KbService.list(client, ctx.projectSlug);
         const data = unwrap(response);
 
         if (options.json) {
@@ -113,16 +119,22 @@ export function kbCommand(program: Command): void {
     .option('--file <path>', 'Path to file to add')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
-      if (!options.project || !options.file) {
-        error('Missing required option: --project and --file are required');
+      if (!options.file) {
+        error('Missing required option: --file is required');
         process.exit(3);
         return;
       }
 
       try {
-        const auth = resolveAuth({});
+        const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!auth.apiKey || !auth.apiUrl) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
@@ -131,8 +143,8 @@ export function kbCommand(program: Command): void {
         const content = readFileSync(options.file, 'utf-8');
         const fileName = basename(options.file);
 
-        const client = configureClient(auth.apiUrl, auth.apiKey);
-        const response = await KbService.add(client, options.project, { content, source: fileName });
+        const client = configureClient(ctx.apiUrl, ctx.apiKey);
+        const response = await KbService.add(client, ctx.projectSlug, { content, source: fileName });
         const data = unwrap(response);
 
         if (options.json) {
