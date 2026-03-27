@@ -10,7 +10,7 @@ function maskApiKey(apiKey: string): string {
   if (apiKey.length <= 8) {
     return '****';
   }
-  return apiKey.substring(0, 4) + '*'.repeat(apiKey.length - 8) + apiKey.substring(apiKey.length - 4);
+  return apiKey.substring(0, 4) + '****' + apiKey.substring(apiKey.length - 4);
 }
 
 export function agentCommand(program: Command): void {
@@ -39,7 +39,8 @@ export function agentCommand(program: Command): void {
         } else {
           console.log(`Name: ${agentData.name}`);
           console.log(`Slug: ${agentData.slug}`);
-          console.log(`API Key: ${maskApiKey(agentData.apiKey)}`);
+          const apiKeyOutput = agentData.apiKey ? maskApiKey(agentData.apiKey) : '(stored as hash — not recoverable)';
+          console.log(`API Key: ${apiKeyOutput}`);
         }
 
         process.exit(0);

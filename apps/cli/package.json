@@ -46,8 +46,8 @@
       "json",
       "ts"
     ],
-    "rootDir": "src",
-    "testRegex": ".*\\.spec\\.ts$",
+    "rootDir": ".",
+    "testRegex": "(src|.nax)/.*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": [
         "ts-jest",
@@ -67,7 +67,7 @@
     "testEnvironment": "node",
     "forceExit": true,
     "transformIgnorePatterns": [
-      "node_modules/(?!chalk|conf|env-paths|dot-prop|atomically|debounce-fn)"
+      "node_modules/(?!chalk|env-paths|dot-prop|atomically|debounce-fn)"
     ]
   }
 }
