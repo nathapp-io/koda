@@ -353,14 +353,19 @@ describeIntegration('API Integration Tests', () => {
       bugTicketRef = data.ref;
     });
 
-    it('GET .../tickets — lists tickets', async () => {
+    it('GET .../tickets — lists tickets with ref field', async () => {
       const res = await request(httpServer)
         .get(`/api/projects/${projectSlug}/tickets`)
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(200);
 
-      const data = body<{ items: unknown[]; total: number }>(res);
+      const data = body<{ items: Array<{ ref: string; number: number }>; total: number }>(res);
       expect(data.items.length).toBeGreaterThanOrEqual(1);
+      // All items should have ref field matching pattern KT-1, KT-2, etc.
+      data.items.forEach((item) => {
+        expect(item.ref).toMatch(/^[A-Z0-9]+-[1-9][0-9]*$/);
+        expect(item.ref).toBe(`KT-${item.number}`);
+      });
     });
 
     it('GET .../tickets/:ref — returns ticket by ref with empty links array', async () => {

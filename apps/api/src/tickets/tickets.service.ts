@@ -158,6 +158,7 @@ export class TicketsService {
     return {
       items: tickets.map((ticket) => ({
         ...ticket,
+        ref: `${project.key}-${ticket.number}`,
         gitRefUrl: this.computeGitRefUrl(
           project.gitRemoteUrl,
           ticket.gitRefVersion,

@@ -273,7 +273,7 @@ describe('TicketsService', () => {
       const result = await service.findAll('koda', {});
 
       expect(result).toEqual(expect.objectContaining({
-        items: [mockTicket],
+        items: [expect.objectContaining({ ...mockTicket, ref: 'KODA-1' })],
         total: 1,
       }));
       expect(prismaService.client.ticket.findMany).toHaveBeenCalledWith(
@@ -284,6 +284,26 @@ describe('TicketsService', () => {
           }),
         })
       );
+    });
+
+    it('should compute and include ref field for each ticket', async () => {
+      const ticket1 = { ...mockTicket, number: 1 };
+      const ticket2 = { ...mockTicket, number: 2, id: 'ticket-124' };
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.ticket.findMany.mockResolvedValue([ticket1, ticket2]);
+      mockPrismaService.client.ticket.count.mockResolvedValue(2);
+
+      const result = await service.findAll('koda', {});
+
+      expect(result.items).toHaveLength(2);
+      expect(result.items[0]).toEqual(expect.objectContaining({
+        ...ticket1,
+        ref: 'KODA-1',
+      }));
+      expect(result.items[1]).toEqual(expect.objectContaining({
+        ...ticket2,
+        ref: 'KODA-2',
+      }));
     });
 
     it('should filter by status', async () => {
