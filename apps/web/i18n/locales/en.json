@@ -52,6 +52,7 @@
     "projects": "Projects",
     "agents": "Agents",
     "kb": "Knowledge Base",
+    "labels": "Labels",
     "toggleSidebar": "Toggle sidebar"
   },
   "projects": {
@@ -218,6 +219,30 @@
       "searchFailed": "Search failed",
       "docAdded": "Document added",
       "addFailed": "Failed to add document"
+    }
+  },
+  "labels": {
+    "title": "Labels",
+    "empty": "No labels yet.",
+    "columns": {
+      "color": "Color",
+      "name": "Name",
+      "actions": "Actions"
+    },
+    "form": {
+      "name": "Name",
+      "namePlaceholder": "e.g. bug, enhancement",
+      "color": "Color",
+      "create": "Create Label"
+    },
+    "actions": {
+      "delete": "Delete"
+    },
+    "toast": {
+      "created": "Label created successfully",
+      "createFailed": "Failed to create label",
+      "deleted": "Label deleted successfully",
+      "deleteFailed": "Failed to delete label"
     }
   },
   "toast": {
