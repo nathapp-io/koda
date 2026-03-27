@@ -15,6 +15,10 @@ const envSchema = Joi.object({
   JWT_REFRESH_SECRET: Joi.string().required(),
   JWT_REFRESH_EXPIRES_IN: Joi.string().default('30d'),
   API_KEY_SECRET: Joi.string().required(),
+  RAG_IN_MEMORY_ONLY: Joi.boolean()
+    .truthy('true')
+    .falsy('false')
+    .optional(),
 }).unknown(true);
 
 export function validate(config: Record<string, unknown>): Record<string, unknown> {

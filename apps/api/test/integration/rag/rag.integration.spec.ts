@@ -50,6 +50,7 @@ describe('RagService integration', () => {
             get: (key: string) => {
               const config: Record<string, unknown> = {
                 'rag.lancedbPath': tmpDir,
+                'rag.inMemoryOnly': true,
                 'rag.ftsIndexMode': 'simple',
                 'rag.similarityHigh': 0.85,
                 'rag.similarityMedium': 0.70,

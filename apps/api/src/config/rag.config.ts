@@ -6,6 +6,9 @@ export const ragConfig = registerAs('rag', () => ({
   ollamaBaseUrl: process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434',
   openaiApiKey: process.env['OPENAI_API_KEY'] ?? '',
   lancedbPath: process.env['LANCEDB_PATH'] ?? './lancedb',
+  inMemoryOnly: process.env['RAG_IN_MEMORY_ONLY']
+    ? process.env['RAG_IN_MEMORY_ONLY'].toLowerCase() === 'true'
+    : process.env['NODE_ENV'] === 'test',
   ftsIndexMode: process.env['FTS_INDEX_MODE'] ?? 'simple',
   // Similarity thresholds for RRF + verdict tiers.
   // SIMILARITY_HIGH: score >= this → 'high' tier / 'likely_duplicate' verdict.
