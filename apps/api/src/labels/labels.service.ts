@@ -24,8 +24,11 @@ export class LabelsService {
     currentUser: CurrentUser,
     actorType: 'user' | 'agent',
   ) {
-    // ADMIN users and agents can create labels; MEMBER users cannot
-    if (actorType === 'user' && currentUser.role === 'MEMBER') {
+    // Agents are explicitly allowed to create labels regardless of role.
+    // For users: ADMIN can create labels; MEMBER users cannot.
+    if (actorType === 'agent') {
+      // intentionally allowed — agents bypass role-based label creation guard
+    } else if (currentUser.role === 'MEMBER') {
       throw new ForbiddenAppException();
     }
 
