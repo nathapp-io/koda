@@ -251,6 +251,52 @@ describe('agentCommand', () => {
         expect.stringContaining('"slug"')
       );
     });
+
+    it('displays hash message when apiKey is undefined', async () => {
+      const mockAgent = {
+        id: 'agent-1',
+        name: 'Test Agent',
+        slug: 'test-agent',
+        apiKey: undefined,
+      };
+
+      (AgentService.me as jest.Mock).mockResolvedValue({
+        data: { ret: 0, data: mockAgent },
+      });
+
+      const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
+      const meCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'me');
+
+      await meCmd?.parseAsync(['node', 'test']);
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('(stored as hash — not recoverable)')
+      );
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('masks API key when apiKey is defined', async () => {
+      const mockAgent = {
+        id: 'agent-1',
+        name: 'Test Agent',
+        slug: 'test-agent',
+        apiKey: 'abcd1234efgh5678',
+      };
+
+      (AgentService.me as jest.Mock).mockResolvedValue({
+        data: { ret: 0, data: mockAgent },
+      });
+
+      const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
+      const meCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'me');
+
+      await meCmd?.parseAsync(['node', 'test']);
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining('abcd********5678')
+      );
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
   });
 
   describe('agent pickup', () => {

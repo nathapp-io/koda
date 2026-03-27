@@ -39,7 +39,8 @@ export function agentCommand(program: Command): void {
         } else {
           console.log(`Name: ${agentData.name}`);
           console.log(`Slug: ${agentData.slug}`);
-          console.log(`API Key: ${maskApiKey(agentData.apiKey)}`);
+          const apiKeyOutput = agentData.apiKey ? maskApiKey(agentData.apiKey) : '(stored as hash — not recoverable)';
+          console.log(`API Key: ${apiKeyOutput}`);
         }
 
         process.exit(0);
