@@ -1,0 +1,113 @@
+{
+  "project": "koda",
+  "feature": "web-fixes",
+  "branchName": "feat/web-fixes",
+  "createdAt": "2026-03-28T00:00:00.000Z",
+  "updatedAt": "2026-03-27T16:56:28.672Z",
+  "userStories": [
+    {
+      "id": "US-007",
+      "title": "Verify ticket navigation uses ref field (fix #25)",
+      "description": "The handleOpenTicket function in apps/web/pages/[project]/index.vue already constructs ticket URLs using ticket.ref. The API now returns the ref field (fixed in PR #27). This story adds a unit test for handleOpenTicket asserting that router.push is called with the correct URL containing the ticket ref (e.g. NAX-1), not undefined or a numeric id. No source changes to index.vue are expected — confirm no other component uses ticket.id or ticket.number as a path segment.",
+      "acceptanceCriteria": [
+        "When handleOpenTicket is called with a ticket where ref is 'NAX-1' and the project slug is 'nax', then router.push is called with '/nax/tickets/NAX-1'",
+        "When handleOpenTicket is called with a mock ticket, then router.push is NOT called with a URL containing 'undefined' as the path segment",
+        "Given a search across all files in apps/web/ for patterns constructing ticket URLs, no file uses ticket.id or ticket.number as the ticket path segment instead of ticket.ref"
+      ],
+      "tags": [
+        "bug",
+        "web",
+        "navigation"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "simple",
+        "modelTier": "powerful"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/pages/[project]/index.vue",
+        "apps/web/tests/pages/project-board.spec.ts",
+        "apps/web/tests/pages/index.spec.ts"
+      ],
+      "priorErrors": [
+        "Attempt 1 failed with model tier: fast: Rectification exhausted after 2 attempts (28 test failures)",
+        "Attempt 1 failed with model tier: balanced: Rectification exhausted after 2 attempts (28 test failures)"
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "fast",
+          "stage": "escalation",
+          "summary": "Failed with tier fast, escalating to next tier",
+          "cost": 0.3570347,
+          "timestamp": "2026-03-27T16:27:21.201Z"
+        },
+        {
+          "attempt": 1,
+          "modelTier": "balanced",
+          "stage": "escalation",
+          "summary": "Failed with tier balanced, escalating to next tier",
+          "cost": 0.17902620000000002,
+          "timestamp": "2026-03-27T16:28:27.786Z"
+        }
+      ],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-008",
+      "title": "Add Label Management page (fix #24)",
+      "description": "Create apps/web/pages/[project]/labels.vue following the exact pattern of apps/web/pages/[project]/agents.vue. The page must list labels fetched from GET /projects/:slug/labels in a Shadcn-nuxt Table with columns: Color (16x16 swatch span with background-color), Name, Actions. A Create Label form/section must have Name (required) and Color (optional, default #6366f1) fields that call POST /projects/:slug/labels on submit and refresh the list. Each row has a Delete button calling DELETE /projects/:slug/labels/:labelId. Success/error toasts shown for all mutations. Add i18n keys under labels.* to apps/web/i18n/locales/en.json and apps/web/i18n/locales/zh.json. Add a Labels nav link in apps/web/layouts/default.vue alongside the existing Agents/KB conditional links. Add unit tests in apps/web/tests/pages/labels.spec.ts covering list render, create, and delete flows.",
+      "acceptanceCriteria": [
+        "When the labels page mounts with a project slug, then useAsyncData calls GET /projects/:slug/labels and renders one table row per label returned",
+        "When a label row is rendered, then a colored span with width 16px, height 16px, and background-color matching label.color is displayed in the Color column",
+        "When the Create Label form is submitted with a valid name and no color, then POST /projects/:slug/labels is called with the name and color defaulting to '#6366f1'",
+        "When POST /projects/:slug/labels succeeds, then the labels list is refreshed and a success toast with the key labels.toast.created is shown",
+        "When POST /projects/:slug/labels fails, then an error toast with the key labels.toast.createFailed is shown",
+        "When the Delete button for a label row is clicked, then DELETE /projects/:slug/labels/:labelId is called with the correct labelId",
+        "When DELETE /projects/:slug/labels/:labelId succeeds, then the labels list is refreshed and a success toast with the key labels.toast.deleted is shown",
+        "When the labels list is empty, then the empty state message corresponding to labels.empty i18n key is displayed",
+        "When apps/web/layouts/default.vue renders with a project route param, then a Labels navigation link pointing to /:project/labels is rendered alongside the Agents and KB links"
+      ],
+      "tags": [
+        "feature",
+        "web",
+        "labels",
+        "crud"
+      ],
+      "dependencies": [
+        "US-007"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/pages/[project]/agents.vue",
+        "apps/web/layouts/default.vue",
+        "apps/web/i18n/locales/en.json",
+        "apps/web/i18n/locales/zh.json",
+        "apps/web/tests/pages/agents.spec.ts"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    }
+  ],
+  "analysis": "Two web bugs targeted in this batch. US-007 (Bug #25): The handleOpenTicket function in apps/web/pages/[project]/index.vue already uses ticket.ref correctly (line 39-41: router.push(`/${slug}/tickets/${ticket.ref}`)). No source code change is needed — the bug was on the API side (PR #27 fixed TicketResponseDto to include ref). The web task is to write a unit test asserting router.push receives the correct URL with ref. Existing test file is at apps/web/tests/pages/project-board.spec.ts (and apps/web/tests/pages/index.spec.ts). The test must be added to apps/web/tests/pages/project-board.spec.ts or a new us-007 spec. US-008 (Bug #24): No label management page exists. apps/web/pages/[project]/labels.vue must be created following the exact pattern of apps/web/pages/[project]/agents.vue — useAsyncData, $api, toast, Shadcn-nuxt Table components. The sidebar in apps/web/layouts/default.vue has conditional project-scoped links (Agents, KB) that must be extended with a Labels link. i18n files live at apps/web/i18n/locales/en.json and apps/web/i18n/locales/zh.json (not apps/web/locales/ as stated in spec — confirmed by exploration). The labels page needs CRUD: list (GET /projects/:slug/labels), create (POST), delete (DELETE /projects/:slug/labels/:labelId). Inline edit is optional/skip. Color swatch is a 16x16 span with background-color. Test file should go in apps/web/tests/pages/labels.spec.ts. Key risks: i18n path mismatch (spec says apps/web/locales/ but actual path is apps/web/i18n/locales/), ensure correct path is used. The agents.vue page uses project-scoped API calls via useRoute().params.project as slug — labels.vue must follow the same pattern. Sidebar links are conditional on $route.params.project existing."
+}

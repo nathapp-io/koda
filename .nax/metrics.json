@@ -673,5 +673,52 @@
         "runtimeCrashes": 0
       }
     ]
+  },
+  {
+    "runId": "run-2026-03-27T16-20-29-823Z",
+    "feature": "web-fixes",
+    "startedAt": "2026-03-27T16:20:29.823Z",
+    "completedAt": "2026-03-27T16:56:40.043Z",
+    "totalCost": 2.7094101000000004,
+    "totalStories": 2,
+    "storiesCompleted": 2,
+    "storiesFailed": 0,
+    "totalDurationMs": 2170220,
+    "stories": [
+      {
+        "storyId": "US-007",
+        "complexity": "simple",
+        "initialComplexity": "simple",
+        "modelTier": "powerful",
+        "modelUsed": "sonnet",
+        "attempts": 3,
+        "finalTier": "powerful",
+        "success": true,
+        "cost": 1.2287351000000004,
+        "durationMs": 202167,
+        "firstPassSuccess": false,
+        "startedAt": "2026-03-27T16:28:29.804Z",
+        "completedAt": "2026-03-27T16:45:19.148Z",
+        "fullSuiteGatePassed": false,
+        "runtimeCrashes": 0
+      },
+      {
+        "storyId": "US-008",
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "modelUsed": "sonnet",
+        "attempts": 1,
+        "finalTier": "balanced",
+        "success": true,
+        "cost": 1.480675,
+        "durationMs": 0,
+        "firstPassSuccess": true,
+        "startedAt": "2026-03-27T16:45:21.208Z",
+        "completedAt": "2026-03-27T16:56:28.671Z",
+        "fullSuiteGatePassed": true,
+        "runtimeCrashes": 0
+      }
+    ]
   }
 ]
