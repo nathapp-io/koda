@@ -1,8 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ScheduleModule, SchedulerRegistry } from '@nestjs/schedule';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
 import { RagController } from './rag.controller';
 import { RagService } from './rag.service';
 import { EmbeddingService } from './embedding.service';
@@ -17,7 +15,6 @@ import { ManualOptimizeStrategy } from './strategies/manual-optimize.strategy';
   providers: [
     RagService,
     EmbeddingService,
-    { provide: 'PrismaService', useExisting: PrismaService<PrismaClient> },
     {
       provide: FTS_OPTIMIZE_STRATEGY,
       useFactory: (configService: ConfigService, schedulerRegistry: SchedulerRegistry): FtsOptimizeStrategy => {

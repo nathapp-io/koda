@@ -130,7 +130,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly configService: ConfigService,
     @Optional() private readonly embeddingService?: EmbeddingService,
-    @Inject(FTS_OPTIMIZE_STRATEGY) private readonly optimizeStrategy?: FtsOptimizeStrategy,
+    @Optional() @Inject(FTS_OPTIMIZE_STRATEGY) private readonly optimizeStrategy?: FtsOptimizeStrategy,
   ) {
     this.lancedbPath = configService.get<string>('rag.lancedbPath') ?? './lancedb';
     this.similarityHigh = configService.get<number>('rag.similarityHigh') ?? 0.85;

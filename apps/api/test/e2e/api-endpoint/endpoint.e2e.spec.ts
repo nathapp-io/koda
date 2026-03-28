@@ -19,7 +19,6 @@ import { AppModule } from '../../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
-import { execSync } from 'child_process';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -51,17 +50,6 @@ describeIntegration('API Integration Tests', () => {
 
   beforeAll(async () => {
     if (!DATABASE_URL) return;
-
-    // Reset SQLite test DB to clean schema
-    try {
-      execSync('bunx prisma db push --force-reset --skip-generate', {
-        stdio: 'inherit',
-        env: { ...process.env, DATABASE_URL },
-      });
-    } catch (error) {
-      // Database reset may fail if schema is already in sync, which is OK for tests
-      // Silent catch - database reset may fail if schema is already in sync
-    }
 
     // Use AppFactory to get NathApplication with useAppGlobal* methods
     // IMPORTANT: DI container is ready right after create() (no init() needed).

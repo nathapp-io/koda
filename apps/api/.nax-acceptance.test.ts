@@ -6,19 +6,19 @@ import type { ConfigService } from '@nestjs/config';
 // Strategy imports — will exist after US-001
 import {
   FTS_OPTIMIZE_STRATEGY,
-} from '../../../apps/api/src/rag/strategies/fts-optimize-strategy.interface';
-import { CounterOptimizeStrategy } from '../../../apps/api/src/rag/strategies/counter-optimize.strategy';
-import { CronOptimizeStrategy } from '../../../apps/api/src/rag/strategies/cron-optimize.strategy';
-import { ManualOptimizeStrategy } from '../../../apps/api/src/rag/strategies/manual-optimize.strategy';
+} from './src/rag/strategies/fts-optimize-strategy.interface';
+import { CounterOptimizeStrategy } from './src/rag/strategies/counter-optimize.strategy';
+import { CronOptimizeStrategy } from './src/rag/strategies/cron-optimize.strategy';
+import { ManualOptimizeStrategy } from './src/rag/strategies/manual-optimize.strategy';
 
 // Config — exists, extended by US-002
-import { ragConfig } from '../../../apps/api/src/config/rag.config';
+import { ragConfig } from './src/config/rag.config';
 
 // RagModule — extended by US-002
-import { RagModule } from '../../../apps/api/src/rag/rag.module';
+import { RagModule } from './src/rag/rag.module';
 
 // RagService — extended by US-003 / US-004
-import { RagService, simpleFtsScore, reciprocalRankFusion } from '../../../apps/api/src/rag/rag.service';
+import { RagService, simpleFtsScore, reciprocalRankFusion } from './src/rag/rag.service';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -111,7 +111,7 @@ describe('CounterOptimizeStrategy', () => {
     table.optimize.mockRejectedValue(new Error('optimize boom'));
     await strategy.onInsert('p1', table);
     await strategy.onInsert('p1', table);
-    await expect(strategy.onInsert('p1', table)).resolves.not.toThrow();
+    await expect(strategy.onInsert('p1', table)).resolves.toBeUndefined();
   });
 
   it('AC-6: onFirstAccess() calls table.optimize() fire-and-forget (returns void)', () => {
@@ -222,7 +222,7 @@ describe('ManualOptimizeStrategy', () => {
   });
 
   it('AC-16: onDestroy() completes without error', async () => {
-    await expect(strategy.onDestroy()).resolves.not.toThrow();
+    await expect(strategy.onDestroy()).resolves.toBeUndefined();
   });
 });
 
@@ -256,7 +256,7 @@ describe('rag.config.ts new keys', () => {
 describe('RagModule — ScheduleModule import (AC-20, file-check)', () => {
   it('AC-20: RagModule source imports ScheduleModule.forRoot()', () => {
     const src = fs.readFileSync(
-      path.resolve(__dirname, '../../../apps/api/src/rag/rag.module.ts'),
+      path.resolve(__dirname, './src/rag/rag.module.ts'),
       'utf-8',
     );
     expect(src).toMatch(/ScheduleModule/);
@@ -282,9 +282,15 @@ describe('RagModule — FTS_OPTIMIZE_STRATEGY provider resolution', () => {
 
   async function compileWithStrategy(strategyName: string) {
     const { ConfigService: CS } = await import('@nestjs/config');
+    const { EmbeddingService } = await import('./src/rag/embedding.service');
+    const { PrismaService } = await import('@nathapp/nestjs-prisma');
     return Test.createTestingModule({ imports: [RagModule] })
       .overrideProvider(CS)
       .useValue(mockConfigService({ ...sharedConfig, 'rag.ftsOptimizeStrategy': strategyName }))
+      .overrideProvider(EmbeddingService)
+      .useValue({})
+      .overrideProvider(PrismaService)
+      .useValue({})
       .compile();
   }
 
@@ -313,7 +319,7 @@ describe('package.json — @nestjs/schedule dependency (AC-24, file-check)', () 
   it('AC-24: @nestjs/schedule is listed as a production dependency', () => {
     const pkg = JSON.parse(
       fs.readFileSync(
-        path.resolve(__dirname, '../../../apps/api/package.json'),
+        path.resolve(__dirname, './package.json'),
         'utf-8',
       ),
     ) as { dependencies?: Record<string, string> };
@@ -587,7 +593,7 @@ describe('POST /projects/:slug/kb/optimize — HTTP endpoint', () => {
   let projectFindUnique: jest.Mock;
 
   beforeAll(async () => {
-    const { RagController } = await import('../../../apps/api/src/rag/rag.controller');
+    const { RagController } = await import('./src/rag/rag.controller');
 
     ragServiceMock = { optimizeTable: jest.fn().mockResolvedValue(undefined) };
     projectFindUnique = jest.fn();
@@ -657,7 +663,7 @@ describe('POST /projects/:slug/kb/optimize — HTTP endpoint', () => {
 
   it('AC-43: optimize endpoint has @ApiOperation and @ApiResponse for 200, 403, 404 (file-check)', () => {
     const src = fs.readFileSync(
-      path.resolve(__dirname, '../../../apps/api/src/rag/rag.controller.ts'),
+      path.resolve(__dirname, './src/rag/rag.controller.ts'),
       'utf-8',
     );
     // Verify the optimize method block contains all required swagger decorators

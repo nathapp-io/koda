@@ -86,6 +86,7 @@
     "coverageDirectory": "../coverage",
     "testEnvironment": "node",
     "forceExit": true,
+    "maxWorkers": 1,
     "setupFilesAfterEnv": [
       "<rootDir>/../test-setup.ts"
     ]

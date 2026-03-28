@@ -89,7 +89,7 @@ describe('CounterOptimizeStrategy', () => {
       table.optimize.mockRejectedValue(new Error('optimize boom'));
       await strategy.onInsert('p1', table);
       await strategy.onInsert('p1', table);
-      await expect(strategy.onInsert('p1', table)).resolves.not.toThrow();
+      await expect(strategy.onInsert('p1', table)).resolves.toBeUndefined();
     });
   });
 

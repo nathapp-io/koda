@@ -32,7 +32,7 @@ describe('ManualOptimizeStrategy', () => {
 
   describe('AC-16: onDestroy() completes without error', () => {
     it('resolves successfully', async () => {
-      await expect(strategy.onDestroy()).resolves.not.toThrow();
+      await expect(strategy.onDestroy()).resolves.toBeUndefined();
     });
   });
 });

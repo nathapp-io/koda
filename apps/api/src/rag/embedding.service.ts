@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EmbeddingProvider } from './embedding.interface';
 import { OllamaEmbeddingProvider } from './providers/ollama-embedding.provider';
@@ -9,7 +9,7 @@ export class EmbeddingService {
   private readonly provider: EmbeddingProvider;
   private readonly _modelName: string;
 
-  constructor(configService: ConfigService) {
+  constructor(@Inject(ConfigService) configService: ConfigService) {
     const providerName = configService.get<string>('rag.embeddingProvider') ?? 'ollama';
     const model = configService.get<string>('rag.embeddingModel') ?? 'nomic-embed-text';
     this._modelName = model;

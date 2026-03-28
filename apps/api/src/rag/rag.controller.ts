@@ -5,7 +5,6 @@ import {
   Get,
   HttpCode,
   HttpStatus,
-  Inject,
   Param,
   Post,
   Query,
@@ -25,11 +24,10 @@ import { SearchKbDto } from './dto/search-kb.dto';
 export class RagController {
   constructor(
     private readonly ragService: RagService,
-    @Inject('PrismaService') private readonly prisma: PrismaService<PrismaClient>,
+    private readonly prisma: PrismaService<PrismaClient>,
   ) {}
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private get db() { return (this.prisma as any).client as PrismaClient; }
+  private get db() { return this.prisma.client; }
 
   private async resolveProject(slug: string) {
     const project = await this.db.project.findUnique({ where: { slug } });
