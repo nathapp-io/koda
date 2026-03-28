@@ -12,7 +12,12 @@
       </Button>
     </div>
 
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div v-if="pending" class="flex items-center justify-center py-12 text-muted-foreground">{{ t('common.loading') }}</div>
+    <div v-else-if="error" class="text-center py-12">
+      <p class="text-destructive text-sm">{{ t('common.loadFailed') }}</p>
+      <Button @click="refresh()" class="mt-4">{{ t('common.retry') }}</Button>
+    </div>
+    <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
       <template v-if="projects && projects.length > 0">
         <Card v-for="project in projects" :key="project.id">
           <CardHeader>
@@ -67,7 +72,7 @@ const showCreateDialog = ref(false)
 
 const { $api } = useApi()
 
-const { data: projectsData, refresh } = useAsyncData('projects', () =>
+const { data: projectsData, pending, error, refresh } = useAsyncData('projects', () =>
   $api.get('/projects') as Promise<Project[]>
 )
 

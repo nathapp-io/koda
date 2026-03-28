@@ -15,7 +15,7 @@ const slug = route.params.project as string
 const { $api } = useApi()
 const { t } = useI18n()
 
-const { data: agentsData, refresh } = useAsyncData(
+const { data: agentsData, pending, error, refresh } = useAsyncData(
   `agents-${slug}`,
   () => $api.get('/agents') as Promise<Agent[]>,
 )
@@ -43,7 +43,12 @@ async function changeStatus(agent: Agent, newStatus: 'ACTIVE' | 'PAUSED' | 'OFFL
   <div class="space-y-4">
     <h1 class="text-2xl font-bold">{{ t('agents.title') }}</h1>
 
-    <Table>
+    <div v-if="pending" class="text-center py-12 text-muted-foreground">{{ t('common.loading') }}</div>
+    <div v-else-if="error" class="text-center py-12">
+      <p class="text-destructive text-sm">{{ t('common.loadFailed') }}</p>
+      <Button @click="refresh()" class="mt-4">{{ t('common.retry') }}</Button>
+    </div>
+    <Table v-else>
       <TableHeader>
         <TableRow>
           <TableHead>{{ t('agents.columns.name') }}</TableHead>

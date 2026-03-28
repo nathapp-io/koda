@@ -16,6 +16,7 @@ interface Ticket {
 
 const route = useRoute()
 const router = useRouter()
+const { t } = useI18n()
 
 const slug = route.params.project as string
 
@@ -28,7 +29,7 @@ interface TicketPage {
   limit: number
 }
 
-const { data: ticketsData, refresh } = useAsyncData(
+const { data: ticketsData, pending, error, refresh } = useAsyncData(
   `tickets-${slug}`,
   () => $api.get<TicketPage>(`/projects/${slug}/tickets`),
 )
@@ -52,7 +53,12 @@ function handleCreated() {
 
 <template>
   <div>
-    <TicketBoard
+    <div v-if="pending" class="text-center py-12 text-muted-foreground">{{ t('common.loading') }}</div>
+    <div v-else-if="error" class="text-center py-12">
+      <p class="text-destructive text-sm">{{ t('common.loadFailed') }}</p>
+      <Button @click="refresh()" class="mt-4">{{ t('common.retry') }}</Button>
+    </div>
+    <TicketBoard v-else
       :tickets="tickets"
       @open-ticket="handleOpenTicket"
       @create="handleCreate"

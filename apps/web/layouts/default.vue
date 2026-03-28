@@ -53,18 +53,6 @@ const sidebarOpen = ref(true)
         </NuxtLink>
       </nav>
 
-      <!-- Bottom user section -->
-      <div class="border-t border-border p-4">
-        <p class="truncate text-sm font-medium text-foreground">
-          {{ auth.user.value?.email }}
-        </p>
-        <button
-          class="mt-2 w-full rounded-md px-3 py-2 text-left text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-          @click="auth.logout()"
-        >
-          {{ t('common.logout') }}
-        </button>
-      </div>
     </aside>
 
     <!-- Main area -->

@@ -16,7 +16,7 @@ const slug = route.params.project as string
 const { $api } = useApi()
 const { t } = useI18n()
 
-const { data: labelsData, refresh } = useAsyncData(
+const { data: labelsData, pending, error, refresh } = useAsyncData(
   `labels-${slug}`,
   () => $api.get(`/projects/${slug}/labels`) as Promise<Label[]>,
 )
@@ -92,8 +92,15 @@ async function deleteLabel(labelId: string) {
       </form>
     </div>
 
+    <!-- Loading / Error / Content states -->
+    <div v-if="pending" class="text-center py-6 text-muted-foreground">{{ t('common.loading') }}</div>
+    <div v-else-if="error" class="text-center py-6">
+      <p class="text-destructive text-sm">{{ t('common.loadFailed') }}</p>
+      <Button @click="refresh()" class="mt-2">{{ t('common.retry') }}</Button>
+    </div>
+
     <!-- Labels Table -->
-    <div v-if="labels.length === 0" class="text-muted-foreground text-sm py-4">
+    <div v-else-if="labels.length === 0" class="text-muted-foreground text-sm py-4">
       {{ t('labels.empty') }}
     </div>
 

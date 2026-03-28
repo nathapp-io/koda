@@ -993,5 +993,86 @@
         "runtimeCrashes": 0
       }
     ]
+  },
+  {
+    "runId": "run-2026-03-28T10-55-57-738Z",
+    "feature": "web-ux-fixes",
+    "startedAt": "2026-03-28T10:55:57.738Z",
+    "completedAt": "2026-03-28T12:42:44.808Z",
+    "totalCost": 18.457837849999997,
+    "totalStories": 4,
+    "storiesCompleted": 4,
+    "storiesFailed": 1,
+    "totalDurationMs": 6407070,
+    "stories": [
+      {
+        "storyId": "US-001",
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "modelUsed": "sonnet",
+        "attempts": 1,
+        "finalTier": "balanced",
+        "success": true,
+        "cost": 13.404278949999997,
+        "durationMs": 0,
+        "firstPassSuccess": true,
+        "startedAt": "2026-03-28T11:03:35.675Z",
+        "completedAt": "2026-03-28T11:34:41.219Z",
+        "fullSuiteGatePassed": true,
+        "runtimeCrashes": 0
+      },
+      {
+        "storyId": "US-002",
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "modelUsed": "sonnet",
+        "attempts": 1,
+        "finalTier": "balanced",
+        "success": true,
+        "cost": 1.51402715,
+        "durationMs": 0,
+        "firstPassSuccess": true,
+        "startedAt": "2026-03-28T11:34:43.292Z",
+        "completedAt": "2026-03-28T11:52:05.587Z",
+        "fullSuiteGatePassed": true,
+        "runtimeCrashes": 0
+      },
+      {
+        "storyId": "US-004",
+        "complexity": "simple",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "modelUsed": "haiku",
+        "attempts": 1,
+        "finalTier": "fast",
+        "success": true,
+        "cost": 0.19512955,
+        "durationMs": 139112,
+        "firstPassSuccess": true,
+        "startedAt": "2026-03-28T12:02:15.103Z",
+        "completedAt": "2026-03-28T12:11:48.444Z",
+        "fullSuiteGatePassed": false,
+        "runtimeCrashes": 0
+      },
+      {
+        "storyId": "US-005",
+        "complexity": "simple",
+        "initialComplexity": "simple",
+        "modelTier": "powerful",
+        "modelUsed": "sonnet",
+        "attempts": 3,
+        "finalTier": "powerful",
+        "success": true,
+        "cost": 2.8512093999999997,
+        "durationMs": 245856,
+        "firstPassSuccess": false,
+        "startedAt": "2026-03-28T12:37:41.531Z",
+        "completedAt": "2026-03-28T12:42:44.166Z",
+        "fullSuiteGatePassed": false,
+        "runtimeCrashes": 0
+      }
+    ]
   }
 ]

@@ -225,13 +225,14 @@ describe('US-005-3 AC5: form POSTs to correct endpoint and appends comment witho
     expect(hasCommentsPost).toBe(true)
   })
 
-  test('source appends new comment to reactive list without full reload', () => {
+  test('source refreshes or appends comment reactively after POST (no full reload)', () => {
     const source = readFileSync(componentPath, 'utf-8')
-    const hasReactiveAppend =
+    // US-001 replaced .push() with refreshComments(); either pattern is acceptable
+    const hasReactiveUpdate =
+      source.includes('refreshComments()') ||
       source.includes('.push(') ||
-      source.includes('comments.value') ||
       source.includes('unshift(')
-    expect(hasReactiveAppend).toBe(true)
+    expect(hasReactiveUpdate).toBe(true)
   })
 
   test('source awaits the POST call before appending', () => {
@@ -397,5 +398,72 @@ describe('US-004 AC4: CommentThread onSubmit catch uses extractApiError', () => 
       source.includes('extractApiError(') &&
       source.includes('toast.error(')
     expect(hasExtractBeforeToast).toBe(true)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// US-001 — Fix CommentThread SSR/hydration and stale data
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('US-001 AC1: CommentThread useAsyncData does not use the await keyword', () => {
+  test('useAsyncData call has no await prefix', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    // The fix removes `await` from `const { data, pending, error } = await useAsyncData(...)`
+    expect(source).not.toMatch(/await\s+useAsyncData/)
+  })
+
+  test('useAsyncData is still present after removing await', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    expect(source).toContain('useAsyncData')
+  })
+})
+
+describe('US-001 AC2: comments is a computed derived from data.value', () => {
+  test('comments is declared as computed(() => data.value ?? [])', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    expect(source).toMatch(/computed\s*\(\s*\(\s*\)\s*=>\s*data\.value\s*\?\?\s*\[\]/)
+  })
+
+  test('comments is NOT declared as a plain ref', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    // The old pattern: `const comments = ref([] as Comment[])` followed by assignment
+    expect(source).not.toMatch(/const\s+comments\s*=\s*ref\s*\(/)
+  })
+})
+
+describe('US-001 AC3: onSubmit calls refreshComments() instead of pushing to comments.value', () => {
+  test('onSubmit calls refreshComments() after a successful POST', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    expect(source).toContain('refreshComments()')
+  })
+
+  test('onSubmit does not mutate comments.value via push', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    expect(source).not.toContain('comments.value.push')
+  })
+})
+
+describe('US-001 AC4: onSubmit calls resetForm() after refreshComments()', () => {
+  test('resetForm() is called and appears after refreshComments() in source order', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    const refreshIdx = source.indexOf('refreshComments()')
+    const resetIdx = source.indexOf('resetForm()')
+    expect(refreshIdx).toBeGreaterThanOrEqual(0)
+    expect(resetIdx).toBeGreaterThanOrEqual(0)
+    expect(resetIdx).toBeGreaterThan(refreshIdx)
+  })
+})
+
+describe('US-001 AC5: template renders loading text via v-if="pending"', () => {
+  test('template has a v-if="pending" branch for the loading state', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    expect(source).toMatch(/v-if="pending"/)
+  })
+})
+
+describe('US-001 AC6: template renders error text via v-else-if="error"', () => {
+  test('template has a v-else-if="error" branch for the error state', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    expect(source).toMatch(/v-else-if="error"/)
   })
 })

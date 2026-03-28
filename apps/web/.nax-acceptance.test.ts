@@ -1,413 +1,443 @@
-import { describe, test, expect, beforeEach } from '@jest/globals'
+import { describe, test, expect } from '@jest/globals'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { ref, computed } from 'vue'
-
-// ── Paths (3 levels up from .nax/features/web-auth-security/ → apps/web) ─────
 
 const webDir = join(__dirname, '../../..')
-const authPath = join(webDir, 'composables/useAuth.ts')
-const apiPath = join(webDir, 'composables/useApi.ts')
-const commentThreadPath = join(webDir, 'components/CommentThread.vue')
-const createTicketPath = join(webDir, 'components/CreateTicketDialog.vue')
-const createProjectPath = join(webDir, 'components/CreateProjectDialog.vue')
-const ticketActionPath = join(webDir, 'components/TicketActionPanel.vue')
-const labelsPath = join(webDir, 'pages/[project]/labels.vue')
-const langSwitcherPath = join(webDir, 'components/LanguageSwitcher.vue')
+const componentsDir = join(webDir, 'components')
+const pagesDir = join(webDir, 'pages')
+const composablesDir = join(webDir, 'composables')
+const layoutsDir = join(webDir, 'layouts')
+const localesDir = join(webDir, 'i18n', 'locales')
 
-// ── Runtime helpers for useAuth composable ────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// US-001 — Fix CommentThread SSR/hydration & stale data
+// ─────────────────────────────────────────────────────────────────────────────
 
-interface CookieCall {
-  name: string
-  opts: unknown
-}
-
-function makeFakeEnv() {
-  const tokenRef = ref<string | null>(null)
-  const userRef = ref<unknown>(null)
-  const navigateToMock = jest.fn()
-  const cookieCalls: CookieCall[] = []
-
-  const fakeCookie = (name: string, opts?: unknown) => {
-    cookieCalls.push({ name, opts })
-    if (name === 'koda_token') return tokenRef
-    return ref<string | null>(null)
-  }
-
-  const fakeState = (key: string, init?: () => unknown) => {
-    if (key === 'koda_user') return userRef
-    return ref(typeof init === 'function' ? init() : null)
-  }
-
-  const fakeRuntimeConfig = () => ({
-    public: { apiBaseUrl: 'http://localhost:3000' },
-  })
-
-  const fetchMock = jest.fn((_url: string, _opts?: Record<string, unknown>) =>
-    Promise.resolve({ accessToken: 'mock-jwt', user: { id: '1', email: 'a@b.com' } })
-  )
-
-  return {
-    tokenRef,
-    userRef,
-    fetchMock,
-    fakeCookie,
-    fakeState,
-    fakeRuntimeConfig,
-    navigateToMock,
-    cookieCalls,
-  }
-}
-
-function applyNuxtGlobals(env: ReturnType<typeof makeFakeEnv>) {
-  ;(globalThis as Record<string, unknown>).useCookie = env.fakeCookie
-  ;(globalThis as Record<string, unknown>).useState = env.fakeState
-  ;(globalThis as Record<string, unknown>).computed = computed
-  ;(globalThis as Record<string, unknown>).$fetch = env.fetchMock
-  ;(globalThis as Record<string, unknown>).useRuntimeConfig = env.fakeRuntimeConfig
-  ;(globalThis as Record<string, unknown>).navigateTo = env.navigateToMock
-}
-
-// beforeEach hook removed - Bun test runner doesn't support jest.resetModules()
-
-// ── AC-1: useCookie called with secure: true ──────────────────────────────────
-
-describe('AC-1: useCookie called with secure: true for koda_token', () => {
-  test('AC-1: useCookie receives { secure: true } as second argument when initializing the token cookie', async () => {
-    const env = makeFakeEnv()
-    applyNuxtGlobals(env)
-    const mod = await import(authPath)
-    mod.useAuth()
-    const tokenCall = env.cookieCalls.find((c) => c.name === 'koda_token')
-    expect(tokenCall).toBeDefined()
-    expect(tokenCall!.opts).toEqual(expect.objectContaining({ secure: true }))
+describe('AC-1: CommentThread useAsyncData does not use await keyword', () => {
+  test('useAsyncData call has no await prefix on the server', () => {
+    const source = readFileSync(join(componentsDir, 'CommentThread.vue'), 'utf-8')
+    // The fix removes `await` from `const { data, pending, error } = await useAsyncData(...)`
+    expect(source).not.toMatch(/await\s+useAsyncData/)
+    // useAsyncData itself must still be present
+    expect(source).toContain('useAsyncData')
   })
 })
 
-// ── AC-2: useCookie called with sameSite: 'strict' ───────────────────────────
-
-describe("AC-2: useCookie called with sameSite: 'strict' for koda_token", () => {
-  test("AC-2: useCookie receives { sameSite: 'strict' } as second argument when initializing the token cookie", async () => {
-    const env = makeFakeEnv()
-    applyNuxtGlobals(env)
-    const mod = await import(authPath)
-    mod.useAuth()
-    const tokenCall = env.cookieCalls.find((c) => c.name === 'koda_token')
-    expect(tokenCall).toBeDefined()
-    expect(tokenCall!.opts).toEqual(expect.objectContaining({ sameSite: 'strict' }))
+describe('AC-2: CommentThread comments is a computed from data.value', () => {
+  test('comments is declared as computed(() => data.value ?? [])', () => {
+    const source = readFileSync(join(componentsDir, 'CommentThread.vue'), 'utf-8')
+    expect(source).toMatch(/computed\s*\(\s*\(\s*\)\s*=>\s*data\.value\s*\?\?\s*\[\]/)
   })
 })
 
-// ── AC-3: useCookie called with maxAge: 604800 ───────────────────────────────
+describe('AC-3: CommentThread onSubmit calls refreshComments() instead of pushing to comments.value', () => {
+  test('onSubmit calls refreshComments() after a successful post', () => {
+    const source = readFileSync(join(componentsDir, 'CommentThread.vue'), 'utf-8')
+    expect(source).toContain('refreshComments()')
+  })
 
-describe('AC-3: useCookie called with maxAge: 604800 for koda_token', () => {
-  test('AC-3: useCookie receives { maxAge: 604800 } as second argument when initializing the token cookie', async () => {
-    const env = makeFakeEnv()
-    applyNuxtGlobals(env)
-    const mod = await import(authPath)
-    mod.useAuth()
-    const tokenCall = env.cookieCalls.find((c) => c.name === 'koda_token')
-    expect(tokenCall).toBeDefined()
-    expect(tokenCall!.opts).toEqual(expect.objectContaining({ maxAge: 604800 }))
+  test('onSubmit does not mutate comments.value directly via push', () => {
+    const source = readFileSync(join(componentsDir, 'CommentThread.vue'), 'utf-8')
+    expect(source).not.toContain('comments.value.push')
   })
 })
 
-// ── AC-4: login() stores the accessToken ─────────────────────────────────────
-
-describe('AC-4: login() stores the accessToken from the API response', () => {
-  test('AC-4: token.value equals the accessToken string returned by the API after login() resolves', async () => {
-    const env = makeFakeEnv()
-    env.fetchMock.mockResolvedValueOnce({
-      accessToken: 'jwt-abc-123',
-      user: { id: '1', email: 'a@b.com' },
-    })
-    applyNuxtGlobals(env)
-    const mod = await import(authPath)
-    const auth = mod.useAuth()
-    await auth.login({ email: 'test@example.com', password: 'secret' })
-    expect(env.tokenRef.value).toBe('jwt-abc-123')
+describe('AC-4: CommentThread onSubmit calls resetForm() after refreshComments()', () => {
+  test('resetForm() is called and appears after refreshComments() in source order', () => {
+    const source = readFileSync(join(componentsDir, 'CommentThread.vue'), 'utf-8')
+    const refreshIdx = source.indexOf('refreshComments()')
+    const resetIdx = source.indexOf('resetForm()')
+    expect(refreshIdx).toBeGreaterThanOrEqual(0)
+    expect(resetIdx).toBeGreaterThanOrEqual(0)
+    expect(resetIdx).toBeGreaterThan(refreshIdx)
   })
 })
 
-// ── AC-5: logout() sets token.value to null ──────────────────────────────────
-
-describe('AC-5: logout() sets token.value to null', () => {
-  test('AC-5: token.value is null after logout() is called', async () => {
-    const env = makeFakeEnv()
-    env.tokenRef.value = 'existing-token'
-    applyNuxtGlobals(env)
-    const mod = await import(authPath)
-    const auth = mod.useAuth()
-    auth.logout()
-    expect(env.tokenRef.value).toBeNull()
+describe('AC-5: CommentThread template renders loading text via v-if="pending"', () => {
+  test('template has a v-if="pending" branch for the loading state', () => {
+    const source = readFileSync(join(componentsDir, 'CommentThread.vue'), 'utf-8')
+    expect(source).toMatch(/v-if="pending"/)
   })
 })
 
-// ── AC-6: fetchUser() with non-null token sets user.value and returns true ────
-
-describe('AC-6: fetchUser() with non-null token sets user.value and returns true on success', () => {
-  test('AC-6: fetchUser returns true and sets user.value to the AuthUser from the API response', async () => {
-    const env = makeFakeEnv()
-    env.tokenRef.value = 'valid-jwt'
-    env.fetchMock.mockResolvedValueOnce({
-      ret: 0,
-      data: { id: '42', email: 'user@koda.test', name: 'Koda User' },
-    })
-    applyNuxtGlobals(env)
-    const mod = await import(authPath)
-    const auth = mod.useAuth()
-    const result = await auth.fetchUser()
-    expect(result).toBe(true)
-    expect(env.userRef.value).toMatchObject({ id: '42', email: 'user@koda.test' })
+describe('AC-6: CommentThread template renders error text via v-else-if="error"', () => {
+  test('template has a v-else-if="error" branch for the error state', () => {
+    const source = readFileSync(join(componentsDir, 'CommentThread.vue'), 'utf-8')
+    expect(source).toMatch(/v-else-if="error"/)
   })
 })
 
-// ── AC-7: fetchUser() with null token returns false without fetch ─────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// US-002 — Add loading & error states to all pages
+// ─────────────────────────────────────────────────────────────────────────────
 
-describe('AC-7: fetchUser() returns false without making any network request when token is null', () => {
-  test('AC-7: fetchUser returns false and does not call $fetch when token.value is null', async () => {
-    const env = makeFakeEnv()
-    // tokenRef.value is null by default in makeFakeEnv
-    applyNuxtGlobals(env)
-    const mod = await import(authPath)
-    const auth = mod.useAuth()
-    const result = await auth.fetchUser()
-    expect(result).toBe(false)
-    expect(env.fetchMock).not.toHaveBeenCalled()
+describe('AC-7: pages/index.vue renders centered Loading element and hides grid when pending', () => {
+  test('template has v-if="pending" loading branch', () => {
+    const source = readFileSync(join(pagesDir, 'index.vue'), 'utf-8')
+    expect(source).toMatch(/v-if="pending"/)
+  })
+
+  test('pending and error are destructured from useAsyncData', () => {
+    const source = readFileSync(join(pagesDir, 'index.vue'), 'utf-8')
+    expect(source).toMatch(/\{\s*data[^}]*pending[^}]*\}|\{\s*data[^}]*,\s*pending/)
   })
 })
 
-// ── AC-8: Empty body triggers validation; $api.post is not called ─────────────
+describe('AC-8: pages/index.vue renders t("common.loadFailed") and retry Button when error', () => {
+  test('template has v-else-if="error" branch', () => {
+    const source = readFileSync(join(pagesDir, 'index.vue'), 'utf-8')
+    expect(source).toMatch(/v-else-if="error"/)
+  })
 
-describe('AC-8: empty body field triggers form validation and $api.post is not called', () => {
-  test('AC-8: CommentThread body field uses z.string().min(1) and handleSubmit gates the API call', () => {
-    const source = readFileSync(commentThreadPath, 'utf-8')
-    // Zod schema must require a non-empty body
-    expect(source).toMatch(/body\s*:\s*z\.string\(\)\.min\s*\(\s*1/)
-    // handleSubmit from vee-validate blocks $api.post when validation fails
-    expect(source).toContain('handleSubmit')
-    expect(source).toContain('$api.post')
+  test('error branch renders common.loadFailed i18n key', () => {
+    const source = readFileSync(join(pagesDir, 'index.vue'), 'utf-8')
+    expect(source).toContain("common.loadFailed")
+  })
+
+  test('error branch has a Button that calls refresh()', () => {
+    const source = readFileSync(join(pagesDir, 'index.vue'), 'utf-8')
+    expect(source).toMatch(/<Button[^>]*@click[^>]*refresh\(\)|<Button[^>]*>.*refresh\(\)/)
+    // refresh must be referenced somewhere in the error branch
+    expect(source).toContain('refresh()')
   })
 })
 
-// ── AC-9: Valid body calls $api.post with body and type values ────────────────
-
-describe('AC-9: valid body and type call $api.post with body and type from form values', () => {
-  test('AC-9: $api.post receives body and type extracted from the validated form values', () => {
-    const source = readFileSync(commentThreadPath, 'utf-8')
-    expect(source).toMatch(/body\s*:\s*values\.body/)
-    expect(source).toMatch(/type\s*:\s*values\.type/)
+describe('AC-9: pages/[project]/index.vue renders loading state when pending', () => {
+  test('template has v-if="pending" loading branch', () => {
+    const source = readFileSync(join(pagesDir, '[project]', 'index.vue'), 'utf-8')
+    expect(source).toMatch(/v-if="pending"/)
   })
 })
 
-// ── AC-10: Invalid type triggers validation; $api.post is not called ──────────
+describe('AC-10: pages/[project]/index.vue renders error message and retry Button when error', () => {
+  test('template has v-else-if="error" error branch', () => {
+    const source = readFileSync(join(pagesDir, '[project]', 'index.vue'), 'utf-8')
+    expect(source).toMatch(/v-else-if="error"/)
+  })
 
-describe("AC-10: type value not in ['GENERAL','VERIFICATION','FIX_REPORT','REVIEW'] triggers validation", () => {
-  test("AC-10: type field schema is z.enum containing all four allowed comment types", () => {
-    const source = readFileSync(commentThreadPath, 'utf-8')
-    expect(source).toContain("z.enum(['GENERAL', 'VERIFICATION', 'FIX_REPORT', 'REVIEW'])")
+  test('error branch contains a Button element', () => {
+    const source = readFileSync(join(pagesDir, '[project]', 'index.vue'), 'utf-8')
+    expect(source).toMatch(/<Button/)
   })
 })
 
-// ── AC-11: Successful comment resets form to initial values ───────────────────
-
-describe("AC-11: successful comment submission calls resetForm() resetting body to '' and type to 'GENERAL'", () => {
-  test("AC-11: resetForm() is called on success and initialValues define body: '' and type: 'GENERAL'", () => {
-    const source = readFileSync(commentThreadPath, 'utf-8')
-    expect(source).toContain('resetForm()')
-    expect(source).toMatch(/body\s*:\s*['"]['"]/)
-    expect(source).toContain("type: 'GENERAL'")
+describe('AC-11: pages/[project]/agents.vue renders loading state when pending', () => {
+  test('template has v-if="pending" loading branch', () => {
+    const source = readFileSync(join(pagesDir, '[project]', 'agents.vue'), 'utf-8')
+    expect(source).toMatch(/v-if="pending"/)
   })
 })
 
-// ── AC-12: CreateTicketDialog resets title to '' on success ──────────────────
+describe('AC-12: pages/[project]/agents.vue renders error message and retry Button calling refresh()', () => {
+  test('template has v-else-if="error" error branch', () => {
+    const source = readFileSync(join(pagesDir, '[project]', 'agents.vue'), 'utf-8')
+    expect(source).toMatch(/v-else-if="error"/)
+  })
 
-describe("AC-12: CreateTicketDialog onSubmit() success calls resetForm() and restores title to ''", () => {
-  test("AC-12: resetForm is destructured and called in onSubmit; initialValues has title: ''", () => {
-    const source = readFileSync(createTicketPath, 'utf-8')
-    // resetForm must be destructured from useForm
-    expect(source).toMatch(/\bresetForm\b/)
-    // resetForm() must be invoked in the success path
-    expect(source).toMatch(/resetForm\s*\(/)
-    // initialValues must define an empty title so reset restores to ''
-    expect(source).toMatch(/title\s*:\s*['"]['"]/)
+  test('error branch has a Button that calls refresh()', () => {
+    const source = readFileSync(join(pagesDir, '[project]', 'agents.vue'), 'utf-8')
+    expect(source).toMatch(/<Button/)
+    expect(source).toContain('refresh()')
   })
 })
 
-// ── AC-13: CreateTicketDialog resets type to '' on success ───────────────────
+describe('AC-13: pages/[project]/labels.vue renders error message and retry Button when error', () => {
+  test('template has v-else-if="error" error branch', () => {
+    const source = readFileSync(join(pagesDir, '[project]', 'labels.vue'), 'utf-8')
+    expect(source).toMatch(/v-else-if="error"/)
+  })
 
-describe("AC-13: CreateTicketDialog onSubmit() success calls resetForm() and restores type to ''", () => {
-  test("AC-13: resetForm is called in onSubmit; initialValues has type: ''", () => {
-    const source = readFileSync(createTicketPath, 'utf-8')
-    expect(source).toMatch(/resetForm\s*\(/)
-    expect(source).toMatch(/type\s*:\s*['"]['"]/)
+  test('error branch contains a Button element', () => {
+    const source = readFileSync(join(pagesDir, '[project]', 'labels.vue'), 'utf-8')
+    expect(source).toMatch(/<Button/)
   })
 })
 
-// ── AC-14: CreateTicketDialog resets priority to 'MEDIUM' on success ─────────
+describe('AC-14: pages/[project]/tickets/[ref].vue uses v-if="pending" for loading (not hardcoded)', () => {
+  test('template has v-if="pending" loading branch', () => {
+    const source = readFileSync(join(pagesDir, '[project]', 'tickets', '[ref].vue'), 'utf-8')
+    expect(source).toMatch(/v-if="pending"/)
+  })
 
-describe("AC-14: CreateTicketDialog onSubmit() success calls resetForm() and restores priority to 'MEDIUM'", () => {
-  test("AC-14: resetForm is called in onSubmit; initialValues has priority: 'MEDIUM'", () => {
-    const source = readFileSync(createTicketPath, 'utf-8')
-    expect(source).toMatch(/resetForm\s*\(/)
-    expect(source).toMatch(/priority\s*:\s*['"]MEDIUM['"]/)
+  test('loadingTicket text is not rendered in a v-else block (unconditionally when ticket is null)', () => {
+    const source = readFileSync(join(pagesDir, '[project]', 'tickets', '[ref].vue'), 'utf-8')
+    // The previous bug: `<div v-else ...>{{ t('common.loadingTicket') }}</div>`
+    // After fix: loading text must only appear inside v-if="pending" branch, not v-else
+    // We detect the specific pattern: v-else immediately followed by loadingTicket
+    expect(source).not.toMatch(/v-else[^>]*>[\s\S]{0,200}common\.loadingTicket/)
   })
 })
 
-// ── AC-15: CreateTicketDialog resets description to '' on success ─────────────
+describe('AC-15: pages/[project]/tickets/[ref].vue renders error message and retry Button when error', () => {
+  test('template has v-else-if="error" error branch', () => {
+    const source = readFileSync(join(pagesDir, '[project]', 'tickets', '[ref].vue'), 'utf-8')
+    expect(source).toMatch(/v-else-if="error"/)
+  })
 
-describe("AC-15: CreateTicketDialog onSubmit() success calls resetForm() and restores description to ''", () => {
-  test("AC-15: resetForm is called in onSubmit; initialValues has description: ''", () => {
-    const source = readFileSync(createTicketPath, 'utf-8')
-    expect(source).toMatch(/resetForm\s*\(/)
-    expect(source).toMatch(/description\s*:\s*['"]['"]/)
+  test('error branch contains a Button element', () => {
+    const source = readFileSync(join(pagesDir, '[project]', 'tickets', '[ref].vue'), 'utf-8')
+    expect(source).toMatch(/<Button/)
   })
 })
 
-// ── AC-16: CreateProjectDialog resets name to '' on success ──────────────────
-
-describe("AC-16: CreateProjectDialog onSubmit() success calls resetForm() and restores name to ''", () => {
-  test("AC-16: resetForm is destructured and called in onSubmit; initialValues has name: ''", () => {
-    const source = readFileSync(createProjectPath, 'utf-8')
-    expect(source).toMatch(/\bresetForm\b/)
-    expect(source).toMatch(/resetForm\s*\(/)
-    expect(source).toMatch(/name\s*:\s*['"]['"]/)
+describe('AC-16: pages/[project]/kb.vue renders loading state when pending', () => {
+  test('template has v-if="pending" loading branch', () => {
+    const source = readFileSync(join(pagesDir, '[project]', 'kb.vue'), 'utf-8')
+    expect(source).toMatch(/v-if="pending"/)
   })
 })
 
-// ── AC-17: CreateProjectDialog resets slug to '' on success ──────────────────
+describe('AC-17: pages/[project]/kb.vue renders error message and retry Button when error', () => {
+  test('template has v-else-if="error" error branch', () => {
+    const source = readFileSync(join(pagesDir, '[project]', 'kb.vue'), 'utf-8')
+    expect(source).toMatch(/v-else-if="error"/)
+  })
 
-describe("AC-17: CreateProjectDialog onSubmit() success calls resetForm() and restores slug to ''", () => {
-  test("AC-17: resetForm is called in onSubmit; initialValues has slug: ''", () => {
-    const source = readFileSync(createProjectPath, 'utf-8')
-    expect(source).toMatch(/resetForm\s*\(/)
-    expect(source).toMatch(/slug\s*:\s*['"]['"]/)
+  test('error branch contains a Button element', () => {
+    const source = readFileSync(join(pagesDir, '[project]', 'kb.vue'), 'utf-8')
+    expect(source).toMatch(/<Button/)
   })
 })
 
-// ── AC-18: CreateProjectDialog resets key to '' on success ───────────────────
-
-describe("AC-18: CreateProjectDialog onSubmit() success calls resetForm() and restores key to ''", () => {
-  test("AC-18: resetForm is called in onSubmit; initialValues has key: ''", () => {
-    const source = readFileSync(createProjectPath, 'utf-8')
-    expect(source).toMatch(/resetForm\s*\(/)
-    expect(source).toMatch(/key\s*:\s*['"]['"]/)
+describe('AC-18: en.json t("common.loadFailed") returns "Failed to load data"', () => {
+  test('en.json common.loadFailed equals "Failed to load data"', () => {
+    const en = JSON.parse(readFileSync(join(localesDir, 'en.json'), 'utf-8'))
+    expect(en.common.loadFailed).toBe('Failed to load data')
   })
 })
 
-// ── AC-19: TicketActionPanel uses ApiError.firstError via extractApiError ─────
-
-describe("AC-19: TicketActionPanel performAction() calls toast.error with ApiError's firstError via extractApiError", () => {
-  test('AC-19: TicketActionPanel uses extractApiError and toast.error receives its return value', () => {
-    const source = readFileSync(ticketActionPath, 'utf-8')
-    expect(source).toContain('extractApiError')
-    expect(source).toMatch(/toast\.error\s*\(\s*extractApiError/)
+describe('AC-19: en.json t("common.retry") returns "Retry"', () => {
+  test('en.json common.retry equals "Retry"', () => {
+    const en = JSON.parse(readFileSync(join(localesDir, 'en.json'), 'utf-8'))
+    expect(en.common.retry).toBe('Retry')
   })
 })
 
-// ── AC-20: CreateTicketDialog uses extractApiError for ApiError ───────────────
-
-describe('AC-20: CreateTicketDialog onSubmit() calls toast.error with extractApiError for ApiError field errors', () => {
-  test('AC-20: CreateTicketDialog uses extractApiError and toast.error receives its return value', () => {
-    const source = readFileSync(createTicketPath, 'utf-8')
-    expect(source).toContain('extractApiError')
-    expect(source).toMatch(/toast\.error\s*\(\s*extractApiError/)
+describe('AC-20: zh.json t("common.loadFailed") returns "加载失败"', () => {
+  test('zh.json common.loadFailed equals "加载失败"', () => {
+    const zh = JSON.parse(readFileSync(join(localesDir, 'zh.json'), 'utf-8'))
+    expect(zh.common.loadFailed).toBe('加载失败')
   })
 })
 
-// ── AC-21: CreateProjectDialog uses extractApiError for ApiError ──────────────
-
-describe('AC-21: CreateProjectDialog onSubmit() calls toast.error with extractApiError for ApiError field errors', () => {
-  test('AC-21: CreateProjectDialog uses extractApiError and toast.error receives its return value', () => {
-    const source = readFileSync(createProjectPath, 'utf-8')
-    expect(source).toContain('extractApiError')
-    expect(source).toMatch(/toast\.error\s*\(\s*extractApiError/)
+describe('AC-21: zh.json t("common.retry") returns "重试"', () => {
+  test('zh.json common.retry equals "重试"', () => {
+    const zh = JSON.parse(readFileSync(join(localesDir, 'zh.json'), 'utf-8'))
+    expect(zh.common.retry).toBe('重试')
   })
 })
 
-// ── AC-22: CommentThread uses extractApiError instead of err.message ──────────
+// ─────────────────────────────────────────────────────────────────────────────
+// US-003 — Fix register page layout & error handling
+// ─────────────────────────────────────────────────────────────────────────────
 
-describe('AC-22: CommentThread onSubmit() calls toast.error with extractApiError(err) not err.message', () => {
-  test('AC-22: CommentThread uses extractApiError and toast.error receives its return value', () => {
-    const source = readFileSync(commentThreadPath, 'utf-8')
-    expect(source).toContain('extractApiError')
-    expect(source).toMatch(/toast\.error\s*\(\s*extractApiError/)
+describe('AC-22: register.vue outermost element is <div class="w-full max-w-md space-y-8"> with no outer flex wrapper', () => {
+  test('template root element does not have flex min-h-screen wrapper', () => {
+    const source = readFileSync(join(pagesDir, 'register.vue'), 'utf-8')
+    const templateMatch = source.match(/<template>([\s\S]*?)<\/template>/)
+    expect(templateMatch).not.toBeNull()
+    const templateContent = templateMatch![1].trim()
+    // The outer flex min-h-screen wrapper must be gone (auth layout provides it)
+    expect(templateContent).not.toMatch(/flex\s+min-h-screen/)
+  })
+
+  test('template root element has class "w-full max-w-md space-y-8"', () => {
+    const source = readFileSync(join(pagesDir, 'register.vue'), 'utf-8')
+    expect(source).toMatch(/w-full max-w-md space-y-8/)
   })
 })
 
-// ── AC-23: labels.vue onSubmit() uses extractApiError; no console.error ───────
-
-describe('AC-23: labels.vue onSubmit() calls toast.error with extractApiError(err) and does not call console.error', () => {
-  test('AC-23: labels.vue uses extractApiError in toast.error and has no console.error calls', () => {
-    const source = readFileSync(labelsPath, 'utf-8')
-    expect(source).toContain('extractApiError')
-    expect(source).toMatch(/toast\.error\s*\(\s*extractApiError/)
-    expect(source).not.toContain('console.error')
+describe('AC-23: register.vue calls toast.error(extractApiError(err)) on handleRegister error', () => {
+  test('catch block calls toast.error(extractApiError(err))', () => {
+    const source = readFileSync(join(pagesDir, 'register.vue'), 'utf-8')
+    expect(source).toMatch(/toast\.error\s*\(\s*extractApiError\s*\(/)
   })
 })
 
-// ── AC-24: labels.vue deleteLabel() uses extractApiError; no console.error ────
+describe('AC-24: register.vue calls toast.success(t("toast.loggedIn")) before navigateTo("/") on success', () => {
+  test('handleRegister calls toast.success with toast.loggedIn key', () => {
+    const source = readFileSync(join(pagesDir, 'register.vue'), 'utf-8')
+    expect(source).toMatch(/toast\.success\s*\(\s*t\s*\(\s*['"]toast\.loggedIn['"]\s*\)/)
+  })
 
-describe('AC-24: labels.vue deleteLabel() calls toast.error with extractApiError(err) and does not call console.error', () => {
-  test('AC-24: labels.vue deleteLabel catch uses extractApiError and has no console.error calls', () => {
-    const source = readFileSync(labelsPath, 'utf-8')
-    // extractApiError must be used (covers both onSubmit and deleteLabel catch blocks)
-    expect(source).toContain('extractApiError')
-    // No console.error anywhere in the file
-    expect(source).not.toContain('console.error')
-    // deleteLabel catch must not fall back to a hardcoded i18n key
-    expect(source).not.toMatch(/toast\.error\s*\(\s*t\s*\(\s*['"]labels\.toast\.deleteFailed/)
+  test('toast.success call appears before navigateTo in source order', () => {
+    const source = readFileSync(join(pagesDir, 'register.vue'), 'utf-8')
+    const toastIdx = source.indexOf('toast.success')
+    const navigateIdx = source.indexOf("navigateTo('/')")
+    expect(toastIdx).toBeGreaterThanOrEqual(0)
+    expect(navigateIdx).toBeGreaterThanOrEqual(0)
+    expect(toastIdx).toBeLessThan(navigateIdx)
   })
 })
 
-// ── AC-25: extractApiError returns error.message for a plain Error ─────────────
-
-describe('AC-25: extractApiError returns error.message for a caught generic Error', () => {
-  test('AC-25: extractApiError with a plain Error instance returns error.message as the display string', async () => {
-    const mod = await import(apiPath)
-    const { extractApiError } = mod
-    const err = new Error('plain error message')
-    expect(extractApiError(err)).toBe('plain error message')
+describe('AC-25: register.vue imports toast from "vue-sonner"', () => {
+  test('script section has: import { toast } from "vue-sonner"', () => {
+    const source = readFileSync(join(pagesDir, 'register.vue'), 'utf-8')
+    expect(source).toMatch(/import\s*\{[^}]*\btoast\b[^}]*\}\s*from\s*['"]vue-sonner['"]/)
   })
 })
 
-// ── AC-26: Active locale button receives highlighted class ────────────────────
-
-describe("AC-26: active locale toggle button receives 'bg-primary text-primary-foreground font-medium' when locale matches", () => {
-  test("AC-26: active button class includes 'bg-primary text-primary-foreground font-medium' based on locale === loc.code", () => {
-    const source = readFileSync(langSwitcherPath, 'utf-8')
-    expect(source).toContain('bg-primary text-primary-foreground font-medium')
-    expect(source).toMatch(/locale\s*===\s*loc\.code/)
+describe('AC-26: register.vue has no error ref variable', () => {
+  test('script section does not declare: const error = ref(...)', () => {
+    const source = readFileSync(join(pagesDir, 'register.vue'), 'utf-8')
+    expect(source).not.toMatch(/const\s+error\s*=\s*ref\s*\(/)
   })
 })
 
-// ── AC-27: Non-active locale button receives muted class ──────────────────────
-
-describe("AC-27: non-active locale toggle button receives 'text-muted-foreground hover:text-foreground hover:bg-muted'", () => {
-  test("AC-27: non-active button class includes 'text-muted-foreground hover:text-foreground hover:bg-muted'", () => {
-    const source = readFileSync(langSwitcherPath, 'utf-8')
-    expect(source).toContain('text-muted-foreground hover:text-foreground hover:bg-muted')
+describe('AC-27: register.vue template has no v-if="error" banner div', () => {
+  test('template does not contain v-if="error"', () => {
+    const source = readFileSync(join(pagesDir, 'register.vue'), 'utf-8')
+    expect(source).not.toMatch(/v-if="error"/)
   })
 })
 
-// ── AC-28: Select model-value is the string value of locale ──────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// US-004 — Make logout async & remove duplicate sidebar user section
+// ─────────────────────────────────────────────────────────────────────────────
 
-describe('AC-28: Select model-value prop equals the string locale value, not the Ref object', () => {
-  test('AC-28: Select :model-value is bound to locale (Vue unwraps to string in template, not a raw Ref)', () => {
-    const source = readFileSync(langSwitcherPath, 'utf-8')
-    // Template must bind locale directly (Vue auto-unwraps ref to string)
-    expect(source).toMatch(/:model-value="locale"/)
-    // Must not explicitly access .value (which would be redundant and confusing)
-    expect(source).not.toMatch(/:model-value="locale\.value"/)
+describe('AC-28: useAuth logout() is declared async and returns Promise<void>', () => {
+  test('logout function is declared with async keyword', () => {
+    const source = readFileSync(join(composablesDir, 'useAuth.ts'), 'utf-8')
+    expect(source).toMatch(/async\s+function\s+logout\s*\(\s*\)/)
   })
 })
 
-// ── AC-29: switchLocale(code) calls setLocale with the same code ──────────────
+describe('AC-29: useAuth logout() sets token.value = null and user.value = null before navigateTo', () => {
+  test('token.value = null appears before navigateTo call', () => {
+    const source = readFileSync(join(composablesDir, 'useAuth.ts'), 'utf-8')
+    // Find first occurrence of both within the logout function body
+    const logoutBodyStart = source.indexOf('async function logout')
+    expect(logoutBodyStart).toBeGreaterThanOrEqual(0)
+    const afterLogout = source.slice(logoutBodyStart)
+    const tokenIdx = afterLogout.indexOf('token.value = null')
+    const navigateIdx = afterLogout.indexOf('navigateTo')
+    expect(tokenIdx).toBeGreaterThanOrEqual(0)
+    expect(navigateIdx).toBeGreaterThanOrEqual(0)
+    expect(tokenIdx).toBeLessThan(navigateIdx)
+  })
 
-describe('AC-29: switchLocale(code) passes the locale code string directly to setLocale', () => {
-  test('AC-29: switchLocale function accepts a code parameter and calls setLocale with that same code', () => {
-    const source = readFileSync(langSwitcherPath, 'utf-8')
-    expect(source).toMatch(/function\s+switchLocale\s*\(\s*code/)
-    expect(source).toMatch(/setLocale\s*\(\s*code\s*\)/)
+  test('user.value = null appears before navigateTo call', () => {
+    const source = readFileSync(join(composablesDir, 'useAuth.ts'), 'utf-8')
+    const logoutBodyStart = source.indexOf('async function logout')
+    expect(logoutBodyStart).toBeGreaterThanOrEqual(0)
+    const afterLogout = source.slice(logoutBodyStart)
+    const userIdx = afterLogout.indexOf('user.value = null')
+    const navigateIdx = afterLogout.indexOf('navigateTo')
+    expect(userIdx).toBeGreaterThanOrEqual(0)
+    expect(navigateIdx).toBeGreaterThanOrEqual(0)
+    expect(userIdx).toBeLessThan(navigateIdx)
+  })
+})
+
+describe('AC-30: useAuth logout() awaits navigateTo("/login")', () => {
+  test('logout body uses: await navigateTo("/login")', () => {
+    const source = readFileSync(join(composablesDir, 'useAuth.ts'), 'utf-8')
+    expect(source).toMatch(/await\s+navigateTo\s*\(\s*['"]\/login['"]\s*\)/)
+  })
+})
+
+describe('AC-31: default.vue sidebar has no <div class="border-t border-border p-4"> user/logout section', () => {
+  test('sidebar does not contain the duplicate border-t p-4 user section', () => {
+    const source = readFileSync(join(layoutsDir, 'default.vue'), 'utf-8')
+    // The duplicate bottom user section had exactly this class on the wrapper div
+    expect(source).not.toMatch(/class="border-t border-border p-4"/)
+  })
+})
+
+describe('AC-32: default.vue sidebar nav links section is still present and unchanged', () => {
+  test('sidebar nav still contains NuxtLink elements', () => {
+    const source = readFileSync(join(layoutsDir, 'default.vue'), 'utf-8')
+    expect(source).toMatch(/<NuxtLink/)
+  })
+
+  test('sidebar nav still contains nav.dashboard and nav.projects links', () => {
+    const source = readFileSync(join(layoutsDir, 'default.vue'), 'utf-8')
+    expect(source).toContain("nav.dashboard")
+    expect(source).toContain("nav.projects")
+  })
+})
+
+describe('AC-33: default.vue header still has user email span and logout button', () => {
+  test('header contains auth.user.value?.email span', () => {
+    const source = readFileSync(join(layoutsDir, 'default.vue'), 'utf-8')
+    expect(source).toContain('auth.user.value?.email')
+  })
+
+  test('header contains logout button calling auth.logout()', () => {
+    const source = readFileSync(join(layoutsDir, 'default.vue'), 'utf-8')
+    expect(source).toMatch(/auth\.logout\(\)/)
+    expect(source).toContain('common.logout')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// US-005 — Use internal API URL for SSR requests
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('AC-34: useApi() on server uses useRuntimeConfig().apiInternalUrl as baseURL', () => {
+  test('useApi.ts reads apiInternalUrl from runtimeConfig', () => {
+    const source = readFileSync(join(composablesDir, 'useApi.ts'), 'utf-8')
+    expect(source).toContain('apiInternalUrl')
+  })
+
+  test('useApi.ts conditionally selects baseURL via import.meta.server', () => {
+    const source = readFileSync(join(composablesDir, 'useApi.ts'), 'utf-8')
+    expect(source).toMatch(/import\.meta\.server/)
+  })
+})
+
+describe('AC-35: useApi() on client uses useRuntimeConfig().public.apiBaseUrl as baseURL', () => {
+  test('useApi.ts still references public.apiBaseUrl for client-side URL', () => {
+    const source = readFileSync(join(composablesDir, 'useApi.ts'), 'utf-8')
+    expect(source).toMatch(/public\.apiBaseUrl/)
+  })
+
+  test('useApi.ts baseURL selection uses ternary or conditional on import.meta.server', () => {
+    const source = readFileSync(join(composablesDir, 'useApi.ts'), 'utf-8')
+    // Must have both the server check and both URL options
+    expect(source).toMatch(/import\.meta\.server/)
+    expect(source).toMatch(/apiInternalUrl/)
+    expect(source).toMatch(/public\.apiBaseUrl/)
+  })
+})
+
+describe('AC-36: useAuth() on server uses useRuntimeConfig().apiInternalUrl as baseURL', () => {
+  test('useAuth.ts reads apiInternalUrl from runtimeConfig', () => {
+    const source = readFileSync(join(composablesDir, 'useAuth.ts'), 'utf-8')
+    expect(source).toContain('apiInternalUrl')
+  })
+
+  test('useAuth.ts conditionally selects baseURL via import.meta.server', () => {
+    const source = readFileSync(join(composablesDir, 'useAuth.ts'), 'utf-8')
+    expect(source).toMatch(/import\.meta\.server/)
+  })
+})
+
+describe('AC-37: useAuth() on client uses useRuntimeConfig().public.apiBaseUrl as baseURL', () => {
+  test('useAuth.ts references public.apiBaseUrl for client-side URL', () => {
+    const source = readFileSync(join(composablesDir, 'useAuth.ts'), 'utf-8')
+    expect(source).toMatch(/public\.apiBaseUrl/)
+  })
+})
+
+describe('AC-38: useAuth.ts constructs auth/login URL using apiInternalUrl during SSR', () => {
+  test('login call uses baseURL variable that resolves to apiInternalUrl on server', () => {
+    const source = readFileSync(join(composablesDir, 'useAuth.ts'), 'utf-8')
+    // baseURL is computed with import.meta.server ? apiInternalUrl : apiBaseUrl
+    expect(source).toMatch(/import\.meta\.server/)
+    expect(source).toMatch(/apiInternalUrl/)
+    // login fetch uses ${baseURL}/auth/login
+    expect(source).toMatch(/\$\{baseURL\}\/auth\/login/)
+  })
+})
+
+describe('AC-39: useApi.ts constructs GET request URL using apiInternalUrl during SSR', () => {
+  test('GET path is prefixed with baseURL that resolves to apiInternalUrl on server', () => {
+    const source = readFileSync(join(composablesDir, 'useApi.ts'), 'utf-8')
+    // baseURL is computed with import.meta.server ? apiInternalUrl : apiBaseUrl
+    expect(source).toMatch(/import\.meta\.server/)
+    expect(source).toMatch(/apiInternalUrl/)
+    // get() helper prefixes path with baseURL: `${baseURL}${path}`
+    expect(source).toMatch(/\`\$\{baseURL\}\$\{path\}\`|\$\{baseURL\}\$\{path\}/)
   })
 })

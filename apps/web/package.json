@@ -72,7 +72,7 @@
     },
     "transform": {
       "^.+\\.ts$": [
-        "ts-jest",
+        "<rootDir>/jest-transform.cjs",
         {
           "tsconfig": {
             "module": "commonjs",

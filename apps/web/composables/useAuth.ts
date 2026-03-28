@@ -28,7 +28,8 @@ interface AuthResponse {
  */
 export function useAuth() {
   const config = useRuntimeConfig()
-  const baseURL = config.public.apiBaseUrl
+  // Server-side: use internal URL for direct API access (import.meta.server)
+  const baseURL = import.meta.server ? config.apiInternalUrl : config.public.apiBaseUrl
 
   const token = useCookie('koda_token', { secure: true, sameSite: 'strict', maxAge: 604800 })
   const user = useState('koda_user', (): AuthUser | null => null)
@@ -55,10 +56,10 @@ export function useAuth() {
     user.value = data.user
   }
 
-  function logout(): void {
+  async function logout(): Promise<void> {
     token.value = null
     user.value = null
-    navigateTo('/login')
+    await navigateTo('/login')
   }
 
   /**

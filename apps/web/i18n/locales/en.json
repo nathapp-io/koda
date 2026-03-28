@@ -13,7 +13,9 @@
     "loadingTicket": "Loading ticket...",
     "changeStatus": "Change Status",
     "addComment": "Add a comment",
-    "commentPlaceholder": "Enter a comment or reason..."
+    "commentPlaceholder": "Enter a comment or reason...",
+    "loadFailed": "Failed to load data",
+    "retry": "Retry"
   },
   "auth": {
     "login": {

@@ -1,18 +1,13 @@
 <template>
-  <div class="flex min-h-screen items-center justify-center bg-background">
-    <div class="w-full max-w-md space-y-8">
-      <div class="text-center">
-        <h2 class="mt-6 text-3xl font-bold tracking-tight">{{ t('auth.register.title') }}</h2>
-        <p class="mt-2 text-sm text-muted-foreground">
-          {{ t('auth.register.subtitle') }}
-        </p>
-      </div>
+  <div class="w-full max-w-md space-y-8">
+    <div class="text-center">
+      <h2 class="mt-6 text-3xl font-bold tracking-tight">{{ t('auth.register.title') }}</h2>
+      <p class="mt-2 text-sm text-muted-foreground">
+        {{ t('auth.register.subtitle') }}
+      </p>
+    </div>
 
-      <div v-if="error" class="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-        {{ error }}
-      </div>
-
-      <form class="space-y-4" @submit.prevent="handleRegister">
+    <form class="space-y-4" @submit.prevent="handleRegister">
         <div>
           <label for="name" class="block text-sm font-medium">
             {{ t('auth.register.name') }}
@@ -63,18 +58,18 @@
         </button>
       </form>
 
-      <p class="text-center text-sm text-muted-foreground">
-        {{ t('auth.register.hasAccount') }}
-        <NuxtLink to="/login" class="font-medium text-primary hover:underline">
-          {{ t('auth.register.signIn') }}
-        </NuxtLink>
-      </p>
-    </div>
+    <p class="text-center text-sm text-muted-foreground">
+      {{ t('auth.register.hasAccount') }}
+      <NuxtLink to="/login" class="font-medium text-primary hover:underline">
+        {{ t('auth.register.signIn') }}
+      </NuxtLink>
+    </p>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { toast } from 'vue-sonner'
 import { extractApiError } from '~/composables/useApi'
 
 definePageMeta({ layout: 'auth' })
@@ -84,17 +79,16 @@ const { t } = useI18n()
 const name = ref('')
 const email = ref('')
 const password = ref('')
-const error = ref('')
 
 const auth = useAuth()
 
 const handleRegister = async () => {
-  error.value = ''
   try {
     await auth.register({ name: name.value, email: email.value, password: password.value })
+    toast.success(t('toast.loggedIn'))
     navigateTo('/')
   } catch (err: unknown) {
-    error.value = extractApiError(err)
+    toast.error(extractApiError(err))
   }
 }
 </script>
