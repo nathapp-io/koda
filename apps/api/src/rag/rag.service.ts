@@ -1,7 +1,8 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional, Inject } from '@nestjs/common';
 import { mkdirSync } from 'node:fs';
 import { ConfigService } from '@nestjs/config';
 import { EmbeddingService } from './embedding.service';
+import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interface';
 import type { KbResultDto, SearchKbResponseDto } from './dto/kb-result.dto';
 
 export interface IndexDocumentInput {
@@ -124,10 +125,12 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
   private readonly similarityLow: number;
   private readonly ftsIndexMode: string;
   private readonly inMemoryOnly: boolean;
+  private readonly firstAccessedProjectIds = new Set<string>();
 
   constructor(
     private readonly configService: ConfigService,
     @Optional() private readonly embeddingService?: EmbeddingService,
+    @Optional() @Inject(FTS_OPTIMIZE_STRATEGY) private readonly optimizeStrategy?: FtsOptimizeStrategy,
   ) {
     this.lancedbPath = configService.get<string>('rag.lancedbPath') ?? './lancedb';
     this.similarityHigh = configService.get<number>('rag.similarityHigh') ?? 0.85;
@@ -156,6 +159,10 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
+    if (this.optimizeStrategy) {
+      await this.optimizeStrategy.onDestroy();
+    }
+
     this.tableCache.clear();
 
     if (this.db && typeof this.db.close === 'function') {
@@ -197,17 +204,16 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn('FTS_INDEX_MODE=eager is not yet implemented — using in-memory FTS fallback');
     }
 
-    const cached = this.tableCache.get(projectId);
+    const tableName = `project_${projectId}`;
+    const cached = this.tableCache.get(tableName);
     if (cached) return cached;
 
     const db = await this.connect();
     if (!this.lanceAvailable || !db) {
       const memTable = new InMemoryTable();
-      this.tableCache.set(projectId, memTable);
+      this.tableCache.set(tableName, memTable);
       return memTable;
     }
-
-    const tableName = `project_${projectId}`;
     const tableNames: string[] = await db.tableNames();
 
     let table: LanceTable;
@@ -234,7 +240,26 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       await table.delete("id = '__schema_sentinel__'");
     }
 
-    this.tableCache.set(projectId, table);
+    // Create FTS index on content column when LanceDB is available
+    if (this.lanceAvailable) {
+      try {
+        const IndexModule = (await import('@lancedb/lancedb')).Index;
+        await table.createIndex('content', {
+          config: IndexModule.fts(),
+          replace: false,
+        });
+      } catch (err) {
+        this.logger.warn(`FTS index creation failed for project ${projectId}: ${(err as Error).message}`);
+      }
+    }
+
+    this.tableCache.set(tableName, table);
+
+    if (this.lanceAvailable && this.optimizeStrategy && !this.firstAccessedProjectIds.has(projectId)) {
+      this.firstAccessedProjectIds.add(projectId);
+      await this.optimizeStrategy.onFirstAccess(projectId, table);
+    }
+
     return table;
   }
 
@@ -259,6 +284,9 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         model: this.embeddingService.modelName,
       };
       await table.add([record]);
+      if (this.lanceAvailable && this.optimizeStrategy) {
+        await this.optimizeStrategy.onInsert(projectId, table);
+      }
     } catch (err) {
       // Embedding service unreachable — store content-only with zero vector for FTS
       this.logger.warn(`Embedding failed (${(err as Error).message}) — storing with zero vector`);
@@ -275,6 +303,9 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         model: this.embeddingService?.modelName ?? 'unknown',
       };
       await table.add([record]);
+      if (this.lanceAvailable && this.optimizeStrategy) {
+        await this.optimizeStrategy.onInsert(projectId, table);
+      }
     }
   }
 
@@ -297,11 +328,37 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     const scanLimit = Math.min(rowCount, 500);
     const allRows: LanceRecord[] = await table.query().limit(scanLimit).toArray();
 
-    const ftsRanked = allRows
-      .map((r) => ({ id: r.id as string, score: simpleFtsScore(r.content as string, query) }))
-      .filter((r) => r.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, fetchLimit);
+    // Native FTS path when LanceDB is available; fall back to in-memory simpleFtsScore
+    let nativeFtsRows: LanceRecord[] = [];
+    let ftsRanked: { id: string; score: number }[];
+
+    if (this.lanceAvailable) {
+      let nativeFtsFailed = false;
+      try {
+        nativeFtsRows = await table.search(query, 'fts', 'content') as LanceRecord[];
+      } catch (err) {
+        nativeFtsFailed = true;
+        this.logger.warn(`Native FTS search failed (${(err as Error).message}) — using in-memory FTS`);
+      }
+      if (nativeFtsFailed) {
+        // Fall back to in-memory FTS when native FTS is unavailable
+        ftsRanked = allRows
+          .map((r) => ({ id: r.id as string, score: simpleFtsScore(r.content as string, query) }))
+          .filter((r) => r.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, fetchLimit);
+      } else {
+        // Score by reciprocal position: 1/(i+1)
+        ftsRanked = nativeFtsRows.map((r, i) => ({ id: r.id as string, score: 1 / (i + 1) }));
+      }
+    } else {
+      ftsRanked = allRows
+        .map((r) => ({ id: r.id as string, score: simpleFtsScore(r.content as string, query) }))
+        .filter((r) => r.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, fetchLimit);
+    }
+
     const ftsScoreMap = new Map<string, number>(ftsRanked.map((r) => [r.id, r.score]));
 
     // Skip vector search when LanceDB is unavailable — use pure FTS
@@ -327,10 +384,11 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         )
       : ftsRanked.slice(0, limit).map((r) => ({ id: r.id, score: r.score }));
 
-    // Build id → record lookup
+    // Build id → record lookup (include nativeFtsRows so FTS-only records resolve)
     const recordMap = new Map<string, LanceRecord>();
     allRows.forEach((r) => recordMap.set(r.id as string, r));
     vectorRows.forEach((r) => recordMap.set(r.id as string, r));
+    nativeFtsRows.forEach((r) => recordMap.set(r.id as string, r));
 
     // Build vectorSimilarity lookup (1 - cosine_distance)
     const simMap = new Map<string, number>();
@@ -440,5 +498,14 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     }
 
     return { valid: true };
+  }
+
+  async optimizeTable(projectId: string): Promise<void> {
+    if (!this.lanceAvailable) {
+      return;
+    }
+
+    const table = await this.getOrCreateTable(projectId);
+    await table.optimize();
   }
 }

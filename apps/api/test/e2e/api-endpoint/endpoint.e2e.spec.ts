@@ -19,7 +19,6 @@ import { AppModule } from '../../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
-import { execSync } from 'child_process';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -39,6 +38,7 @@ describeIntegration('API Integration Tests', () => {
   // Shared state across ordered test sections
   let userAccessToken: string;
   let userRefreshToken: string;
+  let nonAdminUserAccessToken: string;
   let agentApiKey: string;
   let agentSlug: string;
   let projectSlug: string;
@@ -53,13 +53,13 @@ describeIntegration('API Integration Tests', () => {
 
     // Reset SQLite test DB to clean schema
     try {
+      const { execSync } = await import('child_process');
       execSync('bunx prisma db push --force-reset --skip-generate', {
         stdio: 'inherit',
         env: { ...process.env, DATABASE_URL },
       });
-    } catch (error) {
+    } catch {
       // Database reset may fail if schema is already in sync, which is OK for tests
-      // Silent catch - database reset may fail if schema is already in sync
     }
 
     // Use AppFactory to get NathApplication with useAppGlobal* methods
@@ -128,6 +128,19 @@ describeIntegration('API Integration Tests', () => {
       expect(data.accessToken).toBeTruthy();
       userAccessToken = data.accessToken;
       userRefreshToken = data.refreshToken;
+    });
+
+    it('POST /api/auth/register — creates non-admin user for 403 tests', async () => {
+      const res = await request(httpServer)
+        .post('/api/auth/register')
+        .send({ email: 'member@koda.test', name: 'Koda Member', password: 'Member1234!' })
+        .expect(201);
+
+      const data = body<{ accessToken: string; refreshToken: string; user: { email: string; role: string } }>(res);
+      expect(data.accessToken).toBeTruthy();
+      expect(data.user.role).toBe('MEMBER');
+
+      nonAdminUserAccessToken = data.accessToken;
     });
 
     it('POST /api/auth/login — 401 with wrong password', async () => {
@@ -1407,6 +1420,40 @@ describeIntegration('API Integration Tests', () => {
 
       const data = body<{ deletedAt: string | null }>(res);
       expect(data.deletedAt).not.toBeNull();
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // Knowledge Base — Optimize (US-004)
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('Knowledge Base — Optimize (US-004)', () => {
+    it('POST /api/projects/:slug/kb/optimize — returns 200 with ADMIN role', async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/kb/optimize`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const data = body<{ optimized: boolean }>(res);
+      expect(data.optimized).toBe(true);
+    });
+
+    it('POST /api/projects/:slug/kb/optimize — returns 403 without ADMIN role', async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/kb/optimize`)
+        .set('Authorization', `Bearer ${nonAdminUserAccessToken}`)
+        .expect(403);
+
+      expect(res.body).toHaveProperty('ret');
+    });
+
+    it('POST /api/projects/:slug/kb/optimize — returns 404 with invalid slug', async () => {
+      const res = await request(httpServer)
+        .post('/api/projects/nonexistent-slug/kb/optimize')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(404);
+
+      expect(res.body).toHaveProperty('ret');
     });
   });
 });

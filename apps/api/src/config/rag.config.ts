@@ -17,4 +17,8 @@ export const ragConfig = registerAs('rag', () => ({
   similarityHigh: parseFloat(process.env['SIMILARITY_HIGH'] ?? '0.85'),
   similarityMedium: parseFloat(process.env['SIMILARITY_MEDIUM'] ?? '0.70'),
   similarityLow: parseFloat(process.env['SIMILARITY_LOW'] ?? '0.50'),
+  // FTS optimize strategy configuration
+  ftsOptimizeStrategy: process.env['FTS_OPTIMIZE_STRATEGY'] ?? 'counter',
+  ftsOptimizeThreshold: parseInt(process.env['FTS_OPTIMIZE_THRESHOLD'] ?? '10', 10),
+  ftsOptimizeIntervalMs: parseInt(process.env['FTS_OPTIMIZE_INTERVAL_MS'] ?? '300000', 10),
 }));

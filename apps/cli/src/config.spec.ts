@@ -1,14 +1,14 @@
 // Mock conf before importing config module
-const mockData: Record<string, unknown> = {};
+const mockData: Record<string, unknown> = { profiles: {} };
 
 const mockStore = {
-  get: jest.fn((key: string) => {
+  get(key: string) {
     if (key in mockData) return mockData[key];
     return key === 'profiles' ? {} : '';
-  }),
-  set: jest.fn((key: string, value: unknown) => {
+  },
+  set(key: string, value: unknown) {
     mockData[key] = value;
-  }),
+  },
 };
 
 jest.mock('conf', () => {
@@ -36,7 +36,7 @@ describe('config', () => {
     Object.keys(mockData).forEach((key) => {
       delete mockData[key];
     });
-    jest.clearAllMocks();
+    mockData.profiles = {};
   });
 
   describe('maskApiKey', () => {

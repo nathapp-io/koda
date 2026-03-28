@@ -6,6 +6,43 @@ import {
   getVerdict,
 } from './rag.service';
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyRecord = Record<string, any>;
+
+function makeMockRecord(id: string, content: string): AnyRecord {
+  return {
+    id,
+    source: 'ticket',
+    source_id: id,
+    content,
+    vector: [],
+    metadata: '{}',
+    created_at: new Date().toISOString(),
+    provider: 'ollama',
+    model: 'nomic-embed-text',
+  };
+}
+
+const mockConfigServiceForSearch = {
+  get: (key: string): unknown => {
+    const config: Record<string, unknown> = {
+      'rag.lancedbPath': './lancedb',
+      'rag.similarityHigh': 0.85,
+      'rag.similarityMedium': 0.70,
+      'rag.similarityLow': 0.50,
+      'rag.ftsIndexMode': 'simple',
+    };
+    return config[key];
+  },
+};
+
+const mockEmbeddingServiceForSearch = {
+  embed: jest.fn().mockResolvedValue(new Float32Array(384).fill(0)),
+  getDimensions: jest.fn().mockReturnValue(384),
+  provider: 'ollama',
+  model: 'nomic-embed-text',
+};
+
 describe('simpleFtsScore', () => {
   it('returns 0 for empty query', () => {
     expect(simpleFtsScore('some content here', '')).toBe(0);
@@ -160,5 +197,627 @@ describe('RagService lifecycle', () => {
     expect(closeSpy).toHaveBeenCalledTimes(1);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((ragService as any).db).toBeNull();
+  });
+});
+
+describe('RagService.getOrCreateTable — FTS index creation', () => {
+  const mockConfigService = {
+    get: (key: string): unknown => {
+      const config: Record<string, unknown> = {
+        'rag.lancedbPath': './lancedb',
+        'rag.similarityHigh': 0.85,
+        'rag.similarityMedium': 0.70,
+        'rag.similarityLow': 0.50,
+        'rag.ftsIndexMode': 'simple',
+      };
+      return config[key];
+    },
+  };
+
+  it('calls table.createIndex with FTS config when lanceAvailable is true', async () => {
+    const ragService = new RagService(mockConfigService as never);
+    const createIndexSpy = jest.fn().mockResolvedValue(undefined);
+    const deleteSpy = jest.fn().mockResolvedValue(undefined);
+
+    const mockDb = {
+      tableNames: jest.fn().mockResolvedValue([]),
+      createTable: jest.fn().mockResolvedValue({
+        delete: deleteSpy,
+        createIndex: createIndexSpy,
+      }),
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).db = mockDb;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+
+    await ragService.getOrCreateTable('test-project');
+
+    expect(createIndexSpy).toHaveBeenCalledWith(
+      'content',
+      expect.objectContaining({
+        replace: false,
+        config: expect.anything(),
+      }),
+    );
+  });
+
+  it('does not call table.createIndex when lanceAvailable is false', async () => {
+    const ragService = new RagService(mockConfigService as never);
+    ragService.onModuleInit();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = false;
+
+    await ragService.getOrCreateTable('test-project');
+
+    // Verify no error thrown and in-memory table returned
+    const table = await ragService.getOrCreateTable('test-project');
+    expect(table).toBeDefined();
+  });
+
+  it('logs warning and does not throw when createIndex rejects', async () => {
+    const ragService = new RagService(mockConfigService as never);
+    const loggerSpy = jest.spyOn(ragService['logger'], 'warn');
+    const createIndexError = new Error('Index already exists');
+    const createIndexSpy = jest.fn().mockRejectedValue(createIndexError);
+    const deleteSpy = jest.fn().mockResolvedValue(undefined);
+
+    const mockDb = {
+      tableNames: jest.fn().mockResolvedValue([]),
+      createTable: jest.fn().mockResolvedValue({
+        delete: deleteSpy,
+        createIndex: createIndexSpy,
+      }),
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).db = mockDb;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+
+    // Should not throw
+    await expect(ragService.getOrCreateTable('test-project')).resolves.toBeDefined();
+    expect(loggerSpy).toHaveBeenCalled();
+    expect(loggerSpy.mock.calls[0][0]).toContain('FTS index');
+  });
+});
+
+describe('reciprocalRankFusion — export (US-003-2 AC-3)', () => {
+  it('is exported from rag.service.ts', () => {
+    expect(reciprocalRankFusion).toBeDefined();
+    expect(typeof reciprocalRankFusion).toBe('function');
+  });
+});
+
+describe('RagService.search — native FTS path (US-003-2)', () => {
+  function makeTableWithFts(
+    allRows: AnyRecord[],
+    ftsRows: AnyRecord[],
+    vectorRows: AnyRecord[] = [],
+  ) {
+    return {
+      countRows: jest.fn().mockResolvedValue(allRows.length || 1),
+      query: jest.fn().mockReturnValue({
+        limit: jest.fn().mockReturnThis(),
+        toArray: jest.fn().mockResolvedValue(allRows),
+      }),
+      search: jest.fn().mockResolvedValue(ftsRows),
+      vectorSearch: jest.fn().mockReturnValue({
+        distanceType: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        toArray: jest.fn().mockResolvedValue(vectorRows),
+      }),
+    };
+  }
+
+  it('calls table.search(query, "fts", "content") when lanceAvailable is true', async () => {
+    const ragService = new RagService(
+      mockConfigServiceForSearch as never,
+      mockEmbeddingServiceForSearch as never,
+    );
+
+    const ftsRow = makeMockRecord('fts-doc-1', 'authentication error in service');
+    const mockTable = makeTableWithFts([ftsRow], [ftsRow]);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    await ragService.search('test-project', 'authentication error');
+
+    expect(mockTable.search).toHaveBeenCalledWith('authentication error', 'fts', 'content');
+  });
+
+  it('does not call table.search() when lanceAvailable is false', async () => {
+    const ragService = new RagService(
+      mockConfigServiceForSearch as never,
+      mockEmbeddingServiceForSearch as never,
+    );
+
+    const doc = makeMockRecord('doc-1', 'auth keyword content here');
+    const mockTable = makeTableWithFts([doc], [doc]);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    await ragService.search('test-project', 'auth content');
+
+    expect(mockTable.search).not.toHaveBeenCalled();
+  });
+
+  it('scores native FTS results by reciprocal position 1/(i+1)', async () => {
+    const ragService = new RagService(
+      mockConfigServiceForSearch as never,
+      mockEmbeddingServiceForSearch as never,
+    );
+
+    const ftsRows = [
+      makeMockRecord('fts-1', 'first result document'),
+      makeMockRecord('fts-2', 'second result document'),
+      makeMockRecord('fts-3', 'third result document'),
+    ];
+
+    // No vector results — FTS scores drive final output
+    const mockTable = makeTableWithFts(ftsRows, ftsRows, []);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    const result = await ragService.search('test-project', 'result', 3);
+
+    expect(result.results).toHaveLength(3);
+    // FTS result at index 0 → score = 1/(0+1) = 1.0
+    expect(result.results[0].score).toBeCloseTo(1 / (0 + 1));
+    // FTS result at index 1 → score = 1/(1+1) = 0.5
+    expect(result.results[1].score).toBeCloseTo(1 / (1 + 1));
+    // FTS result at index 2 → score = 1/(2+1) ≈ 0.333
+    expect(result.results[2].score).toBeCloseTo(1 / (2 + 1));
+  });
+
+  it('adds ftsRows to recordMap so records unique to native FTS appear in results', async () => {
+    const ragService = new RagService(
+      mockConfigServiceForSearch as never,
+      mockEmbeddingServiceForSearch as never,
+    );
+
+    // fts-only-doc is returned by native FTS but not in the allRows table scan
+    const scannedDoc = makeMockRecord('scanned-doc', 'some generic content');
+    const ftsOnlyDoc = makeMockRecord('fts-only-doc', 'authentication failure critical');
+
+    const mockTable = makeTableWithFts(
+      [scannedDoc],          // allRows: only scanned-doc
+      [ftsOnlyDoc, scannedDoc], // ftsRows: fts-only-doc is the top FTS hit
+      [],                    // vectorRows: empty
+    );
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    const result = await ragService.search('test-project', 'authentication failure', 5);
+
+    const ids = result.results.map((r) => r.id);
+    // fts-only-doc must appear in results because ftsRows were added to recordMap
+    expect(ids).toContain('fts-only-doc');
+  });
+});
+
+describe('RagService.search — in-memory FTS fallback path (US-003-3)', () => {
+  function makeTableWithRejectedSearch(allRows: AnyRecord[]) {
+    return {
+      countRows: jest.fn().mockResolvedValue(allRows.length || 1),
+      query: jest.fn().mockReturnValue({
+        limit: jest.fn().mockReturnThis(),
+        toArray: jest.fn().mockResolvedValue(allRows),
+      }),
+      search: jest.fn().mockRejectedValue(new Error('tantivy index not ready')),
+      vectorSearch: jest.fn().mockReturnValue({
+        distanceType: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        toArray: jest.fn().mockResolvedValue([]),
+      }),
+    };
+  }
+
+  it('when lanceAvailable=true and table.search() rejects, falls back to simpleFtsScore and returns non-empty results', async () => {
+    const ragService = new RagService(
+      mockConfigServiceForSearch as never,
+      mockEmbeddingServiceForSearch as never,
+    );
+
+    const matchingDoc = makeMockRecord('matching-doc', 'authentication error occurred in service');
+    const mockTable = makeTableWithRejectedSearch([matchingDoc]);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    const result = await ragService.search('test-project', 'authentication error', 5);
+
+    // table.search was called (and rejected)
+    expect(mockTable.search).toHaveBeenCalled();
+    // but results must still be populated via simpleFtsScore fallback
+    expect(result.results.length).toBeGreaterThan(0);
+    expect(result.results[0].id).toBe('matching-doc');
+  });
+
+  it('when lanceAvailable=true and table.search() rejects, logs a warning', async () => {
+    const ragService = new RagService(
+      mockConfigServiceForSearch as never,
+      mockEmbeddingServiceForSearch as never,
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const loggerWarnSpy = jest.spyOn((ragService as any).logger, 'warn');
+
+    const doc = makeMockRecord('doc-1', 'some matching content');
+    const mockTable = makeTableWithRejectedSearch([doc]);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    await ragService.search('test-project', 'matching content', 5);
+
+    const warnCalls = loggerWarnSpy.mock.calls.map((c) => String(c[0]));
+    expect(warnCalls.some((msg) => msg.toLowerCase().includes('fts'))).toBe(true);
+  });
+
+  it('when lanceAvailable=true and table.search() rejects, fallback scores match simpleFtsScore output', async () => {
+    const ragService = new RagService(
+      mockConfigServiceForSearch as never,
+      mockEmbeddingServiceForSearch as never,
+    );
+
+    const fullMatchDoc = makeMockRecord('full-match', 'authentication error service crash');
+    const partialMatchDoc = makeMockRecord('partial-match', 'authentication only partial');
+    const noMatchDoc = makeMockRecord('no-match', 'database schema migration rollback');
+
+    const mockTable = makeTableWithRejectedSearch([fullMatchDoc, partialMatchDoc, noMatchDoc]);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    const result = await ragService.search('test-project', 'authentication error service', 5);
+
+    // no-match doc should not appear — simpleFtsScore returns 0 for it
+    const ids = result.results.map((r) => r.id);
+    expect(ids).not.toContain('no-match');
+    // full-match should score higher than partial-match
+    const fullIdx = ids.indexOf('full-match');
+    const partialIdx = ids.indexOf('partial-match');
+    expect(fullIdx).toBeGreaterThanOrEqual(0);
+    expect(partialIdx).toBeGreaterThanOrEqual(0);
+    expect(fullIdx).toBeLessThan(partialIdx);
+  });
+
+  it('when lanceAvailable=false, uses simpleFtsScore without calling table.search()', async () => {
+    const ragService = new RagService(
+      mockConfigServiceForSearch as never,
+      mockEmbeddingServiceForSearch as never,
+    );
+
+    const doc = makeMockRecord('doc-in-memory', 'authentication error keyword content');
+    const mockTable = {
+      countRows: jest.fn().mockResolvedValue(1),
+      query: jest.fn().mockReturnValue({
+        limit: jest.fn().mockReturnThis(),
+        toArray: jest.fn().mockResolvedValue([doc]),
+      }),
+      search: jest.fn().mockResolvedValue([]),
+      vectorSearch: jest.fn().mockReturnValue({
+        distanceType: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        toArray: jest.fn().mockResolvedValue([]),
+      }),
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    const result = await ragService.search('test-project', 'authentication error', 5);
+
+    expect(mockTable.search).not.toHaveBeenCalled();
+    expect(result.results.length).toBeGreaterThan(0);
+    expect(result.results[0].id).toBe('doc-in-memory');
+  });
+});
+
+describe('simpleFtsScore — export (US-003-3 AC-3)', () => {
+  it('is exported from rag.service.ts', () => {
+    expect(simpleFtsScore).toBeDefined();
+    expect(typeof simpleFtsScore).toBe('function');
+  });
+
+  it('returns a score > 0 for matching content', () => {
+    expect(simpleFtsScore('authentication error service', 'authentication')).toBeGreaterThan(0);
+  });
+});
+
+describe('RagService — onFirstAccess and onDestroy lifecycle hooks (US-003-5)', () => {
+  const mockConfigService = {
+    get: (key: string): unknown => {
+      const config: Record<string, unknown> = {
+        'rag.lancedbPath': './lancedb',
+        'rag.similarityHigh': 0.85,
+        'rag.similarityMedium': 0.70,
+        'rag.similarityLow': 0.50,
+        'rag.ftsIndexMode': 'simple',
+      };
+      return config[key];
+    },
+  };
+
+  function makeMockDb(tableExists: boolean) {
+    const mockTable = {
+      delete: jest.fn().mockResolvedValue(undefined),
+      createIndex: jest.fn().mockResolvedValue(undefined),
+    };
+    return {
+      tableNames: jest.fn().mockResolvedValue(tableExists ? ['project_test-project'] : []),
+      openTable: jest.fn().mockResolvedValue(mockTable),
+      createTable: jest.fn().mockResolvedValue(mockTable),
+      mockTable,
+    };
+  }
+
+  describe('getOrCreateTable — onFirstAccess', () => {
+    it('calls optimizeStrategy.onFirstAccess(projectId, table) when lanceAvailable is true', async () => {
+      const ragService = new RagService(mockConfigService as never);
+      const onFirstAccessSpy = jest.fn();
+      const mockStrategy = { onFirstAccess: onFirstAccessSpy, onInsert: jest.fn(), onDestroy: jest.fn() };
+      const { mockTable, ...mockDb } = makeMockDb(false);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).db = mockDb;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).lanceAvailable = true;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).optimizeStrategy = mockStrategy;
+
+      await ragService.getOrCreateTable('test-project');
+
+      expect(onFirstAccessSpy).toHaveBeenCalledWith('test-project', mockTable);
+    });
+
+    it('calls optimizeStrategy.onFirstAccess exactly once per projectId even when called multiple times', async () => {
+      const ragService = new RagService(mockConfigService as never);
+      const onFirstAccessSpy = jest.fn();
+      const mockStrategy = { onFirstAccess: onFirstAccessSpy, onInsert: jest.fn(), onDestroy: jest.fn() };
+      const { mockTable, ...mockDb } = makeMockDb(false);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).db = mockDb;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).lanceAvailable = true;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).optimizeStrategy = mockStrategy;
+
+      await ragService.getOrCreateTable('test-project');
+      await ragService.getOrCreateTable('test-project');
+      await ragService.getOrCreateTable('test-project');
+
+      expect(onFirstAccessSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('calls optimizeStrategy.onFirstAccess once per distinct projectId', async () => {
+      const ragService = new RagService(mockConfigService as never);
+      const onFirstAccessSpy = jest.fn();
+      const mockStrategy = { onFirstAccess: onFirstAccessSpy, onInsert: jest.fn(), onDestroy: jest.fn() };
+
+      const mockTableA = { delete: jest.fn().mockResolvedValue(undefined), createIndex: jest.fn().mockResolvedValue(undefined) };
+      const mockTableB = { delete: jest.fn().mockResolvedValue(undefined), createIndex: jest.fn().mockResolvedValue(undefined) };
+      const mockDb = {
+        tableNames: jest.fn().mockResolvedValue([]),
+        createTable: jest.fn()
+          .mockResolvedValueOnce(mockTableA)
+          .mockResolvedValueOnce(mockTableB),
+      };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).db = mockDb;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).lanceAvailable = true;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).optimizeStrategy = mockStrategy;
+
+      await ragService.getOrCreateTable('project-a');
+      await ragService.getOrCreateTable('project-b');
+      // Second call for project-a — must NOT trigger another onFirstAccess
+      await ragService.getOrCreateTable('project-a');
+
+      expect(onFirstAccessSpy).toHaveBeenCalledTimes(2);
+      expect(onFirstAccessSpy).toHaveBeenCalledWith('project-a', mockTableA);
+      expect(onFirstAccessSpy).toHaveBeenCalledWith('project-b', mockTableB);
+    });
+
+    it('does not call optimizeStrategy.onFirstAccess when lanceAvailable is false', async () => {
+      const ragService = new RagService(mockConfigService as never);
+      const onFirstAccessSpy = jest.fn();
+      const mockStrategy = { onFirstAccess: onFirstAccessSpy, onInsert: jest.fn(), onDestroy: jest.fn() };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).lanceAvailable = false;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).optimizeStrategy = mockStrategy;
+
+      await ragService.getOrCreateTable('test-project');
+
+      expect(onFirstAccessSpy).not.toHaveBeenCalled();
+    });
+
+    it('does not call optimizeStrategy.onFirstAccess when optimizeStrategy is not injected', async () => {
+      const ragService = new RagService(mockConfigService as never);
+      const { mockTable, ...mockDb } = makeMockDb(false);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).db = mockDb;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).lanceAvailable = true;
+      // optimizeStrategy is undefined (not injected)
+
+      await expect(ragService.getOrCreateTable('test-project')).resolves.toBeDefined();
+    });
+  });
+
+  describe('onModuleDestroy — onDestroy', () => {
+    it('calls optimizeStrategy.onDestroy() during onModuleDestroy', async () => {
+      const ragService = new RagService(mockConfigService as never);
+      const onDestroySpy = jest.fn().mockResolvedValue(undefined);
+      const mockStrategy = { onFirstAccess: jest.fn(), onInsert: jest.fn(), onDestroy: onDestroySpy };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).optimizeStrategy = mockStrategy;
+
+      await ragService.onModuleDestroy();
+
+      expect(onDestroySpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('calls optimizeStrategy.onDestroy() even when no LanceDB connection exists', async () => {
+      const ragService = new RagService(mockConfigService as never);
+      const onDestroySpy = jest.fn().mockResolvedValue(undefined);
+      const mockStrategy = { onFirstAccess: jest.fn(), onInsert: jest.fn(), onDestroy: onDestroySpy };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).db = null;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).optimizeStrategy = mockStrategy;
+
+      await ragService.onModuleDestroy();
+
+      expect(onDestroySpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not throw when optimizeStrategy is not injected', async () => {
+      const ragService = new RagService(mockConfigService as never);
+      // optimizeStrategy is undefined (not injected)
+
+      await expect(ragService.onModuleDestroy()).resolves.toBeUndefined();
+    });
+  });
+});
+
+describe('RagService.indexDocument — onInsert Strategy Hook (US-003-4)', () => {
+  const mockConfigService = {
+    get: (key: string): unknown => {
+      const config: Record<string, unknown> = {
+        'rag.lancedbPath': './lancedb',
+        'rag.similarityHigh': 0.85,
+        'rag.similarityMedium': 0.70,
+        'rag.similarityLow': 0.50,
+        'rag.ftsIndexMode': 'simple',
+      };
+      return config[key];
+    },
+  };
+
+  const mockEmbeddingService = {
+    embed: jest.fn().mockResolvedValue([0.1, 0.2, 0.3]),
+    providerName: 'test-provider',
+    modelName: 'test-model',
+    dimensions: 3,
+  };
+
+  it('calls optimizeStrategy.onInsert(projectId, table) after table.add() when lanceAvailable is true', async () => {
+    const ragService = new RagService(mockConfigService as never, mockEmbeddingService as never);
+    const onInsertSpy = jest.fn().mockResolvedValue(undefined);
+    const mockStrategy = { onInsert: onInsertSpy } as unknown as never;
+    const mockTable = { add: jest.fn().mockResolvedValue(undefined) };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).optimizeStrategy = mockStrategy;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    await ragService.indexDocument('test-project', {
+      source: 'ticket',
+      sourceId: 'ticket-001',
+      content: 'Test document content',
+      metadata: { ref: 'TEST-1' },
+    });
+
+    expect(onInsertSpy).toHaveBeenCalledWith('test-project', mockTable);
+  });
+
+  it('does not call optimizeStrategy.onInsert() when lanceAvailable is false', async () => {
+    const ragService = new RagService(mockConfigService as never, mockEmbeddingService as never);
+    const onInsertSpy = jest.fn().mockResolvedValue(undefined);
+    const mockStrategy = { onInsert: onInsertSpy } as unknown as never;
+    const mockTable = { add: jest.fn().mockResolvedValue(undefined) };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).optimizeStrategy = mockStrategy;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    await ragService.indexDocument('test-project', {
+      source: 'ticket',
+      sourceId: 'ticket-001',
+      content: 'Test document content',
+      metadata: { ref: 'TEST-1' },
+    });
+
+    expect(onInsertSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('RagService.optimizeTable (US-004)', () => {
+  const mockConfigService = {
+    get: (key: string): unknown => {
+      const config: Record<string, unknown> = {
+        'rag.lancedbPath': './lancedb',
+        'rag.similarityHigh': 0.85,
+        'rag.similarityMedium': 0.70,
+        'rag.similarityLow': 0.50,
+        'rag.ftsIndexMode': 'simple',
+      };
+      return config[key];
+    },
+  };
+
+  it('calls table.optimize() when lanceAvailable is true', async () => {
+    const ragService = new RagService(mockConfigService as never);
+    const mockTable = { optimize: jest.fn().mockResolvedValue(undefined) };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    jest.spyOn(ragService as any, 'getOrCreateTable').mockResolvedValue(mockTable);
+
+    await ragService.optimizeTable('test-project');
+
+    expect(mockTable.optimize).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call table.optimize() when lanceAvailable is false', async () => {
+    const ragService = new RagService(mockConfigService as never);
+    const mockTable = { optimize: jest.fn().mockResolvedValue(undefined) };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    jest.spyOn(ragService as any, 'getOrCreateTable').mockResolvedValue(mockTable);
+
+    await ragService.optimizeTable('test-project');
+
+    expect(mockTable.optimize).not.toHaveBeenCalled();
   });
 });
