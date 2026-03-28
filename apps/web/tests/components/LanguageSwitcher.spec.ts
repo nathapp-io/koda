@@ -20,10 +20,10 @@ describe('US-005: LanguageSwitcher.vue exists', () => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('US-005 AC1: Active locale button receives bg-primary class', () => {
-  test('source uses locale.value in toggle button class condition', () => {
+  test('source uses locale in toggle button class condition', () => {
     const source = readFileSync(switcherPath, 'utf-8')
-    // Must compare locale.value (not just locale) with loc.code
-    expect(source).toContain('locale.value === loc.code')
+    // In Vue templates, refs are auto-unwrapped — locale (not locale.value) is correct
+    expect(source).toContain('locale === loc.code')
   })
 
   test('source applies bg-primary class when locale matches', () => {
@@ -68,18 +68,11 @@ describe('US-005 AC2: Inactive locale button receives muted classes', () => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('US-005 AC3: Select component model-value is a string', () => {
-  test('source uses locale.value for Select model-value', () => {
+  test('source uses locale for Select model-value', () => {
     const source = readFileSync(switcherPath, 'utf-8')
-    // Must use locale.value (not just locale) for the Select binding
-    const hasSelectWithLocaleValue = source.includes(':model-value="locale.value"')
-    expect(hasSelectWithLocaleValue).toBe(true)
-  })
-
-  test('source does not pass bare Ref object to Select', () => {
-    const source = readFileSync(switcherPath, 'utf-8')
-    // Verify the binding is not just "locale"
-    const badBinding = source.includes(':model-value="locale"')
-    expect(badBinding).toBe(false)
+    // In Vue templates, refs are auto-unwrapped — :model-value="locale" passes the string, not the Ref
+    const hasSelectWithLocale = source.includes(':model-value="locale"')
+    expect(hasSelectWithLocale).toBe(true)
   })
 })
 

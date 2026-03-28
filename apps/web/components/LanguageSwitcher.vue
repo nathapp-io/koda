@@ -28,7 +28,7 @@ function switchLocale(code: string) {
       :key="loc.code"
       :class="[
         'px-2 py-1 text-xs rounded transition-colors',
-        locale.value === loc.code
+        locale === loc.code
           ? 'bg-primary text-primary-foreground font-medium'
           : 'text-muted-foreground hover:text-foreground hover:bg-muted',
       ]"
@@ -39,7 +39,7 @@ function switchLocale(code: string) {
   </div>
 
   <!-- Select dropdown for 3+ locales -->
-  <Select v-else :model-value="locale.value" @update:model-value="switchLocale">
+  <Select v-else :model-value="locale" @update:model-value="switchLocale">
     <SelectTrigger class="w-[110px] h-8 text-xs">
       <span>{{ currentLocaleName }}</span>
     </SelectTrigger>
