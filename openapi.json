@@ -1505,6 +1505,41 @@
         ]
       }
     },
+    "/api/projects/{slug}/kb/optimize": {
+      "post": {
+        "operationId": "RagController_optimizeTable",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Table optimized"
+          },
+          "403": {
+            "description": "Forbidden - admin role required"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Optimize the LanceDB table for a project (admin only)",
+        "tags": [
+          "knowledge-base"
+        ]
+      }
+    },
     "/api/projects/{slug}/webhooks": {
       "post": {
         "operationId": "WebhookController_register",
@@ -2686,6 +2721,10 @@
             "type": "number",
             "description": "Sequential ticket number within project"
           },
+          "ref": {
+            "type": "string",
+            "description": "Project-scoped ticket reference, e.g. NAX-1"
+          },
           "type": {
             "type": "string",
             "description": "Ticket type",
@@ -2795,6 +2834,7 @@
           "id",
           "projectId",
           "number",
+          "ref",
           "type",
           "title",
           "status",
@@ -2828,6 +2868,19 @@
               "CRITICAL"
             ],
             "example": "HIGH"
+          },
+          "status": {
+            "type": "string",
+            "description": "Ticket status",
+            "enum": [
+              "CREATED",
+              "VERIFIED",
+              "IN_PROGRESS",
+              "VERIFY_FIX",
+              "CLOSED",
+              "REJECTED"
+            ],
+            "example": "IN_PROGRESS"
           }
         }
       },
