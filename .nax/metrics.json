@@ -869,5 +869,48 @@
         "runtimeCrashes": 0
       }
     ]
+  },
+  {
+    "runId": "run-2026-03-28T09-02-45-836Z",
+    "feature": "web-auth-security",
+    "startedAt": "2026-03-28T09:02:45.836Z",
+    "completedAt": "2026-03-28T09:20:16.446Z",
+    "totalCost": 4.57825525,
+    "totalStories": 2,
+    "storiesCompleted": 1,
+    "storiesFailed": 4,
+    "totalDurationMs": 1050610,
+    "stories": [
+      {
+        "storyId": "US-002",
+        "complexity": "unknown",
+        "modelTier": "parallel",
+        "modelUsed": "parallel",
+        "attempts": 1,
+        "finalTier": "parallel",
+        "success": true,
+        "cost": 4.57825525,
+        "durationMs": 865411,
+        "firstPassSuccess": true,
+        "startedAt": "2026-03-28T09:02:46.618Z",
+        "completedAt": "2026-03-28T09:17:12.029Z",
+        "source": "parallel"
+      },
+      {
+        "storyId": "US-002",
+        "complexity": "unknown",
+        "modelTier": "parallel",
+        "modelUsed": "parallel",
+        "attempts": 1,
+        "finalTier": "parallel",
+        "success": true,
+        "cost": 4.57825525,
+        "durationMs": 865411,
+        "firstPassSuccess": true,
+        "startedAt": "2026-03-28T09:02:46.618Z",
+        "completedAt": "2026-03-28T09:17:12.029Z",
+        "source": "parallel"
+      }
+    ]
   }
 ]
