@@ -546,3 +546,71 @@ describe('simpleFtsScore — export (US-003-3 AC-3)', () => {
     expect(simpleFtsScore('authentication error service', 'authentication')).toBeGreaterThan(0);
   });
 });
+
+describe('RagService.indexDocument — onInsert Strategy Hook (US-003-4)', () => {
+  const mockConfigService = {
+    get: (key: string): unknown => {
+      const config: Record<string, unknown> = {
+        'rag.lancedbPath': './lancedb',
+        'rag.similarityHigh': 0.85,
+        'rag.similarityMedium': 0.70,
+        'rag.similarityLow': 0.50,
+        'rag.ftsIndexMode': 'simple',
+      };
+      return config[key];
+    },
+  };
+
+  const mockEmbeddingService = {
+    embed: jest.fn().mockResolvedValue([0.1, 0.2, 0.3]),
+    providerName: 'test-provider',
+    modelName: 'test-model',
+    dimensions: 3,
+  };
+
+  it('calls optimizeStrategy.onInsert(projectId, table) after table.add() when lanceAvailable is true', async () => {
+    const ragService = new RagService(mockConfigService as never, mockEmbeddingService as never);
+    const onInsertSpy = jest.fn().mockResolvedValue(undefined);
+    const mockStrategy = { onInsert: onInsertSpy } as unknown as never;
+    const mockTable = { add: jest.fn().mockResolvedValue(undefined) };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).optimizeStrategy = mockStrategy;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    await ragService.indexDocument('test-project', {
+      source: 'ticket',
+      sourceId: 'ticket-001',
+      content: 'Test document content',
+      metadata: { ref: 'TEST-1' },
+    });
+
+    expect(onInsertSpy).toHaveBeenCalledWith('test-project', mockTable);
+  });
+
+  it('does not call optimizeStrategy.onInsert() when lanceAvailable is false', async () => {
+    const ragService = new RagService(mockConfigService as never, mockEmbeddingService as never);
+    const onInsertSpy = jest.fn().mockResolvedValue(undefined);
+    const mockStrategy = { onInsert: onInsertSpy } as unknown as never;
+    const mockTable = { add: jest.fn().mockResolvedValue(undefined) };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).optimizeStrategy = mockStrategy;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    await ragService.indexDocument('test-project', {
+      source: 'ticket',
+      sourceId: 'ticket-001',
+      content: 'Test document content',
+      metadata: { ref: 'TEST-1' },
+    });
+
+    expect(onInsertSpy).not.toHaveBeenCalled();
+  });
+});

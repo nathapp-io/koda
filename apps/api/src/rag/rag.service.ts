@@ -1,7 +1,8 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional, Inject } from '@nestjs/common';
 import { mkdirSync } from 'node:fs';
 import { ConfigService } from '@nestjs/config';
 import { EmbeddingService } from './embedding.service';
+import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interface';
 import type { KbResultDto, SearchKbResponseDto } from './dto/kb-result.dto';
 
 export interface IndexDocumentInput {
@@ -128,6 +129,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly configService: ConfigService,
     @Optional() private readonly embeddingService?: EmbeddingService,
+    @Inject(FTS_OPTIMIZE_STRATEGY) private readonly optimizeStrategy?: FtsOptimizeStrategy,
   ) {
     this.lancedbPath = configService.get<string>('rag.lancedbPath') ?? './lancedb';
     this.similarityHigh = configService.get<number>('rag.similarityHigh') ?? 0.85;
@@ -271,6 +273,9 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         model: this.embeddingService.modelName,
       };
       await table.add([record]);
+      if (this.lanceAvailable && this.optimizeStrategy) {
+        await this.optimizeStrategy.onInsert(projectId, table);
+      }
     } catch (err) {
       // Embedding service unreachable — store content-only with zero vector for FTS
       this.logger.warn(`Embedding failed (${(err as Error).message}) — storing with zero vector`);
@@ -287,6 +292,9 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         model: this.embeddingService?.modelName ?? 'unknown',
       };
       await table.add([record]);
+      if (this.lanceAvailable && this.optimizeStrategy) {
+        await this.optimizeStrategy.onInsert(projectId, table);
+      }
     }
   }
 
