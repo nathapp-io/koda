@@ -234,6 +234,19 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       await table.delete("id = '__schema_sentinel__'");
     }
 
+    // Create FTS index on content column when LanceDB is available
+    if (this.lanceAvailable) {
+      try {
+        const IndexModule = (await import('@lancedb/lancedb')).Index;
+        await table.createIndex('content', {
+          config: IndexModule.fts(),
+          replace: false,
+        });
+      } catch (err) {
+        this.logger.warn(`FTS index creation failed for project ${projectId}: ${(err as Error).message}`);
+      }
+    }
+
     this.tableCache.set(projectId, table);
     return table;
   }

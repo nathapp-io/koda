@@ -162,3 +162,87 @@ describe('RagService lifecycle', () => {
     expect((ragService as any).db).toBeNull();
   });
 });
+
+describe('RagService.getOrCreateTable — FTS index creation', () => {
+  const mockConfigService = {
+    get: (key: string): unknown => {
+      const config: Record<string, unknown> = {
+        'rag.lancedbPath': './lancedb',
+        'rag.similarityHigh': 0.85,
+        'rag.similarityMedium': 0.70,
+        'rag.similarityLow': 0.50,
+        'rag.ftsIndexMode': 'simple',
+      };
+      return config[key];
+    },
+  };
+
+  it('calls table.createIndex with FTS config when lanceAvailable is true', async () => {
+    const ragService = new RagService(mockConfigService as never);
+    const createIndexSpy = jest.fn().mockResolvedValue(undefined);
+    const deleteSpy = jest.fn().mockResolvedValue(undefined);
+
+    const mockDb = {
+      tableNames: jest.fn().mockResolvedValue([]),
+      createTable: jest.fn().mockResolvedValue({
+        delete: deleteSpy,
+        createIndex: createIndexSpy,
+      }),
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).db = mockDb;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+
+    await ragService.getOrCreateTable('test-project');
+
+    expect(createIndexSpy).toHaveBeenCalledWith(
+      'content',
+      expect.objectContaining({
+        replace: false,
+        config: expect.anything(),
+      }),
+    );
+  });
+
+  it('does not call table.createIndex when lanceAvailable is false', async () => {
+    const ragService = new RagService(mockConfigService as never);
+    ragService.onModuleInit();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = false;
+
+    await ragService.getOrCreateTable('test-project');
+
+    // Verify no error thrown and in-memory table returned
+    const table = await ragService.getOrCreateTable('test-project');
+    expect(table).toBeDefined();
+  });
+
+  it('logs warning and does not throw when createIndex rejects', async () => {
+    const ragService = new RagService(mockConfigService as never);
+    const loggerSpy = jest.spyOn(ragService['logger'], 'warn');
+    const createIndexError = new Error('Index already exists');
+    const createIndexSpy = jest.fn().mockRejectedValue(createIndexError);
+    const deleteSpy = jest.fn().mockResolvedValue(undefined);
+
+    const mockDb = {
+      tableNames: jest.fn().mockResolvedValue([]),
+      createTable: jest.fn().mockResolvedValue({
+        delete: deleteSpy,
+        createIndex: createIndexSpy,
+      }),
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).db = mockDb;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+
+    // Should not throw
+    await expect(ragService.getOrCreateTable('test-project')).resolves.toBeDefined();
+    expect(loggerSpy).toHaveBeenCalled();
+    expect(loggerSpy.mock.calls[0][0]).toContain('FTS index');
+  });
+});
