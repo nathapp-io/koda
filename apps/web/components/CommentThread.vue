@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed } from 'vue'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
@@ -28,13 +28,12 @@ const { t } = useI18n()
 
 const commentsEndpoint = `/projects/${props.projectSlug}/tickets/${props.ticketRef}/comments`
 
-const { data, pending, error } = await useAsyncData<Comment[]>(
+const { data, pending, error, refresh: refreshComments } = useAsyncData<Comment[]>(
   `comments-${props.projectSlug}-${props.ticketRef}`,
   () => $api.get(commentsEndpoint) as Promise<Comment[]>
 )
 
-const comments = ref([] as Comment[])
-comments.value = data.value ?? []
+const comments = computed(() => data.value ?? [])
 
 const typePillClass: Record<Comment['type'], string> = {
   VERIFICATION: 'bg-blue-100 text-blue-800',
@@ -60,11 +59,11 @@ const { handleSubmit, resetForm } = useForm({
 
 const onSubmit = handleSubmit(async (values) => {
   try {
-    const newComment = await $api.post(commentsEndpoint, {
+    await $api.post(commentsEndpoint, {
       body: values.body,
       type: values.type,
-    }) as Comment
-    comments.value.push(newComment)
+    })
+    await refreshComments()
     resetForm()
     emit('comment-added')
     toast.success(t('comments.toast.added'))
