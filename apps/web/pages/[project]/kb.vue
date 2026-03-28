@@ -147,7 +147,7 @@ function onDocumentAdded() {
         <div v-if="pending" class="text-center py-12 text-muted-foreground">{{ t('common.loading') }}</div>
         <div v-else-if="error" class="text-center py-12">
           <p class="text-destructive text-sm">{{ t('common.loadFailed') }}</p>
-          <Button @click="refresh()">{{ t('common.retry') }}</Button>
+          <Button @click="refresh()" class="mt-4">{{ t('common.retry') }}</Button>
         </div>
         <template v-else>
         <div class="flex items-center justify-between">

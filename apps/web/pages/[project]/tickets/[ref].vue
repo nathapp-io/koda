@@ -90,7 +90,7 @@ function onCommentAdded() {
 <template>
   <div class="p-6">
     <div v-if="pending" class="flex items-center justify-center py-12">
-      <p class="text-muted-foreground">{{ t('common.loadingTicket') }}</p>
+      <p class="text-muted-foreground">{{ t('common.loading') }}</p>
     </div>
     <div v-else-if="error" class="flex items-center justify-center py-12 flex-col gap-4">
       <p class="text-destructive text-sm">{{ t('common.loadFailed') }}</p>
