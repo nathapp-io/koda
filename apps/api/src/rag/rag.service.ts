@@ -125,6 +125,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
   private readonly similarityLow: number;
   private readonly ftsIndexMode: string;
   private readonly inMemoryOnly: boolean;
+  private readonly firstAccessedProjectIds = new Set<string>();
 
   constructor(
     private readonly configService: ConfigService,
@@ -158,6 +159,10 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
+    if (this.optimizeStrategy) {
+      await this.optimizeStrategy.onDestroy();
+    }
+
     this.tableCache.clear();
 
     if (this.db && typeof this.db.close === 'function') {
@@ -249,6 +254,12 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     }
 
     this.tableCache.set(tableName, table);
+
+    if (this.lanceAvailable && this.optimizeStrategy && !this.firstAccessedProjectIds.has(projectId)) {
+      this.firstAccessedProjectIds.add(projectId);
+      this.optimizeStrategy.onFirstAccess(projectId, table);
+    }
+
     return table;
   }
 
