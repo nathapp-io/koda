@@ -39,6 +39,7 @@ describeIntegration('API Integration Tests', () => {
   // Shared state across ordered test sections
   let userAccessToken: string;
   let userRefreshToken: string;
+  let nonAdminUserAccessToken: string;
   let agentApiKey: string;
   let agentSlug: string;
   let projectSlug: string;
@@ -128,6 +129,19 @@ describeIntegration('API Integration Tests', () => {
       expect(data.accessToken).toBeTruthy();
       userAccessToken = data.accessToken;
       userRefreshToken = data.refreshToken;
+    });
+
+    it('POST /api/auth/register — creates non-admin user for 403 tests', async () => {
+      const res = await request(httpServer)
+        .post('/api/auth/register')
+        .send({ email: 'member@koda.test', name: 'Koda Member', password: 'Member1234!' })
+        .expect(201);
+
+      const data = body<{ accessToken: string; refreshToken: string; user: { email: string; role: string } }>(res);
+      expect(data.accessToken).toBeTruthy();
+      expect(data.user.role).toBe('MEMBER');
+
+      nonAdminUserAccessToken = data.accessToken;
     });
 
     it('POST /api/auth/login — 401 with wrong password', async () => {
@@ -1428,7 +1442,7 @@ describeIntegration('API Integration Tests', () => {
     it('POST /api/projects/:slug/kb/optimize — returns 403 without ADMIN role', async () => {
       const res = await request(httpServer)
         .post(`/api/projects/${projectSlug}/kb/optimize`)
-        .set('Authorization', `Bearer ${agentApiKey}`)
+        .set('Authorization', `Bearer ${nonAdminUserAccessToken}`)
         .expect(403);
 
       expect(res.body).toHaveProperty('ret');

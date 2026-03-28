@@ -800,7 +800,7 @@ describe('RagService.optimizeTable (US-004)', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (ragService as any).lanceAvailable = true;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+    jest.spyOn(ragService as any, 'getOrCreateTable').mockResolvedValue(mockTable);
 
     await ragService.optimizeTable('test-project');
 
@@ -814,7 +814,7 @@ describe('RagService.optimizeTable (US-004)', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (ragService as any).lanceAvailable = false;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+    jest.spyOn(ragService as any, 'getOrCreateTable').mockResolvedValue(mockTable);
 
     await ragService.optimizeTable('test-project');
 
