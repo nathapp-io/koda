@@ -314,13 +314,24 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     let ftsRanked: { id: string; score: number }[];
 
     if (this.lanceAvailable) {
+      let nativeFtsFailed = false;
       try {
         nativeFtsRows = await table.search(query, 'fts', 'content') as LanceRecord[];
       } catch (err) {
+        nativeFtsFailed = true;
         this.logger.warn(`Native FTS search failed (${(err as Error).message}) — using in-memory FTS`);
       }
-      // Score by reciprocal position: 1/(i+1)
-      ftsRanked = nativeFtsRows.map((r, i) => ({ id: r.id as string, score: 1 / (i + 1) }));
+      if (nativeFtsFailed) {
+        // Fall back to in-memory FTS when native FTS is unavailable
+        ftsRanked = allRows
+          .map((r) => ({ id: r.id as string, score: simpleFtsScore(r.content as string, query) }))
+          .filter((r) => r.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, fetchLimit);
+      } else {
+        // Score by reciprocal position: 1/(i+1)
+        ftsRanked = nativeFtsRows.map((r, i) => ({ id: r.id as string, score: 1 / (i + 1) }));
+      }
     } else {
       ftsRanked = allRows
         .map((r) => ({ id: r.id as string, score: simpleFtsScore(r.content as string, query) }))
