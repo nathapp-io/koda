@@ -61,5 +61,27 @@ export function useAuth() {
     navigateTo('/login')
   }
 
-  return { token, user, isAuthenticated, login, register, logout }
+  /**
+   * Validate the stored token by calling /auth/me.
+   * If the token is expired or invalid, clear it and return false.
+   * Called by the auth middleware on initial navigation when a cookie exists but user state is empty.
+   */
+  async function fetchUser(): Promise<boolean> {
+    if (!token.value) return false
+    try {
+      const response = await $fetch<{ ret: number; data: AuthUser }>(`${baseURL}/auth/me`, {
+        headers: { Authorization: `Bearer ${token.value}` },
+      })
+      const data = response.data ?? (response as unknown as AuthUser)
+      user.value = data
+      return true
+    } catch {
+      // Token expired or invalid — clear auth state
+      token.value = null
+      user.value = null
+      return false
+    }
+  }
+
+  return { token, user, isAuthenticated, login, register, logout, fetchUser }
 }

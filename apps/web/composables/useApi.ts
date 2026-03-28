@@ -61,24 +61,28 @@ function unwrap<T>(response: unknown): T {
 /**
  * Extract a human-readable error message from a caught error.
  * Handles: ApiError, $fetch FetchError (with .data body), generic Error.
+ *
+ * Note: ofetch defines `data` as a getter via Object.defineProperty, so we
+ * must access it directly rather than relying solely on `'data' in err`.
  */
 export function extractApiError(err: unknown): string {
   // ApiError from our unwrap
   if (err instanceof ApiError) {
     return err.firstError
   }
-  // $fetch FetchError — the JSON error body is in err.data
-  if (
-    err !== null &&
-    typeof err === 'object' &&
-    'data' in err
-  ) {
-    const data = (err as { data?: JsonResponse }).data
+  // $fetch FetchError — the JSON error body is in err.data (getter from response._data)
+  if (err !== null && typeof err === 'object') {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = (err as any).data as JsonResponse | undefined
     if (data?.message) return data.message
     if (data?.errors) {
       const firstField = Object.values(data.errors)[0]
       if (firstField?.[0]) return firstField[0]
     }
+    // Also check statusMessage from ofetch
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const statusMessage = (err as any).statusMessage as string | undefined
+    if (statusMessage) return statusMessage
   }
   if (err instanceof Error) return err.message
   return 'Something went wrong'

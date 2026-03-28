@@ -1,8 +1,13 @@
-export default defineNuxtRouteMiddleware((to, _from) => {
+export default defineNuxtRouteMiddleware(async (to, _from) => {
   const auth = useAuth()
 
   // Guest-only routes where authenticated users should be redirected
   const guestOnlyRoutes = ['/login', '/register']
+
+  // If we have a token cookie but no user loaded yet, validate it
+  if (auth.token.value && !auth.user.value) {
+    await auth.fetchUser()
+  }
 
   // If unauthenticated and trying to access a protected route (not /login or /register)
   if (!auth.isAuthenticated.value && !guestOnlyRoutes.includes(to.path)) {

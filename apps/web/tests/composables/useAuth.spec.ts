@@ -260,3 +260,69 @@ describe('AC6: isAuthenticated is a computed ref', () => {
     expect(auth.isAuthenticated.value).toBe(false)
   })
 })
+
+// ──────────────────────────────────────────────────────────────────────────────
+// AC7 — fetchUser() validates token and clears on failure
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('AC7: fetchUser validates token', () => {
+  test('source defines a fetchUser function', () => {
+    const source = readFileSync(composablePath, 'utf-8')
+    expect(source).toContain('fetchUser')
+    expect(source).toContain('/auth/me')
+  })
+
+  test('fetchUser returns true and sets user on success', async () => {
+    const env = makeFakeEnv()
+    const { tokenRef, userRef } = env
+
+    tokenRef.value = 'valid-jwt'
+    env.fetchMock.mockResolvedValueOnce({
+      ret: 0,
+      data: { id: '1', email: 'admin@koda.test', name: 'Admin' },
+    })
+
+    applyNuxtGlobals(env)
+
+    const mod = await import(`${composablePath}`)
+    const auth = mod.useAuth()
+
+    const result = await auth.fetchUser()
+
+    expect(result).toBe(true)
+    expect(userRef.value).toMatchObject({ id: '1', email: 'admin@koda.test' })
+  })
+
+  test('fetchUser returns false and clears token on failure', async () => {
+    const env = makeFakeEnv()
+    const { tokenRef, userRef } = env
+
+    tokenRef.value = 'expired-jwt'
+    env.fetchMock.mockRejectedValueOnce(new Error('Unauthorized'))
+
+    applyNuxtGlobals(env)
+
+    const mod = await import(`${composablePath}`)
+    const auth = mod.useAuth()
+
+    const result = await auth.fetchUser()
+
+    expect(result).toBe(false)
+    expect(tokenRef.value).toBeNull()
+    expect(userRef.value).toBeNull()
+  })
+
+  test('fetchUser returns false when no token exists', async () => {
+    const env = makeFakeEnv()
+
+    applyNuxtGlobals(env)
+
+    const mod = await import(`${composablePath}`)
+    const auth = mod.useAuth()
+
+    const result = await auth.fetchUser()
+
+    expect(result).toBe(false)
+    expect(env.fetchMock).not.toHaveBeenCalled()
+  })
+})
