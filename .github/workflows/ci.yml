@@ -103,4 +103,4 @@ jobs:
         run: bun run db:generate
 
       - name: Test
-        run: bun run test -- --bail
+        run: bunx turbo run test -- --bail
