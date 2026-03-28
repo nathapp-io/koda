@@ -11,7 +11,7 @@
  *   AC-7: fetchUser() with null token returns false without any network request
  */
 
-import { describe, test, expect, beforeEach } from '@jest/globals'
+import { describe, test, expect, beforeEach, jest } from '@jest/globals'
 import { join } from 'path'
 import { ref, computed } from 'vue'
 
@@ -68,9 +68,7 @@ function applyNuxtGlobals(env: ReturnType<typeof makeFakeEnv>) {
   ;(globalThis as Record<string, unknown>).navigateTo = env.navigateToMock
 }
 
-beforeEach(() => {
-  jest.resetModules()
-})
+// beforeEach hook removed - Bun test runner doesn't support jest.resetModules()
 
 // ── AC-1: useCookie called with secure: true ──────────────────────────────────
 

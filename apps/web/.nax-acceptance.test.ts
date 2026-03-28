@@ -68,9 +68,7 @@ function applyNuxtGlobals(env: ReturnType<typeof makeFakeEnv>) {
   ;(globalThis as Record<string, unknown>).navigateTo = env.navigateToMock
 }
 
-beforeEach(() => {
-  jest.resetModules()
-})
+// beforeEach hook removed - Bun test runner doesn't support jest.resetModules()
 
 // ── AC-1: useCookie called with secure: true ──────────────────────────────────
 

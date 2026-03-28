@@ -6,9 +6,7 @@ import { ref, computed } from 'vue'
 const webDir = join(__dirname, '../..')
 const middlewarePath = join(webDir, 'middleware', 'auth.global.ts')
 
-beforeEach(() => {
-  jest.resetModules()
-})
+// beforeEach hook removed - Bun test runner doesn't support jest.resetModules()
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Helpers
