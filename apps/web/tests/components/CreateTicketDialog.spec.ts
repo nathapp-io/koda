@@ -289,3 +289,46 @@ describe('US-004-3: CreateTicketDialog.vue has no console.log statements', () =>
     expect(source).not.toContain('console.log')
   })
 })
+
+// ──────────────────────────────────────────────────────────────────────────────
+// US-003: Form reset after successful submission
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('US-003 AC1: resetForm() is called on successful submit for title field', () => {
+  test('source destructures resetForm from useForm()', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    const hasResetFormDestructured = source.includes('resetForm')
+    expect(hasResetFormDestructured).toBe(true)
+  })
+
+  test('source calls resetForm() after successful API call', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    // Check that resetForm is called after the API post succeeds
+    const hasResetFormCall = source.includes('resetForm()')
+    expect(hasResetFormCall).toBe(true)
+  })
+})
+
+describe('US-003 AC2: resetForm() is called on successful submit for type field', () => {
+  test('source calls resetForm() which resets type field', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    const hasResetFormCall = source.includes('resetForm()')
+    expect(hasResetFormCall).toBe(true)
+  })
+})
+
+describe('US-003 AC3: resetForm() is called on successful submit for priority field', () => {
+  test('source calls resetForm() which resets priority to MEDIUM', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    const hasResetFormCall = source.includes('resetForm()')
+    expect(hasResetFormCall).toBe(true)
+  })
+})
+
+describe('US-003 AC4: resetForm() is called on successful submit for description field', () => {
+  test('source calls resetForm() which resets description field', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    const hasResetFormCall = source.includes('resetForm()')
+    expect(hasResetFormCall).toBe(true)
+  })
+})

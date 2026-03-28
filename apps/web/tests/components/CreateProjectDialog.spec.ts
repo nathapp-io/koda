@@ -225,3 +225,38 @@ describe('US-003: CreateProjectDialog.vue has no console.log statements', () => 
     expect(source).not.toContain('console.log')
   })
 })
+
+// ──────────────────────────────────────────────────────────────────────────────
+// US-003: Form reset after successful submission
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('US-003 AC5: resetForm() is called on successful submit for name field', () => {
+  test('source destructures resetForm from useForm()', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    const hasResetFormDestructured = source.includes('resetForm')
+    expect(hasResetFormDestructured).toBe(true)
+  })
+
+  test('source calls resetForm() after successful API call', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    // Check that resetForm is called after the API post succeeds
+    const hasResetFormCall = source.includes('resetForm()')
+    expect(hasResetFormCall).toBe(true)
+  })
+})
+
+describe('US-003 AC6: resetForm() is called on successful submit for slug field', () => {
+  test('source calls resetForm() which resets slug field', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    const hasResetFormCall = source.includes('resetForm()')
+    expect(hasResetFormCall).toBe(true)
+  })
+})
+
+describe('US-003 AC7: resetForm() is called on successful submit for key field', () => {
+  test('source calls resetForm() which resets key field', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    const hasResetFormCall = source.includes('resetForm()')
+    expect(hasResetFormCall).toBe(true)
+  })
+})

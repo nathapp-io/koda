@@ -78,7 +78,7 @@ const formSchema = toTypedSchema(
   }) as any
 )
 
-const { handleSubmit, setFieldValue, isSubmitting, values } = useForm({
+const { handleSubmit, setFieldValue, isSubmitting, values, resetForm } = useForm({
   validationSchema: formSchema,
   initialValues: { name: '', slug: '', key: '' },
 })
@@ -113,6 +113,7 @@ const onSubmit = handleSubmit(async (formValues) => {
     toast.success(t('projects.toast.created'))
     emit('created')
     emit('update:open', false)
+    resetForm()
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : t('projects.toast.createFailed')
     toast.error(message)
