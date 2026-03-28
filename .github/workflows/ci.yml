@@ -1,5 +1,5 @@
 name: CI
-# turbo remote cache enabled via TURBO_TEAM + TURBO_TOKEN repo secrets
+# turbo remote cache enabled via TURBO_TEAM + TURBO_TOKEN repo secrets (verified)
 
 on:
   push:
