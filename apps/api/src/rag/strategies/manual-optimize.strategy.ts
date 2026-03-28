@@ -10,13 +10,12 @@ export class ManualOptimizeStrategy implements FtsOptimizeStrategy {
 
   onInsert(_projectId: string, _table: LanceTable): Promise<void> {
     // No-op on insert — optimize is triggered manually via API endpoint
-    this.logger.debug('ManualOptimizeStrategy.onInsert — no-op');
     return Promise.resolve();
   }
 
-  onFirstAccess(_projectId: string, _table: LanceTable): void {
-    // TODO: implement — fire-and-forget table.optimize()
-    this.logger.debug('onFirstAccess stub — not implemented');
+  onFirstAccess(projectId: string, table: LanceTable): void {
+    this.logger.debug(`onFirstAccess fire-and-forget for project ${projectId}`);
+    void table.optimize();
   }
 
   async onDestroy(): Promise<void> {

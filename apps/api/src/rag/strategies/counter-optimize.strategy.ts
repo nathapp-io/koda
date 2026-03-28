@@ -8,22 +8,30 @@ type LanceTable = any;
 @Injectable()
 export class CounterOptimizeStrategy implements FtsOptimizeStrategy {
   private readonly logger = new Logger(CounterOptimizeStrategy.name);
-  // TODO: use in implementation
-  private readonly _threshold: number;
-  private readonly _counters = new Map<string, number>();
+  private readonly threshold: number;
+  private readonly counters = new Map<string, number>();
 
   constructor(private readonly configService: ConfigService) {
-    this._threshold = this.configService.get<number>('rag.ftsOptimizeThreshold') ?? 10;
+    this.threshold = this.configService.get<number>('rag.ftsOptimizeThreshold') ?? 10;
   }
 
-  async onInsert(_projectId: string, _table: LanceTable): Promise<void> {
-    // TODO: implement — increment counter, call table.optimize() at threshold
-    this.logger.debug('onInsert stub — not implemented');
+  async onInsert(projectId: string, table: LanceTable): Promise<void> {
+    const count = (this.counters.get(projectId) ?? 0) + 1;
+    this.counters.set(projectId, count);
+
+    if (count >= this.threshold) {
+      this.counters.set(projectId, 0);
+      try {
+        await table.optimize();
+      } catch (err) {
+        this.logger.warn(`FTS optimize failed for project ${projectId}: ${(err as Error).message}`);
+      }
+    }
   }
 
-  onFirstAccess(_projectId: string, _table: LanceTable): void {
-    // TODO: implement — fire-and-forget table.optimize()
-    this.logger.debug('onFirstAccess stub — not implemented');
+  onFirstAccess(projectId: string, table: LanceTable): void {
+    this.logger.debug(`onFirstAccess fire-and-forget for project ${projectId}`);
+    void table.optimize();
   }
 
   async onDestroy(): Promise<void> {

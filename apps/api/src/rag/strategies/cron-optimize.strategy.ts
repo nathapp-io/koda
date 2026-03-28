@@ -13,38 +13,46 @@ interface SchedulerRegistryLike {
 @Injectable()
 export class CronOptimizeStrategy implements FtsOptimizeStrategy {
   private readonly logger = new Logger(CronOptimizeStrategy.name);
-  // TODO: use in implementation
-  private readonly _dirtyTables = new Map<string, LanceTable>();
-  private readonly _intervalMs: number;
+  private readonly dirtyTables = new Map<string, LanceTable>();
+  private readonly intervalMs: number;
 
   constructor(
     private readonly configService: ConfigService,
     // @Inject(SchedulerRegistry) injected via NestJS DI in real usage
     private readonly schedulerRegistry: SchedulerRegistryLike,
   ) {
-    this._intervalMs = this.configService.get<number>('rag.ftsOptimizeIntervalMs') ?? 300_000;
-    // TODO: implement — register interval via schedulerRegistry.addInterval('fts-optimize', ...)
-    this.logger.debug('CronOptimizeStrategy stub — interval not registered');
+    this.intervalMs = this.configService.get<number>('rag.ftsOptimizeIntervalMs') ?? 300_000;
+    const interval = setInterval(() => {
+      void this.optimizeDirtyTables();
+    }, this.intervalMs);
+    this.schedulerRegistry.addInterval('fts-optimize', interval);
   }
 
-  onInsert(_projectId: string, _table: LanceTable): Promise<void> {
-    // TODO: implement — add table to _dirtyTables map
-    this.logger.debug('onInsert stub — not implemented');
+  onInsert(projectId: string, table: LanceTable): Promise<void> {
+    this.dirtyTables.set(projectId, table);
     return Promise.resolve();
   }
 
   async optimizeDirtyTables(): Promise<void> {
-    // TODO: implement — call optimize() for each dirty table and clear map
-    this.logger.debug('optimizeDirtyTables stub — not implemented');
+    const entries = Array.from(this.dirtyTables.entries());
+    this.dirtyTables.clear();
+    await Promise.all(
+      entries.map(async ([projectId, table]) => {
+        try {
+          await table.optimize();
+        } catch (err) {
+          this.logger.warn(`FTS optimize failed for project ${projectId}: ${(err as Error).message}`);
+        }
+      }),
+    );
   }
 
-  onFirstAccess(_projectId: string, _table: LanceTable): void {
-    // TODO: implement — fire-and-forget table.optimize()
-    this.logger.debug('onFirstAccess stub — not implemented');
+  onFirstAccess(projectId: string, table: LanceTable): void {
+    this.logger.debug(`onFirstAccess fire-and-forget for project ${projectId}`);
+    void table.optimize();
   }
 
   async onDestroy(): Promise<void> {
-    // TODO: implement — flush dirty tables
-    this.logger.debug('onDestroy stub — not implemented');
+    await this.optimizeDirtyTables();
   }
 }
