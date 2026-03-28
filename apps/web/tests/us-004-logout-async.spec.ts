@@ -1,5 +1,5 @@
 import { describe, test, expect, jest } from '@jest/globals'
-import { existsSync, readFileSync } from 'fs'
+import { readFileSync } from 'fs'
 import { join } from 'path'
 import { ref, computed } from 'vue'
 
@@ -201,9 +201,6 @@ describe('US-004 AC3: logout() awaits navigateTo (not fire-and-forget)', () => {
 describe('US-004 AC4: default.vue sidebar does not have duplicate user section', () => {
   test('sidebar has no "border-t border-border p-4" div with user email', () => {
     const source = readFileSync(layoutPath, 'utf-8')
-    // Check that the specific pattern for duplicate sidebar user section is NOT present
-    const hasDuplicateSection = /border-t\s+border-border\s+p-4/.test(source)
-    const afterAsideClose = source.split('</aside>')[1] || ''
     // Ensure user email/logout is not in a sidebar bottom section
     const hasSidebarUserSection = source.match(
       /<aside[^>]*>[\s\S]*?<div[^>]*class="[^"]*border-t\s+border-border\s+p-4[^"]*"[\s\S]*?<\/div>[\s\S]*?<\/aside>/
