@@ -547,6 +547,170 @@ describe('simpleFtsScore — export (US-003-3 AC-3)', () => {
   });
 });
 
+describe('RagService — onFirstAccess and onDestroy lifecycle hooks (US-003-5)', () => {
+  const mockConfigService = {
+    get: (key: string): unknown => {
+      const config: Record<string, unknown> = {
+        'rag.lancedbPath': './lancedb',
+        'rag.similarityHigh': 0.85,
+        'rag.similarityMedium': 0.70,
+        'rag.similarityLow': 0.50,
+        'rag.ftsIndexMode': 'simple',
+      };
+      return config[key];
+    },
+  };
+
+  function makeMockDb(tableExists: boolean) {
+    const mockTable = {
+      delete: jest.fn().mockResolvedValue(undefined),
+      createIndex: jest.fn().mockResolvedValue(undefined),
+    };
+    return {
+      tableNames: jest.fn().mockResolvedValue(tableExists ? ['project_test-project'] : []),
+      openTable: jest.fn().mockResolvedValue(mockTable),
+      createTable: jest.fn().mockResolvedValue(mockTable),
+      mockTable,
+    };
+  }
+
+  describe('getOrCreateTable — onFirstAccess', () => {
+    it('calls optimizeStrategy.onFirstAccess(projectId, table) when lanceAvailable is true', async () => {
+      const ragService = new RagService(mockConfigService as never);
+      const onFirstAccessSpy = jest.fn();
+      const mockStrategy = { onFirstAccess: onFirstAccessSpy, onInsert: jest.fn(), onDestroy: jest.fn() };
+      const { mockTable, ...mockDb } = makeMockDb(false);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).db = mockDb;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).lanceAvailable = true;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).optimizeStrategy = mockStrategy;
+
+      await ragService.getOrCreateTable('test-project');
+
+      expect(onFirstAccessSpy).toHaveBeenCalledWith('test-project', mockTable);
+    });
+
+    it('calls optimizeStrategy.onFirstAccess exactly once per projectId even when called multiple times', async () => {
+      const ragService = new RagService(mockConfigService as never);
+      const onFirstAccessSpy = jest.fn();
+      const mockStrategy = { onFirstAccess: onFirstAccessSpy, onInsert: jest.fn(), onDestroy: jest.fn() };
+      const { mockTable, ...mockDb } = makeMockDb(false);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).db = mockDb;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).lanceAvailable = true;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).optimizeStrategy = mockStrategy;
+
+      await ragService.getOrCreateTable('test-project');
+      await ragService.getOrCreateTable('test-project');
+      await ragService.getOrCreateTable('test-project');
+
+      expect(onFirstAccessSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('calls optimizeStrategy.onFirstAccess once per distinct projectId', async () => {
+      const ragService = new RagService(mockConfigService as never);
+      const onFirstAccessSpy = jest.fn();
+      const mockStrategy = { onFirstAccess: onFirstAccessSpy, onInsert: jest.fn(), onDestroy: jest.fn() };
+
+      const mockTableA = { delete: jest.fn().mockResolvedValue(undefined), createIndex: jest.fn().mockResolvedValue(undefined) };
+      const mockTableB = { delete: jest.fn().mockResolvedValue(undefined), createIndex: jest.fn().mockResolvedValue(undefined) };
+      const mockDb = {
+        tableNames: jest.fn().mockResolvedValue([]),
+        createTable: jest.fn()
+          .mockResolvedValueOnce(mockTableA)
+          .mockResolvedValueOnce(mockTableB),
+      };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).db = mockDb;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).lanceAvailable = true;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).optimizeStrategy = mockStrategy;
+
+      await ragService.getOrCreateTable('project-a');
+      await ragService.getOrCreateTable('project-b');
+      // Second call for project-a — must NOT trigger another onFirstAccess
+      await ragService.getOrCreateTable('project-a');
+
+      expect(onFirstAccessSpy).toHaveBeenCalledTimes(2);
+      expect(onFirstAccessSpy).toHaveBeenCalledWith('project-a', mockTableA);
+      expect(onFirstAccessSpy).toHaveBeenCalledWith('project-b', mockTableB);
+    });
+
+    it('does not call optimizeStrategy.onFirstAccess when lanceAvailable is false', async () => {
+      const ragService = new RagService(mockConfigService as never);
+      const onFirstAccessSpy = jest.fn();
+      const mockStrategy = { onFirstAccess: onFirstAccessSpy, onInsert: jest.fn(), onDestroy: jest.fn() };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).lanceAvailable = false;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).optimizeStrategy = mockStrategy;
+
+      await ragService.getOrCreateTable('test-project');
+
+      expect(onFirstAccessSpy).not.toHaveBeenCalled();
+    });
+
+    it('does not call optimizeStrategy.onFirstAccess when optimizeStrategy is not injected', async () => {
+      const ragService = new RagService(mockConfigService as never);
+      const { mockTable, ...mockDb } = makeMockDb(false);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).db = mockDb;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).lanceAvailable = true;
+      // optimizeStrategy is undefined (not injected)
+
+      await expect(ragService.getOrCreateTable('test-project')).resolves.toBeDefined();
+    });
+  });
+
+  describe('onModuleDestroy — onDestroy', () => {
+    it('calls optimizeStrategy.onDestroy() during onModuleDestroy', async () => {
+      const ragService = new RagService(mockConfigService as never);
+      const onDestroySpy = jest.fn().mockResolvedValue(undefined);
+      const mockStrategy = { onFirstAccess: jest.fn(), onInsert: jest.fn(), onDestroy: onDestroySpy };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).optimizeStrategy = mockStrategy;
+
+      await ragService.onModuleDestroy();
+
+      expect(onDestroySpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('calls optimizeStrategy.onDestroy() even when no LanceDB connection exists', async () => {
+      const ragService = new RagService(mockConfigService as never);
+      const onDestroySpy = jest.fn().mockResolvedValue(undefined);
+      const mockStrategy = { onFirstAccess: jest.fn(), onInsert: jest.fn(), onDestroy: onDestroySpy };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).db = null;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (ragService as any).optimizeStrategy = mockStrategy;
+
+      await ragService.onModuleDestroy();
+
+      expect(onDestroySpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not throw when optimizeStrategy is not injected', async () => {
+      const ragService = new RagService(mockConfigService as never);
+      // optimizeStrategy is undefined (not injected)
+
+      await expect(ragService.onModuleDestroy()).resolves.toBeUndefined();
+    });
+  });
+});
+
 describe('RagService.indexDocument — onInsert Strategy Hook (US-003-4)', () => {
   const mockConfigService = {
     get: (key: string): unknown => {
