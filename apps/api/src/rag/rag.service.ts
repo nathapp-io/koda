@@ -197,17 +197,16 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn('FTS_INDEX_MODE=eager is not yet implemented — using in-memory FTS fallback');
     }
 
-    const cached = this.tableCache.get(projectId);
+    const tableName = `project_${projectId}`;
+    const cached = this.tableCache.get(tableName);
     if (cached) return cached;
 
     const db = await this.connect();
     if (!this.lanceAvailable || !db) {
       const memTable = new InMemoryTable();
-      this.tableCache.set(projectId, memTable);
+      this.tableCache.set(tableName, memTable);
       return memTable;
     }
-
-    const tableName = `project_${projectId}`;
     const tableNames: string[] = await db.tableNames();
 
     let table: LanceTable;
@@ -247,7 +246,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    this.tableCache.set(projectId, table);
+    this.tableCache.set(tableName, table);
     return table;
   }
 
@@ -310,11 +309,26 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     const scanLimit = Math.min(rowCount, 500);
     const allRows: LanceRecord[] = await table.query().limit(scanLimit).toArray();
 
-    const ftsRanked = allRows
-      .map((r) => ({ id: r.id as string, score: simpleFtsScore(r.content as string, query) }))
-      .filter((r) => r.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, fetchLimit);
+    // Native FTS path when LanceDB is available; fall back to in-memory simpleFtsScore
+    let nativeFtsRows: LanceRecord[] = [];
+    let ftsRanked: { id: string; score: number }[];
+
+    if (this.lanceAvailable) {
+      try {
+        nativeFtsRows = await table.search(query, 'fts', 'content') as LanceRecord[];
+      } catch (err) {
+        this.logger.warn(`Native FTS search failed (${(err as Error).message}) — using in-memory FTS`);
+      }
+      // Score by reciprocal position: 1/(i+1)
+      ftsRanked = nativeFtsRows.map((r, i) => ({ id: r.id as string, score: 1 / (i + 1) }));
+    } else {
+      ftsRanked = allRows
+        .map((r) => ({ id: r.id as string, score: simpleFtsScore(r.content as string, query) }))
+        .filter((r) => r.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, fetchLimit);
+    }
+
     const ftsScoreMap = new Map<string, number>(ftsRanked.map((r) => [r.id, r.score]));
 
     // Skip vector search when LanceDB is unavailable — use pure FTS
@@ -340,10 +354,11 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         )
       : ftsRanked.slice(0, limit).map((r) => ({ id: r.id, score: r.score }));
 
-    // Build id → record lookup
+    // Build id → record lookup (include nativeFtsRows so FTS-only records resolve)
     const recordMap = new Map<string, LanceRecord>();
     allRows.forEach((r) => recordMap.set(r.id as string, r));
     vectorRows.forEach((r) => recordMap.set(r.id as string, r));
+    nativeFtsRows.forEach((r) => recordMap.set(r.id as string, r));
 
     // Build vectorSimilarity lookup (1 - cosine_distance)
     const simMap = new Map<string, number>();
