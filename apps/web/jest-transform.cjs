@@ -8,7 +8,10 @@
 
 const tsJest = require('ts-jest')
 
-// Keyed by stable JSON of transformerConfig to handle different configs per file set
+// Keyed by stable JSON of transformerConfig to handle different configs per file set.
+// The cache is intentionally process-scoped (module-level): it lives for the lifetime
+// of the Jest worker process. For typical CI runs this is acceptable because each
+// worker handles a bounded set of files before the process exits.
 const _transformerCache = new Map()
 
 function getTransformer(transformerConfig) {
@@ -21,7 +24,10 @@ function getTransformer(transformerConfig) {
 
 function patchSource(sourceText, sourcePath) {
   // Skip test files — they may contain the literal string 'import.meta.server'
-  // in expectations and we don't want those replaced
+  // in expectations and we don't want those replaced.
+  // Path-based checks ('/tests/', '/test/') cover test directories; suffix checks
+  // (.spec.ts, .test.ts) cover co-located spec files outside those directories.
+  // Together these two strategies handle all standard Jest test file locations.
   if (
     sourcePath.includes('/tests/') ||
     sourcePath.includes('/test/') ||
