@@ -260,6 +260,34 @@ describe('AC6: isAuthenticated is a computed ref', () => {
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
+// AC8 — useAuth baseURL computation based on import.meta.server
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('AC8: useAuth baseURL uses import.meta.server for SSR', () => {
+  test('source uses import.meta.server instead of process.server', () => {
+    const source = readFileSync(composablePath, 'utf-8')
+    expect(source).toContain('import.meta.server')
+    // Verify it's not using the old process.server pattern
+    expect(source).not.toMatch(/process\.server\s*\?/)
+  })
+
+  test('source references apiInternalUrl config', () => {
+    const source = readFileSync(composablePath, 'utf-8')
+    expect(source).toContain('apiInternalUrl')
+  })
+
+  test('source references public.apiBaseUrl config', () => {
+    const source = readFileSync(composablePath, 'utf-8')
+    expect(source).toContain('public.apiBaseUrl')
+  })
+
+  test('source code has conditional baseURL assignment using import.meta.server', () => {
+    const source = readFileSync(composablePath, 'utf-8')
+    expect(source).toMatch(/import\.meta\.server\s*\?\s*config\.apiInternalUrl\s*:\s*config\.public\.apiBaseUrl/)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
 // AC7 — fetchUser() validates token and clears on failure
 // ──────────────────────────────────────────────────────────────────────────────
 

@@ -91,7 +91,7 @@ export function extractApiError(err: unknown): string {
 export const useApi = () => {
   const config = useRuntimeConfig()
   // Server-side: use internal URL for direct API access (import.meta.server)
-  const baseURL = process.server ? config.apiInternalUrl : config.public.apiBaseUrl
+  const baseURL = import.meta.server ? config.apiInternalUrl : config.public.apiBaseUrl
   const auth = useAuth()
 
   const { locale } = useI18n()

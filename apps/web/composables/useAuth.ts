@@ -29,7 +29,7 @@ interface AuthResponse {
 export function useAuth() {
   const config = useRuntimeConfig()
   // Server-side: use internal URL for direct API access (import.meta.server)
-  const baseURL = process.server ? config.apiInternalUrl : config.public.apiBaseUrl
+  const baseURL = import.meta.server ? config.apiInternalUrl : config.public.apiBaseUrl
 
   const token = useCookie('koda_token', { secure: true, sameSite: 'strict', maxAge: 604800 })
   const user = useState('koda_user', (): AuthUser | null => null)

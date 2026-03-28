@@ -1,0 +1,251 @@
+{
+  "project": "koda",
+  "feature": "web-ux-fixes",
+  "branchName": "feat/web-ux-fixes",
+  "createdAt": "2026-03-28T00:00:00.000Z",
+  "updatedAt": "2026-03-28T12:11:50.502Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Fix CommentThread SSR/hydration and stale data",
+      "description": "Remove `await` from the `useAsyncData` call in CommentThread.vue to eliminate the SSR hydration mismatch. Replace the one-time `ref` assignment with a `computed` so comments stay reactive after refresh. Replace `comments.value.push(newComment)` with a `refreshComments()` call after a successful post.",
+      "acceptanceCriteria": [
+        "When CommentThread mounts on the server, the useAsyncData call does NOT use the await keyword",
+        "When data.value changes (e.g., after refresh), the comments template renders the updated list because comments is a computed(() => data.value ?? [])",
+        "When onSubmit successfully posts a new comment, refreshComments() is called instead of pushing to comments.value",
+        "When onSubmit successfully posts a new comment, resetForm() is still called after refreshComments()",
+        "When useAsyncData is pending, the template renders the loading text via the existing v-if=\"pending\" branch",
+        "When useAsyncData returns an error, the template renders the error text via the existing v-else-if=\"error\" branch"
+      ],
+      "tags": [
+        "bug",
+        "ssr",
+        "hydration"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/components/CommentThread.vue",
+        "apps/web/pages/[project]/tickets/[ref].vue"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-002",
+      "title": "Add loading and error states to all pages",
+      "description": "Destructure `pending` and `error` from every `useAsyncData` call across the six affected pages. Wrap existing page content in a v-else block and add v-if=\"pending\" (loading) and v-else-if=\"error\" (error + retry button) sibling blocks. Add the missing i18n keys `common.loadFailed` and `common.retry` to en.json and zh.json.",
+      "acceptanceCriteria": [
+        "When pages/index.vue useAsyncData is pending, the template renders a centered 'Loading...' element and hides the project grid",
+        "When pages/index.vue useAsyncData resolves with an error, the template renders t('common.loadFailed') and a Button that calls refresh()",
+        "When pages/[project]/index.vue useAsyncData is pending, the template renders a loading state and hides the ticket board",
+        "When pages/[project]/index.vue useAsyncData resolves with an error, the template renders an error message and a retry Button",
+        "When pages/[project]/agents.vue useAsyncData is pending, the template renders a loading state",
+        "When pages/[project]/agents.vue useAsyncData resolves with an error, the template renders an error message and a retry Button that calls refresh()",
+        "When pages/[project]/labels.vue useAsyncData resolves with an error, the template renders an error message and a retry Button",
+        "When pages/[project]/tickets/[ref].vue useAsyncData is pending, the template renders a loading state via v-if=\"pending\" (not the hardcoded 'Loading ticket...' text shown unconditionally)",
+        "When pages/[project]/tickets/[ref].vue useAsyncData resolves with an error, the template renders an error message and a retry Button",
+        "When pages/[project]/kb.vue useAsyncData is pending, the template renders a loading state",
+        "When pages/[project]/kb.vue useAsyncData resolves with an error, the template renders an error message and a retry Button",
+        "Given en.json is loaded, t('common.loadFailed') returns 'Failed to load data'",
+        "Given en.json is loaded, t('common.retry') returns 'Retry'",
+        "Given zh.json is loaded, t('common.loadFailed') returns '加载失败'",
+        "Given zh.json is loaded, t('common.retry') returns '重试'"
+      ],
+      "tags": [
+        "bug",
+        "ux",
+        "error-handling"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/pages/index.vue",
+        "apps/web/pages/[project]/index.vue",
+        "apps/web/pages/[project]/tickets/[ref].vue",
+        "apps/web/i18n/locales/en.json",
+        "apps/web/i18n/locales/zh.json"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-003",
+      "title": "Fix register page layout and error handling",
+      "description": "Remove the redundant full-screen wrapper div from register.vue (the auth layout already provides it). Replace the inline `error` ref and banner div with `toast.error(extractApiError(err))` on failure and `toast.success(t('toast.loggedIn'))` on success, matching the login page pattern.",
+      "acceptanceCriteria": [
+        "When register.vue is rendered, the outermost template element is <div class=\"w-full max-w-md space-y-8\"> with no outer flex min-h-screen wrapper",
+        "When handleRegister throws an error, toast.error(extractApiError(err)) is called instead of setting an error ref",
+        "When handleRegister succeeds, toast.success(t('toast.loggedIn')) is called before navigateTo('/')",
+        "When register.vue script is loaded, toast is imported from 'vue-sonner'",
+        "When register.vue script is loaded, there is no `error` ref variable declared",
+        "When register.vue template is rendered, there is no v-if=\"error\" banner div in the template"
+      ],
+      "tags": [
+        "bug",
+        "ux",
+        "layout"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "validated from LLM output",
+        "modelTier": "balanced"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/pages/register.vue",
+        "apps/web/pages/login.vue",
+        "apps/web/layouts/auth.vue"
+      ],
+      "priorErrors": [
+        "Attempt 1 failed with model tier: fast: Autofix exhausted: review still failing after fix attempts"
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "fast",
+          "stage": "review",
+          "summary": "Failed with tier fast, escalating to next tier",
+          "reviewFindings": [
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/web/tests/pages/register.spec.ts",
+              "line": 1,
+              "message": "Diff contains only test files — the implementation file pages/register.vue is not included. All 6 acceptance criteria target register.vue behaviour but there is no evidence that the file was modified to satisfy them.",
+              "source": "semantic-review"
+            },
+            {
+              "ruleId": "semantic",
+              "severity": "warning",
+              "file": "apps/web/tests/pages/register.spec.ts",
+              "line": 22,
+              "message": "AC1 template extraction uses a non-greedy regex /<template>([\\s\\S]*?)<\\/template>/ which will match only up to the first </template> closing tag. Vue SFCs routinely contain <template> slots inside components, causing the regex to capture a truncated subtree and produce a false pass.",
+              "source": "semantic-review"
+            },
+            {
+              "ruleId": "semantic",
+              "severity": "warning",
+              "file": "apps/web/tests/pages/register.spec.ts",
+              "line": 151,
+              "message": "The toast-before-navigateTo ordering test is wrapped in a double conditional (if tryBlockMatch … if toastIndex !== -1 && navigateIndex !== -1). If the try-block regex fails to match, or if either string is absent, the test passes vacuously with no assertion executed.",
+              "source": "semantic-review"
+            },
+            {
+              "ruleId": "semantic",
+              "severity": "warning",
+              "file": "apps/web/tests/pages/register.spec.ts",
+              "line": 81,
+              "message": "AC5 second test checks for error.value = but not for patterns like error.value = null or error.value = '' used to clear the ref after a successful call. A ref could exist and be used for non-assignment reads and still slip past this check.",
+              "source": "semantic-review"
+            }
+          ],
+          "cost": 0.14302574999999998,
+          "timestamp": "2026-03-28T12:02:13.082Z"
+        }
+      ],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-004",
+      "title": "Make logout async and remove duplicate sidebar UI",
+      "description": "In useAuth.ts, make `logout()` async and await `navigateTo('/login')` so callers can chain on the promise. In layouts/default.vue, remove the sidebar bottom section (lines 57-68) containing the duplicate user email and logout button — the header already has these controls.",
+      "acceptanceCriteria": [
+        "When useAuth().logout() is called, it returns a Promise<void>",
+        "When useAuth().logout() is called, it sets token.value to null and user.value to null before awaiting navigateTo('/login')",
+        "When useAuth().logout() resolves, navigateTo('/login') has been awaited (not fire-and-forget)",
+        "When default.vue sidebar is rendered, there is no <div class=\"border-t border-border p-4\"> section containing user email and logout button",
+        "When default.vue sidebar is rendered, the nav links section (NuxtLink elements) is still present and unchanged",
+        "When default.vue header is rendered, the user email span and logout button are still present in the header"
+      ],
+      "tags": [
+        "bug",
+        "cleanup"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/composables/useAuth.ts",
+        "apps/web/layouts/default.vue"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-005",
+      "title": "Use internal API URL for SSR requests",
+      "description": "In useApi.ts and useAuth.ts, compute baseURL using `import.meta.server ? useRuntimeConfig().apiInternalUrl : useRuntimeConfig().public.apiBaseUrl` so that SSR requests bypass the Nuxt proxy and call the API service directly. Both composables need the same check independently — useAuth.ts uses $fetch directly to avoid circular dependency with useApi.",
+      "acceptanceCriteria": [
+        "When useApi() runs on the server (import.meta.server is true), baseURL equals useRuntimeConfig().apiInternalUrl",
+        "When useApi() runs on the client (import.meta.server is false), baseURL equals useRuntimeConfig().public.apiBaseUrl",
+        "When useAuth() runs on the server (import.meta.server is true), baseURL equals useRuntimeConfig().apiInternalUrl",
+        "When useAuth() runs on the client (import.meta.server is false), baseURL equals useRuntimeConfig().public.apiBaseUrl",
+        "When useAuth.ts makes an auth/login request during SSR, the request URL is constructed as `${useRuntimeConfig().apiInternalUrl}/auth/login`",
+        "When useApi.ts makes a GET request during SSR, the request URL is constructed as `${useRuntimeConfig().apiInternalUrl}${path}`"
+      ],
+      "tags": [
+        "bug",
+        "ssr",
+        "performance"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/composables/useApi.ts",
+        "apps/web/composables/useAuth.ts",
+        "apps/web/nuxt.config.ts"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    }
+  ],
+  "analysis": "All 5 stories target apps/web only — no API or CLI changes needed.\n\n**US-001 (CommentThread):** apps/web/components/CommentThread.vue line 31 uses `await useAsyncData(...)` — this causes Nuxt SSR hydration mismatch because the parent [ref].vue page does not wrap the component in <Suspense>. Lines 36-37 assign the fetched data to a plain `ref` once, so the comments list goes stale after a manual refresh. Line 67 mutates `comments.value.push(newComment)` — once we move to `computed`, this will break at runtime. Fix: remove `await`, change `ref` to `computed(() => data.value ?? [])`, and call `refreshComments()` after a successful post. The `pending`/`error` destructuring already exists and is used in the template (lines 80-81) — they must remain.\n\n**US-002 (Loading/error states):** apps/web/pages/index.vue line 70 does not destructure `pending` or `error` from `useAsyncData`. All six affected pages follow the same pattern: they call `useAsyncData` but only use the returned data, leaving users on an infinite blank screen on network error. The fix is purely additive — wrap existing content in a `v-else` block and add `v-if=\"pending\"` and `v-else-if=\"error\"` sibling blocks. i18n key `common.loading` already exists in en.json/zh.json (line 6). Keys `common.loadFailed` and `common.retry` are missing and must be added to both locale files. The Button component from shadcn-nuxt is already available everywhere. Risk: none — the happy path is unchanged.\n\n**US-003 (Register page):** apps/web/pages/register.vue has `definePageMeta({ layout: 'auth' })` (line 80) but the template at line 2 wraps everything in `<div class=\"flex min-h-screen items-center justify-center bg-background\">` — this duplicates the wrapper already provided by apps/web/layouts/auth.vue. The `error` ref (line 87) and inline error banner (lines 11-13) must be replaced with `toast.error(extractApiError(err))` matching the login page pattern. `toast` from `vue-sonner` is not currently imported in register.vue. `extractApiError` is already imported (line 78). Reference: apps/web/pages/login.vue uses `toast.error()` and `toast.success()` patterns.\n\n**US-004 (Cleanup):** apps/web/composables/useAuth.ts line 58-62 — `logout()` is a sync function that calls `navigateTo('/login')` without `await`, meaning callers cannot know when navigation completes. apps/web/layouts/default.vue lines 57-68 — sidebar bottom section duplicates the user email and logout button already in the header (lines 92-100). Removing the sidebar section only; nav links (lines 20-53) must remain untouched.\n\n**US-005 (SSR API URL):** apps/web/composables/useApi.ts line 93 sets `baseURL = config.public.apiBaseUrl` (always `/api`). During SSR, `/api` is a relative path that hits the Nuxt proxy, which then forwards to the real API — an unnecessary extra round-trip that also breaks in non-Docker environments without the proxy configured. apps/web/composables/useAuth.ts line 31 has the same issue. apps/web/nuxt.config.ts line 79 already configures `runtimeConfig.apiInternalUrl` (server-side) and `runtimeConfig.public.apiBaseUrl` (client-side). The fix is a one-liner in each composable: `const baseURL = import.meta.server ? useRuntimeConfig().apiInternalUrl : useRuntimeConfig().public.apiBaseUrl`. Note: useAuth.ts uses `$fetch` directly (not useApi) to avoid circular dependency — the comment at line 24-28 must be preserved. TypeScript: `useRuntimeConfig()` returns `{ apiInternalUrl: string, public: { apiBaseUrl: string } }` so no type casting needed."
+}

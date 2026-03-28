@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach } from '@jest/globals'
+import { describe, test, expect, beforeEach, jest } from '@jest/globals'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { ref, computed } from 'vue'
@@ -49,6 +49,34 @@ describe('AC1: composables/useApi.ts imports useAuth', () => {
 // AC1b — Authorization header injected when token exists
 // ──────────────────────────────────────────────────────────────────────────────
 
+// ──────────────────────────────────────────────────────────────────────────────
+// AC5 — useApi baseURL computation based on import.meta.server
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('AC5: useApi baseURL uses import.meta.server for SSR', () => {
+  test('source uses import.meta.server instead of process.server', () => {
+    const source = readFileSync(composablePath, 'utf-8')
+    expect(source).toContain('import.meta.server')
+    // Verify it's not using the old process.server pattern
+    expect(source).not.toMatch(/process\.server\s*\?/)
+  })
+
+  test('source references apiInternalUrl config', () => {
+    const source = readFileSync(composablePath, 'utf-8')
+    expect(source).toContain('apiInternalUrl')
+  })
+
+  test('source references public.apiBaseUrl config', () => {
+    const source = readFileSync(composablePath, 'utf-8')
+    expect(source).toContain('public.apiBaseUrl')
+  })
+
+  test('source code has conditional baseURL assignment using import.meta.server', () => {
+    const source = readFileSync(composablePath, 'utf-8')
+    expect(source).toMatch(/import\.meta\.server\s*\?\s*config\.apiInternalUrl\s*:\s*config\.public\.apiBaseUrl/)
+  })
+})
+
 describe('AC1b: Authorization header injected when token exists', () => {
   // beforeEach hook removed - Bun test runner doesn't support jest.resetModules()
   // Reset globals to a clean state before each test
@@ -58,6 +86,7 @@ describe('AC1b: Authorization header injected when token exists', () => {
     g.useAuth = undefined
     g.useI18n = undefined
     g.$fetch = undefined
+    g.import = undefined
   })
 
   test('GET request includes Authorization: Bearer header when token is set', async () => {
