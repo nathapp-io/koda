@@ -57,15 +57,7 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Cache Prisma client
-        id: prisma-cache
-        uses: actions/cache@v4
-        with:
-          path: apps/api/node_modules/.prisma
-          key: prisma-${{ runner.os }}-${{ hashFiles('apps/api/prisma/schema.prisma') }}
-
       - name: Generate Prisma client
-        if: steps.prisma-cache.outputs.cache-hit != 'true'
         run: bun run db:generate
 
       - name: ${{ matrix.check }}
@@ -94,15 +86,7 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Cache Prisma client
-        id: prisma-cache
-        uses: actions/cache@v4
-        with:
-          path: apps/api/node_modules/.prisma
-          key: prisma-${{ runner.os }}-${{ hashFiles('apps/api/prisma/schema.prisma') }}
-
       - name: Generate Prisma client
-        if: steps.prisma-cache.outputs.cache-hit != 'true'
         run: bun run db:generate
 
       - name: Test
@@ -131,15 +115,7 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Cache Prisma client
-        id: prisma-cache
-        uses: actions/cache@v4
-        with:
-          path: apps/api/node_modules/.prisma
-          key: prisma-${{ runner.os }}-${{ hashFiles('apps/api/prisma/schema.prisma') }}
-
       - name: Generate Prisma client
-        if: steps.prisma-cache.outputs.cache-hit != 'true'
         run: bun run db:generate
 
       - name: Smoke test
