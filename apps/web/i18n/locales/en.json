@@ -187,6 +187,17 @@
     }
   },
   "kb": {
+    "pageDescription": "Search and manage documents for the {project} project.",
+    "verdict": {
+      "likelyDuplicate": "Likely Duplicate",
+      "likelyDuplicateDesc": "A very similar issue already exists.",
+      "bestMatch": "Best match: {match}",
+      "possiblyRelated": "Possibly Related",
+      "possiblyRelatedDesc": "Some related issues were found.",
+      "closestMatch": "Closest match: {match}",
+      "noMatch": "No Match",
+      "noMatchDesc": "No closely related issues found."
+    },
     "tabs": {
       "search": "Search",
       "documents": "Documents"
@@ -199,6 +210,7 @@
     "documents": {
       "addButton": "Add Document",
       "addTitle": "Add Document",
+      "addDescription": "Index a document into the knowledge base for this project.",
       "empty": "No documents yet.",
       "columns": {
         "source": "Source",

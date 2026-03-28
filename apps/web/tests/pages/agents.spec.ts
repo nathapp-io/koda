@@ -35,9 +35,9 @@ describe('US-006 AC1: fetches GET /agents via useApi() with useAsyncData', () =>
     expect(source).toContain('$api.get')
   })
 
-  test('source fetches from /agents endpoint', () => {
+  test('source fetches from project-scoped /projects/${slug}/agents endpoint', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toMatch(/['"`]\/agents['"`]/)
+    expect(source).toMatch(/['"`]\/projects\/\$\{slug\}\/agents['"`]/)
   })
 
   test('source renders a Table component', () => {

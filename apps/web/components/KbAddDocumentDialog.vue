@@ -56,7 +56,7 @@ async function submit() {
     <DialogContent class="max-w-lg">
       <DialogHeader>
         <DialogTitle>{{ t('kb.documents.addTitle') }}</DialogTitle>
-        <DialogDescription>Index a document into the knowledge base for this project.</DialogDescription>
+        <DialogDescription>{{ t('kb.documents.addDescription') }}</DialogDescription>
       </DialogHeader>
 
       <div class="space-y-4 py-2">
