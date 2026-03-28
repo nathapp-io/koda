@@ -1409,4 +1409,38 @@ describeIntegration('API Integration Tests', () => {
       expect(data.deletedAt).not.toBeNull();
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────
+  // Knowledge Base — Optimize (US-004)
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('Knowledge Base — Optimize (US-004)', () => {
+    it('POST /api/projects/:slug/kb/optimize — returns 200 with ADMIN role', async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/kb/optimize`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const data = body<{ optimized: boolean }>(res);
+      expect(data.optimized).toBe(true);
+    });
+
+    it('POST /api/projects/:slug/kb/optimize — returns 403 without ADMIN role', async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/kb/optimize`)
+        .set('Authorization', `Bearer ${agentApiKey}`)
+        .expect(403);
+
+      expect(res.body).toHaveProperty('ret');
+    });
+
+    it('POST /api/projects/:slug/kb/optimize — returns 404 with invalid slug', async () => {
+      const res = await request(httpServer)
+        .post('/api/projects/nonexistent-slug/kb/optimize')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(404);
+
+      expect(res.body).toHaveProperty('ret');
+    });
+  });
 });

@@ -100,4 +100,21 @@ export class RagController {
     const data = await this.ragService.search(project.id, dto.query, dto.limit ?? 5);
     return JsonResponse.Ok(data);
   }
+
+  @Post('optimize')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Optimize the LanceDB table for a project (admin only)' })
+  @ApiResponse({ status: 200, description: 'Table optimized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
+  @ApiResponse({ status: 404, description: 'Project not found' })
+  async optimizeTable(
+    @Param('slug') slug: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    @Req() req: any,
+  ) {
+    if (req.user?.extra?.role !== 'ADMIN') throw new ForbiddenAppException();
+    const project = await this.resolveProject(slug);
+    await this.ragService.optimizeTable(project.id);
+    return JsonResponse.Ok({ optimized: true });
+  }
 }

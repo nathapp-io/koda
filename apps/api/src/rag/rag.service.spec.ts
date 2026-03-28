@@ -778,3 +778,46 @@ describe('RagService.indexDocument — onInsert Strategy Hook (US-003-4)', () =>
     expect(onInsertSpy).not.toHaveBeenCalled();
   });
 });
+
+describe('RagService.optimizeTable (US-004)', () => {
+  const mockConfigService = {
+    get: (key: string): unknown => {
+      const config: Record<string, unknown> = {
+        'rag.lancedbPath': './lancedb',
+        'rag.similarityHigh': 0.85,
+        'rag.similarityMedium': 0.70,
+        'rag.similarityLow': 0.50,
+        'rag.ftsIndexMode': 'simple',
+      };
+      return config[key];
+    },
+  };
+
+  it('calls table.optimize() when lanceAvailable is true', async () => {
+    const ragService = new RagService(mockConfigService as never);
+    const mockTable = { optimize: jest.fn().mockResolvedValue(undefined) };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    await ragService.optimizeTable('test-project');
+
+    expect(mockTable.optimize).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call table.optimize() when lanceAvailable is false', async () => {
+    const ragService = new RagService(mockConfigService as never);
+    const mockTable = { optimize: jest.fn().mockResolvedValue(undefined) };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    await ragService.optimizeTable('test-project');
+
+    expect(mockTable.optimize).not.toHaveBeenCalled();
+  });
+});

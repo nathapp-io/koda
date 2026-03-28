@@ -499,4 +499,13 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
 
     return { valid: true };
   }
+
+  async optimizeTable(projectId: string): Promise<void> {
+    if (!this.lanceAvailable) {
+      return;
+    }
+
+    const table = await this.getOrCreateTable(projectId);
+    await table.optimize();
+  }
 }
