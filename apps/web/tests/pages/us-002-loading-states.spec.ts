@@ -41,7 +41,7 @@ describe('US-002 AC1: pages/index.vue renders loading state when pending', () =>
     expect(source).toMatch(/v-else[^-]/)
     expect(source).toContain('grid-cols')
     // The grid must NOT have v-if="pending" — it must be hidden by v-else
-    const gridMatch = source.match(/v-else[^>]*class=["'][^"']*grid[^"']*["']|class=["'][^"']*grid[^"']*["'][^>]*v-else/)
+    const _gridMatch = source.match(/v-else[^>]*class=["'][^"']*grid[^"']*["']|class=["'][^"']*grid[^"']*["'][^>]*v-else/)
     const hasVElse = source.includes('v-else')
     expect(hasVElse).toBe(true)
   })
@@ -244,7 +244,7 @@ describe('US-002 AC8: pages/[project]/tickets/[ref].vue uses v-if="pending" for 
   test('loading text is guarded by v-if (not shown unconditionally)', () => {
     const source = readFileSync(ticketDetailPath, 'utf-8')
     // The loading block must have v-if="pending" before any loading text
-    const pendingBlockMatch = source.match(/v-if=["']pending["'][^<]*<[^>]*>[^<]*(?:loading|Loading)/i)
+    const _pendingBlockMatch = source.match(/v-if=["']pending["'][^<]*<[^>]*>[^<]*(?:loading|Loading)/i)
     const hasPendingConditional = source.includes('v-if="pending"') || source.includes("v-if='pending'")
     expect(hasPendingConditional).toBe(true)
     // There must NOT be a loading text visible outside any v-if guard
