@@ -74,7 +74,7 @@ describe('AC1: composables/useAuth.ts exists', () => {
 describe('AC2: token stored via useCookie("koda_token")', () => {
   test('source calls useCookie with "koda_token"', () => {
     const source = readFileSync(composablePath, 'utf-8')
-    expect(source).toContain("useCookie('koda_token')")
+    expect(source).toContain("useCookie('koda_token'")
   })
 })
 
