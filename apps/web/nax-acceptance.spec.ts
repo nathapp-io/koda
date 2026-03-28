@@ -265,7 +265,7 @@ describe('AC-8: Failed label creation shows error toast with labels.toast.create
     const source = readFileSync(labelsPagePath, 'utf-8')
     // US-004 replaced labels.toast.createFailed with extractApiError(err) to surface
     // structured ApiError field-level messages instead of a generic fallback
-    expect(source).toContain('extractApiError(')
+    expect(source).toContain('toast.error(extractApiError(')
   })
 
   test('labels page uses toast.error for creation failure', () => {
