@@ -257,7 +257,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
 
     if (this.lanceAvailable && this.optimizeStrategy && !this.firstAccessedProjectIds.has(projectId)) {
       this.firstAccessedProjectIds.add(projectId);
-      this.optimizeStrategy.onFirstAccess(projectId, table);
+      await this.optimizeStrategy.onFirstAccess(projectId, table);
     }
 
     return table;
