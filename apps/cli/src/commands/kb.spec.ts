@@ -505,7 +505,7 @@ describe('kbCommand', () => {
       expect(allLogs).toContain('3');
     });
 
-    it('reads the file from disk and sends its content to the API', async () => {
+    it('reads the file from disk and sends content, source, and sourceId to the API', async () => {
       (KbService.add as jest.Mock).mockResolvedValue(mockAddResponse);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
@@ -516,8 +516,36 @@ describe('kbCommand', () => {
       expect(KbService.add).toHaveBeenCalledWith(
         expect.anything(),
         'koda',
-        expect.objectContaining({ content: mockFileContent })
+        expect.objectContaining({ content: mockFileContent, source: 'doc', sourceId: 'README.md' })
       );
+    });
+
+    it('accepts --source option to override default source type', async () => {
+      (KbService.add as jest.Mock).mockResolvedValue(mockAddResponse);
+
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const addCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'add');
+
+      await addCmd?.parseAsync(['node', 'test', '--project', 'koda', '--file', './README.md', '--source', 'manual']);
+
+      expect(KbService.add).toHaveBeenCalledWith(
+        expect.anything(),
+        'koda',
+        expect.objectContaining({ source: 'manual', sourceId: 'README.md' })
+      );
+    });
+
+    it('exits with code 3 for invalid --source value', async () => {
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const addCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'add');
+
+      try {
+        await addCmd?.parseAsync(['node', 'test', '--project', 'koda', '--file', './README.md', '--source', 'invalid']);
+      } catch {
+        // Expected
+      }
+
+      expect(exitSpy).toHaveBeenCalledWith(3);
     });
 
     it('outputs JSON with --json flag', async () => {

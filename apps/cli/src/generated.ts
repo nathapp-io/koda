@@ -284,13 +284,12 @@ export class KbService {
   static async add(
     client: AxiosInstance,
     projectSlug: string,
-    data: { content: string; source: string }
+    data: { content: string; source: 'ticket' | 'doc' | 'manual'; sourceId: string }
   ): Promise<Wrapped<KbAddResponse>> {
     // API: POST /api/projects/{slug}/kb/documents with { source, sourceId, content }
-    const sourceId = data.source; // use filename as sourceId
     const resp = await (client as any).post(`/projects/${projectSlug}/kb/documents`, {
       source: data.source,
-      sourceId,
+      sourceId: data.sourceId,
       content: data.content,
     });
     return { ret: 0, data: resp };

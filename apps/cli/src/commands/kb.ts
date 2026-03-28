@@ -117,10 +117,18 @@ export function kbCommand(program: Command): void {
     .description('Add a document to the knowledge base')
     .option('--project <slug>', 'Project slug')
     .option('--file <path>', 'Path to file to add')
+    .option('--source <type>', 'Source type (ticket|doc|manual)', 'doc')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       if (!options.file) {
         error('Missing required option: --file is required');
+        process.exit(3);
+        return;
+      }
+
+      const validSources = ['ticket', 'doc', 'manual'];
+      if (!validSources.includes(options.source)) {
+        error(`Invalid source type: ${options.source}. Must be one of: ${validSources.join(', ')}`);
         process.exit(3);
         return;
       }
@@ -144,7 +152,7 @@ export function kbCommand(program: Command): void {
         const fileName = basename(options.file);
 
         const client = configureClient(ctx.apiUrl, ctx.apiKey);
-        const response = await KbService.add(client, ctx.projectSlug, { content, source: fileName });
+        const response = await KbService.add(client, ctx.projectSlug, { content, source: options.source, sourceId: fileName });
         const data = unwrap(response);
 
         if (options.json) {
