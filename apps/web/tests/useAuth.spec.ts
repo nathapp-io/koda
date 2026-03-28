@@ -11,7 +11,7 @@
  *   AC-7: fetchUser() with null token returns false without any network request
  */
 
-import { describe, test, expect, beforeEach, jest } from '@jest/globals'
+import { describe, test, expect, jest } from '@jest/globals'
 import { join } from 'path'
 import { ref, computed } from 'vue'
 
