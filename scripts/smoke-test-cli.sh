@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Koda API + CLI Smoke Test
-# Usage: ./scripts/smoke-test.sh [--keep-db]
+# Usage: ./scripts/smoke-test-cli.sh [--keep-db]
 #
 # Starts the API, bootstraps test data, runs all CLI commands, reports results.
 # Safe to re-run: uses a fresh temp DB each run, cleaned up after.
@@ -41,6 +41,8 @@ cleanup() {
     for f in "${FAILURES[@]}"; do echo "  - $f"; done
   fi
   echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+  [[ $FAIL -gt 0 ]] && exit 1
+  exit 0
 }
 trap cleanup EXIT
 
@@ -59,6 +61,16 @@ koda() {
 }
 
 # =============================================================================
+# STEP 0: Basic sanity
+# =============================================================================
+log "Step 0: Basic sanity checks..."
+VERSION_OUT=$(HOME="$(mktemp -d)" bun run --silent --cwd "$CLI_DIR" src/index.ts --version 2>&1 || true)
+assert "koda --version exits cleanly" "[0-9]\+\.[0-9]\+\.[0-9]\+" "$VERSION_OUT"
+
+HELP_OUT=$(HOME="$(mktemp -d)" bun run --silent --cwd "$CLI_DIR" src/index.ts --help 2>&1 || true)
+assert "koda --help shows commands" "ticket\|project\|agent" "$HELP_OUT"
+
+# =============================================================================
 # STEP 1: Build API
 # =============================================================================
 log "Step 1: Building API..."
@@ -73,7 +85,7 @@ fi
 # =============================================================================
 log "Step 2: Running migrations..."
 if (cd "$API_DIR" && DATABASE_URL="file:${TEST_DB}" npx prisma migrate deploy > /dev/null 2>&1); then
-  ok "DB migrations (3 applied)"
+  ok "DB migrations"
 else
   fail "DB migrations failed"; exit 1
 fi
@@ -98,9 +110,8 @@ cd "$REPO_ROOT"
 log "Waiting for API..."
 READY=false
 for i in $(seq 1 20); do
-  # Accept any HTTP response (including 401) — means server is up
-  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/projects" 2>/dev/null || true)
-  if [[ "$HTTP_CODE" =~ ^[1-9][0-9]{2}$ ]]; then
+  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/health" 2>/dev/null || true)
+  if [[ "$HTTP_CODE" == "200" ]]; then
     READY=true; break
   fi
   sleep 1
@@ -113,6 +124,13 @@ if [[ "$READY" != true ]]; then
   exit 1
 fi
 ok "API started (PID=$API_PID)"
+
+# =============================================================================
+# STEP 3b: Health endpoint
+# =============================================================================
+log "Step 3b: Health check..."
+HEALTH_OUT=$(curl -sf "$API_URL/health" 2>&1)
+assert "GET /api/health returns ok" '"status":"ok"' "$HEALTH_OUT"
 
 # =============================================================================
 # STEP 4: Bootstrap test data
@@ -160,7 +178,6 @@ AGENT=$(curl -s -X POST "$API_URL/agents" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $JWT" \
   -d '{"name":"Smoke Agent","slug":"smoke-agent"}' 2>&1)
-# API returns { ret:0, data: { apiKey: "...", agent: {...} } }
 RAW_KEY=$(echo "$AGENT" | python3 -c "import json,sys; d=json.load(sys.stdin); inner=d.get('data',d); print(inner.get('apiKey',inner.get('rawApiKey','')))" 2>/dev/null)
 if [[ -n "$RAW_KEY" ]]; then
   ok "Create agent (API key captured)"
@@ -191,9 +208,20 @@ assert "koda project show koda"    "koda\|KODA\|Koda"  "$(koda project show koda
 assert "koda project show --json"  '"slug"'             "$(koda project show koda --json)"
 
 # =============================================================================
-# STEP 7: Ticket lifecycle
+# STEP 7: Label CRUD
 # =============================================================================
-log "Step 7: Ticket lifecycle..."
+log "Step 7: Label CRUD..."
+LABEL_CREATE_OUT=$(koda label create --project koda --name "smoke-bug" --color "#e11d48" --json)
+assert "koda label create" '"name"\|smoke-bug' "$LABEL_CREATE_OUT"
+LABEL_ID=$(echo "$LABEL_CREATE_OUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('id', d.get('data',{}).get('id','')))" 2>/dev/null || true)
+
+assert "koda label list"       "smoke-bug"    "$(koda label list --project koda)"
+assert "koda label list --json" '"name"'      "$(koda label list --project koda --json)"
+
+# =============================================================================
+# STEP 8: Ticket lifecycle
+# =============================================================================
+log "Step 8: Ticket lifecycle (bug workflow)..."
 CREATE_OUT=$(koda ticket create --project koda --type BUG --title "Smoke test ticket")
 assert "koda ticket create" "KODA-\|created\|success\|ticket\|smoke" "$CREATE_OUT"
 
@@ -207,22 +235,101 @@ assert "koda ticket start"     "start\|success\|IN_PROGRESS" "$(koda ticket star
 assert "koda ticket fix"       "fix\|success\|VERIFY_FIX"   "$(koda ticket fix KODA-1 --comment 'Fixed it')"
 assert "koda ticket verify-fix" "pass\|CLOSED\|success"     "$(koda ticket verify-fix KODA-1 --comment 'Good fix' --pass)"
 
+# =============================================================================
+# STEP 9: Ticket reject flow
+# =============================================================================
+log "Step 9: Ticket reject flow..."
 koda ticket create --project koda --type BUG --title "Reject ticket" > /dev/null
 assert "koda ticket reject"    "reject\|REJECTED\|success"  "$(koda ticket reject KODA-2 --comment 'Not a bug')"
 
 # =============================================================================
-# STEP 8: Comment + agent
+# STEP 10: Ticket assign + mine
 # =============================================================================
-log "Step 8: Comment & agent..."
+log "Step 10: Ticket assign + mine..."
+koda ticket create --project koda --type BUG --title "Assign test ticket" > /dev/null
+assert "koda ticket assign"    "assign\|success\|smoke-agent"  "$(koda ticket assign KODA-3 --to smoke-agent)"
+assert "koda ticket mine"      "KODA-3\|Assign"               "$(koda ticket mine --project koda)"
+assert "koda ticket mine --json" '"id"\|"title"'              "$(koda ticket mine --project koda --json)"
+
+# =============================================================================
+# STEP 11: Ticket update
+# =============================================================================
+log "Step 11: Ticket update..."
+assert "koda ticket update" "update\|success\|Updated" "$(koda ticket update KODA-3 --title 'Updated title' --priority HIGH)"
+
+# =============================================================================
+# STEP 12: Ticket close (direct)
+# =============================================================================
+log "Step 12: Ticket close..."
+koda ticket create --project koda --type TASK --title "Close test ticket" > /dev/null
+koda ticket start KODA-4 > /dev/null
+assert "koda ticket close"    "close\|CLOSED\|success"  "$(koda ticket close KODA-4)"
+
+# =============================================================================
+# STEP 13: Ticket links
+# =============================================================================
+log "Step 13: Ticket links..."
+koda ticket create --project koda --type BUG --title "Link test ticket" > /dev/null
+assert "koda ticket link"     "link\|success\|github"    "$(koda ticket link KODA-5 --url 'https://github.com/owner/repo/pull/42')"
+assert "koda ticket unlink"   "unlink\|success\|removed\|deleted" "$(koda ticket unlink KODA-5 --url 'https://github.com/owner/repo/pull/42')"
+
+# =============================================================================
+# STEP 14: Ticket labels (attach/detach)
+# =============================================================================
+log "Step 14: Ticket labels..."
+if [[ -n "$LABEL_ID" ]]; then
+  assert "koda ticket label add"    "success\|added\|attach"   "$(koda ticket label add KODA-5 --label "$LABEL_ID")"
+  assert "koda ticket label remove" "success\|removed\|detach" "$(koda ticket label remove KODA-5 --label "$LABEL_ID")"
+else
+  fail "koda ticket label add — skipped (no LABEL_ID)"
+  fail "koda ticket label remove — skipped (no LABEL_ID)"
+fi
+
+# =============================================================================
+# STEP 15: Ticket delete
+# =============================================================================
+log "Step 15: Ticket delete..."
+koda ticket create --project koda --type TASK --title "Delete me" > /dev/null
+assert "koda ticket delete (no --force)" "force\|confirm\|require" "$(koda ticket delete KODA-6 2>&1)"
+assert "koda ticket delete --force"      "delet\|success\|removed" "$(koda ticket delete KODA-6 --force)"
+
+# =============================================================================
+# STEP 16: Comment & agent
+# =============================================================================
+log "Step 16: Comment & agent..."
 koda ticket create --project koda --type ENHANCEMENT --title "Comment ticket" > /dev/null
-assert "koda comment add"   "success\|comment\|added\|Comment"  "$(koda comment add KODA-3 --body 'Great ticket')"
+assert "koda comment add"   "success\|comment\|added\|Comment"  "$(koda comment add KODA-7 --body 'Great ticket')"
 assert "koda agent me"      "smoke-agent\|Smoke Agent"          "$(koda agent me)"
 assert "koda agent me --json" '"slug"\|"name"'                  "$(koda agent me --json)"
 
 # =============================================================================
-# STEP 9: Error handling
+# STEP 17: Knowledge base
 # =============================================================================
-log "Step 9: Error handling..."
+log "Step 17: Knowledge base..."
+# Create a temp file for KB add
+KB_FILE=$(mktemp /tmp/koda-kb-XXXX.md)
+echo "# Smoke Test KB Doc" > "$KB_FILE"
+echo "This is a test document for the knowledge base." >> "$KB_FILE"
+
+assert "koda kb add"         "success\|added\|indexed\|document"  "$(koda kb add --project koda --file "$KB_FILE")"
+assert "koda kb list"        "smoke\|document\|kb\|total\|0\|1"   "$(koda kb list --project koda)"
+assert "koda kb search"      "result\|smoke\|score\|no\|found"    "$(koda kb search --project koda --query 'smoke test')"
+rm -f "$KB_FILE"
+
+# =============================================================================
+# STEP 18: Label delete
+# =============================================================================
+log "Step 18: Label delete..."
+if [[ -n "$LABEL_ID" ]]; then
+  assert "koda label delete" "delet\|success\|removed" "$(koda label delete --project koda --id "$LABEL_ID")"
+else
+  fail "koda label delete — skipped (no LABEL_ID)"
+fi
+
+# =============================================================================
+# STEP 19: Error handling
+# =============================================================================
+log "Step 19: Error handling..."
 NO_AUTH_HOME=$(mktemp -d)
 EXIT_CODE=$(HOME="$NO_AUTH_HOME" bun run --silent --cwd "$CLI_DIR" src/index.ts project list > /dev/null 2>&1; echo $?)
 rm -rf "$NO_AUTH_HOME"
