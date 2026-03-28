@@ -8,13 +8,15 @@
 
 const tsJest = require('ts-jest')
 
-let _transformer = null
+// Keyed by stable JSON of transformerConfig to handle different configs per file set
+const _transformerCache = new Map()
 
 function getTransformer(transformerConfig) {
-  if (!_transformer) {
-    _transformer = tsJest.default.createTransformer(transformerConfig || {})
+  const key = JSON.stringify(transformerConfig || {})
+  if (!_transformerCache.has(key)) {
+    _transformerCache.set(key, tsJest.default.createTransformer(transformerConfig || {}))
   }
-  return _transformer
+  return _transformerCache.get(key)
 }
 
 function patchSource(sourceText, sourcePath) {
@@ -22,6 +24,7 @@ function patchSource(sourceText, sourcePath) {
   // in expectations and we don't want those replaced
   if (
     sourcePath.includes('/tests/') ||
+    sourcePath.includes('/test/') ||
     sourcePath.endsWith('.spec.ts') ||
     sourcePath.endsWith('.test.ts')
   ) {
