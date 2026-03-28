@@ -81,7 +81,7 @@ function onDocumentAdded() {
     <!-- Page header -->
     <div>
       <h1 class="text-2xl font-bold">{{ t('nav.kb') }}</h1>
-      <p class="text-sm text-muted-foreground">Search and manage documents for the {{ slug }} project.</p>
+      <p class="text-sm text-muted-foreground">{{ t('kb.pageDescription', { project: slug }) }}</p>
     </div>
 
     <Tabs default-value="search">

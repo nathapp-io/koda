@@ -4,26 +4,32 @@ const props = defineProps<{
   bestMatch?: string | null
 }>()
 
+const { t } = useI18n()
+
 const verdictConfig = computed(() => {
   switch (props.verdict) {
     case 'likely_duplicate':
       return {
-        label: 'Likely Duplicate',
-        description: props.bestMatch ? `Best match: ${props.bestMatch}` : 'A very similar issue already exists.',
+        label: t('kb.verdict.likelyDuplicate'),
+        description: props.bestMatch
+          ? t('kb.verdict.bestMatch', { match: props.bestMatch })
+          : t('kb.verdict.likelyDuplicateDesc'),
         classes: 'bg-red-50 border-red-200 text-red-800 dark:bg-red-950 dark:border-red-800 dark:text-red-200',
         dot: 'bg-red-500',
       }
     case 'possibly_related':
       return {
-        label: 'Possibly Related',
-        description: props.bestMatch ? `Closest match: ${props.bestMatch}` : 'Some related issues were found.',
+        label: t('kb.verdict.possiblyRelated'),
+        description: props.bestMatch
+          ? t('kb.verdict.closestMatch', { match: props.bestMatch })
+          : t('kb.verdict.possiblyRelatedDesc'),
         classes: 'bg-yellow-50 border-yellow-200 text-yellow-800 dark:bg-yellow-950 dark:border-yellow-800 dark:text-yellow-200',
         dot: 'bg-yellow-500',
       }
     case 'no_match':
       return {
-        label: 'No Match',
-        description: 'No closely related issues found.',
+        label: t('kb.verdict.noMatch'),
+        description: t('kb.verdict.noMatchDesc'),
         classes: 'bg-gray-50 border-gray-200 text-gray-700 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300',
         dot: 'bg-gray-400',
       }

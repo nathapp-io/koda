@@ -17,7 +17,7 @@ const { t } = useI18n()
 
 const { data: agentsData, pending, error, refresh } = useAsyncData(
   `agents-${slug}`,
-  () => $api.get('/agents') as Promise<Agent[]>,
+  () => $api.get(`/projects/${slug}/agents`) as Promise<Agent[]>,
 )
 
 const agents = computed(() => agentsData.value ?? [])
@@ -30,7 +30,7 @@ function statusClass(status: string) {
 
 async function changeStatus(agent: Agent, newStatus: 'ACTIVE' | 'PAUSED' | 'OFFLINE') {
   try {
-    await $api.patch(`/agents/${agent.id}`, { status: newStatus })
+    await $api.patch(`/projects/${slug}/agents/${agent.id}`, { status: newStatus })
     toast.success(t('agents.toast.statusUpdated', { status: newStatus }))
     refresh()
   } catch (err) {

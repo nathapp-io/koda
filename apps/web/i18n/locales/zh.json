@@ -187,6 +187,17 @@
     }
   },
   "kb": {
+    "pageDescription": "搜索并管理 {project} 项目的文档。",
+    "verdict": {
+      "likelyDuplicate": "可能重复",
+      "likelyDuplicateDesc": "已存在非常相似的工单。",
+      "bestMatch": "最佳匹配：{match}",
+      "possiblyRelated": "可能相关",
+      "possiblyRelatedDesc": "找到了一些相关的工单。",
+      "closestMatch": "最接近的匹配：{match}",
+      "noMatch": "无匹配",
+      "noMatchDesc": "未找到密切相关的工单。"
+    },
     "tabs": {
       "search": "搜索",
       "documents": "文档"
@@ -199,6 +210,7 @@
     "documents": {
       "addButton": "添加文档",
       "addTitle": "添加文档",
+      "addDescription": "将文档添加到该项目的知识库。",
       "empty": "暂无文档。",
       "columns": {
         "source": "来源",

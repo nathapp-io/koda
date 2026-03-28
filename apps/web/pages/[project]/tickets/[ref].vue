@@ -24,7 +24,7 @@ interface Ticket {
 }
 
 const route = useRoute()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const slug = route.params.project as string
 const ref = route.params.ref as string
@@ -70,7 +70,7 @@ function typeClass(type: string) {
 }
 
 function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString('en-US', {
+  return new Date(dateStr).toLocaleDateString(locale.value, {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
