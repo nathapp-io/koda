@@ -51,6 +51,17 @@ describeIntegration('API Integration Tests', () => {
   beforeAll(async () => {
     if (!DATABASE_URL) return;
 
+    // Reset SQLite test DB to clean schema
+    try {
+      const { execSync } = await import('child_process');
+      execSync('bunx prisma db push --force-reset --skip-generate', {
+        stdio: 'inherit',
+        env: { ...process.env, DATABASE_URL },
+      });
+    } catch {
+      // Database reset may fail if schema is already in sync, which is OK for tests
+    }
+
     // Use AppFactory to get NathApplication with useAppGlobal* methods
     // IMPORTANT: DI container is ready right after create() (no init() needed).
     // Global guards MUST be registered BEFORE init() — NestJS compiles route
