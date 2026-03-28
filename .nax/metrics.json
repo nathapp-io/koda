@@ -912,5 +912,86 @@
         "source": "parallel"
       }
     ]
+  },
+  {
+    "runId": "run-2026-03-28T09-28-21-185Z",
+    "feature": "web-auth-security",
+    "startedAt": "2026-03-28T09:28:21.185Z",
+    "completedAt": "2026-03-28T10:34:20.133Z",
+    "totalCost": 7.0172172,
+    "totalStories": 4,
+    "storiesCompleted": 4,
+    "storiesFailed": 0,
+    "totalDurationMs": 3958948,
+    "stories": [
+      {
+        "storyId": "US-001",
+        "complexity": "simple",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "modelUsed": "haiku",
+        "attempts": 1,
+        "finalTier": "fast",
+        "success": true,
+        "cost": 1.10728935,
+        "durationMs": 0,
+        "firstPassSuccess": true,
+        "startedAt": "2026-03-28T09:28:22.171Z",
+        "completedAt": "2026-03-28T09:39:02.743Z",
+        "fullSuiteGatePassed": false,
+        "runtimeCrashes": 0
+      },
+      {
+        "storyId": "US-003",
+        "complexity": "simple",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "modelUsed": "haiku",
+        "attempts": 1,
+        "finalTier": "fast",
+        "success": true,
+        "cost": 0.2387482,
+        "durationMs": 105609,
+        "firstPassSuccess": true,
+        "startedAt": "2026-03-28T09:39:04.806Z",
+        "completedAt": "2026-03-28T09:42:07.984Z",
+        "fullSuiteGatePassed": false,
+        "runtimeCrashes": 0
+      },
+      {
+        "storyId": "US-004",
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "modelUsed": "sonnet",
+        "attempts": 1,
+        "finalTier": "balanced",
+        "success": true,
+        "cost": 5.45102735,
+        "durationMs": 0,
+        "firstPassSuccess": true,
+        "startedAt": "2026-03-28T09:42:10.048Z",
+        "completedAt": "2026-03-28T10:10:20.467Z",
+        "fullSuiteGatePassed": true,
+        "runtimeCrashes": 0
+      },
+      {
+        "storyId": "US-005",
+        "complexity": "simple",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "modelUsed": "haiku",
+        "attempts": 1,
+        "finalTier": "fast",
+        "success": true,
+        "cost": 0.22015230000000002,
+        "durationMs": 140420,
+        "firstPassSuccess": true,
+        "startedAt": "2026-03-28T10:10:22.528Z",
+        "completedAt": "2026-03-28T10:17:16.409Z",
+        "fullSuiteGatePassed": false,
+        "runtimeCrashes": 0
+      }
+    ]
   }
 ]
