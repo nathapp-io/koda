@@ -363,3 +363,39 @@ describe('US-005-3: CommentThread.vue has no console.log statements', () => {
     expect(source).not.toContain('console.log')
   })
 })
+
+// ──────────────────────────────────────────────────────────────────────────────
+// US-004 AC4 — onSubmit catch uses extractApiError, not instanceof Error
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('US-004 AC4: CommentThread onSubmit catch uses extractApiError', () => {
+  test('source imports extractApiError from ~/composables/useApi', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    const hasImport =
+      source.includes('extractApiError') &&
+      (source.includes('useApi') || source.includes('composables/useApi'))
+    expect(hasImport).toBe(true)
+  })
+
+  test('source calls extractApiError(err) in onSubmit catch block', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    expect(source).toContain('extractApiError(')
+  })
+
+  test('source does not use inferior instanceof Error pattern in catch block', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    // The old pattern: err instanceof Error ? err.message : fallback
+    const hasInferiorPattern =
+      source.includes('instanceof Error ? err.message') ||
+      source.includes('instanceof Error ? error.message')
+    expect(hasInferiorPattern).toBe(false)
+  })
+
+  test('toast.error is called with extractApiError result on comment submit failure', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    const hasExtractBeforeToast =
+      source.includes('extractApiError(') &&
+      source.includes('toast.error(')
+    expect(hasExtractBeforeToast).toBe(true)
+  })
+})

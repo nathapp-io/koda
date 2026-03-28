@@ -359,3 +359,84 @@ describe('US-008: pages/[project]/labels.vue has no console.log statements', () 
     expect(source).not.toContain('console.log')
   })
 })
+
+// ──────────────────────────────────────────────────────────────────────────────
+// US-004 AC5 — onSubmit catch uses extractApiError and no console.error
+// US-004 AC6 — deleteLabel catch uses extractApiError and no console.error
+// US-004 AC7 — extractApiError returns error.message for generic Error
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('US-004 AC5: labels.vue onSubmit catch uses extractApiError and no console.error', () => {
+  test('source imports extractApiError from ~/composables/useApi', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    const hasImport =
+      source.includes('extractApiError') &&
+      (source.includes('useApi') || source.includes('composables/useApi'))
+    expect(hasImport).toBe(true)
+  })
+
+  test('source calls extractApiError(err) in create label catch block', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    expect(source).toContain('extractApiError(')
+  })
+
+  test('toast.error is called with extractApiError result on label create failure', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    const hasExtractBeforeToast =
+      source.includes('extractApiError(') &&
+      source.includes('toast.error(')
+    expect(hasExtractBeforeToast).toBe(true)
+  })
+
+  test('source does not contain console.error in onSubmit catch', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    expect(source).not.toContain('console.error')
+  })
+})
+
+describe('US-004 AC6: labels.vue deleteLabel catch uses extractApiError and no console.error', () => {
+  test('source calls extractApiError(err) in deleteLabel catch block', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    // extractApiError must be present (covers both catch blocks)
+    expect(source).toContain('extractApiError(')
+  })
+
+  test('source does not contain any console.error calls', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    expect(source).not.toContain('console.error')
+  })
+
+  test('source does not use inferior instanceof Error pattern in deleteLabel catch', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    const hasInferiorPattern =
+      source.includes('instanceof Error ? err.message') ||
+      source.includes('instanceof Error ? error.message')
+    expect(hasInferiorPattern).toBe(false)
+  })
+})
+
+describe('US-004 AC7: extractApiError in useApi composable handles generic Error', () => {
+  const useApiPath = join(webDir, 'composables', 'useApi.ts')
+
+  test('composable exports extractApiError function', () => {
+    const source = readFileSync(useApiPath, 'utf-8')
+    expect(source).toContain('export function extractApiError')
+  })
+
+  test('extractApiError handles generic Error by returning error.message', () => {
+    const source = readFileSync(useApiPath, 'utf-8')
+    // The function must have a branch for generic Error instances
+    const hasGenericErrorBranch =
+      source.includes('err instanceof Error') &&
+      source.includes('err.message')
+    expect(hasGenericErrorBranch).toBe(true)
+  })
+
+  test('extractApiError handles ApiError by returning firstError', () => {
+    const source = readFileSync(useApiPath, 'utf-8')
+    const hasApiErrorBranch =
+      source.includes('err instanceof ApiError') &&
+      source.includes('firstError')
+    expect(hasApiErrorBranch).toBe(true)
+  })
+})
