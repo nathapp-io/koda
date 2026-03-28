@@ -1,0 +1,201 @@
+{
+  "project": "koda",
+  "feature": "web-auth-security",
+  "branchName": "feat/web-auth-security",
+  "createdAt": "2026-03-28T00:00:00.000Z",
+  "updatedAt": "2026-03-28T10:17:16.411Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Harden koda_token cookie security attributes",
+      "description": "Add `secure: true`, `sameSite: 'strict'`, and `maxAge: 604800` options to the `useCookie('koda_token')` call in `apps/web/composables/useAuth.ts` line 33. The `httpOnly` option must NOT be set to true because `useApi.ts` reads `auth.token.value` client-side to construct the Authorization header — this is a documented trade-off. All existing auth flows (login, register, logout, fetchUser) must continue to function correctly against the same cookie ref.",
+      "acceptanceCriteria": [
+        "When useAuth() initializes the token cookie, useCookie is called with a second argument containing `secure: true`",
+        "When useAuth() initializes the token cookie, useCookie is called with a second argument containing `sameSite: 'strict'`",
+        "When useAuth() initializes the token cookie, useCookie is called with a second argument containing `maxAge: 604800`",
+        "When login() resolves successfully, token.value equals the accessToken string from the API response",
+        "When logout() is called, token.value is set to null",
+        "Given token.value is non-null, when fetchUser() is called and the API responds successfully, user.value is set to the returned AuthUser and fetchUser() returns true",
+        "Given token.value is null, when fetchUser() is called, it returns false without making any network request"
+      ],
+      "tags": [
+        "security",
+        "auth",
+        "cookie"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "simple",
+        "modelTier": "fast"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/composables/useAuth.ts",
+        "apps/web/composables/useApi.ts"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-002",
+      "title": "Fix CommentThread form validation with toTypedSchema",
+      "description": "In `apps/web/components/CommentThread.vue`, the `commentSchema` z.object (lines 44-47) is passed directly to `useForm({ validationSchema })` without being wrapped with `toTypedSchema()` from `@vee-validate/zod`. This silently disables all client-side validation — the Zod constraints (min(1) on body, z.enum on type) are never enforced. Add the import and wrap the schema exactly as done in `CreateTicketDialog.vue` (line 98) and `CreateProjectDialog.vue` (line 69).",
+      "acceptanceCriteria": [
+        "When a user submits the comment form with an empty body field, form validation fires and the body field error message is displayed without calling $api.post",
+        "When a user submits the comment form with a body value that passes z.string().min(1), $api.post is called with the body and type values",
+        "When a user submits the comment form with a type value not in ['GENERAL','VERIFICATION','FIX_REPORT','REVIEW'], form validation fires and the type field error is displayed without calling $api.post",
+        "Given a successful comment submission, resetForm() clears the body field to '' and resets the type field to 'GENERAL'"
+      ],
+      "tags": [
+        "bug",
+        "forms",
+        "validation"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "simple",
+        "modelTier": "fast"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/components/CommentThread.vue",
+        "apps/web/components/CreateTicketDialog.vue"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-003",
+      "title": "Reset dialog forms after successful submission",
+      "description": "Both `CreateTicketDialog.vue` and `CreateProjectDialog.vue` fail to call `resetForm()` after a successful create, so stale field values appear when the dialog is reopened. In `CreateTicketDialog.vue` (line 109), `resetForm` is not destructured from `useForm()` and is not called. In `CreateProjectDialog.vue` (line 81), `resetForm` is also not destructured (though `handleSubmit`, `setFieldValue`, `isSubmitting`, and `values` are). Both files need `resetForm` destructured and called after `emit('created')` and `emit('update:open', false)` in the success path.",
+      "acceptanceCriteria": [
+        "When CreateTicketDialog's onSubmit() succeeds, resetForm() is called and the title field returns to ''",
+        "When CreateTicketDialog's onSubmit() succeeds, resetForm() is called and the type field returns to ''",
+        "When CreateTicketDialog's onSubmit() succeeds, resetForm() is called and the priority field returns to 'MEDIUM'",
+        "When CreateTicketDialog's onSubmit() succeeds, resetForm() is called and the description field returns to ''",
+        "When CreateProjectDialog's onSubmit() succeeds, resetForm() is called and the name field returns to ''",
+        "When CreateProjectDialog's onSubmit() succeeds, resetForm() is called and the slug field returns to ''",
+        "When CreateProjectDialog's onSubmit() succeeds, resetForm() is called and the key field returns to ''"
+      ],
+      "tags": [
+        "bug",
+        "forms",
+        "ux"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "simple",
+        "modelTier": "fast"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/components/CreateTicketDialog.vue",
+        "apps/web/components/CreateProjectDialog.vue"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-004",
+      "title": "Use extractApiError in all component error catch blocks",
+      "description": "Five components use the inferior `error instanceof Error ? error.message : fallbackString` pattern that loses structured ApiError details (field-level validation errors, non-zero ret codes). Replace all occurrences with `extractApiError(error)` from `~/composables/useApi`, which correctly handles ApiError.firstError, ofetch FetchError .data.message, and generic Error.message. Additionally, remove the two `console.error` calls in `labels.vue` (lines 45 and 56) — they violate the project's no-console-log policy and are replaced by the toast calls.\n\nFiles to update:\n- `TicketActionPanel.vue` line 52-54 (performAction catch)\n- `CreateTicketDialog.vue` lines 127-129 (onSubmit catch)\n- `CreateProjectDialog.vue` lines 116-118 (onSubmit catch)\n- `CommentThread.vue` lines 67-70 (onSubmit catch)\n- `labels.vue` lines 44-47 and 55-57 (two catch blocks)",
+      "acceptanceCriteria": [
+        "When TicketActionPanel's performAction() catches an ApiError, toast.error is called with the ApiError's firstError string (not a generic fallback)",
+        "When CreateTicketDialog's onSubmit() catches an ApiError with field-level errors, toast.error is called with the first field error string via extractApiError",
+        "When CreateProjectDialog's onSubmit() catches an ApiError with field-level errors, toast.error is called with the first field error string via extractApiError",
+        "When CommentThread's onSubmit() catches an ApiError, toast.error is called with extractApiError(err) rather than err.message",
+        "When labels.vue's onSubmit() catches a label creation error, toast.error is called with extractApiError(err) and console.error is not called",
+        "When labels.vue's deleteLabel() catches a delete error, toast.error is called with extractApiError(err) and console.error is not called",
+        "Given a caught generic Error (not ApiError), extractApiError returns error.message so toast.error displays the plain message"
+      ],
+      "tags": [
+        "bug",
+        "error-handling",
+        "dx"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/composables/useApi.ts",
+        "apps/web/components/TicketActionPanel.vue",
+        "apps/web/components/CommentThread.vue",
+        "apps/web/components/CreateTicketDialog.vue",
+        "apps/web/pages/[project]/labels.vue"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-005",
+      "title": "Fix LanguageSwitcher active locale comparison",
+      "description": "In `apps/web/components/LanguageSwitcher.vue`, `locale` from `useI18n()` is a `Ref<string>`. Two bindings compare or pass the Ref object instead of its unwrapped value:\n1. Line 31: `locale === loc.code` — comparing a Ref to a string always returns false, so the active button class is never applied\n2. Line 42: `:model-value=\"locale\"` — passes the Ref object to the Select component instead of the string value, breaking the dropdown selection\n\nFix by changing both to use `locale.value`. The `currentLocaleName` computed (line 12) and `switchLocale` function (line 18) are already correct and must not be changed.",
+      "acceptanceCriteria": [
+        "When the active locale code matches a toggle button's loc.code, the button receives the class 'bg-primary text-primary-foreground font-medium' (locale.value === loc.code evaluates to true)",
+        "When the active locale code does not match a toggle button's loc.code, the button receives the class 'text-muted-foreground hover:text-foreground hover:bg-muted'",
+        "When rendering with 3 or more locales, the Select component's model-value prop equals the string value of locale.value, not the Ref object",
+        "When switchLocale(code) is called with a locale code string, setLocale receives that same string code"
+      ],
+      "tags": [
+        "bug",
+        "i18n",
+        "ux"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "simple",
+        "modelTier": "fast"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/components/LanguageSwitcher.vue"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    }
+  ],
+  "analysis": "Five isolated bug fixes in apps/web/. All changes are client-side only; no API, CLI, or Prisma changes required.\n\n**US-001 — Cookie hardening (useAuth.ts:33):** The `useCookie('koda_token')` call at line 33 has no security options. Must add `secure: true`, `sameSite: 'strict' as const`, and `maxAge: 604800`. `httpOnly` CANNOT be true because `useApi.ts` reads `auth.token.value` at lines 103-105 to set the Authorization header client-side — this is an intentional trade-off documented in the spec. The cookie ref is shared across `login()` (sets `token.value`), `logout()` (clears to null), and `fetchUser()` (reads for /auth/me header). Security override mandates three-session-tdd.\n\n**US-002 — toTypedSchema (CommentThread.vue:44-55):** The `commentSchema` z.object is passed directly to `useForm({ validationSchema })` without being wrapped in `toTypedSchema()` from `@vee-validate/zod`. This silently disables all client-side validation. The fix is a single import + wrapping the schema. `CreateTicketDialog.vue` (line 98) and `CreateProjectDialog.vue` (line 69) already use `toTypedSchema` correctly and serve as reference implementations.\n\n**US-003 — Dialog form reset (CreateTicketDialog.vue, CreateProjectDialog.vue):** `CreateTicketDialog.vue` at line 109 destructures only `handleSubmit` and `isSubmitting` from `useForm()` — `resetForm` is not destructured and not called after success (lines 124-126). `CreateProjectDialog.vue` at line 81 destructures `handleSubmit, setFieldValue, isSubmitting, values` but omits `resetForm`, which is also not called after success (lines 113-115). Both need `resetForm()` called after `emit('created')` and `emit('update:open', false)`. Note: CreateProjectDialog has watchers on `values.name` and `values.key` — these will continue to function correctly after `resetForm()` resets to initial values `{ name: '', slug: '', key: '' }`.\n\n**US-004 — extractApiError (5 files):** `extractApiError` is already exported from `apps/web/composables/useApi.ts` (lines 68-89). It handles ApiError (returns `firstError`), ofetch FetchError (extracts `.data.message` or `.data.errors`), and generic Error. Four components still use the inferior `error instanceof Error ? error.message : fallback` pattern: TicketActionPanel.vue:53, CreateTicketDialog.vue:128, CreateProjectDialog.vue:117, CommentThread.vue:68. Additionally labels.vue has two `console.error()` calls (lines 45, 56) that must be removed and replaced with `toast.error(extractApiError(err))`. All five files need `import { extractApiError } from '~/composables/useApi'` added — note this is a named import, not the `useApi()` composable call (which is separate).\n\n**US-005 — LanguageSwitcher ref comparison (LanguageSwitcher.vue:31,42):** `locale` from `useI18n()` is a `Ref<string>`, not a string. Line 31 compares `locale === loc.code` (Ref vs string — always false), and line 42 binds `:model-value=\"locale\"` (passes Ref object instead of string value). Must change to `locale.value === loc.code` and `:model-value=\"locale.value\"` respectively. Note: `currentLocaleName` computed at line 12 already uses `locale.value` correctly and needs no change. `switchLocale` at line 18 already receives string codes and needs no change.\n\n**Test approach:** The web app uses Jest. Component tests use Vue Test Utils. Existing tests live under `apps/web/test/` or co-located. All stories should write tests first."
+}

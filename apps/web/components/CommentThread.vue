@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useForm } from 'vee-validate'
+import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { toast } from 'vue-sonner'
+import { extractApiError } from '~/composables/useApi'
 
 interface Comment {
   id: string
@@ -41,10 +43,12 @@ const typePillClass: Record<Comment['type'], string> = {
   GENERAL: 'bg-muted text-muted-foreground',
 }
 
-const commentSchema = z.object({
-  body: z.string().min(1, t('comments.validation.bodyRequired')),
-  type: z.enum(['GENERAL', 'VERIFICATION', 'FIX_REPORT', 'REVIEW']),
-})
+const commentSchema = toTypedSchema(
+  z.object({
+    body: z.string().min(1, t('comments.validation.bodyRequired')),
+    type: z.enum(['GENERAL', 'VERIFICATION', 'FIX_REPORT', 'REVIEW']),
+  })
+)
 
 const { handleSubmit, resetForm } = useForm({
   validationSchema: commentSchema,
@@ -65,8 +69,7 @@ const onSubmit = handleSubmit(async (values) => {
     emit('comment-added')
     toast.success(t('comments.toast.added'))
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : t('comments.toast.addFailed')
-    toast.error(message)
+    toast.error(extractApiError(err))
   }
 })
 </script>

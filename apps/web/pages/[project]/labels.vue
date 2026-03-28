@@ -3,6 +3,7 @@ import { toast } from 'vue-sonner'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
+import { extractApiError } from '~/composables/useApi'
 
 interface Label {
   id: string
@@ -42,8 +43,7 @@ const onSubmit = handleSubmit(async (values) => {
     resetForm()
     await refresh()
   } catch (err) {
-    console.error('createLabel failed:', err)
-    toast.error(t('labels.toast.createFailed'))
+    toast.error(extractApiError(err))
   }
 })
 
@@ -53,8 +53,7 @@ async function deleteLabel(labelId: string) {
     toast.success(t('labels.toast.deleted'))
     await refresh()
   } catch (err) {
-    console.error('deleteLabel failed:', err)
-    toast.error(t('labels.toast.deleteFailed'))
+    toast.error(extractApiError(err))
   }
 }
 </script>

@@ -30,7 +30,7 @@ export function useAuth() {
   const config = useRuntimeConfig()
   const baseURL = config.public.apiBaseUrl
 
-  const token = useCookie('koda_token')
+  const token = useCookie('koda_token', { secure: true, sameSite: 'strict', maxAge: 604800 })
   const user = useState('koda_user', (): AuthUser | null => null)
 
   const isAuthenticated = computed(() => !!token.value)

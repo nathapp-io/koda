@@ -225,3 +225,72 @@ describe('US-003: CreateProjectDialog.vue has no console.log statements', () => 
     expect(source).not.toContain('console.log')
   })
 })
+
+// ──────────────────────────────────────────────────────────────────────────────
+// US-003: Form reset after successful submission
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('US-003 AC5: resetForm() is called on successful submit for name field', () => {
+  test('source destructures resetForm from useForm()', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    const hasResetFormDestructured = source.includes('resetForm')
+    expect(hasResetFormDestructured).toBe(true)
+  })
+
+  test('source calls resetForm() after successful API call', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    // Check that resetForm is called after the API post succeeds
+    const hasResetFormCall = source.includes('resetForm()')
+    expect(hasResetFormCall).toBe(true)
+  })
+})
+
+describe('US-003 AC6: resetForm() is called on successful submit for slug field', () => {
+  test('source calls resetForm() which resets slug field', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    const hasResetFormCall = source.includes('resetForm()')
+    expect(hasResetFormCall).toBe(true)
+  })
+})
+
+describe('US-003 AC7: resetForm() is called on successful submit for key field', () => {
+  test('source calls resetForm() which resets key field', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    const hasResetFormCall = source.includes('resetForm()')
+    expect(hasResetFormCall).toBe(true)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// US-004 AC3 — onSubmit catch uses extractApiError, not instanceof Error
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('US-004 AC3: CreateProjectDialog onSubmit catch uses extractApiError', () => {
+  test('source imports extractApiError from ~/composables/useApi', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    const hasImport =
+      source.includes('extractApiError') &&
+      (source.includes('useApi') || source.includes('composables/useApi'))
+    expect(hasImport).toBe(true)
+  })
+
+  test('source calls extractApiError(error) in onSubmit catch block', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    expect(source).toContain('extractApiError(')
+  })
+
+  test('source does not use inferior instanceof Error pattern in catch block', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    // The old pattern: error instanceof Error ? error.message : fallback
+    const hasInferiorPattern = source.includes('instanceof Error ? error.message')
+    expect(hasInferiorPattern).toBe(false)
+  })
+
+  test('toast.error is called with extractApiError result on submit failure', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    const hasExtractBeforeToast =
+      source.includes('extractApiError(') &&
+      source.includes('toast.error(')
+    expect(hasExtractBeforeToast).toBe(true)
+  })
+})

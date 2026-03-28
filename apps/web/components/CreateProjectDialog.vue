@@ -54,6 +54,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { toast } from 'vue-sonner'
+import { extractApiError } from '~/composables/useApi'
 
 defineProps<{
   open: boolean
@@ -78,7 +79,7 @@ const formSchema = toTypedSchema(
   }) as any
 )
 
-const { handleSubmit, setFieldValue, isSubmitting, values } = useForm({
+const { handleSubmit, setFieldValue, isSubmitting, values, resetForm } = useForm({
   validationSchema: formSchema,
   initialValues: { name: '', slug: '', key: '' },
 })
@@ -113,9 +114,9 @@ const onSubmit = handleSubmit(async (formValues) => {
     toast.success(t('projects.toast.created'))
     emit('created')
     emit('update:open', false)
+    resetForm()
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : t('projects.toast.createFailed')
-    toast.error(message)
+    toast.error(extractApiError(error))
   }
 })
 </script>

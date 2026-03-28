@@ -261,13 +261,11 @@ describe('AC-8: Failed label creation shows error toast with labels.toast.create
     expect(hasErrorHandling).toBe(true)
   })
 
-  test('labels page shows error toast with labels.toast.createFailed key', () => {
+  test('labels page shows error toast using extractApiError (US-004 replaced static i18n key)', () => {
     const source = readFileSync(labelsPagePath, 'utf-8')
-    const hasCreateFailedToast =
-      source.includes("labels.toast.createFailed") ||
-      source.includes("'labels.toast.createFailed'") ||
-      source.includes('"labels.toast.createFailed"')
-    expect(hasCreateFailedToast).toBe(true)
+    // US-004 replaced labels.toast.createFailed with extractApiError(err) to surface
+    // structured ApiError field-level messages instead of a generic fallback
+    expect(source).toContain('toast.error(extractApiError(')
   })
 
   test('labels page uses toast.error for creation failure', () => {

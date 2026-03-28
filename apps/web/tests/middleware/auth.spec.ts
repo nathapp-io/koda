@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach } from '@jest/globals'
+import { describe, test, expect } from '@jest/globals'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { ref, computed } from 'vue'
@@ -6,9 +6,7 @@ import { ref, computed } from 'vue'
 const webDir = join(__dirname, '../..')
 const middlewarePath = join(webDir, 'middleware', 'auth.global.ts')
 
-beforeEach(() => {
-  jest.resetModules()
-})
+// beforeEach hook removed - Bun test runner doesn't support jest.resetModules()
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Helpers

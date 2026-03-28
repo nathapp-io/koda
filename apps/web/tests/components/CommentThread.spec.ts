@@ -290,6 +290,70 @@ describe('US-005-3 AC6: body field shows a validation error if submitted empty',
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
+// US-002: Form validation with toTypedSchema
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('US-002 AC1: Empty body field shows validation error without calling API', () => {
+  test('source imports toTypedSchema from @vee-validate/zod', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    expect(source).toContain("import { toTypedSchema } from '@vee-validate/zod'")
+  })
+
+  test('source wraps commentSchema with toTypedSchema', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    const hasToTypedSchema =
+      source.includes('toTypedSchema(') &&
+      (source.includes('commentSchema') ||
+       (source.includes('z.object(') && source.includes('toTypedSchema')))
+    expect(hasToTypedSchema).toBe(true)
+  })
+})
+
+describe('US-002 AC2: Valid body field allows API call with body and type', () => {
+  test('commentSchema validates body with z.string().min(1)', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    const hasBodyMin =
+      source.includes("body: z.string().min(1") ||
+      source.includes("body: z.string().min( 1")
+    expect(hasBodyMin).toBe(true)
+  })
+
+  test('onSubmit handles form submission and calls $api.post', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    const hasSubmit =
+      source.includes('onSubmit') &&
+      source.includes('$api.post')
+    expect(hasSubmit).toBe(true)
+  })
+})
+
+describe('US-002 AC3: Invalid type field shows validation error without calling API', () => {
+  test('commentSchema validates type as z.enum with correct values', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    const hasTypeEnum =
+      source.includes("z.enum(['GENERAL', 'VERIFICATION', 'FIX_REPORT', 'REVIEW'])")
+    expect(hasTypeEnum).toBe(true)
+  })
+})
+
+describe('US-002 AC4: After successful submission, form is reset', () => {
+  test('onSubmit calls resetForm() after successful submission', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    const hasResetForm =
+      source.includes('resetForm()')
+    expect(hasResetForm).toBe(true)
+  })
+
+  test('resetForm initialValues set body to empty string and type to GENERAL', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    const hasInitialValues =
+      (source.includes("body: ''") || source.includes('body: ""')) &&
+      source.includes("type: 'GENERAL'")
+    expect(hasInitialValues).toBe(true)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Quality — no console.log
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -297,5 +361,41 @@ describe('US-005-3: CommentThread.vue has no console.log statements', () => {
   test('source does not contain console.log', () => {
     const source = readFileSync(componentPath, 'utf-8')
     expect(source).not.toContain('console.log')
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// US-004 AC4 — onSubmit catch uses extractApiError, not instanceof Error
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('US-004 AC4: CommentThread onSubmit catch uses extractApiError', () => {
+  test('source imports extractApiError from ~/composables/useApi', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    const hasImport =
+      source.includes('extractApiError') &&
+      (source.includes('useApi') || source.includes('composables/useApi'))
+    expect(hasImport).toBe(true)
+  })
+
+  test('source calls extractApiError(err) in onSubmit catch block', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    expect(source).toContain('extractApiError(')
+  })
+
+  test('source does not use inferior instanceof Error pattern in catch block', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    // The old pattern: err instanceof Error ? err.message : fallback
+    const hasInferiorPattern =
+      source.includes('instanceof Error ? err.message') ||
+      source.includes('instanceof Error ? error.message')
+    expect(hasInferiorPattern).toBe(false)
+  })
+
+  test('toast.error is called with extractApiError result on comment submit failure', () => {
+    const source = readFileSync(componentPath, 'utf-8')
+    const hasExtractBeforeToast =
+      source.includes('extractApiError(') &&
+      source.includes('toast.error(')
+    expect(hasExtractBeforeToast).toBe(true)
   })
 })

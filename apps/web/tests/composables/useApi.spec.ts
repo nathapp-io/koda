@@ -50,14 +50,14 @@ describe('AC1: composables/useApi.ts imports useAuth', () => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('AC1b: Authorization header injected when token exists', () => {
+  // beforeEach hook removed - Bun test runner doesn't support jest.resetModules()
+  // Reset globals to a clean state before each test
   beforeEach(() => {
-    jest.resetModules()
-
-    // Reset globals to a clean state before each test
-    ;(globalThis as Record<string, unknown>).useRuntimeConfig = undefined
-    ;(globalThis as Record<string, unknown>).useAuth = undefined
-    ;(globalThis as Record<string, unknown>).useI18n = undefined
-    ;(globalThis as Record<string, unknown>).$fetch = undefined
+    const g = globalThis as Record<string, unknown>
+    g.useRuntimeConfig = undefined
+    g.useAuth = undefined
+    g.useI18n = undefined
+    g.$fetch = undefined
   })
 
   test('GET request includes Authorization: Bearer header when token is set', async () => {

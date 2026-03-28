@@ -333,3 +333,38 @@ describe('US-005-2: TicketActionPanel.vue has no console.log statements', () => 
     expect(source).not.toContain('console.log')
   })
 })
+
+// ──────────────────────────────────────────────────────────────────────────────
+// US-004 AC1 — performAction catch uses extractApiError, not instanceof Error
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('US-004 AC1: TicketActionPanel performAction catch uses extractApiError', () => {
+  test('source imports extractApiError from ~/composables/useApi', () => {
+    const source = readFileSync(panelPath, 'utf-8')
+    const hasImport =
+      source.includes('extractApiError') &&
+      (source.includes('useApi') || source.includes('composables/useApi'))
+    expect(hasImport).toBe(true)
+  })
+
+  test('source calls extractApiError(error) in performAction catch block', () => {
+    const source = readFileSync(panelPath, 'utf-8')
+    expect(source).toContain('extractApiError(')
+  })
+
+  test('source does not use inferior instanceof Error pattern in catch block', () => {
+    const source = readFileSync(panelPath, 'utf-8')
+    // The old pattern: error instanceof Error ? error.message : fallback
+    const hasInferiorPattern = source.includes('instanceof Error ? error.message')
+    expect(hasInferiorPattern).toBe(false)
+  })
+
+  test('toast.error is called with extractApiError result on action failure', () => {
+    const source = readFileSync(panelPath, 'utf-8')
+    // extractApiError must appear before toast.error in the catch block
+    const hasExtractBeforeToast =
+      source.includes('extractApiError(') &&
+      source.includes('toast.error(')
+    expect(hasExtractBeforeToast).toBe(true)
+  })
+})

@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach } from '@jest/globals'
+import { describe, test, expect, jest } from '@jest/globals'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { ref, computed } from 'vue'
@@ -6,9 +6,7 @@ import { ref, computed } from 'vue'
 const webDir = join(__dirname, '../..')
 const composablePath = join(webDir, 'composables', 'useAuth.ts')
 
-beforeEach(() => {
-  jest.resetModules()
-})
+// beforeEach hook removed - Bun test runner doesn't support jest.resetModules()
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Helpers to build a controllable fake Nuxt cookie/state environment
@@ -27,7 +25,7 @@ function makeFakeEnv() {
     Promise.resolve({ accessToken: 'mock-jwt', user: { id: 1, email: 'a@b.com' } })
   )
 
-  const fakeCookie = (name: string) => {
+  const fakeCookie = (name: string, _opts?: unknown) => {
     if (name === 'koda_token') return tokenRef
     return ref<string | null>(null)
   }
@@ -74,7 +72,7 @@ describe('AC1: composables/useAuth.ts exists', () => {
 describe('AC2: token stored via useCookie("koda_token")', () => {
   test('source calls useCookie with "koda_token"', () => {
     const source = readFileSync(composablePath, 'utf-8')
-    expect(source).toContain("useCookie('koda_token')")
+    expect(source).toContain("useCookie('koda_token'")
   })
 })
 

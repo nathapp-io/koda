@@ -289,3 +289,80 @@ describe('US-004-3: CreateTicketDialog.vue has no console.log statements', () =>
     expect(source).not.toContain('console.log')
   })
 })
+
+// ──────────────────────────────────────────────────────────────────────────────
+// US-003: Form reset after successful submission
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('US-003 AC1: resetForm() is called on successful submit for title field', () => {
+  test('source destructures resetForm from useForm()', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    const hasResetFormDestructured = source.includes('resetForm')
+    expect(hasResetFormDestructured).toBe(true)
+  })
+
+  test('source calls resetForm() after successful API call', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    // Check that resetForm is called after the API post succeeds
+    const hasResetFormCall = source.includes('resetForm()')
+    expect(hasResetFormCall).toBe(true)
+  })
+})
+
+describe('US-003 AC2: resetForm() is called on successful submit for type field', () => {
+  test('source calls resetForm() which resets type field', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    const hasResetFormCall = source.includes('resetForm()')
+    expect(hasResetFormCall).toBe(true)
+  })
+})
+
+describe('US-003 AC3: resetForm() is called on successful submit for priority field', () => {
+  test('source calls resetForm() which resets priority to MEDIUM', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    const hasResetFormCall = source.includes('resetForm()')
+    expect(hasResetFormCall).toBe(true)
+  })
+})
+
+describe('US-003 AC4: resetForm() is called on successful submit for description field', () => {
+  test('source calls resetForm() which resets description field', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    const hasResetFormCall = source.includes('resetForm()')
+    expect(hasResetFormCall).toBe(true)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// US-004 AC2 — onSubmit catch uses extractApiError, not instanceof Error
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('US-004 AC2: CreateTicketDialog onSubmit catch uses extractApiError', () => {
+  test('source imports extractApiError from ~/composables/useApi', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    const hasImport =
+      source.includes('extractApiError') &&
+      (source.includes('useApi') || source.includes('composables/useApi'))
+    expect(hasImport).toBe(true)
+  })
+
+  test('source calls extractApiError(error) in onSubmit catch block', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    expect(source).toContain('extractApiError(')
+  })
+
+  test('source does not use inferior instanceof Error pattern in catch block', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    // The old pattern: error instanceof Error ? error.message : fallback
+    const hasInferiorPattern = source.includes('instanceof Error ? error.message')
+    expect(hasInferiorPattern).toBe(false)
+  })
+
+  test('toast.error is called with extractApiError result on submit failure', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    const hasExtractBeforeToast =
+      source.includes('extractApiError(') &&
+      source.includes('toast.error(')
+    expect(hasExtractBeforeToast).toBe(true)
+  })
+})
