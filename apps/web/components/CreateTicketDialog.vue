@@ -82,6 +82,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { toast } from 'vue-sonner'
+import { extractApiError } from '~/composables/useApi'
 
 const props = defineProps<{
   open: boolean
@@ -126,8 +127,7 @@ const onSubmit = handleSubmit(async (formValues) => {
     emit('update:open', false)
     resetForm()
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : t('tickets.toast.createFailed')
-    toast.error(message)
+    toast.error(extractApiError(error))
   }
 })
 </script>

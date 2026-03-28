@@ -194,9 +194,11 @@ describe('US-008 AC5: POST failure shows labels.toast.createFailed error toast',
     expect(source).toContain('toast.error')
   })
 
-  test('source uses labels.toast.createFailed i18n key for error toast', () => {
+  test('source uses extractApiError to build the error toast message (US-004 supersedes static i18n key)', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('labels.toast.createFailed')
+    // US-004 replaced the static labels.toast.createFailed fallback with extractApiError(err)
+    // so the error toast message is now the structured API error string
+    expect(source).toContain('extractApiError(')
   })
 
   test('source has try/catch error handling around the POST call', () => {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { toast } from 'vue-sonner'
+import { extractApiError } from '~/composables/useApi'
 
 interface Ticket {
   id: string
@@ -50,8 +51,7 @@ async function performAction(action: string, body: Record<string, unknown> = {})
     }
     emit('transition')
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : t('tickets.toast.actionFailed')
-    toast.error(message)
+    toast.error(extractApiError(error))
   }
 }
 

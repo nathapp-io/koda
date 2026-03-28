@@ -4,6 +4,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { toast } from 'vue-sonner'
+import { extractApiError } from '~/composables/useApi'
 
 interface Comment {
   id: string
@@ -68,8 +69,7 @@ const onSubmit = handleSubmit(async (values) => {
     emit('comment-added')
     toast.success(t('comments.toast.added'))
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : t('comments.toast.addFailed')
-    toast.error(message)
+    toast.error(extractApiError(err))
   }
 })
 </script>
