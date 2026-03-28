@@ -7,7 +7,7 @@
     "build": "nest build",
     "build:generate": "prisma generate && nest build",
     "dev": "nest start --watch",
-    "start": "bun dist/main",
+    "start": "nest start --env-file=.env",
     "start:prod-runtime": "ENV_NAME=production bun /app/apps/runtime/dist/main",
     "test": "jest --forceExit --passWithNoTests --testPathIgnorePatterns=integration",
     "test:watch": "jest --watch",
@@ -38,7 +38,7 @@
     "@nestjs/config": "^4.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-fastify": "^11.0.0",
-    "@nestjs/schedule": "^4.0.0",
+    "@nestjs/schedule": "^4.0.0",    
     "@nestjs/swagger": "^11.0.0",
     "@prisma/client": "^6.0.0",
     "bcrypt": "^5.1.0",
@@ -86,7 +86,7 @@
     "coverageDirectory": "../coverage",
     "testEnvironment": "node",
     "forceExit": true,
-    "maxWorkers": 1,
+    "maxWorkers": 1,    
     "setupFilesAfterEnv": [
       "<rootDir>/../test-setup.ts"
     ]

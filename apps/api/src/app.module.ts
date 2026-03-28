@@ -32,10 +32,7 @@ import { validate } from './config/env.validation';
       validate: validate,
     }),
     I18nCoreModule.forRoot({
-      loaderOptions: {
-        path: join(__dirname, 'i18n'),
-        watch: false,
-      },
+      fallbackLanguage: 'en',
     }),
     LoggingModule.register({}),
     PrismaModule.forRoot({

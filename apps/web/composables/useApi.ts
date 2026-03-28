@@ -98,6 +98,7 @@ export const useApi = () => {
   const getHeaders = () => {
     const headers: Record<string, string> = {
       'Accept-Language': locale.value,
+      'lang': locale.value, 
     }
     if (auth.token && auth.token.value) {
       headers['Authorization'] = `Bearer ${auth.token.value}`

@@ -74,6 +74,7 @@ out/
 apps/web/playwright-report/
 apps/web/test-results/
 apps/api/lancedb/
+lancedb/
 
 # nax runtime (top-level)
 nax.lock
