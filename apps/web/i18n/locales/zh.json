@@ -13,7 +13,9 @@
     "loadingTicket": "正在加载工单...",
     "changeStatus": "修改状态",
     "addComment": "添加评论",
-    "commentPlaceholder": "输入评论或原因..."
+    "commentPlaceholder": "输入评论或原因...",
+    "loadFailed": "加载失败",
+    "retry": "重试"
   },
   "auth": {
     "login": {

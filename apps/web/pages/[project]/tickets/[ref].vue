@@ -31,7 +31,7 @@ const ref = route.params.ref as string
 
 const { $api } = useApi()
 
-const { data: ticketData, refresh } = useAsyncData(
+const { data: ticketData, pending, error, refresh } = useAsyncData(
   `ticket-${slug}-${ref}`,
   () => $api.get(`/projects/${slug}/tickets/${ref}`) as Promise<Ticket>,
 )
@@ -89,7 +89,14 @@ function onCommentAdded() {
 
 <template>
   <div class="p-6">
-    <div v-if="ticket" class="grid grid-cols-3 gap-6">
+    <div v-if="pending" class="flex items-center justify-center py-12">
+      <p class="text-muted-foreground">{{ t('common.loadingTicket') }}</p>
+    </div>
+    <div v-else-if="error" class="flex items-center justify-center py-12 flex-col gap-4">
+      <p class="text-destructive text-sm">{{ t('common.loadFailed') }}</p>
+      <Button @click="refresh()">{{ t('common.retry') }}</Button>
+    </div>
+    <div v-else-if="ticket" class="grid grid-cols-3 gap-6">
       <!-- Left column: 2/3 width -->
       <div class="col-span-2 space-y-6">
         <div>
@@ -181,8 +188,5 @@ function onCommentAdded() {
       </div>
     </div>
 
-    <div v-else class="flex items-center justify-center py-12">
-      <p class="text-muted-foreground">{{ t('common.loadingTicket') }}</p>
-    </div>
   </div>
 </template>

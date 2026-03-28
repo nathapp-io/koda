@@ -56,7 +56,7 @@ interface KbDocument {
   createdAt: string
 }
 
-const { data: docsData, refresh } = useAsyncData(
+const { data: docsData, pending, error, refresh } = useAsyncData(
   `kb-docs-${slug}`,
   () => $api.get<{ items: KbDocument[] }>(`/projects/${slug}/kb/documents`),
 )
@@ -144,6 +144,12 @@ function onDocumentAdded() {
 
       <!-- ── Documents Tab ───────────────────────────────────────────────── -->
       <TabsContent value="documents" class="space-y-4">
+        <div v-if="pending" class="text-center py-12 text-muted-foreground">{{ t('common.loading') }}</div>
+        <div v-else-if="error" class="text-center py-12">
+          <p class="text-destructive text-sm">{{ t('common.loadFailed') }}</p>
+          <Button @click="refresh()">{{ t('common.retry') }}</Button>
+        </div>
+        <template v-else>
         <div class="flex items-center justify-between">
           <p class="text-sm text-muted-foreground">{{ docs.length }} document(s) indexed</p>
           <KbAddDocumentDialog :project-slug="slug" @added="onDocumentAdded" />
@@ -179,6 +185,7 @@ function onDocumentAdded() {
             </tbody>
           </table>
         </div>
+        </template>
       </TabsContent>
     </Tabs>
   </div>
