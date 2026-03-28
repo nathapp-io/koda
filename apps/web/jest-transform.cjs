@@ -27,9 +27,12 @@ function patchSource(sourceText, sourcePath) {
   ) {
     return sourceText
   }
+  // Replace import.meta.server with a globalThis flag so individual tests can
+  // control the value: set globalThis.__JEST_IS_SERVER__ = true in a describe
+  // block to exercise the SSR branch, leave it undefined/false for the client branch.
   return sourceText
-    .replace(/\bimport\.meta\.server\b/g, 'false')
-    .replace(/\bimport\.meta\.client\b/g, 'true')
+    .replace(/\bimport\.meta\.server\b/g, '(globalThis.__JEST_IS_SERVER__ === true)')
+    .replace(/\bimport\.meta\.client\b/g, '(globalThis.__JEST_IS_SERVER__ !== true)')
 }
 
 module.exports = {
