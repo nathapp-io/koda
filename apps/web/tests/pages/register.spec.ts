@@ -16,7 +16,12 @@ describe('AC1: pages/register.vue exists and has correct outer structure', () =>
 
   test('outermost template element is <div class="w-full max-w-md space-y-8">', () => {
     const source = readFileSync(registerPath, 'utf-8')
-    expect(source).toContain('class="w-full max-w-md space-y-8">')
+    const templateMatch = source.match(/<template>([\s\S]*?)<\/template>/)
+    if (templateMatch) {
+      const templateContent = templateMatch[1].trim()
+      // Verify the outermost element is the correct div
+      expect(templateContent).toMatch(/^<div\s+class="w-full max-w-md space-y-8">/)
+    }
   })
 
   test('template does not have outer flex min-h-screen wrapper', () => {
@@ -37,7 +42,7 @@ describe('AC1: pages/register.vue exists and has correct outer structure', () =>
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC2 — toast is imported from 'vue-sonner'
+// AC4 — toast is imported from 'vue-sonner'
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('AC4: toast is imported from vue-sonner', () => {
