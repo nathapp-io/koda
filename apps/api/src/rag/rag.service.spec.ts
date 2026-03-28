@@ -6,6 +6,43 @@ import {
   getVerdict,
 } from './rag.service';
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyRecord = Record<string, any>;
+
+function makeMockRecord(id: string, content: string): AnyRecord {
+  return {
+    id,
+    source: 'ticket',
+    source_id: id,
+    content,
+    vector: [],
+    metadata: '{}',
+    created_at: new Date().toISOString(),
+    provider: 'ollama',
+    model: 'nomic-embed-text',
+  };
+}
+
+const mockConfigServiceForSearch = {
+  get: (key: string): unknown => {
+    const config: Record<string, unknown> = {
+      'rag.lancedbPath': './lancedb',
+      'rag.similarityHigh': 0.85,
+      'rag.similarityMedium': 0.70,
+      'rag.similarityLow': 0.50,
+      'rag.ftsIndexMode': 'simple',
+    };
+    return config[key];
+  },
+};
+
+const mockEmbeddingServiceForSearch = {
+  embed: jest.fn().mockResolvedValue(new Float32Array(384).fill(0)),
+  getDimensions: jest.fn().mockReturnValue(384),
+  provider: 'ollama',
+  model: 'nomic-embed-text',
+};
+
 describe('simpleFtsScore', () => {
   it('returns 0 for empty query', () => {
     expect(simpleFtsScore('some content here', '')).toBe(0);
@@ -244,5 +281,131 @@ describe('RagService.getOrCreateTable — FTS index creation', () => {
     await expect(ragService.getOrCreateTable('test-project')).resolves.toBeDefined();
     expect(loggerSpy).toHaveBeenCalled();
     expect(loggerSpy.mock.calls[0][0]).toContain('FTS index');
+  });
+});
+
+describe('reciprocalRankFusion — export (US-003-2 AC-3)', () => {
+  it('is exported from rag.service.ts', () => {
+    expect(reciprocalRankFusion).toBeDefined();
+    expect(typeof reciprocalRankFusion).toBe('function');
+  });
+});
+
+describe('RagService.search — native FTS path (US-003-2)', () => {
+  function makeTableWithFts(
+    allRows: AnyRecord[],
+    ftsRows: AnyRecord[],
+    vectorRows: AnyRecord[] = [],
+  ) {
+    return {
+      countRows: jest.fn().mockResolvedValue(allRows.length || 1),
+      query: jest.fn().mockReturnValue({
+        limit: jest.fn().mockReturnThis(),
+        toArray: jest.fn().mockResolvedValue(allRows),
+      }),
+      search: jest.fn().mockResolvedValue(ftsRows),
+      vectorSearch: jest.fn().mockReturnValue({
+        distanceType: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        toArray: jest.fn().mockResolvedValue(vectorRows),
+      }),
+    };
+  }
+
+  it('calls table.search(query, "fts", "content") when lanceAvailable is true', async () => {
+    const ragService = new RagService(
+      mockConfigServiceForSearch as never,
+      mockEmbeddingServiceForSearch as never,
+    );
+
+    const ftsRow = makeMockRecord('fts-doc-1', 'authentication error in service');
+    const mockTable = makeTableWithFts([ftsRow], [ftsRow]);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    await ragService.search('test-project', 'authentication error');
+
+    expect(mockTable.search).toHaveBeenCalledWith('authentication error', 'fts', 'content');
+  });
+
+  it('does not call table.search() when lanceAvailable is false', async () => {
+    const ragService = new RagService(
+      mockConfigServiceForSearch as never,
+      mockEmbeddingServiceForSearch as never,
+    );
+
+    const doc = makeMockRecord('doc-1', 'auth keyword content here');
+    const mockTable = makeTableWithFts([doc], [doc]);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    await ragService.search('test-project', 'auth content');
+
+    expect(mockTable.search).not.toHaveBeenCalled();
+  });
+
+  it('scores native FTS results by reciprocal position 1/(i+1)', async () => {
+    const ragService = new RagService(
+      mockConfigServiceForSearch as never,
+      mockEmbeddingServiceForSearch as never,
+    );
+
+    const ftsRows = [
+      makeMockRecord('fts-1', 'first result document'),
+      makeMockRecord('fts-2', 'second result document'),
+      makeMockRecord('fts-3', 'third result document'),
+    ];
+
+    // No vector results — FTS scores drive final output
+    const mockTable = makeTableWithFts(ftsRows, ftsRows, []);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    const result = await ragService.search('test-project', 'result', 3);
+
+    expect(result.results).toHaveLength(3);
+    // FTS result at index 0 → score = 1/(0+1) = 1.0
+    expect(result.results[0].score).toBeCloseTo(1 / (0 + 1));
+    // FTS result at index 1 → score = 1/(1+1) = 0.5
+    expect(result.results[1].score).toBeCloseTo(1 / (1 + 1));
+    // FTS result at index 2 → score = 1/(2+1) ≈ 0.333
+    expect(result.results[2].score).toBeCloseTo(1 / (2 + 1));
+  });
+
+  it('adds ftsRows to recordMap so records unique to native FTS appear in results', async () => {
+    const ragService = new RagService(
+      mockConfigServiceForSearch as never,
+      mockEmbeddingServiceForSearch as never,
+    );
+
+    // fts-only-doc is returned by native FTS but not in the allRows table scan
+    const scannedDoc = makeMockRecord('scanned-doc', 'some generic content');
+    const ftsOnlyDoc = makeMockRecord('fts-only-doc', 'authentication failure critical');
+
+    const mockTable = makeTableWithFts(
+      [scannedDoc],          // allRows: only scanned-doc
+      [ftsOnlyDoc, scannedDoc], // ftsRows: fts-only-doc is the top FTS hit
+      [],                    // vectorRows: empty
+    );
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    const result = await ragService.search('test-project', 'authentication failure', 5);
+
+    const ids = result.results.map((r) => r.id);
+    // fts-only-doc must appear in results because ftsRows were added to recordMap
+    expect(ids).toContain('fts-only-doc');
   });
 });
