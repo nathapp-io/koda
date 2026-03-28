@@ -409,3 +409,140 @@ describe('RagService.search — native FTS path (US-003-2)', () => {
     expect(ids).toContain('fts-only-doc');
   });
 });
+
+describe('RagService.search — in-memory FTS fallback path (US-003-3)', () => {
+  function makeTableWithRejectedSearch(allRows: AnyRecord[]) {
+    return {
+      countRows: jest.fn().mockResolvedValue(allRows.length || 1),
+      query: jest.fn().mockReturnValue({
+        limit: jest.fn().mockReturnThis(),
+        toArray: jest.fn().mockResolvedValue(allRows),
+      }),
+      search: jest.fn().mockRejectedValue(new Error('tantivy index not ready')),
+      vectorSearch: jest.fn().mockReturnValue({
+        distanceType: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        toArray: jest.fn().mockResolvedValue([]),
+      }),
+    };
+  }
+
+  it('when lanceAvailable=true and table.search() rejects, falls back to simpleFtsScore and returns non-empty results', async () => {
+    const ragService = new RagService(
+      mockConfigServiceForSearch as never,
+      mockEmbeddingServiceForSearch as never,
+    );
+
+    const matchingDoc = makeMockRecord('matching-doc', 'authentication error occurred in service');
+    const mockTable = makeTableWithRejectedSearch([matchingDoc]);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    const result = await ragService.search('test-project', 'authentication error', 5);
+
+    // table.search was called (and rejected)
+    expect(mockTable.search).toHaveBeenCalled();
+    // but results must still be populated via simpleFtsScore fallback
+    expect(result.results.length).toBeGreaterThan(0);
+    expect(result.results[0].id).toBe('matching-doc');
+  });
+
+  it('when lanceAvailable=true and table.search() rejects, logs a warning', async () => {
+    const ragService = new RagService(
+      mockConfigServiceForSearch as never,
+      mockEmbeddingServiceForSearch as never,
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const loggerWarnSpy = jest.spyOn((ragService as any).logger, 'warn');
+
+    const doc = makeMockRecord('doc-1', 'some matching content');
+    const mockTable = makeTableWithRejectedSearch([doc]);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    await ragService.search('test-project', 'matching content', 5);
+
+    const warnCalls = loggerWarnSpy.mock.calls.map((c) => String(c[0]));
+    expect(warnCalls.some((msg) => msg.toLowerCase().includes('fts'))).toBe(true);
+  });
+
+  it('when lanceAvailable=true and table.search() rejects, fallback scores match simpleFtsScore output', async () => {
+    const ragService = new RagService(
+      mockConfigServiceForSearch as never,
+      mockEmbeddingServiceForSearch as never,
+    );
+
+    const fullMatchDoc = makeMockRecord('full-match', 'authentication error service crash');
+    const partialMatchDoc = makeMockRecord('partial-match', 'authentication only partial');
+    const noMatchDoc = makeMockRecord('no-match', 'database schema migration rollback');
+
+    const mockTable = makeTableWithRejectedSearch([fullMatchDoc, partialMatchDoc, noMatchDoc]);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    const result = await ragService.search('test-project', 'authentication error service', 5);
+
+    // no-match doc should not appear — simpleFtsScore returns 0 for it
+    const ids = result.results.map((r) => r.id);
+    expect(ids).not.toContain('no-match');
+    // full-match should score higher than partial-match
+    const fullIdx = ids.indexOf('full-match');
+    const partialIdx = ids.indexOf('partial-match');
+    expect(fullIdx).toBeGreaterThanOrEqual(0);
+    expect(partialIdx).toBeGreaterThanOrEqual(0);
+    expect(fullIdx).toBeLessThan(partialIdx);
+  });
+
+  it('when lanceAvailable=false, uses simpleFtsScore without calling table.search()', async () => {
+    const ragService = new RagService(
+      mockConfigServiceForSearch as never,
+      mockEmbeddingServiceForSearch as never,
+    );
+
+    const doc = makeMockRecord('doc-in-memory', 'authentication error keyword content');
+    const mockTable = {
+      countRows: jest.fn().mockResolvedValue(1),
+      query: jest.fn().mockReturnValue({
+        limit: jest.fn().mockReturnThis(),
+        toArray: jest.fn().mockResolvedValue([doc]),
+      }),
+      search: jest.fn().mockResolvedValue([]),
+      vectorSearch: jest.fn().mockReturnValue({
+        distanceType: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        toArray: jest.fn().mockResolvedValue([]),
+      }),
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    const result = await ragService.search('test-project', 'authentication error', 5);
+
+    expect(mockTable.search).not.toHaveBeenCalled();
+    expect(result.results.length).toBeGreaterThan(0);
+    expect(result.results[0].id).toBe('doc-in-memory');
+  });
+});
+
+describe('simpleFtsScore — export (US-003-3 AC-3)', () => {
+  it('is exported from rag.service.ts', () => {
+    expect(simpleFtsScore).toBeDefined();
+    expect(typeof simpleFtsScore).toBe('function');
+  });
+
+  it('returns a score > 0 for matching content', () => {
+    expect(simpleFtsScore('authentication error service', 'authentication')).toBeGreaterThan(0);
+  });
+});
