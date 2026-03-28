@@ -58,7 +58,7 @@ jobs:
         id: prisma-cache
         uses: actions/cache@v4
         with:
-          path: node_modules/.prisma
+          path: apps/api/node_modules/.prisma
           key: prisma-${{ runner.os }}-${{ hashFiles('apps/api/prisma/schema.prisma') }}
 
       - name: Generate Prisma client
@@ -95,7 +95,7 @@ jobs:
         id: prisma-cache
         uses: actions/cache@v4
         with:
-          path: node_modules/.prisma
+          path: apps/api/node_modules/.prisma
           key: prisma-${{ runner.os }}-${{ hashFiles('apps/api/prisma/schema.prisma') }}
 
       - name: Generate Prisma client
