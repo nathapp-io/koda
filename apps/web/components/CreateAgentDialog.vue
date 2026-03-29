@@ -5,7 +5,7 @@
         <DialogTitle>{{ t('agents.form.title') }}</DialogTitle>
       </DialogHeader>
 
-      <form @submit="onSubmit" class="space-y-4">
+      <form v-if="!apiKey" @submit="onSubmit" class="space-y-4">
         <FormField name="name" v-slot="{ componentField }">
           <FormItem>
             <FormLabel>{{ t('agents.form.name') }}</FormLabel>
@@ -105,6 +105,19 @@
           </Button>
         </div>
       </form>
+
+      <div v-if="apiKey" class="space-y-4">
+        <div class="flex gap-2">
+          <Input :value="apiKey" readonly class="flex-1 font-mono text-sm" />
+          <Button @click="copyToClipboard">Copy</Button>
+        </div>
+        <p class="text-sm text-muted-foreground">
+          Copy this API key now. It will not be shown again.
+        </p>
+        <div class="flex justify-end">
+          <Button @click="handleDone">Done</Button>
+        </div>
+      </div>
     </DialogContent>
   </Dialog>
 </template>
@@ -136,6 +149,10 @@ const capabilitiesTags = ref<string[]>([])
 
 // Track if slug was manually edited (to preserve user changes)
 const isSlugManuallyEdited = ref(false)
+
+// Key-reveal state
+const apiKey = ref<string | null>(null)
+const copyButtonText = ref('Copy')
 
 const formSchema = toTypedSchema(
   z.object({
@@ -211,14 +228,25 @@ function handleBackspace(event: Event) {
 
 const { $api } = useApi()
 
+async function copyToClipboard() {
+  if (!apiKey.value) return
+  await navigator.clipboard.writeText(apiKey.value)
+  copyButtonText.value = 'Copied!'
+  setTimeout(() => { copyButtonText.value = 'Copy' }, 2*1000)
+}
+
+function handleDone() {
+  emit('created')
+  emit('update:open', false)
+  apiKey.value = null
+  resetForm()
+  capabilitiesTags.value = []
+}
+
 const onSubmit = handleSubmit(async (formValues) => {
   try {
-    await $api.post('/agents', formValues as Record<string, unknown>)
+    const response = await $api.post('/agents', formValues as Record<string, unknown>); const agentApiKey = (response as { apiKey: string }).apiKey; apiKey.value = agentApiKey
     toast.success(t('agents.toast.created'))
-    emit('created')
-    emit('update:open', false)
-    resetForm()
-    capabilitiesTags.value = []
   } catch (error: unknown) {
     toast.error(t('agents.toast.createFailed'))
   }
