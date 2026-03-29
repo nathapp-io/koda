@@ -1,7 +1,56 @@
 <script setup lang="ts">
+import { LayoutDashboard, Kanban, Bot, Tag, BookOpen } from 'lucide-vue-next'
+
 const { t } = useI18n()
 const auth = useAuth()
+const route = useRoute()
 const sidebarOpen = ref(true)
+
+const projectSlug = computed(() => route.params.project as string | undefined)
+
+const navLinkClass =
+  'flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors'
+const activeClass = 'bg-accent text-accent-foreground'
+
+const breadcrumbItems = computed(() => {
+  const project = projectSlug.value
+  if (!project) return []
+
+  const path = route.path
+  const projectBase = { label: project, to: `/${project}` }
+
+  if (path === `/${project}`) {
+    return [{ label: 'Koda', to: '/' }, { label: project }]
+  }
+  if (path === `/${project}/agents`) {
+    return [{ label: 'Koda', to: '/' }, projectBase, { label: t('nav.agents') }]
+  }
+  if (path === `/${project}/labels`) {
+    return [{ label: 'Koda', to: '/' }, projectBase, { label: t('nav.labels') }]
+  }
+  if (path === `/${project}/kb`) {
+    return [{ label: 'Koda', to: '/' }, projectBase, { label: t('nav.kb') }]
+  }
+
+  const ticketRef = (route.params.ref as string | undefined)
+  if (ticketRef) {
+    return [
+      { label: 'Koda', to: '/' },
+      projectBase,
+      { label: t('nav.tickets'), to: `/${project}` },
+      { label: ticketRef },
+    ]
+  }
+
+  return [{ label: 'Koda', to: '/' }, { label: project }]
+})
+
+const backTo = computed(() => {
+  const project = projectSlug.value
+  if (!project) return '/'
+  if (route.path === `/${project}`) return '/'
+  return `/${project}`
+})
 </script>
 
 <template>
@@ -18,41 +67,60 @@ const sidebarOpen = ref(true)
 
       <!-- Nav links -->
       <nav class="flex-1 space-y-1 px-3 py-4">
+        <!-- Always visible: Dashboard -->
         <NuxtLink
           to="/"
-          class="flex items-center rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+          :class="navLinkClass"
+          :active-class="activeClass"
+          exact-active-class=""
         >
+          <LayoutDashboard class="h-4 w-4 shrink-0" />
           {{ t('nav.dashboard') }}
         </NuxtLink>
-        <NuxtLink
-          to="/projects"
-          class="flex items-center rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
-        >
-          {{ t('nav.projects') }}
-        </NuxtLink>
-        <NuxtLink
-          v-if="$route.params.project"
-          :to="`/${$route.params.project}/agents`"
-          class="flex items-center rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
-        >
-          {{ t('nav.agents') }}
-        </NuxtLink>
-        <NuxtLink
-          v-if="$route.params.project"
-          :to="`/${$route.params.project}/kb`"
-          class="flex items-center rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
-        >
-          {{ t('nav.kb') }}
-        </NuxtLink>
-        <NuxtLink
-          v-if="$route.params.project"
-          :to="`/${$route.params.project}/labels`"
-          class="flex items-center rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
-        >
-          {{ t('nav.labels') }}
-        </NuxtLink>
+
+        <!-- Project-scoped links -->
+        <template v-if="projectSlug">
+          <NuxtLink
+            :to="`/${projectSlug}`"
+            :class="navLinkClass"
+            exact-active-class=""
+            :active-class="activeClass"
+          >
+            <Kanban class="h-4 w-4 shrink-0" />
+            {{ t('nav.board') }}
+          </NuxtLink>
+          <NuxtLink
+            :to="`/${projectSlug}/agents`"
+            :class="navLinkClass"
+            :active-class="activeClass"
+          >
+            <Bot class="h-4 w-4 shrink-0" />
+            {{ t('nav.agents') }}
+          </NuxtLink>
+          <NuxtLink
+            :to="`/${projectSlug}/labels`"
+            :class="navLinkClass"
+            :active-class="activeClass"
+          >
+            <Tag class="h-4 w-4 shrink-0" />
+            {{ t('nav.labels') }}
+          </NuxtLink>
+          <NuxtLink
+            :to="`/${projectSlug}/kb`"
+            :class="navLinkClass"
+            :active-class="activeClass"
+          >
+            <BookOpen class="h-4 w-4 shrink-0" />
+            {{ t('nav.kb') }}
+          </NuxtLink>
+        </template>
       </nav>
 
+      <!-- Sidebar footer: Language + Theme switchers -->
+      <div class="flex items-center gap-2 border-t border-border px-3 py-3">
+        <LanguageSwitcher />
+        <ThemeSwitcher />
+      </div>
     </aside>
 
     <!-- Main area -->
@@ -70,13 +138,6 @@ const sidebarOpen = ref(true)
         </button>
 
         <div class="flex items-center gap-4">
-          <!-- Language switcher -->
-          <LanguageSwitcher />
-
-          <!-- Theme switcher -->
-          <ThemeSwitcher />
-
-          <!-- User dropdown -->
           <span class="text-sm font-medium text-foreground">
             {{ auth.user.value?.email }}
           </span>
@@ -88,6 +149,15 @@ const sidebarOpen = ref(true)
           </button>
         </div>
       </header>
+
+      <!-- Breadcrumb bar -->
+      <div
+        v-if="breadcrumbItems.length > 1"
+        class="flex items-center gap-2 border-b border-border px-6 py-2"
+      >
+        <BackButton :to="backTo" />
+        <AppBreadcrumb :items="breadcrumbItems" />
+      </div>
 
       <!-- Page content -->
       <main class="px-6 py-4">
