@@ -52,9 +52,11 @@
   "nav": {
     "dashboard": "Dashboard",
     "projects": "Projects",
+    "board": "Board",
     "agents": "Agents",
     "kb": "Knowledge Base",
     "labels": "Labels",
+    "tickets": "Tickets",
     "toggleSidebar": "Toggle sidebar"
   },
   "projects": {

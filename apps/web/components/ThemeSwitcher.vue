@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import { Monitor, Sun, Moon } from 'lucide-vue-next'
+
 const colorMode = useColorMode()
 
 const modes = [
-  { value: 'system', icon: '🖥️', label: 'System' },
-  { value: 'light', icon: '☀️', label: 'Light' },
-  { value: 'dark', icon: '🌙', label: 'Dark' },
+  { value: 'system', icon: Monitor, label: 'System' },
+  { value: 'light', icon: Sun, label: 'Light' },
+  { value: 'dark', icon: Moon, label: 'Dark' },
 ] as const
 
 function setMode(mode: string) {
@@ -19,14 +21,14 @@ function setMode(mode: string) {
       :key="mode.value"
       :title="mode.label"
       :class="[
-        'rounded px-1.5 py-0.5 text-xs transition-colors',
+        'rounded px-1.5 py-0.5 text-xs transition-colors flex items-center',
         colorMode.preference === mode.value
           ? 'bg-primary text-primary-foreground'
           : 'text-muted-foreground hover:text-foreground hover:bg-muted',
       ]"
       @click="setMode(mode.value)"
     >
-      {{ mode.icon }}
+      <component :is="mode.icon" class="h-3.5 w-3.5" />
     </button>
   </div>
 </template>

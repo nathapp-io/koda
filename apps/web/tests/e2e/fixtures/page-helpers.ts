@@ -1,5 +1,13 @@
 import type { Page } from '@playwright/test';
+import { randomBytes } from 'node:crypto';
 import { E2E_ADMIN } from './api-client';
+
+export function generateUniqueProjectKey(prefix = 'EE'): string {
+  const normalizedPrefix = prefix.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2) || 'EE';
+  const suffixLength = 6 - normalizedPrefix.length;
+  const suffix = Array.from(randomBytes(suffixLength), (byte) => String.fromCharCode(65 + (byte % 26))).join('');
+  return `${normalizedPrefix}${suffix}`;
+}
 
 /**
  * Performs login by calling the API directly, then injecting the auth cookie
@@ -41,21 +49,18 @@ export async function webLogin(
   }
 
   // 2. Inject auth cookies so the browser session is authenticated
-  const webAppUrl = new URL(webUrl);
   await page.context().addCookies([
     {
       name: 'koda_token',
       value: accessToken,
-      domain: webAppUrl.hostname,
-      path: '/',
+      url: webUrl,
       httpOnly: false,
       secure: false,
     },
     {
       name: 'koda_refresh_token',
       value: refreshToken ?? '',
-      domain: webAppUrl.hostname,
-      path: '/',
+      url: webUrl,
       httpOnly: false,
       secure: false,
     },

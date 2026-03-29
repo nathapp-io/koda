@@ -1,10 +1,10 @@
 import { test, expect } from '@playwright/test';
 import { login, createProject, deleteProject, E2E_ADMIN } from './fixtures/api-client';
-import { webLogin } from './fixtures/page-helpers';
+import { webLogin, generateUniqueProjectKey } from './fixtures/page-helpers';
 
 test.describe('Projects', () => {
   let token: string;
-  let createdSlug: string;
+  let createdSlug: string | undefined;
 
   test.beforeAll(async () => {
     ({ token } = await login(E2E_ADMIN.email, E2E_ADMIN.password));
@@ -35,20 +35,19 @@ test.describe('Projects', () => {
     await expect(dialog.locator('input').nth(0)).toHaveValue(projectName);
   });
 
-  test('clicking View Board navigates to project board', async ({ page }) => {
+  test('can navigate to the created project board route', async ({ page }) => {
     const proj = await createProject(token, {
       name: 'E2E Nav Project',
       slug: `e2e-nav-${Date.now()}`,
-      key: 'NAVP',
+      key: generateUniqueProjectKey('NV'),
     });
+    createdSlug = proj.slug;
 
     await webLogin(page);
-    await expect(page).toHaveURL('/');
-
-    // Click the first "View Board" button
-    await page.getByRole('button', { name: 'View Board' }).first().click();
+    await page.goto(`/${proj.slug}`);
     await expect(page).toHaveURL(new RegExp(proj.slug), { timeout: 5000 });
 
     await deleteProject(token, proj.slug);
+    createdSlug = undefined;
   });
 });

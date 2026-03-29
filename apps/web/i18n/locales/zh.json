@@ -52,9 +52,11 @@
   "nav": {
     "dashboard": "仪表盘",
     "projects": "项目",
+    "board": "看板",
     "agents": "代理",
     "kb": "知识库",
     "labels": "标签",
+    "tickets": "工单",
     "toggleSidebar": "切换侧栏"
   },
   "projects": {

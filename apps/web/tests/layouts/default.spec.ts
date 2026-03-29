@@ -28,15 +28,15 @@ describe('US-002 AC1: sidebar has w-56 fixed width', () => {
   })
 })
 
-describe('US-002 AC1: sidebar has Dashboard and Projects navigation links', () => {
+describe('US-002 AC1: sidebar has Dashboard and Board navigation links', () => {
   test('source contains Dashboard navigation link text', () => {
     const source = readFileSync(layoutPath, 'utf-8')
     expect(source).toContain("t('nav.dashboard')")
   })
 
-  test('source contains Projects navigation link text', () => {
+  test('source contains Board navigation link text', () => {
     const source = readFileSync(layoutPath, 'utf-8')
-    expect(source).toContain("t('nav.projects')")
+    expect(source).toContain("t('nav.board')")
   })
 
   test('source uses NuxtLink for navigation items', () => {

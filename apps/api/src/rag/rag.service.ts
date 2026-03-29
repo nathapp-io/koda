@@ -335,7 +335,21 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     if (this.lanceAvailable) {
       let nativeFtsFailed = false;
       try {
-        nativeFtsRows = await table.search(query, 'fts', 'content') as LanceRecord[];
+        const nativeFtsResult = await table.search(query, 'fts', 'content');
+
+        if (Array.isArray(nativeFtsResult)) {
+          nativeFtsRows = nativeFtsResult as LanceRecord[];
+        } else if (
+          nativeFtsResult &&
+          typeof nativeFtsResult === 'object' &&
+          'toArray' in nativeFtsResult &&
+          typeof (nativeFtsResult as { toArray?: unknown }).toArray === 'function'
+        ) {
+          nativeFtsRows = await (nativeFtsResult as { toArray: () => Promise<LanceRecord[]> }).toArray();
+        } else {
+          nativeFtsFailed = true;
+          this.logger.warn('Native FTS returned unsupported shape — using in-memory FTS');
+        }
       } catch (err) {
         nativeFtsFailed = true;
         this.logger.warn(`Native FTS search failed (${(err as Error).message}) — using in-memory FTS`);

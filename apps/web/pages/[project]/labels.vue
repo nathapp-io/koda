@@ -1,4 +1,6 @@
 <script setup lang="ts">
+definePageMeta({ layout: 'default' })
+
 import { toast } from 'vue-sonner'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
@@ -60,7 +62,7 @@ async function deleteLabel(labelId: string) {
 
 <template>
   <div class="space-y-6">
-    <h1 class="text-2xl font-bold">{{ t('labels.title') }}</h1>
+    <PageHeader :title="t('labels.title')" />
 
     <!-- Create Label Form -->
     <div class="rounded-md border border-border p-4 space-y-4">
@@ -92,18 +94,9 @@ async function deleteLabel(labelId: string) {
       </form>
     </div>
 
-    <!-- Loading / Error / Content states -->
-    <div v-if="pending" class="text-center py-6 text-muted-foreground">{{ t('common.loading') }}</div>
-    <div v-else-if="error" class="text-center py-6">
-      <p class="text-destructive text-sm">{{ t('common.loadFailed') }}</p>
-      <Button @click="refresh()" class="mt-2">{{ t('common.retry') }}</Button>
-    </div>
-
-    <!-- Labels Table -->
-    <div v-else-if="labels.length === 0" class="text-muted-foreground text-sm py-4">
-      {{ t('labels.empty') }}
-    </div>
-
+    <LoadingState v-if="pending" />
+    <ErrorState v-else-if="error" @retry="refresh()" />
+    <EmptyState v-else-if="labels.length === 0" :message="t('labels.empty')" />
     <Table v-else>
       <TableHeader>
         <TableRow>

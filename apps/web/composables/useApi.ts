@@ -90,8 +90,12 @@ export function extractApiError(err: unknown): string {
 
 export const useApi = () => {
   const config = useRuntimeConfig()
-  // Server-side: use internal URL for direct API access (import.meta.server)
-  const baseURL = import.meta.server ? config.apiInternalUrl : config.public.apiBaseUrl
+  // Server-side: ensure internal URL includes /api (E2E env provides host:port only)
+  const internalBaseUrl = String(config.apiInternalUrl).replace(/\/+$/, '')
+  const serverBaseUrl = internalBaseUrl.endsWith('/api')
+    ? internalBaseUrl
+    : `${internalBaseUrl}/api`
+  const baseURL = import.meta.server ? serverBaseUrl : config.public.apiBaseUrl
   const auth = useAuth()
 
   const { locale } = useI18n()

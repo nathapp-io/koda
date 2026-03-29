@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { toast } from 'vue-sonner'
-
 definePageMeta({ layout: 'default' })
+
+import { toast } from 'vue-sonner'
 
 const route = useRoute()
 const slug = route.params.project as string
@@ -78,11 +78,10 @@ function onDocumentAdded() {
 
 <template>
   <div class="space-y-6">
-    <!-- Page header -->
-    <div>
-      <h1 class="text-2xl font-bold">{{ t('nav.kb') }}</h1>
-      <p class="text-sm text-muted-foreground">{{ t('kb.pageDescription', { project: slug }) }}</p>
-    </div>
+    <PageHeader
+      :title="t('nav.kb')"
+      :subtitle="t('kb.pageDescription', { project: slug })"
+    />
 
     <Tabs default-value="search">
       <TabsList>
@@ -144,47 +143,44 @@ function onDocumentAdded() {
 
       <!-- ── Documents Tab ───────────────────────────────────────────────── -->
       <TabsContent value="documents" class="space-y-4">
-        <div v-if="pending" class="text-center py-12 text-muted-foreground">{{ t('common.loading') }}</div>
-        <div v-else-if="error" class="text-center py-12">
-          <p class="text-destructive text-sm">{{ t('common.loadFailed') }}</p>
-          <Button @click="refresh()" class="mt-4">{{ t('common.retry') }}</Button>
-        </div>
+        <LoadingState v-if="pending" />
+        <ErrorState v-else-if="error" @retry="refresh()" />
         <template v-else>
-        <div class="flex items-center justify-between">
-          <p class="text-sm text-muted-foreground">{{ docs.length }} document(s) indexed</p>
-          <KbAddDocumentDialog :project-slug="slug" @added="onDocumentAdded" />
-        </div>
+          <div class="flex items-center justify-between">
+            <p class="text-sm text-muted-foreground">{{ docs.length }} document(s) indexed</p>
+            <KbAddDocumentDialog :project-slug="slug" @added="onDocumentAdded" />
+          </div>
 
-        <!-- Empty state -->
-        <div
-          v-if="docs.length === 0"
-          class="rounded-lg border border-dashed border-border py-16 text-center"
-        >
-          <p class="text-sm font-medium text-muted-foreground">{{ t('kb.documents.empty') }}</p>
-        </div>
+          <!-- Empty state -->
+          <div
+            v-if="docs.length === 0"
+            class="rounded-lg border border-dashed border-border py-16 text-center"
+          >
+            <p class="text-sm font-medium text-muted-foreground">{{ t('kb.documents.empty') }}</p>
+          </div>
 
-        <!-- Documents table -->
-        <div v-else class="overflow-hidden rounded-lg border border-border">
-          <table class="w-full text-sm">
-            <thead class="bg-muted/50">
-              <tr>
-                <th class="px-4 py-3 text-left font-medium text-muted-foreground">{{ t('kb.documents.columns.source') }}</th>
-                <th class="px-4 py-3 text-left font-medium text-muted-foreground">{{ t('kb.documents.columns.content') }}</th>
-                <th class="px-4 py-3 text-left font-medium text-muted-foreground">{{ t('kb.documents.columns.created') }}</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-border">
-              <tr v-for="doc in docs" :key="doc.id" class="hover:bg-muted/30">
-                <td class="px-4 py-3">
-                  <span class="rounded border border-border px-1.5 py-0.5 text-xs">{{ doc.source }}</span>
-                  <span v-if="doc.sourceId" class="ml-2 font-mono text-xs text-muted-foreground">{{ doc.sourceId }}</span>
-                </td>
-                <td class="max-w-xs truncate px-4 py-3 text-muted-foreground">{{ truncate(doc.content, 80) }}</td>
-                <td class="whitespace-nowrap px-4 py-3 text-muted-foreground">{{ formatDate(doc.createdAt) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+          <!-- Documents table -->
+          <div v-else class="overflow-hidden rounded-lg border border-border">
+            <table class="w-full text-sm">
+              <thead class="bg-muted/50">
+                <tr>
+                  <th class="px-4 py-3 text-left font-medium text-muted-foreground">{{ t('kb.documents.columns.source') }}</th>
+                  <th class="px-4 py-3 text-left font-medium text-muted-foreground">{{ t('kb.documents.columns.content') }}</th>
+                  <th class="px-4 py-3 text-left font-medium text-muted-foreground">{{ t('kb.documents.columns.created') }}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-border">
+                <tr v-for="doc in docs" :key="doc.id" class="hover:bg-muted/30">
+                  <td class="px-4 py-3">
+                    <span class="rounded border border-border px-1.5 py-0.5 text-xs">{{ doc.source }}</span>
+                    <span v-if="doc.sourceId" class="ml-2 font-mono text-xs text-muted-foreground">{{ doc.sourceId }}</span>
+                  </td>
+                  <td class="max-w-xs truncate px-4 py-3 text-muted-foreground">{{ truncate(doc.content, 80) }}</td>
+                  <td class="whitespace-nowrap px-4 py-3 text-muted-foreground">{{ formatDate(doc.createdAt) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </template>
       </TabsContent>
     </Tabs>
