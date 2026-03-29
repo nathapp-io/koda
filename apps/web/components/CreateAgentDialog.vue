@@ -134,6 +134,9 @@ const availableRoles = ['VERIFIER', 'DEVELOPER', 'REVIEWER'] as const
 const capabilitiesInput = ref('')
 const capabilitiesTags = ref<string[]>([])
 
+// Track if slug was manually edited (to preserve user changes)
+const isSlugManuallyEdited = ref(false)
+
 const formSchema = toTypedSchema(
   z.object({
     name: z.string().min(1, t('agents.validation.nameRequired')),
@@ -155,10 +158,16 @@ const { handleSubmit, isSubmitting, resetForm, setFieldValue, values } = useForm
   },
 })
 
+// Watch name to auto-derive slug, but respect manual edits
 watch(() => values.name, (name) => {
-  if (name !== undefined) {
+  if (name !== undefined && !isSlugManuallyEdited.value) {
     setFieldValue('slug', deriveSlug(name))
   }
+})
+
+// Track when user manually edits the slug
+watch(() => values.slug, () => {
+  isSlugManuallyEdited.value = true
 })
 
 // Sync capabilitiesTags to form field value
