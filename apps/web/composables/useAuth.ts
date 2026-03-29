@@ -28,8 +28,17 @@ interface AuthResponse {
  */
 export function useAuth() {
   const config = useRuntimeConfig()
-  // Server-side: use internal URL for direct API access (import.meta.server)
-  const baseURL = import.meta.server ? config.apiInternalUrl : config.public.apiBaseUrl
+  // Server-side: ensure internal URL includes /api (E2E env provides host:port only)
+  const internalBaseUrl = String(config.apiInternalUrl).replace(/\/+$/, '')
+  const serverBaseUrl = internalBaseUrl.endsWith('/api')
+    ? internalBaseUrl
+    : `${internalBaseUrl}/api`
+  const baseURL = import.meta.server ? serverBaseUrl : config.public.apiBaseUrl
+  const normalizedBaseURL = baseURL.endsWith('/') ? baseURL.slice(0, -1) : baseURL
+  const authBaseURL = import.meta.server
+    ? (normalizedBaseURL.endsWith('/api') ? normalizedBaseURL : `${normalizedBaseURL}/api`)
+    : normalizedBaseURL
+  const authUrl = (path: string) => `${authBaseURL}${path}`
 
   const token = useCookie('koda_token', { secure: true, sameSite: 'strict', maxAge: 604800 })
   const user = useState('koda_user', (): AuthUser | null => null)
@@ -37,7 +46,7 @@ export function useAuth() {
   const isAuthenticated = computed(() => !!token.value)
 
   async function login(credentials: LoginCredentials): Promise<void> {
-    const response = await $fetch<{ ret: number; data: AuthResponse }>(`${baseURL}/auth/login`, {
+    const response = await $fetch<{ ret: number; data: AuthResponse }>(authUrl('/auth/login'), {
       method: 'POST',
       body: credentials,
     })
@@ -47,7 +56,7 @@ export function useAuth() {
   }
 
   async function register(credentials: RegisterCredentials): Promise<void> {
-    const response = await $fetch<{ ret: number; data: AuthResponse }>(`${baseURL}/auth/register`, {
+    const response = await $fetch<{ ret: number; data: AuthResponse }>(authUrl('/auth/register'), {
       method: 'POST',
       body: credentials,
     })
@@ -70,7 +79,7 @@ export function useAuth() {
   async function fetchUser(): Promise<boolean> {
     if (!token.value) return false
     try {
-      const response = await $fetch<{ ret: number; data: AuthUser }>(`${baseURL}/auth/me`, {
+      const response = await $fetch<{ ret: number; data: AuthUser }>(authUrl('/auth/me'), {
         headers: { Authorization: `Bearer ${token.value}` },
       })
       const data = response.data ?? (response as unknown as AuthUser)

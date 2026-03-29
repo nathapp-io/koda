@@ -7,7 +7,7 @@ import {
   transitionTicket,
   E2E_ADMIN,
 } from './fixtures/api-client';
-import { webLogin } from './fixtures/page-helpers';
+import { webLogin, generateUniqueProjectKey } from './fixtures/page-helpers';
 
 /**
  * Ticket lifecycle: CREATED → VERIFIED → IN_PROGRESS → VERIFY_FIX → CLOSED
@@ -26,13 +26,11 @@ test.describe('Ticket Lifecycle', () => {
     ({ token } = await login(E2E_ADMIN.email, E2E_ADMIN.password));
 
     const suffix = Date.now().toString().slice(-6);
-    const letterA = String.fromCharCode(65 + (Number(suffix[0] ?? '0') % 26));
-    const letterB = String.fromCharCode(65 + (Number(suffix[1] ?? '1') % 26));
 
     const proj = await createProject(token, {
       name: 'E2E Ticket Lifecycle',
       slug: `e2etl${suffix}`,
-      key: `TL${letterA}${letterB}`,
+      key: generateUniqueProjectKey('TL'),
     });
     projectSlug = proj.slug;
   });
