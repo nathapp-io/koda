@@ -48,7 +48,7 @@
 
 <script setup lang="ts">
 import { useForm } from 'vee-validate'
-import { toTypedSchema } from '@vee/validate/zod'
+import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 
 const props = defineProps<{
