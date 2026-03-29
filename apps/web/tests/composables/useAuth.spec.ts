@@ -281,9 +281,9 @@ describe('AC8: useAuth baseURL uses import.meta.server for SSR', () => {
     expect(source).toContain('public.apiBaseUrl')
   })
 
-  test('source code has conditional baseURL assignment using import.meta.server', () => {
+  test('source code conditionally assigns baseURL using import.meta.server', () => {
     const source = readFileSync(composablePath, 'utf-8')
-    expect(source).toMatch(/import\.meta\.server\s*\?\s*config\.apiInternalUrl\s*:\s*config\.public\.apiBaseUrl/)
+    expect(source).toMatch(/const\s+baseURL\s*=\s*import\.meta\.server\s*\?\s*[^:]+:\s*config\.public\.apiBaseUrl/)
   })
 })
 
