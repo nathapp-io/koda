@@ -159,7 +159,8 @@ describe('US-002-1 AC6: maxConcurrentTickets defaults to 3, validates integer â‰
   test('source defines maxConcurrentTickets field with default value of 3', () => {
     const source = readFileSync(componentPath, 'utf-8')
     // Should have .default(3) for the default value
-    expect(source).toMatch(/maxConcurrentTickets:\s*z\.number\(\)[^)]*\.default\s*\(\s*3\s*\)/)
+    // Note: using [\s\S]* to match across method calls like .int().min(1)
+    expect(source).toMatch(/maxConcurrentTickets:\s*z\.number\(\)[\s\S]*?\.default\s*\(\s*3\s*\)/)
   })
 
   test('source defines maxConcurrentTickets field with integer â‰¥ 1 validation', () => {
