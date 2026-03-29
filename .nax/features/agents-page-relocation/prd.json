@@ -1,0 +1,71 @@
+{
+  "project": "@nathapp/koda",
+  "feature": "agents-page-relocation",
+  "branchName": "feat/agents-management-page",
+  "createdAt": "2026-03-29T12:00:00.000Z",
+  "updatedAt": "2026-03-29T12:00:00.000Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Move agents.vue to standalone route and fix API endpoint",
+      "description": "Delete apps/web/pages/[project]/agents.vue and create apps/web/pages/agents.vue in its place. Remove the route.params.project / slug dependency entirely. The useAsyncData key becomes 'agents' (no slug). The fetch call changes from $api.get('/projects/${slug}/agents') to $api.get('/agents'). The changeStatus function must call $api.patch('/agents/${agent.slug}', { status: newStatus }) using agent.slug, not a project slug variable. The definePageMeta stays as { layout: 'default' }. All other template/logic from the original file remains unchanged.",
+      "acceptanceCriteria": [
+        "apps/web/pages/[project]/agents.vue does not exist",
+        "apps/web/pages/agents.vue exists with definePageMeta({ layout: 'default' })",
+        "useAsyncData key is the string 'agents' with no slug interpolation",
+        "useAsyncData handler calls $api.get('/agents') with no path parameters",
+        "route.params.project is not referenced anywhere in pages/agents.vue",
+        "changeStatus calls $api.patch('/agents/' + agent.slug, { status: newStatus }) using agent.slug"
+      ],
+      "tags": ["web", "routing", "agents"],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "priorErrors": [],
+      "priorFailures": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "no-test",
+        "reasoning": "pure file move and URL string change — no logic, no new behaviour",
+        "modelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/pages/[project]/agents.vue",
+        "apps/web/composables/useApi.ts"
+      ],
+      "workdir": "apps/web"
+    },
+    {
+      "id": "US-002",
+      "title": "Update layout navigation and breadcrumb for standalone /agents route",
+      "description": "Edit apps/web/layouts/default.vue. Remove the NuxtLink to '/${projectSlug}/agents' from inside the 'v-if=\"projectSlug\"' template block. Add a new NuxtLink to '/agents' in the always-visible nav section (same block as the Dashboard link), using the Bot icon from lucide-vue-next and the t('nav.agents') label. Add a breadcrumb case in the breadcrumbItems computed: when route.path === '/agents', return [{ label: 'Koda', to: '/' }, { label: t('nav.agents') }]. The Bot icon import is already present in the file.",
+      "acceptanceCriteria": [
+        "layouts/default.vue does not contain a NuxtLink with :to containing projectSlug and '/agents'",
+        "layouts/default.vue contains a NuxtLink with to=\"/agents\" outside any v-if=\"projectSlug\" block",
+        "The /agents NuxtLink uses the Bot icon from lucide-vue-next",
+        "breadcrumbItems computed returns [{ label: 'Koda', to: '/' }, { label: t('nav.agents') }] when route.path === '/agents'"
+      ],
+      "tags": ["web", "layout", "navigation", "breadcrumb"],
+      "dependencies": ["US-001"],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "priorErrors": [],
+      "priorFailures": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "no-test",
+        "reasoning": "layout nav link addition and breadcrumb case — additive, no logic change",
+        "modelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/web/layouts/default.vue",
+        "apps/web/pages/agents.vue"
+      ],
+      "workdir": "apps/web"
+    }
+  ]
+}
