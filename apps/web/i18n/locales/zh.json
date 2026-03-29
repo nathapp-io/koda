@@ -188,12 +188,21 @@
       "statusUpdated": "代理状态已更新为 {status}",
       "statusFailed": "更新代理状态失败",
       "rolesUpdated": "代理角色更新成功",
-      "updateRolesFailed": "更新代理角色失败"
+      "updateRolesFailed": "更新代理角色失败",
+      "capabilitiesUpdated": "代理能力更新成功",
+      "updateCapabilitiesFailed": "更新代理能力失败"
     },
     "form": {
       "editRoles": "编辑代理角色",
+      "roles": "角色",
+      "capabilities": "能力",
+      "capabilitiesPlaceholder": "输入并按回车添加",
       "save": "保存",
       "saving": "保存中..."
+    },
+    "actions": {
+      "editRoles": "编辑角色",
+      "editCapabilities": "编辑能力"
     }
   },
   "kb": {

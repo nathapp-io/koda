@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import EditAgentRolesDialog from '~/components/EditAgentRolesDialog.vue'
+import EditAgentCapabilitiesDialog from '~/components/EditAgentCapabilitiesDialog.vue'
+
 definePageMeta({ layout: 'default' })
 
 interface Agent {
@@ -22,6 +25,34 @@ const { data: agentsData, pending, error, refresh } = useAsyncData(
 const agents = computed(() => agentsData.value ?? [])
 
 const isCreateDialogOpen = ref(false)
+
+// Dialog state for Edit Roles
+const isRolesDialogOpen = ref(false)
+const rolesDialogAgent = ref<Agent | null>(null)
+
+// Dialog state for Edit Capabilities
+const isCapabilitiesDialogOpen = ref(false)
+const capabilitiesDialogAgent = ref<Agent | null>(null)
+
+function openRolesDialog(agent: Agent) {
+  rolesDialogAgent.value = agent
+  isRolesDialogOpen.value = true
+}
+
+function openCapabilitiesDialog(agent: Agent) {
+  capabilitiesDialogAgent.value = agent
+  isCapabilitiesDialogOpen.value = true
+}
+
+function handleRolesUpdated() {
+  refresh()
+  isRolesDialogOpen.value = false
+}
+
+function handleCapabilitiesUpdated() {
+  refresh()
+  isCapabilitiesDialogOpen.value = false
+}
 
 function statusClass(status: string) {
   if (status === 'ACTIVE') return 'bg-green-100 text-green-800'
@@ -114,6 +145,13 @@ function handleAgentCreated() {
                 <Button variant="ghost" size="sm">{{ t('common.changeStatus') }}</Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent>
+                <DropdownMenuItem @click="openRolesDialog(agent)">
+                  {{ t('agents.actions.editRoles') }}
+                </DropdownMenuItem>
+                <DropdownMenuItem @click="openCapabilitiesDialog(agent)">
+                  {{ t('agents.actions.editCapabilities') }}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem @click="changeStatus(agent, 'ACTIVE')">
                   {{ t('agents.status.ACTIVE') }}
                 </DropdownMenuItem>
@@ -129,5 +167,21 @@ function handleAgentCreated() {
         </TableRow>
       </TableBody>
     </Table>
+
+    <EditAgentRolesDialog
+      v-if="rolesDialogAgent"
+      :open="isRolesDialogOpen"
+      :agent="rolesDialogAgent"
+      @update:open="isRolesDialogOpen = $event"
+      @updated="handleRolesUpdated"
+    />
+
+    <EditAgentCapabilitiesDialog
+      v-if="capabilitiesDialogAgent"
+      :open="isCapabilitiesDialogOpen"
+      :agent="capabilitiesDialogAgent"
+      @update:open="isCapabilitiesDialogOpen = $event"
+      @updated="handleCapabilitiesUpdated"
+    />
   </div>
 </template>

@@ -188,12 +188,21 @@
       "statusUpdated": "Agent status updated to {status}",
       "statusFailed": "Failed to update agent status",
       "rolesUpdated": "Agent roles updated successfully",
-      "updateRolesFailed": "Failed to update agent roles"
+      "updateRolesFailed": "Failed to update agent roles",
+      "capabilitiesUpdated": "Agent capabilities updated successfully",
+      "updateCapabilitiesFailed": "Failed to update agent capabilities"
     },
     "form": {
       "editRoles": "Edit Agent Roles",
+      "roles": "Roles",
+      "capabilities": "Capabilities",
+      "capabilitiesPlaceholder": "Type and press Enter to add",
       "save": "Save",
       "saving": "Saving..."
+    },
+    "actions": {
+      "editRoles": "Edit Roles",
+      "editCapabilities": "Edit Capabilities"
     }
   },
   "kb": {
