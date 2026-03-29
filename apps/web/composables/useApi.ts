@@ -96,9 +96,6 @@ export const useApi = () => {
     ? internalBaseUrl
     : `${internalBaseUrl}/api`
   const baseURL = import.meta.server ? serverBaseUrl : config.public.apiBaseUrl
-  const auth = useAuth()
-
-  const { locale } = useI18n()
 
   const getHeaders = () => {
     const headers: Record<string, string> = {
