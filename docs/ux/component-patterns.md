@@ -79,7 +79,7 @@ zod schema → toTypedSchema() → useForm({ validationSchema }) → FormField/F
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { useForm } from 'vee-validate'
-import { toast } from 'vue-sonner'
+const toast = useAppToast()
 import { extractApiError } from '~/composables/useApi'
 
 const schema = toTypedSchema(z.object({

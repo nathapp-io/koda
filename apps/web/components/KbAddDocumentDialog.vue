@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { toast } from 'vue-sonner'
-
 const props = defineProps<{ projectSlug: string }>()
 const emit = defineEmits<{ 'added': [] }>()
 
 const { $api } = useApi()
 const { t } = useI18n()
+const toast = useAppToast()
 
 const open = ref(false)
 const loading = ref(false)

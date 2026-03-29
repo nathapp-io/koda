@@ -223,10 +223,9 @@ describe('US-004-3 AC6: description field is an optional Textarea', () => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe("US-004-3 AC7: successful POST emits 'created' and shows success toast", () => {
-  test('source imports toast from vue-sonner', () => {
+  test('source accesses toast from useAppToast helper', () => {
     const source = readFileSync(dialogPath, 'utf-8')
-    expect(source).toContain('vue-sonner')
-    expect(source).toContain('toast')
+    expect(source).toContain('useAppToast(')
   })
 
   test('source calls toast.success on successful create', () => {

@@ -1,12 +1,11 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'default' })
 
-import { toast } from 'vue-sonner'
-
 const route = useRoute()
 const slug = route.params.project as string
 const { $api } = useApi()
 const { t } = useI18n()
+const toast = useAppToast()
 
 // ─── Search ──────────────────────────────────────────────────────────────────
 

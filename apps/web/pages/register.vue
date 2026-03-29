@@ -69,12 +69,12 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { toast } from 'vue-sonner'
 import { extractApiError } from '~/composables/useApi'
 
 definePageMeta({ layout: 'auth' })
 
 const { t } = useI18n()
+const toast = useAppToast()
 
 const name = ref('')
 const email = ref('')

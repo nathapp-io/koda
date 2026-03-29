@@ -1,8 +1,6 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'default' })
 
-import { toast } from 'vue-sonner'
-
 interface Assignee {
   id: string
   name: string
@@ -32,6 +30,7 @@ const slug = route.params.project as string
 const ref = route.params.ref as string
 
 const { $api } = useApi()
+const toast = useAppToast()
 
 const { data: ticketData, pending, error, refresh } = useAsyncData(
   `ticket-${slug}-${ref}`,

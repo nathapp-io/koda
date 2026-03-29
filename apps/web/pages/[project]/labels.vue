@@ -1,7 +1,6 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'default' })
 
-import { toast } from 'vue-sonner'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
@@ -17,6 +16,7 @@ const route = useRoute()
 const slug = route.params.project as string
 const { $api } = useApi()
 const { t } = useI18n()
+const toast = useAppToast()
 
 const { data: labelsData, pending, error, refresh } = useAsyncData(
   `labels-${slug}`,

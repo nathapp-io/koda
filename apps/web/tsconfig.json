@@ -10,6 +10,7 @@
   },
   "include": [
     ".nuxt/nuxt.d.ts",
+    "**/*.d.ts",
     "**/*.ts",
     "**/*.tsx",
     "**/*.vue"

@@ -42,19 +42,18 @@ describe('AC1: pages/register.vue exists and has correct outer structure', () =>
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC4 — toast is imported from 'vue-sonner'
+// AC4 — toast is accessed via useAppToast helper
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('AC4: toast is imported from vue-sonner', () => {
-  test('source imports toast from vue-sonner', () => {
+describe('AC4: toast is provided by useAppToast helper', () => {
+  test('source accesses toast from useAppToast', () => {
     const source = readFileSync(registerPath, 'utf-8')
-    expect(source).toContain('vue-sonner')
-    expect(source).toContain('toast')
+    expect(source).toContain('useAppToast(')
   })
 
-  test('toast import is from vue-sonner specifically', () => {
+  test('source does not directly import toast from vue-sonner', () => {
     const source = readFileSync(registerPath, 'utf-8')
-    expect(source).toMatch(/from\s+['"]vue-sonner['"]/)
+    expect(source).not.toMatch(/import\s*\{\s*toast\s*\}\s*from\s*['"]vue-sonner['"]/)
   })
 })
 

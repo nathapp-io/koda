@@ -152,10 +152,9 @@ describe('US-003 AC7: key field validates /^[A-Z]+$/ with min 2 max 6 chars', ()
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('US-003 AC8: successful create emits created and shows toast.success', () => {
-  test('source imports toast from vue-sonner', () => {
+  test('source accesses toast from useAppToast helper', () => {
     const source = readFileSync(dialogPath, 'utf-8')
-    expect(source).toContain('vue-sonner')
-    expect(source).toContain('toast')
+    expect(source).toContain('useAppToast(')
   })
 
   test('source calls toast.success on successful create', () => {

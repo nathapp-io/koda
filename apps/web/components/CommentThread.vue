@@ -3,7 +3,6 @@ import { computed } from 'vue'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { toast } from 'vue-sonner'
 import { extractApiError } from '~/composables/useApi'
 
 interface Comment {
@@ -25,6 +24,7 @@ const emit = defineEmits<{
 
 const { $api } = useApi()
 const { t } = useI18n()
+const toast = useAppToast()
 
 const commentsEndpoint = `/projects/${props.projectSlug}/tickets/${props.ticketRef}/comments`
 

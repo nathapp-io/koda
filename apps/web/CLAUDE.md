@@ -208,7 +208,7 @@ Add `<Toaster />` once in `app.vue`, then use anywhere:
 
 ```vue
 <script setup lang="ts">
-import { toast } from 'vue-sonner'
+const toast = useAppToast()
 
 // Success
 toast.success('Ticket created successfully')

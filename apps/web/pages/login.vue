@@ -7,7 +7,7 @@
       </p>
     </div>
 
-    <form class="space-y-4" @submit="onSubmit">
+    <form class="space-y-4" @submit.prevent="onSubmit">
       <FormField name="email" v-slot="{ componentField }">
         <FormItem>
           <FormLabel>{{ t('auth.login.email') }}</FormLabel>
@@ -54,7 +54,6 @@
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { toast } from 'vue-sonner'
 import { extractApiError } from '~/composables/useApi'
 
 definePageMeta({ layout: 'auth' })
@@ -74,6 +73,7 @@ const { handleSubmit } = useForm({
 })
 
 const auth = useAuth()
+const toast = useAppToast()
 
 const onSubmit = handleSubmit(async (values) => {
   try {
