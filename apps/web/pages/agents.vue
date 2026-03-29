@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import EditAgentRolesDialog from '~/components/EditAgentRolesDialog.vue'
 import EditAgentCapabilitiesDialog from '~/components/EditAgentCapabilitiesDialog.vue'
+import RotateKeyDialog from '~/components/RotateKeyDialog.vue'
+import DeleteAgentDialog from '~/components/DeleteAgentDialog.vue'
 
 definePageMeta({ layout: 'default' })
 
@@ -34,6 +36,14 @@ const rolesDialogAgent = ref<Agent | null>(null)
 const isCapabilitiesDialogOpen = ref(false)
 const capabilitiesDialogAgent = ref<Agent | null>(null)
 
+// Dialog state for Rotate Key
+const isRotateDialogOpen = ref(false)
+const rotateDialogAgent = ref<Agent | null>(null)
+
+// Dialog state for Delete Agent
+const isDeleteDialogOpen = ref(false)
+const deleteDialogAgent = ref<Agent | null>(null)
+
 function openRolesDialog(agent: Agent) {
   rolesDialogAgent.value = agent
   isRolesDialogOpen.value = true
@@ -44,6 +54,16 @@ function openCapabilitiesDialog(agent: Agent) {
   isCapabilitiesDialogOpen.value = true
 }
 
+function openRotateKeyDialog(agent: Agent) {
+  rotateDialogAgent.value = agent
+  isRotateDialogOpen.value = true
+}
+
+function openDeleteDialog(agent: Agent) {
+  deleteDialogAgent.value = agent
+  isDeleteDialogOpen.value = true
+}
+
 function handleRolesUpdated() {
   refresh()
   isRolesDialogOpen.value = false
@@ -52,6 +72,16 @@ function handleRolesUpdated() {
 function handleCapabilitiesUpdated() {
   refresh()
   isCapabilitiesDialogOpen.value = false
+}
+
+function handleRotated() {
+  refresh()
+  isRotateDialogOpen.value = false
+}
+
+function handleDeleted() {
+  refresh()
+  isDeleteDialogOpen.value = false
 }
 
 function statusClass(status: string) {
@@ -145,6 +175,13 @@ function handleAgentCreated() {
                 <Button variant="ghost" size="sm">{{ t('common.changeStatus') }}</Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent>
+                <DropdownMenuItem @click="openRotateKeyDialog(agent)">
+                  {{ t('agents.actions.rotateKey') }}
+                </DropdownMenuItem>
+                <DropdownMenuItem @click="openDeleteDialog(agent)">
+                  {{ t('agents.actions.delete') }}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem @click="openRolesDialog(agent)">
                   {{ t('agents.actions.editRoles') }}
                 </DropdownMenuItem>
@@ -182,6 +219,22 @@ function handleAgentCreated() {
       :agent="capabilitiesDialogAgent"
       @update:open="isCapabilitiesDialogOpen = $event"
       @updated="handleCapabilitiesUpdated"
+    />
+
+    <RotateKeyDialog
+      v-if="rotateDialogAgent"
+      :open="isRotateDialogOpen"
+      :agent="rotateDialogAgent"
+      @update:open="isRotateDialogOpen = $event"
+      @rotated="handleRotated"
+    />
+
+    <DeleteAgentDialog
+      v-if="deleteDialogAgent"
+      :open="isDeleteDialogOpen"
+      :agent="deleteDialogAgent"
+      @update:open="isDeleteDialogOpen = $event"
+      @deleted="handleDeleted"
     />
   </div>
 </template>
