@@ -57,7 +57,30 @@
           <FormItem>
             <FormLabel>{{ t('agents.form.capabilities') }}</FormLabel>
             <FormControl>
-              <Input :placeholder="t('agents.form.capabilitiesPlaceholder')" v-bind="componentField" />
+              <div class="flex flex-wrap gap-2 rounded-md border border-input bg-background p-2 min-h-[42px]">
+                <Badge
+                  v-for="(cap, index) in capabilitiesTags"
+                  :key="index"
+                  variant="secondary"
+                  class="flex items-center gap-1 px-2 py-0.5"
+                >
+                  {{ cap }}
+                  <button
+                    type="button"
+                    @click="removeCapability(index)"
+                    class="ml-0.5 rounded-sm hover:bg-muted-foreground/20"
+                  >
+                    <LucideX class="h-3 w-3" />
+                  </button>
+                </Badge>
+                <input
+                  :placeholder="capabilitiesTags.length === 0 ? t('agents.form.capabilitiesPlaceholder') : ''"
+                  class="flex-1 min-w-[120px] bg-transparent outline-none placeholder:text-muted-foreground"
+                  @keydown.enter.prevent="addCapability"
+                  @keydown.backspace="handleBackspace"
+                />
+              </div>
+              <input type="hidden" v-bind="componentField" :value="capabilitiesTags.join(',')" />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -90,6 +113,8 @@
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
+import { ref, watch } from 'vue'
+import { LucideX } from 'lucide-vue-next'
 
 const props = defineProps<{
   open: boolean
@@ -104,6 +129,10 @@ const { t } = useI18n()
 const toast = useAppToast()
 
 const availableRoles = ['VERIFIER', 'DEVELOPER', 'REVIEWER'] as const
+
+// Tag input state for capabilities
+const capabilitiesInput = ref('')
+const capabilitiesTags = ref<string[]>([])
 
 const formSchema = toTypedSchema(
   z.object({
@@ -132,11 +161,43 @@ watch(() => values.name, (name) => {
   }
 })
 
+// Sync capabilitiesTags to form field value
+watch(capabilitiesTags, (tags) => {
+  setFieldValue('capabilities', tags.join(','))
+}, { deep: true })
+
+// Clear capabilitiesTags when dialog closes
+watch(() => props.open, (isOpen) => {
+  if (!isOpen) {
+    capabilitiesTags.value = []
+  }
+})
+
 function deriveSlug(name: string): string {
   return name
     .toLowerCase()
     .replace(/\s+/g, '-')
     .replace(/[^a-z0-9-]/g, '')
+}
+
+function addCapability(event: Event) {
+  const input = event.target as HTMLInputElement
+  const value = input.value.trim()
+  if (value && !capabilitiesTags.value.includes(value)) {
+    capabilitiesTags.value.push(value)
+    input.value = ''
+  }
+}
+
+function removeCapability(index: number) {
+  capabilitiesTags.value.splice(index, 1)
+}
+
+function handleBackspace(event: Event) {
+  const input = event.target as HTMLInputElement
+  if (!input.value && capabilitiesTags.value.length > 0) {
+    capabilitiesTags.value.pop()
+  }
 }
 
 const { $api } = useApi()
@@ -148,6 +209,7 @@ const onSubmit = handleSubmit(async (formValues) => {
     emit('created')
     emit('update:open', false)
     resetForm()
+    capabilitiesTags.value = []
   } catch (error: unknown) {
     toast.error(t('agents.toast.createFailed'))
   }
