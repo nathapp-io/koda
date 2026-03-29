@@ -3,7 +3,7 @@
   "feature": "agents-management-page",
   "branchName": "feat/agents-management-page",
   "createdAt": "2026-03-29T00:00:00.000Z",
-  "updatedAt": "2026-03-29T15:50:36.747Z",
+  "updatedAt": "2026-03-29T17:11:21.304Z",
   "userStories": [
     {
       "id": "US-001",
@@ -67,8 +67,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "decomposed",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -261,8 +261,8 @@
         "US-002-2",
         "US-002-3"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "escalations": [],
       "attempts": 0,
       "parentStoryId": "US-002",
@@ -301,14 +301,16 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "complex",
+        "modelTier": "powerful"
       },
       "workdir": "apps/web",
       "contextFiles": [
@@ -321,6 +323,108 @@
       "priorErrors": [],
       "priorFailures": [],
       "storyPoints": 1
+    },
+    {
+      "id": "US-003-1",
+      "title": "EditAgentRolesDialog component",
+      "description": "Create EditAgentRolesDialog.vue: receives `agent` prop, pre-checks current roles as checkboxes (VERIFIER/DEVELOPER/REVIEWER), submits PATCH /agents/:slug/update-roles, shows success toast, emits 'updated'",
+      "acceptanceCriteria": [
+        "When EditAgentRolesDialog opens with an agent, the checkboxes for the agent's current roles are pre-checked",
+        "When the dialog is submitted, it calls $api.patch('/agents/' + agent.slug + '/update-roles', { roles })",
+        "When submission succeeds, it shows a success toast and emits 'updated'"
+      ],
+      "tags": [
+        "feature",
+        "form"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "US-003",
+      "workdir": "apps/web",
+      "routing": {
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Standard dialog component with form state, API call, and event emission — typical medium feature with straightforward logic",
+        "modelTier": "balanced"
+      },
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-003-2",
+      "title": "EditAgentCapabilitiesDialog component",
+      "description": "Create EditAgentCapabilitiesDialog.vue: receives `agent` prop, renders current capabilities as removable Badge tags, Enter in Input appends new tag, submits PATCH /agents/:slug/update-capabilities, shows success toast, emits 'updated'",
+      "acceptanceCriteria": [
+        "When EditAgentCapabilitiesDialog opens with an agent, existing capabilities are rendered as removable Badge tags",
+        "When the user presses Enter in the input, the entered text is appended as a new capability tag",
+        "When a capability Badge's remove control is clicked, that tag is removed from the list",
+        "When the dialog is submitted, it calls $api.patch('/agents/' + agent.slug + '/update-capabilities', { capabilities })",
+        "When submission succeeds, it shows a success toast and emits 'updated'"
+      ],
+      "tags": [
+        "feature",
+        "form"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "US-003",
+      "workdir": "apps/web",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "routing": {
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Standard single-component dialog with CRUD operations on tags, straightforward state management and API call - no novel patterns or multi-system integration",
+        "modelTier": "balanced"
+      }
+    },
+    {
+      "id": "US-003-3",
+      "title": "Actions dropdown with Edit Roles and Edit Capabilities",
+      "description": "Wire both EditAgentRolesDialog and EditAgentCapabilitiesDialog into the actions dropdown per agent row in pages/agents.vue; call refresh() on 'updated' event from either dialog",
+      "acceptanceCriteria": [
+        "When pages/agents.vue receives 'updated' from either edit dialog, it calls refresh()",
+        "When the actions dropdown is opened for an agent row, it contains 'Edit Roles' and 'Edit Capabilities' items"
+      ],
+      "tags": [
+        "feature",
+        "integration"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-003-1",
+        "US-003-2"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "US-003",
+      "workdir": "apps/web",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "routing": {
+        "complexity": "simple",
+        "initialComplexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Wiring existing dialogs into dropdown with event handling is localized integration work, no new logic or multi-file changes",
+        "modelTier": "fast"
+      }
     },
     {
       "id": "US-004",
@@ -346,14 +450,16 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
       },
       "workdir": "apps/web",
       "contextFiles": [
