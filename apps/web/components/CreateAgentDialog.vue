@@ -230,10 +230,13 @@ const { $api } = useApi()
 
 async function copyToClipboard() {
   if (!apiKey.value) return
-  const originalText = copyButtonText.value
   await navigator.clipboard.writeText(apiKey.value)
   copyButtonText.value = 'Copied!'
-  setTimeout(`copyButtonText.value='${originalText}'`, 2000)
+  setTimeout(revertCopyButton, 2000)
+}
+
+function revertCopyButton() {
+  copyButtonText.value = 'Copy'
 }
 
 function handleDone() {
