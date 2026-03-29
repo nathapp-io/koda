@@ -27,11 +27,13 @@ describe('US-002 AC1: pages/index.vue renders loading state when pending', () =>
     expect(source).toMatch(/v-if=["']pending["']/)
   })
 
-  test('loading block renders Loading text via i18n key', () => {
+  test('loading block renders LoadingState component or i18n key', () => {
     const source = readFileSync(indexPath, 'utf-8')
     const hasLoadingText =
       source.includes("t('common.loading')") ||
-      source.includes('t("common.loading")')
+      source.includes('t("common.loading")') ||
+      source.includes('<LoadingState') ||
+      source.includes('<loading-state')
     expect(hasLoadingText).toBe(true)
   })
 
@@ -62,11 +64,13 @@ describe('US-002 AC2: pages/index.vue renders error state with retry', () => {
     expect(source).toMatch(/v-else-if=["']error["']/)
   })
 
-  test('error block renders loadFailed i18n key', () => {
+  test('error block renders ErrorState component or loadFailed i18n key', () => {
     const source = readFileSync(indexPath, 'utf-8')
     const hasLoadFailed =
       source.includes("t('common.loadFailed')") ||
-      source.includes('t("common.loadFailed")')
+      source.includes('t("common.loadFailed")') ||
+      source.includes('<ErrorState') ||
+      source.includes('<error-state')
     expect(hasLoadFailed).toBe(true)
   })
 
@@ -122,11 +126,13 @@ describe('US-002 AC4: pages/[project]/index.vue renders error state with retry',
     expect(source).toMatch(/v-else-if=["']error["']/)
   })
 
-  test('error block renders loadFailed i18n key', () => {
+  test('error block renders ErrorState component or loadFailed i18n key', () => {
     const source = readFileSync(projectIndexPath, 'utf-8')
     const hasLoadFailed =
       source.includes("t('common.loadFailed')") ||
-      source.includes('t("common.loadFailed")')
+      source.includes('t("common.loadFailed")') ||
+      source.includes('<ErrorState') ||
+      source.includes('<error-state')
     expect(hasLoadFailed).toBe(true)
   })
 
@@ -151,11 +157,13 @@ describe('US-002 AC5: pages/[project]/agents.vue renders loading state when pend
     expect(source).toMatch(/v-if=["']pending["']/)
   })
 
-  test('loading block renders loading text', () => {
+  test('loading block renders LoadingState component or loading text', () => {
     const source = readFileSync(agentsPath, 'utf-8')
     const hasLoadingText =
       source.includes("t('common.loading')") ||
-      source.includes('t("common.loading")')
+      source.includes('t("common.loading")') ||
+      source.includes('<LoadingState') ||
+      source.includes('<loading-state')
     expect(hasLoadingText).toBe(true)
   })
 })
@@ -170,11 +178,13 @@ describe('US-002 AC6: pages/[project]/agents.vue renders error state with retry'
     expect(source).toMatch(/v-else-if=["']error["']/)
   })
 
-  test('error block renders loadFailed i18n key', () => {
+  test('error block renders ErrorState component or loadFailed i18n key', () => {
     const source = readFileSync(agentsPath, 'utf-8')
     const hasLoadFailed =
       source.includes("t('common.loadFailed')") ||
-      source.includes('t("common.loadFailed")')
+      source.includes('t("common.loadFailed")') ||
+      source.includes('<ErrorState') ||
+      source.includes('<error-state')
     expect(hasLoadFailed).toBe(true)
   })
 
@@ -204,19 +214,23 @@ describe('US-002 AC7: pages/[project]/labels.vue renders error state with retry'
     expect(source).toMatch(/v-else-if=["']error["']/)
   })
 
-  test('error block renders loadFailed i18n key', () => {
+  test('error block renders ErrorState component or loadFailed i18n key', () => {
     const source = readFileSync(labelsPath, 'utf-8')
     const hasLoadFailed =
       source.includes("t('common.loadFailed')") ||
-      source.includes('t("common.loadFailed")')
+      source.includes('t("common.loadFailed")') ||
+      source.includes('<ErrorState') ||
+      source.includes('<error-state')
     expect(hasLoadFailed).toBe(true)
   })
 
-  test('error block has a retry Button', () => {
+  test('error block has a retry Button or ErrorState component', () => {
     const source = readFileSync(labelsPath, 'utf-8')
     const hasRetryText =
       source.includes("t('common.retry')") ||
-      source.includes('t("common.retry")')
+      source.includes('t("common.retry")') ||
+      source.includes('<ErrorState') ||
+      source.includes('<error-state')
     expect(hasRetryText).toBe(true)
   })
 
@@ -269,11 +283,13 @@ describe('US-002 AC9: pages/[project]/tickets/[ref].vue renders error state with
     expect(source).toMatch(/v-else-if=["']error["']/)
   })
 
-  test('error block renders loadFailed i18n key', () => {
+  test('error block renders ErrorState component or loadFailed i18n key', () => {
     const source = readFileSync(ticketDetailPath, 'utf-8')
     const hasLoadFailed =
       source.includes("t('common.loadFailed')") ||
-      source.includes('t("common.loadFailed")')
+      source.includes('t("common.loadFailed")') ||
+      source.includes('<ErrorState') ||
+      source.includes('<error-state')
     expect(hasLoadFailed).toBe(true)
   })
 
@@ -298,11 +314,13 @@ describe('US-002 AC10: pages/[project]/kb.vue renders loading state when pending
     expect(source).toMatch(/v-if=["']pending["']/)
   })
 
-  test('loading block renders loading text', () => {
+  test('loading block renders LoadingState component or loading text', () => {
     const source = readFileSync(kbPath, 'utf-8')
     const hasLoadingText =
       source.includes("t('common.loading')") ||
-      source.includes('t("common.loading")')
+      source.includes('t("common.loading")') ||
+      source.includes('<LoadingState') ||
+      source.includes('<loading-state')
     expect(hasLoadingText).toBe(true)
   })
 })
@@ -317,11 +335,13 @@ describe('US-002 AC11: pages/[project]/kb.vue renders error state with retry', (
     expect(source).toMatch(/v-else-if=["']error["']/)
   })
 
-  test('error block renders loadFailed i18n key', () => {
+  test('error block renders ErrorState component or loadFailed i18n key', () => {
     const source = readFileSync(kbPath, 'utf-8')
     const hasLoadFailed =
       source.includes("t('common.loadFailed')") ||
-      source.includes('t("common.loadFailed")')
+      source.includes('t("common.loadFailed")') ||
+      source.includes('<ErrorState') ||
+      source.includes('<error-state')
     expect(hasLoadFailed).toBe(true)
   })
 

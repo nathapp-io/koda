@@ -1,4 +1,6 @@
 <script setup lang="ts">
+definePageMeta({ layout: 'default' })
+
 import { toast } from 'vue-sonner'
 
 interface Agent {
@@ -33,21 +35,19 @@ async function changeStatus(agent: Agent, newStatus: 'ACTIVE' | 'PAUSED' | 'OFFL
     await $api.patch(`/projects/${slug}/agents/${agent.id}`, { status: newStatus })
     toast.success(t('agents.toast.statusUpdated', { status: newStatus }))
     refresh()
-  } catch (err) {
+  } catch {
     toast.error(t('agents.toast.statusFailed'))
   }
 }
 </script>
 
 <template>
-  <div class="space-y-4">
-    <h1 class="text-2xl font-bold">{{ t('agents.title') }}</h1>
+  <div class="space-y-6">
+    <PageHeader :title="t('agents.title')" />
 
-    <div v-if="pending" class="text-center py-12 text-muted-foreground">{{ t('common.loading') }}</div>
-    <div v-else-if="error" class="text-center py-12">
-      <p class="text-destructive text-sm">{{ t('common.loadFailed') }}</p>
-      <Button @click="refresh()" class="mt-4">{{ t('common.retry') }}</Button>
-    </div>
+    <LoadingState v-if="pending" />
+    <ErrorState v-else-if="error" @retry="refresh()" />
+    <EmptyState v-else-if="agents.length === 0" :message="t('agents.empty')" />
     <Table v-else>
       <TableHeader>
         <TableRow>

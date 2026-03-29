@@ -1,4 +1,6 @@
 <script setup lang="ts">
+definePageMeta({ layout: 'default' })
+
 import { toast } from 'vue-sonner'
 
 interface Assignee {
@@ -88,17 +90,12 @@ function onCommentAdded() {
 </script>
 
 <template>
-  <div class="p-6">
-    <div v-if="pending" class="flex items-center justify-center py-12">
-      <p class="text-muted-foreground">{{ t('common.loading') }}</p>
-    </div>
-    <div v-else-if="error" class="flex items-center justify-center py-12 flex-col gap-4">
-      <p class="text-destructive text-sm">{{ t('common.loadFailed') }}</p>
-      <Button @click="refresh()">{{ t('common.retry') }}</Button>
-    </div>
-    <div v-else-if="ticket" class="grid grid-cols-3 gap-6">
-      <!-- Left column: 2/3 width -->
-      <div class="col-span-2 space-y-6">
+  <div>
+    <LoadingState v-if="pending" />
+    <ErrorState v-else-if="error" @retry="refresh()" />
+    <div v-else-if="ticket" class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <!-- Main content: 2/3 width on desktop, full width on mobile -->
+      <div class="md:col-span-2 space-y-6">
         <div>
           <h1 class="text-2xl font-bold">{{ ticket.title }}</h1>
         </div>
@@ -133,8 +130,8 @@ function onCommentAdded() {
         />
       </div>
 
-      <!-- Right column: 1/3 width -->
-      <div class="col-span-1 space-y-4">
+      <!-- Sidebar: 1/3 width on desktop, stacks below on mobile -->
+      <div class="space-y-4">
         <Card>
           <CardHeader>
             <CardTitle class="text-sm font-medium">{{ t('common.details') }}</CardTitle>
@@ -187,6 +184,5 @@ function onCommentAdded() {
         />
       </div>
     </div>
-
   </div>
 </template>
