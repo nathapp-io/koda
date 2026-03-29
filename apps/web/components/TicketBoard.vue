@@ -45,16 +45,16 @@ function ticketsForStatus(status: string): Ticket[] {
       <div
         v-for="status in COLUMNS"
         :key="status"
-        class="w-64 flex flex-col gap-2"
+        class="w-64 flex flex-col gap-2 rounded-lg bg-muted/30 border border-border/50 p-3"
       >
-        <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center justify-between mb-1">
           <div class="flex items-center gap-2">
             <span class="text-sm font-semibold">{{ t(`tickets.status.${status}`) }}</span>
             <Badge variant="secondary">{{ ticketsForStatus(status).length }}</Badge>
           </div>
           <button
             v-if="status === 'CREATED'"
-            class="text-xs text-primary hover:underline"
+            class="text-xs text-primary hover:underline whitespace-nowrap"
             @click="emit('create')"
           >
             {{ t('tickets.newTicket') }}

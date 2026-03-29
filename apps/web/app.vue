@@ -7,6 +7,6 @@ import { Toaster } from 'vue-sonner'
     <NuxtLayout>
       <NuxtPage />
     </NuxtLayout>
-    <Toaster />
+    <Toaster position="top-right" />
   </div>
 </template>
