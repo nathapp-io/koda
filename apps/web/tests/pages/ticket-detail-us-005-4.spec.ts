@@ -109,12 +109,9 @@ describe('US-005-4 AC2: CommentThread component is wired into the left column', 
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('US-005-4 AC3: success toast appears after ticket transition', () => {
-  test('source imports toast from vue-sonner', () => {
+  test('source accesses toast from useAppToast helper', () => {
     const src = source()
-    const hasToastImport =
-      src.includes("from 'vue-sonner'") ||
-      src.includes('from "vue-sonner"')
-    expect(hasToastImport).toBe(true)
+    expect(src.includes('useAppToast(')).toBe(true)
   })
 
   test('source has a transition event handler', () => {

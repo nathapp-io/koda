@@ -89,10 +89,9 @@ describe("AC5: definePageMeta({ layout: 'auth' }) present", () => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('AC6: toast.success shown on successful login', () => {
-  test('source imports toast from vue-sonner', () => {
+  test('source gets toast from useAppToast helper', () => {
     const source = readFileSync(loginPath, 'utf-8')
-    expect(source).toContain('vue-sonner')
-    expect(source).toContain('toast')
+    expect(source).toContain('useAppToast(')
   })
 
   test('source calls toast.success on login success', () => {

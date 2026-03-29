@@ -53,7 +53,6 @@
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { toast } from 'vue-sonner'
 import { extractApiError } from '~/composables/useApi'
 
 defineProps<{
@@ -66,6 +65,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const toast = useAppToast()
 
 const formSchema = toTypedSchema(
   z.object({

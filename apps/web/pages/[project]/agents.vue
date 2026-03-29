@@ -1,8 +1,6 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'default' })
 
-import { toast } from 'vue-sonner'
-
 interface Agent {
   id: string
   name: string
@@ -16,6 +14,7 @@ const route = useRoute()
 const slug = route.params.project as string
 const { $api } = useApi()
 const { t } = useI18n()
+const toast = useAppToast()
 
 const { data: agentsData, pending, error, refresh } = useAsyncData(
   `agents-${slug}`,

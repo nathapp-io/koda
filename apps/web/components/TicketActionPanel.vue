@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { toast } from 'vue-sonner'
 import { extractApiError } from '~/composables/useApi'
 
 interface Ticket {
@@ -21,6 +20,7 @@ const emit = defineEmits<{
 
 const { $api } = useApi()
 const { t } = useI18n()
+const toast = useAppToast()
 
 const isOpen = ref(false)
 const comment = ref('')
