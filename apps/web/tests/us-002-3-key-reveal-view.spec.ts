@@ -31,7 +31,6 @@ describe('US-002-3 AC1: On API success, dialog switches from form to key-reveal 
     // Look for: const result = await $api.post or const response = ... etc
     // NOT just the raw call without assignment
     const capturesResponse =
-      source.match(/const\s+\w+\s*=\s*await\s+\$api\.post\s*\(\s*['"]\/agents['"]/) ||
       source.match(/const\s+\w+\s*=\s*await\s+\$api\.post\s*\(\s*['"]\/agents['"]/)
     expect(capturesResponse).not.toBeNull()
   })
@@ -54,9 +53,7 @@ describe('US-002-3 AC1: On API success, dialog switches from form to key-reveal 
     // The onSubmit should store the API response which contains apiKey
     // This means after "await $api.post" there should be something like "const apiKey ="
     // or similar pattern to capture the response
-    // Currently the source does: await $api.post(...) without capturing result
-    // So this test should fail (RED phase)
-    const storesResponse = source.match(/await\s+\$api\.post\s*\(\s*['"]\/agents['"][\s\S]{0,50}const\s+\w+/)
+    const storesResponse = source.match(/await\s+\$api\.post\s*\(\s*['"]\/agents['"][\s\S]{0,100}apiKey/)
     expect(storesResponse).not.toBeNull()
   })
 })
@@ -98,12 +95,11 @@ describe('US-002-3 AC2: Read-only Input displays the returned apiKey value', () 
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('US-002-3 AC3: Copy button writes apiKey to clipboard', () => {
-  test('source has a Copy button in the key-reveal view', () => {
+  test('source has a Button with click handler in the key-reveal view', () => {
     const source = getSource()
-    // Should have a Button with "Copy" text in the key-reveal section
-    // Check for Button with Copy text near apiKey
-    const hasCopyButtonNearApiKey = source.match(/v-if=["']apiKey["'][\s\S]{0,800}Copy/)
-    expect(hasCopyButtonNearApiKey).not.toBeNull()
+    // The key-reveal section should have a Button with @click near apiKey
+    const hasButtonWithClickNearApiKey = source.match(/v-if=["']apiKey["'][\s\S]{0,800}@click/)
+    expect(hasButtonWithClickNearApiKey).not.toBeNull()
   })
 
   test('source uses navigator.clipboard.writeText to copy apiKey', () => {
@@ -118,25 +114,17 @@ describe('US-002-3 AC3: Copy button writes apiKey to clipboard', () => {
     expect(source).toMatch(/writeText\s*\(\s*.*apiKey/)
   })
 
-  test('Copy button has a click handler', () => {
+  test('Copy button click handler calls copyToClipboard function', () => {
     const source = getSource()
-    // Button should have @click handler near the Copy button
-    // Find the Copy button region and check for @click in that region
-    const copyButtonRegion = source.match(/Copy[\s\S]{0,100}<Button/)
-    if (copyButtonRegion) {
-      const hasClickHandler = copyButtonRegion[0].includes('@click')
-      expect(hasClickHandler).toBe(true)
-    } else {
-      // Button might come before text, check if Button has Copy and @click nearby
-      const buttonWithCopy = source.match(/<Button[^>]*>[\s\S]{0,50}Copy[\s\S]{0,50}<\/Button>/)
-      if (buttonWithCopy) {
-        expect(buttonWithCopy[0]).toContain('@click')
-      } else {
-        // Check for Copy in a button with @click before it
-        const copyWithClickNear = source.match(/@click[^>]*>[\s\S]{0,50}Copy/)
-        expect(copyWithClickNear).not.toBeNull()
-      }
-    }
+    // Button should have @click="copyToClipboard" handler
+    // The copyToClipboard function should be defined
+    const hasCopyHandler = source.includes('@click="copyToClipboard"') ||
+                          source.includes("@click=\"copyToClipboard\"") ||
+                          source.includes('@click.once="copyToClipboard"')
+    expect(hasCopyHandler).toBe(true)
+
+    // The function copyToClipboard should be defined
+    expect(source).toMatch(/function\s+copyToClipboard|const\s+copyToClipboard\s*=/)
   })
 })
 
@@ -162,21 +150,44 @@ describe("US-002-3 AC4: Copy button label changes to 'Copied!' for 2 seconds the
     expect(source).toMatch(/Copied!/)
   })
 
-  test('source uses setTimeout to revert button label after 2 seconds', () => {
+  test('source uses setTimeout with a FUNCTION callback (not a string)', () => {
+    const source = getSource()
+    // Should use setTimeout with a proper function callback, NOT a string
+    // Bug pattern: setTimeout(`...`, 2000) - this is a string, not executable code
+    // Correct pattern: setTimeout(() => { ... }, 2000) or setTimeout(function() { ... }, 2000)
+
+    // Check that setTimeout does NOT use template literal or string as first argument
+    const hasBuggyStringCallback = source.match(/setTimeout\s*\(`[^`]*`\s*,/)
+    expect(hasBuggyStringCallback).toBeNull()
+
+    // Check that setTimeout uses a function (arrow function or anonymous function)
+    const hasProperFunctionCallback =
+      source.match(/setTimeout\s*\(\s*\(\s*\)\s*=>/) ||  // arrow function
+      source.match(/setTimeout\s*\(\s*function\s*\(\)/) ||  // anonymous function
+      source.match(/setTimeout\s*\(\s*\w+\s*,/)  // function reference
+    expect(hasProperFunctionCallback).not.toBeNull()
+  })
+
+  test('source uses setTimeout with 2000ms delay to revert button label', () => {
     const source = getSource()
     // Should use setTimeout with 2000ms to revert the button label
     const hasTwoSecondTimeout =
       source.match(/setTimeout\s*\([^)]*2000/) ||
       source.match(/setTimeout\s*\([^)]*2\s*\*\s*1000/)
-    expect(hasTwoSecondTimeout).toBe(true)
+    expect(hasTwoSecondTimeout).toBeTruthy()
   })
 
   test('source reverts button label back to Copy after timeout', () => {
     const source = getSource()
     // After setTimeout, should revert to "Copy"
-    // Look for: setTimeout that sets button text back to Copy
-    const hasRevertToCopy = source.includes("'Copy'") && source.includes('setTimeout')
-    expect(hasRevertToCopy).toBe(true)
+    // This should happen inside the setTimeout callback
+    const setTimeoutCallback = source.match(/setTimeout\s*\([\s\S]{0,200}\)/)
+    expect(setTimeoutCallback).not.toBeNull()
+
+    // The callback should contain logic to revert to 'Copy'
+    const callbackText = setTimeoutCallback![0]
+    const revertsToCopy = callbackText.includes("'Copy'") || callbackText.includes('"Copy"')
+    expect(revertsToCopy).toBe(true)
   })
 
   test('button displays dynamic label based on copy state', () => {
@@ -185,8 +196,8 @@ describe("US-002-3 AC4: Copy button label changes to 'Copied!' for 2 seconds the
     const hasDynamicButtonLabel =
       source.match(/\{\{\s*copyButtonText\s*\}\}/) ||
       source.match(/\{\{\s*buttonLabel\s*\}\}/) ||
-      (source.includes('copyButtonText') && source.includes('{{'))
-    expect(hasDynamicButtonLabel).toBe(true)
+      source.match(/\{\{\s*copiedState\s*\}\}/)
+    expect(hasDynamicButtonLabel).toBeTruthy()
   })
 })
 
@@ -211,6 +222,15 @@ describe("US-002-3 AC5: Warning message 'Copy this API key now. It will not be s
     const hasWarningInSection = keyRevealSection![0].includes('Copy this API key now')
     expect(hasWarningInSection).toBe(true)
   })
+
+  test('warning message is visible to user in key-reveal view', () => {
+    const source = getSource()
+    // The warning should be inside the key-reveal section (v-if="apiKey")
+    // and should be a <p> or similar text element with the warning
+    const warningPattern = /v-if=["']apiKey["'][\s\S]{0,1000}<p[\s\S]{0,200}Copy this API key now/
+    const hasWarningElement = source.match(warningPattern)
+    expect(hasWarningElement).not.toBeNull()
+  })
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -225,20 +245,42 @@ describe("US-002-3 AC6: Done button emits 'created' event and closes the dialog"
     expect(doneButtonInKeyReveal).not.toBeNull()
   })
 
+  test('Done button has a click handler', () => {
+    const source = getSource()
+    // The Done button should have @click handler
+    const doneButtonRegion = source.match(/Done[\s\S]{0,300}<\/Button>/)
+    expect(doneButtonRegion).not.toBeNull()
+    // The Done button should be inside key-reveal section
+    const doneInKeyReveal = source.match(/v-if=["']apiKey["'][\s\S]{0,800}<Button[\s\S]{0,200}Done/)
+    expect(doneInKeyReveal).not.toBeNull()
+  })
+
   test('Done button click handler emits created event', () => {
     const source = getSource()
     // When Done is clicked, should emit 'created'
-    // Find Done button region and check for emit('created') nearby
-    const doneButtonRegion = source.match(/Done[\s\S]{0,200}emit\s*\(\s*['"]created['"]/)
-    expect(doneButtonRegion).not.toBeNull()
+    // The emit('created') should be in a function called from Done button's @click
+    // Look for handleDone function that contains emit('created')
+    const handleDoneFunction = source.match(/function\s+handleDone[\s\S]{0,500}/)
+    expect(handleDoneFunction).not.toBeNull()
+    expect(handleDoneFunction![0]).toContain("emit('created')")
   })
 
-  test('Done button closes the dialog', () => {
+  test('Done button closes the dialog by emitting update:open with false', () => {
     const source = getSource()
     // When Done is clicked, should emit update:open(false) to close
-    // Find Done button region and check for update:open emission nearby
-    const doneClosesDialog = source.match(/Done[\s\S]{0,200}update:open/)
-    expect(doneClosesDialog).not.toBeNull()
+    const handleDoneFunction = source.match(/function\s+handleDone[\s\S]{0,500}/)
+    expect(handleDoneFunction).not.toBeNull()
+    const hasCloseDialog = handleDoneFunction![0].includes("emit('update:open'")
+    expect(hasCloseDialog).toBe(true)
+  })
+
+  test('Done button resets apiKey state after closing', () => {
+    const source = getSource()
+    // After closing, should reset apiKey.value = null for next use
+    const handleDoneFunction = source.match(/function\s+handleDone[\s\S]{0,500}/)
+    expect(handleDoneFunction).not.toBeNull()
+    const resetsApiKey = handleDoneFunction![0].includes('apiKey.value = null')
+    expect(resetsApiKey).toBe(true)
   })
 })
 
@@ -262,6 +304,20 @@ describe('US-002-3: Key-reveal view is a distinct section in the dialog', () => 
     // This means there should be a v-if on the key-reveal section
     const hasMutuallyExclusive = source.includes('v-if="apiKey') || source.includes("v-if='apiKey")
     expect(hasMutuallyExclusive).toBe(true)
+  })
+
+  test('key-reveal view shows Input, Copy button, warning, and Done button together', () => {
+    const source = getSource()
+    // The key-reveal section should contain all required elements
+    const keyRevealSection = source.match(/v-if=["']apiKey["'][\s\S]{0,1500}<\/div>/)
+    expect(keyRevealSection).not.toBeNull()
+    const section = keyRevealSection![0]
+    // Check for all required elements
+    expect(section).toContain('<Input')
+    expect(section).toContain('readonly')
+    expect(section).toContain('copyToClipboard')
+    expect(section).toContain('Copy this API key now')
+    expect(section).toContain('Done')
   })
 })
 
