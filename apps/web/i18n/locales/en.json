@@ -190,7 +190,13 @@
       "rolesUpdated": "Agent roles updated successfully",
       "updateRolesFailed": "Failed to update agent roles",
       "capabilitiesUpdated": "Agent capabilities updated successfully",
-      "updateCapabilitiesFailed": "Failed to update agent capabilities"
+      "updateCapabilitiesFailed": "Failed to update agent capabilities",
+      "deleted": "Agent deleted successfully",
+      "deleteFailed": "Failed to delete agent",
+      "rotateKeyFailed": "Failed to rotate API key"
+    },
+    "rotateKey": {
+      "failed": "Failed to rotate API key"
     },
     "form": {
       "editRoles": "Edit Agent Roles",
@@ -202,7 +208,9 @@
     },
     "actions": {
       "editRoles": "Edit Roles",
-      "editCapabilities": "Edit Capabilities"
+      "editCapabilities": "Edit Capabilities",
+      "rotateKey": "Rotate Key",
+      "delete": "Delete"
     }
   },
   "kb": {
