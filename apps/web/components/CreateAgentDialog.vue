@@ -34,10 +34,10 @@
                 <input
                   type="checkbox"
                   :value="role"
-                  :checked="(componentField.modelValue as string[]).includes(role)"
+                  :checked="((Array.isArray(componentField.modelValue) ? componentField.modelValue : []) as string[]).indexOf(role as string) !== -1"
                   @change="(e) => {
                     const target = e.target as HTMLInputElement
-                    const currentValues = componentField.modelValue as string[] || []
+                    const currentValues = Array.isArray(componentField.modelValue) ? componentField.modelValue : []
                     if (target.checked) {
                       componentField['onUpdate:modelValue']([...currentValues, role])
                     } else {
@@ -111,8 +111,8 @@ const formSchema = toTypedSchema(
     slug: z.string().min(1, t('agents.validation.slugRequired')).regex(/^[a-z0-9-]+$/, t('agents.validation.slugFormat')),
     roles: z.array(z.string()).min(1, t('agents.validation.rolesRequired')),
     capabilities: z.string().optional(),
-    maxConcurrentTickets: z.number().default(3).int().min(1),
-  }) as any
+    maxConcurrentTickets: z.number().int().min(1).default(3),
+  })
 )
 
 const { handleSubmit, isSubmitting, resetForm, setFieldValue, values } = useForm({
@@ -126,7 +126,7 @@ const { handleSubmit, isSubmitting, resetForm, setFieldValue, values } = useForm
   },
 })
 
-watch(() => values.name, (name: string) => {
+watch(() => values.name, (name) => {
   if (name !== undefined) {
     setFieldValue('slug', deriveSlug(name))
   }
