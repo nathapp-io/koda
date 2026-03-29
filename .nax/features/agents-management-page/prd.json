@@ -1,0 +1,168 @@
+{
+  "project": "koda",
+  "feature": "agents-management-page",
+  "branchName": "feat/agents-management-page",
+  "createdAt": "2026-03-29T00:00:00.000Z",
+  "updatedAt": "2026-03-29T12:38:20.171Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Move agents page to standalone route and fix layout nav",
+      "description": "Delete `pages/[project]/agents.vue` and create `pages/agents.vue` that fetches from `GET /agents` (no project slug). Fix `changeStatus` to call `PATCH /agents/:slug`. Update `layouts/default.vue` to remove the project-scoped Agents nav link and add a global `/agents` link (Bot icon) in the always-visible section alongside Dashboard. Add the `/agents` breadcrumb case to `breadcrumbItems`. Add required i18n keys to both locale files.",
+      "acceptanceCriteria": [
+        "When `pages/agents.vue` is loaded, `useAsyncData` is called with key `'agents'` and fetches `$api.get('/agents')`",
+        "When `changeStatus(agent, newStatus)` is called, it calls `$api.patch('/agents/' + agent.slug, { status: newStatus })`",
+        "Given `route.path === '/agents'`, `breadcrumbItems` returns `[{ label: 'Koda', to: '/' }, { label: t('nav.agents') }]`",
+        "When the sidebar renders without a project context, the `/agents` NuxtLink with Bot icon is visible",
+        "When the sidebar renders with a project context (`projectSlug` is set), the old `/${projectSlug}/agents` NuxtLink is not present"
+      ],
+      "tags": [
+        "feature",
+        "routing",
+        "nav"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/pages/[project]/agents.vue",
+        "apps/web/layouts/default.vue",
+        "apps/web/composables/useApi.ts",
+        "apps/web/i18n/locales/en.json",
+        "apps/web/i18n/locales/zh.json"
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "CreateAgentDialog with API key reveal",
+      "description": "Create `components/CreateAgentDialog.vue` using vee-validate + toTypedSchema + zod. Fields: name (required), slug (auto-derived kebab-case from name, user-editable, pattern `/^[a-z0-9-]+$/`), roles (checkboxes VERIFIER/DEVELOPER/REVIEWER, min 1), capabilities (tag input, optional), maxConcurrentTickets (integer ≥ 1, default 3). On success the dialog switches to a key-reveal view: read-only Input with the `apiKey`, Copy button (clipboard + 2s 'Copied!' feedback), warning message 'Copy this API key now. It will not be shown again.', and a Done button that emits `'created'` and closes. Wire a 'Create Agent' button in `pages/agents.vue` PageHeader that opens this dialog; call `refresh()` on `'created'`.",
+      "acceptanceCriteria": [
+        "When the `name` field value changes, `slug` is auto-derived as kebab-case but remains independently editable by the user",
+        "When the form is submitted with valid values, it calls `$api.post('/agents', { name, slug, roles, capabilities, maxConcurrentTickets })`",
+        "When the API call succeeds, the dialog renders a read-only Input containing the returned `apiKey` value",
+        "When the Copy button is clicked, the `apiKey` is written to the clipboard and the button label changes to 'Copied!' for 2 seconds then reverts",
+        "When the form is submitted with `roles` empty, a validation error is shown and `$api.post` is not called",
+        "When the Done button is clicked on the key-reveal view, the dialog emits `'created'` and closes",
+        "When `pages/agents.vue` receives the `'created'` event from `CreateAgentDialog`, it calls `refresh()`",
+        "Given `maxConcurrentTickets` is not provided by the user, the form defaults to `3`"
+      ],
+      "tags": [
+        "feature",
+        "form",
+        "security"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/components/CreateProjectDialog.vue",
+        "apps/web/pages/[project]/agents.vue",
+        "apps/web/composables/useApi.ts",
+        "apps/web/composables/useAppToast.ts",
+        "apps/web/i18n/locales/en.json"
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "EditAgentRolesDialog and EditAgentCapabilitiesDialog",
+      "description": "Create `components/EditAgentRolesDialog.vue`: receives `agent` prop, pre-checks current roles as checkboxes (VERIFIER/DEVELOPER/REVIEWER), submits `PATCH /agents/:slug/update-roles`, shows success toast, emits `'updated'`. Create `components/EditAgentCapabilitiesDialog.vue`: receives `agent` prop, renders current capabilities as removable Badge tags, Enter in Input appends a new tag, submits `PATCH /agents/:slug/update-capabilities`, shows success toast, emits `'updated'`. Wire both into the actions dropdown per agent row in `pages/agents.vue`; call `refresh()` on `'updated'`.",
+      "acceptanceCriteria": [
+        "When `EditAgentRolesDialog` opens with an agent, the checkboxes for the agent's current roles are pre-checked",
+        "When `EditAgentRolesDialog` is submitted, it calls `$api.patch('/agents/' + agent.slug + '/update-roles', { roles })`",
+        "When `EditAgentRolesDialog` submission succeeds, it shows a success toast and emits `'updated'`",
+        "When `EditAgentCapabilitiesDialog` opens with an agent, existing capabilities are rendered as removable Badge tags",
+        "When the user presses Enter in the `EditAgentCapabilitiesDialog` input, the entered text is appended as a new capability tag",
+        "When a capability Badge's remove control is clicked in `EditAgentCapabilitiesDialog`, that tag is removed from the list",
+        "When `EditAgentCapabilitiesDialog` is submitted, it calls `$api.patch('/agents/' + agent.slug + '/update-capabilities', { capabilities })`",
+        "When `EditAgentCapabilitiesDialog` submission succeeds, it shows a success toast and emits `'updated'`",
+        "When `pages/agents.vue` receives `'updated'` from either edit dialog, it calls `refresh()`",
+        "When the actions dropdown is opened for an agent row, it contains 'Edit Roles' and 'Edit Capabilities' items"
+      ],
+      "tags": [
+        "feature",
+        "form"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/pages/agents.vue",
+        "apps/web/components/CreateAgentDialog.vue",
+        "apps/web/composables/useApi.ts",
+        "apps/web/composables/useAppToast.ts",
+        "apps/web/i18n/locales/en.json"
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "RotateKeyDialog and DeleteAgentDialog",
+      "description": "Create `components/RotateKeyDialog.vue`: shows confirm message, on confirm calls `POST /agents/:slug/rotate-key`, on success switches to key-reveal view (same Copy + warning pattern as CreateAgentDialog), Done emits `'rotated'`. Create `components/DeleteAgentDialog.vue`: shows confirm message containing the agent's name, on confirm calls `DELETE /agents/:slug`, on success shows toast, emits `'deleted'`, closes. Wire both into the actions dropdown per agent row in `pages/agents.vue`; call `refresh()` on both events.",
+      "acceptanceCriteria": [
+        "When `RotateKeyDialog` confirm button is clicked, it calls `$api.post('/agents/' + agent.slug + '/rotate-key', {})`",
+        "When `RotateKeyDialog` rotation succeeds, the dialog switches to a key-reveal view showing the new `apiKey` in a read-only Input with Copy button and warning message",
+        "When the Copy button in `RotateKeyDialog` is clicked, the new `apiKey` is written to the clipboard and the button label shows 'Copied!' for 2 seconds",
+        "When `RotateKeyDialog` Done button is clicked, it emits `'rotated'` and closes the dialog",
+        "When `DeleteAgentDialog` opens, the confirm message contains the agent's `name`",
+        "When `DeleteAgentDialog` confirm button is clicked, it calls `$api.delete('/agents/' + agent.slug)`",
+        "When `DeleteAgentDialog` deletion succeeds, it shows a success toast, emits `'deleted'`, and closes",
+        "When `pages/agents.vue` receives `'rotated'` from `RotateKeyDialog`, it calls `refresh()`",
+        "When `pages/agents.vue` receives `'deleted'` from `DeleteAgentDialog`, it calls `refresh()`",
+        "When the actions dropdown is opened for an agent row, it contains 'Rotate Key' and 'Delete' items"
+      ],
+      "tags": [
+        "feature",
+        "security",
+        "destructive"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/pages/agents.vue",
+        "apps/web/components/CreateAgentDialog.vue",
+        "apps/web/composables/useApi.ts",
+        "apps/web/composables/useAppToast.ts",
+        "apps/web/i18n/locales/en.json"
+      ]
+    }
+  ],
+  "analysis": "The existing agents page lives at `apps/web/pages/[project]/agents.vue` and calls `GET /projects/${slug}/agents` which does not exist in the API — causing a 404. The correct endpoint is `GET /agents` (system-level, not project-scoped). The Agents nav link is hidden inside a `v-if=\"projectSlug\"` block in `layouts/default.vue`, making it invisible from the dashboard. All CRUD endpoints (`POST /agents`, `PATCH /agents/:slug/update-roles`, `PATCH /agents/:slug/update-capabilities`, `POST /agents/:slug/rotate-key`, `DELETE /agents/:slug`) exist in the API but are unused in the web UI.\n\nKey files to modify:\n- `apps/web/pages/[project]/agents.vue` → DELETE and replace with `apps/web/pages/agents.vue`\n- `apps/web/layouts/default.vue` → remove project-scoped agents link, add global `/agents` link, add breadcrumb case\n- `apps/web/i18n/locales/en.json` → add agents CRUD i18n keys\n- `apps/web/i18n/locales/zh.json` → add agents CRUD i18n keys (Chinese)\n\nKey files to create:\n- `apps/web/components/CreateAgentDialog.vue` — vee-validate + toTypedSchema + zod, API key reveal on success\n- `apps/web/components/EditAgentRolesDialog.vue` — checkbox modal for roles\n- `apps/web/components/EditAgentCapabilitiesDialog.vue` — tag-input modal\n- `apps/web/components/RotateKeyDialog.vue` — confirm + key-reveal\n- `apps/web/components/DeleteAgentDialog.vue` — confirm + delete\n\nPatterns to follow:\n- Form dialogs: `CreateProjectDialog.vue` uses vee-validate + `toTypedSchema` + zod, `useForm`, `handleSubmit`, `watch` for slug auto-derive\n- API calls: `useApi()` exposes `$api.get`, `$api.post`, `$api.patch`, `$api.delete`; errors caught with `extractApiError`\n- Toasts: `useAppToast()` returns `toast.success()` / `toast.error()`\n- Shadcn-nuxt components available: Dialog, Input, Button, Badge, Table*, FormField/Item/Control/Label/Message, DropdownMenu*, Checkbox (check if available), Separator\n- The `Agent` interface needs `maxConcurrentTickets: number` added vs the current page which omits it\n- `useAsyncData` key must be a stable string without project slug for the top-level page\n- Breadcrumb: `layouts/default.vue` `breadcrumbItems` is a computed that checks `route.path`; add `/agents` case before the fallback\n- i18n: `nav.agents` key already exists; new keys go under `agents.*` namespace\n- Web stack is Nuxt 3 (not Next.js); components use `<script setup lang=\"ts\">` + `<template>` SFC pattern\n\nRisks:\n- Deleting `pages/[project]/agents.vue` removes the project-scoped route `/[project]/agents` — any existing links to it in other pages must be cleaned up (currently only `layouts/default.vue` links to it)\n- The old `useAsyncData` key `agents-${slug}` must become `'agents'` — a mismatch would cause SSR hydration issues\n- `$api.delete` is named `delete_` internally but exposed as `delete` on the returned object — use `$api.delete` in templates"
+}
