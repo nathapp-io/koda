@@ -1,4 +1,6 @@
 <script setup lang="ts">
+definePageMeta({ layout: 'default' })
+
 interface Assignee {
   name: string
   email?: string
@@ -41,10 +43,6 @@ function handleOpenTicket(ticket: Ticket) {
   router.push(`/${slug}/tickets/${ticket.ref}`)
 }
 
-function handleCreate() {
-  showCreateDialog.value = true
-}
-
 function handleCreated() {
   showCreateDialog.value = false
   refresh()
@@ -52,17 +50,23 @@ function handleCreated() {
 </script>
 
 <template>
-  <div>
-    <div v-if="pending" class="text-center py-12 text-muted-foreground">{{ t('common.loading') }}</div>
-    <div v-else-if="error" class="text-center py-12">
-      <p class="text-destructive text-sm">{{ t('common.loadFailed') }}</p>
-      <Button @click="refresh()" class="mt-4">{{ t('common.retry') }}</Button>
-    </div>
+  <div class="space-y-6">
+    <PageHeader :title="slug">
+      <template #actions>
+        <Button @click="showCreateDialog = true">
+          {{ t('tickets.create') }}
+        </Button>
+      </template>
+    </PageHeader>
+
+    <LoadingState v-if="pending" />
+    <ErrorState v-else-if="error" @retry="refresh()" />
     <TicketBoard v-else
       :tickets="tickets"
       @open-ticket="handleOpenTicket"
-      @create="handleCreate"
+      @create="showCreateDialog = true"
     />
+
     <CreateTicketDialog
       :open="showCreateDialog"
       :project-slug="slug"

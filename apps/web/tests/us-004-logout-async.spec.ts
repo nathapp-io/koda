@@ -216,7 +216,7 @@ describe('US-004 AC4: default.vue sidebar does not have duplicate user section',
     const asideContent = asideMatch?.[0] || ''
     expect(asideContent).toContain('NuxtLink')
     expect(asideContent).toContain("t('nav.dashboard')")
-    expect(asideContent).toContain("t('nav.projects')")
+    expect(asideContent).toContain("t('nav.board')")
   })
 })
 

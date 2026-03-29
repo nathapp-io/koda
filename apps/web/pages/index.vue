@@ -1,24 +1,17 @@
 <template>
   <div class="space-y-8">
-    <div class="flex items-center justify-between">
-      <div>
-        <h1 class="text-3xl font-bold tracking-tight">{{ t('projects.title') }}</h1>
-        <p class="mt-2 text-muted-foreground">
-          {{ t('projects.subtitle') }}
-        </p>
-      </div>
-      <Button @click="showCreateDialog = true">
-        {{ t('projects.newProject') }}
-      </Button>
-    </div>
+    <PageHeader :title="t('projects.title')" :subtitle="t('projects.subtitle')">
+      <template #actions>
+        <Button @click="showCreateDialog = true">
+          {{ t('projects.newProject') }}
+        </Button>
+      </template>
+    </PageHeader>
 
-    <div v-if="pending" class="flex items-center justify-center py-12 text-muted-foreground">{{ t('common.loading') }}</div>
-    <div v-else-if="error" class="text-center py-12">
-      <p class="text-destructive text-sm">{{ t('common.loadFailed') }}</p>
-      <Button @click="refresh()" class="mt-4">{{ t('common.retry') }}</Button>
-    </div>
+    <LoadingState v-if="pending" />
+    <ErrorState v-else-if="error" @retry="refresh()" />
     <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-      <template v-if="projects && projects.length > 0">
+      <template v-if="projects.length > 0">
         <Card v-for="project in projects" :key="project.id">
           <CardHeader>
             <div class="flex items-center justify-between">
@@ -36,14 +29,7 @@
           </CardFooter>
         </Card>
       </template>
-      <template v-else>
-        <div class="col-span-full flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-background/50 py-12">
-          <h3 class="mt-4 text-lg font-medium">{{ t('projects.noProjects') }}</h3>
-          <p class="mt-1 text-sm text-muted-foreground">
-            {{ t('projects.noProjectsHint') }}
-          </p>
-        </div>
-      </template>
+      <EmptyState v-else :message="t('projects.noProjects')" />
     </div>
 
     <CreateProjectDialog
