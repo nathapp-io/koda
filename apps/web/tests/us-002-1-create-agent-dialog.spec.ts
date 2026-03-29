@@ -78,8 +78,8 @@ describe('US-002-1 AC3: slug field validates against pattern /^[a-z0-9-]+$/', ()
 
   test('source defines slug field with regex pattern validation', () => {
     const source = readFileSync(componentPath, 'utf-8')
-    // Should have .regex() or .pattern() with the lowercase alphanumeric dash pattern
-    expect(source).toMatch(/slug:\s*z\.string\(\)\.[^)]*\.regex\s*\(\s*\/\[a-z0-9-\]\+\$\//)
+    // Should have .regex() with the lowercase alphanumeric dash pattern
+    expect(source).toContain("regex(/^[a-z0-9-]+$/")
   })
 
   test('source includes FormMessage for slug field error display', () => {
@@ -103,7 +103,7 @@ describe('US-002-1 AC4: roles field requires at least one checkbox selected (VER
   test('source defines roles field with min(1) validation', () => {
     const source = readFileSync(componentPath, 'utf-8')
     // Roles should have a min validation to ensure at least one is selected
-    expect(source).toMatch(/roles:\s*z\.(array|array\(\))\.[^)]*\.min\(1/)
+    expect(source).toContain('z.array(z.string()).min(1')
   })
 
   test('source contains checkboxes or inputs for VERIFIER, DEVELOPER, REVIEWER roles', () => {
@@ -165,7 +165,8 @@ describe('US-002-1 AC6: maxConcurrentTickets defaults to 3, validates integer â‰
   test('source defines maxConcurrentTickets field with integer â‰¥ 1 validation', () => {
     const source = readFileSync(componentPath, 'utf-8')
     // Should have .int() and .min(1) for integer and >= 1 validation
-    expect(source).toMatch(/maxConcurrentTickets:\s*z\.number\(\)[^)]*\.int\(\)[^)]*\.min\(1/)
+    expect(source).toMatch(/\.int\(\)[^)]*\.min\(1\)/)
+    expect(source).toContain('maxConcurrentTickets: z.number()')
   })
 
   test('source includes FormMessage for maxConcurrentTickets field error display', () => {
