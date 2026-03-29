@@ -21,6 +21,8 @@ const { data: agentsData, pending, error, refresh } = useAsyncData(
 
 const agents = computed(() => agentsData.value ?? [])
 
+const isCreateDialogOpen = ref(false)
+
 function statusClass(status: string) {
   if (status === 'ACTIVE') return 'bg-green-100 text-green-800'
   if (status === 'PAUSED') return 'bg-yellow-100 text-yellow-800'
@@ -36,11 +38,25 @@ async function changeStatus(agent: Agent, newStatus: 'ACTIVE' | 'PAUSED' | 'OFFL
     toast.error(t('agents.toast.statusFailed'))
   }
 }
+
+function handleAgentCreated() {
+  refresh()
+  isCreateDialogOpen.value = false
+}
 </script>
 
 <template>
   <div class="space-y-6">
-    <PageHeader :title="t('agents.title')" />
+    <PageHeader :title="t('agents.title')">
+      <template #actions>
+        <Dialog :open="isCreateDialogOpen" @update:open="isCreateDialogOpen = $event">
+          <DialogTrigger as-child>
+            <Button>{{ t('agents.createAgent') }}</Button>
+          </DialogTrigger>
+          <CreateAgentDialog :open="isCreateDialogOpen" @created="handleAgentCreated" />
+        </Dialog>
+      </template>
+    </PageHeader>
 
     <LoadingState v-if="pending" />
     <ErrorState v-else-if="error" @retry="refresh()" />

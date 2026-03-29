@@ -170,6 +170,7 @@
   },
   "agents": {
     "title": "代理",
+    "createAgent": "创建代理",
     "columns": {
       "name": "名称",
       "slug": "标识符",
