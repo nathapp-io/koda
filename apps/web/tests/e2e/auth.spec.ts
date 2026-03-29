@@ -26,18 +26,18 @@ test.describe('Authentication', () => {
     await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
   });
 
-  test('unauthenticated users can open dashboard shell', async ({ page }) => {
+  test('unauthenticated users are redirected to login from dashboard route', async ({ page }) => {
     await page.goto('/');
-    await expect(page).toHaveURL('/', { timeout: 5000 });
-    await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible();
+    await expect(page).toHaveURL('/login', { timeout: 5000 });
+    await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
   });
 
   test('logout clears session and redirects to login', async ({ page }) => {
     await webLogin(page);
     await expect(page).toHaveURL('/');
 
-    // Logout button is in the sidebar — target the sidebar specifically (header also has one)
-    await page.locator('aside').getByRole('button', { name: 'Logout' }).click();
+    // Target the visible logout action regardless of layout region.
+    await page.getByRole('button', { name: 'Logout' }).first().click();
     await expect(page).toHaveURL('/login', { timeout: 5000 });
 
     // Verify session cleared by checking auth cookie removal
@@ -45,8 +45,8 @@ test.describe('Authentication', () => {
     const authCookie = cookies.find((cookie) => cookie.name === 'koda_token');
     expect(authCookie?.value ?? '').toBe('');
 
-    // Navigating to / should no longer depend on authenticated state
+    // Root should redirect to login when unauthenticated.
     await page.goto('/');
-    await expect(page).toHaveURL('/', { timeout: 3000 });
+    await expect(page).toHaveURL('/login', { timeout: 3000 });
   });
 });
