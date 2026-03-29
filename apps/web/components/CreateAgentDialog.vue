@@ -109,7 +109,7 @@
       <div v-if="apiKey" class="space-y-4">
         <div class="flex gap-2">
           <Input :value="apiKey" readonly class="flex-1 font-mono text-sm" />
-          <Button @click="copyToClipboard">Copy</Button>
+          <Button @click="copyToClipboard">{{ copyButtonText }}</Button>
         </div>
         <p class="text-sm text-muted-foreground">
           Copy this API key now. It will not be shown again.
