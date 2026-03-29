@@ -186,7 +186,14 @@
     },
     "toast": {
       "statusUpdated": "Agent status updated to {status}",
-      "statusFailed": "Failed to update agent status"
+      "statusFailed": "Failed to update agent status",
+      "rolesUpdated": "Agent roles updated successfully",
+      "updateRolesFailed": "Failed to update agent roles"
+    },
+    "form": {
+      "editRoles": "Edit Agent Roles",
+      "save": "Save",
+      "saving": "Saving..."
     }
   },
   "kb": {

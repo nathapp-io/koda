@@ -186,7 +186,14 @@
     },
     "toast": {
       "statusUpdated": "代理状态已更新为 {status}",
-      "statusFailed": "更新代理状态失败"
+      "statusFailed": "更新代理状态失败",
+      "rolesUpdated": "代理角色更新成功",
+      "updateRolesFailed": "更新代理角色失败"
+    },
+    "form": {
+      "editRoles": "编辑代理角色",
+      "save": "保存",
+      "saving": "保存中..."
     }
   },
   "kb": {
