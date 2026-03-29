@@ -2,7 +2,7 @@ import { describe, test, expect } from '@jest/globals'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 
-const webDir = join(__dirname, '../../..')
+const webDir = join(__dirname, '.')
 const pagesDir = join(webDir, 'pages')
 const componentsDir = join(webDir, 'components')
 const layoutsDir = join(webDir, 'layouts')

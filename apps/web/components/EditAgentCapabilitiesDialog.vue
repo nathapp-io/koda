@@ -2,7 +2,7 @@
   <Dialog :open="open" @update:open="$emit('update:open', $event)">
     <DialogContent class="sm:max-w-[500px]">
       <DialogHeader>
-        <DialogTitle>{{ t('agents.form.editCapabilities') }}</DialogTitle>
+        <DialogTitle>{{ t('agents.editCapabilities.title') }}</DialogTitle>
       </DialogHeader>
 
       <form @submit="onSubmit" class="space-y-4">
