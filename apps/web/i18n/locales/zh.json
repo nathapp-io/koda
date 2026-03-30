@@ -170,6 +170,7 @@
   },
   "agents": {
     "title": "代理",
+    "createAgent": "创建代理",
     "columns": {
       "name": "名称",
       "slug": "标识符",
@@ -185,7 +186,58 @@
     },
     "toast": {
       "statusUpdated": "代理状态已更新为 {status}",
-      "statusFailed": "更新代理状态失败"
+      "statusFailed": "更新代理状态失败",
+      "rolesUpdated": "代理角色更新成功",
+      "updateRolesFailed": "更新代理角色失败",
+      "capabilitiesUpdated": "代理能力更新成功",
+      "updateCapabilitiesFailed": "更新代理能力失败"
+    },
+    "form": {
+      "editRoles": "编辑代理角色",
+      "roles": "角色",
+      "capabilities": "能力",
+      "capabilitiesPlaceholder": "输入并按回车添加",
+      "save": "保存",
+      "saving": "保存中...",
+      "title": "创建代理",
+      "name": "名称",
+      "namePlaceholder": "例如：Subrina Coder",
+      "slug": "标识符",
+      "slugPlaceholder": "自动从名称生成",
+      "creating": "创建中...",
+      "create": "创建代理",
+      "maxConcurrentTickets": "最大并发工单数",
+      "validation": {
+        "nameRequired": "名称为必填项",
+        "slugRequired": "标识符为必填项",
+        "slugFormat": "标识符必须为小写字母、数字和连字符",
+        "rolesRequired": "至少需要选择一个角色"
+      }
+    },
+    "actions": {
+      "editRoles": "编辑角色",
+      "editCapabilities": "编辑能力",
+      "rotateKey": "轮换密钥",
+      "delete": "删除"
+    },
+    "editCapabilities": {
+      "title": "编辑能力"
+    },
+    "rotateKey": {
+      "failed": "轮换 API 密钥失败",
+      "confirm": "这将使当前密钥立即失效。是否继续？",
+      "newKey": "新 API 密钥",
+      "rotate": "轮换密钥",
+      "apiKeyReveal": {
+        "title": "代理已创建",
+        "message": "立即复制此 API 密钥。它不会再显示。",
+        "copy": "复制",
+        "copied": "已复制！"
+      }
+    },
+    "deleteAgent": {
+      "confirm": "确定要删除 {name} 吗？此操作无法撤销。",
+      "delete": "删除代理"
     }
   },
   "kb": {

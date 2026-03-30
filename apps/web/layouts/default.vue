@@ -17,13 +17,15 @@ const breadcrumbItems = computed(() => {
   if (!project) return []
 
   const path = route.path
+
+  if (path === '/agents') {
+    return [{ label: 'Koda', to: '/' }, { label: t('nav.agents') }]
+  }
+
   const projectBase = { label: project, to: `/${project}` }
 
   if (path === `/${project}`) {
     return [{ label: 'Koda', to: '/' }, { label: project }]
-  }
-  if (path === `/${project}/agents`) {
-    return [{ label: 'Koda', to: '/' }, projectBase, { label: t('nav.agents') }]
   }
   if (path === `/${project}/labels`) {
     return [{ label: 'Koda', to: '/' }, projectBase, { label: t('nav.labels') }]
@@ -67,7 +69,7 @@ const backTo = computed(() => {
 
       <!-- Nav links -->
       <nav class="flex-1 space-y-1 px-3 py-4">
-        <!-- Always visible: Dashboard -->
+        <!-- Always visible: Dashboard + Agents -->
         <NuxtLink
           to="/"
           :class="navLinkClass"
@@ -77,6 +79,8 @@ const backTo = computed(() => {
           <LayoutDashboard class="h-4 w-4 shrink-0" />
           {{ t('nav.dashboard') }}
         </NuxtLink>
+
+        <NuxtLink to="/agents" :class="navLinkClass" :active-class="activeClass"><Bot class="h-4 w-4 shrink-0" />{{ t('nav.agents') }}</NuxtLink>
 
         <!-- Project-scoped links -->
         <template v-if="projectSlug">
@@ -88,14 +92,6 @@ const backTo = computed(() => {
           >
             <Kanban class="h-4 w-4 shrink-0" />
             {{ t('nav.board') }}
-          </NuxtLink>
-          <NuxtLink
-            :to="`/${projectSlug}/agents`"
-            :class="navLinkClass"
-            :active-class="activeClass"
-          >
-            <Bot class="h-4 w-4 shrink-0" />
-            {{ t('nav.agents') }}
           </NuxtLink>
           <NuxtLink
             :to="`/${projectSlug}/labels`"

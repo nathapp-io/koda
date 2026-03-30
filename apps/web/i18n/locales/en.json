@@ -170,6 +170,7 @@
   },
   "agents": {
     "title": "Agents",
+    "createAgent": "Create Agent",
     "columns": {
       "name": "Name",
       "slug": "Slug",
@@ -185,7 +186,61 @@
     },
     "toast": {
       "statusUpdated": "Agent status updated to {status}",
-      "statusFailed": "Failed to update agent status"
+      "statusFailed": "Failed to update agent status",
+      "rolesUpdated": "Agent roles updated successfully",
+      "updateRolesFailed": "Failed to update agent roles",
+      "capabilitiesUpdated": "Agent capabilities updated successfully",
+      "updateCapabilitiesFailed": "Failed to update agent capabilities",
+      "deleted": "Agent deleted successfully",
+      "deleteFailed": "Failed to delete agent",
+      "rotateKeyFailed": "Failed to rotate API key"
+    },
+    "rotateKey": {
+      "failed": "Failed to rotate API key",
+      "confirm": "This will invalidate the current key immediately. Continue?",
+      "newKey": "New API Key",
+      "rotate": "Rotate Key",
+      "apiKeyReveal": {
+        "title": "Agent Created",
+        "message": "Copy this API key now. It will not be shown again.",
+        "copy": "Copy",
+        "copied": "Copied!"
+      }
+    },
+    "form": {
+      "editRoles": "Edit Agent Roles",
+      "roles": "Roles",
+      "capabilities": "Capabilities",
+      "capabilitiesPlaceholder": "Type and press Enter to add",
+      "save": "Save",
+      "saving": "Saving...",
+      "title": "Create Agent",
+      "name": "Name",
+      "namePlaceholder": "e.g. Subrina Coder",
+      "slug": "Slug",
+      "slugPlaceholder": "auto-generated-from-name",
+      "creating": "Creating...",
+      "create": "Create Agent",
+      "maxConcurrentTickets": "Max Concurrent Tickets",
+      "validation": {
+        "nameRequired": "Name is required",
+        "slugRequired": "Slug is required",
+        "slugFormat": "Slug must be lowercase letters, numbers, and hyphens",
+        "rolesRequired": "At least one role is required"
+      }
+    },
+    "actions": {
+      "editRoles": "Edit Roles",
+      "editCapabilities": "Edit Capabilities",
+      "rotateKey": "Rotate Key",
+      "delete": "Delete"
+    },
+    "editCapabilities": {
+      "title": "Edit Capabilities"
+    },
+    "deleteAgent": {
+      "confirm": "Are you sure you want to delete {name}? This cannot be undone.",
+      "delete": "Delete Agent"
     }
   },
   "kb": {
