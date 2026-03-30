@@ -2,7 +2,6 @@ import { Command } from 'commander';
 import { resolveContext } from '../config';
 import { configureClient } from '../client';
 import { AgentService } from '../generated';
-import { error } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 
@@ -25,9 +24,7 @@ export function agentCommand(program: Command): void {
         const ctx = await resolveContext({});
 
         if (!ctx.apiKey || !ctx.apiUrl) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
-          process.exit(2);
-          return;
+          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
         const client = configureClient(ctx.apiUrl, ctx.apiKey);
@@ -59,15 +56,11 @@ export function agentCommand(program: Command): void {
         const ctx = await resolveContext({ projectSlug: options.project });
 
         if (!ctx.projectSlug) {
-          error('Project not configured. Run: koda init');
-          process.exit(2);
-          return;
+          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
         }
 
         if (!ctx.apiKey || !ctx.apiUrl) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
-          process.exit(2);
-          return;
+          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
         const client = configureClient(ctx.apiUrl, ctx.apiKey);
@@ -80,13 +73,11 @@ export function agentCommand(program: Command): void {
         if (options.json) {
           console.log(JSON.stringify(result, null, 2));
           process.exit(0);
-          return;
         }
 
         if (result === null) {
           console.log('No suitable tickets found for pickup.');
           process.exit(0);
-          return;
         }
 
         const { ticket, matchScore, matchedCapabilities } = result;

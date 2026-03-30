@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { resolveContext } from '../config';
 import { configureClient } from '../client';
 import { LabelsService } from '../generated';
-import { table, error } from '../utils/output';
+import { table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 
@@ -23,15 +23,11 @@ export function labelCommand(program: Command): void {
         const ctx = await resolveContext({ projectSlug: options.project });
 
         if (!ctx.projectSlug) {
-          error('Project not configured. Run: koda init');
-          process.exit(2);
-          return;
+          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
         }
 
         if (!ctx.apiKey || !ctx.apiUrl) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
-          process.exit(2);
-          return;
+          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
         const client = configureClient(ctx.apiUrl, ctx.apiKey);
@@ -69,15 +65,11 @@ export function labelCommand(program: Command): void {
         const ctx = await resolveContext({ projectSlug: options.project });
 
         if (!ctx.projectSlug) {
-          error('Project not configured. Run: koda init');
-          process.exit(2);
-          return;
+          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
         }
 
         if (!ctx.apiKey || !ctx.apiUrl) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
-          process.exit(2);
-          return;
+          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
         const client = configureClient(ctx.apiUrl, ctx.apiKey);
@@ -103,20 +95,17 @@ export function labelCommand(program: Command): void {
     .description('Delete a label from a project')
     .option('--project <slug>', 'Project slug')
     .requiredOption('--id <id>', 'Label ID')
+    .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
         const ctx = await resolveContext({ projectSlug: options.project });
 
         if (!ctx.projectSlug) {
-          error('Project not configured. Run: koda init');
-          process.exit(2);
-          return;
+          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
         }
 
         if (!ctx.apiKey || !ctx.apiUrl) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
-          process.exit(2);
-          return;
+          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
         const client = configureClient(ctx.apiUrl, ctx.apiKey);

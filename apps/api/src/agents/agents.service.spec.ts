@@ -4,6 +4,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { NotFoundException as _NotFoundException } from '@nestjs/common';
+import { ValidationAppException } from '@nathapp/nestjs-common';
 import { createHmac } from 'crypto';
 import { randomBytes } from 'crypto';
 
@@ -188,7 +189,7 @@ describe('AgentsService', () => {
         await expect(service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
-        })).rejects.toThrow('API_KEY_SECRET is not configured');
+        })).rejects.toThrow(ValidationAppException);
       });
 
       it('should return created agent in response', async () => {

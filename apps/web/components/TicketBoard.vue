@@ -52,13 +52,15 @@ function ticketsForStatus(status: string): Ticket[] {
             <span class="text-sm font-semibold">{{ t(`tickets.status.${status}`) }}</span>
             <Badge variant="secondary">{{ ticketsForStatus(status).length }}</Badge>
           </div>
-          <button
+          <Button
             v-if="status === 'CREATED'"
+            variant="ghost"
+            size="sm"
             class="text-xs text-primary hover:underline whitespace-nowrap"
             @click="emit('create')"
           >
             {{ t('tickets.newTicket') }}
-          </button>
+          </Button>
         </div>
         <TicketCard
           v-for="ticket in ticketsForStatus(status)"

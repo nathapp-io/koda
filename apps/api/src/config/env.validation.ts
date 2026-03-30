@@ -1,4 +1,5 @@
 import * as Joi from 'joi';
+import { ValidationAppException } from '@nathapp/nestjs-common';
 
 const envSchema = Joi.object({
   NODE_ENV: Joi.string()
@@ -24,9 +25,7 @@ const envSchema = Joi.object({
 export function validate(config: Record<string, unknown>): Record<string, unknown> {
   const { error, value } = envSchema.validate(config, { abortEarly: false });
   if (error) {
-    throw new Error(
-      `Config validation error: ${error.details.map((d) => d.message).join(', ')}`,
-    );
+    throw new ValidationAppException();
   }
   return value as Record<string, unknown>;
 }

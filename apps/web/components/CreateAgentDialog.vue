@@ -65,15 +65,17 @@
                   class="flex items-center gap-1 px-2 py-0.5"
                 >
                   {{ cap }}
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="sm"
                     @click="removeCapability(index)"
-                    class="ml-0.5 rounded-sm hover:bg-muted-foreground/20"
+                    class="ml-0.5 h-4 w-4 p-0"
                   >
                     <LucideX class="h-3 w-3" />
-                  </button>
+                  </Button>
                 </Badge>
-                <input
+                <Input
                   :placeholder="capabilitiesTags.length === 0 ? t('agents.form.capabilitiesPlaceholder') : ''"
                   class="flex-1 min-w-[120px] bg-transparent outline-none placeholder:text-muted-foreground"
                   @keydown.enter.prevent="addCapability"
@@ -210,19 +212,19 @@ function addCapability(event: Event) {
   const input = event.target as HTMLInputElement
   const value = input.value.trim()
   if (value && !capabilitiesTags.value.includes(value)) {
-    capabilitiesTags.value.push(value)
+    capabilitiesTags.value = [...capabilitiesTags.value, value]
     input.value = ''
   }
 }
 
 function removeCapability(index: number) {
-  capabilitiesTags.value.splice(index, 1)
+  capabilitiesTags.value = capabilitiesTags.value.filter((_, i) => i !== index)
 }
 
 function handleBackspace(event: Event) {
   const input = event.target as HTMLInputElement
   if (!input.value && capabilitiesTags.value.length > 0) {
-    capabilitiesTags.value.pop()
+    capabilitiesTags.value = capabilitiesTags.value.slice(0, -1)
   }
 }
 

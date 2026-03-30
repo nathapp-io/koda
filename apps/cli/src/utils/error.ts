@@ -12,17 +12,33 @@ interface ApiErrorResponse {
 
 interface HandleApiErrorOpts {
   notFoundMessage?: string;
+  configError?: boolean;
+  validationError?: boolean;
 }
 
 /**
  * Handle API errors and exit with appropriate code.
  * Exit codes:
  *   - 1: general API error (5xx, unknown)
- *   - 2: auth error (401, 403)
+ *   - 2: config/auth error (401, 403, or config errors)
  *   - 3: validation error (400)
  *   - 4: not found (404)
  */
 export function handleApiError(err: unknown, opts?: HandleApiErrorOpts): never {
+  // Handle config errors (exit code 2)
+  if (opts?.configError) {
+    const configError = err as { message?: string };
+    printError(configError.message ?? 'Configuration error');
+    process.exit(2);
+  }
+
+  // Handle validation errors (exit code 3)
+  if (opts?.validationError) {
+    const validationErr = err as { message?: string };
+    printError(validationErr.message ?? 'Validation error');
+    process.exit(3);
+  }
+
   const apiError = err as ApiErrorResponse;
   const status = apiError.response?.status;
 
