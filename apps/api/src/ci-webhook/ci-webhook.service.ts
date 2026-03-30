@@ -90,39 +90,29 @@ export class CiWebhookService {
   }
 
   private buildDescription(_failure: CiFailureDto, payload: CiWebhookPayloadDto): string {
-    const lines: string[] = [];
-
-    lines.push(`## CI Pipeline Failure`);
-    lines.push('');
-    lines.push(`**Pipeline ID:** ${payload.pipeline.id}`);
-    if (payload.pipeline.url) {
-      lines.push(`**Pipeline URL:** ${payload.pipeline.url}`);
-    }
-    lines.push(`**Commit:** \`${payload.commit.sha}\``);
-    if (payload.commit.message) {
-      lines.push(`**Message:** ${payload.commit.message}`);
-    }
-    lines.push('');
-    lines.push(`## Failures`);
-    lines.push('');
-
-    for (const f of payload.failures) {
-      lines.push(`- **${f.test}**`);
-      if (f.file) {
-        lines.push(`  - File: \`${f.file}\``);
-      }
-      if (f.line) {
-        lines.push(`  - Line: ${f.line}`);
-      }
+    const failureLines = payload.failures.flatMap((f) => {
+      const parts: string[] = [`- **${f.test}**`];
+      if (f.file) parts.push(`  - File: \`${f.file}\``);
+      if (f.line) parts.push(`  - Line: ${f.line}`);
       if (f.file && payload.commit.sha) {
         const project = { gitRemoteUrl: undefined } as { gitRemoteUrl?: string | null };
         const url = buildGitUrl(project.gitRemoteUrl, payload.commit.sha, f.file, f.line);
-        if (url) {
-          lines.push(`  - URL: ${url}`);
-        }
+        if (url) parts.push(`  - URL: ${url}`);
       }
-    }
+      return parts;
+    });
 
-    return lines.join('\n');
+    return [
+      `## CI Pipeline Failure`,
+      '',
+      `**Pipeline ID:** ${payload.pipeline.id}`,
+      ...(payload.pipeline.url ? [`**Pipeline URL:** ${payload.pipeline.url}`] : []),
+      `**Commit:** \`${payload.commit.sha}\``,
+      ...(payload.commit.message ? [`**Message:** ${payload.commit.message}`] : []),
+      '',
+      `## Failures`,
+      '',
+      ...failureLines,
+    ].join('\n');
   }
 }

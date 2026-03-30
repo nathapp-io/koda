@@ -100,7 +100,7 @@ export function getVerdict(topScore: number, high: number, medium: number): Verd
 
 class InMemoryTable {
   private records: LanceRecord[] = [];
-  async add(records: LanceRecord[]): Promise<void> { this.records.push(...records); }
+  async add(records: LanceRecord[]): Promise<void> { this.records = [...this.records, ...records]; }
   async countRows(): Promise<number> { return this.records.length; }
   async delete(filter: string): Promise<void> {
     const sourceIdFilter = /^source_id\s*=\s*'([a-zA-Z0-9_-]+)'$/.exec(filter);
