@@ -6,7 +6,6 @@ import {
   Delete,
   Body,
   Param,
-  Req,
   HttpCode,
 } from '@nestjs/common';
 import {
@@ -19,12 +18,9 @@ import { CommentsService } from './comments.service';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
+import { CurrentActor } from '../auth/decorators/current-user.decorator';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type RequestWithUser = any & { user?: any; agent?: any };
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type CurrentUser = any;
+type CurrentUser = { id: string; sub: string; role?: string } | null;
 
 @ApiTags('comments')
 @ApiBearerAuth()
@@ -74,17 +70,14 @@ export class CommentsController {
   @ApiResponse({ status: 201, description: 'Comment created' })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   @ApiResponse({ status: 404, description: 'Project or ticket not found' })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async createFromHttp(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Body() createCommentDto: CreateCommentDto,
-    @Req() req: RequestWithUser,
+    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
   ) {
-    const currentUser = req.user || req.agent;
-    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
-    const data = await this.create(slug, ref, createCommentDto, currentUser, actorType);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const currentUser = actor.currentUser ?? { id: '', sub: '' };
+    const data = await this.create(slug, ref, createCommentDto, currentUser, actor.actorType ?? 'user');
     return JsonResponse.Ok(data);
   }
 
@@ -107,16 +100,13 @@ export class CommentsController {
   @ApiResponse({ status: 200, description: 'Comment updated' })
   @ApiResponse({ status: 403, description: 'Not authorized to edit this comment' })
   @ApiResponse({ status: 404, description: 'Comment not found' })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async updateFromHttp(
     @Param('id') id: string,
     @Body() updateCommentDto: UpdateCommentDto,
-    @Req() req: RequestWithUser,
+    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
   ) {
-    const currentUser = req.user || req.agent;
-    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
-    const data = await this.update(id, updateCommentDto, currentUser, actorType);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const currentUser = actor.currentUser ?? { id: '', sub: '' };
+    const data = await this.update(id, updateCommentDto, currentUser, actor.actorType ?? 'user');
     return JsonResponse.Ok(data);
   }
 
@@ -128,11 +118,10 @@ export class CommentsController {
   @ApiResponse({ status: 404, description: 'Comment not found' })
   async deleteFromHttp(
     @Param('id') id: string,
-    @Req() req: RequestWithUser,
+    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
   ) {
-    const currentUser = req.user || req.agent;
-    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
-    await this.delete(id, currentUser, actorType);
+    const currentUser = actor.currentUser ?? { id: '', sub: '' };
+    await this.delete(id, currentUser, actor.actorType ?? 'user');
     return JsonResponse.Ok(null);
   }
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// @ts-expect-error - locales and setLocale are added by @nuxtjs/i18n ComposerCustomProperties
-const { locale, locales, setLocale } = useI18n()
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const { locale, locales, setLocale } = useI18n() as any;
 
 const allLocales = computed(() =>
   (locales.value as Array<{ code: string; name: string }>).filter(

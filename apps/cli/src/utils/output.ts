@@ -74,8 +74,8 @@ export function error(message: string): void {
 }
 
 /**
- * Print a warning message in yellow to stdout.
+ * Print a warning message in yellow to stderr.
  */
 export function warn(message: string): void {
-  console.log(chalk.yellow(`⚠ ${message}`));
+  console.error(chalk.yellow(`⚠ ${message}`));
 }

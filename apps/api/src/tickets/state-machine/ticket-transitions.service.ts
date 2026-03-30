@@ -1,4 +1,4 @@
-import { Injectable, Inject, Optional } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import {
@@ -33,7 +33,7 @@ export type TransitionResult = TransitionResultWithComment | TransitionResultWit
 @Injectable()
 export class TicketTransitionsService {
   constructor(
-    @Inject('PrismaService') private prisma: PrismaService<PrismaClient>,
+    private readonly prisma: PrismaService<PrismaClient>,
     @Optional() private readonly ragService?: RagService,
     @Optional() private readonly webhookDispatcher?: WebhookDispatcherService,
   ) {}

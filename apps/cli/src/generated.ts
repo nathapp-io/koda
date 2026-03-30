@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 // This file is a stub - normally generated from OpenAPI spec
 // In production, use: bun run generate
 
@@ -268,8 +267,8 @@ export class KbService {
     query: string
   ): Promise<Wrapped<KbSearchResponse>> {
     // API: POST /api/projects/{slug}/kb/search with { query }
-    const resp = await (client as any).post(`/projects/${projectSlug}/kb/search`, { query });
-    return { ret: 0, data: resp };
+    const resp = await client.post<KbSearchResponse>(`/projects/${projectSlug}/kb/search`, { query });
+    return { ret: 0, data: resp.data };
   }
 
   static async list(
@@ -277,8 +276,8 @@ export class KbService {
     projectSlug: string
   ): Promise<Wrapped<{ items: KbDocument[]; total: number }>> {
     // API: GET /api/projects/{slug}/kb/documents
-    const resp = await (client as any).get(`/projects/${projectSlug}/kb/documents`);
-    return { ret: 0, data: resp };
+    const resp = await client.get<{ items: KbDocument[]; total: number }>(`/projects/${projectSlug}/kb/documents`);
+    return { ret: 0, data: resp.data };
   }
 
   static async add(
@@ -287,12 +286,12 @@ export class KbService {
     data: { content: string; source: 'ticket' | 'doc' | 'manual'; sourceId: string }
   ): Promise<Wrapped<KbAddResponse>> {
     // API: POST /api/projects/{slug}/kb/documents with { source, sourceId, content }
-    const resp = await (client as any).post(`/projects/${projectSlug}/kb/documents`, {
+    const resp = await client.post<KbAddResponse>(`/projects/${projectSlug}/kb/documents`, {
       source: data.source,
       sourceId: data.sourceId,
       content: data.content,
     });
-    return { ret: 0, data: resp };
+    return { ret: 0, data: resp.data };
   }
 }
 

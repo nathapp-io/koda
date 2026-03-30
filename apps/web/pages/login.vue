@@ -64,7 +64,7 @@ const formSchema = toTypedSchema(
   z.object({
     email: z.string().min(1, t('auth.validation.emailRequired')).email(t('auth.validation.emailInvalid')),
     password: z.string().min(8, t('auth.validation.passwordMin')),
-  }) as any
+  })
 )
 
 const { handleSubmit } = useForm({

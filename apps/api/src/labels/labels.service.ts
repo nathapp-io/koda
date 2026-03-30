@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import { ValidationAppException, NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { CreateLabelDto } from './dto/create-label.dto';
 import { UpdateLabelDto } from './dto/update-label.dto';
@@ -57,8 +57,7 @@ export class LabelsService {
 
       return label;
     } catch (error) {
-      // Check if it's a unique constraint violation (duplicate name in project)
-      if (error instanceof Error && error.message.includes('Unique constraint')) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         throw new ValidationAppException();
       }
       throw error;
@@ -150,7 +149,7 @@ export class LabelsService {
         },
       });
     } catch (error) {
-      if (error instanceof Error && error.message.includes('Unique constraint')) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         throw new ValidationAppException();
       }
       throw error;
@@ -277,11 +276,12 @@ export class LabelsService {
       if (error instanceof ValidationAppException || error instanceof NotFoundAppException) {
         throw error;
       }
-      if (error instanceof Error && error.message.includes('already assigned')) {
-        throw new ValidationAppException();
-      }
-      if (error instanceof Error && error.message.includes('Unique constraint')) {
-        throw new ValidationAppException();
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        // P2002 = Unique constraint (label already assigned)
+        // P2003 = Foreign key constraint (invalid label/ticket)
+        if (error.code === 'P2002' || error.code === 'P2003') {
+          throw new ValidationAppException();
+        }
       }
       throw error;
     }

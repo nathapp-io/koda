@@ -1,13 +1,15 @@
-import { CanActivate, ExecutionContext, Inject, Injectable } from '@nestjs/common';
+import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac } from 'crypto';
 import { AuthException } from '@nathapp/nestjs-common';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaClient } from '@prisma/client';
 
 @Injectable()
 export class AgentApiKeyGuard implements CanActivate {
   constructor(
-    @Inject('PrismaService') private readonly prismaService: { client: { agent: { findFirst: (args: unknown) => Promise<unknown> } } },
-    @Inject(ConfigService) private readonly configService: ConfigService,
+    private readonly prismaService: PrismaService<PrismaClient>,
+    private readonly configService: ConfigService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {

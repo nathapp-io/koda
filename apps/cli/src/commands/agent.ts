@@ -1,17 +1,10 @@
 import { Command } from 'commander';
-import { resolveContext } from '../config';
+import { resolveContext, maskApiKey } from '../config';
 import { configureClient } from '../client';
 import { AgentService } from '../generated';
 import { error } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
-
-function maskApiKey(apiKey: string): string {
-  if (apiKey.length <= 8) {
-    return '****';
-  }
-  return apiKey.substring(0, 4) + '****' + apiKey.substring(apiKey.length - 4);
-}
 
 export function agentCommand(program: Command): void {
   const agent = program.command('agent');

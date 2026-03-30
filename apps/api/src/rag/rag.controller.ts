@@ -8,7 +8,6 @@ import {
   Param,
   Post,
   Query,
-  Req,
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ForbiddenAppException, JsonResponse, NotFoundAppException } from '@nathapp/nestjs-common';
@@ -17,6 +16,7 @@ import type { PrismaClient } from '@prisma/client';
 import { RagService } from './rag.service';
 import { AddDocumentDto } from './dto/add-document.dto';
 import { SearchKbDto } from './dto/search-kb.dto';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 
 @ApiTags('knowledge-base')
 @ApiBearerAuth()
@@ -76,10 +76,9 @@ export class RagController {
   async deleteDocument(
     @Param('slug') slug: string,
     @Param('sourceId') sourceId: string,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    @Req() req: any,
+    @CurrentUser() currentUser: { extra?: { role?: string } } | null,
   ) {
-    if (req.user?.extra?.role !== 'ADMIN') throw new ForbiddenAppException();
+    if (currentUser?.extra?.role !== 'ADMIN') throw new ForbiddenAppException();
     const project = await this.resolveProject(slug);
     await this.ragService.deleteBySource(project.id, sourceId);
     return JsonResponse.Ok({ deleted: true });
@@ -107,10 +106,9 @@ export class RagController {
   @ApiResponse({ status: 404, description: 'Project not found' })
   async optimizeTable(
     @Param('slug') slug: string,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    @Req() req: any,
+    @CurrentUser() currentUser: { extra?: { role?: string } } | null,
   ) {
-    if (req.user?.extra?.role !== 'ADMIN') throw new ForbiddenAppException();
+    if (currentUser?.extra?.role !== 'ADMIN') throw new ForbiddenAppException();
     const project = await this.resolveProject(slug);
     await this.ragService.optimizeTable(project.id);
     return JsonResponse.Ok({ optimized: true });

@@ -19,10 +19,10 @@ interface HandleApiErrorOpts {
 /**
  * Handle API errors and exit with appropriate code.
  * Exit codes:
- *   - 1: general API error (5xx, unknown)
+ *   - 0: success
+ *   - 1: API error (5xx, 404, unknown)
  *   - 2: config/auth error (401, 403, or config errors)
  *   - 3: validation error (400)
- *   - 4: not found (404)
  */
 export function handleApiError(err: unknown, opts?: HandleApiErrorOpts): never {
   // Handle config errors (exit code 2)
@@ -64,7 +64,7 @@ export function handleApiError(err: unknown, opts?: HandleApiErrorOpts): never {
 
   if (status === 404) {
     printError(opts?.notFoundMessage ?? 'Not found');
-    process.exit(4);
+    process.exit(1);
   }
 
   printError(errorMessage);
