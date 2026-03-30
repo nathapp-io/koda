@@ -158,7 +158,7 @@ export class AgentsService {
     });
 
     if (!agent) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'agents');
     }
 
     return agent;
@@ -175,7 +175,7 @@ export class AgentsService {
     });
 
     if (!agent) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'agents');
     }
 
     return agent;
@@ -329,7 +329,7 @@ export class AgentsService {
     });
 
     if (!agent) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'agents');
     }
 
     // Rotate key using agent id

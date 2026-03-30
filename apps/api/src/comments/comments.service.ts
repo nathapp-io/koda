@@ -27,13 +27,13 @@ export class CommentsService {
   ) {
     // Validate required fields
     if (!createCommentDto.body) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'comments');
     }
     if (typeof createCommentDto.body === 'string' && createCommentDto.body.trim().length === 0) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'comments');
     }
     if (!createCommentDto.type) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'comments');
     }
 
     // Find project by slug
@@ -42,7 +42,7 @@ export class CommentsService {
     });
 
     if (!project || project.deletedAt) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'comments');
     }
 
     // Find ticket by ref (KODA-1 or CUID)
@@ -70,7 +70,7 @@ export class CommentsService {
     }
 
     if (!ticket || ticket.deletedAt) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'comments');
     }
 
     // Create the comment
@@ -94,7 +94,7 @@ export class CommentsService {
     });
 
     if (!project || project.deletedAt) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'comments');
     }
 
     // Find ticket by ref (KODA-1 or CUID)
@@ -122,7 +122,7 @@ export class CommentsService {
     }
 
     if (!ticket || ticket.deletedAt) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'comments');
     }
 
     // Find all comments for this ticket, ordered by creation date
@@ -154,7 +154,7 @@ export class CommentsService {
     });
 
     if (!comment) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'comments');
     }
 
     // Check authorization: only author or admin can edit
@@ -165,7 +165,7 @@ export class CommentsService {
     const isAdmin = actorType === 'user' && currentUser.role === 'ADMIN';
 
     if (!isAuthor && !isAdmin) {
-      throw new ForbiddenAppException();
+      throw new ForbiddenAppException({}, 'comments');
     }
 
     // Update the comment
@@ -190,7 +190,7 @@ export class CommentsService {
     });
 
     if (!comment) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'comments');
     }
 
     // Check authorization: only author or admin can delete
@@ -201,7 +201,7 @@ export class CommentsService {
     const isAdmin = actorType === 'user' && currentUser.role === 'ADMIN';
 
     if (!isAuthor && !isAdmin) {
-      throw new ForbiddenAppException();
+      throw new ForbiddenAppException({}, 'comments');
     }
 
     // Delete the comment

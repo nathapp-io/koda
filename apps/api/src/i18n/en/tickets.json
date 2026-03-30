@@ -1,5 +1,10 @@
 {
   "notFound": "Ticket not found",
   "invalidTransition": "Invalid ticket status transition",
-  "commentRequired": "A comment is required for this transition"
+  "commentRequired": "A comment is required for this transition",
+  "404": "Ticket not found",
+  "-2": "Validation error",
+  "40003": "Access denied",
+  "titleRequired": "Ticket title is required",
+  "typeRequired": "Ticket type is required"
 }

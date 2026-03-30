@@ -1,5 +1,7 @@
 {
   "notFound": "Project not found",
   "slugTaken": "Project slug is already in use",
-  "keyTaken": "Project key is already in use"
+  "keyTaken": "Project key is already in use",
+  "404": "Project not found",
+  "-2": "Validation error"
 }

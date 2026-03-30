@@ -266,6 +266,7 @@
       "addTitle": "添加文档",
       "addDescription": "将文档添加到该项目的知识库。",
       "empty": "暂无文档。",
+      "indexed": "{count} 个文档已索引",
       "columns": {
         "source": "来源",
         "content": "内容",
@@ -282,6 +283,9 @@
         "content": "内容",
         "contentPlaceholder": "输入文档内容..."
       }
+    },
+    "validation": {
+      "sourceIdRequired": "来源 ID 和内容为必填项"
     },
     "toast": {
       "searchFailed": "搜索失败",

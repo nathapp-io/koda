@@ -54,7 +54,7 @@ function handleCreated() {
     <PageHeader :title="slug">
       <template #actions>
         <Button @click="showCreateDialog = true">
-          {{ t('tickets.create') }}
+          {{ t('tickets.newTicket') }}
         </Button>
       </template>
     </PageHeader>

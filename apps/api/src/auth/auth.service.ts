@@ -55,12 +55,12 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new AuthException();
+      throw new AuthException({}, 'auth');
     }
 
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
     if (!isPasswordValid) {
-      throw new AuthException();
+      throw new AuthException({}, 'auth');
     }
 
     const accessToken = this.generateAccessToken(user.id, user.email, user.role);
@@ -80,7 +80,7 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new AuthException();
+      throw new AuthException({}, 'auth');
     }
 
     const accessToken = this.generateAccessToken(user.id, user.email, user.role);

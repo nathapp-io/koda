@@ -42,12 +42,12 @@ export function validateTransition(
   // Check if transition rule exists
   const fromRules = TRANSITION_RULES[from];
   if (!fromRules) {
-    throw new ValidationAppException();
+    throw new ValidationAppException({}, 'tickets');
   }
 
   const requiredCommentType = fromRules[to];
   if (requiredCommentType === undefined) {
-    throw new ValidationAppException();
+    throw new ValidationAppException({}, 'tickets');
   }
 
   // Check comment type requirement
@@ -58,10 +58,10 @@ export function validateTransition(
 
   // Comment is required
   if (!commentType) {
-    throw new ValidationAppException();
+    throw new ValidationAppException({}, 'tickets');
   }
 
   if (commentType !== requiredCommentType) {
-    throw new ValidationAppException();
+    throw new ValidationAppException({}, 'tickets');
   }
 }

@@ -31,7 +31,7 @@ export class RagController {
 
   private async resolveProject(slug: string) {
     const project = await this.db.project.findUnique({ where: { slug } });
-    if (!project || project.deletedAt) throw new NotFoundAppException();
+    if (!project || project.deletedAt) throw new NotFoundAppException({}, 'rag');
     return project;
   }
 
@@ -78,7 +78,7 @@ export class RagController {
     @Param('sourceId') sourceId: string,
     @CurrentUser() currentUser: { extra?: { role?: string } } | null,
   ) {
-    if (currentUser?.extra?.role !== 'ADMIN') throw new ForbiddenAppException();
+    if (currentUser?.extra?.role !== 'ADMIN') throw new ForbiddenAppException({}, 'rag');
     const project = await this.resolveProject(slug);
     await this.ragService.deleteBySource(project.id, sourceId);
     return JsonResponse.Ok({ deleted: true });
@@ -108,7 +108,7 @@ export class RagController {
     @Param('slug') slug: string,
     @CurrentUser() currentUser: { extra?: { role?: string } } | null,
   ) {
-    if (currentUser?.extra?.role !== 'ADMIN') throw new ForbiddenAppException();
+    if (currentUser?.extra?.role !== 'ADMIN') throw new ForbiddenAppException({}, 'rag');
     const project = await this.resolveProject(slug);
     await this.ragService.optimizeTable(project.id);
     return JsonResponse.Ok({ optimized: true });

@@ -14,19 +14,19 @@ export class ProjectsService {
   async create(createProjectDto: CreateProjectDto) {
     // Validate name
     if (createProjectDto.name.length < 2) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'projects');
     }
 
     // Validate slug format (lowercase alphanumeric and hyphens only)
     const slugPattern = /^[a-z0-9]+(-[a-z0-9]+)*$/;
     if (!slugPattern.test(createProjectDto.slug)) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'projects');
     }
 
     // Validate key format (2-6 uppercase letters only)
     const keyPattern = /^[A-Z]{2,6}$/;
     if (!keyPattern.test(createProjectDto.key)) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'projects');
     }
 
     // Check slug uniqueness
@@ -34,7 +34,7 @@ export class ProjectsService {
       where: { slug: createProjectDto.slug },
     });
     if (existingSlug) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'projects');
     }
 
     // Check key uniqueness
@@ -42,7 +42,7 @@ export class ProjectsService {
       where: { key: createProjectDto.key },
     });
     if (existingKey) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'projects');
     }
 
     // Create project
@@ -74,7 +74,7 @@ export class ProjectsService {
 
     // Filter out soft-deleted projects
     if (!project || project.deletedAt) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'projects');
     }
 
     return project;
@@ -87,19 +87,19 @@ export class ProjectsService {
     });
 
     if (!currentProject) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'projects');
     }
 
     // Validate name if provided
     if (updateProjectDto.name !== undefined && updateProjectDto.name.length < 2) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'projects');
     }
 
     // Validate slug format if provided (lowercase alphanumeric and hyphens only)
     if (updateProjectDto.slug !== undefined) {
       const slugPattern = /^[a-z0-9]+(-[a-z0-9]+)*$/;
       if (!slugPattern.test(updateProjectDto.slug)) {
-        throw new ValidationAppException();
+        throw new ValidationAppException({}, 'projects');
       }
 
       // Check slug uniqueness (unless it's the same as current)
@@ -108,7 +108,7 @@ export class ProjectsService {
           where: { slug: updateProjectDto.slug },
         });
         if (existingSlug && existingSlug.id !== currentProject.id) {
-          throw new ValidationAppException();
+          throw new ValidationAppException({}, 'projects');
         }
       }
     }
@@ -117,7 +117,7 @@ export class ProjectsService {
     if (updateProjectDto.key !== undefined) {
       const keyPattern = /^[A-Z]{2,6}$/;
       if (!keyPattern.test(updateProjectDto.key)) {
-        throw new ValidationAppException();
+        throw new ValidationAppException({}, 'projects');
       }
 
       // Check key uniqueness (unless it's the same as current)
@@ -126,7 +126,7 @@ export class ProjectsService {
           where: { key: updateProjectDto.key },
         });
         if (existingKey && existingKey.id !== currentProject.id) {
-          throw new ValidationAppException();
+          throw new ValidationAppException({}, 'projects');
         }
       }
     }
@@ -154,7 +154,7 @@ export class ProjectsService {
     });
 
     if (!project) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'projects');
     }
 
     // Soft delete by setting deletedAt

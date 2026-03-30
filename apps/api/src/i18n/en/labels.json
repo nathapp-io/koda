@@ -1,0 +1,9 @@
+{
+  "notFound": "Label not found",
+  "nameRequired": "Label name is required",
+  "projectRequired": "Project is required",
+  "slugTaken": "Label slug is already in use",
+  "404": "Label not found",
+  "-2": "Validation error",
+  "40003": "Access denied"
+}

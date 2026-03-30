@@ -25,7 +25,7 @@ export class TicketLinksService {
     });
 
     if (!project) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'ticket-links');
     }
 
     const refMatch = ref.match(/^([A-Z]+)-(\d+)$/);
@@ -43,7 +43,7 @@ export class TicketLinksService {
     }
 
     if (!ticket) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'ticket-links');
     }
 
     return ticket;
@@ -97,7 +97,7 @@ export class TicketLinksService {
     });
 
     if (!link) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'ticket-links');
     }
 
     await this.db.ticketLink.delete({ where: { id: linkId } });

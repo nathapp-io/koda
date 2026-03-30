@@ -20,7 +20,7 @@ export class AgentsController {
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   async generateApiKey(@Body() createAgentDto: CreateAgentDto, @CurrentUser() currentUser: { extra?: { role?: string } } | null) {
     if (currentUser?.extra?.role !== 'ADMIN') {
-      throw new ForbiddenAppException();
+      throw new ForbiddenAppException({}, 'agents');
     }
 
     const data = await this.agentsService.generateApiKey(createAgentDto);
@@ -42,7 +42,7 @@ export class AgentsController {
   async findMe(@CurrentActor() actor: { currentUser: { id?: string } | null; actorType: 'user' | 'agent' | undefined }) {
     const id = actor.currentUser?.id;
     if (!id || (actor.actorType !== 'agent' && actor.actorType !== 'user')) {
-      throw new ForbiddenAppException();
+      throw new ForbiddenAppException({}, 'agents');
     }
     const data = await this.agentsService.findMe(id);
     return JsonResponse.Ok(data);
@@ -65,7 +65,7 @@ export class AgentsController {
   @ApiResponse({ status: 404, description: 'Agent not found' })
   async suggestTicket(@Param('slug') slug: string, @Query('project') project: string) {
     if (!project) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'agents');
     }
     const data = await this.agentsService.suggestTicket(slug, project);
     return JsonResponse.Ok(data);
@@ -79,7 +79,7 @@ export class AgentsController {
   @ApiResponse({ status: 404, description: 'Agent not found' })
   async update(@Param('slug') slug: string, @Body() updateDto: UpdateAgentDto, @CurrentUser() currentUser: { extra?: { role?: string } } | null) {
     if (currentUser?.extra?.role !== 'ADMIN') {
-      throw new ForbiddenAppException();
+      throw new ForbiddenAppException({}, 'agents');
     }
     const data = await this.agentsService.update(slug, updateDto);
     return JsonResponse.Ok(data);
@@ -93,7 +93,7 @@ export class AgentsController {
   @ApiResponse({ status: 404, description: 'Agent not found' })
   async updateRoles(@Param('slug') slug: string, @Body() updateRolesDto: UpdateRolesDto, @CurrentUser() currentUser: { extra?: { role?: string } } | null) {
     if (currentUser?.extra?.role !== 'ADMIN') {
-      throw new ForbiddenAppException();
+      throw new ForbiddenAppException({}, 'agents');
     }
     const agent = await this.agentsService.findBySlug(slug);
     const data = await this.agentsService.updateRoles(agent.id, updateRolesDto);
@@ -108,7 +108,7 @@ export class AgentsController {
   @ApiResponse({ status: 404, description: 'Agent not found' })
   async updateCapabilities(@Param('slug') slug: string, @Body() updateCapabilitiesDto: UpdateCapabilitiesDto, @CurrentUser() currentUser: { extra?: { role?: string } } | null) {
     if (currentUser?.extra?.role !== 'ADMIN') {
-      throw new ForbiddenAppException();
+      throw new ForbiddenAppException({}, 'agents');
     }
     const agent = await this.agentsService.findBySlug(slug);
     const data = await this.agentsService.updateCapabilities(agent.id, updateCapabilitiesDto);
@@ -124,7 +124,7 @@ export class AgentsController {
   @ApiResponse({ status: 404, description: 'Agent not found' })
   async remove(@Param('slug') slug: string, @CurrentUser() currentUser: { extra?: { role?: string } } | null) {
     if (currentUser?.extra?.role !== 'ADMIN') {
-      throw new ForbiddenAppException();
+      throw new ForbiddenAppException({}, 'agents');
     }
     const data = await this.agentsService.remove(slug);
     return JsonResponse.Ok(data);
@@ -139,7 +139,7 @@ export class AgentsController {
   @ApiResponse({ status: 404, description: 'Agent not found' })
   async rotateApiKey(@Param('slug') slug: string, @CurrentUser() currentUser: { extra?: { role?: string } } | null) {
     if (currentUser?.extra?.role !== 'ADMIN') {
-      throw new ForbiddenAppException();
+      throw new ForbiddenAppException({}, 'agents');
     }
     const data = await this.agentsService.rotateApiKey(slug);
     return JsonResponse.Ok(data);

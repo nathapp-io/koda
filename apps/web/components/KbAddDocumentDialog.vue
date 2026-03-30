@@ -23,7 +23,7 @@ function reset() {
 
 async function submit() {
   if (!form.sourceId.trim() || !form.content.trim()) {
-    toast.error('Source ID and Content are required.')
+    toast.error(t('kb.validation.sourceIdRequired'))
     return
   }
   loading.value = true

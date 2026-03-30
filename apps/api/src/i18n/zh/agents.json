@@ -1,5 +1,8 @@
 {
-  "notFound": "Agent not found",
-  "slugTaken": "Agent slug is already in use",
-  "apiKeyShownOnce": "API key is shown only once"
+  "notFound": "未找到代理",
+  "slugTaken": "该代理 slug 已被使用",
+  "apiKeyShownOnce": "API 密钥仅显示一次",
+  "404": "未找到代理",
+  "-2": "验证错误",
+  "40003": "访问被拒绝"
 }

@@ -34,7 +34,7 @@ export class WebhookService {
   async remove(id: string) {
     const webhook = await this.db.webhook.findUnique({ where: { id } });
     if (!webhook) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'webhooks');
     }
     await this.db.webhook.delete({ where: { id } });
     return webhook;
@@ -45,7 +45,7 @@ export class WebhookService {
       where: { slug: projectSlug },
     });
     if (!project || project.deletedAt) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'webhooks');
     }
     return this.findAll(project.id);
   }
@@ -55,7 +55,7 @@ export class WebhookService {
       where: { slug: projectSlug },
     });
     if (!project || project.deletedAt) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'webhooks');
     }
     return project;
   }

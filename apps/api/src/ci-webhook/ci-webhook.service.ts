@@ -19,7 +19,7 @@ export class CiWebhookService {
     });
 
     if (!project || project.deletedAt) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'projects');
     }
 
     // Validate token if set on project
@@ -34,7 +34,7 @@ export class CiWebhookService {
     }
 
     if (!payload.failures || payload.failures.length === 0) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'ciWebhook');
     }
 
     // Use the first failure for the ticket title and git ref

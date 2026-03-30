@@ -18,17 +18,17 @@ export class AgentApiKeyGuard implements CanActivate {
     const authHeader = headers?.['authorization'] ?? '';
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new AuthException();
+      throw new AuthException({}, 'auth');
     }
 
     const rawKey = authHeader.slice('Bearer '.length).trim();
     if (!rawKey) {
-      throw new AuthException();
+      throw new AuthException({}, 'auth');
     }
 
     const secret = this.configService.get<string>('API_KEY_SECRET');
     if (!secret) {
-      throw new AuthException();
+      throw new AuthException({}, 'auth');
     }
 
     const keyHash = createHmac('sha256', secret).update(rawKey).digest('hex');
@@ -38,7 +38,7 @@ export class AgentApiKeyGuard implements CanActivate {
     });
 
     if (!agent) {
-      throw new AuthException();
+      throw new AuthException({}, 'auth');
     }
 
     delete headers['authorization'];
