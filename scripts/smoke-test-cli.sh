@@ -12,7 +12,7 @@ API_DIR="$REPO_ROOT/apps/api"
 CLI_DIR="$REPO_ROOT/apps/cli"
 TEST_DB="/tmp/koda-smoke-$$.db"
 API_LOG="/tmp/koda-smoke-$$.log"
-API_URL="http://localhost:13100/api"
+API_URL="http://localhost:13100"
 API_PORT=13100
 API_PID=""
 SMOKE_HOME=""
@@ -110,7 +110,7 @@ cd "$REPO_ROOT"
 log "Waiting for API..."
 READY=false
 for i in $(seq 1 20); do
-  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/health" 2>/dev/null || true)
+  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/api/health" 2>/dev/null || true)
   if [[ "$HTTP_CODE" == "200" ]]; then
     READY=true; break
   fi
@@ -129,7 +129,7 @@ ok "API started (PID=$API_PID)"
 # STEP 3b: Health endpoint
 # =============================================================================
 log "Step 3b: Health check..."
-HEALTH_OUT=$(curl -sf "$API_URL/health" 2>&1)
+HEALTH_OUT=$(curl -sf "$API_URL/api/health" 2>&1)
 assert "GET /api/health returns ok" '"status":"ok"' "$HEALTH_OUT"
 
 # =============================================================================
@@ -137,7 +137,7 @@ assert "GET /api/health returns ok" '"status":"ok"' "$HEALTH_OUT"
 # =============================================================================
 log "Step 4: Bootstrapping test data..."
 
-REGISTER=$(curl -sf -X POST "$API_URL/auth/register" \
+REGISTER=$(curl -sf -X POST "$API_URL/api/auth/register" \
   -H "Content-Type: application/json" \
   -d '{"email":"smoke@koda.test","name":"Smoke Test","password":"Smoke1234!"}' 2>&1)
 if echo "$REGISTER" | grep -q '"accessToken"'; then
@@ -158,13 +158,13 @@ if ! echo "$PROMOTE_OUT" | grep -qi "success\|executed"; then
 fi
 
 # Re-login to get a fresh JWT with ADMIN role
-LOGIN=$(curl -sf -X POST "$API_URL/auth/login" \
+LOGIN=$(curl -sf -X POST "$API_URL/api/auth/login" \
   -H "Content-Type: application/json" \
   -d '{"email":"smoke@koda.test","password":"Smoke1234!"}' 2>&1)
 JWT=$(echo "$LOGIN" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',d)['accessToken'])" 2>/dev/null)
 ok "Promoted user to ADMIN"
 
-PROJECT=$(curl -sf -X POST "$API_URL/projects" \
+PROJECT=$(curl -sf -X POST "$API_URL/api/projects" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $JWT" \
   -d '{"name":"Koda","slug":"koda","key":"KODA","description":"Smoke test project"}' 2>&1)
@@ -174,7 +174,7 @@ else
   fail "Create project: $PROJECT"; exit 1
 fi
 
-AGENT=$(curl -s -X POST "$API_URL/agents" \
+AGENT=$(curl -s -X POST "$API_URL/api/agents" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $JWT" \
   -d '{"name":"Smoke Agent","slug":"smoke-agent"}' 2>&1)
@@ -322,7 +322,7 @@ assert "koda agent me --json" '"slug"\|"name"'                  "$(koda agent me
 log "Step 17: Knowledge base..."
 # NOTE: `koda kb add` CLI has a bug (sends filename as source instead of enum).
 # Use API directly to seed a KB doc, then test CLI list/search.
-KB_ADD=$(curl -s -X POST "$API_URL/projects/koda/kb/documents" \
+KB_ADD=$(curl -s -X POST "$API_URL/api/projects/koda/kb/documents" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $JWT" \
   -d '{"source":"manual","sourceId":"smoke-doc-1","content":"Smoke test knowledge base document about deployment"}' 2>&1)

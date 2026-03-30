@@ -36,7 +36,7 @@ program
   .command('login')
   .description('Save API credentials locally')
   .requiredOption('--api-key <key>', 'API key for authentication')
-  .option('--api-url <url>', 'API URL (default: http://localhost:3100/api)')
+  .option('--api-url <url>', 'API URL (default: http://localhost:3100)')
   .action(async (options) => {
     try {
       const result = await loginCommand(
@@ -61,7 +61,7 @@ program
   .option('--default-type <type>', 'Default ticket type')
   .option('--default-priority <priority>', 'Default ticket priority')
   .option('--api-key <key>', 'API key for authentication')
-  .option('--api-url <url>', 'API URL (default: http://localhost:3100/api)')
+  .option('--api-url <url>', 'API URL (default: http://localhost:3100)')
   .action(async (options) => {
     await initCommand(options);
   });

@@ -58,7 +58,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Generate Prisma client
-        run: bun run db:generate
+        run: bun run db:generate    
 
       - name: ${{ matrix.check }}
         run: bun run ${{ matrix.check }}
@@ -89,6 +89,9 @@ jobs:
       - name: Generate Prisma client
         run: bun run db:generate
 
+      - name: Generate OPENAPI types
+        run: bun run generate          
+
       - name: Test
         run: bunx turbo run test -- --bail
 
@@ -117,6 +120,9 @@ jobs:
 
       - name: Generate Prisma client
         run: bun run db:generate
+
+      - name: Generate OPENAPI types
+        run: bun run generate   
 
       - name: Smoke test
         run: bash scripts/smoke-test-cli.sh
