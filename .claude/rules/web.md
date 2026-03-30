@@ -27,6 +27,32 @@
 - Top-level keys match feature areas: `common`, `auth`, `nav`, `projects`, `tickets`, `comments`, `agents`, `kb`, `labels`, `toast`
 - Browser detection via cookie (`koda_locale`), fallback: `en`
 
+## Anti-Patterns
+- **No hardcoded strings in templates** — always use `t('key')`, never raw text like `"Cancel"` or `"Deleting..."`
+  ```vue
+  <!-- ❌ Wrong -->
+  <Button>Cancel</Button>
+  <p>Are you sure you want to delete agent "{{ agent.name }}"?</p>
+
+  <!-- ✅ Correct -->
+  <Button>{{ t('common.cancel') }}</Button>
+  <p>{{ t('agents.deleteConfirm', { name: agent.name }) }}</p>
+  ```
+- **No native HTML form elements** — use Shadcn components instead
+  ```vue
+  <!-- ❌ Wrong -->
+  <input type="text" />
+  <textarea />
+  <select>...</select>
+  <button>Save</button>
+
+  <!-- ✅ Correct -->
+  <Input />
+  <Textarea />
+  <Select>...</Select>
+  <Button>{{ t('common.save') }}</Button>
+  ```
+
 ## Middleware
 - `auth.global.ts` handles route protection — no per-page auth checks needed
 - Guest-only routes (`/login`, `/register`) redirect authenticated users to `/`
