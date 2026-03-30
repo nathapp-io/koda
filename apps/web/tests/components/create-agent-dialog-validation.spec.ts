@@ -3,7 +3,7 @@ import { readFileSync } from 'fs'
 import { existsSync } from 'fs'
 import { join } from 'path'
 
-const webDir = join(__dirname, '..')
+const webDir = join(__dirname, '../..')
 const componentPath = join(webDir, 'components', 'CreateAgentDialog.vue')
 
 // ──────────────────────────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { ref, computed } from 'vue'
 
-const webDir = join(__dirname, '..')
+const webDir = join(__dirname, '../..')
 const composablePath = join(webDir, 'composables', 'useAuth.ts')
 const layoutPath = join(webDir, 'layouts', 'default.vue')
 
