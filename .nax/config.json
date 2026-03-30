@@ -44,7 +44,7 @@
         }
     },
     "generate": {
-        "agents": ["claude", "codex"]
+        "agents": ["claude", "codex", "opencode", "gemini"]
     },
     "agent": {
         "protocol": "acp"

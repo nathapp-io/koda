@@ -21,6 +21,7 @@ NestJS 11 + Fastify REST API for the Koda dev ticket tracker.
 - **Framework:** NestJS 11 + Fastify (`@nathapp/nestjs-app` AppFactory)
 - **Auth:** `@nathapp/nestjs-auth` v3 — JWT (humans) + HMAC API key (agents)
 - **ORM:** Prisma 6 — SQLite default, PostgreSQL/MySQL via `DATABASE_PROVIDER` env
+- **Prisma DI:** `@nathapp/nestjs-prisma` — inject `PrismaService<PrismaClient>`, access via `this.prisma.client`
 - **Validation:** `class-validator` + `class-transformer`
 - **Docs:** `@nestjs/swagger` v11 — spec at `/api/docs`
 - **Tests:** Jest
@@ -40,26 +41,75 @@ NestJS 11 + Fastify REST API for the Koda dev ticket tracker.
 ### Project Structure
 ```
 src/
-├── main.ts                  # AppFactory.create — Fastify, prefix 'api', Swagger
-├── app.module.ts            # Root module
-├── prisma/                  # PrismaService (global)
-├── auth/                    # JWT auth, strategies, guards, decorators
-│   ├── strategies/jwt.strategy.ts
-│   ├── guards/jwt-auth.guard.ts
-│   ├── guards/combined-auth.guard.ts
-│   └── decorators/          # @IsPublic(), @CurrentUser()
-├── agents/                  # Agent CRUD + ApiKeyGuard
-├── projects/                # Project CRUD
-├── tickets/                 # Ticket CRUD + state machine
-│   └── state-machine/       # validateTransition()
-├── comments/                # Comment CRUD
-└── labels/                  # Label CRUD
+├── main.ts                     # AppFactory.create — Fastify, prefix 'api', Swagger
+├── app.module.ts               # Root module — imports all feature modules
+├── @types/
+│   └── jest-matchers.d.ts      # Custom Jest matcher types
+├── auth/                       # JWT auth — uses @nathapp/nestjs-auth v3
+│   ├── auth.module.ts          # NathappAuthModule.forRootAsync config
+│   ├── auth.controller.ts      # Login, register, refresh endpoints
+│   ├── auth.service.ts         # User CRUD, password hashing
+│   ├── jwt-auth.provider.ts    # JwtAuthProvider — user lookup for JWT strategy
+│   ├── types.ts                # Auth-related type definitions
+│   ├── guards/
+│   │   └── combined-auth.guard.ts  # Tries JWT first, falls back to ApiKeyGuard
+│   ├── decorators/
+│   │   └── current-user.decorator.ts  # @CurrentUser() — extracts user/agent from request
+│   └── dto/                    # Login, register DTOs
+├── agents/                     # Agent CRUD + API key auth
+├── projects/                   # Project CRUD
+├── tickets/                    # Ticket CRUD + state machine
+│   └── state-machine/          # validateTransition()
+├── comments/                   # Comment CRUD
+├── labels/                     # Label CRUD + ticket labelling
+├── ticket-links/               # External URL links (GitHub/GitLab PRs)
+├── rag/                        # RAG-based knowledge base
+│   ├── rag.module.ts           # Configurable embedding provider
+│   ├── rag.service.ts          # Search, add, optimize operations
+│   ├── rag.controller.ts       # KB endpoints
+│   ├── embedding.service.ts    # Embedding generation
+│   ├── embedding.interface.ts  # Provider contract
+│   ├── providers/
+│   │   ├── ollama-embedding.provider.ts
+│   │   └── openai-embedding.provider.ts
+│   └── strategies/             # FTS optimization strategies
+│       ├── counter-optimize.strategy.ts
+│       ├── cron-optimize.strategy.ts
+│       └── manual-optimize.strategy.ts
+├── webhook/                    # Outbound webhook dispatching
+│   ├── webhook.module.ts
+│   ├── webhook.service.ts      # CRUD for webhook subscriptions
+│   ├── webhook-dispatcher.service.ts  # Fires webhooks on events
+│   ├── webhook.controller.ts
+│   └── webhook.dto.ts
+├── ci-webhook/                 # Inbound CI/CD webhook receiver
+│   ├── ci-webhook.module.ts
+│   ├── ci-webhook.service.ts   # Processes CI events → ticket updates
+│   ├── ci-webhook.controller.ts
+│   └── ci-webhook.dto.ts
+├── health/                     # Health check endpoint
+│   ├── health.module.ts
+│   └── health.controller.ts
+├── common/
+│   └── enums.ts                # Local TypeScript enums (SQLite can't use Prisma enums)
+├── config/
+│   ├── app.config.ts
+│   ├── auth.config.ts
+│   ├── database.config.ts
+│   ├── rag.config.ts
+│   └── env.validation.ts       # Joi schema, fail-fast
+└── i18n/
+    ├── en/                     # English translations (source of truth)
+    └── zh/                     # Chinese translations
 ```
 
 ### Auth Model
-- **Humans:** email + password → JWT (Bearer access token)
+- **Humans:** email + password → JWT (Bearer access token + refresh token)
 - **Agents:** API key → HMAC lookup → `req.agent` + `req.actorType = 'agent'`
 - **`CombinedAuthGuard`:** tries JWT first, falls back to ApiKeyGuard
+- **`@CurrentUser()`** — custom decorator, extracts user/agent from request
+- **`@IsPublic()`** — from `@nathapp/nestjs-auth`, bypasses auth guard
+- **Auth module** uses `NathappAuthModule.forRootAsync` with `JwtAuthProvider` + `JwtStrategy` + `JwtRefreshStrategy`
 
 ---
 
@@ -72,7 +122,7 @@ export const TicketStatus = { CREATED: 'CREATED', VERIFIED: 'VERIFIED', ... } as
 export type TicketStatus = (typeof TicketStatus)[keyof typeof TicketStatus];
 ```
 
-Available enums: `TicketStatus`, `TicketType`, `Priority`, `CommentType`, `ActivityType`, `AgentRole`
+Available enums: `TicketStatus`, `TicketType`, `Priority`, `CommentType`, `ActivityType`, `AgentRole`, `AutoAssignMode`
 
 **Never import enums from `@prisma/client`** — they don't exist for SQLite schemas.
 
@@ -131,12 +181,56 @@ CREATED → VERIFIED → IN_PROGRESS → VERIFY_FIX → CLOSED
 ## Prisma & Database
 
 - **Schema at:** `apps/api/prisma/schema.prisma`
-- Access via `this.prisma.client` (PrismaClient instance from `@nathapp/nestjs-prisma`)
+- **DI:** Inject `PrismaService<PrismaClient>` from `@nathapp/nestjs-prisma`
+- **Access:** `this.prisma.client` returns the `PrismaClient` instance
+
+### Key models
+- `User`, `Agent`, `AgentRoleEntry`, `AgentCapabilityEntry`
+- `Project`, `Ticket`, `Comment`, `Label`, `TicketLabel`
+- `TicketActivity` — audit trail for status changes, assignments, etc.
+- `TicketLink` — external URLs (GitHub/GitLab PRs linked to tickets)
+- `Webhook` — outbound webhook subscriptions per project
 
 ### Key schema notes
 - `Comment` uses `authorUserId` / `authorAgentId` (not `userId` / `agentId`)
 - `TicketActivity` uses `actorUserId` / `actorAgentId` (not `actorId`)
 - `AgentCapabilityEntry` (not `AgentCapability`) — note the full model name
+- `Ticket.deletedAt` — soft delete field; filter with `deletedAt: null` in queries
+
+---
+
+## i18n — Server-Side Translations
+
+Uses `@nathapp/nestjs-common` `I18nCoreModule` with file-based JSON loader.
+
+### Translation files
+```
+src/i18n/
+├── en/                    ← English (source of truth)
+│   ├── agents.json
+│   ├── auth.json
+│   ├── comments.json
+│   ├── common.json
+│   ├── date.json
+│   ├── exception.json
+│   ├── projects.json
+│   ├── tickets.json
+│   └── validation.json
+└── zh/                    ← Chinese (must mirror en/ structure)
+    └── (same files)
+```
+
+### Key naming convention
+- File = module name (e.g. `tickets.json` for `TicketsModule`)
+- Keys are **flat** within each file: `"notFound": "Ticket not found"`
+- Usage in services: `this.i18n.t('tickets.notFound')`
+- Exception messages use `exception.json` keys
+
+### Rules
+1. **Every user-facing string** must use an i18n key — no hardcoded English in services/controllers
+2. When adding a new module, create `{module}.json` in **both** `en/` and `zh/`
+3. `en/` is the source of truth — add English keys first, then Chinese
+4. Keys must be short and descriptive: `"slugTaken"` not `"theSlugIsAlreadyInUse"`
 
 ---
 
@@ -149,6 +243,13 @@ CREATED → VERIFIED → IN_PROGRESS → VERIFY_FIX → CLOSED
 | Unit | `src/**/*.spec.ts` | Co-located with source | `bun run test` |
 | Integration | `test/integration/**/*.integration.spec.ts` | Grouped by concern | `npx jest test/integration` |
 | E2E (API endpoint) | `test/e2e/api-endpoint/endpoint.e2e.spec.ts` | Single file, all endpoints | `npx jest test/e2e` |
+
+### Integration test areas
+- `test/integration/agent-permissions/` — agent role-based access control
+- `test/integration/openapi-client/` — generated client compatibility
+- `test/integration/openapi-spec/` — spec integrity validation
+- `test/integration/rag/` — RAG search + embedding
+- `test/integration/tickets/` — ticket status transitions
 
 ### E2E Test Rule — **Mandatory**
 
@@ -186,6 +287,20 @@ describe('N. Resource — Action', () => {
 
 ---
 
+## Swagger Decorators (required on all controllers)
+
+```typescript
+@ApiTags('tickets')
+@ApiBearerAuth()
+@ApiOperation({ summary: 'Create a ticket' })
+@ApiResponse({ status: 201, type: TicketResponseDto })
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+```
+
+All response DTO fields must have `@ApiProperty()`.
+
+---
+
 ## Quality Gates — Run Before Completing Any Story
 
 ```bash
@@ -210,15 +325,23 @@ cd apps/api && DATABASE_URL=file:./koda-test.db npx jest --forceExit test/e2e
 ## Environment Variables
 
 ```bash
+# Application
+NODE_ENV=development
+API_PORT=3100
+GLOBAL_PREFIX=api
+
+# Database
 DATABASE_PROVIDER=sqlite          # sqlite | postgresql | mysql
 DATABASE_URL=file:./koda.db
+
+# JWT Auth
 JWT_SECRET=                       # REQUIRED
 JWT_EXPIRES_IN=7d
 JWT_REFRESH_SECRET=               # REQUIRED
 JWT_REFRESH_EXPIRES_IN=30d
+
+# Agent API Key
 API_KEY_SECRET=                   # REQUIRED — used for HMAC key hashing
-API_PORT=3100
-API_PREFIX=api
 ```
 
 ---
@@ -234,17 +357,3 @@ bun run lint           # eslint src
 bun run db:migrate     # prisma migrate dev
 bun run db:generate    # prisma generate
 ```
-
----
-
-## Swagger Decorators (required on all controllers)
-
-```typescript
-@ApiTags('tickets')
-@ApiBearerAuth()
-@ApiOperation({ summary: 'Create a ticket' })
-@ApiResponse({ status: 201, type: TicketResponseDto })
-@ApiResponse({ status: 401, description: 'Unauthorized' })
-```
-
-All response DTO fields must have `@ApiProperty()`.

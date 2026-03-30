@@ -1,4 +1,4 @@
-# Project Context
+# Gemini CLI Context
 
 This file is auto-generated from `.nax/context.md`.
 DO NOT EDIT MANUALLY — run `nax generate` to regenerate.

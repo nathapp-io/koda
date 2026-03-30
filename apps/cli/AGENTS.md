@@ -1,3 +1,23 @@
+# Agent Instructions
+
+This file is auto-generated from `.nax/context.md`.
+DO NOT EDIT MANUALLY — run `nax generate` to regenerate.
+
+These instructions apply to all AI coding agents in this project.
+
+---
+
+## Project Metadata
+
+> Auto-injected by `nax generate`
+
+**Project:** `@nathapp/koda-cli`
+
+**Language:** TypeScript
+
+**Key dependencies:** @types/jest, jest, ts-jest, typescript
+
+---
 # CLAUDE.md — Koda CLI (apps/cli)
 
 ## Project: Koda CLI
