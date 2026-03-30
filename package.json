@@ -17,7 +17,7 @@
     "db:migrate": "turbo run db:migrate",
     "db:studio": "turbo run db:studio",
     "db:reset": "turbo run db:reset",
-    "api:export-spec": "bash -c 'cd apps/api && bun run build && node scripts/export-spec.cjs'",
+    "api:export-spec": "bash -c 'cd apps/api && bun run build && bun scripts/export-spec.cjs'",
     "generate:cli": "openapi-ts --input openapi.json --output apps/cli/src/generated --client axios",
     "generate:web": "openapi-ts --input openapi.json --output apps/web/generated --client fetch",
     "generate": "bun run api:export-spec && bun run generate:cli && bun run generate:web"
