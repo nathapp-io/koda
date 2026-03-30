@@ -254,18 +254,10 @@ export function ticketCommand(program: Command): void {
 
         const client = configureClient(ctx.apiUrl, ctx.apiKey);
 
-        const response = await TicketsService.verify(client, ctx.projectSlug, ref, {
+        await TicketsService.verify(client, ctx.projectSlug, ref, {
           body: options.comment,
           type: 'VERIFICATION',
-        });
-        const ticketData = unwrap(response);
-
-        if (options.json) {
-          console.log(JSON.stringify(ticketData, null, 2));
-        } else {
-          console.log(`✓ Ticket verified successfully`);
-        }
-        process.exit(0);
+        });\n        console.log(`✓ Ticket verified successfully`);\n        process.exit(0);
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
@@ -327,15 +319,7 @@ export function ticketCommand(program: Command): void {
 
         const client = configureClient(ctx.apiUrl, ctx.apiKey);
 
-        const response = await TicketsService.start(client, ctx.projectSlug, ref);
-        const ticketData = unwrap(response);
-
-        if (options.json) {
-          console.log(JSON.stringify(ticketData, null, 2));
-        } else {
-          console.log(`✓ Ticket started successfully`);
-        }
-        process.exit(0);
+        await TicketsService.start(client, ctx.projectSlug, ref);\n        console.log(`✓ Ticket started successfully`);\n        process.exit(0);
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
@@ -374,15 +358,7 @@ export function ticketCommand(program: Command): void {
           payload.gitRef = options.gitRef;
         }
 
-        const response = await TicketsService.fix(client, ctx.projectSlug, ref, payload);
-        const ticketData = unwrap(response);
-
-        if (options.json) {
-          console.log(JSON.stringify(ticketData, null, 2));
-        } else {
-          console.log(`✓ Fix submitted successfully`);
-        }
-        process.exit(0);
+        await TicketsService.fix(client, ctx.projectSlug, ref, payload);\n        console.log(`✓ Fix submitted successfully`);\n        process.exit(0);
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
@@ -415,19 +391,11 @@ export function ticketCommand(program: Command): void {
         const client = configureClient(ctx.apiUrl, ctx.apiKey);
 
         const status = options.pass ? 'closed' : 'in_progress';
-        const response = await TicketsService.verifyFix(client, ctx.projectSlug, ref, {
+        await TicketsService.verifyFix(client, ctx.projectSlug, ref, {
           body: options.comment,
           type: 'REVIEW',
           status,
-        });
-        const ticketData = unwrap(response);
-
-        if (options.json) {
-          console.log(JSON.stringify(ticketData, null, 2));
-        } else {
-          console.log(`✓ Fix verification submitted successfully`);
-        }
-        process.exit(0);
+        });\n        console.log(`✓ Fix verification submitted successfully`);\n        process.exit(0);
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
@@ -452,15 +420,7 @@ export function ticketCommand(program: Command): void {
 
         const client = configureClient(ctx.apiUrl, ctx.apiKey);
 
-        const response = await TicketsService.close(client, ctx.projectSlug, ref);
-        const ticketData = unwrap(response);
-
-        if (options.json) {
-          console.log(JSON.stringify(ticketData, null, 2));
-        } else {
-          console.log(`✓ Ticket closed successfully`);
-        }
-        process.exit(0);
+        await TicketsService.close(client, ctx.projectSlug, ref);\n        console.log(`✓ Ticket closed successfully`);\n        process.exit(0);
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
@@ -490,18 +450,10 @@ export function ticketCommand(program: Command): void {
 
         const client = configureClient(ctx.apiUrl, ctx.apiKey);
 
-        const response = await TicketsService.reject(client, ctx.projectSlug, ref, {
+        await TicketsService.reject(client, ctx.projectSlug, ref, {
           body: options.comment,
           type: 'GENERAL',
-        });
-        const ticketData = unwrap(response);
-
-        if (options.json) {
-          console.log(JSON.stringify(ticketData, null, 2));
-        } else {
-          console.log(`✓ Ticket rejected successfully`);
-        }
-        process.exit(0);
+        });\n        console.log(`✓ Ticket rejected successfully`);\n        process.exit(0);
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
@@ -702,14 +654,8 @@ export function ticketCommand(program: Command): void {
 
         const client = configureClient(ctx.apiUrl, ctx.apiKey);
 
-        const response = await LabelsService.removeFromTicket(client, ctx.projectSlug, ref, options.label);
-        const ticketData = unwrap(response);
-
-        if (options.json) {
-          console.log(JSON.stringify(ticketData, null, 2));
-        } else {
-          console.log(`✓ Label detached from ticket ${ref}`);
-        }
+        await LabelsService.removeFromTicket(client, ctx.projectSlug, ref, options.label);
+        console.log(`✓ Label detached from ticket ${ref}`);
         process.exit(0);
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket or label not found` });
