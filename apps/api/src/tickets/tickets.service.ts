@@ -3,6 +3,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { NotFoundAppException, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
+import { TicketResponseDto } from './dto/ticket-response.dto';
 import { PrismaClient } from '@prisma/client';
 import { TicketType, TicketStatus, Priority } from '../common/enums';
 import { validateTransition } from './state-machine/ticket-transitions';
@@ -98,7 +99,7 @@ export class TicketsService {
       });
     });
 
-    return { ...ticket, ref: `${project.key}-${ticket.number}` };
+    return TicketResponseDto.from({ ...ticket, ref: `${project.key}-${ticket.number}` }, project.key);
   }
 
   async findAll(projectSlug: string, filters: FindAllFilters) {
@@ -151,21 +152,29 @@ export class TicketsService {
         take: limit,
         skip,
         orderBy: { number: 'asc' },
+        include: {
+          labels: { include: { label: true } },
+          links: true,
+        },
       }),
       this.db.ticket.count({ where: whereConditions }),
     ]);
 
     return {
-      items: tickets.map((ticket) => ({
-        ...ticket,
-        ref: `${project.key}-${ticket.number}`,
-        gitRefUrl: this.computeGitRefUrl(
-          project.gitRemoteUrl,
-          ticket.gitRefVersion,
-          ticket.gitRefFile,
-          ticket.gitRefLine,
-        ),
-      })),
+      items: TicketResponseDto.fromMany(tickets, project.key).map((t, i) => {
+        // Attach gitRefUrl (computed from project context, not stored on ticket)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const raw = tickets[i] as any;
+        return {
+          ...t,
+          gitRefUrl: this.computeGitRefUrl(
+            project.gitRemoteUrl,
+            raw.gitRefVersion,
+            raw.gitRefFile,
+            raw.gitRefLine,
+          ),
+        };
+      }),
       total,
       page,
       limit,
@@ -220,28 +229,14 @@ export class TicketsService {
       throw new NotFoundAppException({}, 'tickets');
     }
 
-    // Compute ref (e.g. KT-1) and transform labels from nested structure to flat array
-    const ticketRef = `${project.key}-${ticket.number}`;
+    // Compute ref and gitRefUrl
     const gitRefUrl = this.computeGitRefUrl(
       project.gitRemoteUrl,
       ticket.gitRefVersion,
       ticket.gitRefFile,
       ticket.gitRefLine,
     );
-    if (ticket.labels) {
-      interface TicketLabelWithLabel {
-        label: { id: string; projectId: string; name: string; color: string | null };
-      }
-      return {
-        ...ticket,
-        ref: ticketRef,
-        gitRefUrl,
-        labels: (ticket.labels as TicketLabelWithLabel[]).map((tl: TicketLabelWithLabel) => tl.label),
-        links: ticket.links || [],
-      };
-    }
-
-    return { ...ticket, ref: ticketRef, gitRefUrl, links: ticket.links || [] };
+    return TicketResponseDto.from(ticket, project.key, gitRefUrl);
   }
 
   async update(
@@ -251,7 +246,7 @@ export class TicketsService {
     _currentUser: CurrentUser,
     _actorType: 'user' | 'agent',
   ) {
-    // Find ticket by ref
+    // Find ticket by ref (returns TicketResponseDto)
     const ticket = await this.findByRef(projectSlug, ref);
     if (!ticket) {
       throw new NotFoundAppException({}, 'tickets');
@@ -276,11 +271,25 @@ export class TicketsService {
       updateData.status = updateTicketDto.status;
     }
 
-    // Update the ticket
-    return this.db.ticket.update({
+    // Update the ticket and re-fetch with relations
+    const updated = await this.db.ticket.update({
       where: { id: ticket.id },
       data: updateData,
+      include: {
+        labels: { include: { label: true } },
+        links: true,
+      },
     });
+
+    // Get project for gitRefUrl
+    const project = await this.db.project.findUnique({ where: { slug: projectSlug } });
+    const gitRefUrl = this.computeGitRefUrl(
+      project?.gitRemoteUrl,
+      updated.gitRefVersion,
+      updated.gitRefFile,
+      updated.gitRefLine,
+    );
+    return TicketResponseDto.from(updated, project?.key, gitRefUrl);
   }
 
   async softDelete(
@@ -301,12 +310,26 @@ export class TicketsService {
     }
 
     // Soft delete by setting deletedAt
-    return this.db.ticket.update({
+    const updated = await this.db.ticket.update({
       where: { id: ticket.id },
       data: {
         deletedAt: new Date(),
       },
+      include: {
+        labels: { include: { label: true } },
+        links: true,
+      },
     });
+
+    // Get project for gitRefUrl
+    const project = await this.db.project.findUnique({ where: { slug: projectSlug } });
+    const gitRefUrl = this.computeGitRefUrl(
+      project?.gitRemoteUrl,
+      updated.gitRefVersion,
+      updated.gitRefFile,
+      updated.gitRefLine,
+    );
+    return TicketResponseDto.from(updated, project?.key, gitRefUrl);
   }
 
   async assign(projectSlug: string, ref: string, assignInput: AssignInput) {
@@ -346,9 +369,21 @@ export class TicketsService {
       updateData.assignedToAgentId = null;
     }
 
-    return this.db.ticket.update({
+    const updated = await this.db.ticket.update({
       where: { id: ticket.id },
       data: updateData,
+      include: {
+        labels: { include: { label: true } },
+        links: true,
+      },
     });
+
+    const gitRefUrl = this.computeGitRefUrl(
+      project?.gitRemoteUrl,
+      updated.gitRefVersion,
+      updated.gitRefFile,
+      updated.gitRefLine,
+    );
+    return TicketResponseDto.from(updated, project?.key, gitRefUrl);
   }
 }

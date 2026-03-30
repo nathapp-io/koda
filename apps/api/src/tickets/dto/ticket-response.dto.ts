@@ -69,4 +69,70 @@ export class TicketResponseDto {
     type: TicketLinkResponseDto,
   })
   links!: TicketLinkResponseDto[];
+
+  @ApiProperty({
+    description: 'Labels attached to this ticket',
+    isArray: true,
+  })
+  labels!: { id: string; projectId: string; name: string; color: string | null }[];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  static from(ticket: any, projectKey?: string, gitRefUrl?: string | null): TicketResponseDto {
+    const ref = projectKey
+      ? `${projectKey}-${ticket.number}`
+      : ticket.ref ?? `${projectKey ?? ''}-${ticket.number}`;
+
+    // Flatten labels from nested TicketLabel structure if present
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let labels: any[] = [];
+    if (ticket.labels && Array.isArray(ticket.labels)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      labels = ticket.labels.map((tl: any) =>
+        tl.label
+          ? { id: tl.label.id, projectId: tl.label.projectId, name: tl.label.name, color: tl.label.color }
+          : tl,
+      );
+    }
+
+    // Map raw links to TicketLinkResponseDto shape
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const links: TicketLinkResponseDto[] = (ticket.links ?? []).map((l: any) => ({
+      id: l.id,
+      ticketId: l.ticketId,
+      url: l.url,
+      provider: l.provider,
+      externalRef: l.externalRef,
+      createdAt: l.createdAt,
+    }));
+
+    return {
+      id: ticket.id,
+      projectId: ticket.projectId,
+      number: ticket.number,
+      ref,
+      type: ticket.type,
+      title: ticket.title,
+      description: ticket.description,
+      status: ticket.status,
+      priority: ticket.priority,
+      assignedToUserId: ticket.assignedToUserId,
+      assignedToAgentId: ticket.assignedToAgentId,
+      createdByUserId: ticket.createdByUserId,
+      createdByAgentId: ticket.createdByAgentId,
+      gitRefVersion: ticket.gitRefVersion,
+      gitRefFile: ticket.gitRefFile,
+      gitRefLine: ticket.gitRefLine,
+      gitRefUrl: gitRefUrl ?? ticket.gitRefUrl ?? null,
+      createdAt: ticket.createdAt,
+      updatedAt: ticket.updatedAt,
+      deletedAt: ticket.deletedAt,
+      labels,
+      links,
+    };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  static fromMany(tickets: any[], projectKey?: string): TicketResponseDto[] {
+    return tickets.map(t => TicketResponseDto.from(t, projectKey));
+  }
 }

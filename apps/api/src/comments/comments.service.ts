@@ -5,6 +5,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ValidationAppException, NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
+import { CommentResponseDto } from './dto/comment-response.dto';
 
 interface CurrentUser {
   id: string;
@@ -84,7 +85,7 @@ export class CommentsService {
       },
     });
 
-    return comment;
+    return CommentResponseDto.from(comment);
   }
 
   async findByTicket(projectSlug: string, ticketRef: string) {
@@ -131,7 +132,7 @@ export class CommentsService {
       orderBy: { createdAt: 'asc' },
     });
 
-    return comments;
+    return CommentResponseDto.fromMany(comments);
   }
 
   async findById(id: string) {
@@ -139,7 +140,7 @@ export class CommentsService {
       where: { id },
     });
 
-    return comment;
+    return comment ? CommentResponseDto.from(comment) : null;
   }
 
   async update(
@@ -176,7 +177,7 @@ export class CommentsService {
       },
     });
 
-    return updatedComment;
+    return CommentResponseDto.from(updatedComment);
   }
 
   async delete(

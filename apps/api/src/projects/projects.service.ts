@@ -4,6 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import { ValidationAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
+import { ProjectResponseDto } from './dto/project-response.dto';
 
 @Injectable()
 export class ProjectsService {
@@ -46,7 +47,7 @@ export class ProjectsService {
     }
 
     // Create project
-    return this.db.project.create({
+    return ProjectResponseDto.from(await this.db.project.create({
       data: {
         name: createProjectDto.name,
         slug: createProjectDto.slug,
@@ -56,15 +57,15 @@ export class ProjectsService {
         autoIndexOnClose: createProjectDto.autoIndexOnClose ?? true,
         autoAssign: createProjectDto.autoAssign ?? 'OFF'
       },
-    });
+    }));
   }
 
   async findAll() {
-    return this.db.project.findMany({
+    return ProjectResponseDto.fromMany(await this.db.project.findMany({
       where: {
         deletedAt: null,
       },
-    });
+    }));
   }
 
   async findBySlug(slug: string) {
@@ -77,7 +78,7 @@ export class ProjectsService {
       throw new NotFoundAppException({}, 'projects');
     }
 
-    return project;
+    return ProjectResponseDto.from(project);
   }
 
   async update(slug: string, updateProjectDto: UpdateProjectDto) {
@@ -132,7 +133,7 @@ export class ProjectsService {
     }
 
     // Update project
-    return this.db.project.update({
+    return ProjectResponseDto.from(await this.db.project.update({
       where: { slug },
       data: {
         name: updateProjectDto.name,
@@ -144,7 +145,7 @@ export class ProjectsService {
         autoAssign: updateProjectDto.autoAssign,
         ciWebhookToken: updateProjectDto.ciWebhookToken,
       },
-    });
+    }));
   }
 
   async softDelete(slug: string) {
@@ -158,11 +159,11 @@ export class ProjectsService {
     }
 
     // Soft delete by setting deletedAt
-    return this.db.project.update({
+    return ProjectResponseDto.from(await this.db.project.update({
       where: { slug },
       data: {
         deletedAt: new Date(),
       },
-    });
+    }));
   }
 }

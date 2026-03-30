@@ -2,20 +2,37 @@ import { ApiProperty } from '@nestjs/swagger';
 
 export class TicketLinkResponseDto {
   @ApiProperty()
-  id: string;
+  id!: string;
 
   @ApiProperty()
-  ticketId: string;
+  ticketId!: string;
 
   @ApiProperty()
-  url: string;
+  url!: string;
 
   @ApiProperty()
-  provider: string;
+  provider!: string;
 
   @ApiProperty({ nullable: true, type: String })
-  externalRef: string | null;
+  externalRef!: string | null;
 
   @ApiProperty()
-  createdAt: Date;
+  createdAt!: Date;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  static from(link: any): TicketLinkResponseDto {
+    return {
+      id: link.id,
+      ticketId: link.ticketId,
+      url: link.url,
+      provider: link.provider,
+      externalRef: link.externalRef,
+      createdAt: link.createdAt,
+    };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  static fromMany(links: any[]): TicketLinkResponseDto[] {
+    return links.map(link => TicketLinkResponseDto.from(link));
+  }
 }

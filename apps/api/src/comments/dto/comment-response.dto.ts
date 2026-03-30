@@ -51,4 +51,23 @@ export class CommentResponseDto {
     example: '2026-03-17T10:00:00Z',
   })
   updatedAt!: Date;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  static from(comment: any): CommentResponseDto {
+    return {
+      id: comment.id,
+      ticketId: comment.ticketId,
+      body: comment.body,
+      type: comment.type,
+      authorUserId: comment.authorUserId,
+      authorAgentId: comment.authorAgentId,
+      createdAt: comment.createdAt,
+      updatedAt: comment.updatedAt,
+    };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  static fromMany(comments: any[]): CommentResponseDto[] {
+    return comments.map(c => CommentResponseDto.from(c));
+  }
 }

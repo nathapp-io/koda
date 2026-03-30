@@ -7,6 +7,7 @@ import * as bcrypt from 'bcrypt';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import type { IPrincipal } from './types';
+import { UserResponseDto } from './dto/auth-response.dto';
 
 export interface JwtPayload {
   sub: string;
@@ -43,7 +44,7 @@ export class AuthService {
     return {
       accessToken,
       refreshToken,
-      user: this.formatUser(user),
+      user: UserResponseDto.from(user),
     };
   }
 
@@ -69,7 +70,7 @@ export class AuthService {
     return {
       accessToken,
       refreshToken,
-      user: this.formatUser(user),
+      user: UserResponseDto.from(user),
     };
   }
 
@@ -89,7 +90,7 @@ export class AuthService {
     return {
       accessToken,
       refreshToken,
-      user: this.formatUser(user),
+      user: UserResponseDto.from(user),
     };
   }
 
@@ -109,11 +110,5 @@ export class AuthService {
 
   generateRefreshToken(userId: string): string {
     return this.jwtRefreshStrategyProvider.sign({ sub: userId });
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private formatUser(user: any) {
-    const { passwordHash: _passwordHash, ...userWithoutPassword } = user;
-    return userWithoutPassword;
   }
 }

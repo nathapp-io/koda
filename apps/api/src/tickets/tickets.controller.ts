@@ -26,6 +26,8 @@ import { JsonResponse } from '@nathapp/nestjs-common';
 import { TicketType, TicketStatus, Priority } from '../common/enums';
 import { CurrentActor } from '../auth/decorators/current-user.decorator';
 
+type CurrentUser = { id: string; sub: string; role?: string } | null;
+
 @ApiTags('tickets')
 @ApiBearerAuth()
 @Controller('projects/:slug/tickets')
@@ -35,6 +37,107 @@ export class TicketsController {
     private transitionsService: TicketTransitionsService,
   ) {}
 
+  // Public methods for testing (called directly in tests)
+  async createTicket(
+    slug: string,
+    createTicketDto: CreateTicketDto,
+    currentUser: CurrentUser,
+    actorType: 'user' | 'agent',
+  ) {
+    return this.ticketsService.create(slug, createTicketDto, currentUser, actorType);
+  }
+
+  async listTickets(slug: string, filters: Record<string, unknown>) {
+    return this.ticketsService.findAll(slug, filters);
+  }
+
+  async getTicket(slug: string, ref: string) {
+    return this.ticketsService.findByRef(slug, ref);
+  }
+
+  async updateTicket(
+    slug: string,
+    ref: string,
+    updateTicketDto: UpdateTicketDto,
+    currentUser: CurrentUser,
+    actorType: 'user' | 'agent',
+  ) {
+    return this.ticketsService.update(slug, ref, updateTicketDto, currentUser, actorType);
+  }
+
+  async deleteTicket(
+    slug: string,
+    ref: string,
+    currentUser: CurrentUser,
+    actorType: 'user' | 'agent',
+  ) {
+    return this.ticketsService.softDelete(slug, ref, currentUser, actorType);
+  }
+
+  async assignTicket(slug: string, ref: string, assignInput: Record<string, unknown>) {
+    return this.ticketsService.assign(slug, ref, assignInput);
+  }
+
+  async verifyTicket(
+    slug: string,
+    ref: string,
+    body: string,
+    currentUser: CurrentUser,
+    actorType: 'user' | 'agent',
+  ) {
+    return this.transitionsService.verify(slug, ref, body, currentUser, actorType);
+  }
+
+  async startTicket(
+    slug: string,
+    ref: string,
+    currentUser: CurrentUser,
+    actorType: 'user' | 'agent',
+  ) {
+    return this.transitionsService.start(slug, ref, currentUser, actorType);
+  }
+
+  async fixTicket(
+    slug: string,
+    ref: string,
+    body: string,
+    currentUser: CurrentUser,
+    actorType: 'user' | 'agent',
+  ) {
+    return this.transitionsService.fix(slug, ref, body, currentUser, actorType);
+  }
+
+  async verifyFixTicket(
+    slug: string,
+    ref: string,
+    body: string,
+    approve: boolean,
+    currentUser: CurrentUser,
+    actorType: 'user' | 'agent',
+  ) {
+    return this.transitionsService.verifyFix(slug, ref, body, approve, currentUser, actorType);
+  }
+
+  async closeTicket(
+    slug: string,
+    ref: string,
+    currentUser: CurrentUser,
+    actorType: 'user' | 'agent',
+  ) {
+    return this.transitionsService.close(slug, ref, currentUser, actorType);
+  }
+
+  async rejectTicket(
+    slug: string,
+    ref: string,
+    body: string,
+    currentUser: CurrentUser,
+    actorType: 'user' | 'agent',
+  ) {
+    return this.transitionsService.reject(slug, ref, body, currentUser, actorType);
+  }
+
+  // HTTP route handlers
   @Post()
   @HttpCode(201)
   @ApiOperation({ summary: 'Create a new ticket' })
@@ -44,10 +147,10 @@ export class TicketsController {
   async create(
     @Param('slug') slug: string,
     @Body() createTicketDto: CreateTicketDto,
-    @CurrentActor() actor: { currentUser: { id: string; sub: string; role?: string } | null; actorType: 'user' | 'agent' | undefined },
+    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
   ) {
     const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    const data = await this.ticketsService.create(slug, createTicketDto, currentUser, actor.actorType ?? 'user');
+    const data = await this.createTicket(slug, createTicketDto, currentUser, actor.actorType ?? 'user');
     return JsonResponse.Ok(data);
   }
 
@@ -79,7 +182,7 @@ export class TicketsController {
     if (query.limit !== undefined) filters.limit = parseInt(query.limit, 10);
     if (query.page !== undefined) filters.page = parseInt(query.page, 10);
 
-    const data = await this.ticketsService.findAll(slug, filters);
+    const data = await this.listTickets(slug, filters);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data);
   }
@@ -93,7 +196,7 @@ export class TicketsController {
     @Param('slug') slug: string,
     @Param('ref') ref: string,
   ) {
-    const data = await this.ticketsService.findByRef(slug, ref);
+    const data = await this.getTicket(slug, ref);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data);
   }
@@ -107,10 +210,10 @@ export class TicketsController {
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Body() updateTicketDto: UpdateTicketDto,
-    @CurrentActor() actor: { currentUser: { id: string; sub: string; role?: string } | null; actorType: 'user' | 'agent' | undefined },
+    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
   ) {
     const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    const data = await this.ticketsService.update(slug, ref, updateTicketDto, currentUser, actor.actorType ?? 'user');
+    const data = await this.updateTicket(slug, ref, updateTicketDto, currentUser, actor.actorType ?? 'user');
     return JsonResponse.Ok(data);
   }
 
@@ -122,10 +225,10 @@ export class TicketsController {
   async softDelete(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
-    @CurrentActor() actor: { currentUser: { id: string; sub: string; role?: string } | null; actorType: 'user' | 'agent' | undefined },
+    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
   ) {
     const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    const data = await this.ticketsService.softDelete(slug, ref, currentUser, actor.actorType ?? 'user');
+    const data = await this.deleteTicket(slug, ref, currentUser, actor.actorType ?? 'user');
     return JsonResponse.Ok(data);
   }
 
@@ -142,7 +245,7 @@ export class TicketsController {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     @Body() assignInput: Record<string, any>,
   ) {
-    const data = await this.ticketsService.assign(slug, ref, assignInput);
+    const data = await this.assignTicket(slug, ref, assignInput);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data);
   }
@@ -157,10 +260,10 @@ export class TicketsController {
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Body() dto: TransitionWithCommentDto,
-    @CurrentActor() actor: { currentUser: { id: string; sub: string; role?: string } | null; actorType: 'user' | 'agent' | undefined },
+    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
   ) {
     const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    const data = await this.transitionsService.verify(slug, ref, dto.body ?? '', currentUser, actor.actorType ?? 'user');
+    const data = await this.verifyTicket(slug, ref, dto.body ?? '', currentUser, actor.actorType ?? 'user');
     return JsonResponse.Ok(data);
   }
 
@@ -173,10 +276,10 @@ export class TicketsController {
   async start(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
-    @CurrentActor() actor: { currentUser: { id: string; sub: string; role?: string } | null; actorType: 'user' | 'agent' | undefined },
+    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
   ) {
     const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    const data = await this.transitionsService.start(slug, ref, currentUser, actor.actorType ?? 'user');
+    const data = await this.startTicket(slug, ref, currentUser, actor.actorType ?? 'user');
     return JsonResponse.Ok(data);
   }
 
@@ -190,10 +293,10 @@ export class TicketsController {
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Body() dto: TransitionWithCommentDto,
-    @CurrentActor() actor: { currentUser: { id: string; sub: string; role?: string } | null; actorType: 'user' | 'agent' | undefined },
+    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
   ) {
     const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    const data = await this.transitionsService.fix(slug, ref, dto.body ?? '', currentUser, actor.actorType ?? 'user');
+    const data = await this.fixTicket(slug, ref, dto.body ?? '', currentUser, actor.actorType ?? 'user');
     return JsonResponse.Ok(data);
   }
 
@@ -208,11 +311,11 @@ export class TicketsController {
     @Param('ref') ref: string,
     @Body() dto: TransitionWithCommentDto,
     @Query('approve') approve: boolean | string,
-    @CurrentActor() actor: { currentUser: { id: string; sub: string; role?: string } | null; actorType: 'user' | 'agent' | undefined },
+    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
   ) {
     const currentUser = actor.currentUser ?? { id: '', sub: '' };
     const isApproved = approve === 'true' || approve === true;
-    const data = await this.transitionsService.verifyFix(slug, ref, dto.body ?? '', isApproved, currentUser, actor.actorType ?? 'user');
+    const data = await this.verifyFixTicket(slug, ref, dto.body ?? '', isApproved, currentUser, actor.actorType ?? 'user');
     return JsonResponse.Ok(data);
   }
 
@@ -225,10 +328,10 @@ export class TicketsController {
   async close(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
-    @CurrentActor() actor: { currentUser: { id: string; sub: string; role?: string } | null; actorType: 'user' | 'agent' | undefined },
+    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
   ) {
     const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    const data = await this.transitionsService.close(slug, ref, currentUser, actor.actorType ?? 'user');
+    const data = await this.closeTicket(slug, ref, currentUser, actor.actorType ?? 'user');
     return JsonResponse.Ok(data);
   }
 
@@ -242,10 +345,10 @@ export class TicketsController {
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Body() dto: TransitionWithCommentDto,
-    @CurrentActor() actor: { currentUser: { id: string; sub: string; role?: string } | null; actorType: 'user' | 'agent' | undefined },
+    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
   ) {
     const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    const data = await this.transitionsService.reject(slug, ref, dto.body ?? '', currentUser, actor.actorType ?? 'user');
+    const data = await this.rejectTicket(slug, ref, dto.body ?? '', currentUser, actor.actorType ?? 'user');
     return JsonResponse.Ok(data);
   }
 }

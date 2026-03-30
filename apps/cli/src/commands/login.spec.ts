@@ -12,21 +12,23 @@ jest.mock('conf', () => {
   return jest.fn(() => mockStore);
 });
 
-// Mock configureClient
-jest.mock('../client', () => ({
-  configureClient: jest.fn((baseUrl: string, apiKey: string) => {
-    return {
-      get: jest.fn(async () => {
-        // Reject 'invalid' API key, allow others
-        if (apiKey === 'invalid') {
-          const error = new Error('Invalid API key') as unknown as Record<string, unknown>;
-          error.response = { status: 401 };
-          throw error;
-        }
-        return { status: 200, data: {} };
-      }),
-    };
-  }),
+// Shared OpenAPI mock object
+const mockOpenAPI = { BASE: '', TOKEN: '' };
+jest.mock('../generated/core/OpenAPI', () => ({
+  get OpenAPI() { return mockOpenAPI; },
+}));
+
+// Mock agentsControllerFindMe - will check mockOpenAPI.TOKEN at call time
+const mockAgentsControllerFindMe = jest.fn(async () => {
+  if (mockOpenAPI.TOKEN === 'invalid') {
+    const error = new Error('Unauthorized') as Error & { response?: { status: number } };
+    error.response = { status: 401 };
+    throw error;
+  }
+  return { agent: {} };
+});
+jest.mock('../generated/services.gen', () => ({
+  agentsControllerFindMe: () => mockAgentsControllerFindMe(),
 }));
 
 // Mock config module

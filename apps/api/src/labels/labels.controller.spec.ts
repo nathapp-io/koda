@@ -30,18 +30,21 @@ describe('LabelsController', () => {
   };
 
   const mockAdminUser = {
+    id: 'user-admin',
     sub: 'user-admin',
     email: 'admin@example.com',
     role: 'ADMIN',
   };
 
   const mockMemberUser = {
+    id: 'user-member',
     sub: 'user-member',
     email: 'member@example.com',
     role: 'MEMBER',
   };
 
   const mockAgent = {
+    id: 'agent-123',
     sub: 'agent-123',
     slug: 'test-agent',
   };

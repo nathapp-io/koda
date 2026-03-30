@@ -2,22 +2,29 @@ import { ApiProperty } from '@nestjs/swagger';
 
 export class UserResponseDto {
   @ApiProperty()
-  declare id: string;
+  id!: string;
 
   @ApiProperty()
-  declare email: string;
+  email!: string;
 
   @ApiProperty()
-  declare name: string;
+  name!: string;
 
   @ApiProperty()
-  declare role: string;
+  role!: string;
 
   @ApiProperty()
-  declare createdAt: Date;
+  createdAt!: Date;
 
   @ApiProperty()
-  declare updatedAt: Date;
+  updatedAt!: Date;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  static from(user: any): UserResponseDto {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { passwordHash: _passwordHash, ...result } = user;
+    return result as UserResponseDto;
+  }
 }
 
 export class AuthResponseDto {

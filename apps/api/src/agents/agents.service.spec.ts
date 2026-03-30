@@ -23,6 +23,26 @@ describe('AgentsService', () => {
     updatedAt: new Date(),
   };
 
+  // DTO response excludes apiKeyHash for security
+  const mockAgentDto = {
+    id: 'agent-123',
+    name: 'Test Agent',
+    slug: 'test-agent',
+    status: 'ACTIVE',
+    maxConcurrentTickets: 3,
+    roles: [
+      { id: 'role-1', agentId: 'agent-123', role: 'DEVELOPER' },
+    ],
+    capabilities: [
+      { id: 'cap-1', agentId: 'agent-123', capability: 'typescript' },
+      { id: 'cap-2', agentId: 'agent-123', capability: 'nestjs' },
+    ],
+    createdAt: mockAgent.createdAt,
+    updatedAt: mockAgent.updatedAt,
+  };
+
+  const mockAgentsDto = [mockAgentDto];
+
   const mockAgentWithRelations = {
     ...mockAgent,
     roles: [
@@ -200,14 +220,19 @@ describe('AgentsService', () => {
           slug: 'test-agent',
         });
 
-        expect(result.agent).toEqual(mockAgent);
-        expect(result.agent.id).toBe('agent-123');
+        // DTO strips apiKeyHash and formats roles/capabilities
+        expect(result.agent.id).toBe(mockAgent.id);
+        expect(result.agent.name).toBe(mockAgent.name);
+        expect(result.agent.slug).toBe(mockAgent.slug);
+        expect(result.agent.status).toBe(mockAgent.status);
+        expect('apiKeyHash' in result.agent).toBe(false);
       });
     });
 
     describe('for rotating existing agent key', () => {
       it('should generate new random API key', async () => {
         mockPrismaService.client.agent.update.mockResolvedValue(mockAgent);
+        mockPrismaService.client.agent.findUnique.mockResolvedValue(mockAgentWithRelations);
         mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey('agent-123');
@@ -221,6 +246,7 @@ describe('AgentsService', () => {
         const agentWithOldHash = { ...mockAgent, apiKeyHash: oldHash };
 
         mockPrismaService.client.agent.update.mockResolvedValue(agentWithOldHash);
+        mockPrismaService.client.agent.findUnique.mockResolvedValue(mockAgentWithRelations);
         mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey('agent-123');
@@ -239,6 +265,7 @@ describe('AgentsService', () => {
 
         const agentWithOldKey = { ...mockAgent, apiKeyHash: oldHash };
         mockPrismaService.client.agent.update.mockResolvedValue(agentWithOldKey);
+        mockPrismaService.client.agent.findUnique.mockResolvedValue(mockAgentWithRelations);
         mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey('agent-123');
@@ -250,6 +277,7 @@ describe('AgentsService', () => {
 
       it('should return new raw key ONCE', async () => {
         mockPrismaService.client.agent.update.mockResolvedValue(mockAgent);
+        mockPrismaService.client.agent.findUnique.mockResolvedValue(mockAgentWithRelations);
         mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey('agent-123');
@@ -267,7 +295,7 @@ describe('AgentsService', () => {
 
       const result = await service.findAll();
 
-      expect(result).toEqual(agents);
+      expect(result).toEqual(mockAgentsDto);
       expect(prismaService.client.agent.findMany).toHaveBeenCalled();
     });
 
@@ -322,7 +350,7 @@ describe('AgentsService', () => {
 
       const result = await service.findBySlug('test-agent');
 
-      expect(result).toEqual(mockAgentWithRelations);
+      expect(result).toEqual(mockAgentDto);
       expect(prismaService.client.agent.findUnique).toHaveBeenCalledWith({
         where: { slug: 'test-agent' },
         include: {
@@ -363,7 +391,7 @@ describe('AgentsService', () => {
 
       const result = await service.findMe('agent-123');
 
-      expect(result).toEqual(mockAgentWithRelations);
+      expect(result).toEqual(mockAgentDto);
       expect(prismaService.client.agent.findUnique).toHaveBeenCalledWith({
         where: { id: 'agent-123' },
         include: {

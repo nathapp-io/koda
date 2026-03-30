@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { readFileSync } from 'fs';
+import { readFile } from 'fs/promises';
 import { basename } from 'path';
 import { resolveContext } from '../config';
 import { configureClient } from '../client';
@@ -148,7 +148,7 @@ export function kbCommand(program: Command): void {
           return;
         }
 
-        const content = readFileSync(options.file, 'utf-8');
+        const content = await readFile(options.file, 'utf-8');
         const fileName = basename(options.file);
 
         const client = configureClient(ctx.apiUrl, ctx.apiKey);

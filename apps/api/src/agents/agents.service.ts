@@ -7,6 +7,8 @@ import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { createHmac, randomBytes } from 'crypto';
 import type { PrismaClient } from '@prisma/client';
 import { AgentRole } from '../common/enums';
+import { AgentResponseDto } from './dto/agent-response.dto';
+import { TicketResponseDto } from '../tickets/dto/ticket-response.dto';
 
 export class CreateAgentDto {
   @ApiProperty({ example: 'Subrina Coder' })
@@ -77,10 +79,8 @@ export class AgentsService {
   private get db() { return this.prisma.client; }
 
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async generateApiKey(agentId: string): Promise<{ apiKey: string; agent: any }>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async generateApiKey(dto: CreateAgentDto): Promise<{ apiKey: string; agent: any }>;
+  async generateApiKey(agentId: string): Promise<{ apiKey: string; agent: AgentResponseDto }>;
+  async generateApiKey(dto: CreateAgentDto): Promise<{ apiKey: string; agent: AgentResponseDto }>;
   async generateApiKey(agentIdOrDto: string | CreateAgentDto) {
     // Generate random 32-byte hex key
     const rawKey = randomBytes(32).toString('hex');
@@ -95,14 +95,22 @@ export class AgentsService {
     const apiKeyHash = createHmac('sha256', apiKeySecret).update(rawKey).digest('hex');
 
     // Determine if this is an update (string) or create (object)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let agent: any;
+    let agent: Awaited<ReturnType<typeof this.db.agent.update>>;
     if (typeof agentIdOrDto === 'string') {
       // Update existing agent
       agent = await this.db.agent.update({
         where: { id: agentIdOrDto },
         data: { apiKeyHash },
       });
+      // Re-fetch with relations for DTO mapping
+      const agentWithRelations = await this.db.agent.findUnique({
+        where: { id: agent.id },
+        include: { roles: true, capabilities: true },
+      });
+      return {
+        apiKey: rawKey,
+        agent: AgentResponseDto.from(agentWithRelations),
+      };
     } else {
       // Separate scalar fields from relational fields
       const { roles, capabilities, ...scalarFields } = agentIdOrDto;
@@ -113,42 +121,49 @@ export class AgentsService {
         },
       });
       // Create role entries (sequential create — createMany not reliable on SQLite for junction tables)
+      const createdRoles = [];
       if (roles?.length) {
         for (const role of roles) {
-          await this.db.agentRoleEntry.create({
+          const entry = await this.db.agentRoleEntry.create({
             data: { agentId: agent.id, role: role as AgentRole },
           });
+          createdRoles.push(entry);
         }
       }
       // Create capability entries
+      const createdCapabilities = [];
       if (capabilities?.length) {
         for (const capability of capabilities) {
-          await this.db.agentCapabilityEntry.create({
+          const entry = await this.db.agentCapabilityEntry.create({
             data: { agentId: agent.id, capability },
           });
+          createdCapabilities.push(entry);
         }
       }
+      // Build agent with relations from created entries (avoid extra findUnique call)
+      const agentWithRelations = {
+        ...agent,
+        roles: createdRoles,
+        capabilities: createdCapabilities,
+      };
+      // Return raw key ONCE to client (never return the hash)
+      return {
+        apiKey: rawKey,
+        agent: AgentResponseDto.from(agentWithRelations),
+      };
     }
-
-    // Return raw key ONCE to client (never return the hash)
-    return {
-      apiKey: rawKey,
-      agent,
-    };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async findAll(): Promise<any[]> {
-    return this.db.agent.findMany({
+  async findAll(): Promise<AgentResponseDto[]> {
+    return AgentResponseDto.fromMany(await this.db.agent.findMany({
       include: {
         roles: true,
         capabilities: true,
       },
-    });
+    }));
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async findBySlug(slug: string): Promise<any> {
+  async findBySlug(slug: string): Promise<AgentResponseDto> {
     const agent = await this.db.agent.findUnique({
       where: { slug },
       include: {
@@ -161,11 +176,10 @@ export class AgentsService {
       throw new NotFoundAppException({}, 'agents');
     }
 
-    return agent;
+    return AgentResponseDto.from(agent);
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async findMe(agentId: string): Promise<any> {
+  async findMe(agentId: string): Promise<AgentResponseDto> {
     const agent = await this.db.agent.findUnique({
       where: { id: agentId },
       include: {
@@ -178,28 +192,27 @@ export class AgentsService {
       throw new NotFoundAppException({}, 'agents');
     }
 
-    return agent;
+    return AgentResponseDto.from(agent);
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async update(slug: string, updateData: UpdateAgentDto): Promise<any> {
+  async update(slug: string, updateData: UpdateAgentDto): Promise<AgentResponseDto> {
     const agent = await this.db.agent.findUnique({ where: { slug } });
-    if (!agent) throw new NotFoundAppException();
+    if (!agent) throw new NotFoundAppException({}, 'agents');
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const data: any = {};
+    const data: Partial<{ name: string; status: string; maxConcurrentTickets: number }> = {};
     if (updateData.name !== undefined) data.name = updateData.name;
     if (updateData.maxConcurrentTickets !== undefined) data.maxConcurrentTickets = updateData.maxConcurrentTickets;
     if (updateData.status !== undefined) data.status = updateData.status;
 
-    return this.db.agent.update({
+    const updated = await this.db.agent.update({
       where: { slug },
       data,
+      include: { roles: true, capabilities: true },
     });
+    return AgentResponseDto.from(updated);
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async updateRoles(agentId: string, updateData: UpdateRolesDto): Promise<any> {
+  async updateRoles(agentId: string, updateData: UpdateRolesDto): Promise<AgentResponseDto> {
     // Delete all existing roles
     await this.db.agentRoleEntry.deleteMany({
       where: { agentId },
@@ -216,17 +229,16 @@ export class AgentsService {
     }
 
     // Return updated agent with roles
-    return this.db.agent.findUnique({
+    return AgentResponseDto.from(await this.db.agent.findUnique({
       where: { id: agentId },
       include: {
         roles: true,
         capabilities: true,
       },
-    });
+    }));
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async updateCapabilities(agentId: string, updateData: UpdateCapabilitiesDto): Promise<any> {
+  async updateCapabilities(agentId: string, updateData: UpdateCapabilitiesDto): Promise<AgentResponseDto> {
     // Delete all existing capabilities
     await this.db.agentCapabilityEntry.deleteMany({
       where: { agentId },
@@ -245,25 +257,24 @@ export class AgentsService {
     }
 
     // Return updated agent with capabilities
-    return this.db.agent.findUnique({
+    return AgentResponseDto.from(await this.db.agent.findUnique({
       where: { id: agentId },
       include: {
         roles: true,
         capabilities: true,
       },
-    });
+    }));
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async remove(slug: string): Promise<any> {
+  async remove(slug: string): Promise<AgentResponseDto> {
     const agent = await this.db.agent.findUnique({
       where: { slug },
       include: { roles: true, capabilities: true },
     });
-    if (!agent) throw new NotFoundAppException();
+    if (!agent) throw new NotFoundAppException({}, 'agents');
 
     await this.db.agent.delete({ where: { slug } });
-    return agent;
+    return AgentResponseDto.from(agent);
   }
 
   private static readonly PRIORITY_RANK: Record<string, number> = {
@@ -273,19 +284,17 @@ export class AgentsService {
     LOW: 1,
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async suggestTicket(agentSlug: string, projectSlug: string): Promise<{ ticket: any; matchScore: number; matchedCapabilities: string[] } | null> {
+  async suggestTicket(agentSlug: string, projectSlug: string) {
     const agent = await this.db.agent.findUnique({
       where: { slug: agentSlug },
       include: { capabilities: true },
     });
-    if (!agent) throw new NotFoundAppException();
+    if (!agent) throw new NotFoundAppException({}, 'agents');
 
     const project = await this.db.project.findUnique({ where: { slug: projectSlug } });
     if (!project) return null;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const tickets: any[] = await this.db.ticket.findMany({
+    const tickets = await this.db.ticket.findMany({
       where: {
         projectId: project.id,
         status: 'VERIFIED',
@@ -300,15 +309,15 @@ export class AgentsService {
 
     if (tickets.length === 0) return null;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const capabilityNames: string[] = agent.capabilities.map((c: any) => c.capability as string);
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const scored = tickets.map((ticket: any) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const labelNames: string[] = ticket.labels.map((tl: any) => tl.label.name as string);
+    const capabilityNames: string[] = agent.capabilities.map(c => c.capability);
+    const scored = tickets.map((ticket) => {
+      const labelNames: string[] = (ticket.labels ?? []).map((tl: { label?: { name?: string } }) => tl.label?.name ?? '');
       const matched = capabilityNames.filter((cap) => labelNames.includes(cap));
-      return { ticket, matchScore: matched.length, matchedCapabilities: matched };
+      return {
+        ticket: TicketResponseDto.from(ticket, project.key),
+        matchScore: matched.length,
+        matchedCapabilities: matched,
+      };
     });
 
     scored.sort((a, b) => {
@@ -321,18 +330,9 @@ export class AgentsService {
     return scored[0];
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async rotateApiKey(slug: string): Promise<{ apiKey: string; agent: any }> {
-    // Find agent by slug to get the id
-    const agent = await this.db.agent.findUnique({
-      where: { slug },
-    });
-
-    if (!agent) {
-      throw new NotFoundAppException({}, 'agents');
-    }
-
-    // Rotate key using agent id
+  async rotateApiKey(slug: string): Promise<{ apiKey: string; agent: AgentResponseDto }> {
+    const agent = await this.db.agent.findUnique({ where: { slug } });
+    if (!agent) throw new NotFoundAppException({}, 'agents');
     return this.generateApiKey(agent.id);
   }
 }

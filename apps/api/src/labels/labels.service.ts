@@ -5,6 +5,7 @@ import { ValidationAppException, NotFoundAppException, ForbiddenAppException } f
 import { CreateLabelDto } from './dto/create-label.dto';
 import { UpdateLabelDto } from './dto/update-label.dto';
 import { AssignLabelDto } from './dto/assign-label.dto';
+import { LabelResponseDto } from './dto/label-response.dto';
 
 interface CurrentUser {
   id: string;
@@ -55,7 +56,7 @@ export class LabelsService {
         },
       });
 
-      return label;
+      return LabelResponseDto.from(label);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         throw new ValidationAppException({}, 'labels');
@@ -79,7 +80,7 @@ export class LabelsService {
       where: { projectId: project.id },
     });
 
-    return labels;
+    return LabelResponseDto.fromMany(labels);
   }
 
   async delete(
@@ -141,13 +142,13 @@ export class LabelsService {
     if (!label || label.projectId !== project.id) throw new NotFoundAppException();
 
     try {
-      return await this.db.label.update({
+      return LabelResponseDto.from(await this.db.label.update({
         where: { id: labelId },
         data: {
           ...(updateLabelDto.name !== undefined ? { name: updateLabelDto.name } : {}),
           ...(updateLabelDto.color !== undefined ? { color: updateLabelDto.color } : {}),
         },
-      });
+      }));
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         throw new ValidationAppException({}, 'labels');
