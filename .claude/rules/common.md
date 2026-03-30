@@ -17,6 +17,7 @@
 - All user-facing strings must use i18n keys — no hardcoded strings
 - When adding new features, add translations to **both** `en` and `zh`
 - English is the source of truth — add English first, then Chinese
+- **Validation error messages must use i18n keys** — not hardcoded strings in zod schemas or decorators
 
 ## OpenAPI & Code Generation
 - Run `bun run generate` after ANY API endpoint change before touching CLI or web code
@@ -32,3 +33,24 @@
 - Strict mode enabled across all apps
 - No `any` in production code — use proper types
 - `any` in test files is allowed
+
+## Type Safety Anti-Patterns
+- **Never suppress `any` with `eslint-disable`** — use `unknown` or create a proper type
+- **No `@ts-ignore` or `@ts-expect-error`** — fix the root cause, don't suppress it
+- **No non-null assertions (`!`)** — handle null/undefined explicitly
+- **Typed extraction over `any`** — use typed request context extraction instead of `req: any`
+
+## Error Handling
+- **Use error codes over string matching** — never check `error.message.includes('...')`
+  ```ts
+  // ❌ Wrong
+  if (err.message.includes('Unique constraint')) { ... }
+
+  // ✅ Correct
+  if (err.ret === '2000') { ... }  
+  
+  // ✅ Correct
+  if (err.code === 'P2002') { ... }  
+  ```
+- **Never swallow errors** — always handle, re-throw, or log
+- **Validate at system boundaries** — never trust external data (user input, API responses, file content)

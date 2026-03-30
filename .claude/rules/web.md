@@ -52,6 +52,58 @@
   <Select>...</Select>
   <Button>{{ t('common.save') }}</Button>
   ```
+- **Never use raw `v-model` without vee-validate** — all forms must use validation schema
+  ```vue
+  <!-- ❌ Wrong -->
+  <Input v-model="form.name" />
+
+  <!-- ✅ Correct -->
+  <FormField name="name" v-slot="{ componentField }">
+    <Input v-bind="componentField" />
+  </FormField>
+  ```
+
+## Form Validation Anti-Patterns
+- **Zod schemas must use i18n keys for error messages** — never hardcoded English
+  ```ts
+  // ❌ Wrong
+  z.string().min(1, 'Name is required')
+
+  // ✅ Correct — use t() or i18n key
+  z.string().min(1, t('validation.nameRequired'))
+  ```
+- **Never use raw `$fetch` in components** — always use `$api` from `useApi()`
+  ```ts
+  // ❌ Wrong
+  const data = await $fetch('/api/tickets', { method: 'POST' })
+
+  // ✅ Correct
+  const { $api } = useApi()
+  const data = await $api.post('/tickets', payload)
+  ```
+
+## API Error Handling Anti-Patterns
+- **Always use `extractApiError()` for API errors** — don't call `toast.error(err)` directly
+  ```ts
+  // ❌ Wrong
+  toast.error(err.message)
+
+  // ✅ Correct
+  toast.error(extractApiError(err))
+  ```
+
+## Component Anti-Patterns
+- **Extract inline color/helper functions** — don't define `typeBadgeClass()` inside components
+  ```ts
+  // ❌ Wrong — inline in TicketCard.vue
+  const typeBadgeClass = (type: string) => {
+    return type === 'open' ? 'text-red-500' : 'text-green-500'
+  }
+
+  // ✅ Correct — extract to composable or use CSS classes
+  ```
+- **Use generated types** — don't redefine interfaces that exist in `generated/types.gen.ts`
+- **Don't duplicate page logic** — extract shared logic to composables (e.g., agents list logic)
 
 ## Middleware
 - `auth.global.ts` handles route protection — no per-page auth checks needed

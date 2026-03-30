@@ -38,6 +38,7 @@
 - E2E file is the single source of truth for API lifecycle — do not split it
 - Test both happy path AND at least one error case per endpoint
 - Assert exact status codes — no range checks
+- **Mock at service boundary** — don't mock Prisma directly; use Prisma test client pattern
 
 ## Quality Gates (run before completing any story)
 ```bash
@@ -51,3 +52,37 @@ cd apps/api && DATABASE_URL=file:./koda-test.db npx jest --forceExit test/e2e
 - Keys are flat within each file: `"notFound": "Ticket not found"`
 - Usage: `this.i18n.t('tickets.notFound')`
 - When adding a new module, create `{module}.json` in both `en/` and `zh/`
+
+## Request Context Anti-Patterns
+- **Never use `@Req() req: any`** — extract user/agent from typed request context
+  ```ts
+  // ❌ Wrong
+  @Req() req: any
+  const actorType = req.user?.extra?.role
+
+  // ✅ Correct — use @CurrentUser() decorator with proper typing
+  ```
+- **Never pass `actorType` through method chains** — extract from request context at controller entry point
+- **Never use `@Optional()` for required dependencies** — inject normally, don't null-check everywhere
+
+## Dependency Injection Anti-Patterns
+- **Use constructor injection with types** — never string-based DI tokens
+  ```ts
+  // ❌ Wrong
+  @Inject('PrismaService') private prisma: PrismaService
+
+  // ✅ Correct
+  constructor(private readonly prisma: PrismaService) {}
+  ```
+
+## Prisma Anti-Patterns
+- **Return DTOs, not raw Prisma objects** — map to response DTOs before returning
+  ```ts
+  // ❌ Wrong
+  return this.prisma.ticket.findUnique({ where: { id } })
+
+  // ✅ Correct
+  return JsonResponse.Ok(TicketDTO.from(ticket))
+  ```
+- **Use Prisma error codes (`err.code`)** — not string matching on error messages
+- **DTOs must have `@ApiProperty()` decorators** — Swagger won't document undocumented types
