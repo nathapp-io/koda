@@ -210,19 +210,19 @@ function addCapability(event: Event) {
   const input = event.target as HTMLInputElement
   const value = input.value.trim()
   if (value && !capabilitiesTags.value.includes(value)) {
-    capabilitiesTags.value.push(value)
+    capabilitiesTags.value = [...capabilitiesTags.value, value]
     input.value = ''
   }
 }
 
 function removeCapability(index: number) {
-  capabilitiesTags.value.splice(index, 1)
+  capabilitiesTags.value = capabilitiesTags.value.filter((_, i) => i !== index)
 }
 
 function handleBackspace(event: Event) {
   const input = event.target as HTMLInputElement
   if (!input.value && capabilitiesTags.value.length > 0) {
-    capabilitiesTags.value.pop()
+    capabilitiesTags.value = capabilitiesTags.value.slice(0, -1)
   }
 }
 
