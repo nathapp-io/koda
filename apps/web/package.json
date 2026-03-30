@@ -59,7 +59,8 @@
     ],
     "testPathIgnorePatterns": [
       "/node_modules/",
-      "/tests/e2e/"
+      "/tests/e2e/",
+      ".nax/"
     ],
     "moduleFileExtensions": [
       "ts",

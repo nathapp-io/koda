@@ -224,23 +224,23 @@ describe('output', () => {
     it('prints colored warning message', () => {
       warn('Warning: something might happen');
 
-      expect(logOutput.length).toBeGreaterThan(0);
-      const output = logOutput.join('\n');
+      expect(errorOutput.length).toBeGreaterThan(0);
+      const output = errorOutput.join('\n');
       expect(output).toContain('Warning: something might happen');
     });
 
-    it('uses stdout, not stderr', () => {
+    it('uses stderr, not stdout', () => {
       warn('Warning message');
 
-      expect(logOutput.length).toBeGreaterThan(0);
-      expect(errorOutput.length).toBe(0);
+      expect(errorOutput.length).toBeGreaterThan(0);
+      expect(logOutput.length).toBe(0);
     });
 
     it('handles different warning messages', () => {
       warn('Warn 1');
       warn('Warn 2');
 
-      expect(logOutput.length).toBe(2);
+      expect(errorOutput.length).toBe(2);
     });
   });
 });

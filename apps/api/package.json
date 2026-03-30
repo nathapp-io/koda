@@ -83,6 +83,9 @@
     "collectCoverageFrom": [
       "**/*.(t|j)s"
     ],
+    "testPathIgnorePatterns": [
+      ".nax/"
+    ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node",
     "forceExit": true,

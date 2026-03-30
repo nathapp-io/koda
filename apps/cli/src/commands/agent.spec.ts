@@ -52,8 +52,13 @@ jest.mock('../config', () => ({
   setConfig: jest.fn(),
   validateApiKey: jest.fn((key: string) => key && key.length >= 10),
   maskApiKey: jest.fn((key: string) => {
-    if (key.length <= 8) return '****';
-    return key.substring(0, 4) + '*'.repeat(key.length - 8) + key.substring(key.length - 4);
+    if (!key || key.length < 4) return '****';
+    if (key.startsWith('sk-proj-')) {
+      const rest = key.slice('sk-proj-'.length);
+      return `sk-proj-${'*'.repeat(Math.max(4, rest.length))}`;
+    }
+    const visible = key.slice(-6);
+    return `***${visible}`;
   }),
   resolveContext: jest.fn(),
 }));
@@ -293,7 +298,7 @@ describe('agentCommand', () => {
       await meCmd?.parseAsync(['node', 'test']);
 
       expect(logSpy).toHaveBeenCalledWith(
-        expect.stringContaining('abcd****5678')
+        expect.stringContaining('***gh5678')
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
     });

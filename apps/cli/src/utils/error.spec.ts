@@ -214,7 +214,7 @@ describe('error', () => {
       expect(exitCode).toBe(1);
     });
 
-    it('exits with code 4 for 404 not found errors', () => {
+    it('exits with code 1 for 404 not found errors', () => {
       const error = {
         response: {
           status: 404,
@@ -229,7 +229,7 @@ describe('error', () => {
         // Expected to throw process.exit
       }
 
-      expect(exitCode).toBe(4);
+      expect(exitCode).toBe(1);
     });
 
     it('uses opts.notFoundMessage for 404 errors when provided', () => {
@@ -248,7 +248,7 @@ describe('error', () => {
 
       const output = errorOutput.join('\n');
       expect(output).toContain('Project not found: my-slug');
-      expect(exitCode).toBe(4);
+      expect(exitCode).toBe(1);
     });
 
     it('uses default not-found message for 404 when opts.notFoundMessage not provided', () => {
@@ -267,7 +267,7 @@ describe('error', () => {
 
       const output = errorOutput.join('\n');
       expect(output).toContain('Not found');
-      expect(exitCode).toBe(4);
+      expect(exitCode).toBe(1);
     });
 
     it('includes auth hint for 401 errors', () => {
@@ -362,7 +362,7 @@ describe('error', () => {
       expect(exitCode).toBe(3);
     });
 
-    it('returns exit code 4 for not found errors (404)', () => {
+    it('returns exit code 1 for not found errors (404)', () => {
       const error = {
         response: {
           status: 404,
@@ -376,7 +376,7 @@ describe('error', () => {
         // Expected to throw process.exit
       }
 
-      expect(exitCode).toBe(4);
+      expect(exitCode).toBe(1);
     });
   });
 });

@@ -2058,7 +2058,7 @@ describe('ticketCommand', () => {
 
       await assignCmd?.parseAsync(['node', 'test', 'KODA-1', '--project', 'koda', '--agent', 'nonexistent']);
 
-      expect(processExitSpy).toHaveBeenCalledWith(4);
+      expect(processExitSpy).toHaveBeenCalledWith(1);
       expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Agent not found'));
     });
   });

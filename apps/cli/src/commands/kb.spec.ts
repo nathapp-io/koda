@@ -62,6 +62,9 @@ jest.mock('../config', () => ({
 
 // Mock fs module for file reading
 const mockFileContent = 'mock file content for testing';
+jest.mock('fs/promises', () => ({
+  readFile: jest.fn(() => Promise.resolve(mockFileContent)),
+}));
 jest.mock('fs', () => ({
   readFileSync: jest.fn(() => mockFileContent),
   existsSync: jest.fn(() => true),
