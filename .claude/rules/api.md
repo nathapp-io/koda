@@ -1,5 +1,9 @@
 # API Rules — apps/api
 
+## NestJS
+- Before writing any NestJS code, read and follow the `nathapp-nestjs-patterns` skill
+- This skill is the **authoritative source** — do NOT use generic NestJS alternatives when a Nathapp pattern exists
+
 ## Auth
 - **NEVER use `nestjs-iam`** — use `@nathapp/nestjs-auth` v3 only
 - API key hashing: **HMAC-SHA256** (not bcrypt) — must be deterministic for lookup

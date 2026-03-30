@@ -23,11 +23,12 @@
 - Never manually edit files inside `*/generated/`
 - `openapi.json` at monorepo root is committed — source of truth for client generation
 
+## Test Anti-Patterns
+- **No `us-XXX` test files** — never in `src/` or `test/`
+- No `us-XXX` folders in `test/` directories
+- Test files must follow the naming conventions in each app's context.md (unit: `*.spec.ts`, integration: `*.integration.spec.ts`, E2E: `*.e2e.spec.ts`)
+
 ## TypeScript
 - Strict mode enabled across all apps
 - No `any` in production code — use proper types
 - `any` in test files is allowed
-
-## NestJS
-- Before writing any NestJS code, read and follow the `nathapp-nestjs-patterns` skill
-- This skill is the **authoritative source** — do NOT use generic NestJS alternatives when a Nathapp pattern exists
