@@ -2828,6 +2828,37 @@
             "items": {
               "$ref": "#/components/schemas/TicketLinkResponseDto"
             }
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "projectId": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "color": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                },
+                "required": [
+                  "id",
+                  "projectId",
+                  "name",
+                  "color"
+                ]
+              },
+              "selfRequired": true
+            }
           }
         },
         "required": [
@@ -2841,7 +2872,8 @@
           "priority",
           "createdAt",
           "updatedAt",
-          "links"
+          "links",
+          "labels"
         ]
       },
       "UpdateTicketDto": {
