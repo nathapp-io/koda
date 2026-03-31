@@ -27,25 +27,16 @@ jest.mock('conf', () => {
   return jest.fn(() => mockStore);
 });
 
-// Mock axios client
-const mockAxios = {
-  get: jest.fn(),
-  post: jest.fn(),
-};
-
-jest.mock('axios', () => {
-  return {
-    create: () => mockAxios,
-  };
-});
-
 // Mock the generated client
 jest.mock('../generated', () => ({
-  KbService: {
-    search: jest.fn(),
-    list: jest.fn(),
-    add: jest.fn(),
-  },
+  ragControllerSearch: jest.fn(),
+  ragControllerListDocuments: jest.fn(),
+  ragControllerAddDocument: jest.fn(),
+  OpenAPI: { BASE: '', TOKEN: '' },
+}));
+
+jest.mock('../generated/core/OpenAPI', () => ({
+  OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
 // Mock config module to use mockData instead of real filesystem
@@ -72,7 +63,7 @@ jest.mock('fs', () => ({
 
 import { Command } from 'commander';
 import { kbCommand } from './kb';
-import { KbService } from '../generated';
+import { ragControllerSearch, ragControllerListDocuments, ragControllerAddDocument } from '../generated';
 import { resolveContext } from '../config';
 
 describe('kbCommand', () => {
@@ -104,6 +95,12 @@ describe('kbCommand', () => {
     jest.spyOn(console, 'error').mockImplementation(() => {});
 
     jest.clearAllMocks();
+
+    (resolveContext as jest.Mock).mockResolvedValue({
+      apiKey: 'sk-test-key123',
+      apiUrl: 'http://localhost:3100/api',
+      projectSlug: 'koda',
+    });
   });
 
   afterEach(() => {
@@ -115,49 +112,45 @@ describe('kbCommand', () => {
   // ---------------------------------------------------------------------------
   describe('kb search', () => {
     const mockSearchResponse = {
+      ret: 0,
       data: {
-        ret: 0,
-        data: {
-          verdict: 'RELEVANT' as const,
-          confidence: 0.92,
-          results: [
-            {
-              score: 0.95,
-              ticketRef: 'KODA-42',
-              type: 'bug' as const,
-              status: 'in_progress',
-              labels: ['auth', 'critical'],
-            },
-            {
-              score: 0.61,
-              ticketRef: 'KODA-17',
-              type: 'enhancement' as const,
-              status: 'verified',
-              labels: [],
-            },
-          ],
-        },
+        verdict: 'RELEVANT' as const,
+        confidence: 0.92,
+        results: [
+          {
+            score: 0.95,
+            ticketRef: 'KODA-42',
+            type: 'bug' as const,
+            status: 'in_progress',
+            labels: ['auth', 'critical'],
+          },
+          {
+            score: 0.61,
+            ticketRef: 'KODA-17',
+            type: 'enhancement' as const,
+            status: 'verified',
+            labels: [],
+          },
+        ],
       },
     };
 
     it('exits 0 and prints verdict + ranked results for a valid search', async () => {
-      (KbService.search as jest.Mock).mockResolvedValue(mockSearchResponse);
+      (ragControllerSearch as jest.Mock).mockResolvedValue(mockSearchResponse);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const searchCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'search');
 
       await searchCmd?.parseAsync(['node', 'test', '--project', 'koda', '--query', 'auth error']);
 
-      expect(KbService.search).toHaveBeenCalledWith(
-        expect.anything(),
-        'koda',
-        'auth error'
+      expect(ragControllerSearch).toHaveBeenCalledWith(
+        expect.objectContaining({ slug: 'koda', requestBody: { query: 'auth error' } })
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
     it('prints the verdict line in human output', async () => {
-      (KbService.search as jest.Mock).mockResolvedValue(mockSearchResponse);
+      (ragControllerSearch as jest.Mock).mockResolvedValue(mockSearchResponse);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const searchCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'search');
@@ -169,7 +162,7 @@ describe('kbCommand', () => {
     });
 
     it('prints ranked results with ticket refs in human output', async () => {
-      (KbService.search as jest.Mock).mockResolvedValue(mockSearchResponse);
+      (ragControllerSearch as jest.Mock).mockResolvedValue(mockSearchResponse);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const searchCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'search');
@@ -182,7 +175,7 @@ describe('kbCommand', () => {
     });
 
     it('prints score labels (HIGH/MED/LOW) based on score value', async () => {
-      (KbService.search as jest.Mock).mockResolvedValue(mockSearchResponse);
+      (ragControllerSearch as jest.Mock).mockResolvedValue(mockSearchResponse);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const searchCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'search');
@@ -196,7 +189,7 @@ describe('kbCommand', () => {
     });
 
     it('prints confidence score in human output', async () => {
-      (KbService.search as jest.Mock).mockResolvedValue(mockSearchResponse);
+      (ragControllerSearch as jest.Mock).mockResolvedValue(mockSearchResponse);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const searchCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'search');
@@ -208,7 +201,7 @@ describe('kbCommand', () => {
     });
 
     it('outputs raw JSON matching API response shape with --json flag', async () => {
-      (KbService.search as jest.Mock).mockResolvedValue(mockSearchResponse);
+      (ragControllerSearch as jest.Mock).mockResolvedValue(mockSearchResponse);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const searchCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'search');
@@ -282,7 +275,7 @@ describe('kbCommand', () => {
     it('handles API errors via handleApiError', async () => {
       const apiError = new Error('Internal Server Error');
       (apiError as any).response = { status: 500, data: { message: 'Internal Server Error' } };
-      (KbService.search as jest.Mock).mockRejectedValue(apiError);
+      (ragControllerSearch as jest.Mock).mockRejectedValue(apiError);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const searchCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'search');
@@ -299,7 +292,7 @@ describe('kbCommand', () => {
     it('exits with code 2 on 401 API error', async () => {
       const apiError = new Error('Unauthorized');
       (apiError as any).response = { status: 401 };
-      (KbService.search as jest.Mock).mockRejectedValue(apiError);
+      (ragControllerSearch as jest.Mock).mockRejectedValue(apiError);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const searchCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'search');
@@ -319,32 +312,32 @@ describe('kbCommand', () => {
   // ---------------------------------------------------------------------------
   describe('kb list', () => {
     const mockListResponse = {
+      ret: 0,
       data: {
-        ret: 0,
-        data: {
-          items: [
-            { id: 'doc-1', source: 'README.md', createdAt: '2026-01-10T12:00:00.000Z' },
-            { id: 'doc-2', source: 'CONTRIBUTING.md', createdAt: '2026-02-15T09:30:00.000Z' },
-          ],
-          total: 2,
-        },
+        items: [
+          { id: 'doc-1', source: 'README.md', createdAt: '2026-01-10T12:00:00.000Z' },
+          { id: 'doc-2', source: 'CONTRIBUTING.md', createdAt: '2026-02-15T09:30:00.000Z' },
+        ],
+        total: 2,
       },
     };
 
     it('exits 0 and prints document table', async () => {
-      (KbService.list as jest.Mock).mockResolvedValue(mockListResponse);
+      (ragControllerListDocuments as jest.Mock).mockResolvedValue(mockListResponse);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const listCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'list');
 
       await listCmd?.parseAsync(['node', 'test', '--project', 'koda']);
 
-      expect(KbService.list).toHaveBeenCalledWith(expect.anything(), 'koda');
+      expect(ragControllerListDocuments).toHaveBeenCalledWith(
+        expect.objectContaining({ slug: 'koda', limit: '100' })
+      );
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
     it('renders table with ID column', async () => {
-      (KbService.list as jest.Mock).mockResolvedValue(mockListResponse);
+      (ragControllerListDocuments as jest.Mock).mockResolvedValue(mockListResponse);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const listCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'list');
@@ -357,7 +350,7 @@ describe('kbCommand', () => {
     });
 
     it('renders table with Source column', async () => {
-      (KbService.list as jest.Mock).mockResolvedValue(mockListResponse);
+      (ragControllerListDocuments as jest.Mock).mockResolvedValue(mockListResponse);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const listCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'list');
@@ -370,7 +363,7 @@ describe('kbCommand', () => {
     });
 
     it('renders table with Created column', async () => {
-      (KbService.list as jest.Mock).mockResolvedValue(mockListResponse);
+      (ragControllerListDocuments as jest.Mock).mockResolvedValue(mockListResponse);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const listCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'list');
@@ -383,7 +376,7 @@ describe('kbCommand', () => {
     });
 
     it('outputs JSON with --json flag', async () => {
-      (KbService.list as jest.Mock).mockResolvedValue(mockListResponse);
+      (ragControllerListDocuments as jest.Mock).mockResolvedValue(mockListResponse);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const listCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'list');
@@ -442,7 +435,7 @@ describe('kbCommand', () => {
     it('handles API errors via handleApiError', async () => {
       const apiError = new Error('Service unavailable');
       (apiError as any).response = { status: 503, data: { message: 'Service unavailable' } };
-      (KbService.list as jest.Mock).mockRejectedValue(apiError);
+      (ragControllerListDocuments as jest.Mock).mockRejectedValue(apiError);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const listCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'list');
@@ -462,30 +455,28 @@ describe('kbCommand', () => {
   // ---------------------------------------------------------------------------
   describe('kb add', () => {
     const mockAddResponse = {
+      ret: 0,
       data: {
-        ret: 0,
-        data: {
-          id: 'doc-99',
-          source: 'README.md',
-          docCount: 3,
-        },
+        id: 'doc-99',
+        source: 'README.md',
+        docCount: 3,
       },
     };
 
     it('exits 0 and prints success confirmation with file name', async () => {
-      (KbService.add as jest.Mock).mockResolvedValue(mockAddResponse);
+      (ragControllerAddDocument as jest.Mock).mockResolvedValue(mockAddResponse);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const addCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'add');
 
       await addCmd?.parseAsync(['node', 'test', '--project', 'koda', '--file', './README.md']);
 
-      expect(KbService.add).toHaveBeenCalled();
+      expect(ragControllerAddDocument).toHaveBeenCalled();
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
     it('prints confirmation message containing the file name', async () => {
-      (KbService.add as jest.Mock).mockResolvedValue(mockAddResponse);
+      (ragControllerAddDocument as jest.Mock).mockResolvedValue(mockAddResponse);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const addCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'add');
@@ -497,7 +488,7 @@ describe('kbCommand', () => {
     });
 
     it('prints confirmation message containing the doc count', async () => {
-      (KbService.add as jest.Mock).mockResolvedValue(mockAddResponse);
+      (ragControllerAddDocument as jest.Mock).mockResolvedValue(mockAddResponse);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const addCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'add');
@@ -509,32 +500,34 @@ describe('kbCommand', () => {
     });
 
     it('reads the file from disk and sends content, source, and sourceId to the API', async () => {
-      (KbService.add as jest.Mock).mockResolvedValue(mockAddResponse);
+      (ragControllerAddDocument as jest.Mock).mockResolvedValue(mockAddResponse);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const addCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'add');
 
       await addCmd?.parseAsync(['node', 'test', '--project', 'koda', '--file', './README.md']);
 
-      expect(KbService.add).toHaveBeenCalledWith(
-        expect.anything(),
-        'koda',
-        expect.objectContaining({ content: mockFileContent, source: 'doc', sourceId: 'README.md' })
+      expect(ragControllerAddDocument).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slug: 'koda',
+          requestBody: expect.objectContaining({ content: mockFileContent, source: 'doc', sourceId: 'README.md' }),
+        })
       );
     });
 
     it('accepts --source option to override default source type', async () => {
-      (KbService.add as jest.Mock).mockResolvedValue(mockAddResponse);
+      (ragControllerAddDocument as jest.Mock).mockResolvedValue(mockAddResponse);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const addCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'add');
 
       await addCmd?.parseAsync(['node', 'test', '--project', 'koda', '--file', './README.md', '--source', 'manual']);
 
-      expect(KbService.add).toHaveBeenCalledWith(
-        expect.anything(),
-        'koda',
-        expect.objectContaining({ source: 'manual', sourceId: 'README.md' })
+      expect(ragControllerAddDocument).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slug: 'koda',
+          requestBody: expect.objectContaining({ source: 'manual', sourceId: 'README.md' }),
+        })
       );
     });
 
@@ -552,7 +545,7 @@ describe('kbCommand', () => {
     });
 
     it('outputs JSON with --json flag', async () => {
-      (KbService.add as jest.Mock).mockResolvedValue(mockAddResponse);
+      (ragControllerAddDocument as jest.Mock).mockResolvedValue(mockAddResponse);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const addCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'add');
@@ -625,7 +618,7 @@ describe('kbCommand', () => {
     it('handles API errors via handleApiError', async () => {
       const apiError = new Error('Bad Request');
       (apiError as any).response = { status: 400, data: { message: 'Invalid document content' } };
-      (KbService.add as jest.Mock).mockRejectedValue(apiError);
+      (ragControllerAddDocument as jest.Mock).mockRejectedValue(apiError);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const addCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'add');
@@ -636,7 +629,7 @@ describe('kbCommand', () => {
         // Expected
       }
 
-      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(exitSpy).toHaveBeenCalledWith(3);
     });
   });
 

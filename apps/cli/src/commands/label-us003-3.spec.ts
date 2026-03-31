@@ -25,10 +25,7 @@ jest.mock('conf', () =>
   })),
 );
 
-// Mock axios to prevent real HTTP calls
-jest.mock('axios', () => ({ create: jest.fn(() => ({})) }));
-
-// Mock the config module — both getConfig (used by current resolveAuth) and resolveContext (new path)
+// Mock the config module — both getConfig and resolveContext
 jest.mock('../config', () => ({
   getConfig: jest.fn(() => ({
     apiKey: 'test-key-12345678',
@@ -40,20 +37,23 @@ jest.mock('../config', () => ({
 
 // Mock generated API client
 jest.mock('../generated', () => ({
-  LabelsService: {
-    create: jest.fn(),
-    list: jest.fn(),
-    delete: jest.fn(),
-    addToTicket: jest.fn(),
-    removeFromTicket: jest.fn(),
-  },
+  labelsControllerCreateFromHttp: jest.fn(),
+  labelsControllerFindByProjectFromHttp: jest.fn(),
+  labelsControllerDeleteFromHttp: jest.fn(),
+  labelsControllerAssignLabelFromHttp: jest.fn(),
+  labelsControllerRemoveLabelFromHttp: jest.fn(),
+  OpenAPI: { BASE: '', TOKEN: '' },
+}));
+
+jest.mock('../generated/core/OpenAPI', () => ({
+  OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { Command } from 'commander';
 import { labelCommand } from './label';
-import { LabelsService } from '../generated';
+import { labelsControllerCreateFromHttp, labelsControllerFindByProjectFromHttp, labelsControllerDeleteFromHttp } from '../generated';
 import { resolveContext } from '../config';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -100,16 +100,19 @@ describe('US-003-3: labelCommand — resolveContext wiring', () => {
     consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
     consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
 
-    (LabelsService.create as jest.Mock).mockResolvedValue({
-      data: { ret: 0, data: { id: 'lbl-1', name: 'Bug', color: '#ff0000' } },
+    (labelsControllerCreateFromHttp as jest.Mock).mockResolvedValue({
+      ret: 0,
+      data: { id: 'lbl-1', name: 'Bug', color: '#ff0000' },
     });
 
-    (LabelsService.list as jest.Mock).mockResolvedValue({
-      data: { ret: 0, data: { items: [], total: 0 } },
+    (labelsControllerFindByProjectFromHttp as jest.Mock).mockResolvedValue({
+      ret: 0,
+      data: { items: [], total: 0 },
     });
 
-    (LabelsService.delete as jest.Mock).mockResolvedValue({
-      data: { ret: 0, data: null },
+    (labelsControllerDeleteFromHttp as jest.Mock).mockResolvedValue({
+      ret: 0,
+      data: null,
     });
   });
 
@@ -119,12 +122,10 @@ describe('US-003-3: labelCommand — resolveContext wiring', () => {
 
   describe('label create', () => {
     /**
-     * AC-1: When --project is omitted and .koda/config.json has projectSlug: 'configured-project',
-     * LabelsService.create must be called with that projectSlug.
-     *
-     * RED reason: current code requires --project and uses resolveAuth, never calls resolveContext.
+     * AC-1: When --project is omitted, labelsControllerCreateFromHttp must be called
+     * with slug from config.
      */
-    it('AC-1: calls LabelsService.create with projectSlug from config when --project flag is omitted', async () => {
+    it('AC-1: calls labelsControllerCreateFromHttp with slug from config when --project flag is omitted', async () => {
       (resolveContext as jest.Mock).mockResolvedValue({
         projectSlug: 'configured-project',
         apiKey: 'test-key-12345678',
@@ -134,16 +135,13 @@ describe('US-003-3: labelCommand — resolveContext wiring', () => {
       const prog = buildProgram();
       await getCreateCmd(prog)?.parseAsync(['node', 'test', '--name', 'Bug']).catch(() => undefined);
 
-      expect(LabelsService.create).toHaveBeenCalled();
-      const callOpts = (LabelsService.create as jest.Mock).mock.calls[0][1] as Record<string, unknown>;
-      expect(callOpts).toMatchObject({ projectSlug: 'configured-project', name: 'Bug' });
+      expect(labelsControllerCreateFromHttp).toHaveBeenCalled();
+      const callOpts = (labelsControllerCreateFromHttp as jest.Mock).mock.calls[0][0] as Record<string, unknown>;
+      expect(callOpts).toMatchObject({ slug: 'configured-project' });
     });
 
     /**
-     * AC-2: When resolveContext returns projectSlug: undefined (no config, no flag),
-     * the command must exit with code 2 and print the setup hint.
-     *
-     * RED reason: current code requires --project, so it fails before reaching this logic.
+     * AC-2: When resolveContext returns projectSlug: undefined, exit with code 2.
      */
     it('AC-2: exits with code 2 and prints setup hint when projectSlug is undefined', async () => {
       (resolveContext as jest.Mock).mockResolvedValue({
@@ -164,10 +162,10 @@ describe('US-003-3: labelCommand — resolveContext wiring', () => {
 
   describe('label list', () => {
     /**
-     * AC-1: When --project is omitted and .koda/config.json has projectSlug: 'configured-project',
-     * LabelsService.list must be called with that projectSlug.
+     * AC-1: When --project is omitted, labelsControllerFindByProjectFromHttp must be called
+     * with slug from config.
      */
-    it('AC-1: calls LabelsService.list with projectSlug from config when --project flag is omitted', async () => {
+    it('AC-1: calls labelsControllerFindByProjectFromHttp with slug from config when --project flag is omitted', async () => {
       (resolveContext as jest.Mock).mockResolvedValue({
         projectSlug: 'configured-project',
         apiKey: 'test-key-12345678',
@@ -177,14 +175,13 @@ describe('US-003-3: labelCommand — resolveContext wiring', () => {
       const prog = buildProgram();
       await getListCmd(prog)?.parseAsync(['node', 'test']).catch(() => undefined);
 
-      expect(LabelsService.list).toHaveBeenCalled();
-      const callArg = (LabelsService.list as jest.Mock).mock.calls[0][1] as string;
-      expect(callArg).toBe('configured-project');
+      expect(labelsControllerFindByProjectFromHttp).toHaveBeenCalled();
+      const callOpts = (labelsControllerFindByProjectFromHttp as jest.Mock).mock.calls[0][0] as Record<string, unknown>;
+      expect(callOpts).toMatchObject({ slug: 'configured-project' });
     });
 
     /**
-     * AC-2: When resolveContext returns projectSlug: undefined,
-     * exit with code 2 and print setup hint.
+     * AC-2: When resolveContext returns projectSlug: undefined, exit with code 2.
      */
     it('AC-2: exits with code 2 and prints setup hint when projectSlug is undefined', async () => {
       (resolveContext as jest.Mock).mockResolvedValue({
@@ -205,10 +202,10 @@ describe('US-003-3: labelCommand — resolveContext wiring', () => {
 
   describe('label delete', () => {
     /**
-     * AC-1: When --project is omitted and .koda/config.json has projectSlug: 'configured-project',
-     * LabelsService.delete must be called with that projectSlug.
+     * AC-1: When --project is omitted, labelsControllerDeleteFromHttp must be called
+     * with slug from config.
      */
-    it('AC-1: calls LabelsService.delete with projectSlug from config when --project flag is omitted', async () => {
+    it('AC-1: calls labelsControllerDeleteFromHttp with slug from config when --project flag is omitted', async () => {
       (resolveContext as jest.Mock).mockResolvedValue({
         projectSlug: 'configured-project',
         apiKey: 'test-key-12345678',
@@ -218,14 +215,13 @@ describe('US-003-3: labelCommand — resolveContext wiring', () => {
       const prog = buildProgram();
       await getDeleteCmd(prog)?.parseAsync(['node', 'test', '--id', 'lbl-1']).catch(() => undefined);
 
-      expect(LabelsService.delete).toHaveBeenCalled();
-      const [, projectSlug] = (LabelsService.delete as jest.Mock).mock.calls[0];
-      expect(projectSlug).toBe('configured-project');
+      expect(labelsControllerDeleteFromHttp).toHaveBeenCalled();
+      const callOpts = (labelsControllerDeleteFromHttp as jest.Mock).mock.calls[0][0] as Record<string, unknown>;
+      expect(callOpts).toMatchObject({ slug: 'configured-project' });
     });
 
     /**
-     * AC-2: When resolveContext returns projectSlug: undefined,
-     * exit with code 2 and print setup hint.
+     * AC-2: When resolveContext returns projectSlug: undefined, exit with code 2.
      */
     it('AC-2: exits with code 2 and prints setup hint when projectSlug is undefined', async () => {
       (resolveContext as jest.Mock).mockResolvedValue({
@@ -245,7 +241,7 @@ describe('US-003-3: labelCommand — resolveContext wiring', () => {
   });
 
   /**
-   * AC-3: label.ts must not contain any reference to GLOBAL_PROJECT_SLUG after the change.
+   * AC-3: label.ts must not contain any reference to GLOBAL_PROJECT_SLUG.
    */
   it('AC-3: label.ts contains no reference to GLOBAL_PROJECT_SLUG', () => {
     const labelFilePath = join(__dirname, 'label.ts');

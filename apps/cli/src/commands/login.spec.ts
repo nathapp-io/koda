@@ -12,23 +12,14 @@ jest.mock('conf', () => {
   return jest.fn(() => mockStore);
 });
 
-// Shared OpenAPI mock object
-const mockOpenAPI = { BASE: '', TOKEN: '' };
-jest.mock('../generated/core/OpenAPI', () => ({
-  get OpenAPI() { return mockOpenAPI; },
+// Mock the generated client
+jest.mock('../generated', () => ({
+  agentsControllerFindMe: jest.fn(),
+  OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
-// Mock agentsControllerFindMe - will check mockOpenAPI.TOKEN at call time
-const mockAgentsControllerFindMe = jest.fn(async () => {
-  if (mockOpenAPI.TOKEN === 'invalid') {
-    const error = new Error('Unauthorized') as Error & { response?: { status: number } };
-    error.response = { status: 401 };
-    throw error;
-  }
-  return { agent: {} };
-});
-jest.mock('../generated/services.gen', () => ({
-  agentsControllerFindMe: () => mockAgentsControllerFindMe(),
+jest.mock('../generated/core/OpenAPI', () => ({
+  OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
 // Mock config module
@@ -50,6 +41,7 @@ jest.mock('../config', () => ({
 }));
 
 import { loginCommand } from './login';
+import { agentsControllerFindMe } from '../generated';
 
 describe('login command', () => {
   beforeEach(() => {
@@ -57,6 +49,8 @@ describe('login command', () => {
       delete mockData[key];
     });
     jest.clearAllMocks();
+    // Default: agentsControllerFindMe succeeds
+    (agentsControllerFindMe as jest.Mock).mockResolvedValue({ ret: 0, data: {} });
   });
 
   it('saves API key to config when provided', async () => {
@@ -70,6 +64,7 @@ describe('login command', () => {
   });
 
   it('throws error when API key is invalid', async () => {
+    (agentsControllerFindMe as jest.Mock).mockRejectedValue(new Error('Unauthorized'));
     await expect(
       loginCommand('invalid', 'http://example.com', {})
     ).rejects.toThrow();
@@ -85,7 +80,7 @@ describe('login command', () => {
     await loginCommand('sk-proj-test123456', undefined, {});
     expect(mockStore.set).toHaveBeenCalledWith(
       'apiUrl',
-      'http://localhost:3100/api'
+      'http://localhost:3100'
     );
   });
 

@@ -1,6 +1,6 @@
 import { setConfig } from '../config';
 import { OpenAPI } from '../generated/core/OpenAPI';
-import { agentsControllerFindMe } from '../generated/services.gen';
+import { agentsControllerFindMe } from '../generated';
 
 export interface LoginResult {
   success: boolean;
@@ -16,23 +16,19 @@ export async function loginCommand(
     throw new Error('API key is required');
   }
 
-  const baseUrl = apiUrl || 'http://localhost:3100';
+  // Strip /api suffix so OpenAPI.BASE is set to the bare host
+  const url = (apiUrl ?? 'http://localhost:3100').replace(/\/api\/?$/, '');
 
-  // Configure generated client with API credentials
-  // OpenAPI services include /api/ in their paths, so baseUrl should NOT include it
-  OpenAPI.BASE = baseUrl;
+  OpenAPI.BASE = url;
   OpenAPI.TOKEN = apiKey;
 
-  // Validate API key by calling /api/agents/me
   try {
     await agentsControllerFindMe();
   } catch {
     throw new Error('Invalid API key');
   }
 
-  // Save the URL with /api/ suffix for use by other commands (which use axios with generated.ts)
-  const savedUrl = baseUrl.endsWith('/api') ? baseUrl : `${baseUrl}/api`;
-  const config: Record<string, string> = { apiKey, apiUrl: savedUrl };
+  const config: Record<string, string> = { apiKey, apiUrl: url };
   setConfig(config as Parameters<typeof setConfig>[0]);
 
   return {

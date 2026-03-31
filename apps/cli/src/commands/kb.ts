@@ -2,8 +2,8 @@ import { Command } from 'commander';
 import { readFile } from 'fs/promises';
 import { basename } from 'path';
 import { resolveContext } from '../config';
-import { configureClient } from '../client';
-import { KbService } from '../generated';
+import { OpenAPI } from '../generated/core/OpenAPI';
+import { ragControllerSearch, ragControllerListDocuments, ragControllerAddDocument } from '../generated';
 import { error } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
@@ -45,9 +45,18 @@ export function kbCommand(program: Command): void {
           return;
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
-        const response = await KbService.search(client, ctx.projectSlug, options.query);
-        const data = unwrap(response);
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
+
+        const response = await ragControllerSearch({
+          slug: ctx.projectSlug,
+          requestBody: { query: options.query },
+        });
+        const data = unwrap<{
+          verdict: string;
+          confidence: number;
+          results: Array<{ score: number; ticketRef: string; type: string; status: string; labels?: string[] }>;
+        }>(response);
 
         if (options.json) {
           console.log(JSON.stringify(data, null, 2));
@@ -90,9 +99,11 @@ export function kbCommand(program: Command): void {
           return;
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
-        const response = await KbService.list(client, ctx.projectSlug);
-        const data = unwrap(response);
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
+
+        const response = await ragControllerListDocuments({ slug: ctx.projectSlug, limit: '100' });
+        const data = unwrap<{ items: Array<{ id: string; source: string; createdAt: string }>; total: number }>(response);
 
         if (options.json) {
           console.log(JSON.stringify(data, null, 2));
@@ -151,9 +162,14 @@ export function kbCommand(program: Command): void {
         const content = await readFile(options.file, 'utf-8');
         const fileName = basename(options.file);
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
-        const response = await KbService.add(client, ctx.projectSlug, { content, source: options.source, sourceId: fileName });
-        const data = unwrap(response);
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
+
+        const response = await ragControllerAddDocument({
+          slug: ctx.projectSlug,
+          requestBody: { content, source: options.source, sourceId: fileName },
+        });
+        const data = unwrap<{ id: string; source: string; docCount: number }>(response);
 
         if (options.json) {
           console.log(JSON.stringify(data, null, 2));

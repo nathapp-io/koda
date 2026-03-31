@@ -1,7 +1,11 @@
 import { Command } from 'commander';
 import { resolveContext } from '../config';
-import { configureClient } from '../client';
-import { LabelsService } from '../generated';
+import { OpenAPI } from '../generated/core/OpenAPI';
+import {
+  labelsControllerCreateFromHttp,
+  labelsControllerFindByProjectFromHttp,
+  labelsControllerDeleteFromHttp,
+} from '../generated';
 import { table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
@@ -30,13 +34,14 @@ export function labelCommand(program: Command): void {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
-        const response = await LabelsService.create(client, {
-          projectSlug: ctx.projectSlug,
-          name: options.name,
-          color: options.color,
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
+
+        const response = await labelsControllerCreateFromHttp({
+          slug: ctx.projectSlug,
+          requestBody: { name: options.name, color: options.color },
         });
-        const labelData = unwrap(response);
+        const labelData = unwrap<{ id: string; name: string; color?: string }>(response);
 
         if (options.json) {
           console.log(JSON.stringify(labelData, null, 2));
@@ -72,10 +77,14 @@ export function labelCommand(program: Command): void {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
-        const response = await LabelsService.list(client, ctx.projectSlug);
-        const data = unwrap(response);
-        const items: Record<string, unknown>[] = Array.isArray(data) ? data : ((data as Record<string, unknown>).items as Record<string, unknown>[]) || [];
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
+
+        const response = await labelsControllerFindByProjectFromHttp({ slug: ctx.projectSlug });
+        const data = unwrap<{ items?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>>(response);
+        const items: Array<Record<string, unknown>> = Array.isArray(data)
+          ? data
+          : ((data as { items?: Array<Record<string, unknown>> }).items ?? []);
 
         if (options.json) {
           console.log(JSON.stringify(items, null, 2));
@@ -108,8 +117,10 @@ export function labelCommand(program: Command): void {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
-        await LabelsService.delete(client, ctx.projectSlug, options.id);
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
+
+        await labelsControllerDeleteFromHttp({ slug: ctx.projectSlug, id: options.id });
 
         console.log(`Label '${options.id}' deleted.`);
         process.exit(0);

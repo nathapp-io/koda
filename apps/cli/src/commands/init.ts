@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs';
 import { resolveAuth } from '../utils/auth';
-import { configureClient } from '../client';
-import { ProjectsService } from '../generated';
+import { OpenAPI } from '../generated/core/OpenAPI';
+import { projectsControllerFindBySlug } from '../generated';
 
 export interface InitOptions {
   project?: string;
@@ -31,8 +31,9 @@ export const _initDeps: InitDeps = {
   writeFile: (filePath: string, content: string) => fs.writeFile(filePath, content, 'utf-8'),
   mkdir: (dirPath: string, opts: { recursive: boolean }) => fs.mkdir(dirPath, opts).then(() => undefined),
   fetchProject: async (apiUrl: string, apiKey: string, slug: string) => {
-    const client = configureClient(apiUrl, apiKey);
-    return ProjectsService.show(client, slug);
+    OpenAPI.BASE = apiUrl.replace(/\/api\/?$/, '');
+    OpenAPI.TOKEN = apiKey;
+    return projectsControllerFindBySlug({ slug });
   },
   resolveAuth,
   cwd: () => process.cwd(),
@@ -55,8 +56,8 @@ export async function initCommand(options: InitOptions, deps: InitDeps = _initDe
   try {
     await deps.fetchProject(apiUrl, apiKey, slug);
   } catch (err: unknown) {
-    const error = err as { response?: { status: number } };
-    if (error?.response?.status === 404) {
+    const error = err as { response?: { status: number }; status?: number };
+    if (error?.response?.status === 404 || error?.status === 404) {
       console.error(`Project not found: ${slug}`);
     } else {
       console.error(`Failed to fetch project: ${slug}`);

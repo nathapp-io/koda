@@ -24,23 +24,15 @@ jest.mock('conf', () => {
   return jest.fn(() => mockStore);
 });
 
-// Mock axios client
-const mockAxios = {
-  get: jest.fn(),
-};
-
-jest.mock('axios', () => {
-  return {
-    create: () => mockAxios,
-  };
-});
-
 // Mock the generated client
 jest.mock('../generated', () => ({
-  AgentService: {
-    me: jest.fn(),
-    pickup: jest.fn(),
-  },
+  agentsControllerFindMe: jest.fn(),
+  agentsControllerSuggestTicket: jest.fn(),
+  OpenAPI: { BASE: '', TOKEN: '' },
+}));
+
+jest.mock('../generated/core/OpenAPI', () => ({
+  OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
 // Mock config module to use mockData instead of real filesystem
@@ -65,7 +57,7 @@ jest.mock('../config', () => ({
 
 import { Command } from 'commander';
 import { agentCommand } from './agent';
-import { AgentService } from '../generated';
+import { agentsControllerFindMe, agentsControllerSuggestTicket } from '../generated';
 import { resolveContext } from '../config';
 
 describe('agentCommand', () => {
@@ -109,16 +101,14 @@ describe('agentCommand', () => {
         apiKey: 'sk-test-key123',
       };
 
-      (AgentService.me as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockAgent },
-      });
+      (agentsControllerFindMe as jest.Mock).mockResolvedValue({ ret: 0, data: mockAgent });
 
       const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
       const meCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'me');
 
       await meCmd?.parseAsync(['node', 'test']);
 
-      expect(AgentService.me).toHaveBeenCalled();
+      expect(agentsControllerFindMe).toHaveBeenCalled();
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
@@ -130,9 +120,7 @@ describe('agentCommand', () => {
         apiKey: 'sk-1234567890abcdef',
       };
 
-      (AgentService.me as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockAgent },
-      });
+      (agentsControllerFindMe as jest.Mock).mockResolvedValue({ ret: 0, data: mockAgent });
 
       const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
       const meCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'me');
@@ -153,9 +141,7 @@ describe('agentCommand', () => {
         apiKey: 'sk-test-key123',
       };
 
-      (AgentService.me as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockAgent },
-      });
+      (agentsControllerFindMe as jest.Mock).mockResolvedValue({ ret: 0, data: mockAgent });
 
       const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
       const meCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'me');
@@ -193,7 +179,7 @@ describe('agentCommand', () => {
       const mockError = new Error('API Error');
       (mockError as any).response = { status: 500 };
 
-      (AgentService.me as jest.Mock).mockRejectedValue(mockError);
+      (agentsControllerFindMe as jest.Mock).mockRejectedValue(mockError);
 
       const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
       const meCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'me');
@@ -211,7 +197,7 @@ describe('agentCommand', () => {
       const mockError = new Error('Unauthorized');
       (mockError as any).response = { status: 401 };
 
-      (AgentService.me as jest.Mock).mockRejectedValue(mockError);
+      (agentsControllerFindMe as jest.Mock).mockRejectedValue(mockError);
 
       const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
       const meCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'me');
@@ -233,9 +219,7 @@ describe('agentCommand', () => {
         apiKey: 'sk-test-key123',
       };
 
-      (AgentService.me as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockAgent },
-      });
+      (agentsControllerFindMe as jest.Mock).mockResolvedValue({ ret: 0, data: mockAgent });
 
       const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
       const meCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'me');
@@ -265,9 +249,7 @@ describe('agentCommand', () => {
         apiKey: undefined,
       };
 
-      (AgentService.me as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockAgent },
-      });
+      (agentsControllerFindMe as jest.Mock).mockResolvedValue({ ret: 0, data: mockAgent });
 
       const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
       const meCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'me');
@@ -288,9 +270,7 @@ describe('agentCommand', () => {
         apiKey: 'abcd1234efgh5678',
       };
 
-      (AgentService.me as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockAgent },
-      });
+      (agentsControllerFindMe as jest.Mock).mockResolvedValue({ ret: 0, data: mockAgent });
 
       const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
       const meCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'me');
@@ -327,9 +307,7 @@ describe('agentCommand', () => {
     beforeEach(() => {
       mockData.apiKey = 'sk-test-key123';
       mockData.apiUrl = 'http://localhost:3100/api';
-      (AgentService.me as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockAgent },
-      });
+      (agentsControllerFindMe as jest.Mock).mockResolvedValue({ ret: 0, data: mockAgent });
       (resolveContext as jest.Mock).mockResolvedValue({
         projectSlug: 'koda',
         apiKey: 'sk-test-key123',
@@ -338,17 +316,15 @@ describe('agentCommand', () => {
     });
 
     it('prints formatted output when a matching ticket is found', async () => {
-      (AgentService.pickup as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockPickupResult },
-      });
+      (agentsControllerSuggestTicket as jest.Mock).mockResolvedValue({ ret: 0, data: mockPickupResult });
 
       const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
       const pickupCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'pickup');
 
       await pickupCmd?.parseAsync(['node', 'test', '--project', 'koda']);
 
-      expect(AgentService.me).toHaveBeenCalled();
-      expect(AgentService.pickup).toHaveBeenCalled();
+      expect(agentsControllerFindMe).toHaveBeenCalled();
+      expect(agentsControllerSuggestTicket).toHaveBeenCalled();
       expect(logSpy).toHaveBeenCalledWith('Suggested ticket: #42 — Fix the login bug');
       expect(logSpy).toHaveBeenCalledWith('Priority: HIGH | Status: VERIFIED');
       expect(logSpy).toHaveBeenCalledWith('Match score: 2 | Matched capabilities: nestjs, prisma');
@@ -356,9 +332,7 @@ describe('agentCommand', () => {
     });
 
     it('prints no-tickets message when result is null', async () => {
-      (AgentService.pickup as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: null },
-      });
+      (agentsControllerSuggestTicket as jest.Mock).mockResolvedValue({ ret: 0, data: null });
 
       const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
       const pickupCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'pickup');
@@ -408,9 +382,7 @@ describe('agentCommand', () => {
     });
 
     it('outputs JSON with --json flag', async () => {
-      (AgentService.pickup as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockPickupResult },
-      });
+      (agentsControllerSuggestTicket as jest.Mock).mockResolvedValue({ ret: 0, data: mockPickupResult });
 
       const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
       const pickupCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'pickup');

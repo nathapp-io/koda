@@ -29,48 +29,33 @@ jest.mock('conf', () => {
   return jest.fn(() => mockStore);
 });
 
-// Mock axios client
-const mockAxios = {
-  get: jest.fn(),
-  post: jest.fn(),
-  patch: jest.fn(),
-  delete: jest.fn(),
-};
-
-jest.mock('axios', () => {
-  return {
-    create: () => mockAxios,
-  };
-});
-
 // Mock the generated client
 jest.mock('../generated', () => ({
-  TicketsService: {
-    create: jest.fn(),
-    list: jest.fn(),
-    show: jest.fn(),
-    verify: jest.fn(),
-    assign: jest.fn(),
-    start: jest.fn(),
-    fix: jest.fn(),
-    verifyFix: jest.fn(),
-    close: jest.fn(),
-    reject: jest.fn(),
-    update: jest.fn(),
-    delete: jest.fn(),
-  },
-  TicketLinksService: {
-    create: jest.fn(),
-    list: jest.fn(),
-    delete: jest.fn(),
-  },
-  LabelsService: {
-    addToTicket: jest.fn(),
-    removeFromTicket: jest.fn(),
-  },
+  ticketsControllerCreate: jest.fn(),
+  ticketsControllerFindAll: jest.fn(),
+  ticketsControllerFindByRef: jest.fn(),
+  ticketsControllerUpdate: jest.fn(),
+  ticketsControllerSoftDelete: jest.fn(),
+  ticketsControllerAssign: jest.fn(),
+  ticketsControllerVerify: jest.fn(),
+  ticketsControllerStart: jest.fn(),
+  ticketsControllerFix: jest.fn(),
+  ticketsControllerVerifyFix: jest.fn(),
+  ticketsControllerClose: jest.fn(),
+  ticketsControllerReject: jest.fn(),
+  ticketLinksControllerCreate: jest.fn(),
+  ticketLinksControllerFindAll: jest.fn(),
+  ticketLinksControllerRemove: jest.fn(),
+  labelsControllerAssignLabelFromHttp: jest.fn(),
+  labelsControllerRemoveLabelFromHttp: jest.fn(),
+  OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
-// Mock config module to use mockData instead of real filesystem
+jest.mock('../generated/core/OpenAPI', () => ({
+  OpenAPI: { BASE: '', TOKEN: '' },
+}));
+
+// Mock config module
 jest.mock('../config', () => ({
   getConfig: jest.fn(() => ({
     apiKey: mockData.apiKey || '',
@@ -87,7 +72,12 @@ jest.mock('../config', () => ({
 
 import { Command } from 'commander';
 import { ticketCommand } from './ticket';
-import { TicketsService, TicketLinksService } from '../generated';
+import {
+  ticketsControllerFindByRef,
+  ticketLinksControllerCreate,
+  ticketLinksControllerFindAll,
+  ticketLinksControllerRemove,
+} from '../generated';
 import { resolveContext } from '../config';
 
 const TEST_URL = 'https://github.com/owner/repo/pull/1';
@@ -125,9 +115,9 @@ describe('ticket link subcommand', () => {
     }) as never);
 
     jest.clearAllMocks();
-    (TicketLinksService.create as jest.Mock).mockReset();
-    (TicketLinksService.list as jest.Mock).mockReset();
-    (TicketLinksService.delete as jest.Mock).mockReset();
+    (ticketLinksControllerCreate as jest.Mock).mockReset();
+    (ticketLinksControllerFindAll as jest.Mock).mockReset();
+    (ticketLinksControllerRemove as jest.Mock).mockReset();
     (resolveContext as jest.Mock).mockResolvedValue({
       projectSlug: 'test-project',
       apiKey: 'sk-test-key123',
@@ -158,8 +148,9 @@ describe('ticket link subcommand', () => {
 
   describe('ticket link <ref> --url <url>', () => {
     it('AC-1: calls POST links endpoint and prints provider and externalRef', async () => {
-      (TicketLinksService.create as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockLink },
+      (ticketLinksControllerCreate as jest.Mock).mockResolvedValue({
+        ret: 0,
+        data: mockLink,
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -172,11 +163,12 @@ describe('ticket link subcommand', () => {
         '--url', TEST_URL,
       ]);
 
-      expect(TicketLinksService.create).toHaveBeenCalledWith(
-        expect.any(Object),
-        PROJECT_SLUG,
-        TEST_REF,
-        { url: TEST_URL }
+      expect(ticketLinksControllerCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slug: PROJECT_SLUG,
+          ref: TEST_REF,
+          requestBody: { url: TEST_URL },
+        })
       );
 
       const output = consoleLogSpy.mock.calls.map((c) => c.join(' ')).join('\n');
@@ -186,8 +178,9 @@ describe('ticket link subcommand', () => {
     });
 
     it('AC-2: with --json flag prints raw TicketLinkResponseDto JSON', async () => {
-      (TicketLinksService.create as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockLink },
+      (ticketLinksControllerCreate as jest.Mock).mockResolvedValue({
+        ret: 0,
+        data: mockLink,
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -213,10 +206,9 @@ describe('ticket link subcommand', () => {
     });
 
     it('AC-3: when URL already linked prints existing link and exits 0', async () => {
-      // API returns existing link (same shape as create, but status 200 in real API;
-      // for CLI the response shape is the same)
-      (TicketLinksService.create as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockLink },
+      (ticketLinksControllerCreate as jest.Mock).mockResolvedValue({
+        ret: 0,
+        data: mockLink,
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -240,11 +232,13 @@ describe('ticket link subcommand', () => {
   describe('ticket unlink <ref> --url <url>', () => {
     it('AC-4: when matching link exists calls DELETE and exits 0', async () => {
       const anotherLink = { ...mockLink, id: 'link-2', url: 'https://github.com/other/repo/pull/9' };
-      (TicketLinksService.list as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: [anotherLink, mockLink] },
+      (ticketLinksControllerFindAll as jest.Mock).mockResolvedValue({
+        ret: 0,
+        data: [anotherLink, mockLink],
       });
-      (TicketLinksService.delete as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: null },
+      (ticketLinksControllerRemove as jest.Mock).mockResolvedValue({
+        ret: 0,
+        data: null,
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -257,24 +251,20 @@ describe('ticket link subcommand', () => {
         '--url', TEST_URL,
       ]);
 
-      expect(TicketLinksService.list).toHaveBeenCalledWith(
-        expect.any(Object),
-        PROJECT_SLUG,
-        TEST_REF
+      expect(ticketLinksControllerFindAll).toHaveBeenCalledWith(
+        expect.objectContaining({ slug: PROJECT_SLUG, ref: TEST_REF })
       );
-      expect(TicketLinksService.delete).toHaveBeenCalledWith(
-        expect.any(Object),
-        PROJECT_SLUG,
-        TEST_REF,
-        'link-1'
+      expect(ticketLinksControllerRemove).toHaveBeenCalledWith(
+        expect.objectContaining({ slug: PROJECT_SLUG, ref: TEST_REF, linkId: 'link-1' })
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });
 
     it('AC-5: when no matching link prints message and exits 1', async () => {
       const otherLink = { ...mockLink, id: 'link-99', url: 'https://github.com/other/repo/pull/99' };
-      (TicketLinksService.list as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: [otherLink] },
+      (ticketLinksControllerFindAll as jest.Mock).mockResolvedValue({
+        ret: 0,
+        data: [otherLink],
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -287,7 +277,7 @@ describe('ticket link subcommand', () => {
         '--url', TEST_URL,
       ]);
 
-      expect(TicketLinksService.delete).not.toHaveBeenCalled();
+      expect(ticketLinksControllerRemove).not.toHaveBeenCalled();
 
       const output = consoleLogSpy.mock.calls.map((c) => c.join(' ')).join('\n');
       expect(output).toContain(`No link found for ${TEST_URL}`);
@@ -316,7 +306,12 @@ describe('ticket show --json includes links array (AC-6)', () => {
     processExitSpy = jest.spyOn(process, 'exit').mockImplementation((() => {}) as never);
 
     jest.clearAllMocks();
-    (TicketsService.show as jest.Mock).mockReset();
+    (ticketsControllerFindByRef as jest.Mock).mockReset();
+    (resolveContext as jest.Mock).mockResolvedValue({
+      projectSlug: 'test-project',
+      apiKey: 'sk-test-key123',
+      apiUrl: 'http://localhost:3100/api',
+    });
   });
 
   afterEach(() => {
@@ -343,8 +338,9 @@ describe('ticket show --json includes links array (AC-6)', () => {
       ],
     };
 
-    (TicketsService.show as jest.Mock).mockResolvedValue({
-      data: { ret: 0, data: mockTicketWithLinks },
+    (ticketsControllerFindByRef as jest.Mock).mockResolvedValue({
+      ret: 0,
+      data: mockTicketWithLinks,
     });
 
     const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
