@@ -53,6 +53,7 @@ export interface ResolveContextFlags {
   projectSlug?: string;
   apiKey?: string;
   apiUrl?: string;
+  cwd?: string;
 }
 
 export interface ResolveContextDeps {
@@ -121,7 +122,7 @@ export async function resolveContext(
   flags: ResolveContextFlags,
   deps: ResolveContextDeps = _defaultResolveContextDeps,
 ): Promise<ResolvedContext> {
-  const projectConfig = await deps.findProjectConfig();
+  const projectConfig = await deps.findProjectConfig(flags.cwd);
   const globalConfig = deps.getConfig();
 
   const profileName = projectConfig?.profile;

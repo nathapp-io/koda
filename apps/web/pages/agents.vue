@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CreateAgentDialog from '~/components/CreateAgentDialog.vue'
 import EditAgentRolesDialog from '~/components/EditAgentRolesDialog.vue'
 import EditAgentCapabilitiesDialog from '~/components/EditAgentCapabilitiesDialog.vue'
 import RotateKeyDialog from '~/components/RotateKeyDialog.vue'

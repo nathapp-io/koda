@@ -317,6 +317,15 @@ assert "koda agent me"      "smoke-agent\|Smoke Agent"          "$(koda agent me
 assert "koda agent me --json" '"slug"\|"name"'                  "$(koda agent me --json)"
 
 # =============================================================================
+# STEP 16b: Agent pickup
+# =============================================================================
+log "Step 16b: Agent pickup..."
+koda ticket create --project koda --type BUG --title "Pickup candidate" > /dev/null
+koda ticket verify KODA-8 --comment 'Ready for pickup' > /dev/null
+assert "koda agent pickup" "Suggested ticket\|No suitable tickets\|Match score" "$(koda agent pickup --project koda)"
+assert "koda agent pickup --json" '"ticket"\|null' "$(koda agent pickup --project koda --json)"
+
+# =============================================================================
 # STEP 17: Knowledge base
 # =============================================================================
 log "Step 17: Knowledge base..."

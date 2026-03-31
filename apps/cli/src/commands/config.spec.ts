@@ -239,3 +239,4 @@ describe('configProfileRemoveAction', () => {
     expect(output).toContain('Profile not found: nonexistent');
   });
 });
+

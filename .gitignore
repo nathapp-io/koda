@@ -76,13 +76,9 @@ apps/web/test-results/
 apps/api/lancedb/
 lancedb/
 
-# nax runtime (top-level)
-nax.lock
-nax/**/runs/
-nax/metrics.json
-nax/**/status.json
-nax/**/plan/
-nax/**/acceptance-refined.json
-nax/**/interactions/
 .nax-pids
 .nax-wt/
+
+## cli test will create .koda on apps/cli
+## we not ignore the project level .koda
+apps/**/.koda/

@@ -43,7 +43,8 @@ test.describe('Ticket Lifecycle', () => {
     await webLogin(page);
     await page.goto(`/${projectSlug}`);
 
-    await expect(page.getByRole('button', { name: 'New Ticket' })).toBeVisible();
+    const board = page.locator('.overflow-x-auto').first();
+    await expect(board.getByRole('button', { name: 'New Ticket' })).toBeVisible();
   });
 
   test('ticket starts in CREATED status', async ({ page }) => {

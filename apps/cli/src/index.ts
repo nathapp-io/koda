@@ -2,7 +2,7 @@
 
 import { Command } from 'commander';
 import { readFileSync } from 'fs';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { loginCommand } from './commands/login';
 import { initCommand } from './commands/init';
 import { configShow, configSet } from './commands/config';
@@ -29,7 +29,24 @@ const program = new Command();
 program
   .name('koda')
   .description('CLI for Koda — dev ticket tracker')
-  .version(version);
+  .version(version)
+  .option('--cwd <path>', 'Working directory for project config discovery and init');
+
+program.hook('preAction', (thisCommand) => {
+  const globalOptions = thisCommand.optsWithGlobals() as { cwd?: string };
+  if (!globalOptions.cwd) {
+    return;
+  }
+
+  const targetCwd = resolve(globalOptions.cwd);
+  try {
+    process.chdir(targetCwd);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`Error: invalid --cwd path (${targetCwd}): ${errorMessage}`);
+    process.exit(2);
+  }
+});
 
 // Login command
 program
@@ -56,7 +73,7 @@ program
 // Init command
 program
   .command('init')
-  .description('Initialize .koda/config.json in current directory')
+  .description('Initialize .koda/config.json in working directory')
   .option('--project <slug>', 'Project slug')
   .option('--default-type <type>', 'Default ticket type')
   .option('--default-priority <priority>', 'Default ticket priority')

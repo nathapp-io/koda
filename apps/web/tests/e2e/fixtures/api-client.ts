@@ -22,6 +22,10 @@ export interface TicketResult {
   status: string;
 }
 
+export interface AgentResult {
+  slug: string;
+}
+
 export type TicketTransitionAction = 'verify' | 'start' | 'fix' | 'verify-fix' | 'reject' | 'close';
 
 export async function login(email: string, password: string): Promise<LoginResult> {
@@ -134,6 +138,60 @@ export async function deleteProject(token: string, slug: string): Promise<void> 
     method: 'DELETE',
     headers: { Authorization: `Bearer ${token}` },
   });
+}
+
+export async function createAgent(
+  token: string,
+  data: { name: string; slug: string },
+): Promise<AgentResult> {
+  const res = await fetch(`${API_URL}/api/agents`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Create agent failed: ${res.status} ${await res.text()}`);
+  }
+
+  const body = (await res.json()) as {
+    data?: { slug?: string };
+  };
+
+  const slug = body.data?.slug ?? data.slug;
+
+  if (!slug) {
+    throw new Error('Create agent response missing slug');
+  }
+
+  return { slug };
+}
+
+export async function deleteAgent(token: string, slug: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/agents/${slug}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`Delete agent failed: ${res.status} ${await res.text()}`);
+  }
+}
+
+export async function updateAgentStatus(
+  token: string,
+  slug: string,
+  status: 'ACTIVE' | 'PAUSED' | 'OFFLINE',
+): Promise<void> {
+  const res = await fetch(`${API_URL}/api/agents/${slug}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ status }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Update agent status failed: ${res.status} ${await res.text()}`);
+  }
 }
 
 /** Credentials for the seeded E2E admin user */
