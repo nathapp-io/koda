@@ -10,9 +10,12 @@
 - Never use raw `v-model` on form inputs without validation schema
 
 ## API Client
-- Use `useApi()` composable for all API calls — never use raw `$fetch` or `useFetch`
+- Use `useApi()` composable for **all** API calls — never use raw `$fetch`, `useFetch`, or axios
+- Destructure `$api` from `useApi()` and call `$api.get()`, `$api.post()`, `$api.patch()`, `$api.delete()`
+- `$api` paths are relative to the API base (e.g. `/tickets`, not `/api/tickets`)
 - `useAuth()` for login/logout/register/token management
 - `useAppToast()` for success/error notifications
+- Web does **not** use `@hey-api/openapi-ts` generated client — Nuxt composables handle SSR/auth/serialization natively
 
 ## Styling
 - Use semantic Tailwind colors: `text-muted-foreground`, `bg-background`, `border-border`
