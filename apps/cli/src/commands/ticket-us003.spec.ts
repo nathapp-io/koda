@@ -26,9 +26,6 @@ jest.mock('conf', () =>
   })),
 );
 
-// Mock axios to prevent real HTTP calls
-jest.mock('axios', () => ({ create: jest.fn(() => ({})) }));
-
 // Mock the config module — both getConfig (used by current resolveAuth) and resolveContext (new path)
 jest.mock('../config', () => ({
   getConfig: jest.fn(() => ({
@@ -41,36 +38,35 @@ jest.mock('../config', () => ({
 
 // Mock generated API client
 jest.mock('../generated', () => ({
-  TicketsService: {
-    list: jest.fn(),
-    create: jest.fn(),
-    show: jest.fn(),
-    verify: jest.fn(),
-    assign: jest.fn(),
-    start: jest.fn(),
-    fix: jest.fn(),
-    verifyFix: jest.fn(),
-    close: jest.fn(),
-    reject: jest.fn(),
-    update: jest.fn(),
-    delete: jest.fn(),
-  },
-  TicketLinksService: {
-    create: jest.fn(),
-    list: jest.fn(),
-    delete: jest.fn(),
-  },
-  LabelsService: {
-    addToTicket: jest.fn(),
-    removeFromTicket: jest.fn(),
-  },
+  ticketsControllerFindAll: jest.fn(),
+  ticketsControllerCreate: jest.fn(),
+  ticketsControllerFindByRef: jest.fn(),
+  ticketsControllerUpdate: jest.fn(),
+  ticketsControllerSoftDelete: jest.fn(),
+  ticketsControllerAssign: jest.fn(),
+  ticketsControllerVerify: jest.fn(),
+  ticketsControllerStart: jest.fn(),
+  ticketsControllerFix: jest.fn(),
+  ticketsControllerVerifyFix: jest.fn(),
+  ticketsControllerClose: jest.fn(),
+  ticketsControllerReject: jest.fn(),
+  ticketLinksControllerCreate: jest.fn(),
+  ticketLinksControllerFindAll: jest.fn(),
+  ticketLinksControllerRemove: jest.fn(),
+  labelsControllerAssignLabelFromHttp: jest.fn(),
+  labelsControllerRemoveLabelFromHttp: jest.fn(),
+  OpenAPI: { BASE: '', TOKEN: '' },
+}));
+
+jest.mock('../generated/core/OpenAPI', () => ({
+  OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { Command } from 'commander';
 import { ticketCommand } from './ticket';
-import { TicketsService } from '../generated';
+import { ticketsControllerFindAll } from '../generated';
 import { resolveContext } from '../config';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -107,8 +103,9 @@ describe('US-003-1: ticketCommand list — resolveContext wiring', () => {
     consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
     consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
 
-    (TicketsService.list as jest.Mock).mockResolvedValue({
-      data: { ret: 0, data: { items: [], total: 0 } },
+    (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
+      ret: 0,
+      data: { items: [], total: 0 },
     });
   });
 
@@ -118,12 +115,9 @@ describe('US-003-1: ticketCommand list — resolveContext wiring', () => {
 
   /**
    * AC-1: When --project is omitted and .koda/config.json has projectSlug: 'configured-project',
-   * TicketsService.list must be called with that projectSlug — not the old hardcoded 'koda' fallback.
-   *
-   * RED reason: current code uses `options.project || process.env['GLOBAL_PROJECT_SLUG'] || 'koda'`
-   * and never calls resolveContext, so it passes 'koda' instead of 'configured-project'.
+   * ticketsControllerFindAll must be called with that slug.
    */
-  it('AC-1: calls TicketsService.list with projectSlug from config when --project flag is omitted', async () => {
+  it('AC-1: calls ticketsControllerFindAll with slug from config when --project flag is omitted', async () => {
     (resolveContext as jest.Mock).mockResolvedValue({
       projectSlug: 'configured-project',
       apiKey: 'test-key-12345678',
@@ -133,18 +127,15 @@ describe('US-003-1: ticketCommand list — resolveContext wiring', () => {
     const prog = buildProgram();
     await getListCmd(prog)?.parseAsync(['node', 'test']).catch(() => undefined);
 
-    expect(TicketsService.list).toHaveBeenCalled();
-    const callOpts = (TicketsService.list as jest.Mock).mock.calls[0][1] as Record<string, unknown>;
-    expect(callOpts).toMatchObject({ projectSlug: 'configured-project' });
+    expect(ticketsControllerFindAll).toHaveBeenCalled();
+    const callOpts = (ticketsControllerFindAll as jest.Mock).mock.calls[0][0] as Record<string, unknown>;
+    expect(callOpts).toMatchObject({ slug: 'configured-project' });
   });
 
   /**
-   * AC-2: When --project foo is passed, TicketsService.list must receive projectSlug: 'foo'
-   * regardless of what .koda/config.json contains.
-   *
-   * This verifies the flag-takes-precedence behaviour survives the refactor.
+   * AC-2: When --project foo is passed, ticketsControllerFindAll must receive slug: 'foo'.
    */
-  it('AC-2: calls TicketsService.list with projectSlug "foo" when --project foo is passed', async () => {
+  it('AC-2: calls ticketsControllerFindAll with slug "foo" when --project foo is passed', async () => {
     (resolveContext as jest.Mock).mockResolvedValue({
       projectSlug: 'foo',
       apiKey: 'test-key-12345678',
@@ -154,17 +145,13 @@ describe('US-003-1: ticketCommand list — resolveContext wiring', () => {
     const prog = buildProgram();
     await getListCmd(prog)?.parseAsync(['node', 'test', '--project', 'foo']).catch(() => undefined);
 
-    expect(TicketsService.list).toHaveBeenCalled();
-    const callOpts = (TicketsService.list as jest.Mock).mock.calls[0][1] as Record<string, unknown>;
-    expect(callOpts).toMatchObject({ projectSlug: 'foo' });
+    expect(ticketsControllerFindAll).toHaveBeenCalled();
+    const callOpts = (ticketsControllerFindAll as jest.Mock).mock.calls[0][0] as Record<string, unknown>;
+    expect(callOpts).toMatchObject({ slug: 'foo' });
   });
 
   /**
-   * AC-3: When resolveContext returns projectSlug: undefined (no config, no flag),
-   * the command must exit with code 2 and print the setup hint.
-   *
-   * RED reason: current code falls back to hardcoded 'koda' and calls the API successfully,
-   * so it exits with 0 instead of 2.
+   * AC-3: When resolveContext returns projectSlug: undefined, exit with code 2.
    */
   it('AC-3: exits with code 2 and prints setup hint when projectSlug is undefined', async () => {
     (resolveContext as jest.Mock).mockResolvedValue({
@@ -183,9 +170,7 @@ describe('US-003-1: ticketCommand list — resolveContext wiring', () => {
   });
 
   /**
-   * AC-4: ticket.ts must not contain any reference to GLOBAL_PROJECT_SLUG after the change.
-   *
-   * RED reason: current ticket.ts still uses `process.env['GLOBAL_PROJECT_SLUG']` in every action.
+   * AC-4: ticket.ts must not contain any reference to GLOBAL_PROJECT_SLUG.
    */
   it('AC-4: ticket.ts contains no reference to GLOBAL_PROJECT_SLUG', () => {
     const ticketFilePath = join(__dirname, 'ticket.ts');

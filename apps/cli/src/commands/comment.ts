@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { resolveContext } from '../config';
-import { configureClient } from '../client';
-import { CommentsService } from '../generated';
+import { OpenAPI } from '../generated/core/OpenAPI';
+import { commentsControllerCreateFromHttp } from '../generated';
 import { success, error } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
@@ -30,17 +30,22 @@ export function commentCommand(program: Command): void {
           process.exit(2);
         }
 
-        // Validate comment type
         const validTypes = ['GENERAL', 'VERIFICATION', 'FIX_REPORT', 'REVIEW'];
         if (!validTypes.includes(options.type)) {
           error(`Invalid type ${options.type}. Valid values: ${validTypes.join(', ')}`);
           process.exit(3);
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
-        const response = await CommentsService.add(client, ctx.projectSlug, ref, {
-          body: options.body,
-          type: options.type,
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
+
+        const response = await commentsControllerCreateFromHttp({
+          slug: ctx.projectSlug,
+          ref,
+          requestBody: {
+            body: options.body,
+            type: options.type,
+          },
         });
         const commentData = unwrap(response);
 
@@ -48,9 +53,9 @@ export function commentCommand(program: Command): void {
           console.log(JSON.stringify(commentData, null, 2));
         } else {
           success(`Comment added to ${ref}`);
-          console.log(`ID: ${commentData.id}`);
-          console.log(`Type: ${commentData.type}`);
-          console.log(`Body: ${commentData.body}`);
+          console.log(`ID: ${(commentData as Record<string, unknown>).id}`);
+          console.log(`Type: ${(commentData as Record<string, unknown>).type}`);
+          console.log(`Body: ${(commentData as Record<string, unknown>).body}`);
         }
 
         process.exit(0);

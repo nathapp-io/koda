@@ -24,25 +24,17 @@ jest.mock('conf', () => {
   return jest.fn(() => mockStore);
 });
 
-// Mock axios client
-const mockAxios = {
-  get: jest.fn(),
-};
-
-jest.mock('axios', () => {
-  return {
-    create: () => mockAxios,
-  };
-});
-
 // Mock the generated client
 jest.mock('../generated', () => ({
-  ProjectsService: {
-    list: jest.fn(),
-    show: jest.fn(),
-    create: jest.fn(),
-    delete: jest.fn(),
-  },
+  projectsControllerFindAll: jest.fn(),
+  projectsControllerFindBySlug: jest.fn(),
+  projectsControllerCreate: jest.fn(),
+  projectsControllerRemove: jest.fn(),
+  OpenAPI: { BASE: '', TOKEN: '' },
+}));
+
+jest.mock('../generated/core/OpenAPI', () => ({
+  OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
 // Mock config module to use mockData instead of real filesystem
@@ -61,7 +53,12 @@ jest.mock('../config', () => ({
 
 import { Command } from 'commander';
 import { projectCommand } from './project';
-import { ProjectsService } from '../generated';
+import {
+  projectsControllerFindAll,
+  projectsControllerFindBySlug,
+  projectsControllerCreate,
+  projectsControllerRemove,
+} from '../generated';
 
 describe('projectCommand', () => {
   let program: Command;
@@ -87,10 +84,10 @@ describe('projectCommand', () => {
     logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
 
     jest.clearAllMocks();
-    (ProjectsService.list as jest.Mock).mockReset();
-    (ProjectsService.show as jest.Mock).mockReset();
-    (ProjectsService.create as jest.Mock).mockReset();
-    (ProjectsService.delete as jest.Mock).mockReset();
+    (projectsControllerFindAll as jest.Mock).mockReset();
+    (projectsControllerFindBySlug as jest.Mock).mockReset();
+    (projectsControllerCreate as jest.Mock).mockReset();
+    (projectsControllerRemove as jest.Mock).mockReset();
   });
 
   afterEach(() => {
@@ -104,8 +101,9 @@ describe('projectCommand', () => {
         { id: '2', name: 'Project B', key: 'PB', slug: 'project-b' },
       ];
 
-      (ProjectsService.list as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: { items: mockProjects, total: 2 } },
+      (projectsControllerFindAll as jest.Mock).mockResolvedValue({
+        ret: 0,
+        data: { items: mockProjects, total: 2 },
       });
 
       const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
@@ -113,7 +111,7 @@ describe('projectCommand', () => {
 
       await listCmd?.parse(['node', 'test']);
 
-      expect(ProjectsService.list).toHaveBeenCalled();
+      expect(projectsControllerFindAll).toHaveBeenCalled();
     });
 
     it('returns JSON array with --json flag', async () => {
@@ -121,8 +119,9 @@ describe('projectCommand', () => {
         { id: '1', name: 'Project A', key: 'PA', slug: 'project-a' },
       ];
 
-      (ProjectsService.list as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: { items: mockProjects, total: 1 } },
+      (projectsControllerFindAll as jest.Mock).mockResolvedValue({
+        ret: 0,
+        data: { items: mockProjects, total: 1 },
       });
 
       const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
@@ -165,8 +164,9 @@ describe('projectCommand', () => {
         { id: '1', name: 'Project A', key: 'PA', slug: 'project-a' },
       ];
 
-      (ProjectsService.list as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: { items: mockProjects, total: 1 } },
+      (projectsControllerFindAll as jest.Mock).mockResolvedValue({
+        ret: 0,
+        data: { items: mockProjects, total: 1 },
       });
 
       const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
@@ -178,8 +178,7 @@ describe('projectCommand', () => {
         // Expected
       }
 
-      // Should call ProjectsService even though config is empty, using env vars
-      expect(ProjectsService.list).toHaveBeenCalled();
+      expect(projectsControllerFindAll).toHaveBeenCalled();
     });
 
     it('prefers KODA_API_KEY over config file', async () => {
@@ -192,8 +191,9 @@ describe('projectCommand', () => {
         { id: '1', name: 'Project A', key: 'PA', slug: 'project-a' },
       ];
 
-      (ProjectsService.list as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: { items: mockProjects, total: 1 } },
+      (projectsControllerFindAll as jest.Mock).mockResolvedValue({
+        ret: 0,
+        data: { items: mockProjects, total: 1 },
       });
 
       const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
@@ -205,15 +205,14 @@ describe('projectCommand', () => {
         // Expected
       }
 
-      // Should call ProjectsService with env var credentials, not config credentials
-      expect(ProjectsService.list).toHaveBeenCalled();
+      expect(projectsControllerFindAll).toHaveBeenCalled();
     });
 
     it('handles API errors gracefully', async () => {
       const mockError = new Error('API Error');
       (mockError as any).response = { status: 500 };
 
-      (ProjectsService.list as jest.Mock).mockRejectedValue(mockError);
+      (projectsControllerFindAll as jest.Mock).mockRejectedValue(mockError);
 
       const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
       const listCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'list');
@@ -231,7 +230,7 @@ describe('projectCommand', () => {
       const mockError = new Error('Unauthorized');
       (mockError as any).response = { status: 401 };
 
-      (ProjectsService.list as jest.Mock).mockRejectedValue(mockError);
+      (projectsControllerFindAll as jest.Mock).mockRejectedValue(mockError);
 
       const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
       const listCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'list');
@@ -256,18 +255,17 @@ describe('projectCommand', () => {
         description: 'A test project',
       };
 
-      (ProjectsService.create as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockProject },
-      });
+      (projectsControllerCreate as jest.Mock).mockResolvedValue({ ret: 0, data: mockProject });
 
       const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
       const createCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'create');
 
       await createCmd?.parseAsync(['node', 'test', '--name', 'Test', '--slug', 'test', '--key', 'TEST']);
 
-      expect(ProjectsService.create).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({ name: 'Test', slug: 'test', key: 'TEST' })
+      expect(projectsControllerCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestBody: expect.objectContaining({ name: 'Test', slug: 'test', key: 'TEST' }),
+        })
       );
     });
 
@@ -315,9 +313,7 @@ describe('projectCommand', () => {
         slug: 'test',
       };
 
-      (ProjectsService.create as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockProject },
-      });
+      (projectsControllerCreate as jest.Mock).mockResolvedValue({ ret: 0, data: mockProject });
 
       const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
       const createCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'create');
@@ -348,18 +344,15 @@ describe('projectCommand', () => {
 
   describe('project delete', () => {
     it('deletes project when --force flag is provided', async () => {
-      (ProjectsService.delete as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: null },
-      });
+      (projectsControllerRemove as jest.Mock).mockResolvedValue(undefined);
 
       const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
       const deleteCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'delete');
 
       await deleteCmd?.parseAsync(['node', 'test', 'test', '--force']);
 
-      expect(ProjectsService.delete).toHaveBeenCalledWith(
-        expect.anything(),
-        'test'
+      expect(projectsControllerRemove).toHaveBeenCalledWith(
+        expect.objectContaining({ slug: 'test' })
       );
     });
 
@@ -402,9 +395,7 @@ describe('projectCommand', () => {
         description: 'Test project',
       };
 
-      (ProjectsService.show as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockProject },
-      });
+      (projectsControllerFindBySlug as jest.Mock).mockResolvedValue({ ret: 0, data: mockProject });
 
       const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
       const showCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'show');
@@ -415,7 +406,7 @@ describe('projectCommand', () => {
         // Expected
       }
 
-      expect(ProjectsService.show).toHaveBeenCalled();
+      expect(projectsControllerFindBySlug).toHaveBeenCalled();
     });
 
     it('returns JSON object with --json flag', async () => {
@@ -426,9 +417,7 @@ describe('projectCommand', () => {
         slug: 'project-a',
       };
 
-      (ProjectsService.show as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockProject },
-      });
+      (projectsControllerFindBySlug as jest.Mock).mockResolvedValue({ ret: 0, data: mockProject });
 
       const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
       const showCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'show');
@@ -448,7 +437,7 @@ describe('projectCommand', () => {
       const mockError = new Error('Not found');
       (mockError as any).response = { status: 404 };
 
-      (ProjectsService.show as jest.Mock).mockRejectedValue(mockError);
+      (projectsControllerFindBySlug as jest.Mock).mockRejectedValue(mockError);
 
       const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
       const showCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'show');
@@ -486,9 +475,7 @@ describe('projectCommand', () => {
         description: 'A nice project description',
       };
 
-      (ProjectsService.show as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockProject },
-      });
+      (projectsControllerFindBySlug as jest.Mock).mockResolvedValue({ ret: 0, data: mockProject });
 
       const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
       const showCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'show');
@@ -499,7 +486,6 @@ describe('projectCommand', () => {
         // Expected
       }
 
-      // Should call console.log with a string that contains description
       const allCalls = logSpy.mock.calls.flat().join(' ');
       expect(allCalls).toContain('Description');
       expect(allCalls).toContain('A nice project description');

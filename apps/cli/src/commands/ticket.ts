@@ -1,10 +1,48 @@
 import { Command } from 'commander';
 import { resolveContext } from '../config';
-import { configureClient } from '../client';
-import { TicketsService, TicketLinksService, LabelsService, TicketLink } from '../generated';
+import { OpenAPI } from '../generated/core/OpenAPI';
+import {
+  ticketsControllerCreate,
+  ticketsControllerFindAll,
+  ticketsControllerFindByRef,
+  ticketsControllerUpdate,
+  ticketsControllerSoftDelete,
+  ticketsControllerAssign,
+  ticketsControllerVerify,
+  ticketsControllerStart,
+  ticketsControllerFix,
+  ticketsControllerVerifyFix,
+  ticketsControllerClose,
+  ticketsControllerReject,
+  ticketLinksControllerCreate,
+  ticketLinksControllerFindAll,
+  ticketLinksControllerRemove,
+  labelsControllerAssignLabelFromHttp,
+  labelsControllerRemoveLabelFromHttp,
+} from '../generated';
 import { table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
+
+type TicketRow = {
+  ref?: string;
+  number?: number;
+  type: string;
+  priority?: string;
+  status: string;
+  assignee?: { name?: string } | null;
+  title: string;
+};
+
+type TicketDetail = TicketRow & {
+  id: string;
+  description?: string;
+  createdAt: string;
+  updatedAt?: string;
+  comments?: Array<{ author?: { name?: string }; type: string; body: string }>;
+};
+
+type TicketLink = { id: string; url: string; provider: string; externalRef: string };
 
 export function ticketCommand(program: Command): void {
   const ticket = program.command('ticket');
@@ -46,14 +84,19 @@ export function ticketCommand(program: Command): void {
           handleApiError(new Error(`Invalid priority ${options.priority}. Valid values: ${validPriorities.join(', ')}`), { validationError: true });
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
-        const response = await TicketsService.create(client, ctx.projectSlug, {
-          type: options.type,
-          title: options.title,
-          description: options.desc,
-          priority: options.priority,
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
+
+        const response = await ticketsControllerCreate({
+          slug: ctx.projectSlug,
+          requestBody: {
+            type: options.type as 'BUG' | 'ENHANCEMENT' | 'TASK' | 'QUESTION',
+            title: options.title,
+            description: options.desc,
+            priority: options.priority,
+          },
         });
-        const ticketData = unwrap(response);
+        const ticketData = unwrap<{ ref?: string; number?: number }>(response);
 
         if (options.json) {
           console.log(JSON.stringify(ticketData, null, 2));
@@ -91,10 +134,11 @@ export function ticketCommand(program: Command): void {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
 
-        const response = await TicketsService.list(client, {
-          projectSlug: ctx.projectSlug,
+        const response = await ticketsControllerFindAll({
+          slug: ctx.projectSlug,
           status: options.status,
           type: options.type,
           priority: options.priority,
@@ -103,8 +147,8 @@ export function ticketCommand(program: Command): void {
           limit: parseInt(options.limit, 10),
           page: parseInt(options.page, 10),
         });
-        const data = unwrap(response);
-        const items: Record<string, unknown>[] = Array.isArray(data) ? data : ((data as Record<string, unknown>).items as Record<string, unknown>[]) || [];
+        const data = unwrap<{ items?: TicketRow[] } | TicketRow[]>(response);
+        const items: TicketRow[] = Array.isArray(data) ? data : ((data as { items?: TicketRow[] }).items ?? []);
 
         if (options.json) {
           console.log(JSON.stringify(items, null, 2));
@@ -114,7 +158,7 @@ export function ticketCommand(program: Command): void {
             String(t.type),
             String(t.priority || ''),
             String(t.status),
-            String((t.assignee as Record<string, unknown> | undefined)?.name || '—'),
+            String(t.assignee?.name || '—'),
             String(t.title),
           ]);
           table(['#', 'Type', 'Priority', 'Status', 'Assignee', 'Title'], rows);
@@ -144,15 +188,16 @@ export function ticketCommand(program: Command): void {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
 
-        const response = await TicketsService.list(client, {
-          projectSlug: ctx.projectSlug,
+        const response = await ticketsControllerFindAll({
+          slug: ctx.projectSlug,
           status: options.status,
           assignedTo: 'self',
         });
-        const data = unwrap(response);
-        const items: Record<string, unknown>[] = Array.isArray(data) ? data : ((data as Record<string, unknown>).items as Record<string, unknown>[]) || [];
+        const data = unwrap<{ items?: TicketRow[] } | TicketRow[]>(response);
+        const items: TicketRow[] = Array.isArray(data) ? data : ((data as { items?: TicketRow[] }).items ?? []);
 
         if (options.json) {
           console.log(JSON.stringify(items, null, 2));
@@ -162,7 +207,7 @@ export function ticketCommand(program: Command): void {
             String(t.type),
             String(t.priority || ''),
             String(t.status),
-            String((t.assignee as Record<string, unknown> | undefined)?.name || '—'),
+            String(t.assignee?.name || '—'),
             String(t.title),
           ]);
           table(['#', 'Type', 'Priority', 'Status', 'Assignee', 'Title'], rows);
@@ -191,10 +236,11 @@ export function ticketCommand(program: Command): void {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
 
-        const response = await TicketsService.show(client, ctx.projectSlug, ref);
-        const ticketData = unwrap(response);
+        const response = await ticketsControllerFindByRef({ slug: ctx.projectSlug, ref });
+        const ticketData = unwrap<TicketDetail>(response);
 
         if (options.json) {
           console.log(JSON.stringify(ticketData, null, 2));
@@ -217,9 +263,7 @@ export function ticketCommand(program: Command): void {
             console.log(`\nComments:`);
             for (const comment of ticketData.comments) {
               const author = comment.author?.name || 'Unknown';
-              console.log(
-                `  - ${author} (${comment.type}): ${comment.body}`
-              );
+              console.log(`  - ${author} (${comment.type}): ${comment.body}`);
             }
           }
         }
@@ -252,12 +296,16 @@ export function ticketCommand(program: Command): void {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
 
-        await TicketsService.verify(client, ctx.projectSlug, ref, {
-          body: options.comment,
-          type: 'VERIFICATION',
-        });\n        console.log(`✓ Ticket verified successfully`);\n        process.exit(0);
+        await ticketsControllerVerify({
+          slug: ctx.projectSlug,
+          ref,
+          requestBody: { body: options.comment },
+        });
+        console.log(`✓ Ticket verified successfully`);
+        process.exit(0);
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
@@ -282,11 +330,11 @@ export function ticketCommand(program: Command): void {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
-        const agentSlug = options.agent ?? options.to ?? 'self';
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
 
-        const response = await TicketsService.assign(client, ctx.projectSlug, ref, { agentSlug });
-        const ticketData = unwrap(response);
+        const response = await ticketsControllerAssign({ slug: ctx.projectSlug, ref });
+        const ticketData = unwrap<TicketRow>(response);
 
         if (options.json) {
           console.log(JSON.stringify(ticketData, null, 2));
@@ -317,9 +365,12 @@ export function ticketCommand(program: Command): void {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
 
-        await TicketsService.start(client, ctx.projectSlug, ref);\n        console.log(`✓ Ticket started successfully`);\n        process.exit(0);
+        await ticketsControllerStart({ slug: ctx.projectSlug, ref });
+        console.log(`✓ Ticket started successfully`);
+        process.exit(0);
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
@@ -348,17 +399,16 @@ export function ticketCommand(program: Command): void {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
 
-        const payload: { body: string; type: string; gitRef?: string } = {
-          body: options.comment,
-          type: 'FIX_REPORT',
-        };
-        if (options.gitRef) {
-          payload.gitRef = options.gitRef;
-        }
-
-        await TicketsService.fix(client, ctx.projectSlug, ref, payload);\n        console.log(`✓ Fix submitted successfully`);\n        process.exit(0);
+        await ticketsControllerFix({
+          slug: ctx.projectSlug,
+          ref,
+          requestBody: { body: options.comment },
+        });
+        console.log(`✓ Fix submitted successfully`);
+        process.exit(0);
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
@@ -388,14 +438,16 @@ export function ticketCommand(program: Command): void {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
 
-        const status = options.pass ? 'closed' : 'in_progress';
-        await TicketsService.verifyFix(client, ctx.projectSlug, ref, {
-          body: options.comment,
-          type: 'REVIEW',
-          status,
-        });\n        console.log(`✓ Fix verification submitted successfully`);\n        process.exit(0);
+        await ticketsControllerVerifyFix({
+          slug: ctx.projectSlug,
+          ref,
+          requestBody: { body: options.comment },
+        });
+        console.log(`✓ Fix verification submitted successfully`);
+        process.exit(0);
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
@@ -418,9 +470,12 @@ export function ticketCommand(program: Command): void {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
 
-        await TicketsService.close(client, ctx.projectSlug, ref);\n        console.log(`✓ Ticket closed successfully`);\n        process.exit(0);
+        await ticketsControllerClose({ slug: ctx.projectSlug, ref });
+        console.log(`✓ Ticket closed successfully`);
+        process.exit(0);
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
@@ -448,12 +503,16 @@ export function ticketCommand(program: Command): void {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
 
-        await TicketsService.reject(client, ctx.projectSlug, ref, {
-          body: options.comment,
-          type: 'GENERAL',
-        });\n        console.log(`✓ Ticket rejected successfully`);\n        process.exit(0);
+        await ticketsControllerReject({
+          slug: ctx.projectSlug,
+          ref,
+          requestBody: { body: options.comment },
+        });
+        console.log(`✓ Ticket rejected successfully`);
+        process.exit(0);
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
       }
@@ -479,15 +538,16 @@ export function ticketCommand(program: Command): void {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
 
-        const payload: { title?: string; description?: string; priority?: string } = {};
-        if (options.title) payload.title = options.title;
-        if (options.desc) payload.description = options.desc;
-        if (options.priority) payload.priority = options.priority;
+        const requestBody: { title?: string; description?: string; priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' } = {};
+        if (options.title) requestBody.title = options.title;
+        if (options.desc) requestBody.description = options.desc;
+        if (options.priority) requestBody.priority = options.priority;
 
-        const response = await TicketsService.update(client, ctx.projectSlug, ref, payload);
-        const ticketData = unwrap(response);
+        const response = await ticketsControllerUpdate({ slug: ctx.projectSlug, ref, requestBody });
+        const ticketData = unwrap<TicketRow>(response);
 
         if (options.json) {
           console.log(JSON.stringify(ticketData, null, 2));
@@ -522,9 +582,10 @@ export function ticketCommand(program: Command): void {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
 
-        await TicketsService.delete(client, ctx.projectSlug, ref);
+        await ticketsControllerSoftDelete({ slug: ctx.projectSlug, ref });
 
         console.log(`✓ Ticket deleted successfully`);
         process.exit(0);
@@ -551,10 +612,15 @@ export function ticketCommand(program: Command): void {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
 
-        const response = await TicketLinksService.create(client, ctx.projectSlug, ref, { url: options.url });
-        const linkData = unwrap(response) as TicketLink;
+        const response = await ticketLinksControllerCreate({
+          slug: ctx.projectSlug,
+          ref,
+          requestBody: { url: options.url },
+        });
+        const linkData = unwrap<TicketLink>(response);
 
         if (options.json) {
           console.log(JSON.stringify(linkData, null, 2));
@@ -586,10 +652,11 @@ export function ticketCommand(program: Command): void {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
 
-        const listResponse = await TicketLinksService.list(client, ctx.projectSlug, ref);
-        const links = unwrap(listResponse) as TicketLink[];
+        const listResponse = await ticketLinksControllerFindAll({ slug: ctx.projectSlug, ref });
+        const links = unwrap<TicketLink[]>(listResponse);
         const match = links.find((l) => l.url === options.url);
 
         if (!match) {
@@ -597,7 +664,7 @@ export function ticketCommand(program: Command): void {
           process.exit(1);
         }
 
-        await TicketLinksService.delete(client, ctx.projectSlug, ref, match.id);
+        await ticketLinksControllerRemove({ slug: ctx.projectSlug, ref, linkId: match.id });
         process.exit(0);
       } catch (err: unknown) {
         handleApiError(err);
@@ -623,9 +690,14 @@ export function ticketCommand(program: Command): void {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
 
-        await LabelsService.addToTicket(client, ctx.projectSlug, ref, options.label);
+        await labelsControllerAssignLabelFromHttp({
+          slug: ctx.projectSlug,
+          ref,
+          requestBody: { labelId: options.label },
+        });
 
         console.log(`✓ Label attached to ticket ${ref}`);
         process.exit(0);
@@ -652,9 +724,14 @@ export function ticketCommand(program: Command): void {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
 
-        await LabelsService.removeFromTicket(client, ctx.projectSlug, ref, options.label);
+        await labelsControllerRemoveLabelFromHttp({
+          slug: ctx.projectSlug,
+          ref,
+          labelId: options.label,
+        });
         console.log(`✓ Label detached from ticket ${ref}`);
         process.exit(0);
       } catch (err: unknown) {

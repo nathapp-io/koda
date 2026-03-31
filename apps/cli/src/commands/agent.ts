@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { resolveContext } from '../config';
-import { configureClient } from '../client';
-import { AgentService } from '../generated';
+import { OpenAPI } from '../generated/core/OpenAPI';
+import { agentsControllerFindMe, agentsControllerSuggestTicket } from '../generated';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 
@@ -27,9 +27,11 @@ export function agentCommand(program: Command): void {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
-        const response = await AgentService.me(client);
-        const agentData = unwrap(response);
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
+
+        const response = await agentsControllerFindMe();
+        const agentData = unwrap<{ name: string; slug: string; apiKey?: string }>(response);
 
         if (options.json) {
           console.log(JSON.stringify(agentData, null, 2));
@@ -63,11 +65,13 @@ export function agentCommand(program: Command): void {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        const client = configureClient(ctx.apiUrl, ctx.apiKey);
-        const meResponse = await AgentService.me(client);
-        const agentData = unwrap(meResponse);
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
 
-        const pickupResponse = await AgentService.pickup(client, agentData.slug, ctx.projectSlug);
+        const meResponse = await agentsControllerFindMe();
+        const agentData = unwrap<{ name: string; slug: string; apiKey?: string }>(meResponse);
+
+        const pickupResponse = await agentsControllerSuggestTicket({ slug: agentData.slug, project: ctx.projectSlug });
         const result = unwrap(pickupResponse);
 
         if (options.json) {
@@ -80,7 +84,11 @@ export function agentCommand(program: Command): void {
           process.exit(0);
         }
 
-        const { ticket, matchScore, matchedCapabilities } = result;
+        const { ticket, matchScore, matchedCapabilities } = result as {
+          ticket: { number: number; title: string; priority: string; status: string };
+          matchScore: number;
+          matchedCapabilities: string[];
+        };
         console.log(`Suggested ticket: #${ticket.number} — ${ticket.title}`);
         console.log(`Priority: ${ticket.priority} | Status: ${ticket.status}`);
         console.log(`Match score: ${matchScore} | Matched capabilities: ${matchedCapabilities.join(', ')}`);

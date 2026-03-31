@@ -25,9 +25,6 @@ jest.mock('conf', () =>
   })),
 );
 
-// Mock axios to prevent real HTTP calls
-jest.mock('axios', () => ({ create: jest.fn(() => ({})) }));
-
 // Mock the config module — resolveContext
 jest.mock('../config', () => ({
   getConfig: jest.fn(() => ({
@@ -40,18 +37,21 @@ jest.mock('../config', () => ({
 
 // Mock generated API client
 jest.mock('../generated', () => ({
-  KbService: {
-    search: jest.fn(),
-    list: jest.fn(),
-    add: jest.fn(),
-  },
+  ragControllerSearch: jest.fn(),
+  ragControllerListDocuments: jest.fn(),
+  ragControllerAddDocument: jest.fn(),
+  OpenAPI: { BASE: '', TOKEN: '' },
+}));
+
+jest.mock('../generated/core/OpenAPI', () => ({
+  OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { Command } from 'commander';
 import { kbCommand } from './kb';
-import { KbService } from '../generated';
+import { ragControllerSearch, ragControllerListDocuments } from '../generated';
 import { resolveContext } from '../config';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -88,16 +88,14 @@ describe('US-003-5: kbCommand — resolveContext wiring', () => {
     consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
     consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
 
-    (KbService.search as jest.Mock).mockResolvedValue({
-      data: { ret: 0, data: { verdict: 'RELEVANT', confidence: 0.95, results: [] } },
+    (ragControllerSearch as jest.Mock).mockResolvedValue({
+      ret: 0,
+      data: { verdict: 'RELEVANT', confidence: 0.95, results: [] },
     });
 
-    (KbService.list as jest.Mock).mockResolvedValue({
-      data: { ret: 0, data: { items: [], total: 0 } },
-    });
-
-    (KbService.add as jest.Mock).mockResolvedValue({
-      data: { ret: 0, data: { id: 'doc1', source: 'test.md', createdAt: new Date().toISOString(), docCount: 1 } },
+    (ragControllerListDocuments as jest.Mock).mockResolvedValue({
+      ret: 0,
+      data: { items: [], total: 0 },
     });
   });
 
@@ -106,10 +104,9 @@ describe('US-003-5: kbCommand — resolveContext wiring', () => {
   });
 
   /**
-   * AC-1: When --project is omitted and .koda/config.json has projectSlug: 'demo',
-   * kb search must use that projectSlug and make the API call.
+   * AC-1: When --project is omitted, ragControllerSearch must be called with slug from config.
    */
-  it('AC-1: kb search calls KbService.search with projectSlug from config when --project flag is omitted', async () => {
+  it('AC-1: kb search calls ragControllerSearch with slug from config when --project flag is omitted', async () => {
     (resolveContext as jest.Mock).mockResolvedValue({
       projectSlug: 'demo',
       apiKey: 'test-key-12345678',
@@ -119,15 +116,15 @@ describe('US-003-5: kbCommand — resolveContext wiring', () => {
     const prog = buildProgram();
     await getKbSubcommand(prog, 'search')?.parseAsync(['node', 'test', '--query', 'test query']).catch(() => undefined);
 
-    expect(KbService.search).toHaveBeenCalled();
-    const callArgs = (KbService.search as jest.Mock).mock.calls[0];
-    expect(callArgs[1]).toBe('demo');
+    expect(ragControllerSearch).toHaveBeenCalled();
+    const callArgs = (ragControllerSearch as jest.Mock).mock.calls[0][0] as Record<string, unknown>;
+    expect(callArgs).toMatchObject({ slug: 'demo' });
   });
 
   /**
-   * AC-1b: kb list calls KbService.list with projectSlug from config.
+   * AC-1b: kb list calls ragControllerListDocuments with slug from config.
    */
-  it('AC-1b: kb list calls KbService.list with projectSlug from config when --project flag is omitted', async () => {
+  it('AC-1b: kb list calls ragControllerListDocuments with slug from config when --project flag is omitted', async () => {
     (resolveContext as jest.Mock).mockResolvedValue({
       projectSlug: 'demo',
       apiKey: 'test-key-12345678',
@@ -137,14 +134,13 @@ describe('US-003-5: kbCommand — resolveContext wiring', () => {
     const prog = buildProgram();
     await getKbSubcommand(prog, 'list')?.parseAsync(['node', 'test']).catch(() => undefined);
 
-    expect(KbService.list).toHaveBeenCalled();
-    const callArgs = (KbService.list as jest.Mock).mock.calls[0];
-    expect(callArgs[1]).toBe('demo');
+    expect(ragControllerListDocuments).toHaveBeenCalled();
+    const callArgs = (ragControllerListDocuments as jest.Mock).mock.calls[0][0] as Record<string, unknown>;
+    expect(callArgs).toMatchObject({ slug: 'demo' });
   });
 
   /**
-   * AC-2: When resolveContext returns projectSlug: undefined (no config, no flag),
-   * the command must exit with code 2 and print the setup hint.
+   * AC-2: When resolveContext returns projectSlug: undefined, exit with code 2.
    */
   it('AC-2: kb search exits with code 2 and prints setup hint when projectSlug is undefined', async () => {
     (resolveContext as jest.Mock).mockResolvedValue({
@@ -181,7 +177,7 @@ describe('US-003-5: kbCommand — resolveContext wiring', () => {
   });
 
   /**
-   * AC-3: kb.ts must not contain any reference to GLOBAL_PROJECT_SLUG after the change.
+   * AC-3: kb.ts must not contain any reference to GLOBAL_PROJECT_SLUG.
    */
   it('AC-3: kb.ts contains no reference to GLOBAL_PROJECT_SLUG', () => {
     const kbFilePath = join(__dirname, 'kb.ts');
