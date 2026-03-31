@@ -870,6 +870,35 @@ describeIntegration('API Integration Tests', () => {
         .send({ name: 'Ghost' })
         .expect(404);
     });
+
+    it('POST /api/agents/:slug/rotate-key — 404 for nonexistent agent', async () => {
+      await request(httpServer)
+        .post('/api/agents/nonexistent-agent/rotate-key')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(404);
+    });
+
+    it('POST /api/agents/:slug/rotate-key — 403 for non-admin user', async () => {
+      await request(httpServer)
+        .post(`/api/agents/${agentSlug}/rotate-key`)
+        .set('Authorization', `Bearer ${nonAdminUserAccessToken}`)
+        .expect(403);
+    });
+
+    it('POST /api/agents — 403 for non-admin user', async () => {
+      await request(httpServer)
+        .post('/api/agents')
+        .set('Authorization', `Bearer ${nonAdminUserAccessToken}`)
+        .send({ name: 'Forbidden Agent', slug: 'forbidden-agent' })
+        .expect(403);
+    });
+
+    it('GET /api/agents/me — 404 when using user token', async () => {
+      await request(httpServer)
+        .get('/api/agents/me')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(404);
+    });
   });
 
   // ─────────────────────────────────────────────────────────────────

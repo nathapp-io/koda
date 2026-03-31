@@ -85,6 +85,18 @@ describe('initCommand', () => {
       const written = JSON.parse((deps.writeFile as jest.Mock).mock.calls[0][1] as string);
       expect(written).toEqual({ projectSlug: 'koda' });
     });
+
+    it('RED: when --cwd is provided, writes .koda/config.json under that directory', async () => {
+      const deps = makeDeps({ cwd: jest.fn().mockReturnValue('/fake/original-cwd') });
+
+      await initCommand({ project: 'koda', cwd: '/fake/override-cwd' } as any, deps);
+
+      expect(deps.mkdir).toHaveBeenCalledWith('/fake/override-cwd/.koda', { recursive: true });
+      expect(deps.writeFile).toHaveBeenCalledWith(
+        '/fake/override-cwd/.koda/config.json',
+        expect.any(String),
+      );
+    });
   });
 
   describe('AC2: exits 0 and prints success message', () => {

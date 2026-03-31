@@ -423,5 +423,17 @@ describe('config', () => {
       expect(result.apiUrl).toBe('http://localhost:3100');
       expect(result.apiKey).toBe('');
     });
+
+    it('passes cwd override to findProjectConfig when provided', async () => {
+      const findProjectConfig = jest.fn(async () => ({ projectSlug: 'from-cwd' }));
+      const deps: ResolveContextDeps = {
+        findProjectConfig,
+        getConfig: makeGlobalConfig({ apiKey: 'global-key-123456' }),
+      };
+
+      await resolveContext({ cwd: '/repo/feature-dir' }, deps);
+
+      expect(findProjectConfig).toHaveBeenCalledWith('/repo/feature-dir');
+    });
   });
 });

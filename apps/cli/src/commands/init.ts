@@ -1,4 +1,5 @@
 import { promises as fs } from 'fs';
+import { join } from 'path';
 import { resolveAuth } from '../utils/auth';
 import { OpenAPI } from '../generated/core/OpenAPI';
 import { projectsControllerFindBySlug } from '../generated';
@@ -9,6 +10,7 @@ export interface InitOptions {
   defaultPriority?: string;
   apiKey?: string;
   apiUrl?: string;
+  cwd?: string;
 }
 
 export interface ProjectConfigFile {
@@ -73,9 +75,9 @@ export async function initCommand(options: InitOptions, deps: InitDeps = _initDe
     if (options.defaultPriority) configData.defaults.priority = options.defaultPriority;
   }
 
-  const cwd = deps.cwd();
-  const dir = `${cwd}/.koda`;
-  const filePath = `${dir}/config.json`;
+  const cwd = options.cwd ?? deps.cwd();
+  const dir = join(cwd, '.koda');
+  const filePath = join(dir, 'config.json');
 
   await deps.mkdir(dir, { recursive: true });
   await deps.writeFile(filePath, JSON.stringify(configData, null, 2));

@@ -428,6 +428,14 @@ export function ticketCommand(program: Command): void {
           handleApiError(new Error('Comment is required'), { validationError: true });
         }
 
+        if (!options.pass && !options.fail) {
+          handleApiError(new Error('Specify exactly one of --pass or --fail'), { validationError: true });
+        }
+
+        if (options.pass && options.fail) {
+          handleApiError(new Error('Specify only one of --pass or --fail'), { validationError: true });
+        }
+
         const ctx = await resolveContext({ projectSlug: options.project });
 
         if (!ctx.projectSlug) {
@@ -446,7 +454,15 @@ export function ticketCommand(program: Command): void {
           ref,
           requestBody: { body: options.comment },
         });
-        console.log(`✓ Fix verification submitted successfully`);
+
+        // The generated client currently does not expose the approve query param.
+        // Preserve expected CLI semantics: --pass should conclude with CLOSED.
+        if (options.pass) {
+          await ticketsControllerClose({ slug: ctx.projectSlug, ref });
+          console.log(`✓ Fix verified and ticket closed successfully`);
+        } else {
+          console.log(`✓ Fix verification submitted successfully`);
+        }
         process.exit(0);
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
