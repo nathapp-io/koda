@@ -123,26 +123,28 @@ const backTo = computed(() => {
     <div class="flex flex-1 flex-col" :class="sidebarOpen ? 'ml-56' : ''">
       <!-- Header -->
       <header class="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-border bg-background px-6">
-        <button
-          class="rounded-md p-2 hover:bg-accent"
+        <Button
+          variant="ghost"
+          size="sm"
           @click="sidebarOpen = !sidebarOpen"
         >
           <span class="sr-only">{{ t('nav.toggleSidebar') }}</span>
           <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
           </svg>
-        </button>
+        </Button>
 
         <div class="flex items-center gap-4">
           <span class="text-sm font-medium text-foreground">
             {{ auth.user.value?.email }}
           </span>
-          <button
-            class="rounded-md px-3 py-2 text-sm font-medium hover:bg-accent"
+          <Button
+            variant="ghost"
+            size="sm"
             @click="auth.logout()"
           >
             {{ t('common.logout') }}
-          </button>
+          </Button>
         </div>
       </header>
 

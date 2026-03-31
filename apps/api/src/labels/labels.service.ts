@@ -231,7 +231,7 @@ export class LabelsService {
         });
 
         if (existingAssignment) {
-          throw new Error('Label already assigned');
+          throw new ValidationAppException();
         }
 
         // Assign the label

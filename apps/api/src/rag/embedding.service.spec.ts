@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { ValidationAppException } from '@nathapp/nestjs-common';
 import { EmbeddingService } from './embedding.service';
 import { OllamaEmbeddingProvider } from './providers/ollama-embedding.provider';
 import { OpenAIEmbeddingProvider } from './providers/openai-embedding.provider';
@@ -83,7 +84,7 @@ describe('EmbeddingService', () => {
         statusText: 'Service Unavailable',
       } as Response);
 
-      await expect(provider.embed('test')).rejects.toThrow('Ollama embedding request failed');
+      await expect(provider.embed('test')).rejects.toThrow(ValidationAppException);
     });
   });
 
@@ -115,7 +116,7 @@ describe('EmbeddingService', () => {
         statusText: 'Unauthorized',
       } as Response);
 
-      await expect(provider.embed('test')).rejects.toThrow('OpenAI embedding request failed');
+      await expect(provider.embed('test')).rejects.toThrow(ValidationAppException);
     });
   });
 });

@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional, Inject } from '@nestjs/common';
 import { mkdirSync } from 'node:fs';
 import { ConfigService } from '@nestjs/config';
+import { ValidationAppException } from '@nathapp/nestjs-common';
 import { EmbeddingService } from './embedding.service';
 import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interface';
 import type { KbResultDto, SearchKbResponseDto } from './dto/kb-result.dto';
@@ -473,7 +474,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
   async deleteBySource(projectId: string, sourceId: string): Promise<void> {
     // Validate sourceId to prevent SQL injection (only allow safe characters)
     if (!/^[a-zA-Z0-9_-]+$/.test(sourceId)) {
-      throw new Error('Invalid sourceId format');
+      throw new ValidationAppException();
     }
     const table = await this.getOrCreateTable(projectId);
     await table.delete(`source_id = '${sourceId}'`);

@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { IsString, IsOptional, IsNumber, IsArray, MinLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { NotFoundAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { createHmac, randomBytes } from 'crypto';
 import type { PrismaClient } from '@prisma/client';
 import { AgentRole } from '../common/enums';
@@ -89,7 +89,7 @@ export class AgentsService {
     const authCfg = this.configService.get<{ apiKeySecret?: string }>('auth');
     const apiKeySecret = authCfg?.apiKeySecret;
     if (!apiKeySecret) {
-      throw new Error('API_KEY_SECRET is not configured');
+      throw new ValidationAppException();
     }
 
     const apiKeyHash = createHmac('sha256', apiKeySecret).update(rawKey).digest('hex');

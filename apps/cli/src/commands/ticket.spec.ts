@@ -1225,7 +1225,7 @@ describe('ticketCommand', () => {
       };
 
       (TicketsService.verify as jest.Mock).mockResolvedValue({
-        data: mockTicket,
+        data: { ret: 0, data: mockTicket },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -1275,7 +1275,7 @@ describe('ticketCommand', () => {
       };
 
       (TicketsService.verify as jest.Mock).mockResolvedValue({
-        data: mockTicket,
+        data: { ret: 0, data: mockTicket },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -1408,7 +1408,7 @@ describe('ticketCommand', () => {
       };
 
       (TicketsService.start as jest.Mock).mockResolvedValue({
-        data: mockTicket,
+        data: { ret: 0, data: mockTicket },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -1458,7 +1458,7 @@ describe('ticketCommand', () => {
       };
 
       (TicketsService.fix as jest.Mock).mockResolvedValue({
-        data: mockTicket,
+        data: { ret: 0, data: mockTicket },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -1495,7 +1495,7 @@ describe('ticketCommand', () => {
       };
 
       (TicketsService.fix as jest.Mock).mockResolvedValue({
-        data: mockTicket,
+        data: { ret: 0, data: mockTicket },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -1546,7 +1546,7 @@ describe('ticketCommand', () => {
       };
 
       (TicketsService.fix as jest.Mock).mockResolvedValue({
-        data: mockTicket,
+        data: { ret: 0, data: mockTicket },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -1583,7 +1583,7 @@ describe('ticketCommand', () => {
       };
 
       (TicketsService.verifyFix as jest.Mock).mockResolvedValue({
-        data: mockTicket,
+        data: { ret: 0, data: mockTicket },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -1622,7 +1622,7 @@ describe('ticketCommand', () => {
       };
 
       (TicketsService.verifyFix as jest.Mock).mockResolvedValue({
-        data: mockTicket,
+        data: { ret: 0, data: mockTicket },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -1673,7 +1673,7 @@ describe('ticketCommand', () => {
       };
 
       (TicketsService.verifyFix as jest.Mock).mockResolvedValue({
-        data: mockTicket,
+        data: { ret: 0, data: mockTicket },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -1711,7 +1711,7 @@ describe('ticketCommand', () => {
       };
 
       (TicketsService.close as jest.Mock).mockResolvedValue({
-        data: mockTicket,
+        data: { ret: 0, data: mockTicket },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -1761,7 +1761,7 @@ describe('ticketCommand', () => {
       };
 
       (TicketsService.reject as jest.Mock).mockResolvedValue({
-        data: mockTicket,
+        data: { ret: 0, data: mockTicket },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -1811,7 +1811,7 @@ describe('ticketCommand', () => {
       };
 
       (TicketsService.reject as jest.Mock).mockResolvedValue({
-        data: mockTicket,
+        data: { ret: 0, data: mockTicket },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -2173,7 +2173,7 @@ describe('ticketCommand', () => {
     });
 
     it('ticket fix sends { body: comment } to the API', async () => {
-      (TicketsService.fix as jest.Mock).mockResolvedValue({ data: {} });
+      (TicketsService.fix as jest.Mock).mockResolvedValue({ data: { ret: 0, data: {} } });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
       const fixCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'fix');

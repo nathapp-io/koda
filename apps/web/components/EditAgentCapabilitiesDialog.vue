@@ -2,7 +2,7 @@
   <Dialog :open="open" @update:open="$emit('update:open', $event)">
     <DialogContent class="sm:max-w-[500px]">
       <DialogHeader>
-        <DialogTitle>{{ t('agents.editCapabilities.title') }}</DialogTitle>
+        <DialogTitle>{{ t('agents.form.editCapabilities') }}</DialogTitle>
       </DialogHeader>
 
       <form @submit="onSubmit" class="space-y-4">
@@ -18,15 +18,17 @@
                   class="flex items-center gap-1 px-2 py-0.5"
                 >
                   {{ cap }}
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="sm"
                     @click="handleRemove(index)"
-                    class="ml-0.5 rounded-sm hover:bg-muted-foreground/20"
+                    class="ml-0.5 h-4 w-4 p-0"
                   >
                     <LucideX class="h-3 w-3" />
-                  </button>
+                  </Button>
                 </Badge>
-                <input
+                <Input
                   :placeholder="capabilitiesTags.length === 0 ? t('agents.form.capabilitiesPlaceholder') : ''"
                   class="flex-1 min-w-[120px] bg-transparent outline-none placeholder:text-muted-foreground"
                   @keydown.enter.prevent="addCapability"

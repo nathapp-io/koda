@@ -23,9 +23,11 @@ function switchLocale(code: string) {
 <template>
   <!-- Toggle buttons for 2 locales -->
   <div v-if="!useDropdown" class="flex items-center gap-1">
-    <button
+    <Button
       v-for="loc in allLocales"
       :key="loc.code"
+      variant="ghost"
+      size="sm"
       :class="[
         'px-2 py-1 text-xs rounded transition-colors',
         locale === loc.code
@@ -35,7 +37,7 @@ function switchLocale(code: string) {
       @click="switchLocale(loc.code)"
     >
       {{ loc.name }}
-    </button>
+    </Button>
   </div>
 
   <!-- Select dropdown for 3+ locales -->
