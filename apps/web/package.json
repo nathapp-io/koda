@@ -1,6 +1,6 @@
 {
   "name": "@nathapp/koda-web",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "private": true,
   "scripts": {
     "build": "nuxt build",
@@ -37,7 +37,6 @@
     "@playwright/test": "^1.51.0",
     "@nathapp/eslint-config": "workspace:*",
     "@nathapp/typescript-config": "workspace:*",
-
     "@nuxt/devtools": "latest",
     "@nuxt/eslint": "^0.7.6",
     "@types/jest": "^29.5.14",
