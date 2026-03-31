@@ -67,7 +67,7 @@ export function handleApiError(err: unknown, opts?: HandleApiErrorOpts): never {
 
   if (status === 404) {
     printError(opts?.notFoundMessage ?? 'Not found');
-    process.exit(1);
+    process.exit(4);
   }
 
   printError(message);

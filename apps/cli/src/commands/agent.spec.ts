@@ -278,7 +278,7 @@ describe('agentCommand', () => {
       await meCmd?.parseAsync(['node', 'test']);
 
       expect(logSpy).toHaveBeenCalledWith(
-        expect.stringContaining('***gh5678')
+        expect.stringContaining('****5678')
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
     });

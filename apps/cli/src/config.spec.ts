@@ -420,7 +420,7 @@ describe('config', () => {
         getConfig: makeGlobalConfig({}),
       };
       const result = await resolveContext({}, deps);
-      expect(result.apiUrl).toBe('http://localhost:3100/api');
+      expect(result.apiUrl).toBe('http://localhost:3100');
       expect(result.apiKey).toBe('');
     });
   });

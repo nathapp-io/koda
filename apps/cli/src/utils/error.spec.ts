@@ -229,7 +229,7 @@ describe('error', () => {
         // Expected to throw process.exit
       }
 
-      expect(exitCode).toBe(1);
+      expect(exitCode).toBe(4);
     });
 
     it('uses opts.notFoundMessage for 404 errors when provided', () => {
@@ -248,7 +248,7 @@ describe('error', () => {
 
       const output = errorOutput.join('\n');
       expect(output).toContain('Project not found: my-slug');
-      expect(exitCode).toBe(1);
+      expect(exitCode).toBe(4);
     });
 
     it('uses default not-found message for 404 when opts.notFoundMessage not provided', () => {
@@ -267,7 +267,7 @@ describe('error', () => {
 
       const output = errorOutput.join('\n');
       expect(output).toContain('Not found');
-      expect(exitCode).toBe(1);
+      expect(exitCode).toBe(4);
     });
 
     it('includes auth hint for 401 errors', () => {
@@ -376,7 +376,7 @@ describe('error', () => {
         // Expected to throw process.exit
       }
 
-      expect(exitCode).toBe(1);
+      expect(exitCode).toBe(4);
     });
   });
 });
