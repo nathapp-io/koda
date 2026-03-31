@@ -88,7 +88,7 @@ jobs:
         run: bun run db:generate
 
       - name: Generate OPENAPI types
-        run: bun run generate
+        run: bun run generate:cli
 
       - name: Test
         run: bunx turbo run test -- --bail
@@ -120,7 +120,7 @@ jobs:
         run: bun run db:generate
 
       - name: Generate OPENAPI types
-        run: bun run generate
+        run: bun run generate:cli
 
       - name: Smoke test
         run: bash scripts/smoke-test-cli.sh
