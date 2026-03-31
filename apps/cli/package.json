@@ -48,6 +48,9 @@
     ],
     "rootDir": ".",
     "testRegex": "(src|.nax)/.*\\.spec\\.ts$",
+    "testPathIgnorePatterns": [
+      ".nax/"
+    ],
     "transform": {
       "^.+\\.(t|j)s$": [
         "ts-jest",

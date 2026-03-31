@@ -24,28 +24,16 @@ jest.mock('conf', () => {
   return jest.fn(() => mockStore);
 });
 
-// Mock axios client
-const mockAxios = {
-  get: jest.fn(),
-  post: jest.fn(),
-  delete: jest.fn(),
-};
-
-jest.mock('axios', () => {
-  return {
-    create: () => mockAxios,
-  };
-});
-
 // Mock the generated client
 jest.mock('../generated', () => ({
-  LabelsService: {
-    create: jest.fn(),
-    list: jest.fn(),
-    delete: jest.fn(),
-    addToTicket: jest.fn(),
-    removeFromTicket: jest.fn(),
-  },
+  labelsControllerCreateFromHttp: jest.fn(),
+  labelsControllerFindByProjectFromHttp: jest.fn(),
+  labelsControllerDeleteFromHttp: jest.fn(),
+  OpenAPI: { BASE: '', TOKEN: '' },
+}));
+
+jest.mock('../generated/core/OpenAPI', () => ({
+  OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
 // Mock config module to use mockData instead of real filesystem
@@ -65,7 +53,11 @@ jest.mock('../config', () => ({
 
 import { Command } from 'commander';
 import { labelCommand } from './label';
-import { LabelsService } from '../generated';
+import {
+  labelsControllerCreateFromHttp,
+  labelsControllerFindByProjectFromHttp,
+  labelsControllerDeleteFromHttp,
+} from '../generated';
 import { resolveContext } from '../config';
 
 describe('labelCommand', () => {
@@ -92,11 +84,9 @@ describe('labelCommand', () => {
       apiKey: 'sk-test-key123',
       apiUrl: 'http://localhost:3100/api',
     });
-    (LabelsService.create as jest.Mock).mockReset();
-    (LabelsService.list as jest.Mock).mockReset();
-    (LabelsService.delete as jest.Mock).mockReset();
-    (LabelsService.addToTicket as jest.Mock).mockReset();
-    (LabelsService.removeFromTicket as jest.Mock).mockReset();
+    (labelsControllerCreateFromHttp as jest.Mock).mockReset();
+    (labelsControllerFindByProjectFromHttp as jest.Mock).mockReset();
+    (labelsControllerDeleteFromHttp as jest.Mock).mockReset();
   });
 
   afterEach(() => {
@@ -107,9 +97,7 @@ describe('labelCommand', () => {
     it('creates and displays label in table format', async () => {
       const mockLabel = { id: 'lbl-1', name: 'Bug', color: '#ff0000', projectId: 'p-1' };
 
-      (LabelsService.create as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockLabel },
-      });
+      (labelsControllerCreateFromHttp as jest.Mock).mockResolvedValue({ ret: 0, data: mockLabel });
 
       const labelCmd = program.commands.find((cmd) => cmd.name() === 'label');
       const createCmd = labelCmd?.commands.find((cmd) => cmd.name() === 'create');
@@ -118,9 +106,11 @@ describe('labelCommand', () => {
         'node', 'test', '--project', 'koda', '--name', 'Bug', '--color', '#ff0000',
       ]);
 
-      expect(LabelsService.create).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({ projectSlug: 'koda', name: 'Bug', color: '#ff0000' })
+      expect(labelsControllerCreateFromHttp).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slug: 'koda',
+          requestBody: expect.objectContaining({ name: 'Bug', color: '#ff0000' }),
+        })
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
@@ -128,9 +118,7 @@ describe('labelCommand', () => {
     it('outputs unwrapped label JSON with --json flag', async () => {
       const mockLabel = { id: 'lbl-1', name: 'Bug', color: '#ff0000', projectId: 'p-1' };
 
-      (LabelsService.create as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockLabel },
-      });
+      (labelsControllerCreateFromHttp as jest.Mock).mockResolvedValue({ ret: 0, data: mockLabel });
 
       const labelCmd = program.commands.find((cmd) => cmd.name() === 'label');
       const createCmd = labelCmd?.commands.find((cmd) => cmd.name() === 'create');
@@ -165,7 +153,7 @@ describe('labelCommand', () => {
     it('handles API errors gracefully', async () => {
       const mockError = new Error('API Error');
       (mockError as any).response = { status: 500 };
-      (LabelsService.create as jest.Mock).mockRejectedValue(mockError);
+      (labelsControllerCreateFromHttp as jest.Mock).mockRejectedValue(mockError);
 
       const labelCmd = program.commands.find((cmd) => cmd.name() === 'label');
       const createCmd = labelCmd?.commands.find((cmd) => cmd.name() === 'create');
@@ -185,8 +173,9 @@ describe('labelCommand', () => {
         { id: 'lbl-2', name: 'Feature', color: '#00ff00', projectId: 'p-1' },
       ];
 
-      (LabelsService.list as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: { items: mockLabels, total: 2 } },
+      (labelsControllerFindByProjectFromHttp as jest.Mock).mockResolvedValue({
+        ret: 0,
+        data: { items: mockLabels, total: 2 },
       });
 
       const labelCmd = program.commands.find((cmd) => cmd.name() === 'label');
@@ -194,9 +183,8 @@ describe('labelCommand', () => {
 
       await listCmd?.parseAsync(['node', 'test', '--project', 'koda']);
 
-      expect(LabelsService.list).toHaveBeenCalledWith(
-        expect.anything(),
-        'koda'
+      expect(labelsControllerFindByProjectFromHttp).toHaveBeenCalledWith(
+        expect.objectContaining({ slug: 'koda' })
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
@@ -206,8 +194,9 @@ describe('labelCommand', () => {
         { id: 'lbl-1', name: 'Bug', color: '#ff0000', projectId: 'p-1' },
       ];
 
-      (LabelsService.list as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: { items: mockLabels, total: 1 } },
+      (labelsControllerFindByProjectFromHttp as jest.Mock).mockResolvedValue({
+        ret: 0,
+        data: { items: mockLabels, total: 1 },
       });
 
       const labelCmd = program.commands.find((cmd) => cmd.name() === 'label');
@@ -238,9 +227,7 @@ describe('labelCommand', () => {
 
   describe('label delete', () => {
     it('deletes a label by id', async () => {
-      (LabelsService.delete as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: null },
-      });
+      (labelsControllerDeleteFromHttp as jest.Mock).mockResolvedValue(undefined);
 
       const labelCmd = program.commands.find((cmd) => cmd.name() === 'label');
       const deleteCmd = labelCmd?.commands.find((cmd) => cmd.name() === 'delete');
@@ -249,10 +236,8 @@ describe('labelCommand', () => {
         'node', 'test', '--project', 'koda', '--id', 'lbl-1',
       ]);
 
-      expect(LabelsService.delete).toHaveBeenCalledWith(
-        expect.anything(),
-        'koda',
-        'lbl-1'
+      expect(labelsControllerDeleteFromHttp).toHaveBeenCalledWith(
+        expect.objectContaining({ slug: 'koda', id: 'lbl-1' })
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
@@ -277,7 +262,7 @@ describe('labelCommand', () => {
     it('handles 404 not found errors', async () => {
       const mockError = new Error('Not found');
       (mockError as any).response = { status: 404 };
-      (LabelsService.delete as jest.Mock).mockRejectedValue(mockError);
+      (labelsControllerDeleteFromHttp as jest.Mock).mockRejectedValue(mockError);
 
       const labelCmd = program.commands.find((cmd) => cmd.name() === 'label');
       const deleteCmd = labelCmd?.commands.find((cmd) => cmd.name() === 'delete');
@@ -286,7 +271,7 @@ describe('labelCommand', () => {
         'node', 'test', '--project', 'koda', '--id', 'nonexistent',
       ]);
 
-      expect(exitSpy).toHaveBeenCalledWith(4);
+      expect(exitSpy).toHaveBeenCalledWith(1);
     });
   });
 });

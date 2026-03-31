@@ -26,10 +26,7 @@ jest.mock('conf', () =>
   })),
 );
 
-// Mock axios to prevent real HTTP calls
-jest.mock('axios', () => ({ create: jest.fn(() => ({})) }));
-
-// Mock the config module — both getConfig (used by current resolveAuth) and resolveContext (new path)
+// Mock the config module — both getConfig and resolveContext
 jest.mock('../config', () => ({
   getConfig: jest.fn(() => ({
     apiKey: 'test-key-12345678',
@@ -41,17 +38,20 @@ jest.mock('../config', () => ({
 
 // Mock generated API client
 jest.mock('../generated', () => ({
-  AgentService: {
-    me: jest.fn(),
-    pickup: jest.fn(),
-  },
+  agentsControllerFindMe: jest.fn(),
+  agentsControllerSuggestTicket: jest.fn(),
+  OpenAPI: { BASE: '', TOKEN: '' },
+}));
+
+jest.mock('../generated/core/OpenAPI', () => ({
+  OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { Command } from 'commander';
 import { agentCommand } from './agent';
-import { AgentService } from '../generated';
+import { agentsControllerFindMe, agentsControllerSuggestTicket } from '../generated';
 import { resolveContext } from '../config';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -107,12 +107,14 @@ describe('US-003-4: agentCommand pickup — resolveContext wiring', () => {
     consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
     consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
 
-    (AgentService.me as jest.Mock).mockResolvedValue({
-      data: { ret: 0, data: mockAgent },
+    (agentsControllerFindMe as jest.Mock).mockResolvedValue({
+      ret: 0,
+      data: mockAgent,
     });
 
-    (AgentService.pickup as jest.Mock).mockResolvedValue({
-      data: { ret: 0, data: mockPickupResult },
+    (agentsControllerSuggestTicket as jest.Mock).mockResolvedValue({
+      ret: 0,
+      data: mockPickupResult,
     });
   });
 
@@ -122,12 +124,9 @@ describe('US-003-4: agentCommand pickup — resolveContext wiring', () => {
 
   /**
    * AC-1: When --project is omitted and .koda/config.json has projectSlug: 'configured-project',
-   * AgentService.pickup must be called with that projectSlug — not the old hardcoded 'koda' fallback.
-   *
-   * RED reason: current code does NOT use resolveContext in pickup action,
-   * and requires --project flag explicitly.
+   * agentsControllerSuggestTicket must be called with that projectSlug.
    */
-  it('AC-1: calls AgentService.pickup with projectSlug from config when --project flag is omitted', async () => {
+  it('AC-1: calls agentsControllerSuggestTicket with projectSlug from config when --project flag is omitted', async () => {
     (resolveContext as jest.Mock).mockResolvedValue({
       projectSlug: 'configured-project',
       apiKey: 'test-key-12345678',
@@ -137,18 +136,15 @@ describe('US-003-4: agentCommand pickup — resolveContext wiring', () => {
     const prog = buildProgram();
     await getPickupCmd(prog)?.parseAsync(['node', 'test']).catch(() => undefined);
 
-    expect(AgentService.pickup).toHaveBeenCalled();
-    const callArgs = (AgentService.pickup as jest.Mock).mock.calls[0];
-    expect(callArgs[2]).toBe('configured-project');
+    expect(agentsControllerSuggestTicket).toHaveBeenCalled();
+    const callArgs = (agentsControllerSuggestTicket as jest.Mock).mock.calls[0][0] as Record<string, unknown>;
+    expect(callArgs).toMatchObject({ project: 'configured-project' });
   });
 
   /**
-   * AC-2: When --project foo is passed, AgentService.pickup must receive 'foo'
-   * regardless of what .koda/config.json contains.
-   *
-   * This verifies the flag-takes-precedence behaviour.
+   * AC-2: When --project foo is passed, agentsControllerSuggestTicket must receive project: 'foo'.
    */
-  it('AC-2: calls AgentService.pickup with projectSlug "foo" when --project foo is passed', async () => {
+  it('AC-2: calls agentsControllerSuggestTicket with project "foo" when --project foo is passed', async () => {
     (resolveContext as jest.Mock).mockResolvedValue({
       projectSlug: 'foo',
       apiKey: 'test-key-12345678',
@@ -158,16 +154,13 @@ describe('US-003-4: agentCommand pickup — resolveContext wiring', () => {
     const prog = buildProgram();
     await getPickupCmd(prog)?.parseAsync(['node', 'test', '--project', 'foo']).catch(() => undefined);
 
-    expect(AgentService.pickup).toHaveBeenCalled();
-    const callArgs = (AgentService.pickup as jest.Mock).mock.calls[0];
-    expect(callArgs[2]).toBe('foo');
+    expect(agentsControllerSuggestTicket).toHaveBeenCalled();
+    const callArgs = (agentsControllerSuggestTicket as jest.Mock).mock.calls[0][0] as Record<string, unknown>;
+    expect(callArgs).toMatchObject({ project: 'foo' });
   });
 
   /**
-   * AC-3: When resolveContext returns projectSlug: undefined (no config, no flag),
-   * the command must exit with code 2 and print the setup hint.
-   *
-   * RED reason: current code requires --project and exits with code 3 if missing.
+   * AC-3: When resolveContext returns projectSlug: undefined, exit with code 2.
    */
   it('AC-3: exits with code 2 and prints setup hint when projectSlug is undefined', async () => {
     (resolveContext as jest.Mock).mockResolvedValue({
@@ -186,7 +179,7 @@ describe('US-003-4: agentCommand pickup — resolveContext wiring', () => {
   });
 
   /**
-   * AC-4: agent.ts must not contain any reference to GLOBAL_PROJECT_SLUG after the change.
+   * AC-4: agent.ts must not contain any reference to GLOBAL_PROJECT_SLUG.
    */
   it('AC-4: agent.ts contains no reference to GLOBAL_PROJECT_SLUG', () => {
     const agentFilePath = join(__dirname, 'agent.ts');

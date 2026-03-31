@@ -7,56 +7,56 @@
       </p>
     </div>
 
-    <form class="space-y-4" @submit.prevent="handleRegister">
-        <div>
-          <label for="name" class="block text-sm font-medium">
-            {{ t('auth.register.name') }}
-          </label>
-          <input
-            id="name"
-            v-model="name"
-            type="text"
-            required
-            class="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            :placeholder="t('auth.register.namePlaceholder')"
-          />
-        </div>
+    <form class="space-y-4" @submit.prevent="onSubmit">
+      <FormField v-slot="{ componentField }" name="name">
+        <FormItem>
+          <FormLabel>{{ t('auth.register.name') }}</FormLabel>
+          <FormControl>
+            <Input
+              id="name"
+              type="text"
+              :placeholder="t('auth.register.namePlaceholder')"
+              v-bind="componentField"
+            />
+          </FormControl>
+          <FormMessage />
+        </FormItem>
+      </FormField>
 
-        <div>
-          <label for="email" class="block text-sm font-medium">
-            {{ t('auth.register.email') }}
-          </label>
-          <input
-            id="email"
-            v-model="email"
-            type="email"
-            required
-            class="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            :placeholder="t('auth.register.emailPlaceholder')"
-          />
-        </div>
+      <FormField v-slot="{ componentField }" name="email">
+        <FormItem>
+          <FormLabel>{{ t('auth.register.email') }}</FormLabel>
+          <FormControl>
+            <Input
+              id="email"
+              type="email"
+              :placeholder="t('auth.register.emailPlaceholder')"
+              v-bind="componentField"
+            />
+          </FormControl>
+          <FormMessage />
+        </FormItem>
+      </FormField>
 
-        <div>
-          <label for="password" class="block text-sm font-medium">
-            {{ t('auth.register.password') }}
-          </label>
-          <input
-            id="password"
-            v-model="password"
-            type="password"
-            required
-            class="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            :placeholder="t('auth.register.passwordPlaceholder')"
-          />
-        </div>
+      <FormField v-slot="{ componentField }" name="password">
+        <FormItem>
+          <FormLabel>{{ t('auth.register.password') }}</FormLabel>
+          <FormControl>
+            <Input
+              id="password"
+              type="password"
+              :placeholder="t('auth.register.passwordPlaceholder')"
+              v-bind="componentField"
+            />
+          </FormControl>
+          <FormMessage />
+        </FormItem>
+      </FormField>
 
-        <button
-          type="submit"
-          class="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-        >
-          {{ t('auth.register.signUp') }}
-        </button>
-      </form>
+      <Button type="submit" class="w-full">
+        {{ t('auth.register.signUp') }}
+      </Button>
+    </form>
 
     <p class="text-center text-sm text-muted-foreground">
       {{ t('auth.register.hasAccount') }}
@@ -68,7 +68,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { useForm } from 'vee-validate'
+import { toTypedSchema } from '@vee-validate/zod'
+import * as z from 'zod'
 import { extractApiError } from '~/composables/useApi'
 
 definePageMeta({ layout: 'auth' })
@@ -76,19 +78,25 @@ definePageMeta({ layout: 'auth' })
 const { t } = useI18n()
 const toast = useAppToast()
 
-const name = ref('')
-const email = ref('')
-const password = ref('')
+const formSchema = toTypedSchema(z.object({
+  name: z.string().min(1, t('auth.validation.nameRequired') || 'Name is required'),
+  email: z.string().min(1, t('auth.validation.emailRequired') || 'Email is required').email(t('auth.validation.emailInvalid') || 'Invalid email'),
+  password: z.string().min(8, t('auth.validation.passwordMin') || 'Password must be at least 8 characters'),
+}))
+
+const { handleSubmit } = useForm({
+  validationSchema: formSchema,
+})
 
 const auth = useAuth()
 
-const handleRegister = async () => {
+const onSubmit = handleSubmit(async (values) => {
   try {
-    await auth.register({ name: name.value, email: email.value, password: password.value })
+    await auth.register({ name: values.name, email: values.email, password: values.password })
     toast.success(t('toast.loggedIn'))
     navigateTo('/')
   } catch (err: unknown) {
     toast.error(extractApiError(err))
   }
-}
+})
 </script>

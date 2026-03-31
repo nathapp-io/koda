@@ -24,23 +24,14 @@ jest.mock('conf', () => {
   return jest.fn(() => mockStore);
 });
 
-// Mock axios client
-const mockAxios = {
-  get: jest.fn(),
-  post: jest.fn(),
-};
-
-jest.mock('axios', () => {
-  return {
-    create: () => mockAxios,
-  };
-});
-
 // Mock the generated client
 jest.mock('../generated', () => ({
-  CommentsService: {
-    add: jest.fn(),
-  },
+  commentsControllerCreateFromHttp: jest.fn(),
+  OpenAPI: { BASE: '', TOKEN: '' },
+}));
+
+jest.mock('../generated/core/OpenAPI', () => ({
+  OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
 // Mock config module to use mockData instead of real filesystem
@@ -66,7 +57,7 @@ jest.mock('../config', () => ({
 
 import { Command } from 'commander';
 import { commentCommand } from './comment';
-import { CommentsService } from '../generated';
+import { commentsControllerCreateFromHttp } from '../generated';
 
 describe('commentCommand', () => {
   let program: Command;
@@ -88,7 +79,7 @@ describe('commentCommand', () => {
     logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
 
     jest.clearAllMocks();
-    (CommentsService.add as jest.Mock).mockReset();
+    (commentsControllerCreateFromHttp as jest.Mock).mockReset();
   });
 
   afterEach(() => {
@@ -105,22 +96,21 @@ describe('commentCommand', () => {
         createdAt: new Date().toISOString(),
       };
 
-      (CommentsService.add as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockComment },
-      });
+      (commentsControllerCreateFromHttp as jest.Mock).mockResolvedValue({ ret: 0, data: mockComment });
 
       const commentCmd = program.commands.find((cmd) => cmd.name() === 'comment');
       const addCmd = commentCmd?.commands.find((cmd) => cmd.name() === 'add');
 
       await addCmd?.parseAsync(['node', 'test', 'KODA-42', '--body', 'Test comment']).catch(() => undefined);
 
-      expect(CommentsService.add).toHaveBeenCalledWith(
-        expect.any(Object),
-        'koda',
-        'KODA-42',
+      expect(commentsControllerCreateFromHttp).toHaveBeenCalledWith(
         expect.objectContaining({
-          body: 'Test comment',
-          type: 'GENERAL',
+          slug: 'koda',
+          ref: 'KODA-42',
+          requestBody: expect.objectContaining({
+            body: 'Test comment',
+            type: 'GENERAL',
+          }),
         })
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
@@ -135,9 +125,7 @@ describe('commentCommand', () => {
         createdAt: new Date().toISOString(),
       };
 
-      (CommentsService.add as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockComment },
-      });
+      (commentsControllerCreateFromHttp as jest.Mock).mockResolvedValue({ ret: 0, data: mockComment });
 
       const commentCmd = program.commands.find((cmd) => cmd.name() === 'comment');
       const addCmd = commentCmd?.commands.find((cmd) => cmd.name() === 'add');
@@ -152,13 +140,14 @@ describe('commentCommand', () => {
         'FIX_REPORT',
       ]).catch(() => undefined);
 
-      expect(CommentsService.add).toHaveBeenCalledWith(
-        expect.any(Object),
-        'koda',
-        'KODA-42',
+      expect(commentsControllerCreateFromHttp).toHaveBeenCalledWith(
         expect.objectContaining({
-          body: 'Fix report',
-          type: 'FIX_REPORT',
+          slug: 'koda',
+          ref: 'KODA-42',
+          requestBody: expect.objectContaining({
+            body: 'Fix report',
+            type: 'FIX_REPORT',
+          }),
         })
       );
     });
@@ -184,9 +173,7 @@ describe('commentCommand', () => {
           createdAt: new Date().toISOString(),
         };
 
-        (CommentsService.add as jest.Mock).mockResolvedValue({
-          data: { ret: 0, data: mockComment },
-        });
+        (commentsControllerCreateFromHttp as jest.Mock).mockResolvedValue({ ret: 0, data: mockComment });
 
         const commentCmd = program.commands.find((cmd) => cmd.name() === 'comment');
         const addCmd = commentCmd?.commands.find((cmd) => cmd.name() === 'add');
@@ -201,12 +188,11 @@ describe('commentCommand', () => {
           type,
         ]).catch(() => undefined);
 
-        expect(CommentsService.add).toHaveBeenCalledWith(
-          expect.any(Object),
-          'koda',
-          'KODA-42',
+        expect(commentsControllerCreateFromHttp).toHaveBeenCalledWith(
           expect.objectContaining({
-            type,
+            slug: 'koda',
+            ref: 'KODA-42',
+            requestBody: expect.objectContaining({ type }),
           })
         );
       }
@@ -216,14 +202,12 @@ describe('commentCommand', () => {
       const mockComment = {
         id: 'comment-1',
         body: 'Test comment',
-        type: 'general',
+        type: 'GENERAL',
         ticketId: 'ticket-1',
         createdAt: new Date().toISOString(),
       };
 
-      (CommentsService.add as jest.Mock).mockResolvedValue({
-        data: { ret: 0, data: mockComment },
-      });
+      (commentsControllerCreateFromHttp as jest.Mock).mockResolvedValue({ ret: 0, data: mockComment });
 
       const commentCmd = program.commands.find((cmd) => cmd.name() === 'comment');
       const addCmd = commentCmd?.commands.find((cmd) => cmd.name() === 'add');
@@ -264,7 +248,7 @@ describe('commentCommand', () => {
       const mockError = new Error('API Error');
       (mockError as any).response = { status: 500 };
 
-      (CommentsService.add as jest.Mock).mockRejectedValue(mockError);
+      (commentsControllerCreateFromHttp as jest.Mock).mockRejectedValue(mockError);
 
       const commentCmd = program.commands.find((cmd) => cmd.name() === 'comment');
       const addCmd = commentCmd?.commands.find((cmd) => cmd.name() === 'add');
@@ -282,7 +266,7 @@ describe('commentCommand', () => {
       const mockError = new Error('Unauthorized');
       (mockError as any).response = { status: 401 };
 
-      (CommentsService.add as jest.Mock).mockRejectedValue(mockError);
+      (commentsControllerCreateFromHttp as jest.Mock).mockRejectedValue(mockError);
 
       const commentCmd = program.commands.find((cmd) => cmd.name() === 'comment');
       const addCmd = commentCmd?.commands.find((cmd) => cmd.name() === 'add');

@@ -1,4 +1,4 @@
-import { Injectable, Inject, Optional } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import {
@@ -33,7 +33,7 @@ export type TransitionResult = TransitionResultWithComment | TransitionResultWit
 @Injectable()
 export class TicketTransitionsService {
   constructor(
-    @Inject('PrismaService') private prisma: PrismaService<PrismaClient>,
+    private readonly prisma: PrismaService<PrismaClient>,
     @Optional() private readonly ragService?: RagService,
     @Optional() private readonly webhookDispatcher?: WebhookDispatcherService,
   ) {}
@@ -194,7 +194,7 @@ export class TicketTransitionsService {
     const ticket = await this.findTicketByRef(projectSlug, ticketRef);
     if (!ticket) throw new NotFoundAppException();
     if (ticket.status !== TicketStatus.VERIFY_FIX) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'tickets');
     }
     const toStatus = approve ? TicketStatus.CLOSED : TicketStatus.IN_PROGRESS;
     return this.executeTransition(
@@ -222,12 +222,12 @@ export class TicketTransitionsService {
       where: { slug: projectSlug },
     });
     if (!project || project.deletedAt) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'tickets');
     }
 
     const ticket = await this.findTicketByRef(projectSlug, ticketRef);
     if (!ticket) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'tickets');
     }
 
     // Validate that CLOSED is reachable from current status
@@ -236,7 +236,7 @@ export class TicketTransitionsService {
       ticket.status === TicketStatus.CREATED ||
       ticket.status === TicketStatus.REJECTED
     ) {
-      throw new ValidationAppException();  // i18n key for invalid ticket transition
+      throw new ValidationAppException({}, 'tickets');  // i18n key for invalid ticket transition
     }
 
     // Execute transition without comment requirement
@@ -312,13 +312,13 @@ export class TicketTransitionsService {
       where: { slug: projectSlug },
     });
     if (!project || project.deletedAt) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'tickets');
     }
 
     // Find ticket
     const ticket = await this.findTicketByRef(projectSlug, ticketRef);
     if (!ticket) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'tickets');
     }
 
     // Validate transition (ticket.status is String in SQLite schema, cast to local enum type)

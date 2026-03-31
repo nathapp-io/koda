@@ -269,6 +269,7 @@
       "addTitle": "Add Document",
       "addDescription": "Index a document into the knowledge base for this project.",
       "empty": "No documents yet.",
+      "indexed": "{count} document(s) indexed",
       "columns": {
         "source": "Source",
         "content": "Content",
@@ -285,6 +286,9 @@
         "content": "Content",
         "contentPlaceholder": "Enter document content..."
       }
+    },
+    "validation": {
+      "sourceIdRequired": "Source ID and Content are required."
     },
     "toast": {
       "searchFailed": "Search failed",

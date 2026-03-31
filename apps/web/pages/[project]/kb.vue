@@ -146,7 +146,7 @@ function onDocumentAdded() {
         <ErrorState v-else-if="error" @retry="refresh()" />
         <template v-else>
           <div class="flex items-center justify-between">
-            <p class="text-sm text-muted-foreground">{{ docs.length }} document(s) indexed</p>
+            <p class="text-sm text-muted-foreground">{{ t('kb.documents.indexed', { count: docs.length }) }}</p>
             <KbAddDocumentDialog :project-slug="slug" @added="onDocumentAdded" />
           </div>
 

@@ -16,9 +16,11 @@ function setMode(mode: string) {
 
 <template>
   <div class="flex items-center gap-0.5 rounded-md border border-border p-0.5">
-    <button
+    <Button
       v-for="mode in modes"
       :key="mode.value"
+      variant="ghost"
+      size="sm"
       :title="mode.label"
       :class="[
         'rounded px-1.5 py-0.5 text-xs transition-colors flex items-center',
@@ -29,6 +31,6 @@ function setMode(mode: string) {
       @click="setMode(mode.value)"
     >
       <component :is="mode.icon" class="h-3.5 w-3.5" />
-    </button>
+    </Button>
   </div>
 </template>

@@ -6,7 +6,6 @@ import {
   Delete,
   Body,
   Param,
-  Req,
   HttpCode,
 } from '@nestjs/common';
 import {
@@ -20,12 +19,9 @@ import { CreateLabelDto } from './dto/create-label.dto';
 import { UpdateLabelDto } from './dto/update-label.dto';
 import { AssignLabelDto } from './dto/assign-label.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
+import { CurrentActor } from '../auth/decorators/current-user.decorator';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type RequestWithUser = any & { user?: any; agent?: any };
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type CurrentUser = any;
+type CurrentUser = { id: string; sub: string; role?: string } | null;
 
 @ApiTags('labels')
 @ApiBearerAuth()
@@ -94,16 +90,13 @@ export class LabelsController {
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   @ApiResponse({ status: 403, description: 'Unauthorized - admin only' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async createFromHttp(
     @Param('slug') slug: string,
     @Body() createLabelDto: CreateLabelDto,
-    @Req() req: RequestWithUser,
+    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
   ) {
-    const currentUser = req.user || req.agent;
-    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
-    const data = await this.create(slug, createLabelDto, currentUser, actorType);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const currentUser = actor.currentUser ?? { id: '', sub: '' };
+    const data = await this.create(slug, createLabelDto, currentUser, actor.actorType ?? 'user');
     return JsonResponse.Ok(data);
   }
 
@@ -111,10 +104,8 @@ export class LabelsController {
   @ApiOperation({ summary: 'List all labels for a project' })
   @ApiResponse({ status: 200, description: 'List of labels' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async findByProjectFromHttp(@Param('slug') slug: string) {
     const data = await this.findByProject(slug);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data);
   }
 
@@ -129,11 +120,10 @@ export class LabelsController {
     @Param('slug') slug: string,
     @Param('id') id: string,
     @Body() updateLabelDto: UpdateLabelDto,
-    @Req() req: RequestWithUser,
+    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
   ) {
-    const currentUser = req.user || req.agent;
-    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
-    const data = await this.update(slug, id, updateLabelDto, currentUser, actorType);
+    const currentUser = actor.currentUser ?? { id: '', sub: '' };
+    const data = await this.update(slug, id, updateLabelDto, currentUser, actor.actorType ?? 'user');
     return JsonResponse.Ok(data);
   }
 
@@ -146,11 +136,10 @@ export class LabelsController {
   async deleteFromHttp(
     @Param('slug') slug: string,
     @Param('id') id: string,
-    @Req() req: RequestWithUser,
+    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
   ) {
-    const currentUser = req.user || req.agent;
-    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
-    return this.delete(slug, id, currentUser, actorType);
+    const currentUser = actor.currentUser ?? { id: '', sub: '' };
+    return this.delete(slug, id, currentUser, actor.actorType ?? 'user');
   }
 
   @Post('projects/:slug/tickets/:ref/labels')
@@ -159,17 +148,14 @@ export class LabelsController {
   @ApiResponse({ status: 201, description: 'Label assigned to ticket' })
   @ApiResponse({ status: 400, description: 'Invalid request data or label already assigned' })
   @ApiResponse({ status: 404, description: 'Ticket or label not found' })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async assignLabelFromHttp(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Body() assignLabelDto: AssignLabelDto,
-    @Req() req: RequestWithUser,
+    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
   ) {
-    const currentUser = req.user || req.agent;
-    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
-    const data = await this.assignLabel(slug, ref, assignLabelDto, currentUser, actorType);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const currentUser = actor.currentUser ?? { id: '', sub: '' };
+    const data = await this.assignLabel(slug, ref, assignLabelDto, currentUser, actor.actorType ?? 'user');
     return JsonResponse.Ok(data);
   }
 
@@ -182,10 +168,9 @@ export class LabelsController {
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Param('labelId') labelId: string,
-    @Req() req: RequestWithUser,
+    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
   ) {
-    const currentUser = req.user || req.agent;
-    const actorType: 'user' | 'agent' = req.agent ? 'agent' : 'user';
-    return this.removeLabel(slug, ref, labelId, currentUser, actorType);
+    const currentUser = actor.currentUser ?? { id: '', sub: '' };
+    return this.removeLabel(slug, ref, labelId, currentUser, actor.actorType ?? 'user');
   }
 }

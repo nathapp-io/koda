@@ -1,5 +1,7 @@
 {
-  "notFound": "Project not found",
-  "slugTaken": "Project slug is already in use",
-  "keyTaken": "Project key is already in use"
+  "notFound": "未找到项目",
+  "slugTaken": "该项目 slug 已被使用",
+  "keyTaken": "该项目 key 已被使用",
+  "404": "未找到项目",
+  "-2": "验证错误"
 }

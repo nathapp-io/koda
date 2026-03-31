@@ -68,7 +68,7 @@ export class AuthController {
   async me(@Principal() user: JwtPayload) {
     const validatedUser = await this.authService.validateUser(user);
     if (!validatedUser) {
-      throw new AuthException();
+      throw new AuthException({}, 'auth');
     }
     return JsonResponse.Ok(validatedUser);
   }

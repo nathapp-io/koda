@@ -104,14 +104,14 @@ describe('TicketTransitionsService', () => {
       providers: [
         TicketTransitionsService,
         {
-          provide: 'PrismaService',
+          provide: PrismaService,
           useValue: mockPrismaService,
         },
       ],
     }).compile();
 
     service = module.get<TicketTransitionsService>(TicketTransitionsService);
-    prismaService = module.get<any>('PrismaService');
+    prismaService = module.get<PrismaService<PrismaClient>>(PrismaService);
   });
 
   afterEach(() => {

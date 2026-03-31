@@ -25,7 +25,7 @@ export class TicketLinksService {
     });
 
     if (!project) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'ticket-links');
     }
 
     const refMatch = ref.match(/^([A-Z]+)-(\d+)$/);
@@ -43,7 +43,7 @@ export class TicketLinksService {
     }
 
     if (!ticket) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'ticket-links');
     }
 
     return ticket;
@@ -61,7 +61,7 @@ export class TicketLinksService {
     });
 
     if (existing) {
-      return { status: 200, link: existing as TicketLinkResponseDto };
+      return { status: 200, link: TicketLinkResponseDto.from(existing) };
     }
 
     const { provider, externalRef } = detectProvider(dto.url);
@@ -75,7 +75,7 @@ export class TicketLinksService {
       },
     });
 
-    return { status: 201, link: link as TicketLinkResponseDto };
+    return { status: 201, link: TicketLinkResponseDto.from(link) };
   }
 
   async findByTicket(slug: string, ref: string): Promise<TicketLinkResponseDto[]> {
@@ -86,7 +86,7 @@ export class TicketLinksService {
       orderBy: { createdAt: 'asc' },
     });
 
-    return links as TicketLinkResponseDto[];
+    return TicketLinkResponseDto.fromMany(links);
   }
 
   async remove(slug: string, ref: string, linkId: string): Promise<void> {
@@ -97,7 +97,7 @@ export class TicketLinksService {
     });
 
     if (!link) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'ticket-links');
     }
 
     await this.db.ticketLink.delete({ where: { id: linkId } });

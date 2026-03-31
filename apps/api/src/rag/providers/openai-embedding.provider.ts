@@ -1,4 +1,5 @@
 import { EmbeddingProvider } from '../embedding.interface';
+import { ValidationAppException } from '@nathapp/nestjs-common';
 
 export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   readonly name = 'openai';
@@ -19,7 +20,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
       body: JSON.stringify({ model: this.model, input: text }),
     });
     if (!response.ok) {
-      throw new Error(`OpenAI embedding request failed: ${response.status} ${response.statusText}`);
+      throw new ValidationAppException();
     }
     const data = (await response.json()) as { data: { embedding: number[] }[] };
     return data.data[0].embedding;
@@ -35,7 +36,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
       body: JSON.stringify({ model: this.model, input: texts }),
     });
     if (!response.ok) {
-      throw new Error(`OpenAI batch embedding request failed: ${response.status} ${response.statusText}`);
+      throw new ValidationAppException();
     }
     const data = (await response.json()) as { data: { embedding: number[]; index: number }[] };
     return data.data

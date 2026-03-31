@@ -66,4 +66,33 @@ export class ProjectResponseDto {
     required: false,
   })
   ciWebhookToken?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Auto assign mode',
+    required: false,
+  })
+  autoAssign?: string | null;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  static from(project: any): ProjectResponseDto {
+    return {
+      id: project.id,
+      name: project.name,
+      slug: project.slug,
+      key: project.key,
+      description: project.description,
+      gitRemoteUrl: project.gitRemoteUrl,
+      autoIndexOnClose: project.autoIndexOnClose,
+      createdAt: project.createdAt,
+      updatedAt: project.updatedAt,
+      deletedAt: project.deletedAt,
+      ciWebhookToken: project.ciWebhookToken,
+      autoAssign: project.autoAssign,
+    };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  static fromMany(projects: any[]): ProjectResponseDto[] {
+    return projects.map(p => ProjectResponseDto.from(p));
+  }
 }

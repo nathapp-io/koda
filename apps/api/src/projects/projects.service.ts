@@ -4,6 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import { ValidationAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
+import { ProjectResponseDto } from './dto/project-response.dto';
 
 @Injectable()
 export class ProjectsService {
@@ -14,19 +15,19 @@ export class ProjectsService {
   async create(createProjectDto: CreateProjectDto) {
     // Validate name
     if (createProjectDto.name.length < 2) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'projects');
     }
 
     // Validate slug format (lowercase alphanumeric and hyphens only)
     const slugPattern = /^[a-z0-9]+(-[a-z0-9]+)*$/;
     if (!slugPattern.test(createProjectDto.slug)) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'projects');
     }
 
     // Validate key format (2-6 uppercase letters only)
     const keyPattern = /^[A-Z]{2,6}$/;
     if (!keyPattern.test(createProjectDto.key)) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'projects');
     }
 
     // Check slug uniqueness
@@ -34,7 +35,7 @@ export class ProjectsService {
       where: { slug: createProjectDto.slug },
     });
     if (existingSlug) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'projects');
     }
 
     // Check key uniqueness
@@ -42,11 +43,11 @@ export class ProjectsService {
       where: { key: createProjectDto.key },
     });
     if (existingKey) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'projects');
     }
 
     // Create project
-    return this.db.project.create({
+    return ProjectResponseDto.from(await this.db.project.create({
       data: {
         name: createProjectDto.name,
         slug: createProjectDto.slug,
@@ -56,15 +57,15 @@ export class ProjectsService {
         autoIndexOnClose: createProjectDto.autoIndexOnClose ?? true,
         autoAssign: createProjectDto.autoAssign ?? 'OFF'
       },
-    });
+    }));
   }
 
   async findAll() {
-    return this.db.project.findMany({
+    return ProjectResponseDto.fromMany(await this.db.project.findMany({
       where: {
         deletedAt: null,
       },
-    });
+    }));
   }
 
   async findBySlug(slug: string) {
@@ -74,10 +75,10 @@ export class ProjectsService {
 
     // Filter out soft-deleted projects
     if (!project || project.deletedAt) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'projects');
     }
 
-    return project;
+    return ProjectResponseDto.from(project);
   }
 
   async update(slug: string, updateProjectDto: UpdateProjectDto) {
@@ -87,19 +88,19 @@ export class ProjectsService {
     });
 
     if (!currentProject) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'projects');
     }
 
     // Validate name if provided
     if (updateProjectDto.name !== undefined && updateProjectDto.name.length < 2) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'projects');
     }
 
     // Validate slug format if provided (lowercase alphanumeric and hyphens only)
     if (updateProjectDto.slug !== undefined) {
       const slugPattern = /^[a-z0-9]+(-[a-z0-9]+)*$/;
       if (!slugPattern.test(updateProjectDto.slug)) {
-        throw new ValidationAppException();
+        throw new ValidationAppException({}, 'projects');
       }
 
       // Check slug uniqueness (unless it's the same as current)
@@ -108,7 +109,7 @@ export class ProjectsService {
           where: { slug: updateProjectDto.slug },
         });
         if (existingSlug && existingSlug.id !== currentProject.id) {
-          throw new ValidationAppException();
+          throw new ValidationAppException({}, 'projects');
         }
       }
     }
@@ -117,7 +118,7 @@ export class ProjectsService {
     if (updateProjectDto.key !== undefined) {
       const keyPattern = /^[A-Z]{2,6}$/;
       if (!keyPattern.test(updateProjectDto.key)) {
-        throw new ValidationAppException();
+        throw new ValidationAppException({}, 'projects');
       }
 
       // Check key uniqueness (unless it's the same as current)
@@ -126,13 +127,13 @@ export class ProjectsService {
           where: { key: updateProjectDto.key },
         });
         if (existingKey && existingKey.id !== currentProject.id) {
-          throw new ValidationAppException();
+          throw new ValidationAppException({}, 'projects');
         }
       }
     }
 
     // Update project
-    return this.db.project.update({
+    return ProjectResponseDto.from(await this.db.project.update({
       where: { slug },
       data: {
         name: updateProjectDto.name,
@@ -144,7 +145,7 @@ export class ProjectsService {
         autoAssign: updateProjectDto.autoAssign,
         ciWebhookToken: updateProjectDto.ciWebhookToken,
       },
-    });
+    }));
   }
 
   async softDelete(slug: string) {
@@ -154,15 +155,15 @@ export class ProjectsService {
     });
 
     if (!project) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'projects');
     }
 
     // Soft delete by setting deletedAt
-    return this.db.project.update({
+    return ProjectResponseDto.from(await this.db.project.update({
       where: { slug },
       data: {
         deletedAt: new Date(),
       },
-    });
+    }));
   }
 }

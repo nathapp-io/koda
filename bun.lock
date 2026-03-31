@@ -106,7 +106,6 @@
         "zod": "^3.24.0",
       },
       "devDependencies": {
-        "@hey-api/client-fetch": "^0.3.4",
         "@nathapp/eslint-config": "workspace:*",
         "@nathapp/typescript-config": "workspace:*",
         "@nuxt/devtools": "latest",
@@ -378,8 +377,6 @@
     "@hapi/topo": ["@hapi/topo@6.0.2", "", { "dependencies": { "@hapi/hoek": "^11.0.2" } }, "sha512-KR3rD5inZbGMrHmgPxsJ9dbi6zEK+C3ZwUwTa+eMwWLz7oijWUTWD2pMSNNYJAU6Qq+65NkxXjqHr/7LM2Xkqg=="],
 
     "@hey-api/client-axios": ["@hey-api/client-axios@0.3.4", "", { "peerDependencies": { "axios": ">= 1.0.0 < 2" } }, "sha512-9jyZb1kicWZoZwlu/2XnwRDQJsrGi+ExBuSn3liT5slQ6uRSbN5HYqZr1YzRy4fbAkxY9S2vFbqfdHniqWgGGg=="],
-
-    "@hey-api/client-fetch": ["@hey-api/client-fetch@0.3.4", "", {}, "sha512-2iEXxLNf3HQWPJC04XYaZZSqtx+gLg2dxi8oEgrYDhoBGPlaEgpao73rVjdng0YzlB4YkCkZV8p8VkhVnIaKHQ=="],
 
     "@hey-api/openapi-ts": ["@hey-api/openapi-ts@0.46.3", "", { "dependencies": { "@apidevtools/json-schema-ref-parser": "11.6.2", "c12": "1.10.0", "camelcase": "8.0.0", "commander": "12.1.0", "handlebars": "4.7.8" }, "peerDependencies": { "typescript": "^5.x" }, "bin": { "openapi-ts": "bin/index.cjs" } }, "sha512-2C0tmzUq6m9518uDMHBooqiS7wvWy9UD6SepudWU+9fB6lZvC+yxbK/viaMfwvCv4l1hKuBZZZQNP0xrNcyRsQ=="],
 

@@ -1,4 +1,7 @@
 {
   "notFound": "Comment not found",
-  "invalidType": "Invalid comment type for this transition"
+  "invalidType": "Invalid comment type for this transition",
+  "404": "Comment not found",
+  "-2": "Validation error",
+  "40003": "Access denied"
 }

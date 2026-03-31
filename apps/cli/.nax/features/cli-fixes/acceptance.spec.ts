@@ -24,26 +24,32 @@ jest.mock('conf', () => {
   return jest.fn(() => mockStore);
 });
 
-// Mock axios client
-const mockAxios = {
-  get: jest.fn(),
-};
-
-jest.mock('axios', () => {
-  return {
-    create: () => mockAxios,
-  };
-});
-
 // Mock the generated clients
 jest.mock('../../../src/generated', () => ({
-  TicketsService: {
-    list: jest.fn(),
-  },
-  AgentService: {
-    me: jest.fn(),
-    pickup: jest.fn(),
-  },
+  ticketsControllerFindAll: jest.fn(),
+  ticketsControllerCreate: jest.fn(),
+  ticketsControllerFindByRef: jest.fn(),
+  ticketsControllerUpdate: jest.fn(),
+  ticketsControllerSoftDelete: jest.fn(),
+  ticketsControllerAssign: jest.fn(),
+  ticketsControllerVerify: jest.fn(),
+  ticketsControllerStart: jest.fn(),
+  ticketsControllerFix: jest.fn(),
+  ticketsControllerVerifyFix: jest.fn(),
+  ticketsControllerClose: jest.fn(),
+  ticketsControllerReject: jest.fn(),
+  ticketLinksControllerCreate: jest.fn(),
+  ticketLinksControllerFindAll: jest.fn(),
+  ticketLinksControllerRemove: jest.fn(),
+  labelsControllerAssignLabelFromHttp: jest.fn(),
+  labelsControllerRemoveLabelFromHttp: jest.fn(),
+  agentsControllerFindMe: jest.fn(),
+  agentsControllerSuggestTicket: jest.fn(),
+  OpenAPI: { BASE: '', TOKEN: '' },
+}));
+
+jest.mock('../../../src/generated/core/OpenAPI', () => ({
+  OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
 // Mock config module to use mockData instead of real filesystem
@@ -60,7 +66,7 @@ jest.mock('../../../src/config', () => ({
 import { Command } from 'commander';
 import { ticketCommand } from '../../../src/commands/ticket';
 import { agentCommand } from '../../../src/commands/agent';
-import { TicketsService, AgentService } from '../../../src/generated';
+import { ticketsControllerFindAll, agentsControllerFindMe } from '../../../src/generated';
 import { resolveContext } from '../../../src/config';
 
 const DEFAULT_CTX = {
@@ -101,16 +107,14 @@ describe('cli-fixes acceptance tests', () => {
     jest.restoreAllMocks();
   });
 
-  it('AC-1: When TicketsService.list() returns a ticket with ref=\'NAX-1\', the ticket list table renders the first column as \'NAX-1\'', async () => {
+  it('AC-1: When ticketsControllerFindAll() returns a ticket with ref=\'NAX-1\', the ticket list table renders the first column as \'NAX-1\'', async () => {
     const program = makeProgram();
     ticketCommand(program);
 
-    (TicketsService.list as jest.Mock).mockResolvedValue({
+    (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
+      ret: 0,
       data: {
-        ret: 0,
-        data: {
-          items: [{ ref: 'NAX-1', number: 1, type: 'BUG', priority: 'HIGH', status: 'VERIFIED', title: 'Test bug', assignee: null }],
-        },
+        items: [{ ref: 'NAX-1', number: 1, type: 'BUG', priority: 'HIGH', status: 'VERIFIED', title: 'Test bug', assignee: null }],
       },
     });
 
@@ -122,16 +126,14 @@ describe('cli-fixes acceptance tests', () => {
     expect(allLogs).not.toMatch(/KODA-1\b/);
   });
 
-  it('AC-2: When TicketsService.list() returns a ticket with ref=\'NAX-2\', the ticket mine table renders the first column as \'NAX-2\'', async () => {
+  it('AC-2: When ticketsControllerFindAll() returns a ticket with ref=\'NAX-2\', the ticket mine table renders the first column as \'NAX-2\'', async () => {
     const program = makeProgram();
     ticketCommand(program);
 
-    (TicketsService.list as jest.Mock).mockResolvedValue({
+    (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
+      ret: 0,
       data: {
-        ret: 0,
-        data: {
-          items: [{ ref: 'NAX-2', number: 2, type: 'ENHANCEMENT', priority: 'MEDIUM', status: 'IN_PROGRESS', title: 'My ticket', assignee: null }],
-        },
+        items: [{ ref: 'NAX-2', number: 2, type: 'ENHANCEMENT', priority: 'MEDIUM', status: 'IN_PROGRESS', title: 'My ticket', assignee: null }],
       },
     });
 
@@ -147,12 +149,10 @@ describe('cli-fixes acceptance tests', () => {
     const program = makeProgram();
     ticketCommand(program);
 
-    (TicketsService.list as jest.Mock).mockResolvedValue({
+    (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
+      ret: 0,
       data: {
-        ret: 0,
-        data: {
-          items: [{ ref: undefined, number: 1, type: 'BUG', priority: 'LOW', status: 'CREATED', title: 'No ref ticket', assignee: null }],
-        },
+        items: [{ ref: undefined, number: 1, type: 'BUG', priority: 'LOW', status: 'CREATED', title: 'No ref ticket', assignee: null }],
       },
     });
 
@@ -167,12 +167,10 @@ describe('cli-fixes acceptance tests', () => {
     const program = makeProgram();
     ticketCommand(program);
 
-    (TicketsService.list as jest.Mock).mockResolvedValue({
+    (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
+      ret: 0,
       data: {
-        ret: 0,
-        data: {
-          items: [{ ref: undefined, number: 2, type: 'TASK', priority: 'MEDIUM', status: 'IN_PROGRESS', title: 'Mine no ref', assignee: null }],
-        },
+        items: [{ ref: undefined, number: 2, type: 'TASK', priority: 'MEDIUM', status: 'IN_PROGRESS', title: 'Mine no ref', assignee: null }],
       },
     });
 
@@ -183,12 +181,13 @@ describe('cli-fixes acceptance tests', () => {
     expect(allLogs).toContain('KODA-2');
   });
 
-  it('AC-5: When AgentService.me() returns an agent where apiKey is undefined, koda agent me exits with code 0 and does not throw', async () => {
+  it('AC-5: When agentsControllerFindMe() returns an agent where apiKey is undefined, koda agent me exits with code 0 and does not throw', async () => {
     const program = makeProgram();
     agentCommand(program);
 
-    (AgentService.me as jest.Mock).mockResolvedValue({
-      data: { ret: 0, data: { id: 'a1', name: 'Bot', slug: 'bot', apiKey: undefined } },
+    (agentsControllerFindMe as jest.Mock).mockResolvedValue({
+      ret: 0,
+      data: { id: 'a1', name: 'Bot', slug: 'bot', apiKey: undefined },
     });
 
     const meCmd = getSubCommand(program, 'agent', 'me');
@@ -201,8 +200,9 @@ describe('cli-fixes acceptance tests', () => {
     const program = makeProgram();
     agentCommand(program);
 
-    (AgentService.me as jest.Mock).mockResolvedValue({
-      data: { ret: 0, data: { id: 'a1', name: 'Bot', slug: 'bot', apiKey: undefined } },
+    (agentsControllerFindMe as jest.Mock).mockResolvedValue({
+      ret: 0,
+      data: { id: 'a1', name: 'Bot', slug: 'bot', apiKey: undefined },
     });
 
     const meCmd = getSubCommand(program, 'agent', 'me');
@@ -216,8 +216,9 @@ describe('cli-fixes acceptance tests', () => {
     const program = makeProgram();
     agentCommand(program);
 
-    (AgentService.me as jest.Mock).mockResolvedValue({
-      data: { ret: 0, data: { id: 'a1', name: 'Bot', slug: 'bot', apiKey: 'abcd1234efgh5678' } },
+    (agentsControllerFindMe as jest.Mock).mockResolvedValue({
+      ret: 0,
+      data: { id: 'a1', name: 'Bot', slug: 'bot', apiKey: 'abcd1234efgh5678' },
     });
 
     const meCmd = getSubCommand(program, 'agent', 'me');

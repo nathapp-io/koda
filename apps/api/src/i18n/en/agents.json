@@ -1,5 +1,8 @@
 {
   "notFound": "Agent not found",
   "slugTaken": "Agent slug is already in use",
-  "apiKeyShownOnce": "API key is shown only once"
+  "apiKeyShownOnce": "API key is shown only once",
+  "404": "Agent not found",
+  "-2": "Validation error",
+  "40003": "Access denied"
 }

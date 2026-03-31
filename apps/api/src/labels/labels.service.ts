@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import { ValidationAppException, NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { CreateLabelDto } from './dto/create-label.dto';
 import { UpdateLabelDto } from './dto/update-label.dto';
 import { AssignLabelDto } from './dto/assign-label.dto';
+import { LabelResponseDto } from './dto/label-response.dto';
 
 interface CurrentUser {
   id: string;
@@ -25,15 +26,15 @@ export class LabelsService {
     actorType: 'user' | 'agent',
   ) {
     if (actorType !== 'agent' && currentUser.role === 'MEMBER') {
-      throw new ForbiddenAppException();
+      throw new ForbiddenAppException({}, 'labels');
     }
 
     // Validate required fields
     if (!createLabelDto.name) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'labels');
     }
     if (typeof createLabelDto.name === 'string' && createLabelDto.name.trim().length === 0) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'labels');
     }
 
     // Find project by slug
@@ -42,7 +43,7 @@ export class LabelsService {
     });
 
     if (!project || project.deletedAt) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'labels');
     }
 
     // Create the label
@@ -55,11 +56,10 @@ export class LabelsService {
         },
       });
 
-      return label;
+      return LabelResponseDto.from(label);
     } catch (error) {
-      // Check if it's a unique constraint violation (duplicate name in project)
-      if (error instanceof Error && error.message.includes('Unique constraint')) {
-        throw new ValidationAppException();
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ValidationAppException({}, 'labels');
       }
       throw error;
     }
@@ -72,7 +72,7 @@ export class LabelsService {
     });
 
     if (!project || project.deletedAt) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'labels');
     }
 
     // Find all labels for this project
@@ -80,7 +80,7 @@ export class LabelsService {
       where: { projectId: project.id },
     });
 
-    return labels;
+    return LabelResponseDto.fromMany(labels);
   }
 
   async delete(
@@ -91,7 +91,7 @@ export class LabelsService {
   ) {
     // ADMIN users and agents can delete labels; MEMBER users cannot
     if (actorType === 'user' && currentUser.role === 'MEMBER') {
-      throw new ForbiddenAppException();
+      throw new ForbiddenAppException({}, 'labels');
     }
 
     // Find project by slug
@@ -100,7 +100,7 @@ export class LabelsService {
     });
 
     if (!project || project.deletedAt) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'labels');
     }
 
     // Find the label
@@ -109,12 +109,12 @@ export class LabelsService {
     });
 
     if (!label) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'labels');
     }
 
     // Verify the label belongs to the project
     if (label.projectId !== project.id) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'labels');
     }
 
     // Delete the label
@@ -132,7 +132,7 @@ export class LabelsService {
   ) {
     // ADMIN users and agents can update labels; MEMBER users cannot
     if (actorType === 'user' && currentUser.role === 'MEMBER') {
-      throw new ForbiddenAppException();
+      throw new ForbiddenAppException({}, 'labels');
     }
 
     const project = await this.db.project.findUnique({ where: { slug: projectSlug } });
@@ -142,16 +142,16 @@ export class LabelsService {
     if (!label || label.projectId !== project.id) throw new NotFoundAppException();
 
     try {
-      return await this.db.label.update({
+      return LabelResponseDto.from(await this.db.label.update({
         where: { id: labelId },
         data: {
           ...(updateLabelDto.name !== undefined ? { name: updateLabelDto.name } : {}),
           ...(updateLabelDto.color !== undefined ? { color: updateLabelDto.color } : {}),
         },
-      });
+      }));
     } catch (error) {
-      if (error instanceof Error && error.message.includes('Unique constraint')) {
-        throw new ValidationAppException();
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ValidationAppException({}, 'labels');
       }
       throw error;
     }
@@ -170,7 +170,7 @@ export class LabelsService {
     });
 
     if (!project || project.deletedAt) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'labels');
     }
 
     // Find ticket by ref (KODA-1 or CUID)
@@ -200,7 +200,7 @@ export class LabelsService {
     }
 
     if (!ticket || ticket.deletedAt) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'labels');
     }
 
     // Find the label
@@ -209,12 +209,12 @@ export class LabelsService {
     });
 
     if (!label) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'labels');
     }
 
     // Verify the label belongs to the same project
     if (label.projectId !== project.id) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'labels');
     }
 
     // Use transaction to assign label and create activity
@@ -231,7 +231,7 @@ export class LabelsService {
         });
 
         if (existingAssignment) {
-          throw new Error('Label already assigned');
+          throw new ValidationAppException();
         }
 
         // Assign the label
@@ -260,7 +260,7 @@ export class LabelsService {
           include: { labels: { include: { label: true } } },
         });
         if (!updated) {
-          throw new NotFoundAppException();
+          throw new NotFoundAppException({}, 'labels');
         }
         // Transform labels from nested structure to flat array
         interface TicketLabelWithLabel {
@@ -277,11 +277,12 @@ export class LabelsService {
       if (error instanceof ValidationAppException || error instanceof NotFoundAppException) {
         throw error;
       }
-      if (error instanceof Error && error.message.includes('already assigned')) {
-        throw new ValidationAppException();
-      }
-      if (error instanceof Error && error.message.includes('Unique constraint')) {
-        throw new ValidationAppException();
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        // P2002 = Unique constraint (label already assigned)
+        // P2003 = Foreign key constraint (invalid label/ticket)
+        if (error.code === 'P2002' || error.code === 'P2003') {
+          throw new ValidationAppException({}, 'labels');
+        }
       }
       throw error;
     }
@@ -300,7 +301,7 @@ export class LabelsService {
     });
 
     if (!project || project.deletedAt) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'labels');
     }
 
     // Find ticket by ref (KODA-1 or CUID)
@@ -330,7 +331,7 @@ export class LabelsService {
     }
 
     if (!ticket || ticket.deletedAt) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'labels');
     }
 
     // Check if label is assigned to ticket
@@ -345,7 +346,7 @@ export class LabelsService {
     });
 
     if (!ticketLabel) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'labels');
     }
 
     // Use transaction to remove label and create activity
@@ -378,7 +379,7 @@ export class LabelsService {
         include: { labels: { include: { label: true } } },
       });
       if (!updated) {
-        throw new NotFoundAppException();
+        throw new NotFoundAppException({}, 'labels');
       }
       // Transform labels from nested structure to flat array
       interface TicketLabelWithLabel {

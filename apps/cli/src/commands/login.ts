@@ -1,5 +1,6 @@
 import { setConfig } from '../config';
-import { configureClient } from '../client';
+import { OpenAPI } from '../generated/core/OpenAPI';
+import { agentsControllerFindMe } from '../generated';
 
 export interface LoginResult {
   success: boolean;
@@ -15,12 +16,14 @@ export async function loginCommand(
     throw new Error('API key is required');
   }
 
-  const url = apiUrl || 'http://localhost:3100/api';
+  // Strip /api suffix so OpenAPI.BASE is set to the bare host
+  const url = (apiUrl ?? 'http://localhost:3100').replace(/\/api\/?$/, '');
 
-  // Validate API key by calling /agents/me
-  const client = configureClient(url, apiKey);
+  OpenAPI.BASE = url;
+  OpenAPI.TOKEN = apiKey;
+
   try {
-    await client.get('/agents/me');
+    await agentsControllerFindMe();
   } catch {
     throw new Error('Invalid API key');
   }

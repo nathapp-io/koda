@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// @ts-expect-error - locales and setLocale are added by @nuxtjs/i18n ComposerCustomProperties
-const { locale, locales, setLocale } = useI18n()
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const { locale, locales, setLocale } = useI18n() as any;
 
 const allLocales = computed(() =>
   (locales.value as Array<{ code: string; name: string }>).filter(
@@ -23,9 +23,11 @@ function switchLocale(code: string) {
 <template>
   <!-- Toggle buttons for 2 locales -->
   <div v-if="!useDropdown" class="flex items-center gap-1">
-    <button
+    <Button
       v-for="loc in allLocales"
       :key="loc.code"
+      variant="ghost"
+      size="sm"
       :class="[
         'px-2 py-1 text-xs rounded transition-colors',
         locale === loc.code
@@ -35,7 +37,7 @@ function switchLocale(code: string) {
       @click="switchLocale(loc.code)"
     >
       {{ loc.name }}
-    </button>
+    </Button>
   </div>
 
   <!-- Select dropdown for 3+ locales -->

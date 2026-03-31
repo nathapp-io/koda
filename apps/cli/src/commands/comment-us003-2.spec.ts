@@ -25,10 +25,7 @@ jest.mock('conf', () =>
   })),
 );
 
-// Mock axios to prevent real HTTP calls
-jest.mock('axios', () => ({ create: jest.fn(() => ({})) }));
-
-// Mock the config module — both getConfig (used by current resolveAuth) and resolveContext (new path)
+// Mock the config module — both getConfig and resolveContext
 jest.mock('../config', () => ({
   getConfig: jest.fn(() => ({
     apiKey: 'test-key-12345678',
@@ -40,16 +37,19 @@ jest.mock('../config', () => ({
 
 // Mock generated API client
 jest.mock('../generated', () => ({
-  CommentsService: {
-    add: jest.fn(),
-  },
+  commentsControllerCreateFromHttp: jest.fn(),
+  OpenAPI: { BASE: '', TOKEN: '' },
+}));
+
+jest.mock('../generated/core/OpenAPI', () => ({
+  OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { Command } from 'commander';
 import { commentCommand } from './comment';
-import { CommentsService } from '../generated';
+import { commentsControllerCreateFromHttp } from '../generated';
 import { resolveContext } from '../config';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -86,8 +86,9 @@ describe('US-003-2: commentCommand add — resolveContext wiring', () => {
     consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
     consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
 
-    (CommentsService.add as jest.Mock).mockResolvedValue({
-      data: { ret: 0, data: { id: 'c1', type: 'GENERAL', body: 'test comment' } },
+    (commentsControllerCreateFromHttp as jest.Mock).mockResolvedValue({
+      ret: 0,
+      data: { id: 'c1', type: 'GENERAL', body: 'test comment' },
     });
   });
 
@@ -97,9 +98,9 @@ describe('US-003-2: commentCommand add — resolveContext wiring', () => {
 
   /**
    * AC-1: When --project is omitted and .koda/config.json has projectSlug: 'demo',
-   * CommentsService.add must be called with that projectSlug.
+   * commentsControllerCreateFromHttp must be called with slug: 'demo'.
    */
-  it('AC-1: calls CommentsService.add with projectSlug from config when --project flag is omitted', async () => {
+  it('AC-1: calls commentsControllerCreateFromHttp with slug from config when --project flag is omitted', async () => {
     (resolveContext as jest.Mock).mockResolvedValue({
       projectSlug: 'demo',
       apiKey: 'test-key-12345678',
@@ -109,14 +110,13 @@ describe('US-003-2: commentCommand add — resolveContext wiring', () => {
     const prog = buildProgram();
     await getAddCmd(prog)?.parseAsync(['node', 'test', 'KODA-42', '--body', 'test comment']).catch(() => undefined);
 
-    expect(CommentsService.add).toHaveBeenCalled();
-    const callArgs = (CommentsService.add as jest.Mock).mock.calls[0];
-    expect(callArgs[1]).toBe('demo');
+    expect(commentsControllerCreateFromHttp).toHaveBeenCalled();
+    const callArgs = (commentsControllerCreateFromHttp as jest.Mock).mock.calls[0][0] as Record<string, unknown>;
+    expect(callArgs).toMatchObject({ slug: 'demo' });
   });
 
   /**
-   * AC-2: When resolveContext returns projectSlug: undefined (no config, no flag),
-   * the command must exit with code 2 and print the setup hint.
+   * AC-2: When resolveContext returns projectSlug: undefined, exit with code 2.
    */
   it('AC-2: exits with code 2 and prints setup hint when projectSlug is undefined', async () => {
     (resolveContext as jest.Mock).mockResolvedValue({
@@ -135,7 +135,7 @@ describe('US-003-2: commentCommand add — resolveContext wiring', () => {
   });
 
   /**
-   * AC-3: comment.ts must not contain any reference to GLOBAL_PROJECT_SLUG after the change.
+   * AC-3: comment.ts must not contain any reference to GLOBAL_PROJECT_SLUG.
    */
   it('AC-3: comment.ts contains no reference to GLOBAL_PROJECT_SLUG', () => {
     const commentFilePath = join(__dirname, 'comment.ts');

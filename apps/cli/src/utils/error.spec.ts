@@ -214,7 +214,7 @@ describe('error', () => {
       expect(exitCode).toBe(1);
     });
 
-    it('exits with code 4 for 404 not found errors', () => {
+    it('exits with code 1 for 404 not found errors', () => {
       const error = {
         response: {
           status: 404,
@@ -362,7 +362,7 @@ describe('error', () => {
       expect(exitCode).toBe(3);
     });
 
-    it('returns exit code 4 for not found errors (404)', () => {
+    it('returns exit code 1 for not found errors (404)', () => {
       const error = {
         response: {
           status: 404,

@@ -1,4 +1,5 @@
 import { EmbeddingProvider } from '../embedding.interface';
+import { ValidationAppException } from '@nathapp/nestjs-common';
 
 export class OllamaEmbeddingProvider implements EmbeddingProvider {
   readonly name = 'ollama';
@@ -19,7 +20,7 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
       body: JSON.stringify({ model: this.model, prompt: text }),
     });
     if (!response.ok) {
-      throw new Error(`Ollama embedding request failed: ${response.status} ${response.statusText}`);
+      throw new ValidationAppException();
     }
     const data = (await response.json()) as { embedding: number[] };
     return data.embedding;

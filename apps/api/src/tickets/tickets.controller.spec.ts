@@ -46,18 +46,21 @@ describe('TicketsController', () => {
   };
 
   const mockAdminUser = {
+    id: 'user-123',
     sub: 'user-123',
     email: 'admin@example.com',
     role: 'ADMIN',
   };
 
   const mockMemberUser = {
+    id: 'user-456',
     sub: 'user-456',
     email: 'member@example.com',
     role: 'MEMBER',
   };
 
   const mockAgent = {
+    id: 'agent-123',
     sub: 'agent-123',
     slug: 'test-agent',
   };
@@ -108,10 +111,9 @@ describe('TicketsController', () => {
 
       mockTicketsService.create.mockResolvedValue(mockTicket);
 
-      const req: any = { user: mockAdminUser };
-      const result = await controller.create('koda', createDto, req);
+      const result = await controller.createTicket('koda', createDto, mockAdminUser, 'user');
 
-      expect(result.data).toEqual(mockTicket);
+      expect(result).toEqual(mockTicket);
       expect(service.create).toHaveBeenCalledWith('koda', createDto, mockAdminUser, 'user');
     });
 
@@ -124,8 +126,7 @@ describe('TicketsController', () => {
 
       mockTicketsService.create.mockResolvedValue(mockTicket);
 
-      const req: any = { user: mockMemberUser };
-      const result = await controller.create('koda', createDto, req);
+      const result = await controller.createTicket('koda', createDto, mockMemberUser, 'user');
 
       expect(result).toBeDefined();
       expect(service.create).toHaveBeenCalled();
@@ -144,8 +145,7 @@ describe('TicketsController', () => {
         createdByUserId: null,
       });
 
-      const req: any = { agent: mockAgent };
-      const result = await controller.create('koda', createDto, req);
+      const result = await controller.createTicket('koda', createDto, mockAgent, 'agent');
 
       expect(result).toBeDefined();
       expect(service.create).toHaveBeenCalledWith('koda', createDto, mockAgent, 'agent');
@@ -159,11 +159,9 @@ describe('TicketsController', () => {
 
       mockTicketsService.create.mockRejectedValue(new Error('Validation error'));
 
-      const req: any = { user: mockAdminUser };
-
       for (const invalidDto of invalidDtos) {
         await expect(
-          controller.create('koda', invalidDto as CreateTicketDto, req)
+          controller.createTicket('koda', invalidDto as CreateTicketDto, mockAdminUser, 'user')
         ).rejects.toThrow();
       }
     });
@@ -177,10 +175,8 @@ describe('TicketsController', () => {
 
       mockTicketsService.create.mockRejectedValue(new Error('Project not found'));
 
-      const req: any = { user: mockAdminUser };
-
       await expect(
-        controller.create('nonexistent', createDto, req)
+        controller.createTicket('nonexistent', createDto, mockAdminUser, 'user')
       ).rejects.toThrow();
     });
   });
@@ -193,10 +189,10 @@ describe('TicketsController', () => {
         total: 2,
       });
 
-      const result = await controller.findAll('koda', {});
+      const result = await controller.listTickets('koda', {});
 
-      expect((result.data as any).tickets).toEqual(tickets);
-      expect((result.data as any).total).toBe(2);
+      expect((result as any).tickets).toEqual(tickets);
+      expect((result as any).total).toBe(2);
     });
 
     it('should accept filters as query parameters', async () => {
@@ -215,10 +211,10 @@ describe('TicketsController', () => {
         page: 1,
       };
 
-      const result = await controller.findAll('koda', query as any);
+      const result = await controller.listTickets('koda', query);
 
       expect(service.findAll).toHaveBeenCalledWith('koda', expect.objectContaining(query));
-      expect((result.data as any).total).toEqual(1);
+      expect((result as any).total).toEqual(1);
     });
 
     it('should apply status filter', async () => {
@@ -227,10 +223,10 @@ describe('TicketsController', () => {
         total: 1,
       });
 
-      const result = await controller.findAll('koda', { status: 'VERIFIED' } as any);
+      const result = await controller.listTickets('koda', { status: 'VERIFIED' });
 
       expect(service.findAll).toHaveBeenCalledWith('koda', { status: 'VERIFIED' });
-      expect((result.data as any).tickets[0].status).toBe('VERIFIED');
+      expect((result as any).tickets[0].status).toBe('VERIFIED');
     });
 
     it('should apply type filter', async () => {
@@ -239,10 +235,10 @@ describe('TicketsController', () => {
         total: 1,
       });
 
-      const result = await controller.findAll('koda', { type: 'ENHANCEMENT' } as any);
+      const result = await controller.listTickets('koda', { type: 'ENHANCEMENT' });
 
       expect(service.findAll).toHaveBeenCalledWith('koda', { type: 'ENHANCEMENT' });
-      expect((result.data as any).tickets[0].type).toBe('ENHANCEMENT');
+      expect((result as any).tickets[0].type).toBe('ENHANCEMENT');
     });
 
     it('should apply priority filter', async () => {
@@ -251,10 +247,10 @@ describe('TicketsController', () => {
         total: 1,
       });
 
-      const result = await controller.findAll('koda', { priority: 'CRITICAL' } as any);
+      const result = await controller.listTickets('koda', { priority: 'CRITICAL' });
 
       expect(service.findAll).toHaveBeenCalledWith('koda', { priority: 'CRITICAL' });
-      expect((result.data as any).tickets[0].priority).toBe('CRITICAL');
+      expect((result as any).tickets[0].priority).toBe('CRITICAL');
     });
 
     it('should apply assignedTo filter', async () => {
@@ -263,10 +259,10 @@ describe('TicketsController', () => {
         total: 1,
       });
 
-      const result = await controller.findAll('koda', { assignedTo: 'user-456' } as any);
+      const result = await controller.listTickets('koda', { assignedTo: 'user-456' });
 
       expect(service.findAll).toHaveBeenCalledWith('koda', { assignedTo: 'user-456' });
-      expect((result.data as any).tickets[0].assignedToUserId).toBe('user-456');
+      expect((result as any).tickets[0].assignedToUserId).toBe('user-456');
     });
 
     it('should filter for unassigned tickets', async () => {
@@ -275,7 +271,7 @@ describe('TicketsController', () => {
         total: 1,
       });
 
-      await controller.findAll('koda', { unassigned: true } as any);
+      await controller.listTickets('koda', { unassigned: true });
 
       expect(service.findAll).toHaveBeenCalledWith('koda', { unassigned: true });
     });
@@ -286,7 +282,7 @@ describe('TicketsController', () => {
         total: 1,
       });
 
-      await controller.findAll('koda', { limit: 10, page: 2 } as any);
+      await controller.listTickets('koda', { limit: 10, page: 2 });
 
       expect(service.findAll).toHaveBeenCalledWith('koda', { limit: 10, page: 2 });
     });
@@ -297,17 +293,17 @@ describe('TicketsController', () => {
         total: 0,
       });
 
-      const result = await controller.findAll('koda', {});
+      const result = await controller.listTickets('koda', {});
 
-      expect((result.data as any).tickets).toEqual([]);
-      expect((result.data as any).total).toBe(0);
+      expect((result as any).tickets).toEqual([]);
+      expect((result as any).total).toBe(0);
     });
 
     it('should return 404 if project not found', async () => {
       mockTicketsService.findAll.mockRejectedValue(new Error('Project not found'));
 
       await expect(
-        controller.findAll('nonexistent', {})
+        controller.listTickets('nonexistent', {})
       ).rejects.toThrow();
     });
   });
@@ -316,32 +312,32 @@ describe('TicketsController', () => {
     it('should return ticket by KODA-42 reference', async () => {
       mockTicketsService.findByRef.mockResolvedValue(mockTicket);
 
-      const result = await controller.findByRef('koda', 'KODA-1');
+      const result = await controller.getTicket('koda', 'KODA-1');
 
-      expect(result.data).toEqual(mockTicket);
+      expect(result).toEqual(mockTicket);
       expect(service.findByRef).toHaveBeenCalledWith('koda', 'KODA-1');
     });
 
     it('should return ticket by CUID reference', async () => {
       mockTicketsService.findByRef.mockResolvedValue(mockTicket);
 
-      const result = await controller.findByRef('koda', 'ticket-123');
+      const result = await controller.getTicket('koda', 'ticket-123');
 
-      expect(result.data).toEqual(mockTicket);
+      expect(result).toEqual(mockTicket);
       expect(service.findByRef).toHaveBeenCalledWith('koda', 'ticket-123');
     });
 
     it('should propagate rejection if ticket not found', async () => {
       mockTicketsService.findByRef.mockRejectedValue(new Error('Ticket not found'));
 
-      await expect(controller.findByRef('koda', 'KODA-999')).rejects.toThrow();
+      await expect(controller.getTicket('koda', 'KODA-999')).rejects.toThrow();
     });
 
     it('should return 404 if project not found', async () => {
       mockTicketsService.findByRef.mockRejectedValue(new Error('Project not found'));
 
       await expect(
-        controller.findByRef('nonexistent', 'KODA-1')
+        controller.getTicket('nonexistent', 'KODA-1')
       ).rejects.toThrow();
     });
   });
@@ -359,11 +355,10 @@ describe('TicketsController', () => {
         priority: 'CRITICAL',
       });
 
-      const req: any = { user: mockAdminUser };
-      const result = await controller.update('koda', 'KODA-1', updateDto, req);
+      const result = await controller.updateTicket('koda', 'KODA-1', updateDto, mockAdminUser, 'user');
 
-      expect((result.data as any).title).toBe('Updated title');
-      expect((result.data as any).priority).toBe('CRITICAL');
+      expect((result as any).title).toBe('Updated title');
+      expect((result as any).priority).toBe('CRITICAL');
       expect(service.update).toHaveBeenCalledWith('koda', 'KODA-1', updateDto, mockAdminUser, 'user');
     });
 
@@ -377,10 +372,9 @@ describe('TicketsController', () => {
         title: 'Updated by member',
       });
 
-      const req: any = { user: mockMemberUser };
-      const result = await controller.update('koda', 'KODA-1', updateDto, req);
+      const result = await controller.updateTicket('koda', 'KODA-1', updateDto, mockMemberUser, 'user');
 
-      expect((result.data as any).title).toBe('Updated by member');
+      expect((result as any).title).toBe('Updated by member');
     });
 
     it('should allow agent to update ticket', async () => {
@@ -393,10 +387,9 @@ describe('TicketsController', () => {
         title: 'Updated by agent',
       });
 
-      const req: any = { agent: mockAgent };
-      const result = await controller.update('koda', 'KODA-1', updateDto, req);
+      const result = await controller.updateTicket('koda', 'KODA-1', updateDto, mockAgent, 'agent');
 
-      expect((result.data as any).title).toBe('Updated by agent');
+      expect((result as any).title).toBe('Updated by agent');
     });
 
     it('should support partial updates', async () => {
@@ -409,10 +402,9 @@ describe('TicketsController', () => {
         priority: 'MEDIUM',
       });
 
-      const req: any = { user: mockAdminUser };
-      const result = await controller.update('koda', 'KODA-1', updateDto, req);
+      const result = await controller.updateTicket('koda', 'KODA-1', updateDto, mockAdminUser, 'user');
 
-      expect((result.data as any).priority).toBe('MEDIUM');
+      expect((result as any).priority).toBe('MEDIUM');
     });
 
     it('should return 404 if ticket not found', async () => {
@@ -422,10 +414,8 @@ describe('TicketsController', () => {
 
       mockTicketsService.update.mockRejectedValue(new Error('Ticket not found'));
 
-      const req: any = { user: mockAdminUser };
-
       await expect(
-        controller.update('koda', 'KODA-999', updateDto, req)
+        controller.updateTicket('koda', 'KODA-999', updateDto, mockAdminUser, 'user')
       ).rejects.toThrow();
     });
   });
@@ -437,40 +427,33 @@ describe('TicketsController', () => {
         deletedAt: new Date(),
       });
 
-      const req: any = { user: mockAdminUser };
-      const result = await controller.softDelete('koda', 'KODA-1', req);
+      const result = await controller.deleteTicket('koda', 'KODA-1', mockAdminUser, 'user');
 
-      expect((result.data as any).deletedAt).not.toBeNull();
+      expect((result as any).deletedAt).not.toBeNull();
       expect(service.softDelete).toHaveBeenCalledWith('koda', 'KODA-1', mockAdminUser, 'user');
     });
 
     it('should reject delete from non-ADMIN user with 403', async () => {
       mockTicketsService.softDelete.mockRejectedValue(new Error('Forbidden'));
 
-      const req: any = { user: mockMemberUser };
-
       await expect(
-        controller.softDelete('koda', 'KODA-1', req)
+        controller.deleteTicket('koda', 'KODA-1', mockMemberUser, 'user')
       ).rejects.toThrow();
     });
 
     it('should reject delete from agent with 403', async () => {
       mockTicketsService.softDelete.mockRejectedValue(new Error('Forbidden'));
 
-      const req: any = { agent: mockAgent };
-
       await expect(
-        controller.softDelete('koda', 'KODA-1', req)
+        controller.deleteTicket('koda', 'KODA-1', mockAgent, 'agent')
       ).rejects.toThrow();
     });
 
     it('should return 404 if ticket not found', async () => {
       mockTicketsService.softDelete.mockRejectedValue(new Error('Ticket not found'));
 
-      const req: any = { user: mockAdminUser };
-
       await expect(
-        controller.softDelete('koda', 'KODA-999', req)
+        controller.deleteTicket('koda', 'KODA-999', mockAdminUser, 'user')
       ).rejects.toThrow();
     });
 
@@ -478,11 +461,10 @@ describe('TicketsController', () => {
       const deletedTicket = { ...mockTicket, deletedAt: new Date() };
       mockTicketsService.softDelete.mockResolvedValue(deletedTicket);
 
-      const req: any = { user: mockAdminUser };
-      const result = await controller.softDelete('koda', 'KODA-1', req);
+      const result = await controller.deleteTicket('koda', 'KODA-1', mockAdminUser, 'user');
 
       // Ticket should still have ID (not hard-deleted)
-      expect((result.data as any).id).toBe(mockTicket.id);
+      expect((result as any).id).toBe(mockTicket.id);
     });
   });
 
@@ -494,10 +476,10 @@ describe('TicketsController', () => {
         assignedToAgentId: null,
       });
 
-      const result = await controller.assign('koda', 'KODA-1', { userId: 'user-456' });
+      const result = await controller.assignTicket('koda', 'KODA-1', { userId: 'user-456' });
 
-      expect((result.data as any).assignedToUserId).toBe('user-456');
-      expect((result.data as any).assignedToAgentId).toBeNull();
+      expect((result as any).assignedToUserId).toBe('user-456');
+      expect((result as any).assignedToAgentId).toBeNull();
       expect(service.assign).toHaveBeenCalledWith('koda', 'KODA-1', { userId: 'user-456' });
     });
 
@@ -508,10 +490,10 @@ describe('TicketsController', () => {
         assignedToUserId: null,
       });
 
-      const result = await controller.assign('koda', 'KODA-1', { agentId: 'agent-456' });
+      const result = await controller.assignTicket('koda', 'KODA-1', { agentId: 'agent-456' });
 
-      expect((result.data as any).assignedToAgentId).toBe('agent-456');
-      expect((result.data as any).assignedToUserId).toBeNull();
+      expect((result as any).assignedToAgentId).toBe('agent-456');
+      expect((result as any).assignedToUserId).toBeNull();
     });
 
     it('should unassign ticket', async () => {
@@ -521,17 +503,17 @@ describe('TicketsController', () => {
         assignedToAgentId: null,
       });
 
-      const result = await controller.assign('koda', 'KODA-1', {});
+      const result = await controller.assignTicket('koda', 'KODA-1', {});
 
-      expect((result.data as any).assignedToUserId).toBeNull();
-      expect((result.data as any).assignedToAgentId).toBeNull();
+      expect((result as any).assignedToUserId).toBeNull();
+      expect((result as any).assignedToAgentId).toBeNull();
     });
 
     it('should reject both userId and agentId with 400', async () => {
       mockTicketsService.assign.mockRejectedValue(new Error('Bad request'));
 
       await expect(
-        controller.assign('koda', 'KODA-1', { userId: 'user-456', agentId: 'agent-456' })
+        controller.assignTicket('koda', 'KODA-1', { userId: 'user-456', agentId: 'agent-456' })
       ).rejects.toThrow();
     });
 
@@ -539,7 +521,7 @@ describe('TicketsController', () => {
       mockTicketsService.assign.mockRejectedValue(new Error('Ticket not found'));
 
       await expect(
-        controller.assign('koda', 'KODA-999', { userId: 'user-456' })
+        controller.assignTicket('koda', 'KODA-999', { userId: 'user-456' })
       ).rejects.toThrow();
     });
   });

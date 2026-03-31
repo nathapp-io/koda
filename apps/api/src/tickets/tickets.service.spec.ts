@@ -53,6 +53,8 @@ describe('TicketsService', () => {
     createdAt: new Date(),
     updatedAt: new Date(),
     deletedAt: null,
+    labels: [],
+    links: [],
   };
 
   const mockPrismaService = {
@@ -597,6 +599,10 @@ describe('TicketsService', () => {
       expect(prismaService.client.ticket.update).toHaveBeenCalledWith({
         where: { id: mockTicket.id },
         data: { deletedAt: expect.any(Date) },
+        include: {
+          labels: { include: { label: true } },
+          links: true,
+        },
       });
     });
 

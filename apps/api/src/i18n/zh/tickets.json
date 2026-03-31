@@ -1,5 +1,10 @@
 {
-  "notFound": "Ticket not found",
-  "invalidTransition": "Invalid ticket status transition",
-  "commentRequired": "A comment is required for this transition"
+  "notFound": "未找到工单",
+  "invalidTransition": "无效的工单状态转换",
+  "commentRequired": "此转换需要评论",
+  "404": "未找到工单",
+  "-2": "验证错误",
+  "40003": "访问被拒绝",
+  "titleRequired": "工单标题为必填项",
+  "typeRequired": "工单类型为必填项"
 }

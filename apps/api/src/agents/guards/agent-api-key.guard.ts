@@ -1,13 +1,15 @@
-import { CanActivate, ExecutionContext, Inject, Injectable } from '@nestjs/common';
+import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac } from 'crypto';
 import { AuthException } from '@nathapp/nestjs-common';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaClient } from '@prisma/client';
 
 @Injectable()
 export class AgentApiKeyGuard implements CanActivate {
   constructor(
-    @Inject('PrismaService') private readonly prismaService: { client: { agent: { findFirst: (args: unknown) => Promise<unknown> } } },
-    @Inject(ConfigService) private readonly configService: ConfigService,
+    private readonly prismaService: PrismaService<PrismaClient>,
+    private readonly configService: ConfigService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -16,17 +18,17 @@ export class AgentApiKeyGuard implements CanActivate {
     const authHeader = headers?.['authorization'] ?? '';
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new AuthException();
+      throw new AuthException({}, 'auth');
     }
 
     const rawKey = authHeader.slice('Bearer '.length).trim();
     if (!rawKey) {
-      throw new AuthException();
+      throw new AuthException({}, 'auth');
     }
 
     const secret = this.configService.get<string>('API_KEY_SECRET');
     if (!secret) {
-      throw new AuthException();
+      throw new AuthException({}, 'auth');
     }
 
     const keyHash = createHmac('sha256', secret).update(rawKey).digest('hex');
@@ -36,7 +38,7 @@ export class AgentApiKeyGuard implements CanActivate {
     });
 
     if (!agent) {
-      throw new AuthException();
+      throw new AuthException({}, 'auth');
     }
 
     delete headers['authorization'];

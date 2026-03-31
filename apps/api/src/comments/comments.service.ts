@@ -5,6 +5,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ValidationAppException, NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
+import { CommentResponseDto } from './dto/comment-response.dto';
 
 interface CurrentUser {
   id: string;
@@ -27,13 +28,13 @@ export class CommentsService {
   ) {
     // Validate required fields
     if (!createCommentDto.body) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'comments');
     }
     if (typeof createCommentDto.body === 'string' && createCommentDto.body.trim().length === 0) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'comments');
     }
     if (!createCommentDto.type) {
-      throw new ValidationAppException();
+      throw new ValidationAppException({}, 'comments');
     }
 
     // Find project by slug
@@ -42,7 +43,7 @@ export class CommentsService {
     });
 
     if (!project || project.deletedAt) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'comments');
     }
 
     // Find ticket by ref (KODA-1 or CUID)
@@ -70,7 +71,7 @@ export class CommentsService {
     }
 
     if (!ticket || ticket.deletedAt) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'comments');
     }
 
     // Create the comment
@@ -84,7 +85,7 @@ export class CommentsService {
       },
     });
 
-    return comment;
+    return CommentResponseDto.from(comment);
   }
 
   async findByTicket(projectSlug: string, ticketRef: string) {
@@ -94,7 +95,7 @@ export class CommentsService {
     });
 
     if (!project || project.deletedAt) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'comments');
     }
 
     // Find ticket by ref (KODA-1 or CUID)
@@ -122,7 +123,7 @@ export class CommentsService {
     }
 
     if (!ticket || ticket.deletedAt) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'comments');
     }
 
     // Find all comments for this ticket, ordered by creation date
@@ -131,7 +132,7 @@ export class CommentsService {
       orderBy: { createdAt: 'asc' },
     });
 
-    return comments;
+    return CommentResponseDto.fromMany(comments);
   }
 
   async findById(id: string) {
@@ -139,7 +140,7 @@ export class CommentsService {
       where: { id },
     });
 
-    return comment;
+    return comment ? CommentResponseDto.from(comment) : null;
   }
 
   async update(
@@ -154,7 +155,7 @@ export class CommentsService {
     });
 
     if (!comment) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'comments');
     }
 
     // Check authorization: only author or admin can edit
@@ -165,7 +166,7 @@ export class CommentsService {
     const isAdmin = actorType === 'user' && currentUser.role === 'ADMIN';
 
     if (!isAuthor && !isAdmin) {
-      throw new ForbiddenAppException();
+      throw new ForbiddenAppException({}, 'comments');
     }
 
     // Update the comment
@@ -176,7 +177,7 @@ export class CommentsService {
       },
     });
 
-    return updatedComment;
+    return CommentResponseDto.from(updatedComment);
   }
 
   async delete(
@@ -190,7 +191,7 @@ export class CommentsService {
     });
 
     if (!comment) {
-      throw new NotFoundAppException();
+      throw new NotFoundAppException({}, 'comments');
     }
 
     // Check authorization: only author or admin can delete
@@ -201,7 +202,7 @@ export class CommentsService {
     const isAdmin = actorType === 'user' && currentUser.role === 'ADMIN';
 
     if (!isAuthor && !isAdmin) {
-      throw new ForbiddenAppException();
+      throw new ForbiddenAppException({}, 'comments');
     }
 
     // Delete the comment

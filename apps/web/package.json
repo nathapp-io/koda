@@ -7,8 +7,8 @@
     "dev": "nuxt dev --port 3101",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
-    "lint": "eslint \"./**/*.ts\" --ignore-pattern \".nuxt/**\" --ignore-pattern \".output/**\" --ignore-pattern \"generated/**\" --max-warnings=0",
-    "lint:fix": "eslint \"./**/*.ts\" --ignore-pattern \".nuxt/**\" --ignore-pattern \".output/**\" --ignore-pattern \"generated/**\" --fix",
+    "lint": "eslint \"./**/*.ts\" --ignore-pattern \".nuxt/**\" --ignore-pattern \".output/**\" --max-warnings=0",
+    "lint:fix": "eslint \"./**/*.ts\" --ignore-pattern \".nuxt/**\" --ignore-pattern \".output/**\" --fix",
     "type-check": "nuxt typecheck",
     "test": "jest",
     "test:e2e": "playwright test",
@@ -37,7 +37,7 @@
     "@playwright/test": "^1.51.0",
     "@nathapp/eslint-config": "workspace:*",
     "@nathapp/typescript-config": "workspace:*",
-    "@hey-api/client-fetch": "^0.3.4",
+
     "@nuxt/devtools": "latest",
     "@nuxt/eslint": "^0.7.6",
     "@types/jest": "^29.5.14",
@@ -59,7 +59,8 @@
     ],
     "testPathIgnorePatterns": [
       "/node_modules/",
-      "/tests/e2e/"
+      "/tests/e2e/",
+      ".nax/"
     ],
     "moduleFileExtensions": [
       "ts",

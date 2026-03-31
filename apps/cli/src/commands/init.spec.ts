@@ -19,15 +19,14 @@ const mockStore = {
 
 jest.mock('conf', () => jest.fn(() => mockStore));
 
-// Mock axios
-const mockAxios = { get: jest.fn() };
-jest.mock('axios', () => ({ create: () => mockAxios }));
-
 // Mock generated client
 jest.mock('../generated', () => ({
-  ProjectsService: {
-    show: jest.fn(),
-  },
+  projectsControllerFindBySlug: jest.fn(),
+  OpenAPI: { BASE: '', TOKEN: '' },
+}));
+
+jest.mock('../generated/core/OpenAPI', () => ({
+  OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
 // Mock config module

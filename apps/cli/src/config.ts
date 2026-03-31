@@ -115,7 +115,7 @@ export const _defaultResolveContextDeps: ResolveContextDeps = {
   getConfig,
 };
 
-const DEFAULT_API_URL = 'http://localhost:3100/api';
+const DEFAULT_API_URL = 'http://localhost:3100';
 
 export async function resolveContext(
   flags: ResolveContextFlags,

@@ -55,6 +55,12 @@ describe('RAG Config & Module Wiring (US-002)', () => {
   });
 
   describe('RagModule FTS_OPTIMIZE_STRATEGY provider factory', () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => {
+      jest.runOnlyPendingTimers();
+      jest.useRealTimers();
+    });
+
     it('creates ScheduleModule.forRoot() in module imports', () => {
       // This is verified by the fact that RagModule imports ScheduleModule.forRoot()
       // If this wasn't correct, the module wouldn't compile

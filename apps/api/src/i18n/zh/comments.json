@@ -1,4 +1,7 @@
 {
-  "notFound": "Comment not found",
-  "invalidType": "Invalid comment type for this transition"
+  "notFound": "未找到评论",
+  "invalidType": "此转换的评论类型无效",
+  "404": "未找到评论",
+  "-2": "验证错误",
+  "40003": "访问被拒绝"
 }
