@@ -101,6 +101,9 @@ jobs:
       - name: Generate Prisma client
         run: bun run db:generate
 
+      - name: Generate OPENAPI types
+        run: bun run generate:cli        
+
       - name: Build CLI
         run: bunx turbo run build --filter=@nathapp/koda-cli
 
