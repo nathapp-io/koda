@@ -32,7 +32,6 @@
                   :placeholder="capabilitiesTags.length === 0 ? t('agents.form.capabilitiesPlaceholder') : ''"
                   class="flex-1 min-w-[120px] bg-transparent outline-none placeholder:text-muted-foreground"
                   @keydown.enter.prevent="addCapability"
-                  v-bind="componentField"
                 />
               </div>
             </FormControl>
@@ -87,7 +86,7 @@ watch(() => props.agent.capabilities, (newCapabilities) => {
 
 const formSchema = toTypedSchema(
   z.object({
-    capabilities: z.string().optional(),
+    capabilities: z.array(z.string()).default([]),
   })
 )
 

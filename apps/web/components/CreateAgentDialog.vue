@@ -82,7 +82,6 @@
                   @keydown.backspace="handleBackspace"
                 />
               </div>
-              <input type="hidden" v-bind="componentField" :value="capabilitiesTags.join(',')" />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -161,7 +160,7 @@ const formSchema = toTypedSchema(
     name: z.string().min(1, t('agents.validation.nameRequired')),
     slug: z.string().min(1, t('agents.validation.slugRequired')).regex(/^[a-z0-9-]+$/, t('agents.validation.slugFormat')),
     roles: z.array(z.string()).min(1, t('agents.validation.rolesRequired')),
-    capabilities: z.string().optional(),
+    capabilities: z.array(z.string()).default([]),
     maxConcurrentTickets: z.number().int().min(1).default(3),
   })
 )
@@ -172,7 +171,7 @@ const { handleSubmit, isSubmitting, resetForm, setFieldValue, values } = useForm
     name: '',
     slug: '',
     roles: [] as string[],
-    capabilities: '',
+    capabilities: [] as string[],
     maxConcurrentTickets: 3,
   },
 })
@@ -191,7 +190,7 @@ watch(() => values.slug, () => {
 
 // Sync capabilitiesTags to form field value
 watch(capabilitiesTags, (tags) => {
-  setFieldValue('capabilities', tags.join(','))
+  setFieldValue('capabilities', tags)
 }, { deep: true })
 
 // Clear capabilitiesTags when dialog closes
