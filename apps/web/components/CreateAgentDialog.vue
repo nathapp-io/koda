@@ -129,6 +129,7 @@ import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { ref, watch } from 'vue'
 import { LucideX } from 'lucide-vue-next'
+import { normalizeCapabilities } from '~/lib/utils'
 
 const props = defineProps<{
   open: boolean
@@ -210,8 +211,8 @@ function deriveSlug(name: string): string {
 function addCapability(event: Event) {
   const input = event.target as HTMLInputElement
   const value = input.value.trim()
-  if (value && !capabilitiesTags.value.includes(value)) {
-    capabilitiesTags.value = [...capabilitiesTags.value, value]
+  if (value && !capabilitiesTags.value.some(cap => cap.toLowerCase() === value.toLowerCase())) {
+    capabilitiesTags.value = normalizeCapabilities([...capabilitiesTags.value, value])
     input.value = ''
   }
 }
