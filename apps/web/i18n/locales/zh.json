@@ -353,6 +353,10 @@
       "createFailed": "创建标签失败",
       "deleted": "标签删除成功",
       "deleteFailed": "删除标签失败"
+    },
+    "validation": {
+      "colorInvalid": "颜色必须是有效的6位十六进制颜色值（例如 #FF5733）",
+      "nameRequired": "名称为必填项"
     }
   },
   "toast": {

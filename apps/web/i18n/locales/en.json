@@ -353,6 +353,10 @@
       "createFailed": "Failed to create label",
       "deleted": "Label deleted successfully",
       "deleteFailed": "Failed to delete label"
+    },
+    "validation": {
+      "colorInvalid": "Color must be a valid 6-digit hex color (e.g., #FF5733)",
+      "nameRequired": "Name is required"
     }
   },
   "toast": {

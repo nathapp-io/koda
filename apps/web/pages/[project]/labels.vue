@@ -5,6 +5,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { extractApiError } from '~/composables/useApi'
+import { normalizeHexColor, isValidHexColor } from '~/utils/color'
 
 interface Label {
   id: string
@@ -26,20 +27,25 @@ const { data: labelsData, pending, error, refresh } = useAsyncData(
 const labels = computed(() => labelsData.value ?? [])
 
 const formSchema = toTypedSchema(z.object({
-  name: z.string().min(1, 'Name is required'),
-  color: z.string().optional(),
+  name: z.string().min(1, t('labels.validation.nameRequired')),
+  colorHex: z.string().default('#6366F1'),
 }))
 
 const { handleSubmit, resetForm } = useForm({
   validationSchema: formSchema,
-  initialValues: { name: '', color: '#6366f1' },
+  initialValues: { name: '', colorHex: '#6366F1' },
 })
 
 const onSubmit = handleSubmit(async (values) => {
+  const normalized = normalizeHexColor(values.colorHex || '#6366F1')
+  if (!isValidHexColor(normalized)) {
+    toast.error(t('labels.validation.colorInvalid'))
+    return
+  }
   try {
     await $api.post(`/projects/${slug}/labels`, {
       name: values.name,
-      color: values.color || '#6366f1',
+      color: normalized,
     })
     toast.success(t('labels.toast.created'))
     resetForm()
@@ -78,12 +84,13 @@ async function deleteLabel(labelId: string) {
           </FormItem>
         </FormField>
 
-        <FormField name="color" v-slot="{ componentField }">
+        <FormField name="colorHex" v-slot="{ componentField }">
           <FormItem>
             <FormLabel>{{ t('labels.form.color') }}</FormLabel>
-            <FormControl>
-              <Input placeholder="#6366f1" class="w-32" v-bind="componentField" />
-            </FormControl>
+            <ColorPicker
+              :model-value="componentField.modelValue"
+              @update:model-value="componentField['onUpdate:modelValue']($event)"
+            />
             <FormMessage />
           </FormItem>
         </FormField>
