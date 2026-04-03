@@ -27,7 +27,7 @@ describe('US-002 AC1: CreateAgentDialog capabilities field uses z.array(z.string
 
   test('source defines capabilities with .default([]) in the schema', () => {
     const source = getCreateDialogSource()
-    const hasDefaultEmptyArray = source.match(/capabilities:\s*z\.array\s*\([^)]*\)\s*\.default\s*\(\s*\[\s*\]\s*\)/)
+    const hasDefaultEmptyArray = source.match(/capabilities:\s*z\.array\s*\(\s*z\.string\s*\(\s*\)\s*\)\s*\.default\s*\(\s*\[\s*\]\s*\)/)
     expect(hasDefaultEmptyArray).not.toBeNull()
   })
 
@@ -105,7 +105,7 @@ describe('US-002 AC1: CreateAgentDialog onSubmit passes string array to $api.pos
 describe('US-002 AC2: CreateAgentDialog with no capability tags submits capabilities: []', () => {
   test('capabilitiesTags starts as empty array ref', () => {
     const source = getCreateDialogSource()
-    const hasEmptyArrayRef = source.match(/capabilitiesTags\s*=\s*ref\s*\(\s*\[\s*\]\s*\)/)
+    const hasEmptyArrayRef = source.match(/capabilitiesTags\s*=\s*ref\s*<\s*string\[\]\s*>\s*\(\s*\[\s*\]\s*\)/)
     expect(hasEmptyArrayRef).not.toBeNull()
   })
 
@@ -135,7 +135,7 @@ describe('US-002 AC3: EditAgentCapabilitiesDialog capabilities field uses z.arra
 
   test('source defines capabilities with .default([]) in the schema', () => {
     const source = getEditDialogSource()
-    const hasDefaultEmptyArray = source.match(/capabilities:\s*z\.array\s*\([^)]*\)\s*\.default\s*\(\s*\[\s*\]\s*\)/)
+    const hasDefaultEmptyArray = source.match(/capabilities:\s*z\.array\s*\(\s*z\.string\s*\(\s*\)\s*\)\s*\.default\s*\(\s*\[\s*\]\s*\)/)
     expect(hasDefaultEmptyArray).not.toBeNull()
   })
 
@@ -261,7 +261,7 @@ describe('US-002 AC6: EditAgentCapabilitiesDialog handles multi-word capability 
 describe('US-002: CreateAgentDialog capabilities integration', () => {
   test('capabilitiesTags is a ref<string[]>', () => {
     const source = getCreateDialogSource()
-    const hasStringArrayRef = source.match(/capabilitiesTags:\s*ref\s*<\s*string\[\]\s*>\s*\(\s*\[\s*\]\s*\)/)
+    const hasStringArrayRef = source.match(/const\s+capabilitiesTags\s*=\s*ref\s*<\s*string\[\]\s*>\s*\(\s*\[\s*\]\s*\)/)
     expect(hasStringArrayRef).not.toBeNull()
   })
 
