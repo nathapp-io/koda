@@ -3,12 +3,12 @@
   "feature": "web-agents-i18n-capabilities",
   "branchName": "feat/web-agents-i18n-capabilities",
   "createdAt": "2026-04-03T00:00:00.000Z",
-  "updatedAt": "2026-04-03T06:30:30.336Z",
+  "updatedAt": "2026-04-03T07:13:20.055071Z",
   "userStories": [
     {
-      "id": "US-001",
-      "title": "Agent i18n key coverage and hardcoded text removal",
-      "description": "Replace all hardcoded English strings in RotateKeyDialog.vue, DeleteAgentDialog.vue, and the key-reveal section of CreateAgentDialog.vue with `t()` calls. Add all required missing keys to both `en.json` and `zh.json`. Fix the existing `agents.form.editCapabilities` key mismatch used in EditAgentCapabilitiesDialog.vue. Migrate `copyButtonText` ref pattern to a boolean `isCopied` flag so button labels use i18n keys reactively.",
+      "id": "US-001-A",
+      "title": "RotateKeyDialog i18n migration",
+      "description": "Decompose from US-001: migrate RotateKeyDialog hardcoded strings to i18n keys, including reactive copied state labels.",
       "acceptanceCriteria": [
         "When RotateKeyDialog renders with a closed state, then the DialogTitle element text is sourced from t('agents.rotateKey.title') not a hardcoded string literal.",
         "When RotateKeyDialog renders the confirmation form, then the paragraph body text is sourced from t('agents.rotateKey.confirmBody') with agent name interpolated, not a hardcoded literal.",
@@ -18,7 +18,37 @@
         "When RotateKeyDialog key-reveal section is visible, then the warning paragraph text is sourced from t('agents.rotateKey.apiKeyReveal.message').",
         "When RotateKeyDialog key-reveal copy button is idle, then its label is sourced from t('agents.rotateKey.apiKeyReveal.copy').",
         "When RotateKeyDialog key-reveal copy button has been activated, then its label switches to t('agents.rotateKey.apiKeyReveal.copied').",
-        "When RotateKeyDialog key-reveal done button is rendered, then its label is sourced from t('common.done').",
+        "When RotateKeyDialog key-reveal done button is rendered, then its label is sourced from t('common.done')."
+      ],
+      "tags": [
+        "feature",
+        "i18n",
+        "web"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/components/RotateKeyDialog.vue",
+        "apps/web/components/DeleteAgentDialog.vue",
+        "apps/web/components/CreateAgentDialog.vue",
+        "apps/web/i18n/locales/en.json",
+        "apps/web/i18n/locales/zh.json"
+      ]
+    },
+    {
+      "id": "US-001-B",
+      "title": "Delete/Create dialog i18n migration",
+      "description": "Decompose from US-001: migrate DeleteAgentDialog and CreateAgentDialog key-reveal hardcoded strings to i18n keys.",
+      "acceptanceCriteria": [
         "When DeleteAgentDialog renders, then the DialogTitle element text is sourced from t('agents.deleteAgent.title').",
         "When DeleteAgentDialog renders, then the confirmation body text is sourced from t('agents.deleteAgent.confirm') with agent name interpolated.",
         "When DeleteAgentDialog delete submit is in-flight (isSubmitting=true), then the delete button label is sourced from t('agents.deleteAgent.deleting').",
@@ -27,7 +57,39 @@
         "When CreateAgentDialog key-reveal section is visible, then the warning paragraph text is sourced from t('agents.rotateKey.apiKeyReveal.message').",
         "When CreateAgentDialog key-reveal copy button is idle, then its label is sourced from t('agents.rotateKey.apiKeyReveal.copy').",
         "When CreateAgentDialog key-reveal copy button has been activated, then its label switches to t('agents.rotateKey.apiKeyReveal.copied').",
-        "When CreateAgentDialog key-reveal done button is rendered, then its label is sourced from t('common.done').",
+        "When CreateAgentDialog key-reveal done button is rendered, then its label is sourced from t('common.done')."
+      ],
+      "tags": [
+        "feature",
+        "i18n",
+        "web"
+      ],
+      "dependencies": [
+        "US-001-A"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/components/RotateKeyDialog.vue",
+        "apps/web/components/DeleteAgentDialog.vue",
+        "apps/web/components/CreateAgentDialog.vue",
+        "apps/web/i18n/locales/en.json",
+        "apps/web/i18n/locales/zh.json"
+      ]
+    },
+    {
+      "id": "US-001-C",
+      "title": "Locale parity + editCapabilities key fix",
+      "description": "Decompose from US-001: ensure en/zh key parity for added keys and fix EditAgentCapabilitiesDialog key mismatch.",
+      "acceptanceCriteria": [
         "Given apps/web/i18n/locales/en.json contains agents.rotateKey.title, when apps/web/i18n/locales/zh.json is read, then it contains the same key agents.rotateKey.title.",
         "Given apps/web/i18n/locales/en.json contains agents.rotateKey.confirmBody, when apps/web/i18n/locales/zh.json is read, then it contains the same key agents.rotateKey.confirmBody.",
         "Given apps/web/i18n/locales/en.json contains agents.rotateKey.rotating, when apps/web/i18n/locales/zh.json is read, then it contains the same key agents.rotateKey.rotating.",
@@ -42,7 +104,9 @@
         "i18n",
         "web"
       ],
-      "dependencies": [],
+      "dependencies": [
+        "US-001-B"
+      ],
       "status": "pending",
       "passes": false,
       "attempts": 0,
@@ -79,7 +143,7 @@
         "api-contract"
       ],
       "dependencies": [
-        "US-001"
+        "US-001-C"
       ],
       "status": "pending",
       "passes": false,
@@ -98,16 +162,45 @@
       ]
     },
     {
-      "id": "US-003",
-      "title": "Capabilities tag UX normalization and validation",
-      "description": "Extract a pure `normalizeCapabilities(input: string[]): string[]` utility that: trims each entry, drops empty/whitespace-only values, deduplicates case-insensitively preserving the first-seen casing. Apply this normalization in the `addCapability` handler in both CreateAgentDialog.vue and EditAgentCapabilitiesDialog.vue, replacing the current case-sensitive `includes` duplicate check. Guard the Enter handler so blank/whitespace-only input does not append a tag. The utility may be co-located in a composable or as an inline helper — it must remain a pure function testable in isolation.",
+      "id": "US-003-A",
+      "title": "normalizeCapabilities utility behavior",
+      "description": "Decompose from US-003: implement and test pure normalizeCapabilities utility (trim, remove empty, case-insensitive dedupe preserving first casing).",
       "acceptanceCriteria": [
         "normalizeCapabilities(['Read-Code', 'read-code', 'READ-CODE']) returns a single-element array ['Read-Code'] (preserves first-seen casing, deduplicates case-insensitively).",
         "normalizeCapabilities(['  trim me  ', 'clean']) returns ['trim me', 'clean'] with leading/trailing whitespace removed.",
         "normalizeCapabilities(['valid', '', '   ', 'also-valid']) returns ['valid', 'also-valid'] with empty and whitespace-only entries removed.",
         "normalizeCapabilities([]) returns [].",
         "normalizeCapabilities(['Foo', 'foo', 'FOO', 'bar']) returns ['Foo', 'bar'] (first-seen 'Foo' kept, later case variants dropped).",
-        "When addCapability is called in CreateAgentDialog with an input whose trimmed value is empty string, then capabilitiesTags length does not increase.",
+        "When addCapability is called in CreateAgentDialog with an input whose trimmed value is empty string, then capabilitiesTags length does not increase."
+      ],
+      "tags": [
+        "feature",
+        "web",
+        "ux"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/components/CreateAgentDialog.vue",
+        "apps/web/components/EditAgentCapabilitiesDialog.vue"
+      ]
+    },
+    {
+      "id": "US-003-B",
+      "title": "Capabilities tag UX guards and submit consistency",
+      "description": "Decompose from US-003: apply normalization/blank guards in Create/Edit dialogs and verify remove/submit payload consistency.",
+      "acceptanceCriteria": [
         "When addCapability is called in CreateAgentDialog with a value that matches an existing tag case-insensitively, then capabilitiesTags length does not increase.",
         "When addCapability is called in EditAgentCapabilitiesDialog with an input whose trimmed value is empty string, then capabilitiesTags length does not increase.",
         "When addCapability is called in EditAgentCapabilitiesDialog with a value that matches an existing tag case-insensitively, then capabilitiesTags length does not increase.",
@@ -120,7 +213,7 @@
         "ux"
       ],
       "dependencies": [
-        "US-002"
+        "US-003-A"
       ],
       "status": "pending",
       "passes": false,
