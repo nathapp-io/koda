@@ -29,7 +29,7 @@ describe('US-001-B AC1: DeleteAgentDialog DialogTitle uses t("agents.deleteAgent
 describe('US-001-B AC2: DeleteAgentDialog confirmation body uses t("agents.deleteAgent.confirm") with agent name interpolation', () => {
   test('source uses t("agents.deleteAgent.confirm") for confirmation body', () => {
     const source = getSource()
-    expect(source).toContain("t('agents.deleteAgent.confirm')")
+    expect(source).toMatch(/t\s*\(\s*['"]agents\.deleteAgent\.confirm['"]/)
   })
 
   test('source does not contain hardcoded confirmation body text', () => {
