@@ -146,7 +146,7 @@ describe("AC4: When RotateKeyDialog confirmation submit is idle, submit button l
 describe("AC5: When RotateKeyDialog cancel button is clicked, button label rendered is sourced from t('common.cancel')", () => {
   test("source does NOT contain hardcoded string 'Cancel' as cancel button label", () => {
     const source = getSource()
-    const hasHardcodedCancel = source.match(/>\s*Cancel\s*<\/Button>\s*<\!--.*cancel/i) ||
+    const hasHardcodedCancel = source.match(/>\s*Cancel\s*<\/Button>\s*<!--.*cancel/i) ||
       source.match(/variant=["']outline["']\s*>[\s\n]*Cancel/)
     expect(hasHardcodedCancel).toBeNull()
   })

@@ -120,8 +120,7 @@ describe('US-004-1 AC2: When rotation succeeds, dialog switches to key-reveal vi
 
   test('source displays warning message about copying the API key', () => {
     const source = getSource()
-    expect(source).toContain('Copy this API key now')
-    expect(source).toContain('will not be shown again')
+    expect(source).toContain("t('agents.rotateKey.apiKeyReveal.message')")
   })
 })
 
@@ -158,7 +157,7 @@ describe("US-004-1 AC3: When Copy button is clicked, apiKey is written to clipbo
 
   test('source updates button label to Copied! on click', () => {
     const source = getSource()
-    expect(source).toMatch(/Copied!/)
+    expect(source).toMatch(/agents\.rotateKey\.apiKeyReveal\.copied/)
   })
 
   test('source uses setTimeout with a proper function callback (not a string)', () => {
