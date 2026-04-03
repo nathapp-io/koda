@@ -144,10 +144,10 @@ describe("US-002-3 AC4: Copy button label changes to 'Copied!' for 2 seconds the
     expect(hasCopyButtonTextState).toBe(true)
   })
 
-  test('source updates button label to Copied! on click', () => {
+  test('source updates button label using i18n key for copied state on click', () => {
     const source = getSource()
-    // When copy is clicked, should set button text to "Copied!"
-    expect(source).toMatch(/Copied!/)
+    // When copy is clicked, should set button text to i18n key for copied state
+    expect(source).toMatch(/t\s*\(\s*['"]agents\.rotateKey\.apiKeyReveal\.copied['"]/)
   })
 
   test('source uses setTimeout with a FUNCTION callback (not a string)', () => {
@@ -184,9 +184,9 @@ describe("US-002-3 AC4: Copy button label changes to 'Copied!' for 2 seconds the
     const setTimeoutCallback = source.match(/setTimeout\s*\([\s\S]{0,200}\)/)
     expect(setTimeoutCallback).not.toBeNull()
 
-    // The callback should contain logic to revert to 'Copy'
+    // The callback should contain logic to revert using i18n key for copy
     const callbackText = setTimeoutCallback![0]
-    const revertsToCopy = callbackText.includes("'Copy'") || callbackText.includes('"Copy"')
+    const revertsToCopy = callbackText.includes("t('agents.rotateKey.apiKeyReveal.copy')") || callbackText.includes('t("agents.rotateKey.apiKeyReveal.copy")')
     expect(revertsToCopy).toBe(true)
   })
 
@@ -205,29 +205,27 @@ describe("US-002-3 AC4: Copy button label changes to 'Copied!' for 2 seconds the
 // AC5 — Warning message displayed
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe("US-002-3 AC5: Warning message 'Copy this API key now. It will not be shown again.' is displayed", () => {
-  test('source contains the warning text about copying the API key', () => {
+describe("US-002-3 AC5: Warning message uses i18n key for apiKeyReveal.message", () => {
+  test('source uses i18n key for warning message', () => {
     const source = getSource()
-    // Should contain the warning message
-    expect(source).toContain('Copy this API key now')
-    expect(source).toContain('will not be shown again')
+    // Should use i18n key for the warning message
+    expect(source).toMatch(/t\s*\(\s*['"]agents\.rotateKey\.apiKeyReveal\.message['"]/)
   })
 
   test('source displays warning in the key-reveal section', () => {
     const source = getSource()
-    // The warning should appear alongside the apiKey display
-    // After the Input showing the apiKey, there should be warning text
+    // The warning should appear alongside the apiKey display using i18n
     const keyRevealSection = source.match(/v-if=["']apiKey["'][\s\S]*?<\/template>/)
     expect(keyRevealSection).not.toBeNull()
-    const hasWarningInSection = keyRevealSection![0].includes('Copy this API key now')
+    const hasWarningInSection = keyRevealSection![0].includes("t('agents.rotateKey.apiKeyReveal.message')") || keyRevealSection![0].includes('t("agents.rotateKey.apiKeyReveal.message")')
     expect(hasWarningInSection).toBe(true)
   })
 
   test('warning message is visible to user in key-reveal view', () => {
     const source = getSource()
     // The warning should be inside the key-reveal section (v-if="apiKey")
-    // and should be a <p> or similar text element with the warning
-    const warningPattern = /v-if=["']apiKey["'][\s\S]{0,1000}<p[\s\S]{0,200}Copy this API key now/
+    // using the i18n key
+    const warningPattern = /v-if=["']apiKey["'][\s\S]{0,1000}t\s*\(\s*['"]agents\.rotateKey\.apiKeyReveal\.message['"]/
     const hasWarningElement = source.match(warningPattern)
     expect(hasWarningElement).not.toBeNull()
   })
@@ -308,16 +306,16 @@ describe('US-002-3: Key-reveal view is a distinct section in the dialog', () => 
 
   test('key-reveal view shows Input, Copy button, warning, and Done button together', () => {
     const source = getSource()
-    // The key-reveal section should contain all required elements
+    // The key-reveal section should contain all required elements using i18n
     const keyRevealSection = source.match(/v-if=["']apiKey["'][\s\S]{0,1500}<\/div>/)
     expect(keyRevealSection).not.toBeNull()
     const section = keyRevealSection![0]
-    // Check for all required elements
+    // Check for all required elements with i18n keys
     expect(section).toContain('<Input')
     expect(section).toContain('readonly')
     expect(section).toContain('copyToClipboard')
-    expect(section).toContain('Copy this API key now')
-    expect(section).toContain('Done')
+    expect(section).toMatch(/t\s*\(\s*['"]agents\.rotateKey\.apiKeyReveal\.message['"]/)
+    expect(section).toMatch(/t\s*\(\s*['"]common\.done['"]/)
   })
 })
 

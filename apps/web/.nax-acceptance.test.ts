@@ -201,10 +201,10 @@ describe("AC-9: Copy button writes apiKey to clipboard and shows 'Copied!' for 2
     expect(source).toMatch(/apiKey/)
   })
 
-  test("AC-9: Copy button label changes to 'Copied!' after click", () => {
+  test("AC-9: Copy button label changes to i18n key for copied state after click", () => {
     const source = readFileSync(createAgentDialogPath, 'utf-8')
-    // Button should display Copied! or similar text after copying
-    expect(source).toMatch(/Copied['!]?/)
+    // Button should use i18n key for copied state after copying
+    expect(source).toMatch(/t\s*\(\s*['"]agents\.rotateKey\.apiKeyReveal\.copied['"]/)
   })
 
   test('AC-9: setTimeout or similar reverts button label after 2000ms', () => {
@@ -472,10 +472,10 @@ describe('AC-25: RotateKeyDialog shows new apiKey in read-only Input with Copy b
     expect(source).toMatch(/:readonly\s*=|:disabled\s*=/)
   })
 
-  test('AC-25: warning message is displayed about copying the key', () => {
+  test('AC-25: warning message uses i18n key for key reveal message', () => {
     const source = readFileSync(rotateKeyDialogPath, 'utf-8')
-    // Warning about key not being shown again
-    expect(source).toMatch(/not be shown again|Copy this API key/)
+    // Warning about key not being shown again uses i18n
+    expect(source).toMatch(/t\s*\(\s*['"]agents\.rotateKey\.apiKeyReveal\.message['"]/)
   })
 })
 
@@ -490,9 +490,9 @@ describe("AC-26: RotateKeyDialog Copy button writes apiKey to clipboard and show
     expect(source).toMatch(/apiKey/)
   })
 
-  test("AC-26: Button label changes to 'Copied!' after click", () => {
+  test("AC-26: Button label changes to i18n key for copied state after click", () => {
     const source = readFileSync(rotateKeyDialogPath, 'utf-8')
-    expect(source).toMatch(/Copied['!]?/)
+    expect(source).toMatch(/t\s*\(\s*['"]agents\.rotateKey\.apiKeyReveal\.copied['"]/)
   })
 
   test('AC-26: setTimeout with ~2000ms reverts button label', () => {

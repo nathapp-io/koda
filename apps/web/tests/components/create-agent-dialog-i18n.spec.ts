@@ -1,5 +1,5 @@
 import { describe, test, expect } from '@jest/globals'
-import { existsSync, readFileSync } from 'fs'
+import { readFileSync } from 'fs'
 import { join } from 'path'
 
 const webDir = join(__dirname, '../..')
