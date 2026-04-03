@@ -1,18 +1,16 @@
 {
     "version": 1,
     "models": {
-        "fast": {
-            "provider": "anthropic",
-            "model": "haiku"
+        "claude": {
+            "fast": "haiku",
+            "balanced": "sonnet",
+            "powerful": "opus"
         },
-        "balanced": {
-            "provider": "anthropic",
-            "model": "sonnet"
-        },
-        "powerful": {
-            "provider": "anthropic",
-            "model": "sonnet"
-        }
+        "opencode": {
+            "fast": "minimax/MiniMax-M2.7",
+            "balanced": "minimax/MiniMax-M2.7",
+            "powerful": "minimax/MiniMax-M2.7"
+        }        
     },
     "autoMode": {
         "enabled": true,
@@ -21,7 +19,7 @@
         "complexityRouting": {
             "simple": "fast",
             "medium": "balanced",
-            "complex": "powerful",
+            "complex": "balanced",
             "expert": "powerful"
         },
         "escalation": {
@@ -64,9 +62,6 @@
         "maxIterations": 6,
         "iterationDelayMs": 2000,
         "costLimit": 50.0,
-        "sessionTimeoutSeconds": 7200,
-        "verificationTimeoutSeconds": 600,
-        "maxStoriesPerFeature": 25,
         "rectification": {
             "enabled": true,
             "maxRetries": 2,
@@ -80,10 +75,6 @@
             "timeoutSeconds": 600,
             "acceptOnTimeout": true,
             "maxRectificationAttempts": 2
-        },
-        "smartTestRunner": {
-            "enable": true,
-            "testFilePatterns": ["**/**/**.spec.ts"]
         }
     },
     "quality": {
@@ -97,68 +88,7 @@
             "lint": "bunx turbo lint",
             "lintFix": "bunx turbo lint:fix",
             "formatFix": "bunx turbo lint:fix"
-        },
-        "forceExit": false,
-        "detectOpenHandles": true,
-        "detectOpenHandlesRetries": 1,
-        "gracePeriodMs": 5000,
-        "drainTimeoutMs": 2000,
-        "shell": "/bin/sh",
-        "stripEnvVars": [
-            "CLAUDECODE",
-            "REPL_ID",
-            "AGENT",
-            "GITLAB_ACCESS_TOKEN",
-            "GITHUB_TOKEN",
-            "GITHUB_ACCESS_TOKEN",
-            "GH_TOKEN",
-            "CI_GIT_TOKEN",
-            "CI_JOB_TOKEN",
-            "BITBUCKET_ACCESS_TOKEN",
-            "NPM_TOKEN",
-            "NPM_AUTH_TOKEN",
-            "YARN_NPM_AUTH_TOKEN",
-            "ANTHROPIC_API_KEY",
-            "OPENAI_API_KEY",
-            "GEMINI_API_KEY",
-            "COHERE_API_KEY",
-            "AWS_ACCESS_KEY_ID",
-            "AWS_SECRET_ACCESS_KEY",
-            "AWS_SESSION_TOKEN",
-            "GOOGLE_APPLICATION_CREDENTIALS",
-            "GCLOUD_SERVICE_KEY",
-            "AZURE_CLIENT_SECRET",
-            "AZURE_TENANT_ID",
-            "TELEGRAM_BOT_TOKEN",
-            "SLACK_TOKEN",
-            "SLACK_WEBHOOK_URL",
-            "SENTRY_AUTH_TOKEN",
-            "DATADOG_API_KEY"
-        ]
-    },
-    "tdd": {
-        "maxRetries": 2,
-        "autoVerifyIsolation": true,
-        "autoApproveVerifier": true,
-        "strategy": "auto",
-        "sessionTiers": {
-            "testWriter": "balanced",
-            "verifier": "fast"
-        },
-        "testWriterAllowedPaths": ["src/index.ts", "src/**/index.ts"],
-        "rollbackOnFailure": true,
-        "greenfieldDetection": true
-    },
-    "constitution": {
-        "enabled": true,
-        "path": "constitution.md",
-        "maxTokens": 2000
-    },
-    "analyze": {
-        "llmEnhanced": false,
-        "model": "balanced",
-        "fallbackToKeywords": true,
-        "maxCodebaseSummaryTokens": 5000
+        }
     },
     "review": {
         "enabled": true,
@@ -167,8 +97,7 @@
             "build": "bun run build",
             "typecheck": "bunx turbo type-check",
             "lint": "bunx turbo lint",
-            "lintFix": "bunx turbo lint:fix",
-            "formatFix": "bunx turbo lint:fix"
+            "lintFix": "bunx turbo lint:fix"
         },
         "pluginMode": "deferred",
         "semantic": {
@@ -177,8 +106,7 @@
         }
     },
     "plan": {
-        "model": "balanced",
-        "outputPath": "spec.md"
+        "model": "balanced"
     },
     "acceptance": {
         "enabled": true,
@@ -188,41 +116,5 @@
         "model": "balanced",
         "refinement": true,
         "redGate": true
-    },
-    "context": {
-        "fileInjection": "disabled",
-        "testCoverage": {
-            "enabled": true,
-            "detail": "names-and-counts",
-            "maxTokens": 500,
-            "testPattern": "**/*.test.{ts,js,tsx,jsx}",
-            "scopeToStory": true
-        },
-        "autoDetect": {
-            "enabled": true,
-            "maxFiles": 5,
-            "traceImports": false
-        }
-    },
-    "interaction": {
-        "plugin": "telegram"
-    },
-    "precheck": {
-        "storySizeGate": {
-            "enabled": true,
-            "maxAcCount": 20,
-            "maxDescriptionLength": 2000,
-            "maxBulletPoints": 20
-        }
-    },
-    "prompts": {},
-    "decompose": {
-        "trigger": "auto",
-        "maxAcceptanceCriteria": 6,
-        "maxSubstories": 5,
-        "maxSubstoryComplexity": "medium",
-        "maxRetries": 2,
-        "model": "balanced"
-    },
-    "costLimit": 50.0
+    }
 }
