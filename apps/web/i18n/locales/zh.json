@@ -190,7 +190,44 @@
       "rolesUpdated": "代理角色更新成功",
       "updateRolesFailed": "更新代理角色失败",
       "capabilitiesUpdated": "代理能力更新成功",
-      "updateCapabilitiesFailed": "更新代理能力失败"
+      "updateCapabilitiesFailed": "更新代理能力失败",
+      "created": "代理创建成功",
+      "createFailed": "创建代理失败",
+      "deleted": "代理删除成功",
+      "deleteFailed": "删除代理失败",
+      "rotateKeyFailed": "轮换 API 密钥失败",
+      "keyReveal": {
+        "warning": "立即复制此 API 密钥。它不会再显示。",
+        "copy": "复制",
+        "done": "完成"
+      }
+    },
+    "createAgent": {
+      "title": "创建代理",
+      "nameLabel": "代理名称",
+      "namePlaceholder": "例如：code-reviewer",
+      "descriptionLabel": "描述",
+      "descriptionPlaceholder": "此代理的职责是什么？",
+      "capabilitiesLabel": "能力",
+      "capabilitiesPlaceholder": "输入并按回车",
+      "createButton": "创建代理",
+      "creatingButton": "创建中..."
+    },
+    "rotateKey": {
+      "title": "轮换 API 密钥",
+      "confirmMessage": "确定要为 {name} 轮换 API 密钥吗？旧密钥将立即失效。",
+      "rotating": "轮换中...",
+      "confirm": "确认",
+      "warning": "立即复制此 API 密钥。它不会再显示。",
+      "copy": "复制",
+      "done": "完成"
+    },
+    "deleteAgent": {
+      "title": "删除代理",
+      "confirmMessage": "确定要删除代理 \"{name}\" 吗？此操作无法撤销。",
+      "cancel": "取消",
+      "deleting": "删除中...",
+      "delete": "删除"
     },
     "form": {
       "editRoles": "编辑代理角色",

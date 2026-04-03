@@ -2,19 +2,19 @@
   <Dialog :open="open" @update:open="$emit('update:open', $event)">
     <DialogContent class="sm:max-w-[500px]">
       <DialogHeader>
-        <DialogTitle>Delete Agent</DialogTitle>
+        <DialogTitle>{{ t('agents.deleteAgent.title') }}</DialogTitle>
       </DialogHeader>
 
       <div class="space-y-4">
         <p class="text-sm text-muted-foreground">
-          Are you sure you want to delete agent "{{ agent.name }}"? This action cannot be undone.
+          {{ t('agents.deleteAgent.confirmMessage', { name: agent.name }) }}
         </p>
         <div class="flex justify-end gap-2">
           <Button type="button" variant="outline" @click="$emit('update:open', false)">
-            Cancel
+            {{ t('agents.deleteAgent.cancel') }}
           </Button>
           <Button variant="destructive" @click="handleDelete" :disabled="isSubmitting">
-            {{ isSubmitting ? 'Deleting...' : 'Delete' }}
+            {{ isSubmitting ? t('agents.deleteAgent.deleting') : t('agents.deleteAgent.delete') }}
           </Button>
         </div>
       </div>

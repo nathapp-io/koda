@@ -120,8 +120,8 @@ describe('US-004-1 AC2: When rotation succeeds, dialog switches to key-reveal vi
 
   test('source displays warning message about copying the API key', () => {
     const source = getSource()
-    expect(source).toContain('Copy this API key now')
-    expect(source).toContain('will not be shown again')
+    // Uses i18n key agents.rotateKey.warning
+    expect(source).toContain('agents.rotateKey.warning')
   })
 })
 
@@ -158,7 +158,8 @@ describe("US-004-1 AC3: When Copy button is clicked, apiKey is written to clipbo
 
   test('source updates button label to Copied! on click', () => {
     const source = getSource()
-    expect(source).toMatch(/Copied!/)
+    // Uses i18n key agents.rotateKey.apiKeyReveal.copied
+    expect(source).toMatch(/agents\.rotateKey\.apiKeyReveal\.copied/)
   })
 
   test('source uses setTimeout with a proper function callback (not a string)', () => {
@@ -198,15 +199,17 @@ describe("US-004-1 AC3: When Copy button is clicked, apiKey is written to clipbo
 describe("US-004-1 AC4: When Done button is clicked, it emits 'rotated' and closes the dialog", () => {
   test('source has a Done button in the key-reveal view', () => {
     const source = getSource()
-    const doneButtonInKeyReveal = source.match(/v-if=["']apiKey["'][\s\S]{0,500}Done/)
+    // Done button uses i18n key agents.rotateKey.done
+    const doneButtonInKeyReveal = source.match(/v-if=["']apiKey["'][\s\S]{0,500}agents\.rotateKey\.done/)
     expect(doneButtonInKeyReveal).not.toBeNull()
   })
 
   test('Done button has a click handler', () => {
     const source = getSource()
-    const doneButtonRegion = source.match(/Done[\s\S]{0,300}<\/Button>/)
+    // Done button uses i18n key agents.rotateKey.done
+    const doneButtonRegion = source.match(/agents\.rotateKey\.done[\s\S]{0,300}<\/Button>/)
     expect(doneButtonRegion).not.toBeNull()
-    const doneInKeyReveal = source.match(/v-if=["']apiKey["'][\s\S]{0,800}<Button[\s\S]{0,200}Done/)
+    const doneInKeyReveal = source.match(/v-if=["']apiKey["'][\s\S]{0,800}<Button[\s\S]{0,200}agents\.rotateKey\.done/)
     expect(doneInKeyReveal).not.toBeNull()
   })
 
@@ -265,8 +268,9 @@ describe('US-004-1: RotateKeyDialog component structure', () => {
 
   test('component has confirm and cancel buttons in confirm view', () => {
     const source = getSource()
-    const hasCancelButton = source.includes('Cancel')
-    const hasConfirmButton = source.includes('confirm') || source.includes('Confirm')
+    // Cancel uses i18n key common.cancel, Confirm uses agents.rotateKey.confirm
+    const hasCancelButton = source.includes('common.cancel') || source.includes('Cancel')
+    const hasConfirmButton = source.includes('agents.rotateKey.confirm') || source.includes('confirm') || source.includes('Confirm')
     expect(hasCancelButton || source.includes('cancel')).toBe(true)
     expect(hasConfirmButton).toBe(true)
   })

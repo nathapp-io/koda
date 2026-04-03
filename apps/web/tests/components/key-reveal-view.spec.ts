@@ -146,8 +146,9 @@ describe("US-002-3 AC4: Copy button label changes to 'Copied!' for 2 seconds the
 
   test('source updates button label to Copied! on click', () => {
     const source = getSource()
-    // When copy is clicked, should set button text to "Copied!"
-    expect(source).toMatch(/Copied!/)
+    // When copy is clicked, should set button text to the i18n key for "Copied!"
+    // Uses agents.rotateKey.apiKeyReveal.copied
+    expect(source).toMatch(/agents\.rotateKey\.apiKeyReveal\.copied/)
   })
 
   test('source uses setTimeout with a FUNCTION callback (not a string)', () => {
@@ -179,14 +180,12 @@ describe("US-002-3 AC4: Copy button label changes to 'Copied!' for 2 seconds the
 
   test('source reverts button label back to Copy after timeout', () => {
     const source = getSource()
-    // After setTimeout, should revert to "Copy"
-    // This should happen inside the setTimeout callback
-    const setTimeoutCallback = source.match(/setTimeout\s*\([\s\S]{0,200}\)/)
-    expect(setTimeoutCallback).not.toBeNull()
-
-    // The callback should contain logic to revert to 'Copy'
-    const callbackText = setTimeoutCallback![0]
-    const revertsToCopy = callbackText.includes("'Copy'") || callbackText.includes('"Copy"')
+    // After setTimeout, should revert to "Copy" via i18n
+    // The revertCopyButton function sets the text back
+    // Uses agents.toast.keyReveal.copy in CreateAgentDialog
+    const revertFunction = source.match(/function\s+revertCopyButton[\s\S]{0,200}/)
+    expect(revertFunction).not.toBeNull()
+    const revertsToCopy = revertFunction![0].includes('agents.toast.keyReveal.copy') || revertFunction![0].includes("'Copy'")
     expect(revertsToCopy).toBe(true)
   })
 
@@ -208,26 +207,25 @@ describe("US-002-3 AC4: Copy button label changes to 'Copied!' for 2 seconds the
 describe("US-002-3 AC5: Warning message 'Copy this API key now. It will not be shown again.' is displayed", () => {
   test('source contains the warning text about copying the API key', () => {
     const source = getSource()
-    // Should contain the warning message
-    expect(source).toContain('Copy this API key now')
-    expect(source).toContain('will not be shown again')
+    // Should contain the i18n key for the warning message
+    expect(source).toContain('agents.toast.keyReveal.warning')
   })
 
   test('source displays warning in the key-reveal section', () => {
     const source = getSource()
     // The warning should appear alongside the apiKey display
-    // After the Input showing the apiKey, there should be warning text
+    // After the Input showing the apiKey, there should be warning text via i18n
     const keyRevealSection = source.match(/v-if=["']apiKey["'][\s\S]*?<\/template>/)
     expect(keyRevealSection).not.toBeNull()
-    const hasWarningInSection = keyRevealSection![0].includes('Copy this API key now')
+    const hasWarningInSection = keyRevealSection![0].includes('agents.toast.keyReveal.warning')
     expect(hasWarningInSection).toBe(true)
   })
 
   test('warning message is visible to user in key-reveal view', () => {
     const source = getSource()
     // The warning should be inside the key-reveal section (v-if="apiKey")
-    // and should be a <p> or similar text element with the warning
-    const warningPattern = /v-if=["']apiKey["'][\s\S]{0,1000}<p[\s\S]{0,200}Copy this API key now/
+    // and should be a <p> or similar text element with the i18n key
+    const warningPattern = /v-if=["']apiKey["'][\s\S]{0,1000}<p[\s\S]{0,200}agents\.toast\.keyReveal\.warning/
     const hasWarningElement = source.match(warningPattern)
     expect(hasWarningElement).not.toBeNull()
   })
@@ -240,18 +238,18 @@ describe("US-002-3 AC5: Warning message 'Copy this API key now. It will not be s
 describe("US-002-3 AC6: Done button emits 'created' event and closes the dialog", () => {
   test('source has a Done button in the key-reveal view', () => {
     const source = getSource()
-    // Should have a Button with "Done" text in the key-reveal section
-    const doneButtonInKeyReveal = source.match(/v-if=["']apiKey["'][\s\S]{0,500}Done/)
+    // Should have a Button with the i18n key for Done in the key-reveal section
+    const doneButtonInKeyReveal = source.match(/v-if=["']apiKey["'][\s\S]{0,500}agents\.toast\.keyReveal\.done/)
     expect(doneButtonInKeyReveal).not.toBeNull()
   })
 
   test('Done button has a click handler', () => {
     const source = getSource()
     // The Done button should have @click handler
-    const doneButtonRegion = source.match(/Done[\s\S]{0,300}<\/Button>/)
+    const doneButtonRegion = source.match(/agents\.toast\.keyReveal\.done[\s\S]{0,300}<\/Button>/)
     expect(doneButtonRegion).not.toBeNull()
     // The Done button should be inside key-reveal section
-    const doneInKeyReveal = source.match(/v-if=["']apiKey["'][\s\S]{0,800}<Button[\s\S]{0,200}Done/)
+    const doneInKeyReveal = source.match(/v-if=["']apiKey["'][\s\S]{0,800}<Button[\s\S]{0,200}agents\.toast\.keyReveal\.done/)
     expect(doneInKeyReveal).not.toBeNull()
   })
 
@@ -316,8 +314,8 @@ describe('US-002-3: Key-reveal view is a distinct section in the dialog', () => 
     expect(section).toContain('<Input')
     expect(section).toContain('readonly')
     expect(section).toContain('copyToClipboard')
-    expect(section).toContain('Copy this API key now')
-    expect(section).toContain('Done')
+    expect(section).toContain('agents.toast.keyReveal.warning')
+    expect(section).toContain('agents.toast.keyReveal.done')
   })
 })
 

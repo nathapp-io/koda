@@ -6,7 +6,7 @@
       </DialogHeader>
 
       <form @submit="onSubmit" class="space-y-4">
-        <FormField name="capabilities" v-slot="{ componentField }">
+        <FormField name="capabilities" v-slot="{ }">
           <FormItem>
             <FormLabel>{{ t('agents.form.capabilities') }}</FormLabel>
             <FormControl>
@@ -29,10 +29,10 @@
                   </Button>
                 </Badge>
                 <Input
+                  v-model="capabilitiesInput"
                   :placeholder="capabilitiesTags.length === 0 ? t('agents.form.capabilitiesPlaceholder') : ''"
                   class="flex-1 min-w-[120px] bg-transparent outline-none placeholder:text-muted-foreground"
                   @keydown.enter.prevent="addCapability"
-                  v-bind="componentField"
                 />
               </div>
             </FormControl>
@@ -59,6 +59,7 @@ import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { ref, watch } from 'vue'
 import { LucideX } from 'lucide-vue-next'
+import { normalizeCapabilities } from '~/utils/capabilities'
 
 const props = defineProps<{
   open: boolean
@@ -77,7 +78,7 @@ const { t } = useI18n()
 const toast = useAppToast()
 
 // Tag input state for capabilities
-const newCapabilityInput = ref('')
+const capabilitiesInput = ref('')
 const capabilitiesTags = ref<string[]>([...props.agent.capabilities])
 
 // Watch agent prop to update capabilities when agent changes
@@ -85,22 +86,26 @@ watch(() => props.agent.capabilities, (newCapabilities) => {
   capabilitiesTags.value = [...newCapabilities]
 }, { deep: true })
 
+// Sync normalized capabilities to form
+watch(capabilitiesTags, (tags) => {
+  setFieldValue('capabilities', normalizeCapabilities(tags))
+}, { deep: true })
+
 const formSchema = toTypedSchema(
   z.object({
-    capabilities: z.string().optional(),
+    capabilities: z.array(z.string()).optional(),
   })
 )
 
-const { handleSubmit, isSubmitting } = useForm({
+const { handleSubmit, isSubmitting, setFieldValue } = useForm({
   validationSchema: formSchema,
 })
 
-function addCapability(event: Event) {
-  const input = event.target as HTMLInputElement
-  const value = input.value.trim()
-  if (value && !capabilitiesTags.value.includes(value)) {
+function addCapability() {
+  const value = capabilitiesInput.value.trim()
+  if (value) {
     capabilitiesTags.value = [...capabilitiesTags.value, value]
-    input.value = ''
+    capabilitiesInput.value = ''
   }
 }
 
@@ -112,7 +117,7 @@ const { $api } = useApi()
 
 const onSubmit = handleSubmit(async () => {
   try {
-    await $api.patch(`/agents/${props.agent.slug}/update-capabilities`, { capabilities: capabilitiesTags.value })
+    await $api.patch(`/agents/${props.agent.slug}/update-capabilities`, { capabilities: normalizeCapabilities(capabilitiesTags.value) })
     toast.success(t('agents.toast.capabilitiesUpdated'))
     emit('updated')
     emit('update:open', false)
