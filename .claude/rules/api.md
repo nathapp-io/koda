@@ -1,3 +1,8 @@
+---
+paths:
+  - "apps/api/**/*"
+---
+
 # API Rules — apps/api
 
 ## NestJS

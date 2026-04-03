@@ -1,3 +1,8 @@
+---
+paths:
+  - "apps/web/**/*"
+---
+
 # Web Rules — apps/web
 
 ## Components

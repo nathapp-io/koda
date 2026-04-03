@@ -1,3 +1,8 @@
+---
+paths:
+  - "apps/cli/**/*"
+---
+
 # CLI Rules — apps/cli
 
 ## HTTP Client
