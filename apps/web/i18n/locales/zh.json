@@ -240,8 +240,10 @@
       }
     },
     "deleteAgent": {
+      "title": "删除代理",
       "confirm": "确定要删除 {name} 吗？此操作无法撤销。",
-      "delete": "删除代理"
+      "delete": "删除代理",
+      "deleting": "删除中..."
     }
   },
   "kb": {

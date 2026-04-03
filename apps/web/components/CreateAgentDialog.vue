@@ -114,10 +114,10 @@
           <Button @click="copyToClipboard">{{ copyButtonText }}</Button>
         </div>
         <p class="text-sm text-muted-foreground">
-          Copy this API key now. It will not be shown again.
+          {{ t('agents.rotateKey.apiKeyReveal.message') }}
         </p>
         <div class="flex justify-end">
-          <Button @click="handleDone">Done</Button>
+          <Button @click="handleDone">{{ t('common.done') }}</Button>
         </div>
       </div>
     </DialogContent>
@@ -154,7 +154,7 @@ const isSlugManuallyEdited = ref(false)
 
 // Key-reveal state
 const apiKey = ref<string | null>(null)
-const copyButtonText = ref('Copy')
+const copyButtonText = ref(t('agents.rotateKey.apiKeyReveal.copy'))
 
 const formSchema = toTypedSchema(
   z.object({
@@ -233,12 +233,12 @@ const { $api } = useApi()
 async function copyToClipboard() {
   if (!apiKey.value) return
   await navigator.clipboard.writeText(apiKey.value)
-  copyButtonText.value = 'Copied!'
+  copyButtonText.value = t('agents.rotateKey.apiKeyReveal.copied')
   setTimeout(revertCopyButton, 2000)
 }
 
 function revertCopyButton() {
-  copyButtonText.value = 'Copy'
+  copyButtonText.value = t('agents.rotateKey.apiKeyReveal.copy')
 }
 
 function handleDone() {

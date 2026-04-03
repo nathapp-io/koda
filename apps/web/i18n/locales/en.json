@@ -243,8 +243,10 @@
       "title": "Edit Capabilities"
     },
     "deleteAgent": {
+      "title": "Delete Agent",
       "confirm": "Are you sure you want to delete {name}? This cannot be undone.",
-      "delete": "Delete Agent"
+      "delete": "Delete Agent",
+      "deleting": "Deleting..."
     }
   },
   "kb": {
