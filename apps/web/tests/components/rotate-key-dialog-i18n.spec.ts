@@ -214,7 +214,7 @@ describe("AC7: When RotateKeyDialog key-reveal copy button is idle, its label is
   test("source uses t('agents.rotateKey.apiKeyReveal.copy') for initial copy button state", () => {
     const source = getSource()
     const usesI18nCopy =
-      source.match(/copyButtonText\s*=\s*t\s*\(\s*['"]agents\.rotateKey\.apiKeyReveal\.copy['"]\s*\)/)
+      source.match(/copyButtonText\s*=\s*ref\s*\(\s*t\s*\(\s*['"]agents\.rotateKey\.apiKeyReveal\.copy['"]\s*\)\s*\)/)
     expect(usesI18nCopy).not.toBeNull()
   })
 
