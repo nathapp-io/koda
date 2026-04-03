@@ -2,19 +2,19 @@
   <Dialog :open="open" @update:open="$emit('update:open', $event)">
     <DialogContent class="sm:max-w-[500px]">
       <DialogHeader>
-        <DialogTitle>Rotate API Key</DialogTitle>
+        <DialogTitle>{{ t('agents.rotateKey.title') }}</DialogTitle>
       </DialogHeader>
 
       <form v-if="!apiKey" @submit="onConfirm" class="space-y-4">
         <p class="text-sm text-muted-foreground">
-          Are you sure you want to rotate the API key for {{ agent.name }}? The old key will become invalid.
+          {{ t('agents.rotateKey.confirmBody', { name: agent.name }) }}
         </p>
         <div class="flex justify-end gap-2">
           <Button type="button" variant="outline" @click="$emit('update:open', false)">
-            Cancel
+            {{ t('common.cancel') }}
           </Button>
           <Button type="submit" :disabled="isSubmitting">
-            {{ isSubmitting ? 'Rotating...' : 'Confirm' }}
+            {{ isSubmitting ? t('agents.rotateKey.rotating') : t('common.confirm') }}
           </Button>
         </div>
       </form>
@@ -25,10 +25,10 @@
           <Button @click="copyToClipboard">{{ copyButtonText }}</Button>
         </div>
         <p class="text-sm text-muted-foreground">
-          Copy this API key now. It will not be shown again.
+          {{ t('agents.rotateKey.apiKeyReveal.message') }}
         </p>
         <div class="flex justify-end">
-          <Button @click="handleDone">Done</Button>
+          <Button @click="handleDone">{{ t('common.done') }}</Button>
         </div>
       </div>
     </DialogContent>
@@ -62,7 +62,7 @@ const toast = useAppToast()
 const { $api } = useApi()
 
 const apiKey = ref<string | null>(null)
-const copyButtonText = ref('Copy')
+const copyButtonText = ref(t('agents.rotateKey.apiKeyReveal.copy'))
 const isSubmitting = ref(false)
 
 async function onConfirm() {
@@ -80,12 +80,12 @@ async function onConfirm() {
 async function copyToClipboard() {
   if (!apiKey.value) return
   await navigator.clipboard.writeText(apiKey.value)
-  copyButtonText.value = 'Copied!'
+  copyButtonText.value = t('agents.rotateKey.apiKeyReveal.copied')
   setTimeout(revertCopyButton, 2000)
 }
 
 function revertCopyButton() {
-  copyButtonText.value = 'Copy'
+  copyButtonText.value = t('agents.rotateKey.apiKeyReveal.copy')
 }
 
 function handleDone() {

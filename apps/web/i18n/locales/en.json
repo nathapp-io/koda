@@ -3,6 +3,7 @@
     "logout": "Logout",
     "cancel": "Cancel",
     "confirm": "Confirm",
+    "done": "Done",
     "loading": "Loading...",
     "unassigned": "Unassigned",
     "viewBoard": "View Board",
@@ -196,6 +197,9 @@
       "rotateKeyFailed": "Failed to rotate API key"
     },
     "rotateKey": {
+      "title": "Rotate API Key",
+      "confirmBody": "Are you sure you want to rotate the API key for {name}? The old key will become invalid.",
+      "rotating": "Rotating...",
       "failed": "Failed to rotate API key",
       "confirm": "This will invalidate the current key immediately. Continue?",
       "newKey": "New API Key",
