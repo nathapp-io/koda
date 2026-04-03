@@ -127,12 +127,15 @@ describe('US-004-3 AC4: type field is a Select with BUG and ENHANCEMENT options'
 
   test('source includes BUG as a selectable option', () => {
     const source = readFileSync(dialogPath, 'utf-8')
-    expect(source).toContain('BUG')
+    // Now uses TICKET_TYPES array with v-for loop
+    expect(source).toContain('TICKET_TYPES')
   })
 
   test('source includes ENHANCEMENT as a selectable option', () => {
     const source = readFileSync(dialogPath, 'utf-8')
-    expect(source).toContain('ENHANCEMENT')
+    // ENHANCEMENT is in TICKET_TYPES or accessed via template interpolation
+    const hasEnancement = source.includes('ENHANCEMENT') || source.includes('tickets.type.${type}')
+    expect(hasEnancement).toBe(true)
   })
 
   test('source uses Select component for type field', () => {

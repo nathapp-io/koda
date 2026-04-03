@@ -166,9 +166,9 @@ describe('US-005-3 AC3: each comment displays a colored type pill', () => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('US-005-3 AC4: add-comment form has a required body Textarea and type Select', () => {
-  test('source uses Textarea component for comment body', () => {
+  test('source uses MarkdownEditor component for comment body', () => {
     const source = readFileSync(componentPath, 'utf-8')
-    expect(source).toContain('Textarea')
+    expect(source).toContain('MarkdownEditor')
   })
 
   test('source uses Select component for comment type', () => {

@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { marked } from 'marked'
+import { LucidePencil } from 'lucide-vue-next'
+
 definePageMeta({ layout: 'default' })
 
 interface Assignee {
@@ -12,7 +15,7 @@ interface Ticket {
   ref: string
   title: string
   description?: string | null
-  type: 'BUG' | 'ENHANCEMENT'
+  type: 'BUG' | 'ENHANCEMENT' | 'TASK' | 'QUESTION'
   priority: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
   status: 'CREATED' | 'VERIFIED' | 'IN_PROGRESS' | 'VERIFY_FIX' | 'CLOSED' | 'REJECTED'
   assignee?: Assignee | null
@@ -27,17 +30,28 @@ const route = useRoute()
 const { t, locale } = useI18n()
 
 const slug = route.params.project as string
-const ref = route.params.ref as string
+const ticketRef = route.params.ref as string
 
 const { $api } = useApi()
 const toast = useAppToast()
 
 const { data: ticketData, pending, error, refresh } = useAsyncData(
-  `ticket-${slug}-${ref}`,
-  () => $api.get(`/projects/${slug}/tickets/${ref}`) as Promise<Ticket>,
+  `ticket-${slug}-${ticketRef}`,
+  () => $api.get(`/projects/${slug}/tickets/${ticketRef}`) as Promise<Ticket>,
 )
 
 const ticket = computed(() => ticketData.value ?? null)
+
+const isEditDialogOpen = ref(false)
+
+const renderedDescription = computed(() => {
+  if (!ticket.value?.description) return ''
+  try {
+    return marked.parse(ticket.value.description, { breaks: true, gfm: true }) as string
+  } catch {
+    return `<pre class="whitespace-pre-wrap">${ticket.value.description}</pre>`
+  }
+})
 
 function statusClass(status: string) {
   switch (status) {
@@ -67,6 +81,8 @@ function priorityClass(priority: string) {
 function typeClass(type: string) {
   if (type === 'BUG') return 'border-red-300 text-red-700'
   if (type === 'ENHANCEMENT') return 'border-blue-300 text-blue-700'
+  if (type === 'TASK') return 'border-green-300 text-green-700'
+  if (type === 'QUESTION') return 'border-yellow-300 text-yellow-700'
   return ''
 }
 
@@ -86,6 +102,11 @@ async function onTransition() {
 function onCommentAdded() {
   toast.success(t('comments.toast.added'))
 }
+
+function onTicketSaved() {
+  toast.success(t('tickets.toast.updated'))
+  refresh()
+}
 </script>
 
 <template>
@@ -95,8 +116,12 @@ function onCommentAdded() {
     <div v-else-if="ticket" class="grid grid-cols-1 md:grid-cols-3 gap-6">
       <!-- Main content: 2/3 width on desktop, full width on mobile -->
       <div class="md:col-span-2 space-y-6">
-        <div>
+        <div class="flex items-start justify-between gap-4">
           <h1 class="text-2xl font-bold">{{ ticket.title }}</h1>
+          <Button variant="outline" size="sm" @click="isEditDialogOpen = true">
+            <LucidePencil class="h-4 w-4 mr-1" />
+            {{ t('common.edit') }}
+          </Button>
         </div>
 
         <div class="flex gap-2">
@@ -119,12 +144,14 @@ function onCommentAdded() {
 
         <div v-if="ticket.description">
           <p class="text-sm text-muted-foreground mb-1">{{ t('tickets.detail.description') }}</p>
-          <p class="whitespace-pre-wrap text-sm">{{ ticket.description }}</p>
+          <div class="prose prose-sm max-w-none text-sm">
+            <div v-html="renderedDescription" />
+          </div>
         </div>
 
         <CommentThread
           :project-slug="slug"
-          :ticket-ref="ref"
+          :ticket-ref="ticketRef"
           @comment-added="onCommentAdded"
         />
       </div>
@@ -183,5 +210,15 @@ function onCommentAdded() {
         />
       </div>
     </div>
+
+    <EditTicketDialog
+      v-if="ticket"
+      :open="isEditDialogOpen"
+      :ticket="ticket"
+      :project-slug="slug"
+      :ticket-ref="ticketRef"
+      @update:open="isEditDialogOpen = $event"
+      @saved="onTicketSaved"
+    />
   </div>
 </template>

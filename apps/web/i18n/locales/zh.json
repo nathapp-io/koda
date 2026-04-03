@@ -15,7 +15,8 @@
     "addComment": "添加评论",
     "commentPlaceholder": "输入评论或原因...",
     "loadFailed": "加载失败",
-    "retry": "重试"
+    "retry": "重试",
+    "edit": "编辑"
   },
   "auth": {
     "login": {
@@ -108,7 +109,9 @@
     },
     "type": {
       "BUG": "缺陷",
-      "ENHANCEMENT": "增强"
+      "ENHANCEMENT": "增强",
+      "TASK": "任务",
+      "QUESTION": "问题"
     },
     "form": {
       "title": "创建工单",
@@ -121,7 +124,10 @@
       "description": "描述",
       "descriptionPlaceholder": "关于工单的可选详细信息",
       "creating": "正在创建...",
-      "create": "创建工单"
+      "create": "创建工单",
+      "editTitle": "编辑工单",
+      "saving": "保存中...",
+      "save": "保存更改"
     },
     "validation": {
       "titleRequired": "请输入标题",
@@ -162,7 +168,8 @@
     "add": "添加评论",
     "toast": {
       "added": "评论已添加",
-      "addFailed": "添加评论失败"
+      "addFailed": "添加评论失败",
+      "updated": "评论已更新"
     },
     "validation": {
       "bodyRequired": "评论内容不能为空"
@@ -361,5 +368,11 @@
   },
   "toast": {
     "loggedIn": "登录成功"
+  },
+  "markdown": {
+    "write": "编写",
+    "preview": "预览",
+    "renderError": "预览不可用 — 显示原文",
+    "emptyPreview": "暂无内容预览"
   }
 }

@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
+import { marked } from 'marked'
+import { LucidePencil, LucideCheck, LucideX } from 'lucide-vue-next'
 import { extractApiError } from '~/composables/useApi'
+import MarkdownEditor from '~/components/MarkdownEditor.vue'
 
 interface Comment {
   id: string
@@ -34,6 +37,40 @@ const { data, pending, error, refresh: refreshComments } = useAsyncData<Comment[
 )
 
 const comments = computed(() => data.value ?? [])
+
+// Edit state
+const editingCommentId = ref<string | null>(null)
+const editingBody = ref('')
+
+function startEditing(comment: Comment) {
+  editingCommentId.value = comment.id
+  editingBody.value = comment.body
+}
+
+function cancelEditing() {
+  editingCommentId.value = null
+  editingBody.value = ''
+}
+
+async function saveEdit(commentId: string) {
+  try {
+    await $api.patch(`/comments/${commentId}`, { body: editingBody.value })
+    await refreshComments()
+    cancelEditing()
+    toast.success(t('comments.toast.updated'))
+  } catch (err: unknown) {
+    toast.error(extractApiError(err))
+    // Keep draft intact on error
+  }
+}
+
+function renderedBody(body: string): string {
+  try {
+    return marked.parse(body, { breaks: true, gfm: true }) as string
+  } catch {
+    return `<pre class="whitespace-pre-wrap">${body}</pre>`
+  }
+}
 
 const typePillClass: Record<Comment['type'], string> = {
   VERIFICATION: 'bg-blue-100 text-blue-800',
@@ -84,16 +121,46 @@ const onSubmit = handleSubmit(async (values) => {
         :key="comment.id"
         class="border rounded-md p-4 space-y-2"
       >
-        <div class="flex items-center gap-2">
-          <span
-            class="rounded-full px-2 py-0.5 text-xs font-medium"
-            :class="typePillClass[comment.type]"
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <span
+              class="rounded-full px-2 py-0.5 text-xs font-medium"
+              :class="typePillClass[comment.type]"
+            >
+              {{ t(`comments.types.${comment.type}`) }}
+            </span>
+            <span class="text-xs text-muted-foreground">{{ comment.createdAt }}</span>
+          </div>
+          <Button
+            v-if="editingCommentId !== comment.id"
+            variant="ghost"
+            size="sm"
+            @click="startEditing(comment)"
           >
-            {{ t(`comments.types.${comment.type}`) }}
-          </span>
-          <span class="text-xs text-muted-foreground">{{ comment.createdAt }}</span>
+            <LucidePencil class="h-3 w-3 mr-1" />
+            {{ t('common.edit') }}
+          </Button>
         </div>
-        <p class="text-sm whitespace-pre-wrap">{{ comment.body }}</p>
+
+        <!-- Edit mode -->
+        <div v-if="editingCommentId === comment.id" class="space-y-2">
+          <MarkdownEditor v-model="editingBody" :min-height="'80px'" />
+          <div class="flex gap-2">
+            <Button size="sm" @click="saveEdit(comment.id)">
+              <LucideCheck class="h-3 w-3 mr-1" />
+              {{ t('common.save') }}
+            </Button>
+            <Button size="sm" variant="outline" @click="cancelEditing">
+              <LucideX class="h-3 w-3 mr-1" />
+              {{ t('common.cancel') }}
+            </Button>
+          </div>
+        </div>
+
+        <!-- View mode -->
+        <div v-else class="prose prose-sm max-w-none">
+          <div class="text-sm" v-html="renderedBody(comment.body)" />
+        </div>
       </div>
       <p v-if="comments.length === 0" class="text-muted-foreground text-sm">{{ t('common.noCommentsYet') }}</p>
     </div>
@@ -104,10 +171,10 @@ const onSubmit = handleSubmit(async (values) => {
         <FormItem>
           <FormLabel>{{ t('comments.label') }}</FormLabel>
           <FormControl>
-            <Textarea
-              :placeholder="t('comments.placeholder')"
-              rows="3"
+            <MarkdownEditor
               v-bind="componentField"
+              :placeholder="t('comments.placeholder')"
+              :min-height="'80px'"
             />
           </FormControl>
           <FormMessage />

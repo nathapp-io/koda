@@ -26,8 +26,9 @@
                 </SelectTrigger>
               </FormControl>
               <SelectContent>
-                <SelectItem value="BUG">{{ t('tickets.type.BUG') }}</SelectItem>
-                <SelectItem value="ENHANCEMENT">{{ t('tickets.type.ENHANCEMENT') }}</SelectItem>
+                <SelectItem v-for="type in TICKET_TYPES" :key="type" :value="type">
+                  {{ t(`tickets.type.${type}`) }}
+                </SelectItem>
               </SelectContent>
             </Select>
             <FormMessage />
@@ -82,6 +83,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { extractApiError } from '~/composables/useApi'
+import { TICKET_TYPES, PRIORITIES } from '~/composables/useTicketOptions'
 
 const props = defineProps<{
   open: boolean
@@ -99,10 +101,11 @@ const toast = useAppToast()
 const formSchema = toTypedSchema(
   z.object({
     title: z.string().min(3, t('tickets.validation.titleMin')),
-    type: z.string()
-      .min(1, t('tickets.validation.typeRequired'))
-      .refine((v: string) => ['BUG', 'ENHANCEMENT'].includes(v), t('tickets.validation.typeRequired')),
-    priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).default('MEDIUM'),
+    type: z.enum(TICKET_TYPES as unknown as [string, ...string[]]).refine(
+      (v: string) => TICKET_TYPES.includes(v as any),
+      t('tickets.validation.typeRequired')
+    ),
+    priority: z.enum(PRIORITIES as unknown as [string, ...string[]]).default('MEDIUM'),
     description: z.string().optional(),
   }) as any
 )
@@ -111,7 +114,7 @@ const { handleSubmit, isSubmitting, resetForm } = useForm({
   validationSchema: formSchema,
   initialValues: {
     title: '',
-    type: '',
+    type: '' as string,
     priority: 'MEDIUM',
     description: '',
   },

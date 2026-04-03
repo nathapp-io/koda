@@ -96,10 +96,10 @@ describe('US-005-4 AC2: CommentThread component is wired into the left column', 
   test('CommentThread receives ticketRef prop', () => {
     const src = source()
     const hasProp =
-      src.includes(':ticket-ref="ref"') ||
-      src.includes(':ticketRef="ref"') ||
-      src.includes(':ticket-ref=\'ref\'') ||
-      src.includes(':ticketRef=\'ref\'')
+      src.includes(':ticket-ref="ticketRef"') ||
+      src.includes(':ticketRef="ticketRef"') ||
+      src.includes(':ticket-ref=\'ticketRef\'') ||
+      src.includes(':ticketRef=\'ticketRef\'')
     expect(hasProp).toBe(true)
   })
 })

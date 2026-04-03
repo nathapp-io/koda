@@ -128,9 +128,9 @@ describe('US-008 AC3: Create Label form calls POST /projects/:slug/labels with d
     expect(source).toContain('$api.post')
   })
 
-  test('source includes default color value #6366f1', () => {
+  test('source includes default color value #6366F1', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('#6366f1')
+    expect(source).toContain('#6366F1')
   })
 
   test('source has a name field in the create form', () => {
