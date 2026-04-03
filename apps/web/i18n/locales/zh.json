@@ -195,6 +195,7 @@
     },
     "form": {
       "editRoles": "编辑代理角色",
+      "editCapabilities": "编辑能力",
       "roles": "角色",
       "capabilities": "能力",
       "capabilitiesPlaceholder": "输入并按回车添加",

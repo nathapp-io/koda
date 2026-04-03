@@ -213,6 +213,7 @@
     },
     "form": {
       "editRoles": "Edit Agent Roles",
+      "editCapabilities": "Edit Capabilities",
       "roles": "Roles",
       "capabilities": "Capabilities",
       "capabilitiesPlaceholder": "Type and press Enter to add",
