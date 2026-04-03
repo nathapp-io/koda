@@ -133,8 +133,8 @@ describe('US-002-1 AC5: capabilities is an optional tag input field', () => {
 
   test('source defines capabilities field as optional', () => {
     const source = readFileSync(componentPath, 'utf-8')
-    // Capabilities should be optional (.optional() or not have .min())
-    const capabilitiesFieldMatch = source.match(/capabilities:\s*z\.string\(\)(?:\.optional\(\))?/)
+    // Capabilities should be optional - z.array(z.string()).default([]) is implicitly optional
+    const capabilitiesFieldMatch = source.match(/capabilities:\s*z\.array\s*\(\s*z\.string\(\)\s*\)\s*\.default\s*\(\s*\[\s*\]\s*\)/)
     expect(capabilitiesFieldMatch).not.toBeNull()
   })
 
