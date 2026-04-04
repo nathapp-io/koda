@@ -82,7 +82,13 @@ async function deleteLabel(labelId: string) {
           <FormItem>
             <FormLabel>{{ t('labels.form.color') }}</FormLabel>
             <FormControl>
-              <Input placeholder="#6366f1" class="w-32" v-bind="componentField" />
+              <!-- @vue-ignore modelValue is in componentField for vee-validate but explicit binding needed for test -->
+              <ColorPicker
+                :modelValue="(componentField as any).modelValue"
+                defaultColor="#6366F1"
+                v-bind="componentField"
+                @update:modelValue="(componentField as any)['onUpdate:modelValue']"
+              />
             </FormControl>
             <FormMessage />
           </FormItem>
