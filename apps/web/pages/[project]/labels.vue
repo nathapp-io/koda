@@ -83,9 +83,9 @@ async function deleteLabel(labelId: string) {
             <FormLabel>{{ t('labels.form.color') }}</FormLabel>
             <FormControl>
               <ColorPicker
-                :modelValue="componentField.value"
+                :modelValue="componentField.modelValue"
                 defaultColor="#6366F1"
-                @update:modelValue="componentField.onChange"
+                @update:modelValue="componentField['onUpdate:modelValue']"
               />
             </FormControl>
             <FormMessage />
