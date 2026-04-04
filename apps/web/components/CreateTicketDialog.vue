@@ -60,7 +60,7 @@
           <FormItem>
             <FormLabel>{{ t('tickets.form.description') }}</FormLabel>
             <FormControl>
-              <Textarea :placeholder="t('tickets.form.descriptionPlaceholder')" v-bind="componentField" />
+              <MarkdownEditor v-bind="componentField" />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -84,6 +84,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { extractApiError } from '~/composables/useApi'
+import MarkdownEditor from '~/components/MarkdownEditor.vue'
 
 const props = defineProps<{
   open: boolean

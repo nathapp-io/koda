@@ -16,7 +16,9 @@
     "addComment": "Add a comment",
     "commentPlaceholder": "Enter a comment or reason...",
     "loadFailed": "Failed to load data",
-    "retry": "Retry"
+    "retry": "Retry",
+    "edit": "Edit",
+    "save": "Save"
   },
   "auth": {
     "login": {
@@ -149,6 +151,7 @@
       "created": "Ticket created successfully",
       "createFailed": "Failed to create ticket",
       "updated": "Ticket updated successfully",
+      "updateFailed": "Failed to update ticket",
       "actionFailed": "Action failed"
     }
   },

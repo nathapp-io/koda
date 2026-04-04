@@ -1,0 +1,172 @@
+{
+  "project": "koda",
+  "feature": "web-ticket-github-like-editor",
+  "branchName": "feat/web-ticket-github-like-editor",
+  "createdAt": "2026-04-04T00:00:00.000Z",
+  "updatedAt": "2026-04-04T08:23:13.140Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Centralize ticket type/priority options and fix create-form select behavior",
+      "description": "Replace hardcoded type validation list in CreateTicketDialog.vue with API-aligned enum set. Ensure type and priority selects are fully controlled and submit correctly. Add missing i18n keys for TASK and QUESTION ticket types.",
+      "acceptanceCriteria": [
+        "When ticket type options render in CreateTicketDialog.vue, selectable values are BUG, ENHANCEMENT, TASK, and QUESTION",
+        "Given user selects a ticket type, when form submits, payload field type equals selected value",
+        "Given user selects priority, when form submits, payload field priority equals selected value",
+        "Given selected type is not in allowed enum set, when submit attempted, validation blocks request",
+        "Given selected type is not in allowed enum set, when submit attempted, localized type error text is shown"
+      ],
+      "tags": [
+        "feature",
+        "web",
+        "forms",
+        "i18n"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "simple",
+        "modelTier": "fast"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/components/CreateTicketDialog.vue",
+        "apps/api/src/common/enums.ts",
+        "apps/web/i18n/locales/en.json",
+        "apps/web/i18n/locales/zh.json"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "52092d1e6d5ed385ee117f3ca7f64cbe3363b1fd"
+    },
+    {
+      "id": "US-002",
+      "title": "Build reusable markdown write/preview editor component",
+      "description": "Create a MarkdownEditor.vue component with write/preview tabs using existing Tabs shadcn component. Component must handle markdown rendering with fail-open error handling, support v-model binding, and preserve line breaks and fenced code blocks.",
+      "acceptanceCriteria": [
+        "When markdown editor renders in write mode, editable markdown source is bound to modelValue",
+        "When user switches editor to preview mode, rendered output reflects current markdown source",
+        "Given markdown preview renderer throws, when preview requested, component shows plain-text fallback instead of breaking UI",
+        "Given parent uses v-model, when editor content changes, component emits updated modelValue"
+      ],
+      "tags": [
+        "feature",
+        "web",
+        "components",
+        "markdown"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/components/ui/textarea/Textarea.vue",
+        "apps/web/components/ui/tabs/index.ts",
+        "apps/web/app.vue"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "US-003",
+      "title": "Apply markdown editor to ticket create and ticket edit description flows",
+      "description": "Replace plain textarea in CreateTicketDialog with markdown editor. Add edit mode to ticket detail page [ref].vue that allows updating title, description, and priority via PATCH /projects/:slug/tickets/:ref. On success, refresh ticket data and update rendered description display.",
+      "acceptanceCriteria": [
+        "When create-ticket dialog description field shown, markdown editor write/preview UI replaces plain textarea",
+        "Given ticket detail page enters edit state, when user updates description and saves, client calls PATCH /projects/:slug/tickets/:ref with updated description",
+        "Given ticket detail page enters edit state, when user updates title and saves, client calls PATCH /projects/:slug/tickets/:ref with updated title",
+        "Given ticket detail page enters edit state, when user updates priority and saves, client calls PATCH /projects/:slug/tickets/:ref with updated priority",
+        "Given ticket edit save succeeds, when request resolves, ticket detail view refreshes",
+        "Given ticket edit save succeeds, when request resolves, description panel displays updated rendered markdown",
+        "Given ticket edit save fails, when request rejects, edit state and unsaved draft remain available to user"
+      ],
+      "tags": [
+        "feature",
+        "web",
+        "forms",
+        "markdown",
+        "ticket-edit"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/components/CreateTicketDialog.vue",
+        "apps/web/pages/[project]/tickets/[ref].vue",
+        "apps/web/components/MarkdownEditor.vue"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "0b1711f90bc14ecb62d78ef93d1c48368884dab5"
+    },
+    {
+      "id": "US-004",
+      "title": "Apply markdown editor to comment create and add comment edit flow",
+      "description": "Replace plain textarea in CommentThread.vue comment form with markdown editor. Add per-comment edit action that allows updating comment body via PATCH /comments/:id. Preserve draft on API failure with localized error toast.",
+      "acceptanceCriteria": [
+        "When comment create form renders in CommentThread.vue, comment body input uses markdown editor write/preview UI",
+        "Given user edits existing comment body and saves, when request sent, client calls PATCH /comments/:id with updated body",
+        "Given comment edit save succeeds, when request resolves, updated comment body shown in thread render",
+        "Given comment edit save fails, when request rejects, inline edit draft is preserved",
+        "Given comment edit save fails, when request rejects, localized error toast is shown"
+      ],
+      "tags": [
+        "feature",
+        "web",
+        "forms",
+        "markdown",
+        "comments"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/components/CommentThread.vue",
+        "apps/web/components/MarkdownEditor.vue"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    }
+  ],
+  "analysis": "## Analysis Summary\n\n### Current State\n1. **Enum Mismatch**: `CreateTicketDialog.vue` (line 29-31) only offers BUG and ENHANCEMENT, but API enum `TicketType` in `apps/api/src/common/enums.ts:17-22` has BUG, ENHANCEMENT, TASK, QUESTION\n2. **Priority is correct**: LOW, MEDIUM, HIGH, CRITICAL all present in CreateTicketDialog\n3. **Missing i18n keys**: tickets.type.TASK and tickets.type.QUESTION missing in both en.json and zh.json\n4. **No markdown editor**: Plain Textarea.vue (13 lines) with no write/preview tabs\n5. **No ticket edit**: `[project]/tickets/[ref].vue` displays ticket but has no edit mode\n6. **No comment edit**: CommentThread.vue creates comments but cannot edit existing ones\n\n### Files to Modify\n1. `apps/web/components/CreateTicketDialog.vue` - Fix type options, add markdown editor\n2. `apps/web/pages/[project]/tickets/[ref].vue` - Add edit capability for title, description, priority\n3. `apps/web/components/CommentThread.vue` - Add markdown editor, add per-comment edit\n4. `apps/web/i18n/locales/en.json` - Add TASK, QUESTION type translations\n5. `apps/web/i18n/locales/zh.json` - Add TASK, QUESTION type translations\n\n### New Files to Create\n1. `apps/web/components/MarkdownEditor.vue` - Reusable write/preview markdown component\n2. `apps/web/composables/useTicketTypes.ts` - Shared ticket type constants (optional - could also inline)\n\n### Risks\n- Markdown preview rendering could fail on malformed input → fail-open with plain text fallback\n- API update failures must preserve editor state (don't reset form)\n- Concurrent edit conflicts not in scope (no optimistic locking)\n\n### Architecture Decisions\n- Use existing Tabs component from shadcn for write/preview switching\n- Reuse existing form stack (vee-validate + zod)\n- Reuse existing API pattern (useApi, extractApiError, toasts)\n- Markdown rendering: use `marked` library (standard for Node/browser markdown parsing)\n- Fail-open strategy for preview: try/catch around marked.parse(), show plain text on error\n\n### Migration Notes\n- Add i18n keys before using them in components\n- No database migrations needed (API enums already correct)\n- Generated OpenAPI client will need regeneration after API changes (if any)"
+}
