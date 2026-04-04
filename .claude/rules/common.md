@@ -28,6 +28,15 @@
 - **No `us-XXX` test files** — never in `src/` or `test/`
 - No `us-XXX` folders in `test/` directories
 - Test files must follow the naming conventions in each app's context.md (unit: `*.spec.ts`, integration: `*.integration.spec.ts`, E2E: `*.e2e.spec.ts`)
+- **No hardcoded absolute paths in test files** — never use paths like `/Users/...` or `/home/...`. Use `__dirname` + `path.join()` for file references so tests run on any machine (VPS, Mac01, CI):
+  ```ts
+  // ❌ Wrong — breaks on any machine except the author's dev environment
+  const labelsPagePath = '/Users/subrinaai/Desktop/workspace/.../labels.vue'
+
+  // ✅ Correct — portable across all environments
+  const webDir = join(__dirname, '../..')
+  const labelsPagePath = join(webDir, 'pages/[project]/labels.vue')
+  ```
 
 ## TypeScript
 - Strict mode enabled across all apps
