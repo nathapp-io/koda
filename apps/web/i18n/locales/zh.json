@@ -323,6 +323,9 @@
       "createFailed": "创建标签失败",
       "deleted": "标签删除成功",
       "deleteFailed": "删除标签失败"
+    },
+    "validation": {
+      "colorInvalid": "无效的十六进制颜色格式。必须是 # 开头后跟 6 位十六进制数字"
     }
   },
   "toast": {

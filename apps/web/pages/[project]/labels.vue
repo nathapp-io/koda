@@ -5,6 +5,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { extractApiError } from '~/composables/useApi'
+import { normalizeHexColor } from '~/lib/utils'
 
 interface Label {
   id: string
@@ -27,7 +28,7 @@ const labels = computed(() => labelsData.value ?? [])
 
 const formSchema = toTypedSchema(z.object({
   name: z.string().min(1, 'Name is required'),
-  color: z.string().optional(),
+  color: z.string().regex(/^#[0-9A-F]{6}$/, t('labels.validation.colorInvalid')),
 }))
 
 const { handleSubmit, resetForm } = useForm({
@@ -39,7 +40,7 @@ const onSubmit = handleSubmit(async (values) => {
   try {
     await $api.post(`/projects/${slug}/labels`, {
       name: values.name,
-      color: values.color || '#6366F1',
+      color: normalizeHexColor(values.color || '#6366F1'),
     })
     toast.success(t('labels.toast.created'))
     resetForm()

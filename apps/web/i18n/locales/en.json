@@ -326,6 +326,9 @@
       "createFailed": "Failed to create label",
       "deleted": "Label deleted successfully",
       "deleteFailed": "Failed to delete label"
+    },
+    "validation": {
+      "colorInvalid": "Invalid hex color format. Must be # followed by 6 hex digits"
     }
   },
   "toast": {

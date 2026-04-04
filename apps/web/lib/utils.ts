@@ -22,3 +22,24 @@ export function normalizeCapabilities(capabilities: string[]): string[] {
 
   return result
 }
+
+export function normalizeHexColor(color: string): string {
+  const hasPrefix = color.startsWith('#')
+  let hex = color.replace(/[^0-9a-fA-F]/g, '')
+  
+  if (hex.length < 3) {
+    hex = hex.padEnd(3, '0')
+  }
+  
+  if (hex.length === 3) {
+    if (hasPrefix) {
+      hex = hex.split('').map(c => c + c).join('')
+    } else {
+      hex = (hex + '000').slice(0, 6)
+    }
+  }
+  
+  hex = hex.padEnd(6, '0').slice(0, 6)
+  
+  return `#${hex.toUpperCase()}`
+}
