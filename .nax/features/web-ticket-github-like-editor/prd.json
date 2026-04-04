@@ -3,7 +3,7 @@
   "feature": "web-ticket-github-like-editor",
   "branchName": "feat/web-ticket-github-like-editor",
   "createdAt": "2026-04-04T00:00:00.000Z",
-  "updatedAt": "2026-04-04T08:23:13.140Z",
+  "updatedAt": "2026-04-04T09:35:49.122Z",
   "userStories": [
     {
       "id": "US-001",
@@ -106,8 +106,8 @@
         "US-001",
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -149,14 +149,16 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
       },
       "workdir": "apps/web",
       "contextFiles": [
@@ -165,7 +167,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "10aa9b8fb247f322ec5b2df5b75e50c9669b0b82"
     }
   ],
   "analysis": "## Analysis Summary\n\n### Current State\n1. **Enum Mismatch**: `CreateTicketDialog.vue` (line 29-31) only offers BUG and ENHANCEMENT, but API enum `TicketType` in `apps/api/src/common/enums.ts:17-22` has BUG, ENHANCEMENT, TASK, QUESTION\n2. **Priority is correct**: LOW, MEDIUM, HIGH, CRITICAL all present in CreateTicketDialog\n3. **Missing i18n keys**: tickets.type.TASK and tickets.type.QUESTION missing in both en.json and zh.json\n4. **No markdown editor**: Plain Textarea.vue (13 lines) with no write/preview tabs\n5. **No ticket edit**: `[project]/tickets/[ref].vue` displays ticket but has no edit mode\n6. **No comment edit**: CommentThread.vue creates comments but cannot edit existing ones\n\n### Files to Modify\n1. `apps/web/components/CreateTicketDialog.vue` - Fix type options, add markdown editor\n2. `apps/web/pages/[project]/tickets/[ref].vue` - Add edit capability for title, description, priority\n3. `apps/web/components/CommentThread.vue` - Add markdown editor, add per-comment edit\n4. `apps/web/i18n/locales/en.json` - Add TASK, QUESTION type translations\n5. `apps/web/i18n/locales/zh.json` - Add TASK, QUESTION type translations\n\n### New Files to Create\n1. `apps/web/components/MarkdownEditor.vue` - Reusable write/preview markdown component\n2. `apps/web/composables/useTicketTypes.ts` - Shared ticket type constants (optional - could also inline)\n\n### Risks\n- Markdown preview rendering could fail on malformed input → fail-open with plain text fallback\n- API update failures must preserve editor state (don't reset form)\n- Concurrent edit conflicts not in scope (no optimistic locking)\n\n### Architecture Decisions\n- Use existing Tabs component from shadcn for write/preview switching\n- Reuse existing form stack (vee-validate + zod)\n- Reuse existing API pattern (useApi, extractApiError, toasts)\n- Markdown rendering: use `marked` library (standard for Node/browser markdown parsing)\n- Fail-open strategy for preview: try/catch around marked.parse(), show plain text on error\n\n### Migration Notes\n- Add i18n keys before using them in components\n- No database migrations needed (API enums already correct)\n- Generated OpenAPI client will need regeneration after API changes (if any)"
