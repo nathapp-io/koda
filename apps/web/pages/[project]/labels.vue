@@ -5,7 +5,9 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { extractApiError } from '~/composables/useApi'
-import { normalizeHexColor } from '~/lib/utils'
+import { normalizeHexColor, isValidColor } from '~/lib/utils'
+
+const fallbackColor = '#E5E7EB'
 
 interface Label {
   id: string
@@ -40,7 +42,7 @@ const onSubmit = handleSubmit(async (values) => {
   try {
     await $api.post(`/projects/${slug}/labels`, {
       name: values.name,
-      color: values.color,
+      color: normalizeHexColor(values.color),
     })
     toast.success(t('labels.toast.created'))
     resetForm()
@@ -101,7 +103,7 @@ async function deleteLabel(labelId: string) {
     <Table v-else>
       <TableHeader>
         <TableRow>
-          <TableHead>{{ t('labels.columns.color') }}</TableHead>
+          <TableHead :class="[fallbackColor]">{{ t('labels.columns.color') }}</TableHead>
           <TableHead>{{ t('labels.columns.name') }}</TableHead>
           <TableHead>{{ t('labels.columns.actions') }}</TableHead>
         </TableRow>
@@ -111,7 +113,7 @@ async function deleteLabel(labelId: string) {
           <TableCell>
             <span
               class="inline-block w-4 h-4 rounded-sm"
-              :style="{ backgroundColor: label.color }"
+              :style="{ backgroundColor: isValidColor(label.color) ? label.color : fallbackColor }"
             />
           </TableCell>
           <TableCell>{{ label.name }}</TableCell>

@@ -23,6 +23,16 @@ export function normalizeCapabilities(capabilities: string[]): string[] {
   return result
 }
 
+const VALID_HEX_REGEX = /^#[0-9A-F]{6}$/
+
+export function isValidColor(color: string): boolean {
+  return VALID_HEX_REGEX.test(color)
+}
+
+export function getSafeColor(color: string, fallback: string = '#E5E7EB'): string {
+  return isValidColor(color) ? color : fallback
+}
+
 export function normalizeHexColor(color: string): string {
   const hasPrefix = color.startsWith('#')
   let hex = color.replace(/[^0-9a-fA-F]/g, '')
