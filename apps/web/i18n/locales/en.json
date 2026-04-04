@@ -168,7 +168,8 @@
     "add": "Add Comment",
     "toast": {
       "added": "Comment added",
-      "addFailed": "Failed to add comment"
+      "addFailed": "Failed to add comment",
+      "updated": "Comment updated"
     },
     "validation": {
       "bodyRequired": "Comment body is required"
