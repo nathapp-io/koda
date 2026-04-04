@@ -2,7 +2,7 @@ import { describe, test, expect } from '@jest/globals'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
-const webDir = '/Users/subrinaai/Desktop/workspace/subrina-coder/projects/koda/repos/koda/apps/web'
+const webDir = join(__dirname, '../..')
 const labelsPagePath = join(webDir, 'pages/[project]/labels.vue')
 
 describe('US-003 AC3: Given normalized value does not match ^#[0-9A-F]{6}$, when submit is attempted, then form shows validation error and blocks request', () => {

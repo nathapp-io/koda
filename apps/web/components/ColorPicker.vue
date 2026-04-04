@@ -23,6 +23,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { normalizeHexColor } from '~/lib/utils'
 
 const props = defineProps<{
   modelValue?: string
@@ -33,38 +34,23 @@ const emit = defineEmits<{
   'update:modelValue': [value: string]
 }>()
 
-function normalizeHex(color: string): string {
-  let hex = color.trim()
-  if (!hex.startsWith('#')) {
-    hex = '#' + hex
-  }
-  return hex.toUpperCase()
-}
-
-function isValidHex(hex: string): boolean {
-  return /^#?([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(hex)
-}
-
 const displayColor = computed(() => {
   if (props.modelValue) {
-    return normalizeHex(props.modelValue)
+    return normalizeHexColor(props.modelValue)
   }
   if (props.defaultColor) {
-    return normalizeHex(props.defaultColor)
+    return normalizeHexColor(props.defaultColor)
   }
   return '#6366F1'
 })
 
 function onColorInput(event: Event) {
   const target = event.target as HTMLInputElement
-  emit('update:modelValue', normalizeHex(target.value))
+  emit('update:modelValue', normalizeHexColor(target.value))
 }
 
 function onHexInput(event: Event) {
   const target = event.target as HTMLInputElement
-  const value = target.value.trim()
-  if (isValidHex(value)) {
-    emit('update:modelValue', normalizeHex(value))
-  }
+  emit('update:modelValue', normalizeHexColor(target.value))
 }
 </script>

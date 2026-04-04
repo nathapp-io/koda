@@ -2,7 +2,7 @@ import { describe, test, expect } from '@jest/globals'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
-const webDir = '/Users/subrinaai/Desktop/workspace/subrina-coder/projects/koda/repos/koda/apps/web'
+const webDir = join(__dirname, '../..')
 const enPath = join(webDir, 'i18n/locales/en.json')
 const zhPath = join(webDir, 'i18n/locales/zh.json')
 

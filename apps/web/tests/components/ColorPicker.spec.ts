@@ -57,12 +57,12 @@ describe('US-001 AC2: Emits update:modelValue on native picker change', () => {
 
   test('native color input emits normalized hex', () => {
     const source = readFileSync(pickerPath, 'utf-8')
-    expect(source).toContain('toUpperCase')
+    expect(source).toContain("normalizeHexColor")
   })
 
   test('native color input normalizes hex value', () => {
     const source = readFileSync(pickerPath, 'utf-8')
-    expect(source).toContain('toUpperCase()')
+    expect(source).toContain('normalizeHexColor(')
   })
 })
 
