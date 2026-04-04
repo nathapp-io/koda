@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
@@ -71,11 +71,40 @@ const onSubmit = handleSubmit(async (values) => {
     toast.error(extractApiError(err))
   }
 })
+
+const editingId = ref<string | null>(null)
+const editDraft = ref('')
+
+function startEdit(comment: Comment) {
+  editingId.value = comment.id
+  editDraft.value = comment.body
+}
+
+function cancelEdit() {
+  editingId.value = null
+  editDraft.value = ''
+}
+
+async function saveEdit(comment: Comment) {
+  if (!editDraft.value.trim()) return
+
+  try {
+    await $api.patch(`/comments/${comment.id}`, {
+      body: editDraft.value,
+    })
+    editingId.value = null
+    editDraft.value = ''
+    await refreshComments()
+    toast.success(t('comments.toast.updated'))
+  } catch (err: unknown) {
+    // PATCH /comments/:id failed
+    toast.error(extractApiError(err))
+  }
+}
 </script>
 
 <template>
   <div class="space-y-6">
-    <!-- Comments list -->
     <div v-if="pending" class="text-muted-foreground text-sm">{{ t('common.loadingComments') }}</div>
     <div v-else-if="error" class="text-destructive text-sm">{{ t('common.failedLoadComments') }}</div>
     <div v-else class="space-y-4">
@@ -93,7 +122,24 @@ const onSubmit = handleSubmit(async (values) => {
           </span>
           <span class="text-xs text-muted-foreground">{{ comment.createdAt }}</span>
         </div>
-        <p class="text-sm whitespace-pre-wrap">{{ comment.body }}</p>
+
+        <div v-if="editingId === comment.id" class="space-y-2">
+          <MarkdownEditor v-model="editDraft" />
+          <div class="flex gap-2">
+            <Button size="sm" @click="saveEdit(comment)">
+              {{ t('common.save') }}
+            </Button>
+            <Button size="sm" variant="outline" @click="cancelEdit">
+              {{ t('common.cancel') }}
+            </Button>
+          </div>
+        </div>
+        <template v-else>
+          <p class="text-sm whitespace-pre-wrap">{{ comment.body }}</p>
+          <Button size="sm" variant="ghost" @click="startEdit(comment)">
+            {{ t('common.edit') }}
+          </Button>
+        </template>
       </div>
       <p v-if="comments.length === 0" class="text-muted-foreground text-sm">{{ t('common.noCommentsYet') }}</p>
     </div>
@@ -104,11 +150,7 @@ const onSubmit = handleSubmit(async (values) => {
         <FormItem>
           <FormLabel>{{ t('comments.label') }}</FormLabel>
           <FormControl>
-            <Textarea
-              :placeholder="t('comments.placeholder')"
-              rows="3"
-              v-bind="componentField"
-            />
+            <MarkdownEditor v-bind="componentField" />
           </FormControl>
           <FormMessage />
         </FormItem>
