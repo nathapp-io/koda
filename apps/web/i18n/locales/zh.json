@@ -109,7 +109,9 @@
     },
     "type": {
       "BUG": "缺陷",
-      "ENHANCEMENT": "增强"
+      "ENHANCEMENT": "增强",
+      "TASK": "任务",
+      "QUESTION": "问题"
     },
     "form": {
       "title": "创建工单",

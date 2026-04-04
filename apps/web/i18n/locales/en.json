@@ -109,7 +109,9 @@
     },
     "type": {
       "BUG": "Bug",
-      "ENHANCEMENT": "Enhancement"
+      "ENHANCEMENT": "Enhancement",
+      "TASK": "Task",
+      "QUESTION": "Question"
     },
     "form": {
       "title": "Create Ticket",

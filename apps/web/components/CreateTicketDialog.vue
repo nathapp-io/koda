@@ -28,6 +28,8 @@
               <SelectContent>
                 <SelectItem value="BUG">{{ t('tickets.type.BUG') }}</SelectItem>
                 <SelectItem value="ENHANCEMENT">{{ t('tickets.type.ENHANCEMENT') }}</SelectItem>
+                <SelectItem value="TASK">{{ t('tickets.type.TASK') }}</SelectItem>
+                <SelectItem value="QUESTION">{{ t('tickets.type.QUESTION') }}</SelectItem>
               </SelectContent>
             </Select>
             <FormMessage />
@@ -99,9 +101,9 @@ const toast = useAppToast()
 const formSchema = toTypedSchema(
   z.object({
     title: z.string().min(3, t('tickets.validation.titleMin')),
-    type: z.string()
-      .min(1, t('tickets.validation.typeRequired'))
-      .refine((v: string) => ['BUG', 'ENHANCEMENT'].includes(v), t('tickets.validation.typeRequired')),
+    type: z.enum(['BUG', 'ENHANCEMENT', 'TASK', 'QUESTION'], {
+      errorMap: () => ({ message: t('tickets.validation.typeRequired') }),
+    }),
     priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).default('MEDIUM'),
     description: z.string().optional(),
   }) as any
