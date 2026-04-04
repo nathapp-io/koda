@@ -3,7 +3,7 @@
   "feature": "web-agents-i18n-capabilities",
   "branchName": "feat/web-agents-i18n-capabilities",
   "createdAt": "2026-04-03T00:00:00.000Z",
-  "updatedAt": "2026-04-03T07:13:20.055071Z",
+  "updatedAt": "2026-04-03T15:25:19.873Z",
   "userStories": [
     {
       "id": "US-001-A",
@@ -42,7 +42,10 @@
         "apps/web/components/CreateAgentDialog.vue",
         "apps/web/i18n/locales/en.json",
         "apps/web/i18n/locales/zh.json"
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-001-B",
@@ -67,14 +70,16 @@
       "dependencies": [
         "US-001-A"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
       },
       "workdir": "apps/web",
       "contextFiles": [
@@ -83,7 +88,11 @@
         "apps/web/components/CreateAgentDialog.vue",
         "apps/web/i18n/locales/en.json",
         "apps/web/i18n/locales/zh.json"
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "bb31397de5ba5ed29ac0da9be2fe766915b2dc45"
     },
     {
       "id": "US-001-C",
@@ -107,14 +116,16 @@
       "dependencies": [
         "US-001-B"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
       },
       "workdir": "apps/web",
       "contextFiles": [
@@ -123,7 +134,11 @@
         "apps/web/components/CreateAgentDialog.vue",
         "apps/web/i18n/locales/en.json",
         "apps/web/i18n/locales/zh.json"
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "d631c6760ffd1708b84825c2425eff65a0e9470e"
     },
     {
       "id": "US-002",
@@ -145,21 +160,27 @@
       "dependencies": [
         "US-001-C"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
       },
       "workdir": "apps/web",
       "contextFiles": [
         "apps/web/components/CreateAgentDialog.vue",
         "apps/web/components/EditAgentCapabilitiesDialog.vue",
         "apps/web/components/EditAgentRolesDialog.vue"
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "0c72388540fb4e3925772b8118843a622938f63a"
     },
     {
       "id": "US-003-A",
@@ -181,20 +202,26 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
       },
       "workdir": "apps/web",
       "contextFiles": [
         "apps/web/components/CreateAgentDialog.vue",
         "apps/web/components/EditAgentCapabilitiesDialog.vue"
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "9babf6e09b13643212be01007f9db5d2025124b8"
     },
     {
       "id": "US-003-B",
@@ -215,21 +242,27 @@
       "dependencies": [
         "US-003-A"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
       },
       "workdir": "apps/web",
       "contextFiles": [
         "apps/web/components/CreateAgentDialog.vue",
         "apps/web/components/EditAgentCapabilitiesDialog.vue"
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "8b99c99f61aa766b3244104079f713fb19d13fc3"
     }
   ],
-  "analysis": "## Affected Files\n\n### RotateKeyDialog.vue (`apps/web/components/RotateKeyDialog.vue`)\nFully hardcoded UI text throughout: dialog title 'Rotate API Key', confirmation body 'Are you sure you want to rotate the API key for {{ agent.name }}? The old key will become invalid.', button labels 'Cancel'/'Confirm', loading state 'Rotating...', post-rotate key reveal text 'Copy this API key now. It will not be shown again.' and 'Done'. The component already calls `useI18n()` and uses `t('agents.rotateKey.failed')` for the error toast \u2014 so the infrastructure is present but template strings were never migrated. `copyButtonText` is a reactive `ref('Copy')` that gets set to `'Copied!'` \u2014 this must become a computed flag pattern to allow i18n.\n\n### DeleteAgentDialog.vue (`apps/web/components/DeleteAgentDialog.vue`)\nFully hardcoded template: title 'Delete Agent', confirmation body 'Are you sure you want to delete agent \"{{ agent.name }}\"? This action cannot be undone.', and buttons 'Cancel'/'Deleting...'/'Delete'. Already has `const { t } = useI18n()` and uses `t('agents.toast.deleted')` / `t('agents.toast.deleteFailed')` in the script but the template was never wired up.\n\n### CreateAgentDialog.vue (`apps/web/components/CreateAgentDialog.vue`)\nPartially migrated: the form section uses i18n correctly. The key-reveal section (shown after successful agent creation, lines 111-122) is hardcoded: warning text 'Copy this API key now. It will not be shown again.', done button 'Done'. `copyButtonText` ref is initialized with hardcoded `'Copy'` / `'Copied!'` strings. Additionally the capabilities form field has a structural contract problem: schema uses `z.string().optional()`, the form is initialized with `capabilities: ''` (empty string), and a hidden `<input>` stores `capabilitiesTags.join(',')` as the form value. A `watch` syncs tags to the form field via `tags.join(',')`. The `onSubmit` passes `formValues` directly, so `capabilities` reaches the `POST /agents` body as a comma-joined string instead of `string[]`.\n\n### EditAgentCapabilitiesDialog.vue (`apps/web/components/EditAgentCapabilitiesDialog.vue`)\nThe dialog title uses `t('agents.form.editCapabilities')` which is a MISSING key in `en.json` (only `agents.editCapabilities.title` exists, creating a key mismatch). The `onSubmit` at line 113 correctly sends `{ capabilities: capabilitiesTags.value }` as an array \u2014 so the PATCH payload is already correct. However, the visible `<Input>` has `v-bind=\"componentField\"` binding a `z.string()` typed field directly to the text input, meaning the form validation operates on a string field rather than the array. The normalization (deduplication, trimming) is case-sensitive in `addCapability` \u2014 `includes(value)` will allow 'foo' and 'FOO' as separate entries.\n\n### i18n locale files (`apps/web/i18n/locales/en.json`, `zh.json`)\n**Already present** keys useful for this feature: `common.cancel`, `common.confirm`, `agents.rotateKey.failed`, `agents.rotateKey.confirm` (but no `{name}` interpolation), `agents.rotateKey.newKey`, `agents.rotateKey.rotate`, `agents.rotateKey.apiKeyReveal.{title,message,copy,copied}`, `agents.deleteAgent.confirm` (has `{name}` interpolation), `agents.deleteAgent.delete`, `agents.actions.delete`.\n\n**Missing keys** that must be added to both locales:\n- `common.done` \u2014 'Done' (reused by RotateKeyDialog and CreateAgentDialog)\n- `agents.rotateKey.title` \u2014 'Rotate API Key' (dialog title)\n- `agents.rotateKey.confirmBody` \u2014 'Are you sure you want to rotate the API key for {name}? The old key will become invalid.' (confirmation with agent name interpolation)\n- `agents.rotateKey.rotating` \u2014 'Rotating...' (in-flight button label)\n- `agents.deleteAgent.title` \u2014 'Delete Agent' (dialog title)\n- `agents.deleteAgent.deleting` \u2014 'Deleting...' (in-flight button label)\n- `agents.form.editCapabilities` \u2014 'Edit Capabilities' (fixes existing key mismatch in EditAgentCapabilitiesDialog)\n\n## Architecture & Patterns\n- All dialogs use `useI18n()` composable; `t()` is already in scope in all four components.\n- For reactive copy button text: replace `ref<string>('Copy')` pattern with a `ref<boolean>(false)` flag (`isCopied`) and render `isCopied ? t('...copied') : t('...copy')` in the template.\n- Capabilities contract fix in `CreateAgentDialog`: change schema field to `z.array(z.string()).default([])`, remove hidden input, update watcher to `setFieldValue('capabilities', tags)` (array), and update `initialValues.capabilities` to `[]`.\n- `normalizeCapabilities(input: string[]): string[]` should be a pure utility extractable to a shared composable or inline helper \u2014 trim each entry, filter empty, deduplicate case-insensitively preserving first-seen casing.\n- `EditAgentCapabilitiesDialog` form field binding: detach `v-bind=\"componentField\"` from the visible Input (it should only drive the hidden/array value); the Input is used for tag input, not direct field binding.\n\n## Risks\n- The `agents.rotateKey.confirm` key exists but has no `{name}` interpolation \u2014 adding `agents.rotateKey.confirmBody` as a new key (rather than mutating the existing one) avoids breaking any consumer that references the old key.\n- `copyButtonText` as a string ref is used in both `CreateAgentDialog` and `RotateKeyDialog` \u2014 both need the same migration to a boolean `isCopied` flag.\n- Changing the `capabilities` form field schema from `z.string()` to `z.array(z.string())` in `CreateAgentDialog` removes the hidden input. Care must be taken that the `setFieldValue` call after tag updates uses the array, not a joined string.\n- `EditAgentCapabilitiesDialog` already sends `capabilitiesTags.value` correctly in the PATCH body; the schema change is for correctness/type-safety only and does not break the API call.\n\n## Test Approach\n- US-001: Component tests asserting rendered text comes from i18n keys; JSON structure tests asserting key parity between en.json and zh.json.\n- US-002: Unit tests on form submission value shape (capabilities field is string[]).\n- US-003: Pure unit tests for `normalizeCapabilities`; component-level tests for addCapability UX guards."
+  "analysis": "## Affected Files\n\n### RotateKeyDialog.vue (`apps/web/components/RotateKeyDialog.vue`)\nFully hardcoded UI text throughout: dialog title 'Rotate API Key', confirmation body 'Are you sure you want to rotate the API key for {{ agent.name }}? The old key will become invalid.', button labels 'Cancel'/'Confirm', loading state 'Rotating...', post-rotate key reveal text 'Copy this API key now. It will not be shown again.' and 'Done'. The component already calls `useI18n()` and uses `t('agents.rotateKey.failed')` for the error toast — so the infrastructure is present but template strings were never migrated. `copyButtonText` is a reactive `ref('Copy')` that gets set to `'Copied!'` — this must become a computed flag pattern to allow i18n.\n\n### DeleteAgentDialog.vue (`apps/web/components/DeleteAgentDialog.vue`)\nFully hardcoded template: title 'Delete Agent', confirmation body 'Are you sure you want to delete agent \"{{ agent.name }}\"? This action cannot be undone.', and buttons 'Cancel'/'Deleting...'/'Delete'. Already has `const { t } = useI18n()` and uses `t('agents.toast.deleted')` / `t('agents.toast.deleteFailed')` in the script but the template was never wired up.\n\n### CreateAgentDialog.vue (`apps/web/components/CreateAgentDialog.vue`)\nPartially migrated: the form section uses i18n correctly. The key-reveal section (shown after successful agent creation, lines 111-122) is hardcoded: warning text 'Copy this API key now. It will not be shown again.', done button 'Done'. `copyButtonText` ref is initialized with hardcoded `'Copy'` / `'Copied!'` strings. Additionally the capabilities form field has a structural contract problem: schema uses `z.string().optional()`, the form is initialized with `capabilities: ''` (empty string), and a hidden `<input>` stores `capabilitiesTags.join(',')` as the form value. A `watch` syncs tags to the form field via `tags.join(',')`. The `onSubmit` passes `formValues` directly, so `capabilities` reaches the `POST /agents` body as a comma-joined string instead of `string[]`.\n\n### EditAgentCapabilitiesDialog.vue (`apps/web/components/EditAgentCapabilitiesDialog.vue`)\nThe dialog title uses `t('agents.form.editCapabilities')` which is a MISSING key in `en.json` (only `agents.editCapabilities.title` exists, creating a key mismatch). The `onSubmit` at line 113 correctly sends `{ capabilities: capabilitiesTags.value }` as an array — so the PATCH payload is already correct. However, the visible `<Input>` has `v-bind=\"componentField\"` binding a `z.string()` typed field directly to the text input, meaning the form validation operates on a string field rather than the array. The normalization (deduplication, trimming) is case-sensitive in `addCapability` — `includes(value)` will allow 'foo' and 'FOO' as separate entries.\n\n### i18n locale files (`apps/web/i18n/locales/en.json`, `zh.json`)\n**Already present** keys useful for this feature: `common.cancel`, `common.confirm`, `agents.rotateKey.failed`, `agents.rotateKey.confirm` (but no `{name}` interpolation), `agents.rotateKey.newKey`, `agents.rotateKey.rotate`, `agents.rotateKey.apiKeyReveal.{title,message,copy,copied}`, `agents.deleteAgent.confirm` (has `{name}` interpolation), `agents.deleteAgent.delete`, `agents.actions.delete`.\n\n**Missing keys** that must be added to both locales:\n- `common.done` — 'Done' (reused by RotateKeyDialog and CreateAgentDialog)\n- `agents.rotateKey.title` — 'Rotate API Key' (dialog title)\n- `agents.rotateKey.confirmBody` — 'Are you sure you want to rotate the API key for {name}? The old key will become invalid.' (confirmation with agent name interpolation)\n- `agents.rotateKey.rotating` — 'Rotating...' (in-flight button label)\n- `agents.deleteAgent.title` — 'Delete Agent' (dialog title)\n- `agents.deleteAgent.deleting` — 'Deleting...' (in-flight button label)\n- `agents.form.editCapabilities` — 'Edit Capabilities' (fixes existing key mismatch in EditAgentCapabilitiesDialog)\n\n## Architecture & Patterns\n- All dialogs use `useI18n()` composable; `t()` is already in scope in all four components.\n- For reactive copy button text: replace `ref<string>('Copy')` pattern with a `ref<boolean>(false)` flag (`isCopied`) and render `isCopied ? t('...copied') : t('...copy')` in the template.\n- Capabilities contract fix in `CreateAgentDialog`: change schema field to `z.array(z.string()).default([])`, remove hidden input, update watcher to `setFieldValue('capabilities', tags)` (array), and update `initialValues.capabilities` to `[]`.\n- `normalizeCapabilities(input: string[]): string[]` should be a pure utility extractable to a shared composable or inline helper — trim each entry, filter empty, deduplicate case-insensitively preserving first-seen casing.\n- `EditAgentCapabilitiesDialog` form field binding: detach `v-bind=\"componentField\"` from the visible Input (it should only drive the hidden/array value); the Input is used for tag input, not direct field binding.\n\n## Risks\n- The `agents.rotateKey.confirm` key exists but has no `{name}` interpolation — adding `agents.rotateKey.confirmBody` as a new key (rather than mutating the existing one) avoids breaking any consumer that references the old key.\n- `copyButtonText` as a string ref is used in both `CreateAgentDialog` and `RotateKeyDialog` — both need the same migration to a boolean `isCopied` flag.\n- Changing the `capabilities` form field schema from `z.string()` to `z.array(z.string())` in `CreateAgentDialog` removes the hidden input. Care must be taken that the `setFieldValue` call after tag updates uses the array, not a joined string.\n- `EditAgentCapabilitiesDialog` already sends `capabilitiesTags.value` correctly in the PATCH body; the schema change is for correctness/type-safety only and does not break the API call.\n\n## Test Approach\n- US-001: Component tests asserting rendered text comes from i18n keys; JSON structure tests asserting key parity between en.json and zh.json.\n- US-002: Unit tests on form submission value shape (capabilities field is string[]).\n- US-003: Pure unit tests for `normalizeCapabilities`; component-level tests for addCapability UX guards."
 }
