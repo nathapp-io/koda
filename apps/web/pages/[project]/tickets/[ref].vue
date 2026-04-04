@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { marked } from 'marked'
-import { reactive } from 'vue'
+import { computed, reactive } from 'vue'
 import MarkdownEditor from '~/components/MarkdownEditor.vue'
 
 definePageMeta({ layout: 'default' })
