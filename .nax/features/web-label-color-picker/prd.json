@@ -3,7 +3,7 @@
   "feature": "web-label-color-picker",
   "branchName": "feat/web-label-color-picker",
   "createdAt": "2026-04-04T00:00:00.000Z",
-  "updatedAt": "2026-04-04T05:02:19.753Z",
+  "updatedAt": "2026-04-04T06:03:31.093Z",
   "userStories": [
     {
       "id": "US-001",
@@ -97,8 +97,8 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -140,14 +140,16 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
       },
       "workdir": "apps/web",
       "contextFiles": [
@@ -155,7 +157,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "4f9de55e6e7cdb835cefc08486cfc521d17068bf"
     }
   ],
   "analysis": "This feature introduces a color picker UX for the labels page in the web app, replacing plain text color input with a validated, reusable Vue component.\n\n## Key Files\n\n### New File\n- `apps/web/components/ColorPicker.vue` — Shared color picker component with native `<input type=\"color\">`, hex text input, and swatch preview\n\n### Modified Files\n- `apps/web/pages/[project]/labels.vue` — Replace color text input with ColorPicker component, tighten validation schema\n- `apps/web/i18n/locales/en.json` — Add validation error message key for invalid hex format\n- `apps/web/i18n/locales/zh.json` — Add validation error message key for invalid hex format\n\n## Architecture Decisions\n\n### ColorPicker Component\n- Props: `modelValue: string`, `defaultColor?: string` (default: '#6366F1')\n- Emits: `update:modelValue` with normalized uppercase hex\n- Contains `normalizeHexColor(value: string): string` function\n  - Ensures leading `#`\n  - Uppercase hex\n  - Expands 3-digit hex to 6-digit (#abc → #AABBCC)\n\n### Validation Schema (labels form)\n- Current: `color: z.string().optional()`\n- New: `color: z.string().regex(/^#[0-9A-F]{6}$/, 'Invalid hex color format')`\n- Default fallback remains `#6366F1` when empty\n\n### Safe Color Rendering\n- Table swatch uses `backgroundColor: label.color || FALLBACK_COLOR`\n- FALLBACK_COLOR constant: `#9CA3AF` (neutral gray)\n- Fail-open strategy: invalid persisted DB colors render fallback instead of crashing\n\n### Existing Patterns to Follow\n- Form uses `useForm` + `toTypedSchema` + `zod` (already in place)\n- `useAsyncData` + `refresh()` + `useAppToast` pattern for async operations\n- i18n keys under `labels.*` namespace\n- Shadcn Table, Form, Input, Button components\n\n## Dependencies\n- vee-validate + @vee-validate/zod already in dependencies\n- No new npm dependencies required\n\n## Risks\n1. **Breaking validation**: Tightening color validation from optional freeform to strict hex format could reject invalid values that were previously accepted by the API. The API should validate independently; this change is fail-closed on the client side as specified.\n2. **Backward compatibility**: Existing invalid colors in DB will render with fallback in table view (fail-open) — this is the intended behavior per spec.\n\n## Migration Path\n1. Create ColorPicker component (no dependencies, safe to add)\n2. Integrate into labels form\n3. Add validation schema\n4. Add safe fallback for table rendering"
