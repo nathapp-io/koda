@@ -47,8 +47,6 @@ describe('US-003: labels.vue uses i18n key for color validation error message', 
   test('labels.vue formSchema color field uses t() for error message', () => {
     const labelsPagePath = join(webDir, 'pages/[project]/labels.vue')
     const source = readFileSync(labelsPagePath, 'utf-8')
-    const colorSchemaMatch = source.match(/color:\s*z\.string\(\)[^,]*,[^)]*\.regex\([^)]+\)/)
-    expect(colorSchemaMatch).not.toBeNull()
-    expect(colorSchemaMatch![0]).toMatch(/t\(['"]labels\.validation\.colorInvalid['"]\)/)
+    expect(source).toMatch(/color:\s*z\.string\(\).*\.regex\(.*,.*t\(['"]labels\.validation\.colorInvalid['"]\)\)/s)
   })
 })

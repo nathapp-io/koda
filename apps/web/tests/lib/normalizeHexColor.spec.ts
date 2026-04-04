@@ -20,10 +20,10 @@ describe('normalizeHexColor', () => {
     expect(result).toBe('#AABBCC')
   })
 
-  test('given user enters #ABC, when normalizeHexColor runs, then output is #ABCDEF (expands 3-char to 6-char)', async () => {
+  test('given user enters #ABC, when normalizeHexColor runs, then output is #AABBCC (expands 3-char to 6-char)', async () => {
     const { normalizeHexColor } = await import('~/lib/utils')
     const result = normalizeHexColor('#ABC')
-    expect(result).toBe('#ABCDEF')
+    expect(result).toBe('#AABBCC')
   })
 
   test('given user enters #abcdef, when normalizeHexColor runs, then output is #ABCDEF', async () => {
@@ -38,10 +38,10 @@ describe('normalizeHexColor', () => {
     expect(result).toBe('#123000')
   })
 
-  test('given user enters #123, when normalizeHexColor runs, then output is #123000', async () => {
+  test('given user enters #123, when normalizeHexColor runs, then output is #112233 (expands 3-char to 6-char)', async () => {
     const { normalizeHexColor } = await import('~/lib/utils')
     const result = normalizeHexColor('#123')
-    expect(result).toBe('#123000')
+    expect(result).toBe('#112233')
   })
 
   test('result always starts with #', async () => {
