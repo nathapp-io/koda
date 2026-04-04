@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref, computed } from 'vue'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '~/components/ui/tabs'
 import { Textarea } from '~/components/ui/textarea'
 import { marked } from 'marked'
