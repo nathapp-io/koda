@@ -110,11 +110,6 @@
     },
     "acceptance": {
         "enabled": true,
-        "maxRetries": 3,
-        "generateTests": true,
-        "testPath": "acceptance.test.ts",
-        "model": "balanced",
-        "refinement": true,
-        "redGate": true
+        "maxRetries": 3
     }
 }
