@@ -46,7 +46,13 @@ function isValidHex(hex: string): boolean {
 }
 
 const displayColor = computed(() => {
-  return normalizeHex(props.modelValue || '') || normalizeHex(props.defaultColor || '') || '#6366F1'
+  if (props.modelValue) {
+    return normalizeHex(props.modelValue)
+  }
+  if (props.defaultColor) {
+    return normalizeHex(props.defaultColor)
+  }
+  return '#6366F1'
 })
 
 function onColorInput(event: Event) {
