@@ -3,6 +3,7 @@
     "logout": "退出",
     "cancel": "取消",
     "confirm": "确认",
+    "done": "完成",
     "loading": "加载中...",
     "unassigned": "未指派",
     "viewBoard": "查看看板",
@@ -194,6 +195,7 @@
     },
     "form": {
       "editRoles": "编辑代理角色",
+      "editCapabilities": "编辑能力",
       "roles": "角色",
       "capabilities": "能力",
       "capabilitiesPlaceholder": "输入并按回车添加",
@@ -224,6 +226,9 @@
       "title": "编辑能力"
     },
     "rotateKey": {
+      "title": "轮换 API 密钥",
+      "confirmBody": "确定要轮换 {name} 的 API 密钥吗？旧密钥将立即失效。",
+      "rotating": "轮换中...",
       "failed": "轮换 API 密钥失败",
       "confirm": "这将使当前密钥立即失效。是否继续？",
       "newKey": "新 API 密钥",
@@ -236,8 +241,10 @@
       }
     },
     "deleteAgent": {
+      "title": "删除代理",
       "confirm": "确定要删除 {name} 吗？此操作无法撤销。",
-      "delete": "删除代理"
+      "delete": "删除代理",
+      "deleting": "删除中..."
     }
   },
   "kb": {

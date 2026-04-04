@@ -32,7 +32,6 @@
                   :placeholder="capabilitiesTags.length === 0 ? t('agents.form.capabilitiesPlaceholder') : ''"
                   class="flex-1 min-w-[120px] bg-transparent outline-none placeholder:text-muted-foreground"
                   @keydown.enter.prevent="addCapability"
-                  v-bind="componentField"
                 />
               </div>
             </FormControl>
@@ -59,6 +58,7 @@ import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { ref, watch } from 'vue'
 import { LucideX } from 'lucide-vue-next'
+import { normalizeCapabilities } from '~/lib/utils'
 
 const props = defineProps<{
   open: boolean
@@ -87,7 +87,7 @@ watch(() => props.agent.capabilities, (newCapabilities) => {
 
 const formSchema = toTypedSchema(
   z.object({
-    capabilities: z.string().optional(),
+    capabilities: z.array(z.string()).default([]),
   })
 )
 
@@ -98,8 +98,8 @@ const { handleSubmit, isSubmitting } = useForm({
 function addCapability(event: Event) {
   const input = event.target as HTMLInputElement
   const value = input.value.trim()
-  if (value && !capabilitiesTags.value.includes(value)) {
-    capabilitiesTags.value = [...capabilitiesTags.value, value]
+  if (value && !capabilitiesTags.value.some(cap => cap.toLowerCase() === value.toLowerCase())) {
+    capabilitiesTags.value = normalizeCapabilities([...capabilitiesTags.value, value])
     input.value = ''
   }
 }

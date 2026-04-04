@@ -82,7 +82,6 @@
                   @keydown.backspace="handleBackspace"
                 />
               </div>
-              <input type="hidden" v-bind="componentField" :value="capabilitiesTags.join(',')" />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -114,10 +113,10 @@
           <Button @click="copyToClipboard">{{ copyButtonText }}</Button>
         </div>
         <p class="text-sm text-muted-foreground">
-          Copy this API key now. It will not be shown again.
+          {{ t('agents.rotateKey.apiKeyReveal.message') }}
         </p>
         <div class="flex justify-end">
-          <Button @click="handleDone">Done</Button>
+          <Button @click="handleDone">{{ t('common.done') }}</Button>
         </div>
       </div>
     </DialogContent>
@@ -130,6 +129,7 @@ import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { ref, watch } from 'vue'
 import { LucideX } from 'lucide-vue-next'
+import { normalizeCapabilities } from '~/lib/utils'
 
 const props = defineProps<{
   open: boolean
@@ -154,14 +154,14 @@ const isSlugManuallyEdited = ref(false)
 
 // Key-reveal state
 const apiKey = ref<string | null>(null)
-const copyButtonText = ref('Copy')
+const copyButtonText = ref(t('agents.rotateKey.apiKeyReveal.copy'))
 
 const formSchema = toTypedSchema(
   z.object({
     name: z.string().min(1, t('agents.validation.nameRequired')),
     slug: z.string().min(1, t('agents.validation.slugRequired')).regex(/^[a-z0-9-]+$/, t('agents.validation.slugFormat')),
     roles: z.array(z.string()).min(1, t('agents.validation.rolesRequired')),
-    capabilities: z.string().optional(),
+    capabilities: z.array(z.string()).default([]),
     maxConcurrentTickets: z.number().int().min(1).default(3),
   })
 )
@@ -172,7 +172,7 @@ const { handleSubmit, isSubmitting, resetForm, setFieldValue, values } = useForm
     name: '',
     slug: '',
     roles: [] as string[],
-    capabilities: '',
+    capabilities: [] as string[],
     maxConcurrentTickets: 3,
   },
 })
@@ -191,7 +191,7 @@ watch(() => values.slug, () => {
 
 // Sync capabilitiesTags to form field value
 watch(capabilitiesTags, (tags) => {
-  setFieldValue('capabilities', tags.join(','))
+  setFieldValue('capabilities', tags)
 }, { deep: true })
 
 // Clear capabilitiesTags when dialog closes
@@ -211,8 +211,8 @@ function deriveSlug(name: string): string {
 function addCapability(event: Event) {
   const input = event.target as HTMLInputElement
   const value = input.value.trim()
-  if (value && !capabilitiesTags.value.includes(value)) {
-    capabilitiesTags.value = [...capabilitiesTags.value, value]
+  if (value && !capabilitiesTags.value.some(cap => cap.toLowerCase() === value.toLowerCase())) {
+    capabilitiesTags.value = normalizeCapabilities([...capabilitiesTags.value, value])
     input.value = ''
   }
 }
@@ -233,12 +233,12 @@ const { $api } = useApi()
 async function copyToClipboard() {
   if (!apiKey.value) return
   await navigator.clipboard.writeText(apiKey.value)
-  copyButtonText.value = 'Copied!'
+  copyButtonText.value = t('agents.rotateKey.apiKeyReveal.copied')
   setTimeout(revertCopyButton, 2000)
 }
 
 function revertCopyButton() {
-  copyButtonText.value = 'Copy'
+  copyButtonText.value = t('agents.rotateKey.apiKeyReveal.copy')
 }
 
 function handleDone() {

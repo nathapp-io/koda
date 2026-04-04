@@ -3,6 +3,7 @@
     "logout": "Logout",
     "cancel": "Cancel",
     "confirm": "Confirm",
+    "done": "Done",
     "loading": "Loading...",
     "unassigned": "Unassigned",
     "viewBoard": "View Board",
@@ -196,6 +197,9 @@
       "rotateKeyFailed": "Failed to rotate API key"
     },
     "rotateKey": {
+      "title": "Rotate API Key",
+      "confirmBody": "Are you sure you want to rotate the API key for {name}? The old key will become invalid.",
+      "rotating": "Rotating...",
       "failed": "Failed to rotate API key",
       "confirm": "This will invalidate the current key immediately. Continue?",
       "newKey": "New API Key",
@@ -209,6 +213,7 @@
     },
     "form": {
       "editRoles": "Edit Agent Roles",
+      "editCapabilities": "Edit Capabilities",
       "roles": "Roles",
       "capabilities": "Capabilities",
       "capabilitiesPlaceholder": "Type and press Enter to add",
@@ -239,8 +244,10 @@
       "title": "Edit Capabilities"
     },
     "deleteAgent": {
+      "title": "Delete Agent",
       "confirm": "Are you sure you want to delete {name}? This cannot be undone.",
-      "delete": "Delete Agent"
+      "delete": "Delete Agent",
+      "deleting": "Deleting..."
     }
   },
   "kb": {
