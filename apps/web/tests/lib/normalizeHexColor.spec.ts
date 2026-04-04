@@ -1,6 +1,6 @@
 import { describe, test, expect } from '@jest/globals'
 
-const webDir = '/Users/subrinaai/Desktop/workspace/subrina-coder/projects/koda/repos/koda/apps/web'
+const _webDir = '/Users/subrinaai/Desktop/workspace/subrina-coder/projects/koda/repos/koda/apps/web'
 
 describe('normalizeHexColor', () => {
   test('normalizeHexColor function is exported from lib/utils', async () => {

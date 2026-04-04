@@ -18,7 +18,7 @@ describe('US-003 AC3: Given normalized value does not match ^#[0-9A-F]{6}$, when
 
   test('labels.vue formSchema color field validates against ^#[0-9A-F]{6}$ pattern', () => {
     const source = readFileSync(labelsPagePath, 'utf-8')
-    expect(source).toMatch(/\^\#\[0-9A-F\]\{6\}\$/)
+    expect(source).toMatch(/^#[0-9A-F]{6}$/)
   })
 
   test('labels.vue onSubmit calls normalizeHexColor before sending to API', () => {
