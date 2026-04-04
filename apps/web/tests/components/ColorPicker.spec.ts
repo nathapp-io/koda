@@ -101,9 +101,11 @@ describe('US-001 AC5: Falls back to #6366F1 when modelValue is empty', () => {
     expect(source).toContain('#6366F1')
   })
 
-  test('source uses || operator for fallback', () => {
+  test('source falls back to #6366F1 when both modelValue and defaultColor are empty', () => {
     const source = readFileSync(pickerPath, 'utf-8')
-    expect(source).toContain("|| '#6366F1'")
+    expect(source).toContain('#6366F1')
+    const hasFallback = source.includes('return \'#6366F1\'') || source.includes('return "#6366F1"')
+    expect(hasFallback).toBe(true)
   })
 })
 
