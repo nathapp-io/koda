@@ -28,6 +28,8 @@
               <SelectContent>
                 <SelectItem value="BUG">{{ t('tickets.type.BUG') }}</SelectItem>
                 <SelectItem value="ENHANCEMENT">{{ t('tickets.type.ENHANCEMENT') }}</SelectItem>
+                <SelectItem value="TASK">{{ t('tickets.type.TASK') }}</SelectItem>
+                <SelectItem value="QUESTION">{{ t('tickets.type.QUESTION') }}</SelectItem>
               </SelectContent>
             </Select>
             <FormMessage />
@@ -58,7 +60,7 @@
           <FormItem>
             <FormLabel>{{ t('tickets.form.description') }}</FormLabel>
             <FormControl>
-              <Textarea :placeholder="t('tickets.form.descriptionPlaceholder')" v-bind="componentField" />
+              <MarkdownEditor v-bind="componentField" />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -82,6 +84,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { extractApiError } from '~/composables/useApi'
+import MarkdownEditor from '~/components/MarkdownEditor.vue'
 
 const props = defineProps<{
   open: boolean
@@ -99,9 +102,9 @@ const toast = useAppToast()
 const formSchema = toTypedSchema(
   z.object({
     title: z.string().min(3, t('tickets.validation.titleMin')),
-    type: z.string()
-      .min(1, t('tickets.validation.typeRequired'))
-      .refine((v: string) => ['BUG', 'ENHANCEMENT'].includes(v), t('tickets.validation.typeRequired')),
+    type: z.enum(['BUG', 'ENHANCEMENT', 'TASK', 'QUESTION'], {
+      errorMap: () => ({ message: t('tickets.validation.typeRequired') }),
+    }),
     priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).default('MEDIUM'),
     description: z.string().optional(),
   }) as any

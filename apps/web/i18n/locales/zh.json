@@ -16,7 +16,9 @@
     "addComment": "添加评论",
     "commentPlaceholder": "输入评论或原因...",
     "loadFailed": "加载失败",
-    "retry": "重试"
+    "retry": "重试",
+    "edit": "编辑",
+    "save": "保存"
   },
   "auth": {
     "login": {
@@ -109,7 +111,9 @@
     },
     "type": {
       "BUG": "缺陷",
-      "ENHANCEMENT": "增强"
+      "ENHANCEMENT": "增强",
+      "TASK": "任务",
+      "QUESTION": "问题"
     },
     "form": {
       "title": "创建工单",
@@ -147,6 +151,7 @@
       "created": "工单创建成功",
       "createFailed": "创建工单失败",
       "updated": "工单更新成功",
+      "updateFailed": "更新工单失败",
       "actionFailed": "操作失败"
     }
   },
@@ -163,7 +168,8 @@
     "add": "添加评论",
     "toast": {
       "added": "评论已添加",
-      "addFailed": "添加评论失败"
+      "addFailed": "添加评论失败",
+      "updated": "评论已更新"
     },
     "validation": {
       "bodyRequired": "评论内容不能为空"

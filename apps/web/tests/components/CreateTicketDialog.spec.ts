@@ -190,10 +190,10 @@ describe('US-004-3 AC5: priority field is a Select defaulting to MEDIUM', () => 
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC6 — description field is an optional Textarea
+// AC6 — description field is an optional MarkdownEditor
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('US-004-3 AC6: description field is an optional Textarea', () => {
+describe('US-004-3 AC6: description field is an optional MarkdownEditor', () => {
   test('source has an optional description field in Zod schema', () => {
     const source = readFileSync(dialogPath, 'utf-8')
     const hasOptionalDescription =
@@ -204,9 +204,9 @@ describe('US-004-3 AC6: description field is an optional Textarea', () => {
     expect(hasOptionalDescription).toBe(true)
   })
 
-  test('source uses Textarea component for description field', () => {
+  test('source uses MarkdownEditor component for description field', () => {
     const source = readFileSync(dialogPath, 'utf-8')
-    expect(source).toContain('Textarea')
+    expect(source).toContain('MarkdownEditor')
   })
 
   test('source renders description field with FormField wrapper', () => {
@@ -329,6 +329,120 @@ describe('US-003 AC4: resetForm() is called on successful submit for description
     const source = readFileSync(dialogPath, 'utf-8')
     const hasResetFormCall = source.includes('resetForm()')
     expect(hasResetFormCall).toBe(true)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// US-001 AC1 — type Select has BUG, ENHANCEMENT, TASK, QUESTION options
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('US-001 AC1: type Select has BUG, ENHANCEMENT, TASK, QUESTION options', () => {
+  test('source includes TASK as a selectable option', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    expect(source).toContain('TASK')
+  })
+
+  test('source includes QUESTION as a selectable option', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    expect(source).toContain('QUESTION')
+  })
+
+  test('type Select renders 4 SelectItem components', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    const typeSelectItemCount = (source.match(/SelectItem value="(?:BUG|ENHANCEMENT|TASK|QUESTION)"/g) || []).length
+    expect(typeSelectItemCount).toBe(4)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// US-001 AC2 — type field uses z.enum with all 4 types
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('US-001 AC2: type field uses z.enum with all 4 allowed types', () => {
+  test('type field uses z.enum (not z.string with refine)', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    const hasEnumNotRefine = source.includes('type: z.enum(')
+    expect(hasEnumNotRefine).toBe(true)
+  })
+
+  test('type z.enum includes BUG', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    expect(source).toMatch(/type:\s*z\.enum\(\s*\[\s*['"]BUG['"]/)
+  })
+
+  test('type z.enum includes ENHANCEMENT', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    expect(source).toMatch(/z\.enum\(\s*\[\s*['"]BUG['"]\s*,\s*['"]ENHANCEMENT['"]/)
+  })
+
+  test('type z.enum includes TASK', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    expect(source).toMatch(/z\.enum\(\s*\[\s*['"]BUG['"]\s*,\s*['"]ENHANCEMENT['"]\s*,\s*['"]TASK['"]/)
+  })
+
+  test('type z.enum includes QUESTION', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    expect(source).toMatch(/z\.enum\(\s*\[\s*['"]BUG['"]\s*,\s*['"]ENHANCEMENT['"]\s*,\s*['"]TASK['"]\s*,\s*['"]QUESTION['"]/)
+  })
+
+  test('type validation does NOT use .refine() pattern', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    const hasRefinePattern = source.includes('.refine(') && source.includes('[\'BUG\', \'ENHANCEMENT\']')
+    expect(hasRefinePattern).toBe(false)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// US-001 AC4 — invalid type is blocked by validation
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('US-001 AC4: invalid type value is blocked by z.enum validation', () => {
+  test('type z.enum rejects empty string (not in enum)', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    const hasEnumWithEmptyRejection = source.includes('z.enum(')
+    expect(hasEnumWithEmptyRejection).toBe(true)
+  })
+
+  test('type field has required validation', () => {
+    const source = readFileSync(dialogPath, 'utf-8')
+    expect(source).toMatch(/type:\s*z\.enum\(/)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// US-001 AC5 — i18n keys exist for TASK and QUESTION ticket types
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('US-001 AC5: i18n keys exist for TASK and QUESTION ticket types', () => {
+  const enPath = join(webDir, 'i18n', 'locales', 'en.json')
+  const zhPath = join(webDir, 'i18n', 'locales', 'zh.json')
+
+  test('en.json has tickets.type.TASK key', () => {
+    const en = JSON.parse(readFileSync(enPath, 'utf-8'))
+    expect(en.tickets?.type?.TASK).toBeDefined()
+    expect(typeof en.tickets.type.TASK).toBe('string')
+    expect(en.tickets.type.TASK.length).toBeGreaterThan(0)
+  })
+
+  test('en.json has tickets.type.QUESTION key', () => {
+    const en = JSON.parse(readFileSync(enPath, 'utf-8'))
+    expect(en.tickets?.type?.QUESTION).toBeDefined()
+    expect(typeof en.tickets.type.QUESTION).toBe('string')
+    expect(en.tickets.type.QUESTION.length).toBeGreaterThan(0)
+  })
+
+  test('zh.json has tickets.type.TASK key', () => {
+    const zh = JSON.parse(readFileSync(zhPath, 'utf-8'))
+    expect(zh.tickets?.type?.TASK).toBeDefined()
+    expect(typeof zh.tickets.type.TASK).toBe('string')
+    expect(zh.tickets.type.TASK.length).toBeGreaterThan(0)
+  })
+
+  test('zh.json has tickets.type.QUESTION key', () => {
+    const zh = JSON.parse(readFileSync(zhPath, 'utf-8'))
+    expect(zh.tickets?.type?.QUESTION).toBeDefined()
+    expect(typeof zh.tickets.type.QUESTION).toBe('string')
+    expect(zh.tickets.type.QUESTION.length).toBeGreaterThan(0)
   })
 })
 

@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { marked } from 'marked'
+import { computed, reactive } from 'vue'
+import MarkdownEditor from '~/components/MarkdownEditor.vue'
+
 definePageMeta({ layout: 'default' })
 
 interface Assignee {
@@ -38,6 +42,50 @@ const { data: ticketData, pending, error, refresh } = useAsyncData(
 )
 
 const ticket = computed(() => ticketData.value ?? null)
+
+const editState = reactive({
+  isEditing: false,
+  title: '',
+  description: '',
+  priority: 'MEDIUM' as 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW',
+})
+
+function startEdit() {
+  if (!ticket.value) return
+  editState.title = ticket.value.title
+  editState.description = ticket.value.description ?? ''
+  editState.priority = ticket.value.priority
+  editState.isEditing = true
+}
+
+function cancelEdit() {
+  editState.isEditing = false
+}
+
+async function saveEdit() {
+  if (!ticket.value) return
+  try {
+    await $api.patch(`/projects/${slug}/tickets/${ref}`, {
+      title: editState.title,
+      description: editState.description,
+      priority: editState.priority,
+    })
+    await refresh()
+    editState.isEditing = false
+    toast.success(t('tickets.toast.updated'))
+  } catch (error: unknown) {
+    toast.error(t('tickets.toast.updateFailed'))
+  }
+}
+
+const renderedDescription = computed(() => {
+  if (!ticket.value?.description) return ''
+  try {
+    return marked(ticket.value.description)
+  } catch {
+    return ticket.value.description
+  }
+})
 
 function statusClass(status: string) {
   switch (status) {
@@ -95,8 +143,29 @@ function onCommentAdded() {
     <div v-else-if="ticket" class="grid grid-cols-1 md:grid-cols-3 gap-6">
       <!-- Main content: 2/3 width on desktop, full width on mobile -->
       <div class="md:col-span-2 space-y-6">
-        <div>
-          <h1 class="text-2xl font-bold">{{ ticket.title }}</h1>
+        <div class="flex items-center justify-between">
+          <div v-if="!editState.isEditing" class="flex-1">
+            <h1 class="text-2xl font-bold">{{ ticket.title }}</h1>
+          </div>
+          <Input
+            v-else
+            v-model="editState.title"
+            class="text-2xl font-bold"
+            :placeholder="t('tickets.form.titlePlaceholder')"
+          />
+          <div class="flex gap-2 ml-4">
+            <Button v-if="!editState.isEditing" variant="outline" size="sm" @click="startEdit">
+              {{ t('common.edit') }}
+            </Button>
+            <template v-else>
+              <Button variant="outline" size="sm" @click="cancelEdit">
+                {{ t('common.cancel') }}
+              </Button>
+              <Button size="sm" @click="saveEdit">
+                {{ t('common.save') }}
+              </Button>
+            </template>
+          </div>
         </div>
 
         <div class="flex gap-2">
@@ -107,19 +176,36 @@ function onCommentAdded() {
             {{ t(`tickets.status.${ticket.status}`) }}
           </Badge>
           <Badge
+            v-if="!editState.isEditing"
             :variant="priorityVariant(ticket.priority)"
             :class="priorityClass(ticket.priority)"
           >
             {{ t(`tickets.priority.${ticket.priority}`) }}
           </Badge>
+          <Select v-else v-model="editState.priority">
+            <SelectTrigger class="w-[140px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="CRITICAL">{{ t('tickets.priority.CRITICAL') }}</SelectItem>
+              <SelectItem value="HIGH">{{ t('tickets.priority.HIGH') }}</SelectItem>
+              <SelectItem value="MEDIUM">{{ t('tickets.priority.MEDIUM') }}</SelectItem>
+              <SelectItem value="LOW">{{ t('tickets.priority.LOW') }}</SelectItem>
+            </SelectContent>
+          </Select>
           <Badge variant="outline" :class="typeClass(ticket.type)">
             {{ t(`tickets.type.${ticket.type}`) }}
           </Badge>
         </div>
 
-        <div v-if="ticket.description">
+        <div v-if="ticket.description || editState.isEditing">
           <p class="text-sm text-muted-foreground mb-1">{{ t('tickets.detail.description') }}</p>
-          <p class="whitespace-pre-wrap text-sm">{{ ticket.description }}</p>
+          <MarkdownEditor v-if="editState.isEditing" v-model="editState.description" />
+          <p
+            v-else
+            class="whitespace-pre-wrap text-sm"
+            v-html="renderedDescription"
+          />
         </div>
 
         <CommentThread

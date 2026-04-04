@@ -16,7 +16,9 @@
     "addComment": "Add a comment",
     "commentPlaceholder": "Enter a comment or reason...",
     "loadFailed": "Failed to load data",
-    "retry": "Retry"
+    "retry": "Retry",
+    "edit": "Edit",
+    "save": "Save"
   },
   "auth": {
     "login": {
@@ -109,7 +111,9 @@
     },
     "type": {
       "BUG": "Bug",
-      "ENHANCEMENT": "Enhancement"
+      "ENHANCEMENT": "Enhancement",
+      "TASK": "Task",
+      "QUESTION": "Question"
     },
     "form": {
       "title": "Create Ticket",
@@ -147,6 +151,7 @@
       "created": "Ticket created successfully",
       "createFailed": "Failed to create ticket",
       "updated": "Ticket updated successfully",
+      "updateFailed": "Failed to update ticket",
       "actionFailed": "Action failed"
     }
   },
@@ -163,7 +168,8 @@
     "add": "Add Comment",
     "toast": {
       "added": "Comment added",
-      "addFailed": "Failed to add comment"
+      "addFailed": "Failed to add comment",
+      "updated": "Comment updated"
     },
     "validation": {
       "bodyRequired": "Comment body is required"
