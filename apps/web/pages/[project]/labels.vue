@@ -32,14 +32,14 @@ const formSchema = toTypedSchema(z.object({
 
 const { handleSubmit, resetForm } = useForm({
   validationSchema: formSchema,
-  initialValues: { name: '', color: '#6366f1' },
+  initialValues: { name: '', color: '#6366F1' },
 })
 
 const onSubmit = handleSubmit(async (values) => {
   try {
     await $api.post(`/projects/${slug}/labels`, {
       name: values.name,
-      color: values.color || '#6366f1',
+      color: values.color || '#6366F1',
     })
     toast.success(t('labels.toast.created'))
     resetForm()
@@ -82,11 +82,7 @@ async function deleteLabel(labelId: string) {
           <FormItem>
             <FormLabel>{{ t('labels.form.color') }}</FormLabel>
             <FormControl>
-              <ColorPicker
-                :modelValue="componentField.modelValue"
-                defaultColor="#6366F1"
-                @update:modelValue="componentField['onUpdate:modelValue']"
-              />
+              <ColorPicker v-bind="componentField" defaultColor="#6366F1" />
             </FormControl>
             <FormMessage />
           </FormItem>
