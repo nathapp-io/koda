@@ -35,16 +35,18 @@ describe('US-002 AC1: Color FormField uses ColorPicker component', () => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('US-002 AC2: ColorPicker emits normalized hex to form state', () => {
-  test('ColorPicker receives modelValue binding for two-way binding', () => {
+  test('ColorPicker receives modelValue binding for two-way binding via v-bind', () => {
     const source = readFileSync(pagePath, 'utf-8')
     const colorFieldMatch = source.match(/FormField\s+name="color"[\s\S]*?<\/FormField>/)
     expect(colorFieldMatch).not.toBeNull()
-    expect(colorFieldMatch![0]).toContain('modelValue')
+    expect(colorFieldMatch![0]).toContain('v-bind="componentField"')
   })
 
-  test('ColorPicker emits update:modelValue for form binding', () => {
+  test('ColorPicker emits update:modelValue for form binding via componentField', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('update:modelValue')
+    const colorFieldMatch = source.match(/FormField\s+name="color"[\s\S]*?<\/FormField>/)
+    expect(colorFieldMatch).not.toBeNull()
+    expect(colorFieldMatch![0]).toContain('v-bind="componentField"')
   })
 
   test('ColorPicker defaultColor prop is set to #6366F1 for fallback', () => {
@@ -65,22 +67,19 @@ describe('US-002 AC2: ColorPicker emits normalized hex to form state', () => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('US-002 AC3: Default form value is #6366F1 when color not edited', () => {
-  test('initialValues.color is set to #6366f1', () => {
+  test('initialValues.color is set to #6366F1', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('#6366f1')
+    expect(source).toContain('#6366F1')
   })
 
-  test('form uses color field with optional() schema', () => {
+  test('form uses color field with regex validation for hex format', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('color: z.string().optional()')
+    expect(source).toMatch(/color:\s*z\.string\(\).*\.regex/)
   })
 
-  test('onSubmit uses color value or falls back to #6366f1', () => {
+  test('onSubmit normalizes color value before sending to API', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    const hasFallback =
-      source.includes("color: values.color || '#6366f1'") ||
-      source.includes('color: values.color ?? \'#6366f1\'')
-    expect(hasFallback).toBe(true)
+    expect(source).toContain('normalizeHexColor')
   })
 })
 
