@@ -265,9 +265,9 @@ describe('US-002: CreateAgentDialog capabilities integration', () => {
     expect(hasStringArrayRef).not.toBeNull()
   })
 
-  test('addCapability pushes to capabilitiesTags array', () => {
+  test('addCapability pushes to capabilitiesTags array via normalizeCapabilities', () => {
     const source = getCreateDialogSource()
-    const hasPush = source.match(/capabilitiesTags\.value\s*=\s*\[\s*\.\.\.\s*capabilitiesTags\.value\s*,\s*\w+\s*\]/)
+    const hasPush = source.match(/normalizeCapabilities\(\[\s*\.\.\.\s*capabilitiesTags\.value\s*,\s*\w+\s*\]\)/)
     expect(hasPush).not.toBeNull()
   })
 
@@ -289,9 +289,9 @@ describe('US-002: EditAgentCapabilitiesDialog capabilities integration', () => {
     expect(hasStringArrayRef).not.toBeNull()
   })
 
-  test('addCapability pushes to capabilitiesTags array', () => {
+  test('addCapability pushes to capabilitiesTags array via normalizeCapabilities', () => {
     const source = getEditDialogSource()
-    const hasPush = source.match(/capabilitiesTags\.value\s*=\s*\[\s*\.\.\.\s*capabilitiesTags\.value\s*,\s*\w+\s*\]/)
+    const hasPush = source.match(/normalizeCapabilities\(\[\s*\.\.\.\s*capabilitiesTags\.value\s*,\s*\w+\s*\]\)/)
     expect(hasPush).not.toBeNull()
   })
 
