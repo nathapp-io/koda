@@ -1257,5 +1257,90 @@
         "runtimeCrashes": 0
       }
     ]
+  },
+  {
+    "runId": "run-2026-04-04T04-27-58-968Z",
+    "feature": "web-label-color-picker",
+    "startedAt": "2026-04-04T04:27:58.968Z",
+    "completedAt": "2026-04-04T06:03:48.461Z",
+    "totalCost": 0.8031391050000001,
+    "totalStories": 4,
+    "storiesCompleted": 4,
+    "storiesFailed": 0,
+    "totalDurationMs": 5749493,
+    "stories": [
+      {
+        "storyId": "US-001",
+        "complexity": "simple",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "modelUsed": "minimax/MiniMax-M2.7",
+        "agentUsed": "opencode",
+        "attempts": 1,
+        "finalTier": "fast",
+        "success": true,
+        "cost": 0.09639415500000002,
+        "durationMs": 296848,
+        "firstPassSuccess": true,
+        "startedAt": "2026-04-04T04:32:38.141Z",
+        "completedAt": "2026-04-04T04:43:45.291Z",
+        "fullSuiteGatePassed": false,
+        "runtimeCrashes": 0
+      },
+      {
+        "storyId": "US-002",
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "modelUsed": "minimax/MiniMax-M2.7",
+        "agentUsed": "opencode",
+        "attempts": 1,
+        "finalTier": "balanced",
+        "success": true,
+        "cost": 0.19721239499999998,
+        "durationMs": 0,
+        "firstPassSuccess": true,
+        "startedAt": "2026-04-04T04:43:47.349Z",
+        "completedAt": "2026-04-04T05:02:17.696Z",
+        "fullSuiteGatePassed": false,
+        "runtimeCrashes": 0
+      },
+      {
+        "storyId": "US-003",
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "modelUsed": "minimax/MiniMax-M2.7",
+        "agentUsed": "opencode",
+        "attempts": 1,
+        "finalTier": "balanced",
+        "success": true,
+        "cost": 0.254755335,
+        "durationMs": 0,
+        "firstPassSuccess": true,
+        "startedAt": "2026-04-04T05:02:19.753Z",
+        "completedAt": "2026-04-04T05:28:57.953Z",
+        "fullSuiteGatePassed": false,
+        "runtimeCrashes": 0
+      },
+      {
+        "storyId": "US-004",
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "modelUsed": "minimax/MiniMax-M2.7",
+        "agentUsed": "opencode",
+        "attempts": 1,
+        "finalTier": "balanced",
+        "success": true,
+        "cost": 0.25477722,
+        "durationMs": 0,
+        "firstPassSuccess": true,
+        "startedAt": "2026-04-04T05:29:00.013Z",
+        "completedAt": "2026-04-04T06:03:31.091Z",
+        "fullSuiteGatePassed": false,
+        "runtimeCrashes": 0
+      }
+    ]
   }
 ]

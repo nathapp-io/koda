@@ -5,6 +5,12 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { extractApiError } from '~/composables/useApi'
+import { normalizeHexColor } from '~/lib/utils'
+
+const fallbackColor = '#E5E7EB'
+
+const VALID_HEX_REGEX = /^#[0-9A-F]{6}$/
+const isValidColor = (color: string): boolean => VALID_HEX_REGEX.test(color)
 
 interface Label {
   id: string
@@ -27,19 +33,19 @@ const labels = computed(() => labelsData.value ?? [])
 
 const formSchema = toTypedSchema(z.object({
   name: z.string().min(1, 'Name is required'),
-  color: z.string().optional(),
+  color: z.string().regex(/^#[0-9A-F]{6}$/, t('labels.validation.colorInvalid')),
 }))
 
 const { handleSubmit, resetForm } = useForm({
   validationSchema: formSchema,
-  initialValues: { name: '', color: '#6366f1' },
+  initialValues: { name: '', color: '#6366F1' },
 })
 
 const onSubmit = handleSubmit(async (values) => {
   try {
     await $api.post(`/projects/${slug}/labels`, {
       name: values.name,
-      color: values.color || '#6366f1',
+      color: normalizeHexColor(values.color || '#6366F1'),
     })
     toast.success(t('labels.toast.created'))
     resetForm()
@@ -82,7 +88,7 @@ async function deleteLabel(labelId: string) {
           <FormItem>
             <FormLabel>{{ t('labels.form.color') }}</FormLabel>
             <FormControl>
-              <Input placeholder="#6366f1" class="w-32" v-bind="componentField" />
+              <ColorPicker v-bind="componentField" defaultColor="#6366F1" />
             </FormControl>
             <FormMessage />
           </FormItem>
@@ -100,7 +106,7 @@ async function deleteLabel(labelId: string) {
     <Table v-else>
       <TableHeader>
         <TableRow>
-          <TableHead>{{ t('labels.columns.color') }}</TableHead>
+          <TableHead :class="[fallbackColor]">{{ t('labels.columns.color') }}</TableHead>
           <TableHead>{{ t('labels.columns.name') }}</TableHead>
           <TableHead>{{ t('labels.columns.actions') }}</TableHead>
         </TableRow>
@@ -110,7 +116,7 @@ async function deleteLabel(labelId: string) {
           <TableCell>
             <span
               class="inline-block w-4 h-4 rounded-sm"
-              :style="{ backgroundColor: label.color }"
+              :style="{ backgroundColor: isValidColor(label.color) ? label.color : fallbackColor }"
             />
           </TableCell>
           <TableCell>{{ label.name }}</TableCell>

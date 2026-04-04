@@ -3,42 +3,36 @@
   "approved": true,
   "tests": {
     "allPassing": true,
-    "passCount": 21,
+    "passCount": 24,
     "failCount": 0
   },
   "testModifications": {
-    "detected": false,
-    "files": [],
+    "detected": true,
+    "files": [
+      "apps/web/tests/lib/normalizeHexColor.spec.ts",
+      "apps/web/tests/i18n/labels-validation-i18n.spec.ts"
+    ],
     "legitimate": true,
-    "reasoning": "No test files were modified by the implementer. Only a PRD file was modified."
+    "reasoning": "Fixed incorrect test expectations: (1) #ABC expected #ABCDEF corrected to #AABBCC (doubling behavior consistent with #abc→#AABBCC per acceptance criteria), (2) #123 expected #123000 corrected to #112233 (doubling behavior for 3-char hex), (3) i18n test regex updated to use toMatch with 's' flag for multi-line matching, properly matching the actual code structure in labels.vue"
   },
   "acceptanceCriteria": {
     "allMet": true,
     "criteria": [
       {
-        "criterion": "AC1: CreateAgentDialog addCapability rejects case-insensitive duplicates",
-        "met": true,
-        "evidence": "Line 214: uses toLowerCase() comparison; Line 215: uses normalizeCapabilities for dedup"
+        "criterion": "Given user enters 6366f1, when normalizeHexColor runs, then output is #6366F1",
+        "met": true
       },
       {
-        "criterion": "AC2: EditAgentCapabilitiesDialog addCapability rejects empty trimmed input",
-        "met": true,
-        "evidence": "Line 100: trims input; Line 101: if (value && ...) check prevents empty addition"
+        "criterion": "Given user enters #abc, when normalizeHexColor runs, then output is #AABBCC",
+        "met": true
       },
       {
-        "criterion": "AC3: EditAgentCapabilitiesDialog addCapability rejects case-insensitive duplicates",
-        "met": true,
-        "evidence": "Line 101: uses toLowerCase() comparison; Line 102: uses normalizeCapabilities for dedup"
+        "criterion": "Given normalized value does not match ^#[0-9A-F]{6}$, when submit is attempted, then form shows validation error and blocks request",
+        "met": true
       },
       {
-        "criterion": "AC4: CreateAgentDialog removeCapability updates tags and onSubmit payload",
-        "met": true,
-        "evidence": "Line 220-222: filter removes by index; Line 193-195: watcher syncs to form field"
-      },
-      {
-        "criterion": "AC5: EditAgentCapabilitiesDialog handleRemove updates tags and onSubmit payload",
-        "met": true,
-        "evidence": "Line 107-109: filter removes by index; Line 115: submits capabilitiesTags.value"
+        "criterion": "Given valid color input, when submit occurs, then POST /projects/:slug/labels receives normalized color",
+        "met": true
       }
     ]
   },
@@ -46,6 +40,10 @@
     "rating": "good",
     "issues": []
   },
-  "fixes": [],
-  "reasoning": "All 21 story-scoped tests pass. Implementation correctly uses normalizeCapabilities for case-insensitive deduplication and empty/whitespace filtering. Both dialogs properly sync capabilitiesTags to their form fields via watchers. No test modifications detected."
+  "fixes": [
+    "Fixed normalizeHexColor test expectation: #ABC→#ABCDEF corrected to #ABC→#AABBCC (doubling behavior consistent with acceptance criteria for #abc→#AABBCC)",
+    "Fixed normalizeHexColor test expectation: #123→#123000 corrected to #123→#112233 (doubling behavior for 3-char hex)",
+    "Fixed i18n test regex to use toMatch with 's' flag for multi-line matching, matching actual code structure"
+  ],
+  "reasoning": "All story-scoped tests pass. Implementation correctly: (1) normalizes 6366f1→#6366F1 and #abc→#AABBCC per acceptance criteria, (2) uses z.string().regex(/^#[0-9A-F]{6}$/) for validation with i18n error message, (3) calls normalizeHexColor in onSubmit before API call. Test modifications were legitimate fixes for incorrect test expectations - the tests were asserting wrong expected values that contradicted the acceptance criteria doubling behavior."
 }
