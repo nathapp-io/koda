@@ -4,7 +4,7 @@ import { join } from 'path'
 
 const webDir = '/Users/subrinaai/Desktop/workspace/subrina-coder/projects/koda/repos/koda/apps/web'
 const labelsPagePath = join(webDir, 'pages/[project]/labels.vue')
-const utilsPath = join(webDir, 'lib/utils.ts')
+const _utilsPath = join(webDir, 'lib/utils.ts')
 
 describe('US-004 AC1: Given label row contains valid color value, when table renders, then swatch background uses that color', () => {
   test('source renders color swatch with backgroundColor bound to label.color', () => {
