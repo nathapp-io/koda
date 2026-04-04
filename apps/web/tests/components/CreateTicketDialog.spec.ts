@@ -190,10 +190,10 @@ describe('US-004-3 AC5: priority field is a Select defaulting to MEDIUM', () => 
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC6 — description field is an optional Textarea
+// AC6 — description field is an optional MarkdownEditor
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('US-004-3 AC6: description field is an optional Textarea', () => {
+describe('US-004-3 AC6: description field is an optional MarkdownEditor', () => {
   test('source has an optional description field in Zod schema', () => {
     const source = readFileSync(dialogPath, 'utf-8')
     const hasOptionalDescription =
@@ -204,9 +204,9 @@ describe('US-004-3 AC6: description field is an optional Textarea', () => {
     expect(hasOptionalDescription).toBe(true)
   })
 
-  test('source uses Textarea component for description field', () => {
+  test('source uses MarkdownEditor component for description field', () => {
     const source = readFileSync(dialogPath, 'utf-8')
-    expect(source).toContain('Textarea')
+    expect(source).toContain('MarkdownEditor')
   })
 
   test('source renders description field with FormField wrapper', () => {
