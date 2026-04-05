@@ -18,132 +18,157 @@ DO NOT EDIT MANUALLY — run `nax generate` to regenerate.
 ---
 # Koda — Dev Ticket Tracker
 
-Turborepo monorepo with a NestJS API, Nuxt 3 web UI, and a Commander.js CLI. Built for human developers and AI agents to collaborate on bug fixes and enhancement tickets.
+Koda is a Bun-managed Turborepo monorepo for tracking developer tickets and coordinating work between humans and AI agents.
 
-## Tech Stack (Overview)
+## Context Source Of Truth
+
+This file is the root source-of-truth for Codex/NAX repository guidance.
+
+Rules:
+- `AGENTS.md` at the repo root is generated from this file
+- app-specific context must live under `.nax/mono/apps/<app>/context.md`
+- in this monorepo, do not treat `apps/*/AGENTS.md` as the authoring source
+- when repo-level architecture or workflow changes, update this file first
+
+## Monorepo Shape
+
+```text
+koda/
+├── apps/
+│   ├── api/     # NestJS API, system of record
+│   ├── cli/     # Commander.js API client for agents/terminals
+│   └── web/     # Nuxt SSR app for humans
+├── packages/
+│   ├── eslint-config/
+│   └── typescript-config/
+├── docs/
+├── .nax/
+│   ├── context.md
+│   └── mono/apps/{api,cli,web}/context.md
+├── openapi.json
+├── package.json
+├── turbo.json
+└── tsconfig.base.json
+```
+
+## System Architecture
+
+The architecture is client-server within a monorepo:
+- `apps/api` owns persistence, auth, domain rules, workflow transitions, RAG, and integrations
+- `apps/web` is a Nuxt 3 SSR client that proxies `/api/**` to the API service
+- `apps/cli` is a thin CLI client that calls the API through a generated OpenAPI client
+- shared TypeScript and ESLint config live in `packages/*`
+
+The detailed architecture reference lives in `docs/architecture.md`.
+
+## Tech Stack
 
 | Layer | Choice |
 |:------|:-------|
-| Runtime | **Node.js 22 + Bun 1.3.7+** — Bun as package manager |
-| Language | **TypeScript strict** throughout all apps |
-| API | **NestJS 11 + Fastify** via `@nathapp/nestjs-app` AppFactory |
-| Web | **Nuxt 3 + Shadcn-nuxt + Tailwind CSS** |
-| CLI | **Commander.js 12** — bin: `koda` |
-| ORM | **Prisma 6** — SQLite (dev) / PostgreSQL / MySQL |
-| Test | **Jest 29** — all apps |
-| Build | **Turborepo** |
-| Lint | **ESLint** |
+| Runtime | Node.js 22+ and Bun workspaces |
+| Language | TypeScript strict |
+| Monorepo | Turborepo |
+| API | NestJS 11 + Fastify + Prisma |
+| Web | Nuxt 3 + Shadcn-nuxt + Tailwind CSS |
+| CLI | Commander.js 12 |
+| Database | Prisma with SQLite default; PostgreSQL/MySQL supported |
+| Test | Jest; Playwright in web |
+| i18n | API and web maintain separate translation systems |
+
+## Workspace Responsibilities
+
+### `apps/api`
+- source of truth for business logic
+- exports the OpenAPI spec to `openapi.json`
+- owns Prisma schema and migrations
+- owns ticket state transitions, auth, RAG, webhooks, and CI webhook intake
+
+### `apps/cli`
+- remains thin
+- should use generated client code in `apps/cli/src/generated/`
+- should not reimplement API business rules locally
+- resolves auth and project context from flags, env, user config, and local project config
+
+### `apps/web`
+- remains a UI client over the API
+- intentionally uses Nuxt-native composables for API access instead of a generated client
+- proxies browser requests through Nuxt to the API host
+- should not duplicate backend business rules in components/pages
+
+### `packages/*`
+- shared config packages used by the apps
+- keep repo-wide lint/type rules centralized here when possible
+
+## OpenAPI And Client Generation
+
+Current code-backed flow:
+
+```text
+apps/api
+  -> bun run api:export-spec
+  -> openapi.json
+  -> bun run generate:cli
+  -> apps/cli/src/generated/
+```
+
+Rules:
+- run `bun run generate` after API contract changes that affect the CLI
+- do not edit generated files under `apps/cli/src/generated/`
+- `openapi.json` is committed and should reflect the current API contract
+- `apps/web/generated/` is intentionally not part of the current architecture
+- web client generation was dropped because Nuxt composables and proxying are the preferred integration pattern for `apps/web`
 
 ## Monorepo Commands
 
 | Command | Purpose |
 |:--------|:--------|
-| `bun run build` | Build all apps |
-| `bun run dev` | Start all apps in dev mode |
-| `bun run test` | Run all Jest tests |
-| `bun run lint` | ESLint across all apps |
-| `bun run type-check` | TypeScript check across all apps |
-| `bun run db:generate` | Regenerate Prisma client (delegates to `apps/api`) |
-| `bun run db:migrate` | Run pending migrations (delegates to `apps/api`) |
-| `bun run db:studio` | Open Prisma Studio (delegates to `apps/api`) |
-| `bun run db:reset` | Reset database (delegates to `apps/api`) |
-| `bun run api:export-spec` | Export OpenAPI spec → `openapi.json` at root |
-| `bun run generate` | Export spec + regenerate CLI + web clients |
+| `bun run build` | Build all workspaces through Turbo |
+| `bun run dev` | Run workspace dev tasks |
+| `bun run test` | Run tests across workspaces |
+| `bun run lint` | Run ESLint across workspaces |
+| `bun run type-check` | Run type checks across workspaces |
+| `bun run db:generate` | Regenerate Prisma client in `apps/api` |
+| `bun run db:migrate` | Apply/create Prisma migrations in `apps/api` |
+| `bun run db:studio` | Open Prisma Studio from `apps/api` |
+| `bun run db:reset` | Reset the database in `apps/api` |
+| `bun run api:export-spec` | Build/export API spec to `openapi.json` |
+| `bun run generate` | Export spec and regenerate CLI client |
 
-## Repository Structure
+## Engineering Rules
 
-```
-koda/                              ← monorepo root
-├── apps/
-│   ├── api/                       ← NestJS 11 + Fastify backend
-│   │   ├── prisma/schema.prisma   ← Prisma schema (lives here, not root)
-│   │   ├── src/
-│   │   │   ├── main.ts            ← AppFactory bootstrap
-│   │   │   ├── app.module.ts      ← Root module
-│   │   │   ├── @types/            ← Custom type declarations
-│   │   │   ├── auth/              ← JWT + API key auth
-│   │   │   ├── agents/            ← Agent CRUD + API key auth
-│   │   │   ├── projects/          ← Project CRUD
-│   │   │   ├── tickets/           ← Ticket CRUD + state machine
-│   │   │   ├── comments/          ← Comment CRUD
-│   │   │   ├── labels/            ← Label CRUD + ticket labelling
-│   │   │   ├── ticket-links/      ← External links (GitHub/GitLab PRs)
-│   │   │   ├── rag/               ← RAG-based knowledge base (embeddings)
-│   │   │   ├── webhook/           ← Outbound webhook dispatching
-│   │   │   ├── ci-webhook/        ← Inbound CI/CD webhook receiver
-│   │   │   ├── health/            ← Health check endpoint
-│   │   │   ├── common/enums.ts    ← Local TypeScript enums (SQLite can't use Prisma enums)
-│   │   │   ├── config/            ← Typed config (app, auth, database, rag)
-│   │   │   └── i18n/              ← en/ + zh/ translations
-│   │   └── test/                  ← Integration + E2E tests
-│   ├── cli/                       ← Commander.js CLI (bin: `koda`)
-│   │   └── src/
-│   │       ├── index.ts           ← Program entry, registers all commands
-│   │       ├── commands/          ← login, init, config, project, ticket, comment, agent, label, kb
-│   │       ├── generated/         ← Auto-generated from OpenAPI (do NOT edit)
-│   │       └── utils/             ← output, error, auth helpers
-│   └── web/                       ← Nuxt 3 + Shadcn-nuxt
-│       ├── pages/                 ← File-based routing
-│       ├── composables/           ← useApi, useAuth, useAppToast
-│       ├── components/ui/         ← Shadcn-nuxt components
-│       ├── layouts/               ← default, auth
-│       └── tests/                 ← Component/page tests
-├── .nax/                          ← nax config + context files
-├── package.json                   ← Bun workspaces root
-├── turbo.json                     ← Turborepo pipeline config
-├── tsconfig.base.json             ← Shared TS config
-└── openapi.json                   ← Generated OpenAPI spec (committed)
-```
+- keep business logic in the API unless there is a strong reason not to
+- prefer updating tests alongside behavior changes
+- treat soft-delete, auth, and workflow constraints as API-owned invariants
+- never manually edit generated client files
+- never manually edit generated `AGENTS.md`; edit the matching `context.md` source instead
+- when changing app-specific guidance, update the file under `.nax/mono/apps/<app>/context.md`
 
-## OpenAPI Spec & Client Generation
+## Tests
 
-```
-apps/api (NestJS + @nestjs/swagger)
-  → bun run api:export-spec
-  → openapi.json (monorepo root — source of truth)
-  → bun run generate:cli  → apps/cli/src/generated/
-  → bun run generate:web  → apps/web/generated/
-```
+Default organization rules:
+- unit tests: `src/**/*.spec.ts`
+- integration tests: `test/integration/**/*.integration.spec.ts`
+- e2e tests: `test/e2e/**/*.e2e.spec.ts`
 
-**Rules:**
-- Run `bun run generate` after ANY API endpoint change before touching CLI or web code
-- Never manually edit files inside `*/generated/`
-- `openapi.json` is committed so CI can regenerate clients without booting the API
+Repository rules:
+- do not create `us-XXX` folders under app `test/` directories
+- nax acceptance material belongs under `.nax/features/<feature>/`
+- app-specific test guidance belongs in `.nax/mono/apps/<app>/context.md`
 
-## Engineering Persona
+## i18n
 
-- **Senior Engineer mindset**: check edge cases, null/undefined, race conditions, and error states.
-- **TDD first**: write or update tests before implementation when the story calls for it.
-- **Stuck rule**: if the same test fails 2+ iterations, stop, summarise failed attempts, reassess approach.
-- **Never push to remote** — the human reviews and pushes.
+API and web both support English and Chinese, but they are separate systems.
 
-## Test Organization Rules
+Rules:
+- API strings must use API i18n files under `apps/api/src/i18n/{en,zh}`
+- web strings must use web i18n files under `apps/web/i18n/locales/{en,zh}.json`
+- do not assume keys are shared across API and web
 
-| Type | Location | Naming |
-|:-----|:---------|:-------|
-| Unit | `src/**/*.spec.ts` | Co-located with source |
-| Integration | `test/integration/**/*.integration.spec.ts` | Grouped in `test/integration/` |
-| E2E | `test/e2e/**/*.e2e.spec.ts` | Grouped in `test/e2e/` |
+## App-Specific Contexts
 
-**Rules:**
-- No `us-XXX` folders in `test/` — nax acceptance tests go in `.nax/features/<feature>/`
-- See each app's CLAUDE.md for app-specific test details
+Read the matching app context before making app-local changes:
+- `.nax/mono/apps/api/context.md`
+- `.nax/mono/apps/cli/context.md`
+- `.nax/mono/apps/web/context.md`
 
-## i18n — Internationalization
-
-Both the API and web app support i18n. Languages: **English (en)** and **Chinese (zh)**.
-
-| App | Library | Translation files | Key style |
-|:----|:--------|:-----------------|:----------|
-| API | `@nathapp/nestjs-common` `I18nCoreModule` | `apps/api/src/i18n/{en,zh}/*.json` | Flat per module (e.g. `agents.json`, `tickets.json`) |
-| Web | `@nuxtjs/i18n` | `apps/web/i18n/locales/{en,zh}.json` | Nested single file (e.g. `auth.login.title`) |
-
-**Rules:**
-- All user-facing strings must use i18n keys — no hardcoded strings in API responses or web UI
-- When adding a new API module, create corresponding `{module}.json` in both `en/` and `zh/`
-- When adding web UI text, add keys to both `en.json` and `zh.json`
-- API and web use **separate** translation systems — keys are NOT shared between them
-
-## NestJS Development — Mandatory Skill
-
-**Before writing any NestJS code**, read and follow the `nathapp-nestjs-patterns` skill. This skill is the **authoritative source** for all Nathapp NestJS patterns. Do NOT use generic NestJS alternatives when a Nathapp pattern exists.
+If a new app is added to this monorepo, create its context file under `.nax/mono/apps/<new-app>/context.md`.
