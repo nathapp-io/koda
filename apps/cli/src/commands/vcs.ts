@@ -33,15 +33,22 @@ export function vcsCommand(program: Command): void {
 
   vcs
     .command('connect')
-    .requiredOption('--provider <provider>', 'VCS provider (e.g., github)')
-    .requiredOption('--owner <owner>', 'Repository owner')
-    .requiredOption('--repo <repo>', 'Repository name')
-    .requiredOption('--token <token>', 'API token for provider')
+    .option('--provider <provider>', 'VCS provider (e.g., github)')
+    .option('--owner <owner>', 'Repository owner')
+    .option('--repo <repo>', 'Repository name')
+    .option('--token <token>', 'API token for provider')
     .option('--project <slug>', 'Project slug (uses config if not provided)')
     .option('--sync-mode <mode>', 'Sync mode (polling, webhook, manual)')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
+        // Validate required flags
+        if (!options.provider || !options.owner || !options.repo || !options.token) {
+          error('Missing required options: --provider, --owner, --repo, --token');
+          process.exit(3);
+          return;
+        }
+
         // Check authentication (using resolveAuth to validate configured keys)
         const auth = resolveAuth({});
         if (!auth.apiKey || !auth.apiUrl) {

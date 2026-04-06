@@ -41,6 +41,11 @@ jest.mock('../config', () => ({
     apiKey: mockData.apiKey || '',
     apiUrl: mockData.apiUrl || '',
   })),
+  resolveContext: jest.fn(async (flags: any) => ({
+    projectSlug: flags.projectSlug || mockData.projectSlug,
+    apiKey: mockData.apiKey || '',
+    apiUrl: mockData.apiUrl || '',
+  })),
   setConfig: jest.fn(),
   validateApiKey: jest.fn((key: string) => key && key.length >= 10),
   maskApiKey: jest.fn((key: string) => {
