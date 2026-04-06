@@ -3,7 +3,7 @@
   "feature": "vcs-phase1-connection-issue-sync",
   "branchName": "feat/vcs-phase1-connection-issue-sync",
   "createdAt": "2026-04-06T00:00:00Z",
-  "updatedAt": "2026-04-06T11:51:56.879Z",
+  "updatedAt": "2026-04-06T12:11:01.971Z",
   "userStories": [
     {
       "id": "VCS-P1-001",
@@ -895,8 +895,8 @@
         "apps/web/pages/[project]/labels.vue",
         "apps/web/i18n/locales/en.json"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "escalations": [],
       "attempts": 0,
       "parentStoryId": "VCS-P1-005",
@@ -948,11 +948,13 @@
         "complexity": "simple",
         "testStrategy": "tdd-simple",
         "reasoning": "Pure JSON additions to four locale files, no logic changes. Depends on all sibling stories to know the full set of required keys. ~50 LOC of JSON.",
-        "modelTier": "balanced"
+        "modelTier": "balanced",
+        "initialComplexity": "simple"
       },
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "f7afe5677356eddd037898093d8b1dcd11caaca5"
     }
   ],
   "analysis": "## Key Architectural Changes\n\nThis feature introduces a per-project VCS abstraction layer that enables issue sync from GitHub (with GitLab support designed for Phase 5). The implementation spans three API layers: provider interface, connection management service, and sync orchestration service.\n\n### New Prisma Models\n- **VcsConnection**: Stores per-project VCS config (provider, repo coords, encrypted token, sync mode, allowed authors, webhook secret, polling state)\n- **VcsSyncLog**: Audit trail for sync runs (type, counts, errors, timestamps)\n- **Ticket extensions**: externalVcsId, externalVcsUrl, vcsSyncedAt (to track synced issues)\n- **Project extensions**: one-to-one optional vcsConnection relation\n\nExisting models (Ticket, Project, Webhook) will be extended, not replaced. Migrations will be additive.\n\n### Security-Critical Components\n1. **Token Encryption**: AES-256-GCM with per-encryption random IV. Master key from VCS_ENCRYPTION_KEY env. Decryption failure should mark connection inactive, not crash the server.\n2. **Webhook Verification**: HMAC-SHA256 signature on X-Hub-Signature-256 header (existing pattern in webhook-dispatcher.service.ts)\n3. **Auth on Endpoints**: Bearer token required for all non-public endpoints; webhook receiver is @Public() but signature-verified\n\n### Provider Abstraction\nIVcsProvider interface with three methods (fetchIssues, fetchIssue, testConnection) enables GitLab to be swapped in Phase 5 without changing sync logic. GitHub API quirks handled in GitHubProvider: filter pull requests from issue listing, handle 404 as NotFoundAppException.\n\n### Sync Orchestration\nThree entry points (polling interval, webhook, manual import) converge on vcsService.syncIssue(project, issue, syncType). Core logic:\n1. Check if ticket with externalVcsId already exists (idempotency)\n2. Create ticket with type=TASK, status=CREATED, priority=MEDIUM\n3. Allocate number via MAX(number)+1 in transaction (existing pattern)\n4. Set external tracking fields (externalVcsId, externalVcsUrl, vcsSyncedAt)\n5. Filter by allowedAuthors (except manual import)\n\n**Polling Service**: Uses SchedulerRegistry to register dynamic intervals per connection. Must handle:\n- Module init: register intervals for existing active connections\n- Create/update connection: add/replace interval with new config\n- Delete connection: unregister interval\n- Fetch failure: log error, write VcsSyncLog, retry on next interval (don't update lastSyncedAt)\n\n**Webhook Handler**: Verifies HMAC signature, processes only issues.opened events, filters by allowedAuthors, returns 200 { ignored: true } for filtered/unsupported events.\n\n**Manual Import**: Endpoint for importing single issue by number, bypasses allowedAuthors filter. Useful for one-off issues or testing.\n\n### CLI + Web Integration\nCLI uses generated OpenAPI client from apps/cli/src/generated/ (regenerate after API endpoint changes). Web uses Nuxt composables and proxying pattern (not generated client).\n\n### Dependencies & Impact\n- **Prisma**: Schema migration required (new models, extended models)\n- **NestJS**: SchedulerRegistry for polling, DI for services, config registration\n- **Fastify**: No changes needed\n- **Commander.js**: New vcs subcommand group\n- **Nuxt**: New /[project]/settings page\n- **Existing services**: Ticket creation (number allocation), project resolution, auth\n\n### Risks & Mitigations\n1. **Rate Limiting**: GitHub API rate limit (60 req/hr unauthenticated, 5000/hr authenticated). Mitigation: Respect Retry-After header, log warnings in VcsSyncLog, retry on next interval.\n2. **Token Leakage**: Never log plaintext token, mask in API responses, store only encrypted. Use @Sensitive() if available.\n3. **Duplicate Sync**: Multiple webhook hits or polling overlaps. Mitigation: unique(projectId, externalVcsId) check before sync.\n4. **Scheduler Leaks**: Intervals not cleaned up on deletion. Mitigation: explicit unregisterAll + defensive checks.\n5. **Decryption Failure**: Corrupted ciphertext or wrong key. Mitigation: mark connection inactive, log error, return 500 on sync attempts.\n6. **Migration Path**: Add nullable VcsConnection fields first, migrate data separately, enable constraints in separate migration.\n\n### Test Coverage Strategy\nEach story enforces three-session TDD (test-writer → implementer → verifier) for security-critical and complex stories. Provider tests mock GitHub API. Sync tests use in-memory Prisma fixture. Polling tests verify SchedulerRegistry interaction. Webhook tests verify signature validation."
