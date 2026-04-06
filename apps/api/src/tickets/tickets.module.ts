@@ -6,9 +6,11 @@ import { TicketsService } from './tickets.service';
 import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
 import { RagModule } from '../rag/rag.module';
 import { WebhookModule } from '../webhook/webhook.module';
+import { VcsModule } from '../vcs/vcs.module';
+import { TicketLinksModule } from '../ticket-links/ticket-links.module';
 
 @Module({
-  imports: [RagModule, WebhookModule],
+  imports: [RagModule, WebhookModule, VcsModule, TicketLinksModule],
   controllers: [TicketsController],
   providers: [
     TicketsService,

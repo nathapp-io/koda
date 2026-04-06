@@ -1,4 +1,4 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable, Optional, Logger } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import {
@@ -11,6 +11,11 @@ import { TicketStatus, CommentType, ActivityType } from '../../common/enums';
 import { validateTransition } from './ticket-transitions';
 import { RagService } from '../../rag/rag.service';
 import { WebhookDispatcherService } from '../../webhook/webhook-dispatcher.service';
+import { VcsConnectionService } from '../../vcs/vcs-connection.service';
+import { buildBranchName } from '../../vcs/branch-name.util';
+import { createVcsProvider, VcsProviderConfig } from '../../vcs/factory';
+import { TicketLinksService } from '../../ticket-links/ticket-links.service';
+import { IVcsProvider, VcsPullRequest } from '../../vcs';
 
 export interface CurrentUser {
   id: string;
@@ -32,10 +37,14 @@ export type TransitionResult = TransitionResultWithComment | TransitionResultWit
 
 @Injectable()
 export class TicketTransitionsService {
+  private readonly logger = new Logger(TicketTransitionsService.name);
+
   constructor(
     private readonly prisma: PrismaService<PrismaClient>,
     @Optional() private readonly ragService?: RagService,
     @Optional() private readonly webhookDispatcher?: WebhookDispatcherService,
+    @Optional() private readonly vcsConnectionService?: VcsConnectionService,
+    @Optional() private readonly ticketLinksService?: TicketLinksService,
   ) {}
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private get db() { return this.prisma.client; }
@@ -101,6 +110,71 @@ export class TicketTransitionsService {
       })
       .catch(() => {
         // suppress RAG indexing errors — ticket close must always succeed
+      });
+  }
+
+  /**
+   * Fire-and-forget: create a GitHub PR when ticket transitions to VERIFIED.
+   * Only runs when VCS connection exists and VcsConnectionService/TicketLinksService are available.
+   */
+  private createPrForTicket(
+    project: { id: string; key: string },
+    ticket: Ticket,
+  ): void {
+    if (!this.vcsConnectionService || !this.ticketLinksService) return;
+
+    const vcsService = this.vcsConnectionService;
+    const ticketLinksService = this.ticketLinksService;
+    const projectId = project.id;
+    const ticketId = ticket.id;
+    const projectKey = project.key;
+
+    vcsService.getFullByProject(projectId)
+      .then((connection) => {
+        if (!connection.isActive) return;
+
+        const repoUrl = `https://github.com/${connection.repoOwner}/${connection.repoName}`;
+        const provider = createVcsProvider(connection.provider, {
+          provider: connection.provider,
+          token: '',
+          repoUrl,
+        });
+
+        return provider.getDefaultBranch().then((baseBranch) => {
+          const branchName = buildBranchName(projectKey, ticket.number, ticket.title);
+          const prTitle = `${projectKey}-${ticket.number}: ${ticket.title}`;
+          const prBody = ticket.description ?? '';
+
+          return provider.createPullRequest({
+            title: prTitle,
+            body: prBody,
+            headBranch: branchName,
+            baseBranch,
+          }).then((pr) => {
+            return this.db.ticketLink.create({
+              data: {
+                ticketId,
+                url: pr.url,
+                provider: 'github',
+                externalRef: `${connection.repoOwner}/${connection.repoName}#${pr.number}`,
+              },
+            });
+          }).then(() => {
+            return this.db.ticketActivity.create({
+              data: {
+                ticketId,
+                action: ActivityType.VCS_PR_CREATED,
+              },
+            });
+          }).catch((err) => {
+            this.logger.warn(
+              `[vcs] Failed to create PR for ticket ${projectKey}-${ticket.number}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          });
+        });
+      })
+      .catch(() => {
+        // suppress VCS errors — ticket transition must always succeed
       });
   }
 
@@ -382,6 +456,10 @@ export class TicketTransitionsService {
       }
       // Dispatch webhook for status change
       this.dispatchStatusChangeWebhook(project.id, result.ticket, ticket.status, toStatus);
+      // Auto-create PR when ticket transitions to VERIFIED
+      if (toStatus === TicketStatus.VERIFIED) {
+        this.createPrForTicket(project, result.ticket);
+      }
       return result;
     });
   }

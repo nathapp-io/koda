@@ -19,6 +19,7 @@ export interface CreatePrParams {
   body: string;
   headBranch: string;
   baseBranch: string;
+  draft?: boolean;
 }
 
 /**

@@ -1,0 +1,45 @@
+Timestamp: 2026-04-06T14:32:45.336Z
+Session:   nax-5166d743-vcs-phase2-auto-create-pr-vcs-p2-001-refine
+Type:      complete
+StoryId:   VCS-P2-001
+Feature:   vcs-phase2-auto-create-pr
+Stage:     complete
+---
+IMPORTANT: Your entire response must be a single JSON object or array. Do not explain your reasoning. Do not use markdown formatting. Output ONLY the JSON.
+
+You are an acceptance criteria refinement assistant. Your task is to convert raw acceptance criteria into concrete, machine-verifiable assertions.
+
+CODEBASE CONTEXT:
+
+
+ACCEPTANCE CRITERIA TO REFINE:
+1. buildBranchName('KODA', 42, 'Fix login redirect bug') returns 'koda/KODA-42/fix-login-redirect-bug'
+2. buildBranchName('PROJ', 1, 'A very long title that exceeds the maximum allowed length for branch names') returns a branch name that is at most 100 characters
+3. buildBranchName('PROJ', 1, 'Special chars: @#$%^&*()') returns a branch name with only alphanumeric characters and hyphens in the slug portion
+4. buildBranchName('PROJ', 1, 'trailing---hyphens---') returns a branch name with no trailing hyphens in the slug portion
+5. IVcsProvider interface includes createPullRequest(CreatePrParams): Promise<VcsPullRequest> method signature
+6. IVcsProvider interface includes getDefaultBranch(): Promise<string> method signature
+7. GitHubProvider.getDefaultBranch() returns the repository's default branch name via GET /repos/{owner}/{repo}
+8. GitHubProvider.createPullRequest() creates a new branch from the repo's default branch HEAD via POST /repos/{owner}/{repo}/git/refs
+9. GitHubProvider.createPullRequest() opens a draft PR targeting the default branch via POST /repos/{owner}/{repo}/pulls
+10. GitHubProvider.createPullRequest() returns VcsPullRequest with number, url, branchName, state, and draft fields
+11. GitHubProvider.createPullRequest() when branch already exists (HTTP 422 on ref creation) skips branch creation and proceeds to create PR
+12. HttpClient interface includes post() method for GitHub API calls
+13. VcsProviderConfig httpClient includes post() method in factory
+
+For each criterion, produce a refined version that is concrete and automatically testable where possible.
+Respond with a JSON array:
+[{
+  "original": "<exact original criterion text>",
+  "refined": "<concrete, machine-verifiable description>",
+  "testable": true,
+  "storyId": ""
+}]
+
+Rules:
+- "original" must match the input criterion text exactly
+- "refined" must be a concrete assertion (e.g., "Array of length N returned", "HTTP status 200 returned")
+- "testable" is false only if the criterion cannot be automatically verified (e.g., "UX feels responsive", "design looks good")
+- "storyId" leave as empty string — it will be assigned by the caller
+
+YOUR RESPONSE MUST START WITH { OR [ AND END WITH } OR ]. No other text.
