@@ -391,7 +391,7 @@ test.describe('VCS-P1-005-C: Settings page VCS Integration tab E2E', () => {
     // Validation errors should be visible
     const errors = page.locator('[role="alert"], .error')
     // At least one error should be present for required fields
-    const errorCount = await errors.count()
+    const _errorCount = await errors.count()
     // This is optional - might not fail if validation is client-side
   })
 
@@ -402,7 +402,7 @@ test.describe('VCS-P1-005-C: Settings page VCS Integration tab E2E', () => {
 
     for (let i = 0; i < count; i++) {
       const input = inputs.nth(i)
-      const hasLabel = await input.evaluate((el: HTMLInputElement) => {
+      const _hasLabel = await input.evaluate((el: HTMLInputElement) => {
         // Check if input has associated label
         if (el.id) {
           const label = document.querySelector(`label[for="${el.id}"]`)
