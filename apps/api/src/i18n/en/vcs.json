@@ -24,6 +24,9 @@
     "invalidProvider": "Invalid VCS provider specified",
     "invalidToken": "Invalid or expired authentication token",
     "issueAlreadySynced": "Issue is already synced as a ticket",
-    "invalidIssueNumber": "Invalid issue number provided"
+    "invalidIssueNumber": "Invalid issue number provided",
+    "decryptionFailed": "Failed to decrypt VCS token",
+    "unknown": "An unknown error occurred",
+    "ticketAlreadySynced": "Ticket with this external VCS ID already exists"
   }
 }

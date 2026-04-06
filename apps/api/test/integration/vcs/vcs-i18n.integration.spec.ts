@@ -146,6 +146,9 @@ describe('VCS-P1-005-F: API i18n - VCS Error Messages', () => {
     'errors.invalidToken',
     'errors.issueAlreadySynced',
     'errors.invalidIssueNumber',
+    'errors.decryptionFailed',
+    'errors.unknown',
+    'errors.ticketAlreadySynced',
   ]
 
   errorKeys.forEach((key) => {

@@ -24,6 +24,9 @@
     "invalidProvider": "指定的 VCS 提供商无效",
     "invalidToken": "认证令牌无效或已过期",
     "issueAlreadySynced": "问题已作为工单同步",
-    "invalidIssueNumber": "提供的问题号无效"
+    "invalidIssueNumber": "提供的问题号无效",
+    "decryptionFailed": "无法解密 VCS 令牌",
+    "unknown": "出现未知错误",
+    "ticketAlreadySynced": "已存在具有此外部 VCS ID 的工单"
   }
 }
