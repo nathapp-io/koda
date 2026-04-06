@@ -6,6 +6,23 @@ import { decryptToken } from '../common/utils/encryption.util';
 import { createVcsProvider } from './factory';
 import { VcsSyncService } from './vcs-sync.service';
 
+// PrismaClientLike from @nathapp/nestjs-prisma doesn't expose VCS models,
+// but they exist at runtime. Define a delegate interface for proper typing.
+interface PrismaDelegate {
+  findUnique(options: { where: Record<string, unknown>; select?: unknown; include?: unknown }): Promise<unknown>
+  findMany(options?: unknown): Promise<unknown[]>
+  findFirst(options?: unknown): Promise<unknown>
+  create(options: { data: unknown; select?: unknown; include?: unknown }): Promise<unknown>
+  update(options: { where: Record<string, unknown>; data: unknown; select?: unknown; include?: unknown }): Promise<unknown>
+  delete(options: { where: Record<string, unknown>; select?: unknown; include?: unknown }): Promise<unknown>
+}
+
+interface ExtendedPrismaClient {
+  vcsConnection: PrismaDelegate
+  vcsSyncLog: PrismaDelegate
+  [key: string]: unknown
+}
+
 /**
  * Polling service for syncing issues on a schedule
  */
@@ -19,10 +36,8 @@ export class VcsPollingService implements OnModuleInit {
     private readonly syncService: VcsSyncService,
   ) {}
 
-  // PrismaClientLike from @nathapp/nestjs-prisma doesn't expose VCS models,
-  // but they exist at runtime. Using double cast to allow property access.
   private get db() {
-    return this.prisma.client as unknown as Record<string, unknown>;
+    return this.prisma.client as unknown as ExtendedPrismaClient;
   }
 
   async onModuleInit() {
@@ -34,7 +49,7 @@ export class VcsPollingService implements OnModuleInit {
    * Initialize polling intervals for all polling connections
    */
   private async initializePolling(): Promise<void> {
-    const connections = await (this.db.vcsConnection as Record<string, unknown>).findMany({
+    const connections = await this.db.vcsConnection.findMany({
       where: {
         syncMode: 'polling',
         isActive: true,
@@ -45,7 +60,7 @@ export class VcsPollingService implements OnModuleInit {
     });
 
     for (const connection of connections) {
-      this.schedulePolling(connection);
+      this.schedulePolling(connection as VcsConnection & { project: Project });
     }
   }
 
@@ -117,13 +132,13 @@ export class VcsPollingService implements OnModuleInit {
       }
 
       // Update connection lastSyncedAt
-      await (this.db.vcsConnection as Record<string, unknown>).update({
+      await this.db.vcsConnection.update({
         where: { id: connection.id },
         data: { lastSyncedAt: new Date() },
       });
 
       // Write sync log
-      await (this.db.vcsSyncLog as Record<string, unknown>).create({
+      await this.db.vcsSyncLog.create({
         data: {
           vcsConnectionId: connection.id,
           syncType: 'issues',
@@ -141,7 +156,7 @@ export class VcsPollingService implements OnModuleInit {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
       // Write sync log with error
-      await (this.db.vcsSyncLog as Record<string, unknown>).create({
+      await this.db.vcsSyncLog.create({
         data: {
           vcsConnectionId: connection.id,
           syncType: 'issues',

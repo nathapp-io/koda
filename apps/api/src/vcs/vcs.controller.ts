@@ -13,7 +13,7 @@ import {
 import { Principal } from '@nathapp/nestjs-auth';
 import { ConfigService } from '@nestjs/config';
 import { AuthException } from '@nathapp/nestjs-common';
-import { PrismaClient } from '@prisma/client';
+import { Project } from '@prisma/client';
 import { VcsConnectionService } from './vcs-connection.service';
 import { VcsSyncService } from './vcs-sync.service';
 import { VcsWebhookService, GitHubWebhookPayload } from './vcs-webhook.service';
@@ -198,9 +198,6 @@ export class VcsController {
     // Get project by slug
     const project = await this.projectsService.findBySlug(slug);
 
-    // Get VCS connection
-    const connectionDto = await this.vcsService.findByProject(project.id);
-
     // Get encryption key from config
     const encryptionKey = this.configService.get<string>('vcs.encryptionKey');
     if (!encryptionKey) {
@@ -208,36 +205,21 @@ export class VcsController {
     }
 
     // Get the full connection with all fields
-    const db = (this.vcsService as unknown as { db: Record<string, unknown> }).db;
-    const connection = await (db.vcsConnection as unknown as Record<string, unknown>).findUnique({
-      where: { projectId: project.id },
-    });
-
-    if (!connection) {
-      throw new Error('VCS connection not found');
-    }
+    const connection = await this.vcsService.getFullByProject(project.id);
 
     // Decrypt token and create provider
-    const connData = connection as Record<string, unknown>;
-    const decryptedToken = decryptToken(
-      connData.encryptedToken as string,
-      encryptionKey,
-    );
-    const provider = createVcsProvider(connData.provider as string, {
-      provider: connData.provider as string,
+    const decryptedToken = decryptToken(connection.encryptedToken, encryptionKey);
+    const provider = createVcsProvider(connection.provider, {
+      provider: connection.provider,
       token: decryptedToken,
-      repoUrl: `https://github.com/${connData.repoOwner}/${connData.repoName}`,
+      repoUrl: `https://github.com/${connection.repoOwner}/${connection.repoName}`,
     });
 
     // Fetch specific issue
     const issue = await provider.fetchIssue(parseInt(issueNumber, 10));
 
     // Sync the issue (regardless of allowedAuthors per AC)
-    const result = await this.syncService.syncIssue(
-      project as unknown as Parameters<typeof this.syncService.syncIssue>[0],
-      issue,
-      'manual',
-    );
+    const result = await this.syncService.syncIssue(project as Project, issue, 'manual');
 
     return {
       issuesSynced: result.action === 'created' ? 1 : 0,
@@ -267,9 +249,6 @@ export class VcsController {
     // Get project by slug
     const project = await this.projectsService.findBySlug(slug);
 
-    // Get VCS connection
-    const connectionDto = await this.vcsService.findByProject(project.id);
-
     // Get encryption key from config
     const encryptionKey = this.configService.get<string>('vcs.encryptionKey');
     if (!encryptionKey) {
@@ -277,21 +256,10 @@ export class VcsController {
     }
 
     // Get the full connection with all fields
-    const db = (this.vcsService as unknown as { db: Record<string, unknown> }).db;
-    const connection = await (db.vcsConnection as unknown as Record<string, unknown>).findUnique({
-      where: { projectId: project.id },
-    });
-
-    if (!connection) {
-      throw new Error('VCS connection not found');
-    }
+    const connection = await this.vcsService.getFullByProject(project.id);
 
     // Run full sync
-    const result = await this.syncService.fullSync(
-      project as unknown as Parameters<typeof this.syncService.fullSync>[0],
-      connection as Parameters<typeof this.syncService.fullSync>[1],
-      encryptionKey,
-    );
+    const result = await this.syncService.fullSync(project as Project, connection, encryptionKey);
 
     return {
       issuesSynced: result.issuesSynced,

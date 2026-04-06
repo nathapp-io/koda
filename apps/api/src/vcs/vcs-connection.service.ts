@@ -8,14 +8,29 @@ import { UpdateVcsConnectionDto } from './dto/update-vcs-connection.dto';
 import { VcsConnectionResponseDto } from './dto/vcs-connection-response.dto';
 import { createVcsProvider } from './factory';
 
+// PrismaClientLike from @nathapp/nestjs-prisma doesn't expose VCS models,
+// but they exist at runtime. Define a delegate interface for proper typing.
+interface PrismaDelegate {
+  findUnique(options: { where: Record<string, unknown>; select?: unknown; include?: unknown }): Promise<unknown>
+  findMany(options?: unknown): Promise<unknown[]>
+  findFirst(options?: unknown): Promise<unknown>
+  create(options: { data: unknown; select?: unknown; include?: unknown }): Promise<unknown>
+  update(options: { where: Record<string, unknown>; data: unknown; select?: unknown; include?: unknown }): Promise<unknown>
+  delete(options: { where: Record<string, unknown>; select?: unknown; include?: unknown }): Promise<unknown>
+}
+
+interface ExtendedPrismaClient {
+  project: PrismaDelegate
+  vcsConnection: PrismaDelegate
+  [key: string]: unknown
+}
+
 @Injectable()
 export class VcsConnectionService {
   constructor(private readonly prisma: PrismaService) {}
 
-  // PrismaClientLike from @nathapp/nestjs-prisma doesn't expose VCS models,
-  // but they exist at runtime. Using double cast to allow property access.
   private get db() {
-    return this.prisma.client as unknown as Record<string, unknown>;
+    return this.prisma.client as unknown as ExtendedPrismaClient;
   }
 
   /**
@@ -27,7 +42,7 @@ export class VcsConnectionService {
     dto: CreateVcsConnectionDto,
   ): Promise<VcsConnectionResponseDto> {
     // Verify project exists
-    const project = await (this.db.project as Record<string, unknown>).findUnique({
+    const project = await this.db.project.findUnique({
       where: { id: projectId },
     });
 
@@ -36,7 +51,7 @@ export class VcsConnectionService {
     }
 
     // Check if connection already exists
-    const existingConnection = await (this.db.vcsConnection as Record<string, unknown>).findUnique({
+    const existingConnection = await this.db.vcsConnection.findUnique({
       where: { projectId },
     });
 
@@ -57,7 +72,7 @@ export class VcsConnectionService {
     }
 
     // Create connection
-    const connection = await (this.db.vcsConnection as Record<string, unknown>).create({
+    const connection = (await this.db.vcsConnection.create({
       data: {
         projectId,
         provider: dto.provider.toLowerCase(),
@@ -70,7 +85,7 @@ export class VcsConnectionService {
         webhookSecret: dto.webhookSecret,
         isActive: true,
       },
-    });
+    })) as VcsConnection;
 
     return this.mapToResponseDto(connection);
   }
@@ -79,9 +94,9 @@ export class VcsConnectionService {
    * Get VCS connection for a project
    */
   async findByProject(projectId: string): Promise<VcsConnectionResponseDto> {
-    const connection = await (this.db.vcsConnection as Record<string, unknown>).findUnique({
+    const connection = (await this.db.vcsConnection.findUnique({
       where: { projectId },
-    });
+    })) as VcsConnection | null;
 
     if (!connection) {
       throw new NotFoundAppException({}, 'vcs_connections');
@@ -99,9 +114,9 @@ export class VcsConnectionService {
     dto: UpdateVcsConnectionDto,
   ): Promise<VcsConnectionResponseDto> {
     // Verify connection exists
-    const connection = await (this.db.vcsConnection as Record<string, unknown>).findUnique({
+    const connection = (await this.db.vcsConnection.findUnique({
       where: { projectId },
-    });
+    })) as VcsConnection | null;
 
     if (!connection) {
       throw new NotFoundAppException({}, 'vcs_connections');
@@ -129,10 +144,10 @@ export class VcsConnectionService {
       return this.mapToResponseDto(connection);
     }
 
-    const updated = await (this.db.vcsConnection as Record<string, unknown>).update({
+    const updated = (await this.db.vcsConnection.update({
       where: { projectId },
       data: updateData,
-    });
+    })) as VcsConnection;
 
     return this.mapToResponseDto(updated);
   }
@@ -141,15 +156,15 @@ export class VcsConnectionService {
    * Delete VCS connection
    */
   async delete(projectId: string): Promise<void> {
-    const connection = await (this.db.vcsConnection as Record<string, unknown>).findUnique({
+    const connection = (await this.db.vcsConnection.findUnique({
       where: { projectId },
-    });
+    })) as VcsConnection | null;
 
     if (!connection) {
       throw new NotFoundAppException({}, 'vcs_connections');
     }
 
-    await (this.db.vcsConnection as Record<string, unknown>).delete({
+    await this.db.vcsConnection.delete({
       where: { projectId },
     });
   }
@@ -161,9 +176,9 @@ export class VcsConnectionService {
     projectId: string,
     encryptionKey: string,
   ): Promise<{ success: boolean; latencyMs: number; error?: string }> {
-    const connection = await (this.db.vcsConnection as Record<string, unknown>).findUnique({
+    const connection = (await this.db.vcsConnection.findUnique({
       where: { projectId },
-    });
+    })) as VcsConnection | null;
 
     if (!connection) {
       throw new NotFoundAppException({}, 'vcs_connections');
@@ -215,6 +230,21 @@ export class VcsConnectionService {
         error: errorMessage,
       };
     }
+  }
+
+  /**
+   * Get full connection for internal use (includes encryptedToken)
+   */
+  async getFullByProject(projectId: string): Promise<VcsConnection> {
+    const connection = (await this.db.vcsConnection.findUnique({
+      where: { projectId },
+    })) as VcsConnection | null;
+
+    if (!connection) {
+      throw new NotFoundAppException({}, 'vcs_connections');
+    }
+
+    return connection;
   }
 
   /**

@@ -16,14 +16,29 @@ export interface SyncIssueResult {
   reason?: string;
 }
 
+// PrismaClientLike from @nathapp/nestjs-prisma doesn't expose VCS models,
+// but they exist at runtime. Define a delegate interface for proper typing.
+interface PrismaDelegate {
+  findUnique(options: { where: Record<string, unknown>; select?: unknown; include?: unknown }): Promise<unknown>
+  findMany(options?: unknown): Promise<unknown[]>
+  findFirst(options?: unknown): Promise<unknown>
+  create(options: { data: unknown; select?: unknown; include?: unknown }): Promise<unknown>
+  update(options: { where: Record<string, unknown>; data: unknown; select?: unknown; include?: unknown }): Promise<unknown>
+  delete(options: { where: Record<string, unknown>; select?: unknown; include?: unknown }): Promise<unknown>
+}
+
+interface ExtendedPrismaClient {
+  ticket: PrismaDelegate
+  $transaction<T>(callback: (tx: ExtendedPrismaClient) => Promise<T>): Promise<T>
+  [key: string]: unknown
+}
+
 @Injectable()
 export class VcsSyncService {
   constructor(private readonly prisma: PrismaService) {}
 
-  // PrismaClientLike from @nathapp/nestjs-prisma doesn't expose VCS models,
-  // but they exist at runtime. Using double cast to allow property access.
   private get db() {
-    return this.prisma.client as unknown as Record<string, unknown>;
+    return this.prisma.client as unknown as ExtendedPrismaClient;
   }
 
   /**
@@ -35,7 +50,7 @@ export class VcsSyncService {
     syncMode: 'manual' | 'polling' | 'webhook',
   ): Promise<SyncIssueResult> {
     // Check if issue already exists (deduplication)
-    const existingTicket = await (this.db.ticket as Record<string, unknown>).findFirst({
+    const existingTicket = await this.db.ticket.findFirst({
       where: {
         projectId: project.id,
         externalVcsId: `${issue.number}`,
@@ -51,21 +66,17 @@ export class VcsSyncService {
     }
 
     // Allocate ticket number in transaction
-    const result = await (
-      this.db.$transaction as unknown as (
-        callback: (tx: unknown) => Promise<Ticket>,
-      ) => Promise<Ticket>
-    )(async (tx) => {
+    const result = await this.db.$transaction<Ticket>(async (tx) => {
       // Get the current max ticket number for this project
-      const lastTicket = await tx.ticket.findFirst({
+      const lastTicket = await (tx.ticket.findFirst({
         where: { projectId: project.id },
         orderBy: { number: 'desc' },
-      });
+      }) as Promise<Ticket | null>);
 
       const nextNumber = (lastTicket?.number ?? 0) + 1;
 
       // Create the ticket
-      const ticket = await tx.ticket.create({
+      const ticket = await (tx.ticket.create({
         data: {
           projectId: project.id,
           number: nextNumber,
@@ -78,7 +89,7 @@ export class VcsSyncService {
           externalVcsUrl: issue.url,
           vcsSyncedAt: new Date(),
         },
-      });
+      }) as Promise<Ticket>);
 
       return ticket;
     });
