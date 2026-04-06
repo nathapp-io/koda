@@ -3,7 +3,7 @@
   "feature": "vcs-phase1-connection-issue-sync",
   "branchName": "feat/vcs-phase1-connection-issue-sync",
   "createdAt": "2026-04-06T00:00:00Z",
-  "updatedAt": "2026-04-06T11:45:19.276Z",
+  "updatedAt": "2026-04-06T11:51:56.879Z",
   "userStories": [
     {
       "id": "VCS-P1-001",
@@ -854,8 +854,8 @@
         "apps/web/pages/[project]/tickets/[ref].vue",
         "apps/web/i18n/locales/en.json"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "escalations": [],
       "attempts": 0,
       "parentStoryId": "VCS-P1-005",
@@ -904,11 +904,13 @@
         "complexity": "medium",
         "testStrategy": "three-session-tdd-lite",
         "reasoning": "Two independent UI additions (~100 LOC total): a nav link and a modal with a single input. Grouped because both are small board/nav additions with shared i18n dependency.",
-        "modelTier": "balanced"
+        "modelTier": "balanced",
+        "initialComplexity": "medium"
       },
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "dee73a68e36288b8266108af1e854b128e20a3fc"
     },
     {
       "id": "VCS-P1-005-F",
