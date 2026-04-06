@@ -3,7 +3,7 @@
   "feature": "vcs-phase1-connection-issue-sync",
   "branchName": "feat/vcs-phase1-connection-issue-sync",
   "createdAt": "2026-04-06T00:00:00Z",
-  "updatedAt": "2026-04-06T08:43:44.242Z",
+  "updatedAt": "2026-04-06T08:48:09.713Z",
   "userStories": [
     {
       "id": "VCS-P1-001",
@@ -119,8 +119,8 @@
         "apps/api/src/common/exceptions/app.exception.ts",
         "apps/api/src/ci-webhook/ci-webhook.service.ts"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "escalations": [],
       "attempts": 0,
       "parentStoryId": "VCS-P1-002",
@@ -172,11 +172,13 @@
         "complexity": "medium",
         "testStrategy": "three-session-tdd-lite",
         "reasoning": "Multiple methods with HTTP interaction, edge case handling (404, PR filtering, since param), and response mapping across ~120-160 LOC. Fits three-session-tdd-lite with mocked HTTP in tests.",
-        "modelTier": "balanced"
+        "modelTier": "balanced",
+        "initialComplexity": "medium"
       },
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "fa0ba1256f5b87fa873855fa79184bd0946e4259"
     },
     {
       "id": "VCS-P1-002-C",
