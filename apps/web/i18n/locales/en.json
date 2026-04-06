@@ -60,7 +60,8 @@
     "kb": "Knowledge Base",
     "labels": "Labels",
     "tickets": "Tickets",
-    "toggleSidebar": "Toggle sidebar"
+    "toggleSidebar": "Toggle sidebar",
+    "settings": "Settings"
   },
   "projects": {
     "title": "Projects",
@@ -395,6 +396,19 @@
       "notConnected": "Not connected",
       "lastSync": "Last sync: {time}",
       "neverSynced": "Never synced"
+    },
+    "importIssue": {
+      "title": "Import Issue",
+      "button": "Import Issue",
+      "label": "Issue Number",
+      "placeholder": "Enter GitHub issue number",
+      "submit": "Import",
+      "success": "Issue imported successfully: {ref}",
+      "error": "Failed to import issue: {error}",
+      "validation": {
+        "required": "Issue number is required",
+        "invalidNumber": "Please enter a valid issue number"
+      }
     }
   },
   "toast": {

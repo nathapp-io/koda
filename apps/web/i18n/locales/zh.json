@@ -60,7 +60,8 @@
     "kb": "知识库",
     "labels": "标签",
     "tickets": "工单",
-    "toggleSidebar": "切换侧栏"
+    "toggleSidebar": "切换侧栏",
+    "settings": "设置"
   },
   "projects": {
     "title": "项目",
@@ -392,6 +393,19 @@
       "notConnected": "未连接",
       "lastSync": "最后同步：{time}",
       "neverSynced": "从未同步"
+    },
+    "importIssue": {
+      "title": "导入工单",
+      "button": "导入工单",
+      "label": "工单号",
+      "placeholder": "输入 GitHub 工单号",
+      "submit": "导入",
+      "success": "工单导入成功：{ref}",
+      "error": "导入工单失败：{error}",
+      "validation": {
+        "required": "工单号必填",
+        "invalidNumber": "请输入有效的工单号"
+      }
     }
   },
   "toast": {
