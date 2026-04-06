@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { resolveAuth } from '../utils/auth';
 import { resolveContext } from '../config';
 import { OpenAPI } from '../generated/core/OpenAPI';
+import { ApiError } from '../generated/core/ApiError';
 import { table, error } from '../utils/output';
 import { handleApiError } from '../utils/error';
 import {
@@ -78,13 +79,10 @@ export function vcsCommand(program: Command): void {
         };
 
         // Call API
-        const response = await vcsControllerCreateConnection({
+        const data = await vcsControllerCreateConnection({
           slug: ctx.projectSlug,
           requestBody,
         });
-
-        // Handle response
-        const data = (response as any).data || response;
 
         if (options.json) {
           console.log(JSON.stringify(data, null, 2));
@@ -127,8 +125,7 @@ export function vcsCommand(program: Command): void {
         OpenAPI.TOKEN = auth.apiKey;
 
         // Call API
-        const response = await vcsControllerGetConnection({ slug: ctx.projectSlug });
-        const data = (response as any).data || response;
+        const data = await vcsControllerGetConnection({ slug: ctx.projectSlug });
 
         if (options.json) {
           console.log(JSON.stringify(data, null, 2));
@@ -140,10 +137,8 @@ export function vcsCommand(program: Command): void {
 
         process.exit(0);
       } catch (err: unknown) {
-        const apiErr = err as any;
-
         // Handle 404 specially for status command
-        if (apiErr.response?.status === 404) {
+        if (err instanceof ApiError && err.status === 404) {
           error('No VCS connection configured');
           process.exit(1);
           return;

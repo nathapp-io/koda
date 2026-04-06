@@ -20,7 +20,7 @@ export interface VcsConnectionResponseDto {
   updatedAt: Date;
 }
 
-export async function vcsControllerCreateConnection(options: {
+export async function vcsControllerCreateConnection(_options: {
   slug: string;
   requestBody?: {
     provider: string;
@@ -33,13 +33,13 @@ export async function vcsControllerCreateConnection(options: {
   throw new Error('Not implemented - stub only');
 }
 
-export async function vcsControllerGetConnection(options: {
+export async function vcsControllerGetConnection(_options: {
   slug: string;
 }): Promise<VcsConnectionResponseDto> {
   throw new Error('Not implemented - stub only');
 }
 
-export async function vcsControllerDeleteConnection(options: {
+export async function vcsControllerDeleteConnection(_options: {
   slug: string;
 }): Promise<void> {
   throw new Error('Not implemented - stub only');
