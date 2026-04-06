@@ -5,9 +5,10 @@ export class VcsConnectionResponseDto {
   repoOwner: string;
   repoName: string;
   syncMode: string;
+  webhookSecret?: string;
   lastSyncedAt?: Date;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
-  // Note: token is intentionally not included in the response DTO
+  // Note: encryptedToken is intentionally not included in the response DTO
 }

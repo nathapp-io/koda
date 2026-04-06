@@ -216,7 +216,7 @@ export class VcsConnectionService {
   }
 
   /**
-   * Map Prisma VcsConnection to response DTO (excludes token)
+   * Map Prisma VcsConnection to response DTO (excludes encryptedToken)
    */
   private mapToResponseDto(connection: VcsConnection): VcsConnectionResponseDto {
     return {
@@ -226,6 +226,7 @@ export class VcsConnectionService {
       repoOwner: connection.repoOwner,
       repoName: connection.repoName,
       syncMode: connection.syncMode,
+      webhookSecret: connection.webhookSecret ?? undefined,
       lastSyncedAt: connection.lastSyncedAt ?? undefined,
       isActive: connection.isActive,
       createdAt: connection.createdAt,
