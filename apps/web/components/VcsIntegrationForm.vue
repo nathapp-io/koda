@@ -109,7 +109,6 @@ import { ref, computed, watch } from 'vue'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { useI18n } from 'vue-i18n'
 import { useApi, extractApiError } from '~/composables/useApi'
 import { useAppToast } from '~/composables/useAppToast'
 
@@ -118,7 +117,7 @@ interface VcsConnection {
   owner: string
   repo: string
   token?: string
-  syncMode: string
+  syncMode: 'polling' | 'webhook'
   pollingInterval: number
   authors?: string
 }

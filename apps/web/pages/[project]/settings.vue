@@ -11,7 +11,7 @@ interface VcsConnection {
   owner: string
   repo: string
   token?: string
-  syncMode: string
+  syncMode: 'polling' | 'webhook'
   pollingInterval: number
   authors?: string
 }
