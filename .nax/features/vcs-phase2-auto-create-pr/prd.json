@@ -3,7 +3,7 @@
   "feature": "vcs-phase2-auto-create-pr",
   "branchName": "feat/vcs-phase2-auto-create-pr",
   "createdAt": "2026-04-06T00:00:00.000Z",
-  "updatedAt": "2026-04-06T15:28:16.786Z",
+  "updatedAt": "2026-04-06T16:22:06.247Z",
   "userStories": [
     {
       "id": "VCS-P2-001",
@@ -81,8 +81,8 @@
       "dependencies": [
         "VCS-P2-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -124,14 +124,16 @@
       "dependencies": [
         "VCS-P2-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "simple",
         "testStrategy": "tdd-simple",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "simple",
+        "modelTier": "fast"
       },
       "workdir": "apps/web",
       "contextFiles": [
@@ -142,7 +144,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "2129f2297e88f7a609ee5e33271d5a01ef2ef060"
     }
   ],
   "analysis": "This is Phase 2 of VCS integration. Phase 1 established the VCS provider interface (IVcsProvider), GitHub provider implementation, VCS connection management, and issue sync. Phase 2 adds automatic PR creation when tickets transition to VERIFIED status.\n\n## Key Files to Modify\n\n### VCS-P2-001 (Branch Name Utility + GitHub PR Creation):\n- `apps/api/src/vcs/vcs-provider.ts` — extend IVcsProvider with `createPullRequest()` and `getDefaultBranch()`\n- `apps/api/src/vcs/providers/github.provider.ts` — implement new methods using GitHub REST API\n- `apps/api/src/vcs/factory.ts` — HTTP client interface only has `get()`, needs `post()` for ref creation and PR creation\n- Create `apps/api/src/vcs/utils/branch-name.util.ts` — slugify and build branch name from ticket\n- Create `apps/api/src/vcs/utils/branch-name.util.spec.ts` — tests for branch name utility\n\n### VCS-P2-002 (Auto-Create PR on VERIFIED Transition):\n- `apps/api/src/common/enums.ts` — add `VCS_PR_CREATED` to ActivityType\n- Create `apps/api/src/vcs/vcs-pr.service.ts` — new service for PR creation, TicketLink creation, and activity logging\n- `apps/api/src/tickets/state-machine/ticket-transitions.service.ts` — inject VcsPrService, call `createPrForTicket()` after successful `verify()` transition to VERIFIED (fire-and-forget)\n- `apps/api/src/vcs/vcs.module.ts` — add VcsPrService to providers and exports\n- `apps/api/src/i18n/en/vcs.json` — add prCreated, prCreateFailed i18n keys\n- `apps/api/src/i18n/zh/vcs.json` — add Chinese translations\n\n### VCS-P2-003 (Web + CLI Display):\n- `apps/web/pages/[project]/tickets/[ref].vue` — add PR link badge in sidebar when TicketLink with provider='github' exists\n- `apps/web/components/TicketCard.vue` — may need PR badge if not done in Phase 1\n- `apps/cli/src/commands/ticket.ts` — update `show` command to display links section with PR info\n- `apps/web/i18n/locales/en.json` — add pr-related i18n keys\n- `apps/web/i18n/locales/zh.json` — add Chinese translations\n\n## Architecture Decisions\n\n1. **New VcsPrService**: The existing VcsModule exports connection, sync, webhook, and polling services. A new `VcsPrService` is needed for PR creation logic that depends on TicketLinksService (circular dependency risk avoided by keeping it separate).\n\n2. **Fire-and-forget pattern**: Already established via `dispatchStatusChangeWebhook()` in `TicketTransitionsService`. The same pattern applies: catch errors and log, don't block the transition.\n\n3. **HTTP client needs POST**: Current `HttpClient` interface only has `get()`. GitHub API for creating refs uses POST. Need to extend the interface and factory.\n\n4. **Integration point**: `TicketTransitionsService.verify()` calls `executeTransition()` which updates ticket status. After the transaction completes and status change webhook is dispatched, we need to trigger PR creation. The verify method transitions to VERIFIED when ticket is in CREATED state.\n\n5. **Branch already exists handling**: When a ticket is re-verified after being rejected, the branch may already exist. GitHub API returns 422 when ref already exists. Need to catch this and proceed to PR creation.\n\n6. **No VCS connection**: Not all projects have VCS connected. Skip silently per spec.\n\n## Risks\n- Circular dependency between VcsModule and TicketLinksModule must be avoided\n- HTTP client POST method addition must not break existing GET-only consumers\n- The `verify()` method can transition to CLOSED (via VERIFY_FIX route) or VERIFIED — need to only trigger PR for VERIFIED transitions\n- Token decryption failures must be caught and logged, not thrown"
