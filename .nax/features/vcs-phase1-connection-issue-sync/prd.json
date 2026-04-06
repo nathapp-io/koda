@@ -3,7 +3,7 @@
   "feature": "vcs-phase1-connection-issue-sync",
   "branchName": "feat/vcs-phase1-connection-issue-sync",
   "createdAt": "2026-04-06T00:00:00Z",
-  "updatedAt": "2026-04-06T12:29:14.157Z",
+  "updatedAt": "2026-04-06T12:54:32.650Z",
   "userStories": [
     {
       "id": "VCS-P1-001",
@@ -939,10 +939,10 @@
         "apps/web/i18n/locales/en.json",
         "apps/web/i18n/locales/zh.json"
       ],
-      "status": "pending",
+      "status": "failed",
       "passes": false,
       "escalations": [],
-      "attempts": 0,
+      "attempts": 1,
       "parentStoryId": "VCS-P1-005",
       "routing": {
         "complexity": "simple",
