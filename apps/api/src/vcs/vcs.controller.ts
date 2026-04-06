@@ -9,6 +9,7 @@ import {
   HttpCode,
   HttpStatus,
   Headers,
+  ConflictException,
 } from '@nestjs/common';
 import { Principal } from '@nathapp/nestjs-auth';
 import { ConfigService } from '@nestjs/config';
@@ -217,6 +218,11 @@ export class VcsController {
 
     // Sync the issue (regardless of allowedAuthors per AC)
     const result = await this.syncService.syncIssue(project as Project, issue, 'manual');
+
+    // Return 409 Conflict if issue already synced (AC2)
+    if (result.action === 'skipped') {
+      throw new ConflictException('Issue is already synced');
+    }
 
     return {
       issuesSynced: result.action === 'created' ? 1 : 0,
