@@ -9,12 +9,13 @@ import {
   vcsControllerCreateConnection,
   vcsControllerGetConnection,
   vcsControllerDeleteConnection,
+  VcsConnectionResponseDto,
 } from '../vcs-client.stub';
 
 /**
  * Format a connection for display
  */
-function formatConnection(conn: Record<string, unknown>): string[][] {
+function formatConnection(conn: VcsConnectionResponseDto): string[][] {
   const rows: string[][] = [];
 
   if (conn.provider) rows.push(['Provider', String(conn.provider)]);
@@ -23,8 +24,8 @@ function formatConnection(conn: Record<string, unknown>): string[][] {
   if (conn.syncMode) rows.push(['Sync Mode', String(conn.syncMode)]);
   if (conn.isActive !== undefined) rows.push(['Active', String(conn.isActive)]);
   if (conn.lastSyncedAt)
-    rows.push(['Last Synced At', new Date(conn.lastSyncedAt as string).toISOString()]);
-  if (conn.createdAt) rows.push(['Created At', new Date(conn.createdAt as string).toISOString()]);
+    rows.push(['Last Synced At', conn.lastSyncedAt.toISOString()]);
+  if (conn.createdAt) rows.push(['Created At', conn.createdAt.toISOString()]);
 
   return rows;
 }
