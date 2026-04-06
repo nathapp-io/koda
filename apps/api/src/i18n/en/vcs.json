@@ -11,7 +11,8 @@
     "completed": "Sync operation completed successfully",
     "failed": "Sync operation failed",
     "issueAlreadySynced": "Issue has already been synced",
-    "issueNotFound": "Issue not found in the repository"
+    "issueNotFound": "Issue not found in the repository",
+    "summary": "Sync completed: {created} created, {updated} updated, {skipped} skipped"
   },
   "test": {
     "success": "Connection test successful",
@@ -27,6 +28,12 @@
     "invalidIssueNumber": "Invalid issue number provided",
     "decryptionFailed": "Failed to decrypt VCS token",
     "unknown": "An unknown error occurred",
-    "ticketAlreadySynced": "Ticket with this external VCS ID already exists"
+    "ticketAlreadySynced": "Ticket with this external VCS ID already exists",
+    "authRequired": "Authentication required for VCS connection",
+    "repositoryNotFound": "Repository not found or no access to repository",
+    "providerTypeInvalid": "Provider type must be a non-empty string",
+    "invalidRepositoryUrl": "Invalid GitHub repository URL format. Expected: https://github.com/owner/repo",
+    "gitlabNotSupported": "GitLab VCS provider is not yet supported",
+    "unsupportedProvider": "Unsupported VCS provider: {provider}"
   }
 }

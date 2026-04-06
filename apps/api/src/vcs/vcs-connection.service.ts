@@ -189,11 +189,7 @@ export class VcsConnectionService {
     try {
       decryptedToken = decryptToken(connection.encryptedToken, encryptionKey);
     } catch (error) {
-      return {
-        success: false,
-        latencyMs: 0,
-        error: 'Failed to decrypt token',
-      };
+      throw new ValidationAppException({}, 'vcs');
     }
 
     // Create provider and test connection

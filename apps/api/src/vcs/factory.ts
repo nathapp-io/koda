@@ -58,7 +58,7 @@ export function createVcsProvider(
   config: VcsProviderConfig,
 ): IVcsProvider {
   if (!providerType || typeof providerType !== 'string') {
-    throw new ValidationAppException('Provider type must be a non-empty string');
+    throw new ValidationAppException({}, 'vcs');
   }
 
   if (providerType.toLowerCase() === 'github') {
@@ -69,9 +69,7 @@ export function createVcsProvider(
     const repoName = urlMatch[2];
 
     if (!repoOwner || !repoName) {
-      throw new ValidationAppException(
-        'Invalid GitHub repository URL format. Expected: https://github.com/owner/repo',
-      );
+      throw new ValidationAppException({}, 'vcs');
     }
 
     // Create a default HTTP client using fetch
@@ -84,8 +82,8 @@ export function createVcsProvider(
   }
 
   if (providerType.toLowerCase() === 'gitlab') {
-    throw new ValidationAppException('GitLab VCS provider is not yet supported');
+    throw new ValidationAppException({}, 'vcs');
   }
 
-  throw new ValidationAppException(`Unsupported VCS provider: ${providerType}`);
+  throw new ValidationAppException({}, 'vcs');
 }

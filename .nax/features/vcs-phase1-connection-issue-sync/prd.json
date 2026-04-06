@@ -3,7 +3,7 @@
   "feature": "vcs-phase1-connection-issue-sync",
   "branchName": "feat/vcs-phase1-connection-issue-sync",
   "createdAt": "2026-04-06T00:00:00Z",
-  "updatedAt": "2026-04-06T12:54:32.650Z",
+  "updatedAt": "2026-04-06T13:35:52.695Z",
   "userStories": [
     {
       "id": "VCS-P1-001",
@@ -939,10 +939,10 @@
         "apps/web/i18n/locales/en.json",
         "apps/web/i18n/locales/zh.json"
       ],
-      "status": "failed",
+      "status": "pending",
       "passes": false,
       "escalations": [],
-      "attempts": 1,
+      "attempts": 0,
       "parentStoryId": "VCS-P1-005",
       "routing": {
         "complexity": "simple",
@@ -951,29 +951,8 @@
         "modelTier": "powerful",
         "initialComplexity": "simple"
       },
-      "priorErrors": [
-        "Attempt 1 failed with model tier: balanced: Autofix exhausted: review still failing after fix attempts"
-      ],
-      "priorFailures": [
-        {
-          "attempt": 1,
-          "modelTier": "balanced",
-          "stage": "review",
-          "summary": "Failed with tier balanced, escalating to next tier",
-          "reviewFindings": [
-            {
-              "ruleId": "semantic",
-              "severity": "warning",
-              "file": "apps/api/src/vcs/vcs.controller.ts",
-              "line": 240,
-              "message": "ConflictException() is thrown without i18n handling. The API i18n files define 'sync.issueAlreadySynced' key, but this exception uses NestJS's default 'Conflict' message instead. This is inconsistent with the i18n pattern used elsewhere (ValidationAppException, AuthException) and means the error message won't be translated.",
-              "source": "semantic-review"
-            }
-          ],
-          "cost": 0,
-          "timestamp": "2026-04-06T12:29:12.141Z"
-        }
-      ],
+      "priorErrors": [],
+      "priorFailures": [],
       "storyPoints": 1,
       "storyGitRef": "f7afe5677356eddd037898093d8b1dcd11caaca5"
     }

@@ -11,7 +11,8 @@
     "completed": "同步操作完成",
     "failed": "同步操作失败",
     "issueAlreadySynced": "问题已经被同步",
-    "issueNotFound": "在仓库中未找到问题"
+    "issueNotFound": "在仓库中未找到问题",
+    "summary": "同步完成：创建 {created} 个，更新 {updated} 个，跳过 {skipped} 个"
   },
   "test": {
     "success": "连接测试成功",
@@ -27,6 +28,12 @@
     "invalidIssueNumber": "提供的问题号无效",
     "decryptionFailed": "无法解密 VCS 令牌",
     "unknown": "出现未知错误",
-    "ticketAlreadySynced": "已存在具有此外部 VCS ID 的工单"
+    "ticketAlreadySynced": "已存在具有此外部 VCS ID 的工单",
+    "authRequired": "VCS 连接需要身份验证",
+    "repositoryNotFound": "仓库未找到或无权访问仓库",
+    "providerTypeInvalid": "提供商类型必须是非空字符串",
+    "invalidRepositoryUrl": "GitHub 仓库 URL 格式无效。预期格式：https://github.com/owner/repo",
+    "gitlabNotSupported": "GitLab VCS 提供商尚不支持",
+    "unsupportedProvider": "不支持的 VCS 提供商：{provider}"
   }
 }

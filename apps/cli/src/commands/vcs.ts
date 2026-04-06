@@ -11,6 +11,7 @@ import { resolveContext } from '../config';
 import { OpenAPI } from '../generated/core/OpenAPI';
 import { table, error } from '../utils/output';
 import { handleApiError } from '../utils/error';
+import { VCS_MESSAGES } from './vcs-messages';
 import {
   vcsControllerCreateConnection,
   vcsControllerGetConnection,
@@ -55,7 +56,7 @@ export function vcsCommand(program: Command): void {
       try {
         // Validate required flags
         if (!options.provider || !options.owner || !options.repo || !options.token) {
-          error('Missing required options: --provider, --owner, --repo, --token');
+          error(VCS_MESSAGES.MISSING_REQUIRED_OPTIONS);
           process.exit(3);
           return;
         }
@@ -63,7 +64,7 @@ export function vcsCommand(program: Command): void {
         // Check authentication (using resolveAuth to validate configured keys)
         const auth = resolveAuth({});
         if (!auth.apiKey || !auth.apiUrl) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
+          error(VCS_MESSAGES.MISSING_AUTH);
           process.exit(2);
           return;
         }
@@ -71,7 +72,7 @@ export function vcsCommand(program: Command): void {
         // Get project slug from context
         const ctx = await resolveContext({ projectSlug: options.project });
         if (!ctx.projectSlug) {
-          error('Project slug not specified. Use --project flag or set via config');
+          error(VCS_MESSAGES.MISSING_PROJECT);
           process.exit(3);
           return;
         }
@@ -101,7 +102,7 @@ export function vcsCommand(program: Command): void {
           console.log(JSON.stringify(data, null, 2));
         } else {
           const rows = formatConnection(data);
-          console.log(`\nVCS connection established for project ${ctx.projectSlug}:`);
+          console.log(VCS_MESSAGES.CONNECTED(ctx.projectSlug));
           table(['Field', 'Value'], rows);
         }
 
@@ -120,7 +121,7 @@ export function vcsCommand(program: Command): void {
         // Check authentication (using resolveAuth to validate configured keys)
         const auth = resolveAuth({});
         if (!auth.apiKey || !auth.apiUrl) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
+          error(VCS_MESSAGES.MISSING_AUTH);
           process.exit(2);
           return;
         }
@@ -128,7 +129,7 @@ export function vcsCommand(program: Command): void {
         // Get project slug from context
         const ctx = await resolveContext({ projectSlug: options.project });
         if (!ctx.projectSlug) {
-          error('Project slug not specified. Use --project flag or set via config');
+          error(VCS_MESSAGES.MISSING_PROJECT);
           process.exit(3);
           return;
         }
@@ -145,7 +146,7 @@ export function vcsCommand(program: Command): void {
           console.log(JSON.stringify(data, null, 2));
         } else {
           const rows = formatConnection(data);
-          console.log(`\nVCS Connection status for project ${ctx.projectSlug}:`);
+          console.log(VCS_MESSAGES.STATUS_HEADER(ctx.projectSlug));
           table(['Field', 'Value'], rows);
         }
 
@@ -155,7 +156,7 @@ export function vcsCommand(program: Command): void {
 
         // Handle 404 specially for status command
         if (apiErr.response?.status === 404) {
-          error('No VCS connection configured');
+          error(VCS_MESSAGES.NO_CONNECTION);
           process.exit(1);
           return;
         }
@@ -172,7 +173,7 @@ export function vcsCommand(program: Command): void {
         // Check authentication (using resolveAuth to validate configured keys)
         const auth = resolveAuth({});
         if (!auth.apiKey || !auth.apiUrl) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
+          error(VCS_MESSAGES.MISSING_AUTH);
           process.exit(2);
           return;
         }
@@ -180,7 +181,7 @@ export function vcsCommand(program: Command): void {
         // Get project slug from context
         const ctx = await resolveContext({ projectSlug: options.project });
         if (!ctx.projectSlug) {
-          error('Project slug not specified. Use --project flag or set via config');
+          error(VCS_MESSAGES.MISSING_PROJECT);
           process.exit(3);
           return;
         }
@@ -192,7 +193,7 @@ export function vcsCommand(program: Command): void {
         // Call API
         await vcsControllerDeleteConnection({ slug: ctx.projectSlug });
 
-        console.log(`VCS connection disconnected for project ${ctx.projectSlug}`);
+        console.log(VCS_MESSAGES.DISCONNECTED(ctx.projectSlug));
 
         process.exit(0);
       } catch (err: unknown) {
@@ -210,7 +211,7 @@ export function vcsCommand(program: Command): void {
         // Check authentication
         const auth = resolveAuth({});
         if (!auth.apiKey || !auth.apiUrl) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
+          error(VCS_MESSAGES.MISSING_AUTH);
           process.exit(2);
           return;
         }
@@ -218,7 +219,7 @@ export function vcsCommand(program: Command): void {
         // Get project slug from context
         const ctx = await resolveContext({ projectSlug: options.project });
         if (!ctx.projectSlug) {
-          error('Project slug not specified. Use --project flag or set via config');
+          error(VCS_MESSAGES.MISSING_PROJECT);
           process.exit(3);
           return;
         }
@@ -242,7 +243,7 @@ export function vcsCommand(program: Command): void {
           requestBody: requestBody as Record<string, string>,
         });
 
-        console.log(`VCS settings updated for project ${ctx.projectSlug}`);
+        console.log(VCS_MESSAGES.SETTINGS_UPDATED(ctx.projectSlug));
 
         process.exit(0);
       } catch (err: unknown) {
@@ -258,7 +259,7 @@ export function vcsCommand(program: Command): void {
         // Check authentication
         const auth = resolveAuth({});
         if (!auth.apiKey || !auth.apiUrl) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
+          error(VCS_MESSAGES.MISSING_AUTH);
           process.exit(2);
           return;
         }
@@ -266,7 +267,7 @@ export function vcsCommand(program: Command): void {
         // Get project slug from context
         const ctx = await resolveContext({ projectSlug: options.project });
         if (!ctx.projectSlug) {
-          error('Project slug not specified. Use --project flag or set via config');
+          error(VCS_MESSAGES.MISSING_PROJECT);
           process.exit(3);
           return;
         }
@@ -281,9 +282,9 @@ export function vcsCommand(program: Command): void {
         });
 
         if (result.success) {
-          console.log('Connection OK');
+          console.log(VCS_MESSAGES.CONNECTION_OK);
         } else {
-          error(result.message || 'Connection test failed');
+          error(result.message || VCS_MESSAGES.CONNECTION_TEST_FAILED);
           process.exit(1);
           return;
         }
@@ -302,7 +303,7 @@ export function vcsCommand(program: Command): void {
         // Check authentication
         const auth = resolveAuth({});
         if (!auth.apiKey || !auth.apiUrl) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
+          error(VCS_MESSAGES.MISSING_AUTH);
           process.exit(2);
           return;
         }
@@ -310,7 +311,7 @@ export function vcsCommand(program: Command): void {
         // Get project slug from context
         const ctx = await resolveContext({ projectSlug: options.project });
         if (!ctx.projectSlug) {
-          error('Project slug not specified. Use --project flag or set via config');
+          error(VCS_MESSAGES.MISSING_PROJECT);
           process.exit(3);
           return;
         }
@@ -342,7 +343,7 @@ export function vcsCommand(program: Command): void {
         // Validate issue number
         const issueNumber = parseInt(issueNumberArg, 10);
         if (isNaN(issueNumber)) {
-          error('Issue number must be a valid integer');
+          error(VCS_MESSAGES.INVALID_ISSUE_NUMBER);
           process.exit(1);
           return;
         }
@@ -350,7 +351,7 @@ export function vcsCommand(program: Command): void {
         // Check authentication
         const auth = resolveAuth({});
         if (!auth.apiKey || !auth.apiUrl) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
+          error(VCS_MESSAGES.MISSING_AUTH);
           process.exit(2);
           return;
         }
@@ -358,7 +359,7 @@ export function vcsCommand(program: Command): void {
         // Get project slug from context
         const ctx = await resolveContext({ projectSlug: options.project });
         if (!ctx.projectSlug) {
-          error('Project slug not specified. Use --project flag or set via config');
+          error(VCS_MESSAGES.MISSING_PROJECT);
           process.exit(3);
           return;
         }
@@ -373,7 +374,7 @@ export function vcsCommand(program: Command): void {
           issueNumber: issueNumber,
         });
 
-        console.log(`Issue imported: ${result.ticketRef}`);
+        console.log(VCS_MESSAGES.ISSUE_IMPORTED(result.ticketRef));
 
         process.exit(0);
       } catch (err: unknown) {
