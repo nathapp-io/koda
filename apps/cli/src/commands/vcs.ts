@@ -9,6 +9,10 @@ import {
   vcsControllerCreateConnection,
   vcsControllerGetConnection,
   vcsControllerDeleteConnection,
+  vcsControllerUpdateConnection,
+  vcsControllerTestConnection,
+  vcsControllerSyncConnection,
+  vcsControllerImportIssue,
   VcsConnectionResponseDto,
 } from '../vcs-client.stub';
 
@@ -178,6 +182,187 @@ export function vcsCommand(program: Command): void {
         await vcsControllerDeleteConnection({ slug: ctx.projectSlug });
 
         console.log(`VCS connection disconnected for project ${ctx.projectSlug}`);
+
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err);
+      }
+    });
+
+  vcs
+    .command('update')
+    .option('--sync-mode <mode>', 'Sync mode (polling, webhook, manual)')
+    .option('--authors <authors>', 'Comma-separated list of allowed authors')
+    .option('--project <slug>', 'Project slug (uses config if not provided)')
+    .action(async (options) => {
+      try {
+        // Check authentication
+        const auth = resolveAuth({});
+        if (!auth.apiKey || !auth.apiUrl) {
+          error('API key or URL not configured. Run: koda login --api-key <key>');
+          process.exit(2);
+          return;
+        }
+
+        // Get project slug from context
+        const ctx = await resolveContext({ projectSlug: options.project });
+        if (!ctx.projectSlug) {
+          error('Project slug not specified. Use --project flag or set via config');
+          process.exit(3);
+          return;
+        }
+
+        // Set API client configuration
+        OpenAPI.BASE = auth.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = auth.apiKey;
+
+        // Build request body
+        const requestBody: Record<string, string> = {};
+        if (options.syncMode) {
+          requestBody.syncMode = options.syncMode;
+        }
+        if (options.authors) {
+          requestBody.allowedAuthors = options.authors;
+        }
+
+        // Call API
+        await vcsControllerUpdateConnection({
+          slug: ctx.projectSlug,
+          requestBody: requestBody as any,
+        });
+
+        console.log(`VCS settings updated for project ${ctx.projectSlug}`);
+
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err);
+      }
+    });
+
+  vcs
+    .command('test')
+    .option('--project <slug>', 'Project slug (uses config if not provided)')
+    .action(async (options) => {
+      try {
+        // Check authentication
+        const auth = resolveAuth({});
+        if (!auth.apiKey || !auth.apiUrl) {
+          error('API key or URL not configured. Run: koda login --api-key <key>');
+          process.exit(2);
+          return;
+        }
+
+        // Get project slug from context
+        const ctx = await resolveContext({ projectSlug: options.project });
+        if (!ctx.projectSlug) {
+          error('Project slug not specified. Use --project flag or set via config');
+          process.exit(3);
+          return;
+        }
+
+        // Set API client configuration
+        OpenAPI.BASE = auth.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = auth.apiKey;
+
+        // Call API
+        const result = await vcsControllerTestConnection({
+          slug: ctx.projectSlug,
+        });
+
+        if (result.success) {
+          console.log('Connection OK');
+        } else {
+          error(result.message || 'Connection test failed');
+          process.exit(1);
+          return;
+        }
+
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err);
+      }
+    });
+
+  vcs
+    .command('sync')
+    .option('--project <slug>', 'Project slug (uses config if not provided)')
+    .action(async (options) => {
+      try {
+        // Check authentication
+        const auth = resolveAuth({});
+        if (!auth.apiKey || !auth.apiUrl) {
+          error('API key or URL not configured. Run: koda login --api-key <key>');
+          process.exit(2);
+          return;
+        }
+
+        // Get project slug from context
+        const ctx = await resolveContext({ projectSlug: options.project });
+        if (!ctx.projectSlug) {
+          error('Project slug not specified. Use --project flag or set via config');
+          process.exit(3);
+          return;
+        }
+
+        // Set API client configuration
+        OpenAPI.BASE = auth.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = auth.apiKey;
+
+        // Call API
+        const result = await vcsControllerSyncConnection({
+          slug: ctx.projectSlug,
+        });
+
+        console.log(
+          `Sync complete: created ${result.created}, updated ${result.updated}, skipped ${result.skipped}`
+        );
+
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err);
+      }
+    });
+
+  vcs
+    .command('import <issueNumber>')
+    .option('--project <slug>', 'Project slug (uses config if not provided)')
+    .action(async (issueNumberArg, options) => {
+      try {
+        // Validate issue number
+        const issueNumber = parseInt(issueNumberArg, 10);
+        if (isNaN(issueNumber)) {
+          error('Issue number must be a valid integer');
+          process.exit(1);
+          return;
+        }
+
+        // Check authentication
+        const auth = resolveAuth({});
+        if (!auth.apiKey || !auth.apiUrl) {
+          error('API key or URL not configured. Run: koda login --api-key <key>');
+          process.exit(2);
+          return;
+        }
+
+        // Get project slug from context
+        const ctx = await resolveContext({ projectSlug: options.project });
+        if (!ctx.projectSlug) {
+          error('Project slug not specified. Use --project flag or set via config');
+          process.exit(3);
+          return;
+        }
+
+        // Set API client configuration
+        OpenAPI.BASE = auth.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = auth.apiKey;
+
+        // Call API
+        const result = await vcsControllerImportIssue({
+          slug: ctx.projectSlug,
+          issueNumber: issueNumber,
+        });
+
+        console.log(`Issue imported: ${result.ticketRef}`);
 
         process.exit(0);
       } catch (err: unknown) {
