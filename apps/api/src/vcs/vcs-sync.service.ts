@@ -1,8 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { Project, VcsConnection } from '@prisma/client';
-import { ValidationAppException } from '@nathapp/nestjs-common';
+import { Project, VcsConnection, Ticket } from '@prisma/client';
+import { ValidationAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { VcsIssue } from './types';
+import { createVcsProvider } from './factory';
+import { decryptToken } from '../common/utils/encryption.util';
 
 /**
  * Result of syncing a single issue
@@ -100,5 +102,74 @@ export class VcsSyncService {
       // If parsing fails, allow all issues
       return issues;
     }
+  }
+
+  /**
+   * Perform a full sync of all issues from the provider
+   */
+  async fullSync(
+    project: Project,
+    connection: VcsConnection,
+    encryptionKey: string,
+  ): Promise<{
+    issuesSynced: number;
+    issuesSkipped: number;
+    createdTickets: Array<{ id: string; number: number }>;
+    errors: string[];
+  }> {
+    const createdTickets: Array<{ id: string; number: number }> = [];
+    const errors: string[] = [];
+    let issuesSynced = 0;
+    let issuesSkipped = 0;
+
+    try {
+      // Decrypt token
+      const decryptedToken = decryptToken(connection.encryptedToken, encryptionKey);
+
+      // Create provider
+      const provider = createVcsProvider(connection.provider, {
+        provider: connection.provider,
+        token: decryptedToken,
+        repoUrl: `https://github.com/${connection.repoOwner}/${connection.repoName}`,
+      });
+
+      // Fetch all issues
+      const issues = await provider.fetchIssues();
+
+      // Filter by allowed authors
+      const filteredIssues = this.filterByAllowedAuthors(issues, connection.allowedAuthors);
+
+      // Sync each issue
+      for (const issue of filteredIssues) {
+        try {
+          const result = await this.syncIssue(project, issue, 'manual');
+          if (result.action === 'created') {
+            issuesSynced++;
+            if (result.ticketId && result.ticketNumber) {
+              createdTickets.push({
+                id: result.ticketId,
+                number: result.ticketNumber,
+              });
+            }
+          } else {
+            issuesSkipped++;
+          }
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          errors.push(`Issue ${issue.number}: ${errorMsg}`);
+          issuesSkipped++;
+        }
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      errors.push(`Sync failed: ${errorMsg}`);
+    }
+
+    return {
+      issuesSynced,
+      issuesSkipped,
+      createdTickets,
+      errors,
+    };
   }
 }

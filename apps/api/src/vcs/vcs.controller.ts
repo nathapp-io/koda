@@ -195,7 +195,7 @@ export class VcsController {
     const project = await this.projectsService.findBySlug(slug);
 
     // Get VCS connection
-    const connection = await this.vcsService.findByProject(project.id);
+    const connectionDto = await this.vcsService.findByProject(project.id);
 
     // Get encryption key from config
     const encryptionKey = this.configService.get<string>('vcs.encryptionKey');
@@ -203,11 +203,46 @@ export class VcsController {
       throw new Error('VCS encryption key not configured');
     }
 
-    // TODO: Implement manual single issue sync
+    // Get the full connection with all fields
+    const db: any = (this.vcsService as any).db || this.vcsService['db'];
+    const connection = await db.vcsConnection.findUnique({
+      where: { projectId: project.id },
+    });
+
+    if (!connection) {
+      throw new Error('VCS connection not found');
+    }
+
+    // Decrypt token and create provider
+    const decryptedToken = require('../common/utils/encryption.util').decryptToken(
+      connection.encryptedToken,
+      encryptionKey,
+    );
+    const provider = require('./factory').createVcsProvider(connection.provider, {
+      provider: connection.provider,
+      token: decryptedToken,
+      repoUrl: `https://github.com/${connection.repoOwner}/${connection.repoName}`,
+    });
+
+    // Fetch specific issue
+    const issue = await provider.fetchIssue(parseInt(issueNumber, 10));
+
+    // Sync the issue (regardless of allowedAuthors per AC)
+    const result = await this.syncService.syncIssue(project as any, issue, 'manual');
+
     return {
-      issuesSynced: 0,
-      issuesSkipped: 0,
-      createdTickets: [],
+      issuesSynced: result.action === 'created' ? 1 : 0,
+      issuesSkipped: result.action === 'skipped' ? 1 : 0,
+      createdTickets:
+        result.action === 'created' && result.ticketId && result.ticketNumber
+          ? [
+              {
+                id: result.ticketId,
+                projectKey: project.key,
+                number: result.ticketNumber,
+              },
+            ]
+          : [],
     };
   }
 
@@ -224,7 +259,7 @@ export class VcsController {
     const project = await this.projectsService.findBySlug(slug);
 
     // Get VCS connection
-    const connection = await this.vcsService.findByProject(project.id);
+    const connectionDto = await this.vcsService.findByProject(project.id);
 
     // Get encryption key from config
     const encryptionKey = this.configService.get<string>('vcs.encryptionKey');
@@ -232,11 +267,28 @@ export class VcsController {
       throw new Error('VCS encryption key not configured');
     }
 
-    // TODO: Implement full sync run
+    // Get the full connection with all fields
+    const db: any = (this.vcsService as any).db || this.vcsService['db'];
+    const connection = await db.vcsConnection.findUnique({
+      where: { projectId: project.id },
+    });
+
+    if (!connection) {
+      throw new Error('VCS connection not found');
+    }
+
+    // Run full sync
+    const result = await this.syncService.fullSync(project as any, connection, encryptionKey);
+
     return {
-      issuesSynced: 0,
-      issuesSkipped: 0,
-      createdTickets: [],
+      issuesSynced: result.issuesSynced,
+      issuesSkipped: result.issuesSkipped,
+      createdTickets: result.createdTickets.map((ticket) => ({
+        id: ticket.id,
+        projectKey: project.key,
+        number: ticket.number,
+      })),
+      errors: result.errors.length > 0 ? result.errors : undefined,
     };
   }
 }
