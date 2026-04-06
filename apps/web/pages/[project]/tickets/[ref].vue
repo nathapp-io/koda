@@ -11,6 +11,15 @@ interface Assignee {
   email?: string
 }
 
+interface TicketLink {
+  id: string
+  ticketId: string
+  url: string
+  provider: string
+  externalRef: string | null
+  createdAt: string
+}
+
 interface Ticket {
   id: string
   ref: string
@@ -25,6 +34,7 @@ interface Ticket {
   gitRefLine?: number | null
   gitRefUrl?: string | null
   externalVcsUrl?: string | null
+  links?: TicketLink[]
   [key: string]: unknown
 }
 
@@ -140,6 +150,17 @@ function extractIssueNumber(url: string): string {
   const parts = url.split('/')
   return parts[parts.length - 1] || ''
 }
+
+const githubPrLinks = computed(() => {
+  if (!ticket.value?.links) return []
+  return ticket.value.links.filter(link => link.provider === 'github' && link.externalRef)
+})
+
+function extractPrNumber(externalRef: string | null): string {
+  if (!externalRef) return ''
+  const parts = externalRef.split('#')
+  return parts[parts.length - 1] || ''
+}
 </script>
 
 <template>
@@ -202,6 +223,16 @@ function extractIssueNumber(url: string): string {
           <Badge variant="outline" :class="typeClass(ticket.type)">
             {{ t(`tickets.type.${ticket.type}`) }}
           </Badge>
+          <template v-for="link in githubPrLinks" :key="link.id">
+            <a
+              :href="link.url"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md bg-github-link-bg text-gitHub-link-text hover:bg-gitHub-link-bg/80 border border-gitHub-link-border"
+            >
+              <span>{{ t('tickets.pr.badge', { number: extractPrNumber(link.externalRef) }) }}</span>
+            </a>
+          </template>
         </div>
 
         <div v-if="ticket.description || editState.isEditing">
