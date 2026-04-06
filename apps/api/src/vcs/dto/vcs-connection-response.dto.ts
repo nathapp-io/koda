@@ -5,6 +5,8 @@ export class VcsConnectionResponseDto {
   repoOwner: string;
   repoName: string;
   syncMode: string;
+  allowedAuthors: string;
+  pollingIntervalMs: number;
   webhookSecret?: string;
   lastSyncedAt?: Date;
   isActive: boolean;

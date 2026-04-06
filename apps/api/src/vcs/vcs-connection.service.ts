@@ -258,6 +258,8 @@ export class VcsConnectionService {
       repoOwner: connection.repoOwner,
       repoName: connection.repoName,
       syncMode: connection.syncMode,
+      allowedAuthors: connection.allowedAuthors,
+      pollingIntervalMs: connection.pollingIntervalMs,
       webhookSecret: connection.webhookSecret ?? undefined,
       lastSyncedAt: connection.lastSyncedAt ?? undefined,
       isActive: connection.isActive,
