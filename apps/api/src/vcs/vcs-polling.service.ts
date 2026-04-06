@@ -49,7 +49,7 @@ export class VcsPollingService implements OnModuleInit {
    * Initialize polling intervals for all polling connections
    */
   private async initializePolling(): Promise<void> {
-    const connections = await this.db.vcsConnection.findMany({
+    const connections = (await this.db.vcsConnection.findMany({
       where: {
         syncMode: 'polling',
         isActive: true,
@@ -57,10 +57,15 @@ export class VcsPollingService implements OnModuleInit {
       include: {
         project: true,
       },
-    });
+    })) as Array<VcsConnection & { project: Project }>;
 
-    for (const connection of connections) {
-      this.schedulePolling(connection as VcsConnection & { project: Project });
+    // Filter again in code for resilience (ensures only polling and active connections)
+    const pollingConnections = connections.filter(
+      (conn) => conn.syncMode === 'polling' && conn.isActive === true,
+    );
+
+    for (const connection of pollingConnections) {
+      this.schedulePolling(connection);
     }
   }
 
