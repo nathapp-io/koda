@@ -56,7 +56,7 @@ export class VcsConnectionService {
     });
 
     if (existingConnection) {
-      throw new ValidationAppException({}, 'vcs_connections');
+      throw new ValidationAppException({}, 'vcs');
     }
 
     // Encrypt the token
@@ -68,7 +68,7 @@ export class VcsConnectionService {
     const repoName = urlMatch[2];
 
     if (!repoOwner || !repoName) {
-      throw new ValidationAppException({}, 'vcs_connections');
+      throw new ValidationAppException({}, 'vcs');
     }
 
     // Create connection
@@ -99,7 +99,7 @@ export class VcsConnectionService {
     })) as VcsConnection | null;
 
     if (!connection) {
-      throw new NotFoundAppException({}, 'vcs_connections');
+      throw new NotFoundAppException({}, 'vcs');
     }
 
     return this.mapToResponseDto(connection);
@@ -119,7 +119,7 @@ export class VcsConnectionService {
     })) as VcsConnection | null;
 
     if (!connection) {
-      throw new NotFoundAppException({}, 'vcs_connections');
+      throw new NotFoundAppException({}, 'vcs');
     }
 
     const updateData: Record<string, unknown> = {};
@@ -161,7 +161,7 @@ export class VcsConnectionService {
     })) as VcsConnection | null;
 
     if (!connection) {
-      throw new NotFoundAppException({}, 'vcs_connections');
+      throw new NotFoundAppException({}, 'vcs');
     }
 
     await this.db.vcsConnection.delete({
@@ -181,7 +181,7 @@ export class VcsConnectionService {
     })) as VcsConnection | null;
 
     if (!connection) {
-      throw new NotFoundAppException({}, 'vcs_connections');
+      throw new NotFoundAppException({}, 'vcs');
     }
 
     // Decrypt the token
@@ -241,7 +241,7 @@ export class VcsConnectionService {
     })) as VcsConnection | null;
 
     if (!connection) {
-      throw new NotFoundAppException({}, 'vcs_connections');
+      throw new NotFoundAppException({}, 'vcs');
     }
 
     return connection;
