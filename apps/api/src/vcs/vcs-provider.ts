@@ -1,4 +1,4 @@
-import { VcsIssue } from './types';
+import { VcsIssue, VcsPullRequest, CreatePrParams } from './types';
 
 /**
  * Interface for VCS providers (GitHub, GitLab, etc.)
@@ -19,4 +19,15 @@ export interface IVcsProvider {
    * Test the connection to the VCS service
    */
   testConnection(): Promise<{ ok: boolean; error?: string }>;
+
+  /**
+   * Get the default branch name for the repository
+   */
+  getDefaultBranch(): Promise<string>;
+
+  /**
+   * Create a pull request
+   * @param params The pull request parameters
+   */
+  createPullRequest(params: CreatePrParams): Promise<VcsPullRequest>;
 }

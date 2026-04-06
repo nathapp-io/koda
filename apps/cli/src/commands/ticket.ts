@@ -40,6 +40,7 @@ type TicketDetail = TicketRow & {
   createdAt: string;
   updatedAt?: string;
   comments?: Array<{ author?: { name?: string }; type: string; body: string }>;
+  links?: TicketLink[];
 };
 
 type TicketLink = { id: string; url: string; provider: string; externalRef: string };
@@ -264,6 +265,13 @@ export function ticketCommand(program: Command): void {
             for (const comment of ticketData.comments) {
               const author = comment.author?.name || 'Unknown';
               console.log(`  - ${author} (${comment.type}): ${comment.body}`);
+            }
+          }
+
+          if (ticketData.links && ticketData.links.length > 0) {
+            console.log(`\nLinks:`);
+            for (const link of ticketData.links) {
+              console.log(`  - ${link.url} (${link.provider})${link.externalRef ? ` [${link.externalRef}]` : ''}`);
             }
           }
         }

@@ -10,3 +10,25 @@ export interface VcsIssue {
   labels: string[];
   createdAt: Date;
 }
+
+/**
+ * Parameters for creating a pull request
+ */
+export interface CreatePrParams {
+  title: string;
+  body: string;
+  headBranch: string;
+  baseBranch: string;
+  draft?: boolean;
+}
+
+/**
+ * Represents a VCS pull request from any provider
+ */
+export interface VcsPullRequest {
+  number: number;
+  url: string;
+  branchName: string;
+  state: string;
+  draft: boolean;
+}

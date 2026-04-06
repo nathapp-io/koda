@@ -23,6 +23,7 @@ describe('GitHubProvider (Integration)', () => {
   beforeEach(() => {
     mockHttpClient = {
       get: jest.fn(),
+      post: jest.fn(),
     };
 
     provider = new GitHubProvider(testOwner, testRepo, testToken, mockHttpClient);

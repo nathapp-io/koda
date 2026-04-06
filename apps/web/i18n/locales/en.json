@@ -144,6 +144,10 @@
     "vcs": {
       "github": "GitHub"
     },
+    "pr": {
+      "created": "PR created: {repo}#{number}",
+      "badge": "PR #{number}"
+    },
     "actions": {
       "verify": "Verify",
       "reject": "Reject",

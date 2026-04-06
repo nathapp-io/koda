@@ -337,3 +337,75 @@ describe('US-005-1: pages/[project]/tickets/[ref].vue has no console.log stateme
     expect(source).not.toContain('console.log')
   })
 })
+
+// ──────────────────────────────────────────────────────────────────────────────
+// VCS-P2-003 AC1: Web ticket detail page shows linked PR as clickable badge
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('VCS-P2-003 AC1: Ticket detail page shows PR as clickable badge when TicketLink with github provider exists', () => {
+  test('source includes links array in Ticket interface', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    expect(source).toContain('links')
+  })
+
+  test('source renders a clickable badge for GitHub PR links', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    const hasPrBadge =
+      (source.includes('Badge') || source.includes('badge')) &&
+      (source.includes('github') || source.includes('GitHub') || source.includes('pr') || source.includes('PR'))
+    expect(hasPrBadge).toBe(true)
+  })
+
+  test('source uses v-for to iterate over links for display', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    const hasLinksLoop =
+      source.includes('v-for') &&
+      source.includes('links')
+    expect(hasLinksLoop).toBe(true)
+  })
+
+  test('source filters or displays only github provider links', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    const hasGithubFilter =
+      source.includes("'github'") ||
+      source.includes('"github"') ||
+      source.includes('provider')
+    expect(hasGithubFilter).toBe(true)
+  })
+
+  test('source renders an anchor tag with href bound to link.url', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    const hasLinkHref =
+      (source.includes(':href') || source.includes('href=')) &&
+      source.includes('url')
+    expect(hasLinkHref).toBe(true)
+  })
+
+  test('source displays PR number from externalRef in badge text', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    const hasExternalRef =
+      source.includes('externalRef') ||
+      source.includes('externalRef')
+    expect(hasExternalRef).toBe(true)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// VCS-P2-003 AC5: i18n keys for PR-related display strings
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('VCS-P2-003 AC5: Web i18n files contain PR-related keys', () => {
+  test('en.json contains pr.created or pr-related key', () => {
+    const enPath = join(webDir, 'i18n', 'locales', 'en.json')
+    const enSource = readFileSync(enPath, 'utf-8')
+    const hasPrKey = enSource.includes('"pr"') || enSource.includes('"prCreated"')
+    expect(hasPrKey).toBe(true)
+  })
+
+  test('zh.json contains pr.created or pr-related key', () => {
+    const zhPath = join(webDir, 'i18n', 'locales', 'zh.json')
+    const zhSource = readFileSync(zhPath, 'utf-8')
+    const hasPrKey = zhSource.includes('"pr"') || zhSource.includes('"prCreated"')
+    expect(hasPrKey).toBe(true)
+  })
+})

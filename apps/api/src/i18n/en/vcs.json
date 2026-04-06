@@ -1,4 +1,8 @@
 {
+  "pr": {
+    "created": "Pull request created successfully",
+    "createFailed": "Failed to create pull request: {error}"
+  },
   "connection": {
     "created": "VCS connection created successfully",
     "updated": "VCS connection updated successfully",
