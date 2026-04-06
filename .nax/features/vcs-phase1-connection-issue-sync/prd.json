@@ -3,7 +3,7 @@
   "feature": "vcs-phase1-connection-issue-sync",
   "branchName": "feat/vcs-phase1-connection-issue-sync",
   "createdAt": "2026-04-06T00:00:00Z",
-  "updatedAt": "2026-04-06T08:48:09.713Z",
+  "updatedAt": "2026-04-06T08:57:37.309Z",
   "userStories": [
     {
       "id": "VCS-P1-001",
@@ -163,8 +163,8 @@
         "apps/api/src/common/utils/git-url.util.ts",
         "apps/api/src/ci-webhook/ci-webhook.service.ts"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "escalations": [],
       "attempts": 0,
       "parentStoryId": "VCS-P1-002",
@@ -209,11 +209,13 @@
         "complexity": "simple",
         "testStrategy": "tdd-simple",
         "reasoning": "Single function, switch/if pattern, under 20 LOC. Isolated from HTTP logic. Simple enough for tdd-simple.",
-        "modelTier": "balanced"
+        "modelTier": "balanced",
+        "initialComplexity": "simple"
       },
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "52eeb97d967379842653ecc21a80f214c3121cca"
     },
     {
       "id": "VCS-P1-003",
