@@ -19,8 +19,10 @@ export class VcsPollingService implements OnModuleInit {
     private readonly syncService: VcsSyncService,
   ) {}
 
-  private get db(): any {
-    return this.prisma.client;
+  // PrismaClientLike from @nathapp/nestjs-prisma doesn't expose VCS models,
+  // but they exist at runtime. Using double cast to allow property access.
+  private get db() {
+    return this.prisma.client as unknown as Record<string, unknown>;
   }
 
   async onModuleInit() {
@@ -32,7 +34,7 @@ export class VcsPollingService implements OnModuleInit {
    * Initialize polling intervals for all polling connections
    */
   private async initializePolling(): Promise<void> {
-    const connections = await this.db.vcsConnection.findMany({
+    const connections = await (this.db.vcsConnection as Record<string, unknown>).findMany({
       where: {
         syncMode: 'polling',
         isActive: true,
@@ -115,13 +117,13 @@ export class VcsPollingService implements OnModuleInit {
       }
 
       // Update connection lastSyncedAt
-      await this.db.vcsConnection.update({
+      await (this.db.vcsConnection as Record<string, unknown>).update({
         where: { id: connection.id },
         data: { lastSyncedAt: new Date() },
       });
 
       // Write sync log
-      await this.db.vcsSyncLog.create({
+      await (this.db.vcsSyncLog as Record<string, unknown>).create({
         data: {
           vcsConnectionId: connection.id,
           syncType: 'issues',
@@ -139,7 +141,7 @@ export class VcsPollingService implements OnModuleInit {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
       // Write sync log with error
-      await this.db.vcsSyncLog.create({
+      await (this.db.vcsSyncLog as Record<string, unknown>).create({
         data: {
           vcsConnectionId: connection.id,
           syncType: 'issues',

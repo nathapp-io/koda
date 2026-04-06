@@ -34,8 +34,10 @@ export class VcsWebhookService {
     private readonly syncService: VcsSyncService,
   ) {}
 
-  private get db(): any {
-    return this.prisma.client;
+  // PrismaClientLike from @nathapp/nestjs-prisma doesn't expose VCS models,
+  // but they exist at runtime. Using double cast to allow property access.
+  private get db() {
+    return this.prisma.client as unknown as Record<string, unknown>;
   }
 
   /**

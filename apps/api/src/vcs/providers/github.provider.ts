@@ -1,6 +1,7 @@
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { IVcsProvider } from '../vcs-provider';
 import { VcsIssue } from '../types';
+import { HttpClient } from '../factory';
 
 /**
  * GitHub REST API response for an issue
@@ -26,11 +27,11 @@ export class GitHubProvider implements IVcsProvider {
     private readonly repoOwner: string,
     private readonly repoName: string,
     private readonly token: string,
-    private readonly httpClient: any, // HTTP client with get method
+    private readonly httpClient: HttpClient,
   ) {}
 
   async fetchIssues(since?: Date): Promise<VcsIssue[]> {
-    const params: Record<string, any> = {
+    const params: Record<string, unknown> = {
       state: 'open',
       sort: 'created',
       direction: 'asc',
@@ -50,9 +51,10 @@ export class GitHubProvider implements IVcsProvider {
     });
 
     // Filter out pull requests (which GitHub API returns in issues endpoint)
-    const issues = response.data.filter((item: GitHubIssueResponse) => !item.pull_request);
+    const data = response.data as GitHubIssueResponse[];
+    const issues = data.filter((item) => !item.pull_request);
 
-    return issues.map(this.mapGitHubIssueToVcsIssue);
+    return issues.map((issue) => this.mapGitHubIssueToVcsIssue(issue));
   }
 
   async fetchIssue(issueNumber: number): Promise<VcsIssue> {
@@ -65,9 +67,10 @@ export class GitHubProvider implements IVcsProvider {
         },
       });
 
-      return this.mapGitHubIssueToVcsIssue(response.data);
-    } catch (error: any) {
-      if (error?.response?.status === 404) {
+      return this.mapGitHubIssueToVcsIssue(response.data as GitHubIssueResponse);
+    } catch (error: unknown) {
+      const errorObj = error as Record<string, unknown>;
+      if ((errorObj?.response as Record<string, unknown>)?.status === 404) {
         throw new NotFoundAppException(`Issue #${issueNumber} not found`);
       }
       throw error;
@@ -85,9 +88,9 @@ export class GitHubProvider implements IVcsProvider {
       });
 
       return { ok: true };
-    } catch (error: any) {
-      const errorMessage = error?.message || 'Connection failed';
-      return { ok: false, error: errorMessage };
+    } catch (error: unknown) {
+      const errorMessage = (error as Record<string, unknown>)?.message || 'Connection failed';
+      return { ok: false, error: errorMessage as string };
     }
   }
 

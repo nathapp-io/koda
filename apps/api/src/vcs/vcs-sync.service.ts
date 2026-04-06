@@ -20,8 +20,10 @@ export interface SyncIssueResult {
 export class VcsSyncService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private get db(): any {
-    return this.prisma.client;
+  // PrismaClientLike from @nathapp/nestjs-prisma doesn't expose VCS models,
+  // but they exist at runtime. Using double cast to allow property access.
+  private get db() {
+    return this.prisma.client as unknown as Record<string, unknown>;
   }
 
   /**
@@ -33,7 +35,7 @@ export class VcsSyncService {
     syncMode: 'manual' | 'polling' | 'webhook',
   ): Promise<SyncIssueResult> {
     // Check if issue already exists (deduplication)
-    const existingTicket = await this.db.ticket.findFirst({
+    const existingTicket = await (this.db.ticket as Record<string, unknown>).findFirst({
       where: {
         projectId: project.id,
         externalVcsId: `${issue.number}`,
@@ -49,7 +51,11 @@ export class VcsSyncService {
     }
 
     // Allocate ticket number in transaction
-    const result = await this.db.$transaction(async (tx: any) => {
+    const result = await (
+      this.db.$transaction as unknown as (
+        callback: (tx: unknown) => Promise<Ticket>,
+      ) => Promise<Ticket>
+    )(async (tx) => {
       // Get the current max ticket number for this project
       const lastTicket = await tx.ticket.findFirst({
         where: { projectId: project.id },

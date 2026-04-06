@@ -3,13 +3,51 @@ import { IVcsProvider } from './vcs-provider';
 import { GitHubProvider } from './providers/github.provider';
 
 /**
+ * HTTP client interface for making requests
+ */
+export interface HttpClient {
+  get(url: string, config: { headers: Record<string, string>; params?: Record<string, unknown> }): Promise<{ data: unknown }>;
+}
+
+/**
  * Configuration for creating a VCS provider
  */
 export interface VcsProviderConfig {
   provider: string;
   token: string;
   repoUrl: string;
-  [key: string]: any;
+  [key: string]: unknown;
+  httpClient?: HttpClient;
+}
+
+/**
+ * Create a default HTTP client using native fetch API
+ */
+function createDefaultHttpClient(): HttpClient {
+  return {
+    async get(url: string, config: { headers: Record<string, string>; params?: Record<string, unknown> }): Promise<{ data: unknown }> {
+      const urlObj = new URL(url);
+      if (config.params) {
+        Object.entries(config.params).forEach(([key, value]) => {
+          urlObj.searchParams.append(key, String(value));
+        });
+      }
+
+      const response = await fetch(urlObj.toString(), {
+        method: 'GET',
+        headers: config.headers,
+      });
+
+      if (!response.ok) {
+        const error = new Error(`HTTP ${response.status}`);
+        (error as unknown as Record<string, unknown>).response = { status: response.status };
+        throw error;
+      }
+
+      const data = await response.json();
+      return { data };
+    },
+  };
 }
 
 /**
@@ -36,16 +74,10 @@ export function createVcsProvider(
       );
     }
 
-    // Create a default HTTP client using axios
+    // Create a default HTTP client using fetch
     let httpClient = config.httpClient;
     if (!httpClient) {
-      try {
-        // Dynamically import axios if httpClient not provided
-        const axios = require('axios');
-        httpClient = axios.create();
-      } catch {
-        throw new ValidationAppException('HTTP client not available for GitHub provider');
-      }
+      httpClient = createDefaultHttpClient();
     }
 
     return new GitHubProvider(repoOwner, repoName, config.token, httpClient);

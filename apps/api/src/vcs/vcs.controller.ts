@@ -13,15 +13,18 @@ import {
 import { Principal } from '@nathapp/nestjs-auth';
 import { ConfigService } from '@nestjs/config';
 import { AuthException } from '@nathapp/nestjs-common';
+import { PrismaClient } from '@prisma/client';
 import { VcsConnectionService } from './vcs-connection.service';
 import { VcsSyncService } from './vcs-sync.service';
-import { VcsWebhookService } from './vcs-webhook.service';
+import { VcsWebhookService, GitHubWebhookPayload } from './vcs-webhook.service';
 import { ProjectsService } from '../projects/projects.service';
 import { CreateVcsConnectionDto } from './dto/create-vcs-connection.dto';
 import { UpdateVcsConnectionDto } from './dto/update-vcs-connection.dto';
 import { VcsConnectionResponseDto } from './dto/vcs-connection-response.dto';
 import { TestConnectionResultDto } from './dto/test-connection-result.dto';
 import { SyncResultDto } from './dto/sync-result.dto';
+import { decryptToken } from '../common/utils/encryption.util';
+import { createVcsProvider } from './factory';
 
 @Controller('/projects/:slug/vcs')
 export class VcsController {
@@ -145,8 +148,7 @@ export class VcsController {
   async handleWebhook(
     @Param('slug') slug: string,
     @Headers('x-hub-signature-256') signature: string,
-    @Body() payload: any,
-    @Body() rawPayload?: any,
+    @Body() payload: GitHubWebhookPayload,
   ): Promise<{ success: boolean; ignored?: boolean; reason?: string }> {
     // Get project by slug
     const project = await this.projectsService.findBySlug(slug);
@@ -169,11 +171,13 @@ export class VcsController {
     }
 
     // Get event type
-    const event = (payload as any).action || 'unknown';
+    const event = payload.action || 'unknown';
 
     // Handle webhook
     const result = await this.webhookService.handleWebhook(
-      { ...connection, project } as any,
+      { ...connection, project, id: connection.id } as Parameters<
+        typeof this.webhookService.handleWebhook
+      >[0],
       `issues.${event}`,
       payload,
     );
@@ -204,8 +208,8 @@ export class VcsController {
     }
 
     // Get the full connection with all fields
-    const db: any = (this.vcsService as any).db || this.vcsService['db'];
-    const connection = await db.vcsConnection.findUnique({
+    const db = (this.vcsService as unknown as { db: Record<string, unknown> }).db;
+    const connection = await (db.vcsConnection as unknown as Record<string, unknown>).findUnique({
       where: { projectId: project.id },
     });
 
@@ -214,21 +218,26 @@ export class VcsController {
     }
 
     // Decrypt token and create provider
-    const decryptedToken = require('../common/utils/encryption.util').decryptToken(
-      connection.encryptedToken,
+    const connData = connection as Record<string, unknown>;
+    const decryptedToken = decryptToken(
+      connData.encryptedToken as string,
       encryptionKey,
     );
-    const provider = require('./factory').createVcsProvider(connection.provider, {
-      provider: connection.provider,
+    const provider = createVcsProvider(connData.provider as string, {
+      provider: connData.provider as string,
       token: decryptedToken,
-      repoUrl: `https://github.com/${connection.repoOwner}/${connection.repoName}`,
+      repoUrl: `https://github.com/${connData.repoOwner}/${connData.repoName}`,
     });
 
     // Fetch specific issue
     const issue = await provider.fetchIssue(parseInt(issueNumber, 10));
 
     // Sync the issue (regardless of allowedAuthors per AC)
-    const result = await this.syncService.syncIssue(project as any, issue, 'manual');
+    const result = await this.syncService.syncIssue(
+      project as unknown as Parameters<typeof this.syncService.syncIssue>[0],
+      issue,
+      'manual',
+    );
 
     return {
       issuesSynced: result.action === 'created' ? 1 : 0,
@@ -268,8 +277,8 @@ export class VcsController {
     }
 
     // Get the full connection with all fields
-    const db: any = (this.vcsService as any).db || this.vcsService['db'];
-    const connection = await db.vcsConnection.findUnique({
+    const db = (this.vcsService as unknown as { db: Record<string, unknown> }).db;
+    const connection = await (db.vcsConnection as unknown as Record<string, unknown>).findUnique({
       where: { projectId: project.id },
     });
 
@@ -278,7 +287,11 @@ export class VcsController {
     }
 
     // Run full sync
-    const result = await this.syncService.fullSync(project as any, connection, encryptionKey);
+    const result = await this.syncService.fullSync(
+      project as unknown as Parameters<typeof this.syncService.fullSync>[0],
+      connection as Parameters<typeof this.syncService.fullSync>[1],
+      encryptionKey,
+    );
 
     return {
       issuesSynced: result.issuesSynced,
