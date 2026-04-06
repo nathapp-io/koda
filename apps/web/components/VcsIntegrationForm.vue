@@ -10,9 +10,9 @@
           </SelectTrigger>
         </FormControl>
         <SelectContent>
-          <SelectItem value="github">GitHub</SelectItem>
-          <SelectItem value="gitlab">GitLab</SelectItem>
-          <SelectItem value="bitbucket">Bitbucket</SelectItem>
+          <SelectItem value="github">{{ t('vcs.form.providerGithub') }}</SelectItem>
+          <SelectItem value="gitlab">{{ t('vcs.form.providerGitlab') }}</SelectItem>
+          <SelectItem value="bitbucket">{{ t('vcs.form.providerBitbucket') }}</SelectItem>
         </SelectContent>
       </Select>
       <FormMessage />

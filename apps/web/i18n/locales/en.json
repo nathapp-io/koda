@@ -349,6 +349,9 @@
     "form": {
       "provider": "Provider",
       "providerPlaceholder": "Select a provider",
+      "providerGithub": "GitHub",
+      "providerGitlab": "GitLab",
+      "providerBitbucket": "Bitbucket",
       "owner": "Repository Owner",
       "ownerPlaceholder": "e.g. octocat",
       "repo": "Repository Name",

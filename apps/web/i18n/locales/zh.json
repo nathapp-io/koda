@@ -346,6 +346,9 @@
     "form": {
       "provider": "提供商",
       "providerPlaceholder": "选择提供商",
+      "providerGithub": "GitHub",
+      "providerGitlab": "GitLab",
+      "providerBitbucket": "Bitbucket",
       "owner": "仓库所有者",
       "ownerPlaceholder": "例如 octocat",
       "repo": "仓库名称",
