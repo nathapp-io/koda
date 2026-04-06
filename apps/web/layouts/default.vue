@@ -109,6 +109,13 @@ const backTo = computed(() => {
             <BookOpen class="h-4 w-4 shrink-0" />
             {{ t('nav.kb') }}
           </NuxtLink>
+          <NuxtLink
+            :to="`/${projectSlug}/settings`"
+            :class="navLinkClass"
+            :active-class="activeClass"
+          >
+            {{ t('nav.settings') }}
+          </NuxtLink>
         </template>
       </nav>
 
