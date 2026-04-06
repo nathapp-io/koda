@@ -3,7 +3,7 @@
   "feature": "vcs-phase1-connection-issue-sync",
   "branchName": "feat/vcs-phase1-connection-issue-sync",
   "createdAt": "2026-04-06T00:00:00Z",
-  "updatedAt": "2026-04-06T09:54:50.901Z",
+  "updatedAt": "2026-04-06T10:09:14.173Z",
   "userStories": [
     {
       "id": "VCS-P1-001",
@@ -569,8 +569,8 @@
         "apps/api/src/vcs/vcs-webhook.controller.ts",
         "apps/api/src/vcs/vcs.service.ts"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "escalations": [],
       "attempts": 0,
       "parentStoryId": "VCS-P1-004",
@@ -621,11 +621,13 @@
         "complexity": "medium",
         "testStrategy": "three-session-tdd-lite",
         "reasoning": "Two REST endpoints with straightforward delegation to syncIssue() and the polling run logic. ~150 LOC. No new abstractions; primary risk is the 409 conflict path and the SyncResultDto shape.",
-        "modelTier": "balanced"
+        "modelTier": "balanced",
+        "initialComplexity": "medium"
       },
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "cc267580ef58434260b717c0329ebe46d6e6ae5b"
     },
     {
       "id": "VCS-P1-005",
