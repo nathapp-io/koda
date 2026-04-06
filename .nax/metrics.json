@@ -1752,5 +1752,17 @@
       "cache_read_input_tokens": 5593291,
       "cache_creation_input_tokens": 191952
     }
+  },
+  {
+    "runId": "run-2026-04-06T13-20-55-706Z",
+    "feature": "vcs-phase1-connection-issue-sync",
+    "startedAt": "2026-04-06T13:20:55.706Z",
+    "completedAt": "2026-04-06T13:21:34.512Z",
+    "totalCost": 0,
+    "totalStories": 0,
+    "storiesCompleted": 0,
+    "storiesFailed": 1,
+    "totalDurationMs": 38806,
+    "stories": []
   }
 ]
