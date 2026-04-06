@@ -11,6 +11,12 @@ import {
   Headers,
   ConflictException,
 } from '@nestjs/common';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+} from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
 import { ConfigService } from '@nestjs/config';
 import { AuthException } from '@nathapp/nestjs-common';
@@ -27,6 +33,8 @@ import { SyncResultDto } from './dto/sync-result.dto';
 import { decryptToken } from '../common/utils/encryption.util';
 import { createVcsProvider } from './factory';
 
+@ApiTags('vcs')
+@ApiBearerAuth()
 @Controller('/projects/:slug/vcs')
 export class VcsController {
   constructor(
@@ -188,6 +196,10 @@ export class VcsController {
    * Manually sync a specific issue
    */
   @Post('/sync/:issueNumber')
+  @ApiOperation({ summary: 'Manually sync a specific issue by number' })
+  @ApiResponse({ status: 200, description: 'Issue synced successfully', type: SyncResultDto })
+  @ApiResponse({ status: 404, description: 'Project or VCS connection not found' })
+  @ApiResponse({ status: 409, description: 'Issue already synced (externalVcsId exists)' })
   async syncIssue(
     @Param('slug') slug: string,
     @Param('issueNumber') issueNumber: string,
@@ -246,6 +258,9 @@ export class VcsController {
    * Trigger full sync run
    */
   @Post('/sync')
+  @ApiOperation({ summary: 'Trigger a full sync of all issues from the VCS provider' })
+  @ApiResponse({ status: 200, description: 'Full sync completed', type: SyncResultDto })
+  @ApiResponse({ status: 404, description: 'Project or VCS connection not found' })
   async syncAll(
     @Param('slug') slug: string,
     @Principal('userId') userId?: string,
