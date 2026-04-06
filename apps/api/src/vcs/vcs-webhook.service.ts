@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { createHmac } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { VcsConnection, Project } from '@prisma/client';
 import { VcsSyncService } from './vcs-sync.service';
@@ -41,12 +41,26 @@ export class VcsWebhookService {
   }
 
   /**
-   * Verify GitHub webhook signature
+   * Verify GitHub webhook signature using timing-safe comparison
    */
   verifySignature(payload: string, signature: string, secret: string): boolean {
-    const hash = createHmac('sha256', secret).update(payload).digest('hex');
-    const expectedSignature = `sha256=${hash}`;
-    return expectedSignature === signature;
+    try {
+      const hash = createHmac('sha256', secret).update(payload).digest('hex');
+      const expectedSignature = `sha256=${hash}`;
+
+      // Use timing-safe comparison to prevent timing attacks
+      const expected = Buffer.from(expectedSignature);
+      const received = Buffer.from(signature);
+
+      // Signatures must be same length for comparison
+      if (expected.length !== received.length) {
+        return false;
+      }
+
+      return timingSafeEqual(expected, received);
+    } catch {
+      return false;
+    }
   }
 
   /**

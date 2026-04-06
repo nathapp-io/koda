@@ -156,18 +156,15 @@ export class VcsController {
     // Get VCS connection
     const connection = await this.vcsService.findByProject(project.id);
 
-    // Verify signature (would need raw payload as string)
-    // For now, skip verification - in production, middleware would handle this
-    if (signature) {
-      const isValid = this.webhookService.verifySignature(
-        JSON.stringify(payload),
-        signature,
-        connection.webhookSecret || '',
-      );
+    // Verify signature using timing-safe comparison
+    const isValid = this.webhookService.verifySignature(
+      JSON.stringify(payload),
+      signature || '',
+      connection.webhookSecret || '',
+    );
 
-      if (!isValid) {
-        throw new AuthException({}, 'vcs_webhook');
-      }
+    if (!isValid) {
+      throw new AuthException({}, 'vcs_webhook');
     }
 
     // Get event type
