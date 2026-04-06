@@ -5,3 +5,4 @@
 
 export { IVcsProvider } from './vcs-provider';
 export type { VcsIssue } from './types';
+export type { VcsPullRequest, CreatePrParams } from './types';

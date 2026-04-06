@@ -7,6 +7,7 @@ import { GitHubProvider } from './providers/github.provider';
  */
 export interface HttpClient {
   get(url: string, config: { headers: Record<string, string>; params?: Record<string, unknown> }): Promise<{ data: unknown }>;
+  post(url: string, config: { headers: Record<string, string>; body: unknown }): Promise<{ data: unknown }>;
 }
 
 /**
@@ -36,6 +37,22 @@ function createDefaultHttpClient(): HttpClient {
       const response = await fetch(urlObj.toString(), {
         method: 'GET',
         headers: config.headers,
+      });
+
+      if (!response.ok) {
+        const error = new Error(`HTTP ${response.status}`);
+        (error as unknown as Record<string, unknown>).response = { status: response.status };
+        throw error;
+      }
+
+      const data = await response.json();
+      return { data };
+    },
+    async post(url: string, config: { headers: Record<string, string>; body: unknown }): Promise<{ data: unknown }> {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: config.headers,
+        body: JSON.stringify(config.body),
       });
 
       if (!response.ok) {

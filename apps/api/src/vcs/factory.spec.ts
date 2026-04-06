@@ -187,6 +187,7 @@ describe('createVcsProvider factory', () => {
     it('should accept and use a custom HTTP client in config', () => {
       const mockHttpClient = {
         get: jest.fn(),
+        post: jest.fn(),
       };
 
       const configWithClient: VcsProviderConfig = {

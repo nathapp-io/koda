@@ -1,5 +1,5 @@
 import { IVcsProvider } from './vcs-provider';
-import { VcsIssue } from './types';
+import { VcsIssue, VcsPullRequest, CreatePrParams } from './types';
 
 describe('VcsIssue Type', () => {
   describe('VcsIssue type structure', () => {
@@ -124,7 +124,6 @@ describe('VcsIssue Type', () => {
         createdAt: new Date(),
       };
       expect(issue).toBeDefined();
-      // Verify all required fields are present
       expect(issue.number).toBeDefined();
       expect(issue.title).toBeDefined();
       expect(issue.body).toBeDefined();
@@ -139,7 +138,6 @@ describe('VcsIssue Type', () => {
 describe('IVcsProvider Interface', () => {
   describe('IVcsProvider interface structure', () => {
     it('should define fetchIssues method with optional since parameter', () => {
-      // Create a minimal implementation to test the interface contract
       class MockVcsProvider implements IVcsProvider {
         async fetchIssues(since?: Date): Promise<VcsIssue[]> {
           return [];
@@ -151,6 +149,14 @@ describe('IVcsProvider Interface', () => {
 
         async testConnection(): Promise<{ ok: boolean; error?: string }> {
           return { ok: true };
+        }
+
+        async getDefaultBranch(): Promise<string> {
+          return 'main';
+        }
+
+        async createPullRequest(params: CreatePrParams): Promise<VcsPullRequest> {
+          throw new Error('Not implemented');
         }
       }
 
@@ -182,6 +188,14 @@ describe('IVcsProvider Interface', () => {
         async testConnection(): Promise<{ ok: boolean; error?: string }> {
           return { ok: true };
         }
+
+        async getDefaultBranch(): Promise<string> {
+          return 'main';
+        }
+
+        async createPullRequest(params: CreatePrParams): Promise<VcsPullRequest> {
+          throw new Error('Not implemented');
+        }
       }
 
       const provider = new MockVcsProvider();
@@ -205,6 +219,14 @@ describe('IVcsProvider Interface', () => {
 
         async testConnection(): Promise<{ ok: boolean; error?: string }> {
           return { ok: true };
+        }
+
+        async getDefaultBranch(): Promise<string> {
+          return 'main';
+        }
+
+        async createPullRequest(params: CreatePrParams): Promise<VcsPullRequest> {
+          throw new Error('Not implemented');
         }
       }
 
@@ -235,6 +257,14 @@ describe('IVcsProvider Interface', () => {
         async testConnection(): Promise<{ ok: boolean; error?: string }> {
           return { ok: true };
         }
+
+        async getDefaultBranch(): Promise<string> {
+          return 'main';
+        }
+
+        async createPullRequest(params: CreatePrParams): Promise<VcsPullRequest> {
+          throw new Error('Not implemented');
+        }
       }
 
       const provider = new MockVcsProvider();
@@ -262,6 +292,14 @@ describe('IVcsProvider Interface', () => {
         async testConnection(): Promise<{ ok: boolean; error?: string }> {
           return { ok: true };
         }
+
+        async getDefaultBranch(): Promise<string> {
+          return 'main';
+        }
+
+        async createPullRequest(params: CreatePrParams): Promise<VcsPullRequest> {
+          throw new Error('Not implemented');
+        }
       }
 
       const provider = new MockVcsProvider();
@@ -283,6 +321,14 @@ describe('IVcsProvider Interface', () => {
         async testConnection(): Promise<{ ok: boolean; error?: string }> {
           return { ok: true };
         }
+
+        async getDefaultBranch(): Promise<string> {
+          return 'main';
+        }
+
+        async createPullRequest(params: CreatePrParams): Promise<VcsPullRequest> {
+          throw new Error('Not implemented');
+        }
       }
 
       const provider = new MockVcsProvider();
@@ -301,6 +347,14 @@ describe('IVcsProvider Interface', () => {
 
         async testConnection(): Promise<{ ok: boolean; error?: string }> {
           return { ok: true, error: undefined };
+        }
+
+        async getDefaultBranch(): Promise<string> {
+          return 'main';
+        }
+
+        async createPullRequest(params: CreatePrParams): Promise<VcsPullRequest> {
+          throw new Error('Not implemented');
         }
       }
 
@@ -323,6 +377,14 @@ describe('IVcsProvider Interface', () => {
         async testConnection(): Promise<{ ok: boolean; error?: string }> {
           return { ok: false, error: 'Connection failed' };
         }
+
+        async getDefaultBranch(): Promise<string> {
+          return 'main';
+        }
+
+        async createPullRequest(params: CreatePrParams): Promise<VcsPullRequest> {
+          throw new Error('Not implemented');
+        }
       }
 
       const provider = new MockVcsProvider();
@@ -335,7 +397,6 @@ describe('IVcsProvider Interface', () => {
 
 describe('VcsIssue and IVcsProvider exports', () => {
   it('should export VcsIssue type', () => {
-    // VcsIssue is imported from types
     const issue: VcsIssue = {
       number: 1,
       title: 'Test',
@@ -360,6 +421,14 @@ describe('VcsIssue and IVcsProvider exports', () => {
 
       async testConnection(): Promise<{ ok: boolean; error?: string }> {
         return { ok: true };
+      }
+
+      async getDefaultBranch(): Promise<string> {
+        return 'main';
+      }
+
+      async createPullRequest(params: CreatePrParams): Promise<VcsPullRequest> {
+        throw new Error('Not implemented');
       }
     }
     expect(TestProvider).toBeDefined();

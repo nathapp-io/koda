@@ -1,6 +1,6 @@
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { IVcsProvider } from '../vcs-provider';
-import { VcsIssue } from '../types';
+import { VcsIssue, VcsPullRequest, CreatePrParams } from '../types';
 import { HttpClient } from '../factory';
 
 /**
@@ -92,6 +92,14 @@ export class GitHubProvider implements IVcsProvider {
       const errorMessage = (error as Record<string, unknown>)?.message || 'Connection failed';
       return { ok: false, error: errorMessage as string };
     }
+  }
+
+  async getDefaultBranch(): Promise<string> {
+    throw new Error('Method not implemented');
+  }
+
+  async createPullRequest(params: CreatePrParams): Promise<VcsPullRequest> {
+    throw new Error('Method not implemented');
   }
 
   private mapGitHubIssueToVcsIssue(gitHubIssue: GitHubIssueResponse): VcsIssue {
