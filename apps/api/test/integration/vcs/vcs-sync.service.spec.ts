@@ -118,7 +118,7 @@ describe('VcsSyncService.syncIssue', () => {
 
       // Mock transaction
       ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: Function) => {
+        async (callback: (client: any) => Promise<any>) => {
           mockTicketDelegate.findFirst.mockResolvedValueOnce(null); // No existing tickets
           return callback(prismaService.client);
         },
@@ -178,7 +178,7 @@ describe('VcsSyncService.syncIssue', () => {
 
         mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
         ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-          async (callback: Function) => {
+          async (callback: (client: any) => Promise<any>) => {
             mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
             return callback(prismaService.client);
           },
@@ -230,7 +230,7 @@ describe('VcsSyncService.syncIssue', () => {
       mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
 
       ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: Function) => {
+        async (callback: (client: any) => Promise<any>) => {
           mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
           return callback(prismaService.client);
         },
@@ -280,7 +280,7 @@ describe('VcsSyncService.syncIssue', () => {
       mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
 
       ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: Function) => {
+        async (callback: (client: any) => Promise<any>) => {
           mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
           return callback(prismaService.client);
         },
@@ -330,7 +330,7 @@ describe('VcsSyncService.syncIssue', () => {
       mockTicketDelegate.findFirst.mockResolvedValueOnce(null); // No existing ticket
 
       ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: Function) => {
+        async (callback: (client: any) => Promise<any>) => {
           mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
           return callback(prismaService.client);
         },
@@ -392,7 +392,7 @@ describe('VcsSyncService.syncIssue', () => {
       mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
 
       ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: Function) => {
+        async (callback: (client: any) => Promise<any>) => {
           mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
           return callback(prismaService.client);
         },
@@ -479,7 +479,7 @@ describe('VcsSyncService.syncIssue', () => {
       mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
 
       ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: Function) => {
+        async (callback: (client: any) => Promise<any>) => {
           mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
           return callback(prismaService.client);
         },
@@ -526,7 +526,7 @@ describe('VcsSyncService.syncIssue', () => {
       mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
 
       ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: Function) => {
+        async (callback: (client: any) => Promise<any>) => {
           mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
           return callback(prismaService.client);
         },
@@ -575,7 +575,7 @@ describe('VcsSyncService.syncIssue', () => {
       mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
 
       ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: Function) => {
+        async (callback: (client: any) => Promise<any>) => {
           mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
           return callback(prismaService.client);
         },
@@ -634,7 +634,7 @@ describe('VcsSyncService.syncIssue', () => {
       mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
 
       ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: Function) => {
+        async (callback: (client: any) => Promise<any>) => {
           mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
           return callback(prismaService.client);
         },
@@ -686,7 +686,7 @@ describe('VcsSyncService.syncIssue', () => {
       mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
 
       ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: Function) => {
+        async (callback: (client: any) => Promise<any>) => {
           mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
           return callback(prismaService.client);
         },
@@ -758,9 +758,9 @@ describe('VcsSyncService.syncIssue', () => {
 
       mockTicketDelegate.findFirst.mockResolvedValueOnce(null); // Deduplication check
 
-      let transactionCallbackArg: Function;
+      let transactionCallbackArg: (client: any) => Promise<any>;
       ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: Function) => {
+        async (callback: (client: any) => Promise<any>) => {
           transactionCallbackArg = callback;
           mockTicketDelegate.findFirst.mockResolvedValueOnce(lastTicketInProject); // In transaction
           mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
@@ -815,7 +815,7 @@ describe('VcsSyncService.syncIssue', () => {
       mockTicketDelegate.findFirst.mockResolvedValueOnce(null); // Deduplication check
 
       ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: Function) => {
+        async (callback: (client: any) => Promise<any>) => {
           mockTicketDelegate.findFirst.mockResolvedValueOnce(null); // No existing tickets
           mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
           return callback(prismaService.client);
@@ -856,7 +856,7 @@ describe('VcsSyncService.syncIssue', () => {
       mockTicketDelegate.findFirst.mockResolvedValueOnce(null); // Deduplication check
 
       ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: Function) => {
+        async (callback: (client: any) => Promise<any>) => {
           // Verify callback receives the transactional client
           mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
           mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
@@ -923,7 +923,7 @@ describe('VcsSyncService.syncIssue', () => {
       mockTicketDelegate.findFirst.mockResolvedValueOnce(null); // Deduplication check
 
       ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: Function) => {
+        async (callback: (client: any) => Promise<any>) => {
           mockTicketDelegate.findFirst.mockResolvedValueOnce(null); // No tickets in projectId
           mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
           return callback(prismaService.client);
@@ -998,7 +998,7 @@ describe('VcsSyncService.syncIssue', () => {
       mockTicketDelegate.findFirst.mockResolvedValueOnce(null); // Deduplication check
 
       ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: Function) => {
+        async (callback: (client: any) => Promise<any>) => {
           mockTicketDelegate.findFirst.mockResolvedValueOnce(lastTicket); // Returns soft-deleted ticket
           mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
           return callback(prismaService.client);
@@ -1051,7 +1051,7 @@ describe('VcsSyncService.syncIssue', () => {
         mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
 
         ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-          async (callback: Function) => {
+          async (callback: (client: any) => Promise<any>) => {
             mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
             mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
             return callback(prismaService.client);
@@ -1113,7 +1113,7 @@ describe('VcsSyncService.syncIssue', () => {
         mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
 
         ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-          async (callback: Function) => {
+          async (callback: (client: any) => Promise<any>) => {
             mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
             mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
             return callback(prismaService.client);
