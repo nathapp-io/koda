@@ -219,6 +219,11 @@ export class VcsController {
     // Sync the issue (regardless of allowedAuthors per AC)
     const result = await this.syncService.syncIssue(project as Project, issue, 'manual');
 
+    // Return HTTP 409 if issue is already synced
+    if (result.action === 'skipped') {
+      throw new ConflictException('Issue is already synced');
+    }
+
     return {
       issuesSynced: result.action === 'created' ? 1 : 0,
       issuesSkipped: result.action === 'skipped' ? 1 : 0,
