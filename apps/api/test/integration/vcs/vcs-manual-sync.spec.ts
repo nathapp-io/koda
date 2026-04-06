@@ -93,8 +93,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
   };
 
   beforeEach(async () => {
-    jest.clearAllMocks();
-
+    // Create mock services
     const mockSyncServiceInstance = {
       syncIssue: jest.fn(),
       fullSync: jest.fn(),
