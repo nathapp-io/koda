@@ -9,7 +9,6 @@ import {
   HttpCode,
   HttpStatus,
   Headers,
-  ConflictException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -237,7 +236,7 @@ export class VcsController {
 
     // Return HTTP 409 if issue is already synced
     if (result.action === 'skipped') {
-      throw new ConflictException();
+      throw new ValidationAppException({}, 'vcs');
     }
 
     // Issue was successfully created
