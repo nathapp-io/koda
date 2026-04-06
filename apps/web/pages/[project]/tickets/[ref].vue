@@ -24,6 +24,7 @@ interface Ticket {
   gitRefFile?: string | null
   gitRefLine?: number | null
   gitRefUrl?: string | null
+  externalVcsUrl?: string | null
   [key: string]: unknown
 }
 

@@ -12,6 +12,7 @@ interface Ticket {
   type: 'BUG' | 'ENHANCEMENT'
   priority: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
   assignee?: Assignee | null
+  externalVcsUrl?: string | null
 }
 
 const props = defineProps<{ ticket: Ticket }>()

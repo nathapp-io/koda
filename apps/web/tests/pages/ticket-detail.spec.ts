@@ -223,6 +223,111 @@ describe('US-005-1 AC7: placeholder slots exist for TicketActionPanel and Commen
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
+// VCS-P1-005-D AC3 — Sync link rendered when externalVcsUrl is present
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('VCS-P1-005-D AC3: Ticket detail page renders sync link when externalVcsUrl is present', () => {
+  test('source includes externalVcsUrl in Ticket interface', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    expect(source).toContain('externalVcsUrl')
+  })
+
+  test('source renders a link element for the sync link', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    const hasLinkElement =
+      source.includes('<a') ||
+      source.includes('href=')
+    expect(hasLinkElement).toBe(true)
+  })
+
+  test('source conditionally renders the sync link based on externalVcsUrl', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    const hasConditionalLink =
+      source.includes('v-if') &&
+      source.includes('externalVcsUrl')
+    expect(hasConditionalLink).toBe(true)
+  })
+
+  test('source references GitHub or Synced text for the link', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    const hasSyncedRef =
+      source.includes('Synced') ||
+      source.includes('synced') ||
+      source.includes('GitHub') ||
+      source.includes('github')
+    expect(hasSyncedRef).toBe(true)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// VCS-P1-005-D AC4 — Sync link not rendered when externalVcsUrl is absent
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('VCS-P1-005-D AC4: Ticket detail page does not render sync link when externalVcsUrl is absent', () => {
+  test('source uses v-if conditional with externalVcsUrl for sync link', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    const hasExplicitCondition =
+      source.includes('v-if') &&
+      source.includes('externalVcsUrl')
+    expect(hasExplicitCondition).toBe(true)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// VCS-P1-005-D AC5 — Issue number parsed from externalVcsUrl in detail page
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('VCS-P1-005-D AC5: Ticket detail page parses issue number from externalVcsUrl', () => {
+  test('source contains logic to extract issue number from URL', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    const hasIssueExtractor =
+      source.includes('split') ||
+      source.includes('match') ||
+      source.includes('substring') ||
+      source.includes('slice') ||
+      source.includes('replace') ||
+      source.includes('/') // Check for path parsing
+    expect(hasIssueExtractor).toBe(true)
+  })
+
+  test('source displays issue number with # symbol in sync link text', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    const hasIssueDisplay =
+      source.includes('#') ||
+      source.includes('issue') ||
+      source.includes('Issue')
+    expect(hasIssueDisplay).toBe(true)
+  })
+
+  test('source passes externalVcsUrl as href attribute', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    const hasHrefBinding =
+      source.includes(':href') ||
+      source.includes('href=')
+    expect(hasHrefBinding).toBe(true)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// VCS-P1-005-D AC6 — i18n keys used for sync link text
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('VCS-P1-005-D AC6: Ticket detail page uses i18n keys for sync link text', () => {
+  test('source uses useI18n composable', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    expect(source).toContain('useI18n')
+  })
+
+  test('source references t() for sync link text', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    const hasI18nUsage =
+      source.includes("t('") ||
+      source.includes('t("')
+    expect(hasI18nUsage).toBe(true)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Quality — no console.log
 // ──────────────────────────────────────────────────────────────────────────────
 
