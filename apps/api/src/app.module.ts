@@ -17,10 +17,12 @@ import { HealthModule } from './health/health.module';
 import { RagModule } from './rag/rag.module';
 import { WebhookModule } from './webhook/webhook.module';
 import { CiWebhookModule } from './ci-webhook/ci-webhook.module';
+import { VcsModule } from './vcs/vcs.module';
 import { appConfig } from './config/app.config';
 import { authConfig } from './config/auth.config';
 import { databaseConfig } from './config/database.config';
 import { ragConfig } from './config/rag.config';
+import { vcsConfig } from './config/vcs.config';
 import { validate } from './config/env.validation';
 
 @Module({
@@ -28,7 +30,7 @@ import { validate } from './config/env.validation';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
-      load: [appConfig, authConfig, databaseConfig, ragConfig],
+      load: [appConfig, authConfig, databaseConfig, ragConfig, vcsConfig],
       validate: validate,
     }),
     I18nCoreModule.forRoot({
@@ -59,6 +61,7 @@ import { validate } from './config/env.validation';
     RagModule,
     WebhookModule,
     CiWebhookModule,
+    VcsModule,
   ],
 })
 export class AppModule {}
