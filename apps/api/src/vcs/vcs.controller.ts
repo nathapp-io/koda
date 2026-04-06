@@ -224,11 +224,12 @@ export class VcsController {
       throw new ConflictException('Issue is already synced');
     }
 
+    // Issue was successfully created
     return {
-      issuesSynced: result.action === 'created' ? 1 : 0,
-      issuesSkipped: result.action === 'skipped' ? 1 : 0,
+      issuesSynced: 1,
+      issuesSkipped: 0,
       createdTickets:
-        result.action === 'created' && result.ticketId && result.ticketNumber
+        result.ticketId && result.ticketNumber
           ? [
               {
                 id: result.ticketId,

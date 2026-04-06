@@ -16,13 +16,14 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConflictException } from '@nestjs/common';
 import { VcsController } from '../../../src/vcs/vcs.controller';
 import { VcsConnectionService } from '../../../src/vcs/vcs-connection.service';
 import { VcsSyncService, SyncIssueResult } from '../../../src/vcs/vcs-sync.service';
 import { VcsWebhookService } from '../../../src/vcs/vcs-webhook.service';
 import { ProjectsService } from '../../../src/projects/projects.service';
 import { ConfigService } from '@nestjs/config';
-import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { VcsIssue } from '../../../src/vcs/types';
 import { Project, VcsConnection } from '@prisma/client';
 
@@ -163,13 +164,6 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
         syncService.syncIssue.mockResolvedValue(syncResult);
 
-        // Note: The test calls the controller method, which internally:
-        // 1. Gets project by slug
-        // 2. Gets VCS connection
-        // 3. Creates provider from connection
-        // 4. Fetches issue from provider
-        // 5. Calls syncService.syncIssue()
-
         const result = await controller.syncIssue(mockProject.slug, issueNumber);
 
         // Verify the result includes the synced ticket
@@ -181,8 +175,8 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
       });
 
       it('should bypass allowedAuthors filter and sync any issue', async () => {
-        // The acceptance criteria states that allowedAuthors should be bypassed
-        // for manual sync. This means even if the issue author is not in allowedAuthors,
+        // AC1 requires that allowedAuthors should be bypassed for manual sync.
+        // This means even if the issue author is not in allowedAuthors,
         // it should still be synced.
 
         const issueNumber = '42';
@@ -206,10 +200,31 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         expect(syncService.syncIssue).toHaveBeenCalled();
         expect(result.issuesSynced).toBe(1);
       });
+
+      it('should call syncIssue with manual source regardless of author', async () => {
+        const issueNumber = '42';
+        const syncResult: SyncIssueResult = {
+          action: 'created',
+          ticketId: 'ticket-123',
+          ticketNumber: 1,
+        };
+
+        vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
+        syncService.syncIssue.mockResolvedValue(syncResult);
+
+        await controller.syncIssue(mockProject.slug, issueNumber);
+
+        // Verify syncIssue was called with 'manual' mode
+        expect(syncService.syncIssue).toHaveBeenCalledWith(
+          mockProject,
+          expect.objectContaining({ number: 42 }),
+          'manual'
+        );
+      });
     });
 
     describe('AC2: Returns HTTP 409 when issue already synced', () => {
-      it('should return 409 Conflict when issue has externalVcsId', async () => {
+      it('should throw ConflictException when issue is already synced', async () => {
         const issueNumber = '42';
         const syncResult: SyncIssueResult = {
           action: 'skipped',
@@ -219,11 +234,9 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
         syncService.syncIssue.mockResolvedValue(syncResult);
 
-        const result = await controller.syncIssue(mockProject.slug, issueNumber);
-
-        expect(result.issuesSynced).toBe(0);
-        expect(result.issuesSkipped).toBe(1);
-        expect(result.createdTickets).toHaveLength(0);
+        await expect(controller.syncIssue(mockProject.slug, issueNumber)).rejects.toThrow(
+          ConflictException
+        );
       });
 
       it('should indicate skip in response when issue is duplicate', async () => {
@@ -236,10 +249,9 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
         syncService.syncIssue.mockResolvedValue(syncResult);
 
-        const result = await controller.syncIssue(mockProject.slug, issueNumber);
-
-        expect(result.issuesSynced).toBe(0);
-        expect(result.issuesSkipped).toBe(1);
+        await expect(controller.syncIssue(mockProject.slug, issueNumber)).rejects.toThrow(
+          ConflictException
+        );
       });
     });
 
@@ -313,6 +325,23 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         expect(typeof result.issuesSkipped).toBe('number');
         expect(Array.isArray(result.createdTickets)).toBe(true);
       });
+
+      it('should have issuesSynced=1 when ticket is created successfully', async () => {
+        const issueNumber = '42';
+        const syncResult: SyncIssueResult = {
+          action: 'created',
+          ticketId: 'ticket-123',
+          ticketNumber: 1,
+        };
+
+        vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
+        syncService.syncIssue.mockResolvedValue(syncResult);
+
+        const result = await controller.syncIssue(mockProject.slug, issueNumber);
+
+        expect(result.issuesSynced).toBe(1);
+        expect(result.issuesSkipped).toBe(0);
+      });
     });
 
     describe('Error Handling', () => {
@@ -385,7 +414,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         );
       });
 
-      it('should call syncIssue for each issue via fullSync', async () => {
+      it('should call fullSync with correct parameters', async () => {
         const fullSyncResult = {
           issuesSynced: 2,
           issuesSkipped: 1,
