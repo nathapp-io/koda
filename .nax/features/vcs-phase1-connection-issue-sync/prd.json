@@ -3,7 +3,7 @@
   "feature": "vcs-phase1-connection-issue-sync",
   "branchName": "feat/vcs-phase1-connection-issue-sync",
   "createdAt": "2026-04-06T00:00:00Z",
-  "updatedAt": "2026-04-06T09:28:06.581Z",
+  "updatedAt": "2026-04-06T09:42:00.504Z",
   "userStories": [
     {
       "id": "VCS-P1-001",
@@ -483,8 +483,8 @@
         "apps/api/src/vcs/vcs.service.ts",
         "apps/api/src/vcs/vcs-connection.service.ts"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "escalations": [],
       "attempts": 0,
       "parentStoryId": "VCS-P1-004",
@@ -534,11 +534,13 @@
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
         "reasoning": "Integrates SchedulerRegistry with dynamic interval management, allowedAuthors filtering, audit logging, and error-path divergence. ~220 LOC across service + integration tests.",
-        "modelTier": "balanced"
+        "modelTier": "balanced",
+        "initialComplexity": "complex"
       },
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "4dcf5c34e4cb1483bce8ad15bcd2d97b134cd28d"
     },
     {
       "id": "VCS-P1-004-C",
