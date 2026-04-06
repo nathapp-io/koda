@@ -3,7 +3,7 @@
   "feature": "vcs-phase1-connection-issue-sync",
   "branchName": "feat/vcs-phase1-connection-issue-sync",
   "createdAt": "2026-04-06T00:00:00Z",
-  "updatedAt": "2026-04-06T11:15:22.841Z",
+  "updatedAt": "2026-04-06T11:25:03.980Z",
   "userStories": [
     {
       "id": "VCS-P1-001",
@@ -769,8 +769,8 @@
         "apps/cli/src/generated/",
         "apps/cli/src/index.ts"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "escalations": [],
       "attempts": 0,
       "parentStoryId": "VCS-P1-005",
@@ -822,11 +822,13 @@
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
         "reasoning": "New page with multi-field form, conditional create/update logic, two async action buttons with distinct toast outcomes, and pre-fill on load. ~300 LOC across page + composable.",
-        "modelTier": "balanced"
+        "modelTier": "balanced",
+        "initialComplexity": "complex"
       },
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "58e5ad881fc40ceabddfe96f61e7145d7bbfed58"
     },
     {
       "id": "VCS-P1-005-D",

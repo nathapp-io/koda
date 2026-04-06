@@ -337,6 +337,62 @@
       "colorInvalid": "Invalid hex color format. Must be # followed by 6 hex digits"
     }
   },
+  "vcs": {
+    "tab": "VCS Integration",
+    "title": "VCS Integration Settings",
+    "description": "Configure your Version Control System integration",
+    "form": {
+      "provider": "Provider",
+      "providerPlaceholder": "Select a provider",
+      "owner": "Repository Owner",
+      "ownerPlaceholder": "e.g. octocat",
+      "repo": "Repository Name",
+      "repoPlaceholder": "e.g. hello-world",
+      "token": "Personal Access Token",
+      "tokenPlaceholder": "••••••••",
+      "syncMode": "Sync Mode",
+      "syncModePolling": "Polling (automatic periodic sync)",
+      "syncModeWebhook": "Webhook (event-based sync)",
+      "pollingInterval": "Polling Interval (seconds)",
+      "pollingIntervalPlaceholder": "300",
+      "authors": "Filter Authors (comma-separated, optional)",
+      "authorsPlaceholder": "e.g. john,jane,bot",
+      "testConnection": "Test Connection",
+      "syncNow": "Sync Now",
+      "submit": "Save Connection",
+      "update": "Update Connection",
+      "disconnect": "Disconnect",
+      "testing": "Testing...",
+      "syncing": "Syncing..."
+    },
+    "validation": {
+      "providerRequired": "Please select a provider",
+      "ownerRequired": "Repository owner is required",
+      "repoRequired": "Repository name is required",
+      "tokenRequired": "Personal access token is required",
+      "syncModeRequired": "Please select a sync mode",
+      "pollingIntervalRequired": "Polling interval is required",
+      "pollingIntervalMin": "Polling interval must be at least 60 seconds",
+      "pollingIntervalMax": "Polling interval must not exceed 86400 seconds"
+    },
+    "toast": {
+      "connectionSuccess": "VCS connection configured successfully",
+      "connectionFailed": "Failed to configure VCS connection",
+      "connectionTestSuccess": "Connection successful",
+      "connectionTestFailed": "Connection failed: {error}",
+      "syncStarted": "Sync started",
+      "syncComplete": "Sync complete: {created} created, {updated} updated, {skipped} skipped",
+      "syncFailed": "Sync failed: {error}",
+      "disconnectSuccess": "VCS connection removed",
+      "disconnectFailed": "Failed to remove VCS connection"
+    },
+    "status": {
+      "connected": "Connected",
+      "notConnected": "Not connected",
+      "lastSync": "Last sync: {time}",
+      "neverSynced": "Never synced"
+    }
+  },
   "toast": {
     "loggedIn": "Logged in successfully"
   }

@@ -334,6 +334,62 @@
       "colorInvalid": "无效的十六进制颜色格式。必须是 # 开头后跟 6 位十六进制数字"
     }
   },
+  "vcs": {
+    "tab": "VCS 集成",
+    "title": "VCS 集成设置",
+    "description": "配置您的版本控制系统集成",
+    "form": {
+      "provider": "提供商",
+      "providerPlaceholder": "选择提供商",
+      "owner": "仓库所有者",
+      "ownerPlaceholder": "例如 octocat",
+      "repo": "仓库名称",
+      "repoPlaceholder": "例如 hello-world",
+      "token": "个人访问令牌",
+      "tokenPlaceholder": "••••••••",
+      "syncMode": "同步模式",
+      "syncModePolling": "轮询（定期自动同步）",
+      "syncModeWebhook": "Webhook（基于事件的同步）",
+      "pollingInterval": "轮询间隔（秒）",
+      "pollingIntervalPlaceholder": "300",
+      "authors": "筛选作者（逗号分隔，可选）",
+      "authorsPlaceholder": "例如 john,jane,bot",
+      "testConnection": "测试连接",
+      "syncNow": "立即同步",
+      "submit": "保存连接",
+      "update": "更新连接",
+      "disconnect": "断开连接",
+      "testing": "正在测试...",
+      "syncing": "正在同步..."
+    },
+    "validation": {
+      "providerRequired": "请选择提供商",
+      "ownerRequired": "仓库所有者必填",
+      "repoRequired": "仓库名称必填",
+      "tokenRequired": "个人访问令牌必填",
+      "syncModeRequired": "请选择同步模式",
+      "pollingIntervalRequired": "轮询间隔必填",
+      "pollingIntervalMin": "轮询间隔最少 60 秒",
+      "pollingIntervalMax": "轮询间隔不超过 86400 秒"
+    },
+    "toast": {
+      "connectionSuccess": "VCS 连接配置成功",
+      "connectionFailed": "配置 VCS 连接失败",
+      "connectionTestSuccess": "连接成功",
+      "connectionTestFailed": "连接失败：{error}",
+      "syncStarted": "开始同步",
+      "syncComplete": "同步完成：{created} 个新增，{updated} 个更新，{skipped} 个跳过",
+      "syncFailed": "同步失败：{error}",
+      "disconnectSuccess": "VCS 连接已移除",
+      "disconnectFailed": "移除 VCS 连接失败"
+    },
+    "status": {
+      "connected": "已连接",
+      "notConnected": "未连接",
+      "lastSync": "最后同步：{time}",
+      "neverSynced": "从未同步"
+    }
+  },
   "toast": {
     "loggedIn": "登录成功"
   }
