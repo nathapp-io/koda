@@ -181,9 +181,18 @@ describe('GitHubProvider PR Methods', () => {
         mockHttpClient.get.mockResolvedValue({
           data: { default_branch: 'main' },
         });
-        mockHttpClient.post.mockResolvedValue({
-          data: { ref: 'refs/heads/feature-branch', object: { sha: 'abc123' } },
-        });
+        mockHttpClient.post
+          .mockResolvedValueOnce({
+            data: { ref: 'refs/heads/feature-branch', object: { sha: 'abc123' } },
+          })
+          .mockResolvedValueOnce({
+            data: {
+              number: 42,
+              html_url: 'https://github.com/owner/repo/pull/42',
+              state: 'open',
+              draft: true,
+            },
+          });
 
         const params: CreatePrParams = {
           title: 'Test PR',
@@ -194,7 +203,7 @@ describe('GitHubProvider PR Methods', () => {
 
         await provider.createPullRequest(params);
 
-        const postCall = mockHttpClient.post.mock.calls[1];
+        const postCall = mockHttpClient.post.mock.calls[0];
         const body = postCall[1].body as { ref: string };
         expect(body.ref).toBe('refs/heads/feature-branch');
       });
@@ -205,14 +214,18 @@ describe('GitHubProvider PR Methods', () => {
         mockHttpClient.get.mockResolvedValue({
           data: { default_branch: 'main' },
         });
-        mockHttpClient.post.mockResolvedValue({
-          data: {
-            number: 42,
-            html_url: 'https://github.com/owner/repo/pull/42',
-            state: 'open',
-            draft: true,
-          },
-        });
+        mockHttpClient.post
+          .mockResolvedValueOnce({
+            data: { ref: 'refs/heads/feature-branch', object: { sha: 'abc123' } },
+          })
+          .mockResolvedValueOnce({
+            data: {
+              number: 42,
+              html_url: 'https://github.com/owner/repo/pull/42',
+              state: 'open',
+              draft: true,
+            },
+          });
 
         const params: CreatePrParams = {
           title: 'Test PR',
@@ -233,14 +246,18 @@ describe('GitHubProvider PR Methods', () => {
         mockHttpClient.get.mockResolvedValue({
           data: { default_branch: 'main' },
         });
-        mockHttpClient.post.mockResolvedValue({
-          data: {
-            number: 42,
-            html_url: 'https://github.com/owner/repo/pull/42',
-            state: 'open',
-            draft: true,
-          },
-        });
+        mockHttpClient.post
+          .mockResolvedValueOnce({
+            data: { ref: 'refs/heads/feature-branch', object: { sha: 'abc123' } },
+          })
+          .mockResolvedValueOnce({
+            data: {
+              number: 42,
+              html_url: 'https://github.com/owner/repo/pull/42',
+              state: 'open',
+              draft: true,
+            },
+          });
 
         const params: CreatePrParams = {
           title: 'Test PR',
@@ -251,7 +268,7 @@ describe('GitHubProvider PR Methods', () => {
 
         await provider.createPullRequest(params);
 
-        const postCall = mockHttpClient.post.mock.calls[2];
+        const postCall = mockHttpClient.post.mock.calls[1];
         const body = postCall[1].body as { head: string };
         expect(body.head).toBe('koda/KODA-42/fix-login-bug');
       });
@@ -260,14 +277,18 @@ describe('GitHubProvider PR Methods', () => {
         mockHttpClient.get.mockResolvedValue({
           data: { default_branch: 'main' },
         });
-        mockHttpClient.post.mockResolvedValue({
-          data: {
-            number: 42,
-            html_url: 'https://github.com/owner/repo/pull/42',
-            state: 'open',
-            draft: true,
-          },
-        });
+        mockHttpClient.post
+          .mockResolvedValueOnce({
+            data: { ref: 'refs/heads/feature-branch', object: { sha: 'abc123' } },
+          })
+          .mockResolvedValueOnce({
+            data: {
+              number: 42,
+              html_url: 'https://github.com/owner/repo/pull/42',
+              state: 'open',
+              draft: true,
+            },
+          });
 
         const params: CreatePrParams = {
           title: 'Test PR',
@@ -278,7 +299,7 @@ describe('GitHubProvider PR Methods', () => {
 
         await provider.createPullRequest(params);
 
-        const postCall = mockHttpClient.post.mock.calls[2];
+        const postCall = mockHttpClient.post.mock.calls[1];
         const body = postCall[1].body as { base: string };
         expect(body.base).toBe('main');
       });
@@ -287,14 +308,18 @@ describe('GitHubProvider PR Methods', () => {
         mockHttpClient.get.mockResolvedValue({
           data: { default_branch: 'main' },
         });
-        mockHttpClient.post.mockResolvedValue({
-          data: {
-            number: 42,
-            html_url: 'https://github.com/owner/repo/pull/42',
-            state: 'open',
-            draft: true,
-          },
-        });
+        mockHttpClient.post
+          .mockResolvedValueOnce({
+            data: { ref: 'refs/heads/feature-branch', object: { sha: 'abc123' } },
+          })
+          .mockResolvedValueOnce({
+            data: {
+              number: 42,
+              html_url: 'https://github.com/owner/repo/pull/42',
+              state: 'open',
+              draft: true,
+            },
+          });
 
         const params: CreatePrParams = {
           title: 'Test PR',
@@ -305,7 +330,7 @@ describe('GitHubProvider PR Methods', () => {
 
         await provider.createPullRequest(params);
 
-        const postCall = mockHttpClient.post.mock.calls[2];
+        const postCall = mockHttpClient.post.mock.calls[1];
         const body = postCall[1].body as { draft: boolean };
         expect(body.draft).toBe(true);
       });
@@ -314,14 +339,18 @@ describe('GitHubProvider PR Methods', () => {
         mockHttpClient.get.mockResolvedValue({
           data: { default_branch: 'main' },
         });
-        mockHttpClient.post.mockResolvedValue({
-          data: {
-            number: 42,
-            html_url: 'https://github.com/owner/repo/pull/42',
-            state: 'open',
-            draft: true,
-          },
-        });
+        mockHttpClient.post
+          .mockResolvedValueOnce({
+            data: { ref: 'refs/heads/feature-branch', object: { sha: 'abc123' } },
+          })
+          .mockResolvedValueOnce({
+            data: {
+              number: 42,
+              html_url: 'https://github.com/owner/repo/pull/42',
+              state: 'open',
+              draft: true,
+            },
+          });
 
         const params: CreatePrParams = {
           title: 'Fix login redirect bug',
@@ -332,7 +361,7 @@ describe('GitHubProvider PR Methods', () => {
 
         await provider.createPullRequest(params);
 
-        const postCall = mockHttpClient.post.mock.calls[2];
+        const postCall = mockHttpClient.post.mock.calls[1];
         const body = postCall[1].body as { title: string; body: string };
         expect(body.title).toBe('Fix login redirect bug');
         expect(body.body).toBe('This PR fixes the login redirect bug');
@@ -344,14 +373,18 @@ describe('GitHubProvider PR Methods', () => {
         mockHttpClient.get.mockResolvedValue({
           data: { default_branch: 'main' },
         });
-        mockHttpClient.post.mockResolvedValue({
-          data: {
-            number: 42,
-            html_url: 'https://github.com/owner/repo/pull/42',
-            state: 'open',
-            draft: true,
-          },
-        });
+        mockHttpClient.post
+          .mockResolvedValueOnce({
+            data: { ref: 'refs/heads/feature-branch', object: { sha: 'abc123' } },
+          })
+          .mockResolvedValueOnce({
+            data: {
+              number: 42,
+              html_url: 'https://github.com/owner/repo/pull/42',
+              state: 'open',
+              draft: true,
+            },
+          });
 
         const params: CreatePrParams = {
           title: 'Test PR',
@@ -369,14 +402,18 @@ describe('GitHubProvider PR Methods', () => {
         mockHttpClient.get.mockResolvedValue({
           data: { default_branch: 'main' },
         });
-        mockHttpClient.post.mockResolvedValue({
-          data: {
-            number: 42,
-            html_url: 'https://github.com/owner/repo/pull/42',
-            state: 'open',
-            draft: true,
-          },
-        });
+        mockHttpClient.post
+          .mockResolvedValueOnce({
+            data: { ref: 'refs/heads/feature-branch', object: { sha: 'abc123' } },
+          })
+          .mockResolvedValueOnce({
+            data: {
+              number: 42,
+              html_url: 'https://github.com/owner/repo/pull/42',
+              state: 'open',
+              draft: true,
+            },
+          });
 
         const params: CreatePrParams = {
           title: 'Test PR',
@@ -394,14 +431,18 @@ describe('GitHubProvider PR Methods', () => {
         mockHttpClient.get.mockResolvedValue({
           data: { default_branch: 'main' },
         });
-        mockHttpClient.post.mockResolvedValue({
-          data: {
-            number: 42,
-            html_url: 'https://github.com/owner/repo/pull/42',
-            state: 'open',
-            draft: true,
-          },
-        });
+        mockHttpClient.post
+          .mockResolvedValueOnce({
+            data: { ref: 'refs/heads/feature-branch', object: { sha: 'abc123' } },
+          })
+          .mockResolvedValueOnce({
+            data: {
+              number: 42,
+              html_url: 'https://github.com/owner/repo/pull/42',
+              state: 'open',
+              draft: true,
+            },
+          });
 
         const params: CreatePrParams = {
           title: 'Test PR',
@@ -419,14 +460,18 @@ describe('GitHubProvider PR Methods', () => {
         mockHttpClient.get.mockResolvedValue({
           data: { default_branch: 'main' },
         });
-        mockHttpClient.post.mockResolvedValue({
-          data: {
-            number: 42,
-            html_url: 'https://github.com/owner/repo/pull/42',
-            state: 'open',
-            draft: true,
-          },
-        });
+        mockHttpClient.post
+          .mockResolvedValueOnce({
+            data: { ref: 'refs/heads/feature-branch', object: { sha: 'abc123' } },
+          })
+          .mockResolvedValueOnce({
+            data: {
+              number: 42,
+              html_url: 'https://github.com/owner/repo/pull/42',
+              state: 'open',
+              draft: true,
+            },
+          });
 
         const params: CreatePrParams = {
           title: 'Test PR',
@@ -444,14 +489,18 @@ describe('GitHubProvider PR Methods', () => {
         mockHttpClient.get.mockResolvedValue({
           data: { default_branch: 'main' },
         });
-        mockHttpClient.post.mockResolvedValue({
-          data: {
-            number: 42,
-            html_url: 'https://github.com/owner/repo/pull/42',
-            state: 'open',
-            draft: true,
-          },
-        });
+        mockHttpClient.post
+          .mockResolvedValueOnce({
+            data: { ref: 'refs/heads/feature-branch', object: { sha: 'abc123' } },
+          })
+          .mockResolvedValueOnce({
+            data: {
+              number: 42,
+              html_url: 'https://github.com/owner/repo/pull/42',
+              state: 'open',
+              draft: true,
+            },
+          });
 
         const params: CreatePrParams = {
           title: 'Test PR',
@@ -476,9 +525,6 @@ describe('GitHubProvider PR Methods', () => {
         mockHttpClient.post
           .mockRejectedValueOnce(error422)
           .mockResolvedValueOnce({
-            data: { ref: 'refs/heads/feature-branch', object: { sha: 'abc123' } },
-          })
-          .mockResolvedValueOnce({
             data: {
               number: 42,
               html_url: 'https://github.com/owner/repo/pull/42',
@@ -496,7 +542,7 @@ describe('GitHubProvider PR Methods', () => {
 
         const result = await provider.createPullRequest(params);
 
-        expect(mockHttpClient.post).toHaveBeenCalledTimes(3);
+        expect(mockHttpClient.post).toHaveBeenCalledTimes(2);
         expect(result.number).toBe(42);
       });
 
@@ -508,9 +554,6 @@ describe('GitHubProvider PR Methods', () => {
         });
         mockHttpClient.post
           .mockRejectedValueOnce(error422)
-          .mockResolvedValueOnce({
-            data: { ref: 'refs/heads/feature-branch', object: { sha: 'abc123' } },
-          })
           .mockResolvedValueOnce({
             data: {
               number: 42,
@@ -544,9 +587,18 @@ describe('GitHubProvider PR Methods', () => {
         mockHttpClient.get.mockResolvedValue({
           data: { default_branch: 'main' },
         });
-        mockHttpClient.post.mockResolvedValue({
-          data: { ref: 'refs/heads/feature-branch', object: { sha: 'abc123' } },
-        });
+        mockHttpClient.post
+          .mockResolvedValueOnce({
+            data: { ref: 'refs/heads/feature-branch', object: { sha: 'abc123' } },
+          })
+          .mockResolvedValueOnce({
+            data: {
+              number: 42,
+              html_url: 'https://github.com/owner/repo/pull/42',
+              state: 'open',
+              draft: true,
+            },
+          });
 
         const params: CreatePrParams = {
           title: 'Test PR',
