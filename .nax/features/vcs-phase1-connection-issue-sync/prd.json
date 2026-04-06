@@ -3,7 +3,7 @@
   "feature": "vcs-phase1-connection-issue-sync",
   "branchName": "feat/vcs-phase1-connection-issue-sync",
   "createdAt": "2026-04-06T00:00:00Z",
-  "updatedAt": "2026-04-06T09:17:41.032Z",
+  "updatedAt": "2026-04-06T09:28:06.581Z",
   "userStories": [
     {
       "id": "VCS-P1-001",
@@ -244,8 +244,8 @@
         "VCS-P1-001",
         "VCS-P1-002"
       ],
-      "status": "decomposed",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -386,8 +386,8 @@
         "apps/api/src/tickets/tickets.controller.ts",
         "apps/api/src/common/enums.ts"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "escalations": [],
       "attempts": 0,
       "parentStoryId": "VCS-P1-003",
@@ -492,11 +492,13 @@
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
         "reasoning": "Core shared logic touching Prisma transactions, ticket creation invariants, and deduplication. ~180 LOC across service + unit tests. All downstream sync paths depend on this.",
-        "modelTier": "balanced"
+        "modelTier": "balanced",
+        "initialComplexity": "complex"
       },
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "8233165e55abbfca828b62beb36579b9d1069eaa"
     },
     {
       "id": "VCS-P1-004-B",
