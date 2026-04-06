@@ -137,7 +137,11 @@
       "description": "Description",
       "assignee": "Assignee",
       "created": "Created",
-      "gitRef": "Source Reference"
+      "gitRef": "Source Reference",
+      "syncedFromGithub": "Synced from GitHub #{issue}"
+    },
+    "vcs": {
+      "github": "GitHub"
     },
     "actions": {
       "verify": "Verify",

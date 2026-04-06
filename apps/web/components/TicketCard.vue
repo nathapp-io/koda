@@ -47,6 +47,11 @@ function assigneeInitials(assignee: Assignee): string {
     .toUpperCase()
     .slice(0, 2)
 }
+
+function extractIssueNumber(url: string): string {
+  const parts = url.split('/')
+  return parts[parts.length - 1] || ''
+}
 </script>
 
 <template>
@@ -68,6 +73,9 @@ function assigneeInitials(assignee: Assignee): string {
               :class="priorityClass(ticket.priority)"
             >
               {{ t(`tickets.priority.${ticket.priority}`) }}
+            </Badge>
+            <Badge v-if="ticket.externalVcsUrl" variant="outline">
+              {{ t('tickets.vcs.github') }} #{{ extractIssueNumber(ticket.externalVcsUrl) }}
             </Badge>
           </div>
         </div>

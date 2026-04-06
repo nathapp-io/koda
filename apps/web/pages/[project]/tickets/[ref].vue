@@ -135,6 +135,11 @@ async function onTransition() {
 function onCommentAdded() {
   toast.success(t('comments.toast.added'))
 }
+
+function extractIssueNumber(url: string): string {
+  const parts = url.split('/')
+  return parts[parts.length - 1] || ''
+}
 </script>
 
 <template>
@@ -259,6 +264,20 @@ function onCommentAdded() {
               <span v-else class="font-mono text-sm text-muted-foreground">
                 {{ ticket.gitRefFile }}<span v-if="ticket.gitRefLine">:{{ ticket.gitRefLine }}</span>
               </span>
+            </div>
+
+            <Separator v-if="ticket.externalVcsUrl" />
+
+            <div v-if="ticket.externalVcsUrl">
+              <p class="text-xs text-muted-foreground mb-1">{{ t('common.details') }}</p>
+              <a
+                :href="ticket.externalVcsUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-blue-500 hover:underline text-sm"
+              >
+                {{ t('tickets.detail.syncedFromGithub', { issue: extractIssueNumber(ticket.externalVcsUrl) }) }}
+              </a>
             </div>
           </CardContent>
         </Card>
