@@ -14,6 +14,7 @@ paths:
 ## Output
 - **`--json` flag is mandatory** on all commands that return data — agents depend on it
 - Human output uses `chalk` formatting; `--json` outputs `JSON.stringify(data, null, 2)`
+- **CLI output strings are intentionally English-only** — developer tools standardize on English; translated error messages come from API responses via the error handler
 
 ## Exit Codes
 - `0` = success

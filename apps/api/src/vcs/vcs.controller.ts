@@ -233,7 +233,7 @@ export class VcsController {
 
     // Return HTTP 409 if issue is already synced
     if (result.action === 'skipped') {
-      throw new ConflictException('Issue is already synced');
+      throw new ConflictException();
     }
 
     // Issue was successfully created

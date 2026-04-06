@@ -1,3 +1,10 @@
+/**
+ * VCS CLI Commands
+ *
+ * Note: Output strings are intentionally English-only as per CLI design standards for developer tools.
+ * Translated error messages come from API responses and are handled by the error handler.
+ * See .claude/rules/cli.md for rationale.
+ */
 import { Command } from 'commander';
 import { resolveAuth } from '../utils/auth';
 import { resolveContext } from '../config';
