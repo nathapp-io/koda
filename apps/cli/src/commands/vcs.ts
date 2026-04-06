@@ -2,7 +2,6 @@ import { Command } from 'commander';
 import { resolveAuth } from '../utils/auth';
 import { resolveContext } from '../config';
 import { OpenAPI } from '../generated/core/OpenAPI';
-import { ApiError } from '../generated/core/ApiError';
 import { table, error } from '../utils/output';
 import { handleApiError } from '../utils/error';
 import {
@@ -89,7 +88,7 @@ export function vcsCommand(program: Command): void {
         });
 
         // Handle response envelope
-        const data = (response as any).data || response;
+        const data = ((response as unknown as Record<string, unknown>).data || (response as unknown as Record<string, unknown>)) as Record<string, unknown>;
 
         if (options.json) {
           console.log(JSON.stringify(data, null, 2));
@@ -133,7 +132,7 @@ export function vcsCommand(program: Command): void {
 
         // Call API
         const response = await vcsControllerGetConnection({ slug: ctx.projectSlug });
-        const data = (response as any).data || response;
+        const data = ((response as unknown as Record<string, unknown>).data || (response as unknown as Record<string, unknown>)) as Record<string, unknown>;
 
         if (options.json) {
           console.log(JSON.stringify(data, null, 2));
@@ -145,7 +144,7 @@ export function vcsCommand(program: Command): void {
 
         process.exit(0);
       } catch (err: unknown) {
-        const apiErr = err as any;
+        const apiErr = err as { response?: { status?: number } };
 
         // Handle 404 specially for status command
         if (apiErr.response?.status === 404) {
@@ -233,7 +232,7 @@ export function vcsCommand(program: Command): void {
         // Call API
         await vcsControllerUpdateConnection({
           slug: ctx.projectSlug,
-          requestBody: requestBody as any,
+          requestBody: requestBody as Record<string, string>,
         });
 
         console.log(`VCS settings updated for project ${ctx.projectSlug}`);
