@@ -3,7 +3,7 @@
   "feature": "vcs-phase1-connection-issue-sync",
   "branchName": "feat/vcs-phase1-connection-issue-sync",
   "createdAt": "2026-04-06T00:00:00Z",
-  "updatedAt": "2026-04-06T09:42:00.504Z",
+  "updatedAt": "2026-04-06T09:54:50.901Z",
   "userStories": [
     {
       "id": "VCS-P1-001",
@@ -525,8 +525,8 @@
         "apps/api/src/vcs/vcs.service.ts",
         "apps/api/src/vcs/vcs-connection.service.ts"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "escalations": [],
       "attempts": 0,
       "parentStoryId": "VCS-P1-004",
@@ -578,11 +578,13 @@
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
         "reasoning": "Security-critical: HMAC verification requires three-session-tdd regardless of LOC. Controller + service + timing-safe crypto ~200 LOC. Must enforce security override.",
-        "modelTier": "balanced"
+        "modelTier": "balanced",
+        "initialComplexity": "complex"
       },
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "b25c31800702d8643e0430191f611a13ba5a449d"
     },
     {
       "id": "VCS-P1-004-D",
