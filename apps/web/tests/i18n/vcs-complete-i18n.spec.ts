@@ -43,26 +43,26 @@ describe('VCS-P1-005-F: Web i18n - VCS Integration Form Keys', () => {
       const content = readFileSync(enLocalesPath, 'utf-8')
       const json = JSON.parse(content)
       const keys = key.split('.')
-      let value: any = json
+      let value: unknown = json
       keys.forEach((k) => {
-        value = value?.[k]
+        value = (value as Record<string, unknown>)?.[k]
       })
       expect(value).toBeDefined()
       expect(typeof value).toBe('string')
-      expect(value.length).toBeGreaterThan(0)
+      expect((value as string).length).toBeGreaterThan(0)
     })
 
     test(`zh.json contains ${key}`, () => {
       const content = readFileSync(zhLocalesPath, 'utf-8')
       const json = JSON.parse(content)
       const keys = key.split('.')
-      let value: any = json
+      let value: unknown = json
       keys.forEach((k) => {
-        value = value?.[k]
+        value = (value as Record<string, unknown>)?.[k]
       })
       expect(value).toBeDefined()
       expect(typeof value).toBe('string')
-      expect(value.length).toBeGreaterThan(0)
+      expect((value as string).length).toBeGreaterThan(0)
     })
   })
 })
@@ -82,26 +82,26 @@ describe('VCS-P1-005-F: Web i18n - VCS Form Validation Keys', () => {
       const content = readFileSync(enLocalesPath, 'utf-8')
       const json = JSON.parse(content)
       const keys = key.split('.')
-      let value: any = json
+      let value: unknown = json
       keys.forEach((k) => {
-        value = value?.[k]
+        value = (value as Record<string, unknown>)?.[k]
       })
       expect(value).toBeDefined()
       expect(typeof value).toBe('string')
-      expect(value.length).toBeGreaterThan(0)
+      expect((value as string).length).toBeGreaterThan(0)
     })
 
     test(`zh.json contains ${key}`, () => {
       const content = readFileSync(zhLocalesPath, 'utf-8')
       const json = JSON.parse(content)
       const keys = key.split('.')
-      let value: any = json
+      let value: unknown = json
       keys.forEach((k) => {
-        value = value?.[k]
+        value = (value as Record<string, unknown>)?.[k]
       })
       expect(value).toBeDefined()
       expect(typeof value).toBe('string')
-      expect(value.length).toBeGreaterThan(0)
+      expect((value as string).length).toBeGreaterThan(0)
     })
   })
 })
@@ -120,26 +120,26 @@ describe('VCS-P1-005-F: Web i18n - VCS Toast Messages', () => {
       const content = readFileSync(enLocalesPath, 'utf-8')
       const json = JSON.parse(content)
       const keys = key.split('.')
-      let value: any = json
+      let value: unknown = json
       keys.forEach((k) => {
-        value = value?.[k]
+        value = (value as Record<string, unknown>)?.[k]
       })
       expect(value).toBeDefined()
       expect(typeof value).toBe('string')
-      expect(value.length).toBeGreaterThan(0)
+      expect((value as string).length).toBeGreaterThan(0)
     })
 
     test(`zh.json contains ${key}`, () => {
       const content = readFileSync(zhLocalesPath, 'utf-8')
       const json = JSON.parse(content)
       const keys = key.split('.')
-      let value: any = json
+      let value: unknown = json
       keys.forEach((k) => {
-        value = value?.[k]
+        value = (value as Record<string, unknown>)?.[k]
       })
       expect(value).toBeDefined()
       expect(typeof value).toBe('string')
-      expect(value.length).toBeGreaterThan(0)
+      expect((value as string).length).toBeGreaterThan(0)
     })
   })
 })
@@ -152,26 +152,26 @@ describe('VCS-P1-005-F: Web i18n - VCS Ticket Card Badge', () => {
       const content = readFileSync(enLocalesPath, 'utf-8')
       const json = JSON.parse(content)
       const keys = key.split('.')
-      let value: any = json
+      let value: unknown = json
       keys.forEach((k) => {
-        value = value?.[k]
+        value = (value as Record<string, unknown>)?.[k]
       })
       expect(value).toBeDefined()
       expect(typeof value).toBe('string')
-      expect(value.length).toBeGreaterThan(0)
+      expect((value as string).length).toBeGreaterThan(0)
     })
 
     test(`zh.json contains ${key}`, () => {
       const content = readFileSync(zhLocalesPath, 'utf-8')
       const json = JSON.parse(content)
       const keys = key.split('.')
-      let value: any = json
+      let value: unknown = json
       keys.forEach((k) => {
-        value = value?.[k]
+        value = (value as Record<string, unknown>)?.[k]
       })
       expect(value).toBeDefined()
       expect(typeof value).toBe('string')
-      expect(value.length).toBeGreaterThan(0)
+      expect((value as string).length).toBeGreaterThan(0)
     })
   })
 })
@@ -191,26 +191,26 @@ describe('VCS-P1-005-F: Web i18n - VCS Import Issue Dialog Keys', () => {
       const content = readFileSync(enLocalesPath, 'utf-8')
       const json = JSON.parse(content)
       const keys = key.split('.')
-      let value: any = json
+      let value: unknown = json
       keys.forEach((k) => {
-        value = value?.[k]
+        value = (value as Record<string, unknown>)?.[k]
       })
       expect(value).toBeDefined()
       expect(typeof value).toBe('string')
-      expect(value.length).toBeGreaterThan(0)
+      expect((value as string).length).toBeGreaterThan(0)
     })
 
     test(`zh.json contains ${key}`, () => {
       const content = readFileSync(zhLocalesPath, 'utf-8')
       const json = JSON.parse(content)
       const keys = key.split('.')
-      let value: any = json
+      let value: unknown = json
       keys.forEach((k) => {
-        value = value?.[k]
+        value = (value as Record<string, unknown>)?.[k]
       })
       expect(value).toBeDefined()
       expect(typeof value).toBe('string')
-      expect(value.length).toBeGreaterThan(0)
+      expect((value as string).length).toBeGreaterThan(0)
     })
   })
 })
