@@ -19,7 +19,7 @@ import {
 } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
 import { ConfigService } from '@nestjs/config';
-import { AuthException } from '@nathapp/nestjs-common';
+import { AuthException, ValidationAppException } from '@nathapp/nestjs-common';
 import { Project } from '@prisma/client';
 import { VcsConnectionService } from './vcs-connection.service';
 import { VcsSyncService } from './vcs-sync.service';
@@ -45,6 +45,10 @@ export class VcsController {
     private readonly configService: ConfigService,
   ) {}
 
+  private throwEncryptionKeyNotConfigured(): never {
+    throw new ValidationAppException({}, 'vcs');
+  }
+
   /**
    * POST /projects/:slug/vcs
    * Create a new VCS connection for a project
@@ -62,7 +66,7 @@ export class VcsController {
     // Get encryption key from config
     const encryptionKey = this.configService.get<string>('vcs.encryptionKey');
     if (!encryptionKey) {
-      throw new Error('VCS encryption key not configured');
+      this.throwEncryptionKeyNotConfigured();
     }
 
     return this.vcsService.create(project.id, encryptionKey, dto);
@@ -99,7 +103,7 @@ export class VcsController {
     // Get encryption key from config
     const encryptionKey = this.configService.get<string>('vcs.encryptionKey');
     if (!encryptionKey) {
-      throw new Error('VCS encryption key not configured');
+      this.throwEncryptionKeyNotConfigured();
     }
 
     return this.vcsService.update(project.id, encryptionKey, dto);
@@ -136,7 +140,7 @@ export class VcsController {
     // Get encryption key from config
     const encryptionKey = this.configService.get<string>('vcs.encryptionKey');
     if (!encryptionKey) {
-      throw new Error('VCS encryption key not configured');
+      this.throwEncryptionKeyNotConfigured();
     }
 
     const result = await this.vcsService.testConnection(project.id, encryptionKey);
@@ -211,7 +215,7 @@ export class VcsController {
     // Get encryption key from config
     const encryptionKey = this.configService.get<string>('vcs.encryptionKey');
     if (!encryptionKey) {
-      throw new Error('VCS encryption key not configured');
+      this.throwEncryptionKeyNotConfigured();
     }
 
     // Get the full connection with all fields
@@ -271,7 +275,7 @@ export class VcsController {
     // Get encryption key from config
     const encryptionKey = this.configService.get<string>('vcs.encryptionKey');
     if (!encryptionKey) {
-      throw new Error('VCS encryption key not configured');
+      this.throwEncryptionKeyNotConfigured();
     }
 
     // Get the full connection with all fields
