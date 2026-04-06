@@ -63,7 +63,7 @@ const formSchema = toTypedSchema(
 const { handleSubmit, isSubmitting, resetForm } = useForm({
   validationSchema: formSchema,
   initialValues: {
-    issueNumber: '',
+    issueNumber: 0,
   },
 })
 
