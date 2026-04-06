@@ -20,6 +20,33 @@ interface GitHubIssueResponse {
 }
 
 /**
+ * GitHub REST API response for a repository
+ */
+interface GitHubRepoResponse {
+  default_branch: string;
+}
+
+/**
+ * GitHub REST API response for ref creation
+ */
+interface GitHubRefResponse {
+  ref: string;
+  object: {
+    sha: string;
+  };
+}
+
+/**
+ * GitHub REST API response for PR creation
+ */
+interface GitHubPullRequestResponse {
+  number: number;
+  html_url: string;
+  state: string;
+  draft: boolean;
+}
+
+/**
  * GitHub VCS provider implementation
  */
 export class GitHubProvider implements IVcsProvider {
@@ -95,11 +122,82 @@ export class GitHubProvider implements IVcsProvider {
   }
 
   async getDefaultBranch(): Promise<string> {
-    throw new Error('Method not implemented');
+    const url = `https://api.github.com/repos/${this.repoOwner}/${this.repoName}`;
+
+    const response = await this.httpClient.get(url, {
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
+    });
+
+    const data = response.data as { default_branch: string };
+    return data.default_branch;
   }
 
   async createPullRequest(params: CreatePrParams): Promise<VcsPullRequest> {
-    throw new Error('Method not implemented');
+    const repoResponse = await this.httpClient.get(
+      `https://api.github.com/repos/${this.repoOwner}/${this.repoName}`,
+      {
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+        },
+      },
+    );
+
+    const repoData = repoResponse.data as GitHubRepoResponse;
+    const defaultBranch = repoData.default_branch;
+
+    let branchSha: string;
+    try {
+      const refResponse = await this.httpClient.post(
+        `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/git/refs`,
+        {
+          headers: {
+            Authorization: `Bearer ${this.token}`,
+          },
+          body: {
+            ref: `refs/heads/${params.headBranch}`,
+            sha: defaultBranch,
+          },
+        },
+      );
+      const refData = refResponse.data as GitHubRefResponse;
+      branchSha = refData.object.sha;
+    } catch (error: unknown) {
+      const errorObj = error as Record<string, unknown>;
+      const status = (errorObj?.response as Record<string, unknown>)?.status;
+      if (status === 422) {
+        // Branch already exists, proceed to PR creation
+      } else {
+        throw error;
+      }
+    }
+
+    const prResponse = await this.httpClient.post(
+      `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/pulls`,
+      {
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+        },
+        body: {
+          title: params.title,
+          body: params.body,
+          head: params.headBranch,
+          base: defaultBranch,
+          draft: true,
+        },
+      },
+    );
+
+    const prData = prResponse.data as GitHubPullRequestResponse;
+
+    return {
+      number: prData.number,
+      url: prData.html_url,
+      branchName: params.headBranch,
+      state: prData.state,
+      draft: prData.draft,
+    };
   }
 
   private mapGitHubIssueToVcsIssue(gitHubIssue: GitHubIssueResponse): VcsIssue {
