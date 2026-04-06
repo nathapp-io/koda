@@ -43,12 +43,12 @@ const formSchema = toTypedSchema(z.object({
   owner: z.string().min(1, t('vcs.validation.ownerRequired')),
   repo: z.string().min(1, t('vcs.validation.repoRequired')),
   token: z.string().min(1, t('vcs.validation.tokenRequired')),
-  syncMode: z.string().min(1, t('vcs.validation.syncModeRequired')),
+  syncMode: z.enum(['polling', 'webhook']),
   pollingInterval: z.number().min(60, t('vcs.validation.pollingIntervalMin')).max(86400, t('vcs.validation.pollingIntervalMax')).optional(),
   authors: z.string().optional(),
 }))
 
-const { handleSubmit, setValues, resetForm, isSubmitting } = useForm<VcsConnection>({
+const { handleSubmit, setValues, isSubmitting } = useForm({
   validationSchema: formSchema,
   initialValues: {
     provider: '',
@@ -165,135 +165,71 @@ async function syncNow() {
           <form v-else @submit="onSubmit" class="space-y-6">
             <!-- Provider Field -->
             <FormField name="provider" v-slot="{ componentField }">
-              <FormItem>
-                <FormLabel>{{ t('vcs.form.provider') }}</FormLabel>
-                <Select v-bind="componentField">
-                  <FormControl>
-                    <SelectTrigger>
-                      <SelectValue :placeholder="t('vcs.form.providerPlaceholder')" />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    <SelectItem value="github">GitHub</SelectItem>
-                    <SelectItem value="gitlab">GitLab</SelectItem>
-                    <SelectItem value="bitbucket">Bitbucket</SelectItem>
-                  </SelectContent>
-                </Select>
-                <FormMessage />
-              </FormItem>
+              <FormLabel>{{ t('vcs.form.provider') }}</FormLabel>
+              <Select v-bind="componentField">
+                <FormControl>
+                  <SelectTrigger>
+                    <SelectValue :placeholder="t('vcs.form.providerPlaceholder')" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  <SelectItem value="github">GitHub</SelectItem>
+                  <SelectItem value="gitlab">GitLab</SelectItem>
+                  <SelectItem value="bitbucket">Bitbucket</SelectItem>
+                </SelectContent>
+              </Select>
+              <FormMessage />
             </FormField>
 
             <!-- Owner Field -->
             <FormField name="owner" v-slot="{ componentField }">
-              <FormItem>
-                <FormLabel>{{ t('vcs.form.owner') }}</FormLabel>
-                <FormControl>
-                  <Input
-                    :placeholder="t('vcs.form.ownerPlaceholder')"
-                    v-bind="componentField"
-                    type="text"
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
+              <FormLabel>{{ t('vcs.form.owner') }}</FormLabel>
+              <Input :placeholder="t('vcs.form.ownerPlaceholder')" v-bind="componentField" type="text" />
+              <FormMessage />
             </FormField>
 
             <!-- Repo Field -->
             <FormField name="repo" v-slot="{ componentField }">
-              <FormItem>
-                <FormLabel>{{ t('vcs.form.repo') }}</FormLabel>
-                <FormControl>
-                  <Input
-                    :placeholder="t('vcs.form.repoPlaceholder')"
-                    v-bind="componentField"
-                    type="text"
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
+              <FormLabel>{{ t('vcs.form.repo') }}</FormLabel>
+              <Input :placeholder="t('vcs.form.repoPlaceholder')" v-bind="componentField" type="text" />
+              <FormMessage />
             </FormField>
 
             <!-- Token Field -->
             <FormField name="token" v-slot="{ componentField }">
-              <FormItem>
-                <FormLabel>{{ t('vcs.form.token') }}</FormLabel>
-                <FormControl>
-                  <Input
-                    :placeholder="t('vcs.form.tokenPlaceholder')"
-                    v-bind="componentField"
-                    type="password"
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
+              <FormLabel>{{ t('vcs.form.token') }}</FormLabel>
+              <Input :placeholder="t('vcs.form.tokenPlaceholder')" v-bind="componentField" type="password" />
+              <FormMessage />
             </FormField>
 
             <!-- Sync Mode Field (RadioGroup) -->
             <FormField name="syncMode" v-slot="{ componentField }">
-              <FormItem>
-                <FormLabel>{{ t('vcs.form.syncMode') }}</FormLabel>
-                <FormControl>
-                  <div class="radiogroup space-y-2">
-                    <div class="flex items-center space-x-2">
-                      <input
-                        type="radio"
-                        value="polling"
-                        id="sync-polling"
-                        v-bind="componentField"
-                        role="radio"
-                        class="w-4 h-4 cursor-pointer"
-                      />
-                      <label for="sync-polling" class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer">
-                        {{ t('vcs.form.syncModePolling') }}
-                      </label>
-                    </div>
-                    <div class="flex items-center space-x-2">
-                      <input
-                        type="radio"
-                        value="webhook"
-                        id="sync-webhook"
-                        v-bind="componentField"
-                        role="radio"
-                        class="w-4 h-4 cursor-pointer"
-                      />
-                      <label for="sync-webhook" class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer">
-                        {{ t('vcs.form.syncModeWebhook') }}
-                      </label>
-                    </div>
-                  </div>
-                </FormControl>
-                <FormMessage />
-              </FormItem>
+              <FormLabel>{{ t('vcs.form.syncMode') }}</FormLabel>
+              <RadioGroup v-bind="componentField" class="space-y-2">
+                <div class="flex items-center space-x-2">
+                  <RadioGroupItem value="polling" />
+                  <label>{{ t('vcs.form.syncModePolling') }}</label>
+                </div>
+                <div class="flex items-center space-x-2">
+                  <RadioGroupItem value="webhook" />
+                  <label>{{ t('vcs.form.syncModeWebhook') }}</label>
+                </div>
+              </RadioGroup>
+              <FormMessage />
             </FormField>
 
             <!-- Polling Interval Field -->
             <FormField name="pollingInterval" v-slot="{ componentField }">
-              <FormItem>
-                <FormLabel>{{ t('vcs.form.pollingInterval') }}</FormLabel>
-                <FormControl>
-                  <Input
-                    :placeholder="t('vcs.form.pollingIntervalPlaceholder')"
-                    v-bind="componentField"
-                    type="number"
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
+              <FormLabel>{{ t('vcs.form.pollingInterval') }}</FormLabel>
+              <Input :placeholder="t('vcs.form.pollingIntervalPlaceholder')" v-bind="componentField" type="number" />
+              <FormMessage />
             </FormField>
 
             <!-- Authors Field -->
             <FormField name="authors" v-slot="{ componentField }">
-              <FormItem>
-                <FormLabel>{{ t('vcs.form.authors') }}</FormLabel>
-                <FormControl>
-                  <Input
-                    :placeholder="t('vcs.form.authorsPlaceholder')"
-                    v-bind="componentField"
-                    type="text"
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
+              <FormLabel>{{ t('vcs.form.authors') }}</FormLabel>
+              <Input :placeholder="t('vcs.form.authorsPlaceholder')" v-bind="componentField" type="text" />
+              <FormMessage />
             </FormField>
 
             <!-- Form Actions -->
