@@ -1,0 +1,29 @@
+{
+  "connection": {
+    "created": "VCS connection created successfully",
+    "updated": "VCS connection updated successfully",
+    "deleted": "VCS connection deleted successfully",
+    "notFound": "VCS connection not found",
+    "alreadyExists": "VCS connection already exists for this project"
+  },
+  "sync": {
+    "started": "Sync operation started",
+    "completed": "Sync operation completed successfully",
+    "failed": "Sync operation failed",
+    "issueAlreadySynced": "Issue has already been synced",
+    "issueNotFound": "Issue not found in the repository"
+  },
+  "test": {
+    "success": "Connection test successful",
+    "failed": "Connection test failed",
+    "connectionError": "Failed to establish connection to the VCS provider"
+  },
+  "errors": {
+    "encryptionKeyNotConfigured": "VCS encryption key is not configured",
+    "connectionNotFound": "VCS connection not configured for this project",
+    "invalidProvider": "Invalid VCS provider specified",
+    "invalidToken": "Invalid or expired authentication token",
+    "issueAlreadySynced": "Issue is already synced as a ticket",
+    "invalidIssueNumber": "Invalid issue number provided"
+  }
+}

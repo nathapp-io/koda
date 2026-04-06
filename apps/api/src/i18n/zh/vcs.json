@@ -1,0 +1,29 @@
+{
+  "connection": {
+    "created": "VCS 连接创建成功",
+    "updated": "VCS 连接更新成功",
+    "deleted": "VCS 连接删除成功",
+    "notFound": "未找到 VCS 连接",
+    "alreadyExists": "该项目已存在 VCS 连接"
+  },
+  "sync": {
+    "started": "同步操作已启动",
+    "completed": "同步操作完成",
+    "failed": "同步操作失败",
+    "issueAlreadySynced": "问题已经被同步",
+    "issueNotFound": "在仓库中未找到问题"
+  },
+  "test": {
+    "success": "连接测试成功",
+    "failed": "连接测试失败",
+    "connectionError": "无法连接到 VCS 提供商"
+  },
+  "errors": {
+    "encryptionKeyNotConfigured": "VCS 加密密钥未配置",
+    "connectionNotFound": "该项目未配置 VCS 连接",
+    "invalidProvider": "指定的 VCS 提供商无效",
+    "invalidToken": "认证令牌无效或已过期",
+    "issueAlreadySynced": "问题已作为工单同步",
+    "invalidIssueNumber": "提供的问题号无效"
+  }
+}
