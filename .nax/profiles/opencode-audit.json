@@ -2,5 +2,6 @@
   "autoMode": {
     "defaultAgent": "opencode",
     "fallbackOrder": ["opencode"]
-  }
+  },
+  "agent": { "promptAudit": { "enabled": true } }
 }
