@@ -75,6 +75,7 @@ describe('Auto-create PR on VERIFIED Transition', () => {
   beforeEach(() => {
     mockPrismaService = {
       client: {
+        $transaction: jest.fn((cb) => cb(mockPrismaService.client)),
         project: {
           findUnique: jest.fn(),
           findFirst: jest.fn(),
@@ -189,6 +190,7 @@ describe('Auto-create PR on VERIFIED Transition', () => {
           body: 'This bug causes login to redirect to the wrong page',
           headBranch: 'koda/KODA-42/fix-login-redirect-bug',
           baseBranch: 'main',
+          draft: true,
         };
 
         mockVcsProvider.createPullRequest.mockResolvedValueOnce({
@@ -227,7 +229,7 @@ describe('Auto-create PR on VERIFIED Transition', () => {
   describe('AC9: No PR creation when project has no VCS connection', () => {
     it('skips PR creation when VCS connection not found', async () => {
       mockPrismaService.client.project.findUnique.mockResolvedValue(testProject);
-      mockPrismaService.client.ticket.findFirst.mockResolvedValue(testTicket);
+      mockPrismaService.client.ticket.findUnique.mockResolvedValue(testTicket);
       mockPrismaService.client.ticket.update.mockResolvedValue({
         ...testTicket,
         status: TicketStatus.VERIFIED,
@@ -251,7 +253,7 @@ describe('Auto-create PR on VERIFIED Transition', () => {
       mockVcsProvider.createPullRequest.mockRejectedValue(error);
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(testProject);
-      mockPrismaService.client.ticket.findFirst.mockResolvedValue(testTicket);
+      mockPrismaService.client.ticket.findUnique.mockResolvedValue(testTicket);
       mockPrismaService.client.ticket.update.mockResolvedValue({
         ...testTicket,
         status: TicketStatus.VERIFIED,
@@ -290,7 +292,7 @@ describe('Auto-create PR on VERIFIED Transition', () => {
 describe('AC12: No PR creation for non-VERIFIED transitions', () => {
     it('does not create PR when transitioning to IN_PROGRESS', async () => {
       mockPrismaService.client.project.findUnique.mockResolvedValue(testProject);
-      mockPrismaService.client.ticket.findFirst.mockResolvedValue({
+      mockPrismaService.client.ticket.findUnique.mockResolvedValue({
         ...testTicket,
         status: TicketStatus.VERIFIED,
       });
@@ -310,7 +312,7 @@ describe('AC12: No PR creation for non-VERIFIED transitions', () => {
 
     it('does not create PR when transitioning to CLOSED', async () => {
       mockPrismaService.client.project.findUnique.mockResolvedValue(testProject);
-      mockPrismaService.client.ticket.findFirst.mockResolvedValue({
+      mockPrismaService.client.ticket.findUnique.mockResolvedValue({
         ...testTicket,
         status: TicketStatus.VERIFY_FIX,
       });

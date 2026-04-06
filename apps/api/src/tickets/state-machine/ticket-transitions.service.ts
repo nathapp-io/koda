@@ -150,6 +150,7 @@ export class TicketTransitionsService {
             body: prBody,
             headBranch: branchName,
             baseBranch,
+            draft: true,
           }).then((pr) => {
             return this.db.ticketLink.create({
               data: {
