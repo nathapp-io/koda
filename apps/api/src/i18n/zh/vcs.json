@@ -1,4 +1,8 @@
 {
+  "pr": {
+    "created": "拉取请求创建成功",
+    "createFailed": "创建拉取请求失败：{error}"
+  },
   "connection": {
     "created": "VCS 连接创建成功",
     "updated": "VCS 连接更新成功",
