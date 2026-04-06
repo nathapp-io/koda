@@ -284,9 +284,8 @@ describe('Token Encryption Integration (AES-256-GCM)', () => {
 
     it('fails if master key is too short', () => {
       const shortKey = crypto.randomBytes(16).toString('hex');
-      const encrypted = encryptToken(plaintext, shortKey);
 
-      expect(() => decryptToken(encrypted, shortKey)).toThrow();
+      expect(() => encryptToken(plaintext, shortKey)).toThrow();
     });
   });
 
@@ -307,7 +306,7 @@ describe('Token Encryption Integration (AES-256-GCM)', () => {
 
       segments.forEach((segment) => {
         expect(/^[0-9a-f]*$/.test(segment)).toBe(true);
-        expect(/^[0-9A-F]/.test(segment)).toBe(false); // No uppercase
+        expect(/[A-F]/.test(segment)).toBe(false); // No uppercase
       });
     });
 
