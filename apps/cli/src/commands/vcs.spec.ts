@@ -29,6 +29,10 @@ jest.mock('../vcs-client.stub', () => ({
   vcsControllerCreateConnection: jest.fn(),
   vcsControllerGetConnection: jest.fn(),
   vcsControllerDeleteConnection: jest.fn(),
+  vcsControllerUpdateConnection: jest.fn(),
+  vcsControllerTestConnection: jest.fn(),
+  vcsControllerSyncConnection: jest.fn(),
+  vcsControllerImportIssue: jest.fn(),
 }));
 
 jest.mock('../generated/core/OpenAPI', () => ({

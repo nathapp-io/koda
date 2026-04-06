@@ -13,13 +13,12 @@ import {
   vcsControllerTestConnection,
   vcsControllerSyncConnection,
   vcsControllerImportIssue,
-  VcsConnectionResponseDto,
 } from '../vcs-client.stub';
 
 /**
  * Format a connection for display
  */
-function formatConnection(conn: VcsConnectionResponseDto): string[][] {
+function formatConnection(conn: Record<string, unknown>): string[][] {
   const rows: string[][] = [];
 
   if (conn.provider) rows.push(['Provider', String(conn.provider)]);
@@ -28,8 +27,8 @@ function formatConnection(conn: VcsConnectionResponseDto): string[][] {
   if (conn.syncMode) rows.push(['Sync Mode', String(conn.syncMode)]);
   if (conn.isActive !== undefined) rows.push(['Active', String(conn.isActive)]);
   if (conn.lastSyncedAt)
-    rows.push(['Last Synced At', conn.lastSyncedAt.toISOString()]);
-  if (conn.createdAt) rows.push(['Created At', conn.createdAt.toISOString()]);
+    rows.push(['Last Synced At', new Date(conn.lastSyncedAt as string).toISOString()]);
+  if (conn.createdAt) rows.push(['Created At', new Date(conn.createdAt as string).toISOString()]);
 
   return rows;
 }
@@ -84,10 +83,13 @@ export function vcsCommand(program: Command): void {
         };
 
         // Call API
-        const data = await vcsControllerCreateConnection({
+        const response = await vcsControllerCreateConnection({
           slug: ctx.projectSlug,
           requestBody,
         });
+
+        // Handle response envelope
+        const data = (response as any).data || response;
 
         if (options.json) {
           console.log(JSON.stringify(data, null, 2));
@@ -130,7 +132,8 @@ export function vcsCommand(program: Command): void {
         OpenAPI.TOKEN = auth.apiKey;
 
         // Call API
-        const data = await vcsControllerGetConnection({ slug: ctx.projectSlug });
+        const response = await vcsControllerGetConnection({ slug: ctx.projectSlug });
+        const data = (response as any).data || response;
 
         if (options.json) {
           console.log(JSON.stringify(data, null, 2));
@@ -142,8 +145,10 @@ export function vcsCommand(program: Command): void {
 
         process.exit(0);
       } catch (err: unknown) {
+        const apiErr = err as any;
+
         // Handle 404 specially for status command
-        if (err instanceof ApiError && err.status === 404) {
+        if (apiErr.response?.status === 404) {
           error('No VCS connection configured');
           process.exit(1);
           return;
