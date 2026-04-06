@@ -12,6 +12,7 @@ import { commentCommand } from './commands/comment';
 import { agentCommand } from './commands/agent';
 import { labelCommand } from './commands/label';
 import { kbCommand } from './commands/kb';
+import { vcsCommand } from './commands/vcs';
 
 // Read package.json to get version
 let version = '0.1.0';
@@ -153,6 +154,9 @@ labelCommand(program);
 
 // KB command
 kbCommand(program);
+
+// VCS command
+vcsCommand(program);
 
 // Global error handling for uncaught exceptions
 process.on('uncaughtException', (error: Error) => {

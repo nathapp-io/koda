@@ -1,0 +1,961 @@
+{
+  "project": "koda",
+  "feature": "vcs-phase1-connection-issue-sync",
+  "branchName": "feat/vcs-phase1-connection-issue-sync",
+  "createdAt": "2026-04-06T00:00:00Z",
+  "updatedAt": "2026-04-06T13:43:19.303Z",
+  "userStories": [
+    {
+      "id": "VCS-P1-001",
+      "title": "Prisma schema + token encryption utility + VCS config",
+      "description": "Create VcsConnection and VcsSyncLog Prisma models, extend Ticket and Project models, implement AES-256-GCM token encryption/decryption utility, and register vcsConfig to read encryption key and polling defaults from environment. This story lays the foundation for all subsequent VCS work.",
+      "acceptanceCriteria": [
+        "Prisma schema defines VcsConnection model with fields: id, projectId (unique, cascade delete), provider, repoOwner, repoName, encryptedToken, syncMode, allowedAuthors (JSON string), pollingIntervalMs, webhookSecret, lastSyncedAt, isActive, createdAt, updatedAt",
+        "Prisma schema defines VcsSyncLog model with fields: id, vcsConnectionId (foreign key, cascade delete), syncType, issuesSynced, issuesSkipped, errorMessage, startedAt, completedAt",
+        "Ticket model extended with nullable fields: externalVcsId, externalVcsUrl, vcsSyncedAt",
+        "Project model extended with one-to-one optional relation vcsConnection (cascade delete)",
+        "encryptToken(plaintext, masterKey) returns string in format 'iv:authTag:ciphertext' where each segment is hex-encoded",
+        "decryptToken(encryptToken(plaintext, masterKey), masterKey) returns original plaintext",
+        "decryptToken(tampered_ciphertext, masterKey) throws error on GCM integrity check failure",
+        "decryptToken(validCiphertext, wrongMasterKey) throws error",
+        "vcsConfig registers with namespace 'vcs' and provides encryptionKey, defaultPollingIntervalMs, githubApiUrl from environment variables"
+      ],
+      "tags": [
+        "feature",
+        "database",
+        "security",
+        "config"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/config/auth.config.ts",
+        "apps/api/src/config/env.validation.ts",
+        "apps/api/src/auth/agents.service.ts"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "8e01d219b5e3838e1c3ed5dd30aaa4036945de5f"
+    },
+    {
+      "id": "VCS-P1-002",
+      "title": "Provider interface + GitHub provider implementation",
+      "description": "Define IVcsProvider interface with fetchIssues, fetchIssue, and testConnection methods. Implement GitHubProvider using GitHub REST API. Create provider factory function that returns GitHubProvider for 'github' or throws ValidationAppException for unsupported providers like 'gitlab'.",
+      "acceptanceCriteria": [
+        "IVcsProvider interface defines fetchIssues(since?: Date): Promise<VcsIssue[]>",
+        "IVcsProvider interface defines fetchIssue(issueNumber: number): Promise<VcsIssue>",
+        "IVcsProvider interface defines testConnection(): Promise<{ ok: boolean; error?: string }>",
+        "VcsIssue type exports: number, title, body (nullable), authorLogin, url, labels, createdAt",
+        "GitHubProvider.fetchIssues() calls GET /repos/{owner}/{repo}/issues with query params: state=open, sort=created, direction=asc",
+        "GitHubProvider.fetchIssues(since) passes ISO 8601 since parameter to filter issues created after date",
+        "GitHubProvider.fetchIssues() filters out entries where pull_request field is present (API returns PRs in issues endpoint)",
+        "GitHubProvider.fetchIssue(42) calls GET /repos/{owner}/{repo}/issues/42 and returns VcsIssue",
+        "GitHubProvider.fetchIssue(nonexistent) throws NotFoundAppException when GitHub returns 404",
+        "GitHubProvider.testConnection() returns { ok: true } when token has repo read access",
+        "GitHubProvider.testConnection() returns { ok: false, error: 'message' } when token invalid or repo not found",
+        "createVcsProvider('github', config) returns GitHubProvider instance",
+        "createVcsProvider('gitlab', config) throws ValidationAppException indicating unsupported provider"
+      ],
+      "tags": [
+        "feature",
+        "integration",
+        "external-api"
+      ],
+      "dependencies": [
+        "VCS-P1-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/ci-webhook/ci-webhook.service.ts",
+        "apps/api/src/common/utils/git-url.util.ts",
+        "apps/api/src/common/exceptions/app.exception.ts"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "VCS-P1-002-A",
+      "title": "IVcsProvider interface + VcsIssue type definitions",
+      "description": "Define the IVcsProvider interface and VcsIssue type that all VCS provider implementations must satisfy. These are pure TypeScript contracts with no runtime logic.",
+      "acceptanceCriteria": [
+        "VcsIssue type exports fields: number (issue number), title (string), body (string | null), authorLogin (string), url (string), labels (string[]), createdAt (Date)",
+        "IVcsProvider interface defines fetchIssues(since?: Date): Promise<VcsIssue[]>",
+        "IVcsProvider interface defines fetchIssue(issueNumber: number): Promise<VcsIssue>",
+        "IVcsProvider interface defines testConnection(): Promise<{ ok: boolean; error?: string }>",
+        "Both VcsIssue and IVcsProvider are exported from a shared types or vcs-provider module within apps/api/src"
+      ],
+      "tags": [
+        "feature",
+        "types",
+        "interface"
+      ],
+      "dependencies": [
+        "VCS-P1-001"
+      ],
+      "contextFiles": [
+        "apps/api/src/common/exceptions/app.exception.ts",
+        "apps/api/src/ci-webhook/ci-webhook.service.ts"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "VCS-P1-002",
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Pure TypeScript type and interface definitions, no runtime logic, single file, under 30 LOC.",
+        "modelTier": "balanced",
+        "initialComplexity": "simple"
+      },
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "f1b2f34ea0695ed9b10bca0bb6318beec2d74e63"
+    },
+    {
+      "id": "VCS-P1-002-B",
+      "title": "GitHubProvider implementation",
+      "description": "Implement GitHubProvider class that satisfies IVcsProvider. Uses GitHub REST API to fetch issues and test connectivity. Filters pull requests from the issues endpoint response.",
+      "acceptanceCriteria": [
+        "GitHubProvider.fetchIssues() calls GET /repos/{owner}/{repo}/issues with state=open, sort=created, direction=asc and filters out entries where pull_request field is present",
+        "GitHubProvider.fetchIssues(since) passes ISO 8601 since parameter to the GitHub issues endpoint",
+        "GitHubProvider.fetchIssue(issueNumber) calls GET /repos/{owner}/{repo}/issues/{issueNumber} and returns a mapped VcsIssue",
+        "GitHubProvider.fetchIssue(nonexistent) throws NotFoundAppException when GitHub returns 404",
+        "GitHubProvider.testConnection() returns { ok: true } when token has repo read access",
+        "GitHubProvider.testConnection() returns { ok: false, error: 'message' } when the token is invalid or repo is not found",
+        "All HTTP requests include Authorization: Bearer {token} header",
+        "GitHub API responses are mapped to VcsIssue shape (number, title, body, authorLogin, url, labels, createdAt)"
+      ],
+      "tags": [
+        "feature",
+        "integration",
+        "external-api"
+      ],
+      "dependencies": [
+        "VCS-P1-002-A"
+      ],
+      "contextFiles": [
+        "apps/api/src/common/exceptions/app.exception.ts",
+        "apps/api/src/common/utils/git-url.util.ts",
+        "apps/api/src/ci-webhook/ci-webhook.service.ts"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "VCS-P1-002",
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Multiple methods with HTTP interaction, edge case handling (404, PR filtering, since param), and response mapping across ~120-160 LOC. Fits three-session-tdd-lite with mocked HTTP in tests.",
+        "modelTier": "balanced",
+        "initialComplexity": "medium"
+      },
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "fa0ba1256f5b87fa873855fa79184bd0946e4259"
+    },
+    {
+      "id": "VCS-P1-002-C",
+      "title": "createVcsProvider factory function",
+      "description": "Implement a factory function createVcsProvider(providerType, config) that returns a GitHubProvider for 'github' or throws ValidationAppException for unsupported provider types.",
+      "acceptanceCriteria": [
+        "createVcsProvider('github', config) returns a GitHubProvider instance",
+        "createVcsProvider('gitlab', config) throws ValidationAppException indicating the provider is unsupported",
+        "createVcsProvider with any unrecognised providerType throws ValidationAppException",
+        "Factory is exported and usable by the sync service (VCS-P1-004)"
+      ],
+      "tags": [
+        "feature",
+        "factory"
+      ],
+      "dependencies": [
+        "VCS-P1-002-B"
+      ],
+      "contextFiles": [
+        "apps/api/src/common/exceptions/app.exception.ts"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "VCS-P1-002",
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Single function, switch/if pattern, under 20 LOC. Isolated from HTTP logic. Simple enough for tdd-simple.",
+        "modelTier": "balanced",
+        "initialComplexity": "simple"
+      },
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "52eeb97d967379842653ecc21a80f214c3121cca"
+    },
+    {
+      "id": "VCS-P1-003",
+      "title": "VCS connection CRUD API (service + controller + DTOs)",
+      "description": "Implement VcsConnectionService with create, read, update, delete operations that handle token encryption and validation. Create VcsController with REST endpoints for connection management. Define DTOs for request/response serialization. Token is never returned in API responses.",
+      "acceptanceCriteria": [
+        "POST /projects/:slug/vcs with valid CreateVcsConnectionDto returns 201 with VcsConnectionResponseDto (token field omitted)",
+        "POST /projects/:slug/vcs encrypts plaintext token before storage (raw token never persisted)",
+        "POST /projects/:slug/vcs returns 409 when project already has a connection",
+        "POST /projects/:slug/vcs returns 404 when project slug not found",
+        "GET /projects/:slug/vcs returns VcsConnectionResponseDto with all fields except token",
+        "GET /projects/:slug/vcs returns 404 when no connection exists",
+        "PATCH /projects/:slug/vcs with { syncMode: 'polling' } updates sync mode and returns updated VcsConnectionResponseDto",
+        "PATCH /projects/:slug/vcs with { token: 'new-token' } decrypts old token, re-encrypts new token, and stores",
+        "DELETE /projects/:slug/vcs returns 204 and removes connection",
+        "DELETE /projects/:slug/vcs returns 404 when no connection exists",
+        "POST /projects/:slug/vcs/test decrypts stored token, calls provider.testConnection(), returns TestConnectionResultDto"
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "service",
+        "database"
+      ],
+      "dependencies": [
+        "VCS-P1-001",
+        "VCS-P1-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/webhook/webhook.controller.ts",
+        "apps/api/src/webhook/webhook.service.ts",
+        "apps/api/src/tickets/tickets.controller.ts",
+        "apps/api/src/common/enums.ts"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "VCS-P1-003-A",
+      "title": "VCS connection DTOs and response serialization",
+      "description": "Define all request and response DTOs for VCS connection endpoints: CreateVcsConnectionDto, UpdateVcsConnectionDto, VcsConnectionResponseDto (token excluded), and TestConnectionResultDto. Use class-validator decorators for input validation.",
+      "acceptanceCriteria": [
+        "CreateVcsConnectionDto requires provider (enum), token (string), repoUrl (string), and optional syncMode and webhookSecret fields",
+        "UpdateVcsConnectionDto has all fields optional: token, syncMode, webhookSecret",
+        "VcsConnectionResponseDto includes all VcsConnection fields except token",
+        "TestConnectionResultDto includes success (boolean), latencyMs (number), and optional error (string)",
+        "CreateVcsConnectionDto rejects invalid provider enum values with a validation error",
+        "CreateVcsConnectionDto rejects missing required fields with a validation error"
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "dto"
+      ],
+      "dependencies": [
+        "VCS-P1-001"
+      ],
+      "contextFiles": [
+        "apps/api/src/common/enums.ts",
+        "apps/api/src/tickets/tickets.controller.ts",
+        "apps/api/src/webhook/webhook.controller.ts"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "VCS-P1-003",
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Pure DTO definitions with class-validator decorators; under 50 LOC, single-purpose files, no business logic",
+        "modelTier": "balanced",
+        "initialComplexity": "simple"
+      },
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "2619996e428fc5cb158898ce9b73aee1531627d0"
+    },
+    {
+      "id": "VCS-P1-003-B",
+      "title": "VcsConnectionService CRUD with token encryption",
+      "description": "Implement VcsConnectionService with create, findByProject, update, and delete operations. Token must be encrypted before storage using the utility from VCS-P1-001 and never returned in query results. Update re-encrypts token when provided. testConnection() decrypts the stored token and delegates to the provider.",
+      "acceptanceCriteria": [
+        "create() encrypts the plaintext token using the encryption utility before persisting to the database",
+        "create() throws ConflictException (409) when the project already has a VCS connection",
+        "create() throws NotFoundException (404) when the project slug does not resolve to a project",
+        "findByProject() returns the connection record with the token field omitted",
+        "findByProject() throws NotFoundException (404) when no connection exists for the project",
+        "update() with syncMode updates only the syncMode field and returns the updated record without token",
+        "update() with a new token decrypts the current stored token, re-encrypts the new token, and persists it",
+        "delete() removes the connection record and returns void",
+        "delete() throws NotFoundException (404) when no connection exists for the project",
+        "testConnection() decrypts the stored token, calls provider.testConnection() via createVcsProvider factory, and returns TestConnectionResultDto"
+      ],
+      "tags": [
+        "feature",
+        "service",
+        "security",
+        "database"
+      ],
+      "dependencies": [
+        "VCS-P1-001",
+        "VCS-P1-002-A",
+        "VCS-P1-002-B",
+        "VCS-P1-002-C",
+        "VCS-P1-003-A"
+      ],
+      "contextFiles": [
+        "apps/api/src/webhook/webhook.service.ts",
+        "apps/api/src/tickets/tickets.controller.ts",
+        "apps/api/src/common/enums.ts"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "VCS-P1-003",
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Security-critical: handles token encryption/decryption and storage; spans Prisma, encryption utility, and provider factory; three-session-tdd required by security override",
+        "modelTier": "balanced",
+        "initialComplexity": "complex"
+      },
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "5570f277903fe52073dcabe9394af76515b6239e"
+    },
+    {
+      "id": "VCS-P1-003-C",
+      "title": "VcsController REST endpoints for connection management",
+      "description": "Implement VcsController with REST endpoints under /projects/:slug/vcs that delegate to VcsConnectionService. Wire HTTP status codes, guard routes, and apply the response DTO transformation. Includes the POST /test sub-route.",
+      "acceptanceCriteria": [
+        "POST /projects/:slug/vcs with valid CreateVcsConnectionDto returns 201 with VcsConnectionResponseDto",
+        "POST /projects/:slug/vcs propagates 409 ConflictException when project already has a connection",
+        "POST /projects/:slug/vcs propagates 404 NotFoundException when project slug is not found",
+        "GET /projects/:slug/vcs returns 200 with VcsConnectionResponseDto when connection exists",
+        "GET /projects/:slug/vcs returns 404 when no connection exists for the project",
+        "PATCH /projects/:slug/vcs returns 200 with updated VcsConnectionResponseDto",
+        "DELETE /projects/:slug/vcs returns 204 with no body when deletion succeeds",
+        "DELETE /projects/:slug/vcs returns 404 when no connection exists",
+        "POST /projects/:slug/vcs/test returns 200 with TestConnectionResultDto"
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "controller"
+      ],
+      "dependencies": [
+        "VCS-P1-003-A",
+        "VCS-P1-003-B"
+      ],
+      "contextFiles": [
+        "apps/api/src/webhook/webhook.controller.ts",
+        "apps/api/src/tickets/tickets.controller.ts",
+        "apps/api/src/common/enums.ts"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "VCS-P1-003",
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Standard NestJS controller wiring; delegates all logic to the service; 2-3 files, clear patterns matching existing controllers in the codebase",
+        "modelTier": "balanced",
+        "initialComplexity": "medium"
+      },
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b06ee42fead68fba68d78f3b5b8f8e13281d0b15"
+    },
+    {
+      "id": "VCS-P1-004",
+      "title": "Issue sync core + polling + webhook + manual import",
+      "description": "Implement core sync logic (vcsService.syncIssue) shared by all three sync paths. Set up polling via SchedulerRegistry with dynamic interval management. Implement webhook receiver with HMAC signature verification. Add manual single-issue import endpoint. Write sync logs for audit trail. Handle filtering by allowedAuthors, deduplication, error cases.",
+      "acceptanceCriteria": [
+        "vcsService.syncIssue(project, issue, 'manual') creates ticket with type='TASK', status='CREATED', priority='MEDIUM'",
+        "vcsService.syncIssue() returns { action: 'skipped' } when ticket with matching externalVcsId exists in project",
+        "vcsService.syncIssue() sets externalVcsId, externalVcsUrl, vcsSyncedAt on newly created ticket",
+        "vcsService.syncIssue() allocates ticket.number via MAX(number)+1 in Prisma transaction",
+        "VcsSyncService registers interval via SchedulerRegistry for each connection with syncMode='polling' on module initialization",
+        "Polling service filters issues by allowedAuthors before calling syncIssue()",
+        "Polling service updates connection.lastSyncedAt only after successful sync run",
+        "Polling service writes VcsSyncLog entry with issuesSynced, issuesSkipped, startedAt, completedAt after each run",
+        "Polling fetch failure writes VcsSyncLog with errorMessage, does not update lastSyncedAt, and retries on next interval",
+        "POST /projects/:slug/vcs-webhook with valid X-Hub-Signature-256 and issues.opened event syncs issue",
+        "POST /projects/:slug/vcs-webhook with invalid X-Hub-Signature-256 returns 401",
+        "POST /projects/:slug/vcs-webhook with issues.closed event returns 200 { ignored: true }",
+        "POST /projects/:slug/vcs-webhook filters by allowedAuthors, returns 200 { ignored: true } for non-allowed authors",
+        "POST /projects/:slug/vcs/sync/:issueNumber fetches issue and creates ticket regardless of allowedAuthors",
+        "POST /projects/:slug/vcs/sync/:issueNumber returns 409 when issue already synced",
+        "POST /projects/:slug/vcs/sync triggers full sync run and returns SyncResultDto with counts and created ticket refs"
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "integration",
+        "scheduling",
+        "security"
+      ],
+      "dependencies": [
+        "VCS-P1-002",
+        "VCS-P1-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/ci-webhook/ci-webhook.controller.ts",
+        "apps/api/src/ci-webhook/ci-webhook.service.ts",
+        "apps/api/src/rag/strategies/cron-optimize.strategy.ts",
+        "apps/api/src/webhook/webhook-dispatcher.service.ts",
+        "apps/api/src/tickets/tickets.service.ts"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "VCS-P1-004-A",
+      "title": "Core vcsService.syncIssue with deduplication and ticket creation",
+      "description": "Implement the shared vcsService.syncIssue(project, issue, source) method used by all three sync paths. Creates a ticket from a VcsIssue, deduplicates via externalVcsId, sets VCS metadata fields, and allocates ticket.number atomically via MAX(number)+1 inside a Prisma transaction.",
+      "acceptanceCriteria": [
+        "syncIssue(project, issue, 'manual') creates a ticket with type='TASK', status='CREATED', priority='MEDIUM'",
+        "syncIssue() returns { action: 'created', ticketId } on successful creation",
+        "syncIssue() returns { action: 'skipped' } when a ticket with the same externalVcsId already exists in the project",
+        "Created ticket has externalVcsId, externalVcsUrl, and vcsSyncedAt populated from the VcsIssue input",
+        "ticket.number is allocated as MAX(number)+1 scoped to the project inside a single Prisma transaction, preventing duplicates under concurrent requests"
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "integration"
+      ],
+      "dependencies": [
+        "VCS-P1-002-C",
+        "VCS-P1-003-B"
+      ],
+      "contextFiles": [
+        "apps/api/src/tickets/tickets.service.ts",
+        "apps/api/src/ci-webhook/ci-webhook.service.ts",
+        "apps/api/src/vcs/vcs.service.ts",
+        "apps/api/src/vcs/vcs-connection.service.ts"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "VCS-P1-004",
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Core shared logic touching Prisma transactions, ticket creation invariants, and deduplication. ~180 LOC across service + unit tests. All downstream sync paths depend on this.",
+        "modelTier": "balanced",
+        "initialComplexity": "complex"
+      },
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "8233165e55abbfca828b62beb36579b9d1069eaa"
+    },
+    {
+      "id": "VCS-P1-004-B",
+      "title": "Polling service with SchedulerRegistry, allowedAuthors filter, and VcsSyncLog",
+      "description": "Implement VcsSyncService that registers a polling interval per VCS connection with syncMode='polling' on module init using NestJS SchedulerRegistry. Each poll fetches issues from the provider, filters by allowedAuthors, calls syncIssue for each candidate, updates lastSyncedAt on success, and writes a VcsSyncLog entry with issue counts. On fetch failure, writes an error log without updating lastSyncedAt.",
+      "acceptanceCriteria": [
+        "VcsSyncService registers one SchedulerRegistry interval per connection with syncMode='polling' on module initialization",
+        "Polling run filters fetched issues against connection.allowedAuthors before calling syncIssue()",
+        "Polling run updates connection.lastSyncedAt only after all syncIssue calls complete without a fetch error",
+        "Polling run writes a VcsSyncLog entry with issuesSynced, issuesSkipped, startedAt, and completedAt on success",
+        "Polling run writes a VcsSyncLog entry with errorMessage and does not update lastSyncedAt when the provider fetch throws"
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "scheduling"
+      ],
+      "dependencies": [
+        "VCS-P1-004-A"
+      ],
+      "contextFiles": [
+        "apps/api/src/rag/strategies/cron-optimize.strategy.ts",
+        "apps/api/src/vcs/vcs-sync.service.ts",
+        "apps/api/src/vcs/vcs.service.ts",
+        "apps/api/src/vcs/vcs-connection.service.ts"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "VCS-P1-004",
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Integrates SchedulerRegistry with dynamic interval management, allowedAuthors filtering, audit logging, and error-path divergence. ~220 LOC across service + integration tests.",
+        "modelTier": "balanced",
+        "initialComplexity": "complex"
+      },
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "4dcf5c34e4cb1483bce8ad15bcd2d97b134cd28d"
+    },
+    {
+      "id": "VCS-P1-004-C",
+      "title": "Webhook receiver with HMAC-SHA256 signature verification and event routing",
+      "description": "Implement POST /projects/:slug/vcs-webhook controller and handler. Verify the X-Hub-Signature-256 header using HMAC-SHA256 against the connection's webhookSecret before processing any payload. Route issues.opened events to syncIssue() with allowedAuthors filtering. Return 200 { ignored: true } for issues.closed and non-allowed authors. Return 401 for invalid signatures.",
+      "acceptanceCriteria": [
+        "POST /projects/:slug/vcs-webhook with a valid X-Hub-Signature-256 and issues.opened event calls syncIssue() and returns the sync result",
+        "POST /projects/:slug/vcs-webhook with an invalid X-Hub-Signature-256 returns HTTP 401 without processing the payload",
+        "POST /projects/:slug/vcs-webhook with issues.closed event returns HTTP 200 { ignored: true }",
+        "POST /projects/:slug/vcs-webhook filters the issue author against allowedAuthors and returns HTTP 200 { ignored: true } for non-allowed authors",
+        "HMAC verification uses timing-safe comparison to prevent timing attacks"
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "security",
+        "integration"
+      ],
+      "dependencies": [
+        "VCS-P1-004-A"
+      ],
+      "contextFiles": [
+        "apps/api/src/ci-webhook/ci-webhook.controller.ts",
+        "apps/api/src/ci-webhook/ci-webhook.service.ts",
+        "apps/api/src/webhook/webhook-dispatcher.service.ts",
+        "apps/api/src/vcs/vcs-webhook.controller.ts",
+        "apps/api/src/vcs/vcs.service.ts"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "VCS-P1-004",
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Security-critical: HMAC verification requires three-session-tdd regardless of LOC. Controller + service + timing-safe crypto ~200 LOC. Must enforce security override.",
+        "modelTier": "balanced",
+        "initialComplexity": "complex"
+      },
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b25c31800702d8643e0430191f611a13ba5a449d"
+    },
+    {
+      "id": "VCS-P1-004-D",
+      "title": "Manual single-issue and full-sync endpoints",
+      "description": "Add two manual sync endpoints to VcsController. POST /projects/:slug/vcs/sync/:issueNumber fetches a single issue by number from the provider and creates a ticket, bypassing allowedAuthors. Returns 409 if already synced. POST /projects/:slug/vcs/sync triggers a full sync run and returns a SyncResultDto with issue counts and created ticket references.",
+      "acceptanceCriteria": [
+        "POST /projects/:slug/vcs/sync/:issueNumber fetches the issue from the provider and calls syncIssue() regardless of allowedAuthors",
+        "POST /projects/:slug/vcs/sync/:issueNumber returns HTTP 409 when the issue is already synced (externalVcsId exists)",
+        "POST /projects/:slug/vcs/sync/:issueNumber returns the created ticket reference on success",
+        "POST /projects/:slug/vcs/sync triggers a full provider fetch, calls syncIssue() for each issue, and returns SyncResultDto with issuesSynced and issuesSkipped counts",
+        "POST /projects/:slug/vcs/sync includes created ticket IDs in SyncResultDto createdTickets array"
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "integration"
+      ],
+      "dependencies": [
+        "VCS-P1-004-A",
+        "VCS-P1-003-C"
+      ],
+      "contextFiles": [
+        "apps/api/src/vcs/vcs.controller.ts",
+        "apps/api/src/vcs/vcs.service.ts",
+        "apps/api/src/vcs/vcs-sync.service.ts",
+        "apps/api/src/vcs/dto/sync-result.dto.ts"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "VCS-P1-004",
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Two REST endpoints with straightforward delegation to syncIssue() and the polling run logic. ~150 LOC. No new abstractions; primary risk is the 409 conflict path and the SyncResultDto shape.",
+        "modelTier": "powerful",
+        "initialComplexity": "medium"
+      },
+      "priorErrors": [
+        "Attempt 1 failed with model tier: balanced: Autofix exhausted: review still failing after fix attempts"
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "balanced",
+          "stage": "review",
+          "summary": "Failed with tier balanced, escalating to next tier",
+          "reviewFindings": [
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src/vcs/vcs.controller.ts",
+              "line": 190,
+              "message": "AC2 not implemented: POST /projects/:slug/vcs/sync/:issueNumber should return HTTP 409 when the issue is already synced (externalVcsId exists). Currently returns HTTP 200 with issuesSynced=0, issuesSkipped=1 instead of throwing ConflictException.",
+              "source": "semantic-review"
+            }
+          ],
+          "cost": 0,
+          "timestamp": "2026-04-06T10:27:04.585Z"
+        }
+      ],
+      "storyPoints": 1,
+      "storyGitRef": "cc267580ef58434260b717c0329ebe46d6e6ae5b"
+    },
+    {
+      "id": "VCS-P1-005",
+      "title": "CLI commands + Web UI + ticket VCS badges",
+      "description": "Implement CLI vcs subcommands (connect, status, update, disconnect, test, sync, import) using generated OpenAPI client. Create Web settings page with VCS Integration tab, connection form, test/sync buttons. Add GitHub icon badges to ticket cards for synced issues. Add Settings link to project sidebar. Add i18n keys for en and zh in both API and Web.",
+      "acceptanceCriteria": [
+        "koda vcs connect --provider github --owner o --repo r --token t --sync-mode polling calls POST /projects/:slug/vcs and prints connection info",
+        "koda vcs connect --json prints VcsConnectionResponseDto as JSON to stdout",
+        "koda vcs status calls GET /projects/:slug/vcs and prints connection config and last sync time",
+        "koda vcs status with no connection prints 'No VCS connection configured' and exits 1",
+        "koda vcs update --sync-mode webhook --authors user1,user2 calls PATCH /projects/:slug/vcs",
+        "koda vcs disconnect calls DELETE /projects/:slug/vcs and prints confirmation",
+        "koda vcs test calls POST /projects/:slug/vcs/test and prints 'Connection OK' or error message",
+        "koda vcs sync calls POST /projects/:slug/vcs/sync and prints SyncResultDto summary",
+        "koda vcs import 42 calls POST /projects/:slug/vcs/sync/42 and prints created ticket ref",
+        "Web /[project]/settings page renders VCS Integration tab with connection form (provider, repo owner, repo name, token field, sync mode radio, polling interval input, authors tag input)",
+        "Web settings Test Connection button calls POST .../vcs/test and shows success/error toast",
+        "Web settings Sync Now button calls POST .../vcs/sync and shows sync result toast",
+        "Web ticket cards on board show GitHub icon badge with issue number when externalVcsUrl present",
+        "Web ticket detail page shows 'Synced from GitHub #42' link when externalVcsUrl present",
+        "Web board page has Import Issue dialog that accepts issue number and calls POST .../vcs/sync/:issueNumber",
+        "Web project sidebar includes Settings link below KB section",
+        "i18n keys exist in apps/api/src/i18n/en/vcs.json and apps/api/src/i18n/zh/vcs.json for all API strings",
+        "i18n keys exist in apps/web/i18n/locales/en.json and apps/web/i18n/locales/zh.json for all Web strings"
+      ],
+      "tags": [
+        "feature",
+        "cli",
+        "web",
+        "i18n"
+      ],
+      "dependencies": [
+        "VCS-P1-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output"
+      },
+      "contextFiles": [
+        "apps/cli/src/commands/ticket.ts",
+        "apps/web/pages/[project]/labels.vue",
+        "apps/web/components/TicketCard.vue",
+        "apps/web/pages/[project]/tickets/[ref].vue"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    },
+    {
+      "id": "VCS-P1-005-A",
+      "title": "CLI vcs connect, status, and disconnect subcommands",
+      "description": "Implement the koda vcs connect, vcs status, and vcs disconnect subcommands using the generated OpenAPI client. The connect command accepts --provider, --owner, --repo, --token, --sync-mode flags and calls POST /projects/:slug/vcs. Status calls GET /projects/:slug/vcs and prints connection config with last sync time. Disconnect calls DELETE /projects/:slug/vcs. All commands resolve project slug from current context.",
+      "acceptanceCriteria": [
+        "koda vcs connect --provider github --owner o --repo r --token t --sync-mode polling calls POST /projects/:slug/vcs and prints connection info",
+        "koda vcs connect --json prints VcsConnectionResponseDto as JSON to stdout",
+        "koda vcs status calls GET /projects/:slug/vcs and prints connection config and last sync time",
+        "koda vcs status with no connection prints 'No VCS connection configured' and exits with code 1",
+        "koda vcs disconnect calls DELETE /projects/:slug/vcs and prints confirmation message",
+        "All three commands resolve project slug from CLI context (flag or local config)",
+        "Network errors are caught and printed to stderr with non-zero exit code"
+      ],
+      "tags": [
+        "feature",
+        "cli"
+      ],
+      "dependencies": [
+        "VCS-P1-004"
+      ],
+      "contextFiles": [
+        "apps/cli/src/commands/ticket.ts",
+        "apps/cli/src/generated/",
+        "apps/cli/src/index.ts"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "VCS-P1-005",
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Three commands, ~150 LOC, uses generated client patterns already established in the CLI. Clear request/response mapping with no novel abstractions.",
+        "modelTier": "balanced",
+        "initialComplexity": "medium"
+      },
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "ce6300e3e74895f6dbc28c2782067fea8f12c975"
+    },
+    {
+      "id": "VCS-P1-005-B",
+      "title": "CLI vcs update, test, sync, and import subcommands",
+      "description": "Implement the koda vcs update, vcs test, vcs sync, and vcs import subcommands. Update calls PATCH /projects/:slug/vcs with optional --sync-mode and --authors flags. Test calls POST /projects/:slug/vcs/test and prints 'Connection OK' or the error message. Sync calls POST /projects/:slug/vcs/sync and prints a SyncResultDto summary. Import accepts a positional issue number and calls POST /projects/:slug/vcs/sync/:issueNumber, printing the created ticket ref.",
+      "acceptanceCriteria": [
+        "koda vcs update --sync-mode webhook --authors user1,user2 calls PATCH /projects/:slug/vcs with parsed body",
+        "koda vcs test calls POST /projects/:slug/vcs/test and prints 'Connection OK' on success",
+        "koda vcs test prints the provider error message and exits 1 when the connection fails",
+        "koda vcs sync calls POST /projects/:slug/vcs/sync and prints SyncResultDto summary (created, updated, skipped counts)",
+        "koda vcs import 42 calls POST /projects/:slug/vcs/sync/42 and prints the created ticket ref",
+        "koda vcs import without an issue number prints usage help and exits 1",
+        "Network errors in all four commands are caught and printed to stderr with non-zero exit code"
+      ],
+      "tags": [
+        "feature",
+        "cli"
+      ],
+      "dependencies": [
+        "VCS-P1-005-A"
+      ],
+      "contextFiles": [
+        "apps/cli/src/commands/ticket.ts",
+        "apps/cli/src/generated/",
+        "apps/cli/src/index.ts"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "VCS-P1-005",
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Four commands following the same pattern as 005-A, ~150 LOC. Grouped separately due to distinct action semantics (mutate, validate, sync, import) vs CRUD in 005-A.",
+        "modelTier": "balanced",
+        "initialComplexity": "medium"
+      },
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "e3addfafea210ed98f65fbe330e0cea9b3cfdb48"
+    },
+    {
+      "id": "VCS-P1-005-C",
+      "title": "Web settings page with VCS Integration tab, form, and action buttons",
+      "description": "Create the /[project]/settings page with a VCS Integration tab. The tab contains a connection form with provider selector, repo owner, repo name, token field, sync mode radio group, polling interval input, and authors tag input. A Test Connection button calls POST .../vcs/test and shows a success or error toast. A Sync Now button calls POST .../vcs/sync and shows a sync result toast. On page load the form pre-fills from GET .../vcs if a connection exists.",
+      "acceptanceCriteria": [
+        "Navigating to /[project]/settings renders a page with a VCS Integration tab",
+        "VCS Integration tab renders fields: provider selector, repo owner text, repo name text, masked token input, sync mode radio (polling/webhook), polling interval number input, authors tag input",
+        "Submitting the form with no existing connection calls POST /projects/:slug/vcs",
+        "Submitting the form with an existing connection calls PATCH /projects/:slug/vcs",
+        "Test Connection button calls POST /projects/:slug/vcs/test and shows a success toast on 200 or an error toast with the provider message on failure",
+        "Sync Now button calls POST /projects/:slug/vcs/sync and shows a toast with created/updated/skipped counts",
+        "On page load the form pre-fills fields from GET /projects/:slug/vcs when a connection exists",
+        "All form labels and toast messages use web i18n keys (no hardcoded strings)"
+      ],
+      "tags": [
+        "feature",
+        "web"
+      ],
+      "dependencies": [
+        "VCS-P1-005-A",
+        "VCS-P1-005-B"
+      ],
+      "contextFiles": [
+        "apps/web/pages/[project]/labels.vue",
+        "apps/web/pages/[project]/tickets/[ref].vue",
+        "apps/web/i18n/locales/en.json"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "VCS-P1-005",
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "New page with multi-field form, conditional create/update logic, two async action buttons with distinct toast outcomes, and pre-fill on load. ~300 LOC across page + composable.",
+        "modelTier": "balanced",
+        "initialComplexity": "complex"
+      },
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "58e5ad881fc40ceabddfe96f61e7145d7bbfed58"
+    },
+    {
+      "id": "VCS-P1-005-D",
+      "title": "Web ticket card GitHub badge and ticket detail sync link",
+      "description": "Modify TicketCard.vue to display a GitHub icon badge with the issue number when externalVcsUrl is present on the ticket. Modify the ticket detail page to display a 'Synced from GitHub #42' link (using externalVcsUrl) when that field is present. Both additions must use i18n keys for any text and must be conditionally rendered only when externalVcsUrl is non-null.",
+      "acceptanceCriteria": [
+        "TicketCard renders a GitHub icon badge with the issue number when ticket.externalVcsUrl is a non-empty string",
+        "TicketCard does not render the badge when ticket.externalVcsUrl is null or undefined",
+        "The ticket detail page renders a 'Synced from GitHub #<number>' link pointing to externalVcsUrl when it is present",
+        "The ticket detail page does not render the sync link when externalVcsUrl is absent",
+        "The issue number displayed in badge and detail link is parsed from externalVcsUrl (last path segment)",
+        "All new strings use web i18n keys"
+      ],
+      "tags": [
+        "feature",
+        "web"
+      ],
+      "dependencies": [
+        "VCS-P1-005-C"
+      ],
+      "contextFiles": [
+        "apps/web/components/TicketCard.vue",
+        "apps/web/pages/[project]/tickets/[ref].vue",
+        "apps/web/i18n/locales/en.json"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "VCS-P1-005",
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Modifications to two existing components, ~80 LOC total. Conditional rendering with URL parsing is the only non-trivial logic.",
+        "modelTier": "balanced",
+        "initialComplexity": "medium"
+      },
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "f4c43a0bc5954ca9932f65d996f1a46b3b01d85c"
+    },
+    {
+      "id": "VCS-P1-005-E",
+      "title": "Web board Import Issue dialog and sidebar Settings link",
+      "description": "Add a Settings link to the project sidebar below the KB section. Add an Import Issue dialog to the board page that accepts an issue number input and calls POST /projects/:slug/vcs/sync/:issueNumber on submit, then navigates to or highlights the created ticket. Both additions must use i18n keys.",
+      "acceptanceCriteria": [
+        "Project sidebar renders a Settings link below the KB section that navigates to /[project]/settings",
+        "Board page renders an Import Issue button that opens a modal dialog",
+        "Import Issue dialog contains a numeric issue number input field and a submit button",
+        "Submitting the dialog calls POST /projects/:slug/vcs/sync/:issueNumber with the entered number",
+        "On success the dialog closes and shows a toast with the created ticket ref",
+        "On failure the dialog shows an inline error message from the API response",
+        "All new UI strings use web i18n keys"
+      ],
+      "tags": [
+        "feature",
+        "web"
+      ],
+      "dependencies": [
+        "VCS-P1-005-C"
+      ],
+      "contextFiles": [
+        "apps/web/pages/[project]/labels.vue",
+        "apps/web/i18n/locales/en.json"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "VCS-P1-005",
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Two independent UI additions (~100 LOC total): a nav link and a modal with a single input. Grouped because both are small board/nav additions with shared i18n dependency.",
+        "modelTier": "balanced",
+        "initialComplexity": "medium"
+      },
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "dee73a68e36288b8266108af1e854b128e20a3fc"
+    },
+    {
+      "id": "VCS-P1-005-F",
+      "title": "API and Web i18n keys for all VCS feature strings",
+      "description": "Add all missing i18n translation keys for the VCS feature to the four locale files: apps/api/src/i18n/en/vcs.json, apps/api/src/i18n/zh/vcs.json, apps/web/i18n/locales/en.json (vcs namespace), and apps/web/i18n/locales/zh.json (vcs namespace). Keys must cover connection CRUD responses, sync result messages, error messages, form labels, toast messages, and badge/link text introduced in 005-A through 005-E.",
+      "acceptanceCriteria": [
+        "apps/api/src/i18n/en/vcs.json exists and contains keys for all API VCS response and error strings",
+        "apps/api/src/i18n/zh/vcs.json exists with Chinese translations for every key in the English file",
+        "apps/web/i18n/locales/en.json contains vcs-namespaced keys for all form labels, toasts, badge text, and dialog strings",
+        "apps/web/i18n/locales/zh.json contains Chinese translations for every vcs-namespaced key in the English web file",
+        "No VCS-related hardcoded English strings remain in any CLI output handler, Vue component, or API response after this story"
+      ],
+      "tags": [
+        "feature",
+        "i18n"
+      ],
+      "dependencies": [
+        "VCS-P1-005-A",
+        "VCS-P1-005-B",
+        "VCS-P1-005-C",
+        "VCS-P1-005-D",
+        "VCS-P1-005-E"
+      ],
+      "contextFiles": [
+        "apps/api/src/i18n/en/",
+        "apps/web/i18n/locales/en.json",
+        "apps/web/i18n/locales/zh.json"
+      ],
+      "status": "passed",
+      "passes": true,
+      "escalations": [],
+      "attempts": 0,
+      "parentStoryId": "VCS-P1-005",
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Pure JSON additions to four locale files, no logic changes. Depends on all sibling stories to know the full set of required keys. ~50 LOC of JSON.",
+        "modelTier": "powerful",
+        "initialComplexity": "simple"
+      },
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "f7afe5677356eddd037898093d8b1dcd11caaca5"
+    }
+  ],
+  "analysis": "## Key Architectural Changes\n\nThis feature introduces a per-project VCS abstraction layer that enables issue sync from GitHub (with GitLab support designed for Phase 5). The implementation spans three API layers: provider interface, connection management service, and sync orchestration service.\n\n### New Prisma Models\n- **VcsConnection**: Stores per-project VCS config (provider, repo coords, encrypted token, sync mode, allowed authors, webhook secret, polling state)\n- **VcsSyncLog**: Audit trail for sync runs (type, counts, errors, timestamps)\n- **Ticket extensions**: externalVcsId, externalVcsUrl, vcsSyncedAt (to track synced issues)\n- **Project extensions**: one-to-one optional vcsConnection relation\n\nExisting models (Ticket, Project, Webhook) will be extended, not replaced. Migrations will be additive.\n\n### Security-Critical Components\n1. **Token Encryption**: AES-256-GCM with per-encryption random IV. Master key from VCS_ENCRYPTION_KEY env. Decryption failure should mark connection inactive, not crash the server.\n2. **Webhook Verification**: HMAC-SHA256 signature on X-Hub-Signature-256 header (existing pattern in webhook-dispatcher.service.ts)\n3. **Auth on Endpoints**: Bearer token required for all non-public endpoints; webhook receiver is @Public() but signature-verified\n\n### Provider Abstraction\nIVcsProvider interface with three methods (fetchIssues, fetchIssue, testConnection) enables GitLab to be swapped in Phase 5 without changing sync logic. GitHub API quirks handled in GitHubProvider: filter pull requests from issue listing, handle 404 as NotFoundAppException.\n\n### Sync Orchestration\nThree entry points (polling interval, webhook, manual import) converge on vcsService.syncIssue(project, issue, syncType). Core logic:\n1. Check if ticket with externalVcsId already exists (idempotency)\n2. Create ticket with type=TASK, status=CREATED, priority=MEDIUM\n3. Allocate number via MAX(number)+1 in transaction (existing pattern)\n4. Set external tracking fields (externalVcsId, externalVcsUrl, vcsSyncedAt)\n5. Filter by allowedAuthors (except manual import)\n\n**Polling Service**: Uses SchedulerRegistry to register dynamic intervals per connection. Must handle:\n- Module init: register intervals for existing active connections\n- Create/update connection: add/replace interval with new config\n- Delete connection: unregister interval\n- Fetch failure: log error, write VcsSyncLog, retry on next interval (don't update lastSyncedAt)\n\n**Webhook Handler**: Verifies HMAC signature, processes only issues.opened events, filters by allowedAuthors, returns 200 { ignored: true } for filtered/unsupported events.\n\n**Manual Import**: Endpoint for importing single issue by number, bypasses allowedAuthors filter. Useful for one-off issues or testing.\n\n### CLI + Web Integration\nCLI uses generated OpenAPI client from apps/cli/src/generated/ (regenerate after API endpoint changes). Web uses Nuxt composables and proxying pattern (not generated client).\n\n### Dependencies & Impact\n- **Prisma**: Schema migration required (new models, extended models)\n- **NestJS**: SchedulerRegistry for polling, DI for services, config registration\n- **Fastify**: No changes needed\n- **Commander.js**: New vcs subcommand group\n- **Nuxt**: New /[project]/settings page\n- **Existing services**: Ticket creation (number allocation), project resolution, auth\n\n### Risks & Mitigations\n1. **Rate Limiting**: GitHub API rate limit (60 req/hr unauthenticated, 5000/hr authenticated). Mitigation: Respect Retry-After header, log warnings in VcsSyncLog, retry on next interval.\n2. **Token Leakage**: Never log plaintext token, mask in API responses, store only encrypted. Use @Sensitive() if available.\n3. **Duplicate Sync**: Multiple webhook hits or polling overlaps. Mitigation: unique(projectId, externalVcsId) check before sync.\n4. **Scheduler Leaks**: Intervals not cleaned up on deletion. Mitigation: explicit unregisterAll + defensive checks.\n5. **Decryption Failure**: Corrupted ciphertext or wrong key. Mitigation: mark connection inactive, log error, return 500 on sync attempts.\n6. **Migration Path**: Add nullable VcsConnection fields first, migrate data separately, enable constraints in separate migration.\n\n### Test Coverage Strategy\nEach story enforces three-session TDD (test-writer → implementer → verifier) for security-critical and complex stories. Provider tests mock GitHub API. Sync tests use in-memory Prisma fixture. Polling tests verify SchedulerRegistry interaction. Webhook tests verify signature validation."
+}

@@ -92,6 +92,7 @@ model Project {
   labels  Label[]
   webhooks Webhook[]
   ciWebhookToken String?
+  vcsConnection VcsConnection?
 }
 
 model Ticket {
@@ -110,6 +111,9 @@ model Ticket {
   gitRefVersion     String?   // e.g. 'v1.0', 'main'
   gitRefFile        String?   // e.g. 'apps/api/src/auth.ts'
   gitRefLine        Int?      // e.g. 42
+  externalVcsId     String?   // e.g. 'owner/repo#123' for GitHub issues
+  externalVcsUrl    String?   // full URL to external VCS issue
+  vcsSyncedAt       DateTime?
   deletedAt         DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
@@ -203,4 +207,41 @@ model TicketLink {
   ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   @@unique([ticketId, url])
+}
+
+// ---------------------------------------------------------------------------
+// VCS Integration Models
+// ---------------------------------------------------------------------------
+
+model VcsConnection {
+  id                   String    @id @default(cuid())
+  projectId            String    @unique
+  provider             String    // github | gitlab | bitbucket | etc
+  repoOwner            String
+  repoName             String
+  encryptedToken       String    // encrypted access token
+  syncMode             String    // manual | webhook | polling
+  allowedAuthors       String    // JSON string of allowed authors
+  pollingIntervalMs    Int       // polling interval in milliseconds
+  webhookSecret        String?   // secret for validating webhook payloads
+  lastSyncedAt         DateTime?
+  isActive             Boolean   @default(true)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  project              Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  syncLogs             VcsSyncLog[]
+}
+
+model VcsSyncLog {
+  id              String   @id @default(cuid())
+  vcsConnectionId String
+  syncType        String   // issues | prs | comments | etc
+  issuesSynced    Int      @default(0)
+  issuesSkipped   Int      @default(0)
+  errorMessage    String?
+  startedAt       DateTime
+  completedAt     DateTime?
+
+  vcsConnection   VcsConnection @relation(fields: [vcsConnectionId], references: [id], onDelete: Cascade)
 }

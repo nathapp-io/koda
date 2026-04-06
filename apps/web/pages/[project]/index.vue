@@ -38,6 +38,7 @@ const { data: ticketsData, pending, error, refresh } = useAsyncData(
 
 const tickets = computed(() => ticketsData.value?.items ?? [])
 const showCreateDialog = ref(false)
+const showImportDialog = ref(false)
 
 function handleOpenTicket(ticket: Ticket) {
   router.push(`/${slug}/tickets/${ticket.ref}`)
@@ -56,6 +57,9 @@ function handleCreated() {
         <Button @click="showCreateDialog = true">
           {{ t('tickets.newTicket') }}
         </Button>
+        <Button @click="showImportDialog = true">
+          {{ t('vcs.importIssue.button') }}
+        </Button>
       </template>
     </PageHeader>
 
@@ -72,6 +76,12 @@ function handleCreated() {
       :project-slug="slug"
       @update:open="showCreateDialog = $event"
       @created="handleCreated"
+    />
+
+    <ImportIssueDialog
+      :open="showImportDialog"
+      :project-slug="slug"
+      @update:open="showImportDialog = $event"
     />
   </div>
 </template>

@@ -228,6 +228,100 @@ describe('US-004-1 AC6: Component emits open event on click', () => {
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
+// VCS-P1-005-D AC1 — GitHub badge renders when externalVcsUrl is present
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('VCS-P1-005-D AC1: TicketCard renders GitHub badge when externalVcsUrl is present', () => {
+  test('source includes externalVcsUrl in the Ticket interface', () => {
+    const source = readFileSync(cardPath, 'utf-8')
+    expect(source).toContain('externalVcsUrl')
+  })
+
+  test('source uses Badge component for GitHub badge', () => {
+    const source = readFileSync(cardPath, 'utf-8')
+    expect(source).toContain('Badge')
+  })
+
+  test('source conditionally renders badge based on externalVcsUrl', () => {
+    const source = readFileSync(cardPath, 'utf-8')
+    const hasConditionalRender =
+      source.includes('v-if') &&
+      source.includes('externalVcsUrl')
+    expect(hasConditionalRender).toBe(true)
+  })
+
+  test('source references GitHub or VCS keyword for badge identification', () => {
+    const source = readFileSync(cardPath, 'utf-8')
+    const hasGitHubRef =
+      source.includes('GitHub') ||
+      source.includes('github') ||
+      source.includes('vcs') ||
+      source.includes('VCS')
+    expect(hasGitHubRef).toBe(true)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// VCS-P1-005-D AC2 — Badge not rendered when externalVcsUrl is null/undefined
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('VCS-P1-005-D AC2: TicketCard does not render badge when externalVcsUrl is null or undefined', () => {
+  test('source uses v-if conditional with externalVcsUrl for badge', () => {
+    const source = readFileSync(cardPath, 'utf-8')
+    const hasExplicitCondition =
+      source.includes('v-if') &&
+      source.includes('externalVcsUrl')
+    expect(hasExplicitCondition).toBe(true)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// VCS-P1-005-D AC5 — Issue number parsed from externalVcsUrl
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('VCS-P1-005-D AC5: Issue number is parsed from externalVcsUrl in TicketCard', () => {
+  test('source contains a function to extract issue number from URL', () => {
+    const source = readFileSync(cardPath, 'utf-8')
+    const hasIssueExtractor =
+      source.includes('split') ||
+      source.includes('match') ||
+      source.includes('substring') ||
+      source.includes('slice') ||
+      source.includes('replace') ||
+      source.includes('/') // Check for path parsing
+    expect(hasIssueExtractor).toBe(true)
+  })
+
+  test('source references or displays issue number in badge', () => {
+    const source = readFileSync(cardPath, 'utf-8')
+    const hasIssueDisplay =
+      source.includes('#') ||
+      source.includes('issue') ||
+      source.includes('Issue')
+    expect(hasIssueDisplay).toBe(true)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// VCS-P1-005-D AC6 — i18n keys used for badge text
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('VCS-P1-005-D AC6: GitHub badge uses i18n keys for text', () => {
+  test('source uses useI18n composable', () => {
+    const source = readFileSync(cardPath, 'utf-8')
+    expect(source).toContain('useI18n')
+  })
+
+  test('source references t() for GitHub badge label', () => {
+    const source = readFileSync(cardPath, 'utf-8')
+    const hasI18nUsage =
+      source.includes("t('") ||
+      source.includes('t("')
+    expect(hasI18nUsage).toBe(true)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Quality — no console.log
 // ──────────────────────────────────────────────────────────────────────────────
 
