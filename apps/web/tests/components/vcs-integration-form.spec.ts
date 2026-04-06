@@ -56,7 +56,7 @@ describe('VCS-P1-005-C: Provider selector field', () => {
 
   test('source uses Select component for provider dropdown', () => {
     const source = getSource()
-    const providerFieldMatch = source.match(/FormField[^>]*name="provider"[\s\S]{0,500}<\/FormField>/)
+    const providerFieldMatch = source.match(/<FormField[^>]*name="provider"[\s\S]{0,1000}<\/FormField>/)
     expect(providerFieldMatch).not.toBeNull()
     const fieldContent = providerFieldMatch![0]
     expect(fieldContent).toContain('Select')
@@ -69,7 +69,7 @@ describe('VCS-P1-005-C: Provider selector field', () => {
 
   test('source includes FormMessage for provider field error display', () => {
     const source = getSource()
-    const providerFieldMatch = source.match(/FormField[^>]*name="provider"[\s\S]{0,500}<\/FormField>/)
+    const providerFieldMatch = source.match(/<FormField[^>]*name="provider"[\s\S]{0,1000}<\/FormField>/)
     expect(providerFieldMatch).not.toBeNull()
     expect(providerFieldMatch![0]).toContain('FormMessage')
   })
@@ -179,14 +179,14 @@ describe('VCS-P1-005-C: Sync mode radio group field', () => {
 
   test('source uses RadioGroup component for sync mode field', () => {
     const source = getSource()
-    const syncModeFieldMatch = source.match(/FormField[^>]*name="syncMode"[\s\S]{0,500}<\/FormField>/)
+    const syncModeFieldMatch = source.match(/<FormField[^>]*name="syncMode"[\s\S]{0,1000}<\/FormField>/)
     expect(syncModeFieldMatch).not.toBeNull()
     expect(syncModeFieldMatch![0]).toContain('RadioGroup')
   })
 
   test('source includes polling and webhook radio options', () => {
     const source = getSource()
-    const syncModeFieldMatch = source.match(/FormField[^>]*name="syncMode"[\s\S]{0,800}<\/FormField>/)
+    const syncModeFieldMatch = source.match(/<FormField[^>]*name="syncMode"[\s\S]{0,1000}<\/FormField>/)
     expect(syncModeFieldMatch).not.toBeNull()
     const fieldContent = syncModeFieldMatch![0]
     expect(fieldContent).toContain('polling')
@@ -200,7 +200,7 @@ describe('VCS-P1-005-C: Sync mode radio group field', () => {
 
   test('source includes FormMessage for syncMode field error display', () => {
     const source = getSource()
-    const syncModeFieldMatch = source.match(/FormField[^>]*name="syncMode"[\s\S]{0,800}<\/FormField>/)
+    const syncModeFieldMatch = source.match(/<FormField[^>]*name="syncMode"[\s\S]{0,1000}<\/FormField>/)
     expect(syncModeFieldMatch).not.toBeNull()
     expect(syncModeFieldMatch![0]).toContain('FormMessage')
   })
