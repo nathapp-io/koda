@@ -289,6 +289,145 @@ describe('Auto-create PR on VERIFIED Transition', () => {
     });
   });
 
+describe('AC14: prNumber and prState persisted on TicketLink after successful PR creation', () => {
+    beforeEach(() => {
+      // Setup mocks for VCS connection which is needed by createPrForTicket
+      mockPrismaService = {
+        client: {
+          $transaction: jest.fn((cb: any) => cb(mockPrismaService.client)),
+          project: {
+            findUnique: jest.fn().mockResolvedValue(testProject),
+            findFirst: jest.fn(),
+          },
+          ticket: {
+            findUnique: jest.fn().mockResolvedValue(testTicket),
+            findFirst: jest.fn(),
+            update: jest.fn().mockResolvedValue({ ...testTicket, status: TicketStatus.VERIFIED }),
+          },
+          comment: {
+            create: jest.fn().mockResolvedValue({}),
+          },
+          ticketActivity: {
+            create: jest.fn().mockResolvedValue({}),
+          },
+          ticketLink: {
+            create: jest.fn().mockResolvedValue({
+              id: 'link-1',
+              ticketId: 'ticket-1',
+              url: 'https://github.com/test-owner/test-repo/pull/123',
+              provider: 'github',
+              externalRef: 'test-owner/test-repo#123',
+              prState: 'draft',
+              prNumber: 123,
+              prUpdatedAt: expect.any(Date),
+              createdAt: new Date(),
+            }),
+            findFirst: jest.fn(),
+          },
+          vcsConnection: {
+            findUnique: jest.fn(),
+          },
+        },
+      };
+
+      mockTicketLinksService = {
+        create: jest.fn(),
+      };
+
+      mockVcsConnectionService = {
+        getFullByProject: jest.fn().mockResolvedValue(testVcsConnection),
+        findByProject: jest.fn(),
+      };
+
+      mockVcsProvider = {
+        fetchIssues: jest.fn(),
+        fetchIssue: jest.fn(),
+        testConnection: jest.fn(),
+        getDefaultBranch: jest.fn().mockResolvedValue('main'),
+        createPullRequest: jest.fn(),
+      };
+
+      // Mock the VCS factory to return our mock provider
+      jest.mock('../../../src/vcs/factory', () => ({
+        createVcsProvider: jest.fn().mockReturnValue(mockVcsProvider),
+      }));
+
+      transitionsService = new TicketTransitionsService(
+        mockPrismaService as any,
+        undefined,
+        undefined,
+        mockVcsConnectionService as any,
+        mockTicketLinksService as any,
+      );
+    });
+
+    it('updates TicketLink with prNumber from VcsPullRequest when PR creation succeeds', async () => {
+      const mockPrResponse = {
+        number: 123,
+        url: 'https://github.com/test-owner/test-repo/pull/123',
+        branchName: 'koda/KODA-42/fix-login-redirect-bug',
+        state: 'open',
+        draft: true,
+      };
+
+      mockVcsProvider.createPullRequest.mockResolvedValue(mockPrResponse);
+
+      await transitionsService.verify('test-project', 'KODA-42', 'Verified', testUser, 'user');
+
+      // Verify ticketLink.create was called with prNumber and prState
+      expect(mockPrismaService.client.ticketLink.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            prNumber: 123,
+            prState: 'draft',
+          }),
+        }),
+      );
+    });
+
+    it('sets prState to "draft" regardless of actual PR draft status', async () => {
+      const mockPrResponse = {
+        number: 456,
+        url: 'https://github.com/test-owner/test-repo/pull/456',
+        branchName: 'koda/KODA-42/some-feature',
+        state: 'open',
+        draft: false, // API may return draft: false even though we requested draft: true
+      };
+
+      mockVcsProvider.createPullRequest.mockResolvedValue(mockPrResponse);
+      mockPrismaService.client.ticketLink.create.mockResolvedValue({
+        id: 'link-1',
+        ticketId: 'ticket-1',
+        url: mockPrResponse.url,
+        provider: 'github',
+        externalRef: 'test-owner/test-repo#456',
+        prState: 'draft',
+        prNumber: 456,
+        prUpdatedAt: expect.any(Date),
+        createdAt: new Date(),
+      });
+
+      await transitionsService.verify('test-project', 'KODA-42', 'Verified', testUser, 'user');
+
+      expect(mockPrismaService.client.ticketLink.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            prState: 'draft',
+          }),
+        }),
+      );
+    });
+
+    it('TicketLink is not created when PR creation fails', async () => {
+      mockVcsProvider.createPullRequest.mockRejectedValue(new Error('GitHub API error'));
+
+      await transitionsService.verify('test-project', 'KODA-42', 'Verified', testUser, 'user');
+
+      // When PR creation fails, ticketLink.create should NOT be called at all
+      expect(mockPrismaService.client.ticketLink.create).not.toHaveBeenCalled();
+    });
+  });
+
 describe('AC12: No PR creation for non-VERIFIED transitions', () => {
     it('does not create PR when transitioning to IN_PROGRESS', async () => {
       mockPrismaService.client.project.findUnique.mockResolvedValue(testProject);

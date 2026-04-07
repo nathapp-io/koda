@@ -158,6 +158,9 @@ export class TicketTransitionsService {
                 url: pr.url,
                 provider: 'github',
                 externalRef: `${connection.repoOwner}/${connection.repoName}#${pr.number}`,
+                prNumber: pr.number,
+                prState: 'draft',
+                prUpdatedAt: new Date(),
               },
             });
           }).then(() => {
