@@ -43,6 +43,7 @@ Thumbs.db
 .nax-verifier-verdict.json
 
 # nax runtime
+.nax/prompt-audit/
 nax.lock
 nax/metrics.json
 nax/**/status.json
