@@ -47,3 +47,14 @@ export interface VcsPullRequest {
   state: string;
   draft: boolean;
 }
+
+/**
+ * Represents a VCS commit from any provider
+ */
+export interface VcsCommit {
+  sha: string;
+  message: string;
+  authorLogin: string;
+  url: string;
+  date: Date;
+}

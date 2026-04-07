@@ -72,6 +72,7 @@ export class TicketLinksService {
         url: dto.url,
         provider,
         externalRef,
+        linkType: dto.linkType ?? 'url',
       },
     });
 

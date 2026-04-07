@@ -1,6 +1,6 @@
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { IVcsProvider } from '../vcs-provider';
-import { VcsIssue, VcsPullRequest, VcsPrStatus, CreatePrParams } from '../types';
+import { VcsIssue, VcsPullRequest, VcsPrStatus, VcsCommit, CreatePrParams } from '../types';
 import { HttpClient } from '../factory';
 
 /**
@@ -59,6 +59,25 @@ interface GitHubPrStatusResponse {
   merge_commit_sha: string | null;
   html_url: string;
   title: string;
+}
+
+/**
+ * GitHub REST API response for a commit (from GET /repos/{owner}/{repo}/pulls/{pr_number}/commits)
+ */
+interface GitHubCommitResponse {
+  sha: string;
+  commit: {
+    message: string;
+    author: {
+      name: string;
+      email: string;
+      date: string;
+    };
+  };
+  html_url: string;
+  author: {
+    login: string;
+  } | null;
 }
 
 /**
@@ -251,6 +270,27 @@ export class GitHubProvider implements IVcsProvider {
     return data.map((pr) => this.mapGitHubPrToVcsPrStatus(pr));
   }
 
+  async listPrCommits(prNumber: number): Promise<VcsCommit[]> {
+    const url = `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/pulls/${prNumber}/commits`;
+
+    try {
+      const response = await this.httpClient.get(url, {
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+        },
+      });
+
+      const data = response.data as GitHubCommitResponse[];
+      return data.map((commit) => this.mapGitHubCommitToVcsCommit(commit));
+    } catch (error: unknown) {
+      const errorObj = error as Record<string, unknown>;
+      if ((errorObj?.response as Record<string, unknown>)?.status === 404) {
+        throw new NotFoundAppException(`PR #${prNumber} not found`);
+      }
+      throw error;
+    }
+  }
+
   private mapGitHubIssueToVcsIssue(gitHubIssue: GitHubIssueResponse): VcsIssue {
     return {
       number: gitHubIssue.number,
@@ -274,6 +314,16 @@ export class GitHubProvider implements IVcsProvider {
       mergeSha: gitHubPr.merge_commit_sha,
       url: gitHubPr.html_url,
       title: gitHubPr.title,
+    };
+  }
+
+  private mapGitHubCommitToVcsCommit(gitHubCommit: GitHubCommitResponse): VcsCommit {
+    return {
+      sha: gitHubCommit.sha,
+      message: gitHubCommit.commit.message,
+      authorLogin: gitHubCommit.author?.login ?? gitHubCommit.commit.author.name,
+      url: gitHubCommit.html_url,
+      date: new Date(gitHubCommit.commit.author.date),
     };
   }
 }
