@@ -52,6 +52,7 @@ describe('TicketLinksService', () => {
     prState: null,
     prNumber: null,
     prUpdatedAt: null,
+    linkType: 'url',
     createdAt: new Date(),
   };
 
