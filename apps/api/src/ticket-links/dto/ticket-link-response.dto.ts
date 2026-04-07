@@ -16,13 +16,13 @@ export class TicketLinkResponseDto {
   @ApiProperty({ nullable: true, type: String })
   externalRef!: string | null;
 
-  @ApiProperty({ nullable: true, type: String })
+  @ApiProperty({ nullable: true })
   prState!: string | null;
 
-  @ApiProperty({ nullable: true, type: Number })
+  @ApiProperty({ nullable: true })
   prNumber!: number | null;
 
-  @ApiProperty({ nullable: true, type: Date })
+  @ApiProperty({ nullable: true })
   prUpdatedAt!: Date | null;
 
   @ApiProperty()

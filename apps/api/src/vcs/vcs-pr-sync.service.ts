@@ -69,7 +69,7 @@ export class VcsPrSyncService {
   constructor(private readonly prisma: PrismaService) {}
 
   private get db() {
-    return this.prisma.client as unknown as ExtendedPrismaClient;
+    return this.prisma as unknown as ExtendedPrismaClient;
   }
 
   /**
