@@ -1,23 +1,43 @@
 /**
  * VcsPrSyncService - Syncs PR status from VCS provider to TicketLink records
  */
-import { Injectable } from '@nestjs/common';
-import { NotFoundAppException } from '@nathapp/nestjs-common';
+import { Injectable, Logger } from '@nestjs/common';
+import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Project, VcsConnection } from '@prisma/client';
 import { decryptToken } from '../common/utils/encryption.util';
 import { createVcsProvider } from './factory';
 import { VcsPrStatus } from './types';
+import { TicketStatus, CommentType, ActivityType } from '../common/enums';
+import { validateTransition } from '../tickets/state-machine/ticket-transitions';
 
 // PrismaClientLike from @nathapp/nestjs-prisma doesn't expose VCS models,
 // but they exist at runtime. Define a delegate interface for proper typing.
 interface TicketLinkDelegate {
   findMany(options: { where: Record<string, unknown> }): Promise<unknown[]>
   update(options: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<unknown>
+  findUnique(options: { where: Record<string, unknown> }): Promise<unknown>
+}
+
+interface TicketDelegate {
+  findUnique(options: { where: Record<string, unknown> }): Promise<unknown>
+  update(options: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<unknown>
+}
+
+interface CommentDelegate {
+  create(options: { data: Record<string, unknown> }): Promise<unknown>
+}
+
+interface TicketActivityDelegate {
+  create(options: { data: Record<string, unknown> }): Promise<unknown>
 }
 
 interface ExtendedPrismaClient {
   ticketLink: TicketLinkDelegate
+  ticket: TicketDelegate
+  comment: CommentDelegate
+  ticketActivity: TicketActivityDelegate
+  $transaction<T>(fn: (client: ExtendedPrismaClient) => Promise<T>): Promise<T>
   [key: string]: unknown
 }
 
@@ -26,8 +46,14 @@ interface ExtendedPrismaClient {
  */
 interface TicketLinkData {
   id: string
+  ticketId: string
   prNumber: number | null
   prState: string | null
+  url: string
+  ticket?: {
+    id: string
+    status: string
+  }
 }
 
 export interface SyncPrStatusResult {
@@ -37,6 +63,8 @@ export interface SyncPrStatusResult {
 
 @Injectable()
 export class VcsPrSyncService {
+  private readonly logger = new Logger(VcsPrSyncService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   private get db() {
@@ -50,6 +78,14 @@ export class VcsPrSyncService {
    * prState NOT IN ('merged', 'closed')), fetches current PR status from
    * the VCS provider, and updates TicketLink.prState and prUpdatedAt
    * when the state has changed.
+   *
+   * Auto-transition on PR merge:
+   * - When prState changes to 'merged' and ticket.status === 'IN_PROGRESS',
+   *   the ticket is transitioned to 'VERIFY_FIX', a FIX_REPORT comment is created,
+   *   and a VCS_PR_MERGED activity is logged
+   * - When prState changes to 'merged' and ticket.status !== 'IN_PROGRESS',
+   *   only prState is updated without transition
+   * - Failures in auto-transition do not prevent prState from being persisted
    *
    * Per-PR error handling:
    * - General API error: skip the PR, continue with remaining PRs
@@ -105,6 +141,12 @@ export class VcsPrSyncService {
 
         // Update if state differs
         if (newPrState !== link.prState) {
+          // Handle auto-transition when PR is merged
+          if (newPrState === 'merged') {
+            await this.handleMergedPrAutoTransition(link, prStatus);
+          }
+
+          // Always update prState regardless of transition outcome
           await this.db.ticketLink.update({
             where: { id: link.id },
             data: {
@@ -133,6 +175,83 @@ export class VcsPrSyncService {
     }
 
     return { updated, skipped };
+  }
+
+  /**
+   * Handle auto-transition when a PR is merged
+   *
+   * When a PR transitions to 'merged':
+   * - If the linked ticket is IN_PROGRESS, transition it to VERIFY_FIX,
+   *   create a FIX_REPORT comment, and log VCS_PR_MERGED activity
+   * - If the ticket is not IN_PROGRESS, no transition is attempted
+   *
+   * Note: Failures in this auto-transition do NOT prevent the caller
+   * from updating prState - this method handles its own errors internally.
+   */
+  private async handleMergedPrAutoTransition(
+    link: TicketLinkData,
+    prStatus: VcsPrStatus,
+  ): Promise<void> {
+    // If ticket is not IN_PROGRESS, skip auto-transition
+    if (!link.ticket || link.ticket.status !== TicketStatus.IN_PROGRESS) {
+      return;
+    }
+
+    try {
+      await this.db.$transaction(async (tx) => {
+        // Validate the transition
+        validateTransition(
+          TicketStatus.IN_PROGRESS,
+          TicketStatus.VERIFY_FIX,
+          CommentType.FIX_REPORT,
+        );
+
+        // Update ticket status to VERIFY_FIX
+        await tx.ticket.update({
+          where: { id: link.ticketId },
+          data: { status: TicketStatus.VERIFY_FIX },
+        });
+
+        // Create FIX_REPORT comment with PR details
+        const mergeAuthor = prStatus.mergedBy ?? 'unknown';
+        const mergeSha = prStatus.mergeSha ?? 'unknown';
+        const commentBody = `Merged PR: ${prStatus.url} by ${mergeAuthor} (${mergeSha})`;
+
+        await tx.comment.create({
+          data: {
+            ticketId: link.ticketId,
+            body: commentBody,
+            type: CommentType.FIX_REPORT,
+            authorUserId: null,
+            authorAgentId: 'system',
+          },
+        });
+
+        // Log VCS_PR_MERGED activity
+        await tx.ticketActivity.create({
+          data: {
+            ticketId: link.ticketId,
+            action: ActivityType.VCS_PR_MERGED,
+            fromStatus: TicketStatus.IN_PROGRESS,
+            toStatus: TicketStatus.VERIFY_FIX,
+            actorUserId: null,
+            actorAgentId: null,
+          },
+        });
+      });
+    } catch (error) {
+      // Log the error but don't rethrow - auto-transition failure should not
+      // prevent prState from being updated
+      if (error instanceof ValidationAppException) {
+        this.logger.warn(
+          `[vcs-pr-sync] Auto-transition validation failed for ticket ${link.ticketId}: ${error.message}`,
+        );
+      } else {
+        this.logger.error(
+          `[vcs-pr-sync] Auto-transition failed for ticket ${link.ticketId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
   }
 
   /**
