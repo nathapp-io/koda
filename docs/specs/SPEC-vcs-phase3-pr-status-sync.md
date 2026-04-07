@@ -169,7 +169,7 @@ One optional convenience endpoint:
 
 | ID | Title | Complexity | Depends On |
 |:---|:------|:-----------|:-----------|
-| VCS-P3-001 | Extend TicketLink schema + IVcsProvider PR status methods + GitHub implementation | Medium | Phase 2 |
+| VCS-P3-001 | Extend TicketLink schema + IVcsProvider PR status methods + GitHub implementation | Medium | |
 | VCS-P3-002 | PR status sync service + auto-transition on merge + polling/webhook integration | Complex | VCS-P3-001 |
 | VCS-P3-003 | Web PR status display + CLI PR info + manual sync-pr endpoint | Medium | VCS-P3-002 |
 
