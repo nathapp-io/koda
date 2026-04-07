@@ -23,6 +23,21 @@ export interface CreatePrParams {
 }
 
 /**
+ * Represents a VCS pull request status from any provider
+ */
+export interface VcsPrStatus {
+  number: number;
+  state: string;
+  draft: boolean;
+  merged: boolean;
+  mergedAt: Date | null;
+  mergedBy: string | null;
+  mergeSha: string | null;
+  url: string;
+  title: string;
+}
+
+/**
  * Represents a VCS pull request from any provider
  */
 export interface VcsPullRequest {
