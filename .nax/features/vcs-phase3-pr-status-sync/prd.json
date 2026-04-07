@@ -1,388 +1,328 @@
 {
-  "project": "koda",
-  "feature": "vcs-phase3-pr-status-sync",
-  "analysis": "This is Phase 3 of VCS integration. Phase 2 established auto-creation of PRs when tickets transition to VERIFIED. Phase 3 adds PR status synchronization from GitHub back into Koda — tracking PR state (draft/open/merged/closed) on TicketLink and auto-transitioning tickets from IN_PROGRESS to VERIFY_FIX when PRs are merged.\n\n## Key Files to Modify\n\n### Schema (VCS-P3-001):\n- `apps/api/prisma/schema.prisma` — add prState (String?), prNumber (Int?), prUpdatedAt (DateTime?) to TicketLink model\n\n### VCS Provider Interface + GitHub Implementation (VCS-P3-001):\n- `apps/api/src/vcs/vcs-provider.interface.ts` (or `vcs-provider.ts`) — interface file already exports IVcsProvider but lives at `vcs-provider.ts`; add `VcsPrStatus` interface, `getPullRequestStatus(prNumber)`, and `listPullRequests(state)` to IVcsProvider\n- `apps/api/src/vcs/providers/github.provider.ts` — implement getPullRequestStatus() calling GET /repos/{owner}/{repo}/pulls/{pr_number} and listPullRequests() calling GET /repos/{owner}/{repo}/pulls\n- `apps/api/src/vcs/types.ts` — extend VcsPullRequest type to include merged, mergedAt, mergedBy, mergeSha fields\n\n### TicketLink Service (VCS-P3-001):\n- `apps/api/src/ticket-links/ticket-links.service.ts` — update create() to accept prNumber and prState, update findByTicket() to include new fields\n- `apps/api/src/ticket-links/dto/ticket-link-response.dto.ts` — add prState, prNumber, prUpdatedAt to response DTO\n\n### VCS PR Sync Service (VCS-P3-002):\n- Create `apps/api/src/vcs/vcs-pr-sync.service.ts` — new service with syncPrStatus() that queries TicketLinks where prNumber IS NOT NULL and prState NOT IN ('merged', 'closed'), fetches PR status from GitHub, updates TicketLink\n- Create `apps/api/src/vcs/vcs-pr-sync.service.spec.ts`\n\n### VCS Polling Service Extension (VCS-P3-002):\n- `apps/api/src/vcs/vcs-polling.service.ts` — after issue sync in poll(), also call vcsPrSyncService.syncPrStatus()\n\n### VCS Webhook Service Extension (VCS-P3-002):\n- `apps/api/src/vcs/vcs-webhook.service.ts` — extend handleWebhook() to handle 'pull_request' event types (opened, closed, ready_for_review, reopened, converted_to_draft)\n- Add pull_request payload interface (GitHubPullRequestWebhookPayload)\n\n### VCS Controller Extension (VCS-P3-002, VCS-P3-003):\n- `apps/api/src/vcs/vcs.controller.ts` — add POST /projects/:slug/vcs/sync-pr endpoint\n\n### Auto-Transition on Merge (VCS-P3-002):\n- Create `apps/api/src/vcs/vcs-auto-transition.service.ts` — handles PR merged → ticket IN_PROGRESS → VERIFY_FIX transition with FIX_REPORT comment and VCS_PR_MERGED activity\n- `apps/api/src/common/enums.ts` — add VCS_PR_MERGED to ActivityType\n- `apps/api/src/tickets/tickets.service.ts` or state-machine — add method to auto-transition ticket with FIX_REPORT comment\n- `apps/api/src/tickets/state-machine/ticket-transitions.ts` — validateTransition already requires FIX_REPORT for IN_PROGRESS → VERIFY_FIX\n\n### Enums (VCS-P3-001, VCS-P3-002):\n- `apps/api/src/common/enums.ts` — add VCS_PR_MERGED to ActivityType\n\n### Web Display (VCS-P3-003):\n- `apps/web/components/TicketCard.vue` — add PR status badge (colored dot/label: green=merged, blue=open, gray=draft, red=closed) when TicketLink has prState\n- `apps/web/pages/[project]/tickets/[ref].vue` — show PR status section with PR number (linked), state badge, merge info when merged\n- `apps/web/i18n/locales/en.json` — add pr status i18n keys\n- `apps/web/i18n/locales/zh.json` — add Chinese translations\n\n### CLI Extension (VCS-P3-003):\n- `apps/cli/src/commands/vcs.ts` — add sync-pr subcommand\n- `apps/cli/src/commands/ticket.ts` — update show command to display prState, prNumber in links section for --json output\n\n### i18n (VCS-P3-002, VCS-P3-003):\n- `apps/api/src/i18n/en/vcs.json` — add prStatus keys, merge notification strings\n- `apps/api/src/i18n/zh/vcs.json` — Chinese translations\n\n## Architecture Decisions\n\n1. **prState derivation**: prState is 'draft' when GitHub PR is open with draft:true, 'open' when GitHub PR is open with draft:false, 'merged' when GitHub PR merged:true, 'closed' when GitHub PR state:closed and merged:false\n\n2. **Separate VcsPrSyncService**: New service to avoid coupling with existing VcsSyncService which handles issue sync. This keeps concerns separated.\n\n3. **Auto-transition guard**: Only transition if ticket.status === 'IN_PROGRESS' when PR merges. If ticket is elsewhere, update prState but skip transition.\n\n4. **Webhook matching**: Match pull_request events to TicketLink via prNumber field (unique per repo).\n\n5. **Phase 2 TicketLink population**: Phase 2 createPullRequest() should also set prNumber and prState on the created TicketLink so Phase 3 sync can track it.\n\n6. **Polling runs after issue sync**: Each polling tick runs issue sync then PR status sync.\n\n## Risks\n- PR status sync must handle GitHub API errors gracefully (skip individual PRs, continue with others)\n- 404 from GitHub when PR doesn't exist should mark prState as 'closed' (PR was deleted)\n- Multiple PRs linked to same ticket: first merge triggers auto-transition, subsequent merges find ticket already in VERIFY_FIX or beyond\n- Phase 2 TicketLink creation needs prNumber field set — check if this was included in Phase 2 implementation\n- Need to check if createPullRequest in Phase 2 already sets prNumber and prState on TicketLink",
-  "branchName": "feat/vcs-phase3-pr-status-sync",
-  "createdAt": "2026-04-07T00:00:00.000Z",
-  "updatedAt": "2026-04-07T00:00:00.000Z",
-  "userStories": [
-    {
-      "id": "VCS-P3-001",
-      "title": "Extend TicketLink schema + IVcsProvider PR status methods + GitHub implementation",
-      "description": "Extend the TicketLink model with prState, prNumber, and prUpdatedAt fields. Add getPullRequestStatus() and listPullRequests() methods to IVcsProvider interface and implement them in GitHubProvider. Update TicketLink response DTO to include new fields.",
-      "acceptanceCriteria": [
-        "TicketLink model has prState String? field (values: 'draft' | 'open' | 'merged' | 'closed')",
-        "TicketLink model has prNumber Int? field for direct PR lookup",
-        "TicketLink model has prUpdatedAt DateTime? field for tracking last sync time",
-        "IVcsProvider interface includes getPullRequestStatus(prNumber: number): Promise<VcsPrStatus> method",
-        "IVcsProvider interface includes listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> method",
-        "VcsPrStatus interface has number, state, draft, merged, mergedAt, mergedBy, mergeSha, url, title fields",
-        "GitHubProvider.getPullRequestStatus(42) calls GET /repos/{owner}/{repo}/pulls/42 and returns VcsPrStatus",
-        "GitHubProvider.getPullRequestStatus(42) returns merged:true and populates mergedAt, mergedBy, mergeSha when PR is merged",
-        "GitHubProvider.getPullRequestStatus(99999) throws NotFoundAppException when GitHub returns 404",
-        "GitHubProvider.listPullRequests('open') returns array of VcsPrStatus for all open PRs in the repo",
-        "TicketLinkResponseDto includes prState, prNumber, prUpdatedAt fields in serialization",
-        "Phase 2 createPullRequest() sets prNumber and prState on the created TicketLink"
-      ],
-      "contextFiles": [
-        "apps/api/prisma/schema.prisma",
-        "apps/api/src/vcs/vcs-provider.interface.ts",
-        "apps/api/src/vcs/providers/github.provider.ts",
-        "apps/api/src/vcs/types.ts",
-        "apps/api/src/ticket-links/ticket-links.service.ts",
-        "apps/api/src/ticket-links/dto/ticket-link-response.dto.ts"
-      ],
-      "tags": [
-        "feature",
-        "api",
-        "vcs",
-        "database"
-      ],
-      "dependencies": [
-        "VCS-P2-001"
-      ],
-      "workdir": "apps/api",
-      "status": "decomposed",
-      "passes": false,
-      "routing": {
-        "complexity": "medium",
-        "testStrategy": "three-session-tdd-lite",
-        "noTestJustification": null,
-        "reasoning": "Schema changes + interface extension + GitHub API implementation with error handling"
-      },
-      "escalations": [],
-      "attempts": 0
-    },
-    {
-      "id": "VCS-P3-001-A",
-      "title": "Extend TicketLink Prisma schema with PR tracking fields + update DTO",
-      "description": "Add prState, prNumber, and prUpdatedAt fields to the TicketLink Prisma model, generate the migration, and extend TicketLinkResponseDto to expose the new fields in API responses.",
-      "acceptanceCriteria": [
-        "TicketLink model has prState String? field (values: 'draft' | 'open' | 'merged' | 'closed')",
-        "TicketLink model has prNumber Int? field for direct PR lookup",
-        "TicketLink model has prUpdatedAt DateTime? field for tracking last sync time",
-        "Prisma migration is generated and applies cleanly against a fresh SQLite database",
-        "TicketLinkResponseDto declares prState, prNumber, prUpdatedAt fields with correct nullable types",
-        "TicketLinkResponseDto.from() maps prState, prNumber, prUpdatedAt from the Prisma record",
-        "All three new DTO fields have @ApiProperty({ nullable: true }) decorators"
-      ],
-      "tags": [
-        "feature",
-        "api",
-        "database",
-        "vcs"
-      ],
-      "dependencies": [
-        "VCS-P2-001"
-      ],
-      "contextFiles": [
-        "apps/api/prisma/schema.prisma",
-        "apps/api/src/ticket-links/dto/ticket-link-response.dto.ts"
-      ],
-      "status": "pending",
-      "passes": false,
-      "escalations": [],
-      "attempts": 0,
-      "parentStoryId": "VCS-P3-001",
-      "workdir": "apps/api",
-      "routing": {
-        "complexity": "simple",
-        "testStrategy": "tdd-simple",
-        "reasoning": "Two-file additive change — schema fields + DTO mapping. No business logic. Migration is auto-generated by Prisma.",
-        "modelTier": "balanced"
-      }
-    },
-    {
-      "id": "VCS-P3-001-B",
-      "title": "Add VcsPrStatus type + getPullRequestStatus/listPullRequests to IVcsProvider and GitHubProvider",
-      "description": "Define the VcsPrStatus interface in types.ts, extend IVcsProvider with getPullRequestStatus() and listPullRequests() methods, and implement both in GitHubProvider using the GitHub REST API with proper 404 error handling.",
-      "acceptanceCriteria": [
-        "VcsPrStatus interface has number, state, draft, merged, mergedAt, mergedBy, mergeSha, url, title fields with correct nullable types",
-        "IVcsProvider interface includes getPullRequestStatus(prNumber: number): Promise<VcsPrStatus> method",
-        "IVcsProvider interface includes listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> method",
-        "GitHubProvider.getPullRequestStatus(42) calls GET /repos/{owner}/{repo}/pulls/42 and maps the response to VcsPrStatus",
-        "GitHubProvider.getPullRequestStatus returns merged:true and populates mergedAt, mergedBy, mergeSha when GitHub PR is merged",
-        "GitHubProvider.getPullRequestStatus throws NotFoundAppException when GitHub returns 404",
-        "GitHubProvider.listPullRequests('open') calls GET /repos/{owner}/{repo}/pulls?state=open and returns array of VcsPrStatus",
-        "GitHubProvider.listPullRequests() defaults to state='open' when no argument is provided"
-      ],
-      "tags": [
-        "feature",
-        "api",
-        "vcs",
-        "github"
-      ],
-      "dependencies": [
-        "VCS-P3-001-A"
-      ],
-      "contextFiles": [
-        "apps/api/src/vcs/types.ts",
-        "apps/api/src/vcs/vcs-provider.ts",
-        "apps/api/src/vcs/providers/github.provider.ts",
-        "apps/api/src/vcs/vcs-provider.spec.ts",
-        "apps/api/src/vcs/factory.ts"
-      ],
-      "status": "pending",
-      "passes": false,
-      "escalations": [],
-      "attempts": 0,
-      "parentStoryId": "VCS-P3-001",
-      "workdir": "apps/api",
-      "routing": {
-        "complexity": "medium",
-        "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Three-file change with HTTP integration, type mapping, and error handling branches. Requires unit tests for both happy path and 404 error case.",
-        "modelTier": "balanced"
-      }
-    },
-    {
-      "id": "VCS-P3-001-C",
-      "title": "Persist prNumber and prState on TicketLink after Phase 2 createPullRequest",
-      "description": "After the Phase 2 auto-create PR flow creates a pull request, update the resulting TicketLink record with the returned prNumber and prState so the link carries PR tracking data from creation.",
-      "acceptanceCriteria": [
-        "When createPullRequest() succeeds, the TicketLink record is updated with prNumber from the returned VcsPullRequest",
-        "When createPullRequest() succeeds, the TicketLink record prState is set to 'draft' (PRs are always created as draft)",
-        "The TicketLink update uses prisma.client.ticketLink.update with where: { id } and the new prNumber/prState values",
-        "If the PR creation API call fails, prNumber and prState remain null on the TicketLink (no partial update)"
-      ],
-      "tags": [
-        "feature",
-        "api",
-        "vcs"
-      ],
-      "dependencies": [
-        "VCS-P3-001-A",
-        "VCS-P3-001-B"
-      ],
-      "contextFiles": [
-        "apps/api/src/ticket-links/ticket-links.service.ts",
-        "apps/api/src/vcs/vcs-connection.service.ts",
-        "apps/api/src/ticket-links/dto/ticket-link-response.dto.ts"
-      ],
-      "status": "pending",
-      "passes": false,
-      "escalations": [],
-      "attempts": 0,
-      "parentStoryId": "VCS-P3-001",
-      "workdir": "apps/api",
-      "routing": {
-        "complexity": "simple",
-        "testStrategy": "tdd-simple",
-        "reasoning": "Targeted additive change to the existing createPullRequest flow — one Prisma update call after successful PR creation. No new abstractions.",
-        "modelTier": "balanced"
-      }
-    },
-    {
-      "id": "VCS-P3-002",
-      "title": "PR status sync service + auto-transition on merge + polling/webhook integration",
-      "description": "Implement VcsPrSyncService to poll PR statuses and update TicketLink.prState. When a PR transitions to 'merged', auto-transition the linked ticket from IN_PROGRESS to VERIFY_FIX with an auto-generated FIX_REPORT comment. Extend VcsWebhookService to handle pull_request webhook events. Extend VcsPollingService to run PR sync after issue sync.",
-      "acceptanceCriteria": [
-        "VcsPrSyncService.syncPrStatus() queries TicketLink entries where prNumber IS NOT NULL and prState NOT IN ('merged', 'closed') for the project",
-        "syncPrStatus() updates TicketLink.prState and prUpdatedAt when GitHub PR state has changed",
-        "When PR state changes to 'merged' and ticket.status === 'IN_PROGRESS', the ticket transitions to 'VERIFY_FIX'",
-        "Auto-transition creates a Comment with type FIX_REPORT containing PR URL, merge commit SHA, and merge author",
-        "Auto-transition logs a TicketActivity with action 'VCS_PR_MERGED'",
-        "When PR state changes to 'merged' and ticket.status !== 'IN_PROGRESS', prState is updated but no transition is attempted",
-        "When GitHub API returns an error for a specific PR, that PR is skipped and sync continues with remaining PRs",
-        "When GitHub API returns 404 for a PR, prState is marked as 'closed'",
-        "VcsPollingService.poll() runs PR status sync after issue sync on each polling tick",
-        "VcsWebhookService.handleWebhook() handles 'pull_request' event with action 'opened' updating prState to 'open' or 'draft'",
-        "VcsWebhookService.handleWebhook() handles 'pull_request' event with action 'closed' where merged=true updating prState to 'merged' and triggering auto-transition",
-        "VcsWebhookService.handleWebhook() handles 'pull_request' event with action 'closed' where merged=false updating prState to 'closed'",
-        "VcsWebhookService.handleWebhook() handles 'pull_request' event with action 'ready_for_review' updating prState from 'draft' to 'open'",
-        "Webhook matches PR to TicketLink via prNumber field",
-        "ActivityType.VCS_PR_MERGED is added to the ActivityType enum"
-      ],
-      "contextFiles": [
-        "apps/api/src/vcs/vcs-pr-sync.service.ts",
-        "apps/api/src/vcs/vcs-polling.service.ts",
-        "apps/api/src/vcs/vcs-webhook.service.ts",
-        "apps/api/src/tickets/tickets.service.ts",
-        "apps/api/src/tickets/state-machine/ticket-transitions.ts",
-        "apps/api/src/common/enums.ts"
-      ],
-      "tags": [
-        "feature",
-        "api",
-        "vcs"
-      ],
-      "dependencies": [
-        "VCS-P3-001"
-      ],
-      "workdir": "apps/api",
-      "status": "decomposed",
-      "passes": false,
-      "routing": {
-        "complexity": "complex",
-        "testStrategy": "three-session-tdd-lite",
-        "noTestJustification": null,
-        "reasoning": "New service + webhook extension + polling integration + auto-transition logic with state machine interaction"
-      },
-      "escalations": [],
-      "attempts": 0
-    },
-    {
-      "id": "VCS-P3-002-A",
-      "title": "Add VCS_PR_MERGED ActivityType + VcsPrSyncService core (query, state update, error handling)",
-      "description": "Add VCS_PR_MERGED to the ActivityType enum. Implement VcsPrSyncService.syncPrStatus() to query TicketLink entries with active PRs, fetch current PR status from the VCS provider, and update TicketLink.prState and prUpdatedAt when the state has changed. Handle per-PR errors gracefully: skip on general API error, mark as 'closed' on 404.",
-      "acceptanceCriteria": [
-        "ActivityType enum includes VCS_PR_MERGED",
-        "syncPrStatus() queries TicketLink entries where prNumber IS NOT NULL and prState NOT IN ('merged', 'closed') for the project",
-        "syncPrStatus() calls the VCS provider to fetch current PR status for each matching TicketLink",
-        "syncPrStatus() updates TicketLink.prState and prUpdatedAt when the fetched state differs from stored state",
-        "When the VCS provider returns a general API error for a PR, that PR is skipped and sync continues with remaining PRs",
-        "When the VCS provider returns 404 for a PR, TicketLink.prState is set to 'closed'",
-        "syncPrStatus() returns a summary of updated and skipped PR counts"
-      ],
-      "tags": [
-        "feature",
-        "api",
-        "vcs"
-      ],
-      "dependencies": [
-        "VCS-P3-001-B",
-        "VCS-P3-001-C"
-      ],
-      "contextFiles": [
-        "apps/api/src/vcs/vcs-pr-sync.service.ts",
-        "apps/api/src/common/enums.ts",
-        "apps/api/src/vcs/providers/github.provider.ts"
-      ],
-      "status": "pending",
-      "passes": false,
-      "escalations": [],
-      "attempts": 0,
-      "parentStoryId": "VCS-P3-002",
-      "workdir": "apps/api",
-      "routing": {
-        "complexity": "medium",
-        "testStrategy": "three-session-tdd-lite",
-        "reasoning": "New service with DB query, provider calls, state diffing, and two distinct error paths. ~120-160 LOC across service + enum change.",
-        "modelTier": "balanced"
-      }
-    },
-    {
-      "id": "VCS-P3-002-B",
-      "title": "Auto-transition ticket to VERIFY_FIX on PR merge with FIX_REPORT comment and activity log",
-      "description": "Extend VcsPrSyncService so that when a PR transitions to 'merged', it checks the linked ticket status. If the ticket is IN_PROGRESS, transition it to VERIFY_FIX, create a Comment of type FIX_REPORT containing the PR URL, merge commit SHA, and merge author, and log a TicketActivity with action VCS_PR_MERGED. If the ticket is not IN_PROGRESS, only update prState without attempting a transition.",
-      "acceptanceCriteria": [
-        "When prState changes to 'merged' and ticket.status === 'IN_PROGRESS', the ticket is transitioned to 'VERIFY_FIX'",
-        "Auto-transition creates a Comment with type FIX_REPORT containing PR URL, merge commit SHA, and merge author",
-        "Auto-transition logs a TicketActivity with action 'VCS_PR_MERGED'",
-        "When prState changes to 'merged' and ticket.status !== 'IN_PROGRESS', prState is updated but no transition or comment is created",
-        "Auto-transition respects the existing state machine constraints in ticket-transitions.ts",
-        "A failure in the auto-transition does not prevent prState from being persisted"
-      ],
-      "tags": [
-        "feature",
-        "api",
-        "vcs"
-      ],
-      "dependencies": [
-        "VCS-P3-002-A"
-      ],
-      "contextFiles": [
-        "apps/api/src/vcs/vcs-pr-sync.service.ts",
-        "apps/api/src/tickets/tickets.service.ts",
-        "apps/api/src/tickets/state-machine/ticket-transitions.ts",
-        "apps/api/src/common/enums.ts"
-      ],
-      "status": "pending",
-      "passes": false,
-      "escalations": [],
-      "attempts": 0,
-      "parentStoryId": "VCS-P3-002",
-      "workdir": "apps/api",
-      "routing": {
-        "complexity": "medium",
-        "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Cross-service orchestration (state machine, comment, activity) triggered by a state diff. Roughly 100-130 LOC of transition + comment + activity logic with conditional branching.",
-        "modelTier": "balanced"
-      }
-    },
-    {
-      "id": "VCS-P3-002-C",
-      "title": "VcsPollingService PR sync integration + VcsWebhookService pull_request event handling",
-      "description": "Extend VcsPollingService.poll() to call syncPrStatus() after issue sync on each tick. Extend VcsWebhookService.handleWebhook() to handle pull_request events: 'opened' sets prState to 'open' or 'draft'; 'closed' with merged=true updates prState to 'merged' and triggers auto-transition; 'closed' with merged=false sets prState to 'closed'; 'ready_for_review' transitions prState from 'draft' to 'open'. All webhook handlers match the TicketLink via prNumber.",
-      "acceptanceCriteria": [
-        "VcsPollingService.poll() calls syncPrStatus() after issue sync completes on each polling tick",
-        "handleWebhook() with event 'pull_request' and action 'opened' updates TicketLink.prState to 'draft' if draft=true, otherwise 'open'",
-        "handleWebhook() with event 'pull_request', action 'closed', and merged=true updates prState to 'merged' and triggers the auto-transition logic from VCS-P3-002-B",
-        "handleWebhook() with event 'pull_request', action 'closed', and merged=false updates prState to 'closed'",
-        "handleWebhook() with event 'pull_request' and action 'ready_for_review' updates prState to 'open'",
-        "Webhook handlers look up TicketLink using the prNumber field from the webhook payload",
-        "If no TicketLink matches the prNumber, the webhook event is silently ignored",
-        "Unhandled pull_request actions are ignored without error"
-      ],
-      "tags": [
-        "feature",
-        "api",
-        "vcs"
-      ],
-      "dependencies": [
-        "VCS-P3-002-B"
-      ],
-      "contextFiles": [
-        "apps/api/src/vcs/vcs-polling.service.ts",
-        "apps/api/src/vcs/vcs-webhook.service.ts",
-        "apps/api/src/vcs/vcs-pr-sync.service.ts"
-      ],
-      "status": "pending",
-      "passes": false,
-      "escalations": [],
-      "attempts": 0,
-      "parentStoryId": "VCS-P3-002",
-      "workdir": "apps/api",
-      "routing": {
-        "complexity": "medium",
-        "testStrategy": "three-session-tdd-lite",
-        "reasoning": "Two separate integration points (polling loop extension + webhook dispatcher branching). Each is straightforward but together span 3 files and ~100-130 LOC.",
-        "modelTier": "balanced"
-      }
-    },
-    {
-      "id": "VCS-P3-003",
-      "title": "Web PR status display + CLI PR info + manual sync-pr endpoint",
-      "description": "Display PR status badges on web ticket cards and ticket detail pages. Add PR status information to CLI ticket show command. Add manual POST /projects/:slug/vcs/sync-pr endpoint and corresponding CLI command.",
-      "acceptanceCriteria": [
-        "Web TicketCard component shows PR status badge (colored dot/label) when TicketLink has prState: green for 'merged', blue for 'open', gray for 'draft', red for 'closed'",
-        "Web ticket detail page shows PR status section with PR number (linked to GitHub), current state badge, and merge info (SHA, author, time) when merged",
-        "Web ticket detail activity timeline shows 'PR merged: owner/repo#12 by @user' for VCS_PR_MERGED activity type",
-        "koda ticket show <ref> displays linked PR number and state in the output when prState is present on a TicketLink",
-        "koda ticket show <ref> --json includes prState, prNumber, prUpdatedAt in links[] entries",
-        "POST /projects/:slug/vcs/sync-pr triggers manual PR status sync and returns { updated: number }",
-        "koda vcs sync-pr calls the manual PR sync endpoint and prints the count of updated PRs",
-        "i18n keys exist in apps/api/src/i18n/en/vcs.json and zh/vcs.json for PR status labels and merge notification strings",
-        "i18n keys exist in apps/web/i18n/locales/en.json and zh.json for PR status display labels"
-      ],
-      "contextFiles": [
-        "apps/web/components/TicketCard.vue",
-        "apps/web/pages/[project]/tickets/[ref].vue",
-        "apps/cli/src/commands/ticket.ts",
-        "apps/cli/src/commands/vcs.ts",
-        "apps/api/src/vcs/vcs.controller.ts",
-        "apps/web/i18n/locales/en.json"
-      ],
-      "tags": [
-        "feature",
-        "web",
-        "cli",
-        "api"
-      ],
-      "dependencies": [
-        "VCS-P3-002"
-      ],
-      "workdir": "apps/web",
-      "status": "pending",
-      "passes": false,
-      "routing": {
-        "complexity": "medium",
-        "testStrategy": "tdd-simple",
-        "noTestJustification": null,
-        "reasoning": "UI display changes + CLI output updates + new API endpoint"
-      },
-      "escalations": [],
-      "attempts": 0
-    }
-  ]
+    "project": "koda",
+    "feature": "vcs-phase3-pr-status-sync",
+    "analysis": "This is Phase 3 of VCS integration. Phase 2 established auto-creation of PRs when tickets transition to VERIFIED. Phase 3 adds PR status synchronization from GitHub back into Koda — tracking PR state (draft/open/merged/closed) on TicketLink and auto-transitioning tickets from IN_PROGRESS to VERIFY_FIX when PRs are merged.\n\n## Key Files to Modify\n\n### Schema (VCS-P3-001):\n- `apps/api/prisma/schema.prisma` — add prState (String?), prNumber (Int?), prUpdatedAt (DateTime?) to TicketLink model\n\n### VCS Provider Interface + GitHub Implementation (VCS-P3-001):\n- `apps/api/src/vcs/vcs-provider.interface.ts` (or `vcs-provider.ts`) — interface file already exports IVcsProvider but lives at `vcs-provider.ts`; add `VcsPrStatus` interface, `getPullRequestStatus(prNumber)`, and `listPullRequests(state)` to IVcsProvider\n- `apps/api/src/vcs/providers/github.provider.ts` — implement getPullRequestStatus() calling GET /repos/{owner}/{repo}/pulls/{pr_number} and listPullRequests() calling GET /repos/{owner}/{repo}/pulls\n- `apps/api/src/vcs/types.ts` — extend VcsPullRequest type to include merged, mergedAt, mergedBy, mergeSha fields\n\n### TicketLink Service (VCS-P3-001):\n- `apps/api/src/ticket-links/ticket-links.service.ts` — update create() to accept prNumber and prState, update findByTicket() to include new fields\n- `apps/api/src/ticket-links/dto/ticket-link-response.dto.ts` — add prState, prNumber, prUpdatedAt to response DTO\n\n### VCS PR Sync Service (VCS-P3-002):\n- Create `apps/api/src/vcs/vcs-pr-sync.service.ts` — new service with syncPrStatus() that queries TicketLinks where prNumber IS NOT NULL and prState NOT IN ('merged', 'closed'), fetches PR status from GitHub, updates TicketLink\n- Create `apps/api/src/vcs/vcs-pr-sync.service.spec.ts`\n\n### VCS Polling Service Extension (VCS-P3-002):\n- `apps/api/src/vcs/vcs-polling.service.ts` — after issue sync in poll(), also call vcsPrSyncService.syncPrStatus()\n\n### VCS Webhook Service Extension (VCS-P3-002):\n- `apps/api/src/vcs/vcs-webhook.service.ts` — extend handleWebhook() to handle 'pull_request' event types (opened, closed, ready_for_review, reopened, converted_to_draft)\n- Add pull_request payload interface (GitHubPullRequestWebhookPayload)\n\n### VCS Controller Extension (VCS-P3-002, VCS-P3-003):\n- `apps/api/src/vcs/vcs.controller.ts` — add POST /projects/:slug/vcs/sync-pr endpoint\n\n### Auto-Transition on Merge (VCS-P3-002):\n- Create `apps/api/src/vcs/vcs-auto-transition.service.ts` — handles PR merged → ticket IN_PROGRESS → VERIFY_FIX transition with FIX_REPORT comment and VCS_PR_MERGED activity\n- `apps/api/src/common/enums.ts` — add VCS_PR_MERGED to ActivityType\n- `apps/api/src/tickets/tickets.service.ts` or state-machine — add method to auto-transition ticket with FIX_REPORT comment\n- `apps/api/src/tickets/state-machine/ticket-transitions.ts` — validateTransition already requires FIX_REPORT for IN_PROGRESS → VERIFY_FIX\n\n### Enums (VCS-P3-001, VCS-P3-002):\n- `apps/api/src/common/enums.ts` — add VCS_PR_MERGED to ActivityType\n\n### Web Display (VCS-P3-003):\n- `apps/web/components/TicketCard.vue` — add PR status badge (colored dot/label: green=merged, blue=open, gray=draft, red=closed) when TicketLink has prState\n- `apps/web/pages/[project]/tickets/[ref].vue` — show PR status section with PR number (linked), state badge, merge info when merged\n- `apps/web/i18n/locales/en.json` — add pr status i18n keys\n- `apps/web/i18n/locales/zh.json` — add Chinese translations\n\n### CLI Extension (VCS-P3-003):\n- `apps/cli/src/commands/vcs.ts` — add sync-pr subcommand\n- `apps/cli/src/commands/ticket.ts` — update show command to display prState, prNumber in links section for --json output\n\n### i18n (VCS-P3-002, VCS-P3-003):\n- `apps/api/src/i18n/en/vcs.json` — add prStatus keys, merge notification strings\n- `apps/api/src/i18n/zh/vcs.json` — Chinese translations\n\n## Architecture Decisions\n\n1. **prState derivation**: prState is 'draft' when GitHub PR is open with draft:true, 'open' when GitHub PR is open with draft:false, 'merged' when GitHub PR merged:true, 'closed' when GitHub PR state:closed and merged:false\n\n2. **Separate VcsPrSyncService**: New service to avoid coupling with existing VcsSyncService which handles issue sync. This keeps concerns separated.\n\n3. **Auto-transition guard**: Only transition if ticket.status === 'IN_PROGRESS' when PR merges. If ticket is elsewhere, update prState but skip transition.\n\n4. **Webhook matching**: Match pull_request events to TicketLink via prNumber field (unique per repo).\n\n5. **Phase 2 TicketLink population**: Phase 2 createPullRequest() should also set prNumber and prState on the created TicketLink so Phase 3 sync can track it.\n\n6. **Polling runs after issue sync**: Each polling tick runs issue sync then PR status sync.\n\n## Risks\n- PR status sync must handle GitHub API errors gracefully (skip individual PRs, continue with others)\n- 404 from GitHub when PR doesn't exist should mark prState as 'closed' (PR was deleted)\n- Multiple PRs linked to same ticket: first merge triggers auto-transition, subsequent merges find ticket already in VERIFY_FIX or beyond\n- Phase 2 TicketLink creation needs prNumber field set — check if this was included in Phase 2 implementation\n- Need to check if createPullRequest in Phase 2 already sets prNumber and prState on TicketLink",
+    "branchName": "feat/vcs-phase3-pr-status-sync",
+    "createdAt": "2026-04-07T00:00:00.000Z",
+    "updatedAt": "2026-04-07T00:00:00.000Z",
+    "userStories": [
+        {
+            "id": "VCS-P3-001",
+            "title": "Extend TicketLink schema + IVcsProvider PR status methods + GitHub implementation",
+            "description": "Extend the TicketLink model with prState, prNumber, and prUpdatedAt fields. Add getPullRequestStatus() and listPullRequests() methods to IVcsProvider interface and implement them in GitHubProvider. Update TicketLink response DTO to include new fields.",
+            "acceptanceCriteria": [
+                "TicketLink model has prState String? field (values: 'draft' | 'open' | 'merged' | 'closed')",
+                "TicketLink model has prNumber Int? field for direct PR lookup",
+                "TicketLink model has prUpdatedAt DateTime? field for tracking last sync time",
+                "IVcsProvider interface includes getPullRequestStatus(prNumber: number): Promise<VcsPrStatus> method",
+                "IVcsProvider interface includes listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> method",
+                "VcsPrStatus interface has number, state, draft, merged, mergedAt, mergedBy, mergeSha, url, title fields",
+                "GitHubProvider.getPullRequestStatus(42) calls GET /repos/{owner}/{repo}/pulls/42 and returns VcsPrStatus",
+                "GitHubProvider.getPullRequestStatus(42) returns merged:true and populates mergedAt, mergedBy, mergeSha when PR is merged",
+                "GitHubProvider.getPullRequestStatus(99999) throws NotFoundAppException when GitHub returns 404",
+                "GitHubProvider.listPullRequests('open') returns array of VcsPrStatus for all open PRs in the repo",
+                "TicketLinkResponseDto includes prState, prNumber, prUpdatedAt fields in serialization",
+                "Phase 2 createPullRequest() sets prNumber and prState on the created TicketLink"
+            ],
+            "contextFiles": [
+                "apps/api/prisma/schema.prisma",
+                "apps/api/src/vcs/vcs-provider.interface.ts",
+                "apps/api/src/vcs/providers/github.provider.ts",
+                "apps/api/src/vcs/types.ts",
+                "apps/api/src/ticket-links/ticket-links.service.ts",
+                "apps/api/src/ticket-links/dto/ticket-link-response.dto.ts"
+            ],
+            "tags": ["feature", "api", "vcs", "database"],
+            "dependencies": [],
+            "workdir": "apps/api",
+            "status": "decomposed",
+            "passes": false,
+            "routing": {
+                "complexity": "medium",
+                "testStrategy": "three-session-tdd-lite",
+                "noTestJustification": null,
+                "reasoning": "Schema changes + interface extension + GitHub API implementation with error handling"
+            },
+            "escalations": [],
+            "attempts": 0
+        },
+        {
+            "id": "VCS-P3-001-A",
+            "title": "Extend TicketLink Prisma schema with PR tracking fields + update DTO",
+            "description": "Add prState, prNumber, and prUpdatedAt fields to the TicketLink Prisma model, generate the migration, and extend TicketLinkResponseDto to expose the new fields in API responses.",
+            "acceptanceCriteria": [
+                "TicketLink model has prState String? field (values: 'draft' | 'open' | 'merged' | 'closed')",
+                "TicketLink model has prNumber Int? field for direct PR lookup",
+                "TicketLink model has prUpdatedAt DateTime? field for tracking last sync time",
+                "Prisma migration is generated and applies cleanly against a fresh SQLite database",
+                "TicketLinkResponseDto declares prState, prNumber, prUpdatedAt fields with correct nullable types",
+                "TicketLinkResponseDto.from() maps prState, prNumber, prUpdatedAt from the Prisma record",
+                "All three new DTO fields have @ApiProperty({ nullable: true }) decorators"
+            ],
+            "tags": ["feature", "api", "database", "vcs"],
+            "dependencies": [],
+            "contextFiles": [
+                "apps/api/prisma/schema.prisma",
+                "apps/api/src/ticket-links/dto/ticket-link-response.dto.ts"
+            ],
+            "status": "pending",
+            "passes": false,
+            "escalations": [],
+            "attempts": 0,
+            "parentStoryId": "VCS-P3-001",
+            "workdir": "apps/api",
+            "routing": {
+                "complexity": "simple",
+                "testStrategy": "tdd-simple",
+                "reasoning": "Two-file additive change — schema fields + DTO mapping. No business logic. Migration is auto-generated by Prisma.",
+                "modelTier": "balanced"
+            }
+        },
+        {
+            "id": "VCS-P3-001-B",
+            "title": "Add VcsPrStatus type + getPullRequestStatus/listPullRequests to IVcsProvider and GitHubProvider",
+            "description": "Define the VcsPrStatus interface in types.ts, extend IVcsProvider with getPullRequestStatus() and listPullRequests() methods, and implement both in GitHubProvider using the GitHub REST API with proper 404 error handling.",
+            "acceptanceCriteria": [
+                "VcsPrStatus interface has number, state, draft, merged, mergedAt, mergedBy, mergeSha, url, title fields with correct nullable types",
+                "IVcsProvider interface includes getPullRequestStatus(prNumber: number): Promise<VcsPrStatus> method",
+                "IVcsProvider interface includes listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> method",
+                "GitHubProvider.getPullRequestStatus(42) calls GET /repos/{owner}/{repo}/pulls/42 and maps the response to VcsPrStatus",
+                "GitHubProvider.getPullRequestStatus returns merged:true and populates mergedAt, mergedBy, mergeSha when GitHub PR is merged",
+                "GitHubProvider.getPullRequestStatus throws NotFoundAppException when GitHub returns 404",
+                "GitHubProvider.listPullRequests('open') calls GET /repos/{owner}/{repo}/pulls?state=open and returns array of VcsPrStatus",
+                "GitHubProvider.listPullRequests() defaults to state='open' when no argument is provided"
+            ],
+            "tags": ["feature", "api", "vcs", "github"],
+            "dependencies": ["VCS-P3-001-A"],
+            "contextFiles": [
+                "apps/api/src/vcs/types.ts",
+                "apps/api/src/vcs/vcs-provider.ts",
+                "apps/api/src/vcs/providers/github.provider.ts",
+                "apps/api/src/vcs/vcs-provider.spec.ts",
+                "apps/api/src/vcs/factory.ts"
+            ],
+            "status": "pending",
+            "passes": false,
+            "escalations": [],
+            "attempts": 0,
+            "parentStoryId": "VCS-P3-001",
+            "workdir": "apps/api",
+            "routing": {
+                "complexity": "medium",
+                "testStrategy": "three-session-tdd-lite",
+                "reasoning": "Three-file change with HTTP integration, type mapping, and error handling branches. Requires unit tests for both happy path and 404 error case.",
+                "modelTier": "balanced"
+            }
+        },
+        {
+            "id": "VCS-P3-001-C",
+            "title": "Persist prNumber and prState on TicketLink after Phase 2 createPullRequest",
+            "description": "After the Phase 2 auto-create PR flow creates a pull request, update the resulting TicketLink record with the returned prNumber and prState so the link carries PR tracking data from creation.",
+            "acceptanceCriteria": [
+                "When createPullRequest() succeeds, the TicketLink record is updated with prNumber from the returned VcsPullRequest",
+                "When createPullRequest() succeeds, the TicketLink record prState is set to 'draft' (PRs are always created as draft)",
+                "The TicketLink update uses prisma.client.ticketLink.update with where: { id } and the new prNumber/prState values",
+                "If the PR creation API call fails, prNumber and prState remain null on the TicketLink (no partial update)"
+            ],
+            "tags": ["feature", "api", "vcs"],
+            "dependencies": ["VCS-P3-001-A", "VCS-P3-001-B"],
+            "contextFiles": [
+                "apps/api/src/ticket-links/ticket-links.service.ts",
+                "apps/api/src/vcs/vcs-connection.service.ts",
+                "apps/api/src/ticket-links/dto/ticket-link-response.dto.ts"
+            ],
+            "status": "pending",
+            "passes": false,
+            "escalations": [],
+            "attempts": 0,
+            "parentStoryId": "VCS-P3-001",
+            "workdir": "apps/api",
+            "routing": {
+                "complexity": "simple",
+                "testStrategy": "tdd-simple",
+                "reasoning": "Targeted additive change to the existing createPullRequest flow — one Prisma update call after successful PR creation. No new abstractions.",
+                "modelTier": "balanced"
+            }
+        },
+        {
+            "id": "VCS-P3-002",
+            "title": "PR status sync service + auto-transition on merge + polling/webhook integration",
+            "description": "Implement VcsPrSyncService to poll PR statuses and update TicketLink.prState. When a PR transitions to 'merged', auto-transition the linked ticket from IN_PROGRESS to VERIFY_FIX with an auto-generated FIX_REPORT comment. Extend VcsWebhookService to handle pull_request webhook events. Extend VcsPollingService to run PR sync after issue sync.",
+            "acceptanceCriteria": [
+                "VcsPrSyncService.syncPrStatus() queries TicketLink entries where prNumber IS NOT NULL and prState NOT IN ('merged', 'closed') for the project",
+                "syncPrStatus() updates TicketLink.prState and prUpdatedAt when GitHub PR state has changed",
+                "When PR state changes to 'merged' and ticket.status === 'IN_PROGRESS', the ticket transitions to 'VERIFY_FIX'",
+                "Auto-transition creates a Comment with type FIX_REPORT containing PR URL, merge commit SHA, and merge author",
+                "Auto-transition logs a TicketActivity with action 'VCS_PR_MERGED'",
+                "When PR state changes to 'merged' and ticket.status !== 'IN_PROGRESS', prState is updated but no transition is attempted",
+                "When GitHub API returns an error for a specific PR, that PR is skipped and sync continues with remaining PRs",
+                "When GitHub API returns 404 for a PR, prState is marked as 'closed'",
+                "VcsPollingService.poll() runs PR status sync after issue sync on each polling tick",
+                "VcsWebhookService.handleWebhook() handles 'pull_request' event with action 'opened' updating prState to 'open' or 'draft'",
+                "VcsWebhookService.handleWebhook() handles 'pull_request' event with action 'closed' where merged=true updating prState to 'merged' and triggering auto-transition",
+                "VcsWebhookService.handleWebhook() handles 'pull_request' event with action 'closed' where merged=false updating prState to 'closed'",
+                "VcsWebhookService.handleWebhook() handles 'pull_request' event with action 'ready_for_review' updating prState from 'draft' to 'open'",
+                "Webhook matches PR to TicketLink via prNumber field",
+                "ActivityType.VCS_PR_MERGED is added to the ActivityType enum"
+            ],
+            "contextFiles": [
+                "apps/api/src/vcs/vcs-pr-sync.service.ts",
+                "apps/api/src/vcs/vcs-polling.service.ts",
+                "apps/api/src/vcs/vcs-webhook.service.ts",
+                "apps/api/src/tickets/tickets.service.ts",
+                "apps/api/src/tickets/state-machine/ticket-transitions.ts",
+                "apps/api/src/common/enums.ts"
+            ],
+            "tags": ["feature", "api", "vcs"],
+            "dependencies": ["VCS-P3-001"],
+            "workdir": "apps/api",
+            "status": "decomposed",
+            "passes": false,
+            "routing": {
+                "complexity": "complex",
+                "testStrategy": "three-session-tdd-lite",
+                "noTestJustification": null,
+                "reasoning": "New service + webhook extension + polling integration + auto-transition logic with state machine interaction"
+            },
+            "escalations": [],
+            "attempts": 0
+        },
+        {
+            "id": "VCS-P3-002-A",
+            "title": "Add VCS_PR_MERGED ActivityType + VcsPrSyncService core (query, state update, error handling)",
+            "description": "Add VCS_PR_MERGED to the ActivityType enum. Implement VcsPrSyncService.syncPrStatus() to query TicketLink entries with active PRs, fetch current PR status from the VCS provider, and update TicketLink.prState and prUpdatedAt when the state has changed. Handle per-PR errors gracefully: skip on general API error, mark as 'closed' on 404.",
+            "acceptanceCriteria": [
+                "ActivityType enum includes VCS_PR_MERGED",
+                "syncPrStatus() queries TicketLink entries where prNumber IS NOT NULL and prState NOT IN ('merged', 'closed') for the project",
+                "syncPrStatus() calls the VCS provider to fetch current PR status for each matching TicketLink",
+                "syncPrStatus() updates TicketLink.prState and prUpdatedAt when the fetched state differs from stored state",
+                "When the VCS provider returns a general API error for a PR, that PR is skipped and sync continues with remaining PRs",
+                "When the VCS provider returns 404 for a PR, TicketLink.prState is set to 'closed'",
+                "syncPrStatus() returns a summary of updated and skipped PR counts"
+            ],
+            "tags": ["feature", "api", "vcs"],
+            "dependencies": ["VCS-P3-001-B", "VCS-P3-001-C"],
+            "contextFiles": [
+                "apps/api/src/vcs/vcs-pr-sync.service.ts",
+                "apps/api/src/common/enums.ts",
+                "apps/api/src/vcs/providers/github.provider.ts"
+            ],
+            "status": "pending",
+            "passes": false,
+            "escalations": [],
+            "attempts": 0,
+            "parentStoryId": "VCS-P3-002",
+            "workdir": "apps/api",
+            "routing": {
+                "complexity": "medium",
+                "testStrategy": "three-session-tdd-lite",
+                "reasoning": "New service with DB query, provider calls, state diffing, and two distinct error paths. ~120-160 LOC across service + enum change.",
+                "modelTier": "balanced"
+            }
+        },
+        {
+            "id": "VCS-P3-002-B",
+            "title": "Auto-transition ticket to VERIFY_FIX on PR merge with FIX_REPORT comment and activity log",
+            "description": "Extend VcsPrSyncService so that when a PR transitions to 'merged', it checks the linked ticket status. If the ticket is IN_PROGRESS, transition it to VERIFY_FIX, create a Comment of type FIX_REPORT containing the PR URL, merge commit SHA, and merge author, and log a TicketActivity with action VCS_PR_MERGED. If the ticket is not IN_PROGRESS, only update prState without attempting a transition.",
+            "acceptanceCriteria": [
+                "When prState changes to 'merged' and ticket.status === 'IN_PROGRESS', the ticket is transitioned to 'VERIFY_FIX'",
+                "Auto-transition creates a Comment with type FIX_REPORT containing PR URL, merge commit SHA, and merge author",
+                "Auto-transition logs a TicketActivity with action 'VCS_PR_MERGED'",
+                "When prState changes to 'merged' and ticket.status !== 'IN_PROGRESS', prState is updated but no transition or comment is created",
+                "Auto-transition respects the existing state machine constraints in ticket-transitions.ts",
+                "A failure in the auto-transition does not prevent prState from being persisted"
+            ],
+            "tags": ["feature", "api", "vcs"],
+            "dependencies": ["VCS-P3-002-A"],
+            "contextFiles": [
+                "apps/api/src/vcs/vcs-pr-sync.service.ts",
+                "apps/api/src/tickets/tickets.service.ts",
+                "apps/api/src/tickets/state-machine/ticket-transitions.ts",
+                "apps/api/src/common/enums.ts"
+            ],
+            "status": "pending",
+            "passes": false,
+            "escalations": [],
+            "attempts": 0,
+            "parentStoryId": "VCS-P3-002",
+            "workdir": "apps/api",
+            "routing": {
+                "complexity": "medium",
+                "testStrategy": "three-session-tdd-lite",
+                "reasoning": "Cross-service orchestration (state machine, comment, activity) triggered by a state diff. Roughly 100-130 LOC of transition + comment + activity logic with conditional branching.",
+                "modelTier": "balanced"
+            }
+        },
+        {
+            "id": "VCS-P3-002-C",
+            "title": "VcsPollingService PR sync integration + VcsWebhookService pull_request event handling",
+            "description": "Extend VcsPollingService.poll() to call syncPrStatus() after issue sync on each tick. Extend VcsWebhookService.handleWebhook() to handle pull_request events: 'opened' sets prState to 'open' or 'draft'; 'closed' with merged=true updates prState to 'merged' and triggers auto-transition; 'closed' with merged=false sets prState to 'closed'; 'ready_for_review' transitions prState from 'draft' to 'open'. All webhook handlers match the TicketLink via prNumber.",
+            "acceptanceCriteria": [
+                "VcsPollingService.poll() calls syncPrStatus() after issue sync completes on each polling tick",
+                "handleWebhook() with event 'pull_request' and action 'opened' updates TicketLink.prState to 'draft' if draft=true, otherwise 'open'",
+                "handleWebhook() with event 'pull_request', action 'closed', and merged=true updates prState to 'merged' and triggers the auto-transition logic from VCS-P3-002-B",
+                "handleWebhook() with event 'pull_request', action 'closed', and merged=false updates prState to 'closed'",
+                "handleWebhook() with event 'pull_request' and action 'ready_for_review' updates prState to 'open'",
+                "Webhook handlers look up TicketLink using the prNumber field from the webhook payload",
+                "If no TicketLink matches the prNumber, the webhook event is silently ignored",
+                "Unhandled pull_request actions are ignored without error"
+            ],
+            "tags": ["feature", "api", "vcs"],
+            "dependencies": ["VCS-P3-002-B"],
+            "contextFiles": [
+                "apps/api/src/vcs/vcs-polling.service.ts",
+                "apps/api/src/vcs/vcs-webhook.service.ts",
+                "apps/api/src/vcs/vcs-pr-sync.service.ts"
+            ],
+            "status": "pending",
+            "passes": false,
+            "escalations": [],
+            "attempts": 0,
+            "parentStoryId": "VCS-P3-002",
+            "workdir": "apps/api",
+            "routing": {
+                "complexity": "medium",
+                "testStrategy": "three-session-tdd-lite",
+                "reasoning": "Two separate integration points (polling loop extension + webhook dispatcher branching). Each is straightforward but together span 3 files and ~100-130 LOC.",
+                "modelTier": "balanced"
+            }
+        },
+        {
+            "id": "VCS-P3-003",
+            "title": "Web PR status display + CLI PR info + manual sync-pr endpoint",
+            "description": "Display PR status badges on web ticket cards and ticket detail pages. Add PR status information to CLI ticket show command. Add manual POST /projects/:slug/vcs/sync-pr endpoint and corresponding CLI command.",
+            "acceptanceCriteria": [
+                "Web TicketCard component shows PR status badge (colored dot/label) when TicketLink has prState: green for 'merged', blue for 'open', gray for 'draft', red for 'closed'",
+                "Web ticket detail page shows PR status section with PR number (linked to GitHub), current state badge, and merge info (SHA, author, time) when merged",
+                "Web ticket detail activity timeline shows 'PR merged: owner/repo#12 by @user' for VCS_PR_MERGED activity type",
+                "koda ticket show <ref> displays linked PR number and state in the output when prState is present on a TicketLink",
+                "koda ticket show <ref> --json includes prState, prNumber, prUpdatedAt in links[] entries",
+                "POST /projects/:slug/vcs/sync-pr triggers manual PR status sync and returns { updated: number }",
+                "koda vcs sync-pr calls the manual PR sync endpoint and prints the count of updated PRs",
+                "i18n keys exist in apps/api/src/i18n/en/vcs.json and zh/vcs.json for PR status labels and merge notification strings",
+                "i18n keys exist in apps/web/i18n/locales/en.json and zh.json for PR status display labels"
+            ],
+            "contextFiles": [
+                "apps/web/components/TicketCard.vue",
+                "apps/web/pages/[project]/tickets/[ref].vue",
+                "apps/cli/src/commands/ticket.ts",
+                "apps/cli/src/commands/vcs.ts",
+                "apps/api/src/vcs/vcs.controller.ts",
+                "apps/web/i18n/locales/en.json"
+            ],
+            "tags": ["feature", "web", "cli", "api"],
+            "dependencies": ["VCS-P3-002"],
+            "workdir": "apps/web",
+            "status": "pending",
+            "passes": false,
+            "routing": {
+                "complexity": "medium",
+                "testStrategy": "tdd-simple",
+                "noTestJustification": null,
+                "reasoning": "UI display changes + CLI output updates + new API endpoint"
+            },
+            "escalations": [],
+            "attempts": 0
+        }
+    ]
 }
