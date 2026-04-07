@@ -14,7 +14,7 @@ import { validateTransition } from '../tickets/state-machine/ticket-transitions'
 // PrismaClientLike from @nathapp/nestjs-prisma doesn't expose VCS models,
 // but they exist at runtime. Define a delegate interface for proper typing.
 interface TicketLinkDelegate {
-  findMany(options: { where: Record<string, unknown> }): Promise<unknown[]>
+  findMany<T = unknown>(options: Record<string, unknown>): Promise<T[]>
   update(options: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<unknown>
   findUnique(options: { where: Record<string, unknown> }): Promise<unknown>
 }
@@ -111,8 +111,16 @@ export class VcsPrSyncService {
       repoUrl: `https://github.com/${connection.repoOwner}/${connection.repoName}`,
     });
 
-    // Query TicketLink entries with active PRs
+    // Query TicketLink entries with active PRs and their linked tickets
     const ticketLinks = (await this.db.ticketLink.findMany({
+      include: {
+        ticket: {
+          select: {
+            id: true,
+            status: true,
+          },
+        },
+      },
       where: {
         prNumber: { not: null },
         prState: { notIn: ['merged', 'closed'] },
