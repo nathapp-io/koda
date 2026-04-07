@@ -145,23 +145,31 @@ export class TicketTransitionsService {
           const prTitle = `${projectKey}-${ticket.number}: ${ticket.title}`;
           const prBody = ticket.description ?? '';
 
-          return provider.createPullRequest({
-            title: prTitle,
-            body: prBody,
-            headBranch: branchName,
-            baseBranch,
-            draft: true,
-          }).then((pr) => {
-            return this.db.ticketLink.create({
-              data: {
-                ticketId,
-                url: pr.url,
-                provider: 'github',
-                externalRef: `${connection.repoOwner}/${connection.repoName}#${pr.number}`,
-                prNumber: pr.number,
-                prState: 'draft',
-                prUpdatedAt: new Date(),
-              },
+          return this.db.ticketLink.create({
+            data: {
+              ticketId,
+              url: `https://github.com/${connection.repoOwner}/${connection.repoName}/pulls/pending`,
+              provider: 'github',
+              externalRef: `${connection.repoOwner}/${connection.repoName}#pending`,
+            },
+          }).then((link) => {
+            return provider.createPullRequest({
+              title: prTitle,
+              body: prBody,
+              headBranch: branchName,
+              baseBranch,
+              draft: true,
+            }).then((pr) => {
+              return this.db.ticketLink.update({
+                where: { id: link.id },
+                data: {
+                  url: pr.url,
+                  externalRef: `${connection.repoOwner}/${connection.repoName}#${pr.number}`,
+                  prNumber: pr.number,
+                  prState: 'draft',
+                  prUpdatedAt: new Date(),
+                },
+              });
             });
           }).then(() => {
             return this.db.ticketActivity.create({
