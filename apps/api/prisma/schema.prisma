@@ -202,7 +202,7 @@ model TicketLink {
   url         String
   provider    String    // github | gitlab | bitbucket | other
   externalRef String?   // provider-specific reference e.g. 'owner/repo#42'
-  prState     String?   @default('draft') // draft | open | merged | closed
+  prState     String?   @default("draft") // draft | open | merged | closed
   prNumber    Int?      // direct PR lookup
   prUpdatedAt DateTime? // tracking last sync time
   createdAt   DateTime  @default(now())
