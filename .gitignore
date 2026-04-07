@@ -83,3 +83,6 @@ lancedb/
 ## cli test will create .koda on apps/cli
 ## we not ignore the project level .koda
 apps/**/.koda/.nax/features/
+# nax feature dirs (globstar)
+**/.nax-acceptance*
+**/.nax/features/*/
