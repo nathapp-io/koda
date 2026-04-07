@@ -61,7 +61,19 @@ describe('VCS-P4-003 AC7: ticket show --json includes linkType field', () => {
   test('links in JSON output preserve linkType from API response', () => {
     const source = readFileSync(ticketCommandPath, 'utf-8');
     // When outputting JSON, should include linkType from API
-    const ticketShowJsonSection = source.match(/ticket show[\s\S]*?process\.exit/m);
-    expect(ticketShowJsonSection).not.toBeNull();
+    // Check that JSON.stringify is called with ticketData in the show command
+    const hasJsonOutput = source.includes("JSON.stringify(ticketData");
+    expect(hasJsonOutput).toBe(true);
+    // ticketData is of type TicketDetail which includes links with linkType
+    // Verify TicketLink type includes linkType field
+    const ticketLinkMatch = source.match(/type TicketLink = \{[\s\S]*?\};/m);
+    expect(ticketLinkMatch).not.toBeNull();
+    const ticketLinkBlock = ticketLinkMatch ? ticketLinkMatch[0] : '';
+    expect(ticketLinkBlock).toContain('linkType');
+    // Verify TicketDetail references TicketLink for links
+    const ticketDetailMatch = source.match(/type TicketDetail = [\{\s\S]+?\n\};/m);
+    expect(ticketDetailMatch).not.toBeNull();
+    const ticketDetailBlock = ticketDetailMatch ? ticketDetailMatch[0] : '';
+    expect(ticketDetailBlock).toContain('TicketLink');
   });
 });
