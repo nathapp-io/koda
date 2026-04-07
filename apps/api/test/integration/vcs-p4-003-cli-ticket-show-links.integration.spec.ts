@@ -17,7 +17,7 @@ describe('VCS-P4-003 AC6: ticket show displays links grouped by type', () => {
   test('TicketLink type includes linkType field', () => {
     const source = readFileSync(ticketCommandPath, 'utf-8');
     // Find the TicketLink type definition
-    const ticketLinkMatch = source.match(/type TicketLink = [\{][\s\S]*?\};/m);
+    const ticketLinkMatch = source.match(/type TicketLink = \{[\s\S]*?\};/m);
     expect(ticketLinkMatch).not.toBeNull();
 
     const ticketLinkBlock = ticketLinkMatch ? ticketLinkMatch[0] : '';
@@ -71,7 +71,7 @@ describe('VCS-P4-003 AC7: ticket show --json includes linkType field', () => {
     const ticketLinkBlock = ticketLinkMatch ? ticketLinkMatch[0] : '';
     expect(ticketLinkBlock).toContain('linkType');
     // Verify TicketDetail references TicketLink for links
-    const ticketDetailMatch = source.match(/type TicketDetail = [\{\s\S]+?\n\};/m);
+    const ticketDetailMatch = source.match(/type TicketDetail = \{[\s\S]+?\n\};/m);
     expect(ticketDetailMatch).not.toBeNull();
     const ticketDetailBlock = ticketDetailMatch ? ticketDetailMatch[0] : '';
     expect(ticketDetailBlock).toContain('TicketLink');
