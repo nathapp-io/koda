@@ -2050,5 +2050,17 @@
     "storiesFailed": 0,
     "totalDurationMs": 2492128,
     "stories": []
+  },
+  {
+    "runId": "run-2026-04-07T13-30-32-898Z",
+    "feature": "vcs-phase4-branch-commit-links",
+    "startedAt": "2026-04-07T13:30:32.898Z",
+    "completedAt": "2026-04-07T13:30:33.591Z",
+    "totalCost": 0,
+    "totalStories": 0,
+    "storiesCompleted": 0,
+    "storiesFailed": 0,
+    "totalDurationMs": 693,
+    "stories": []
   }
 ]
