@@ -1,102 +1,35 @@
-# nax Project Constitution
+# Koda Project Constitution
 
-> Condensed architectural rules. Full details: `docs/ARCHITECTURE.md`
+> Hard invariants. Full context: `docs/architecture.md`, `.nax/context.md`, `.nax/mono/apps/*/context.md`
 
-## Size Limits
+## Non-Negotiable Rules
 
-- **Files:** ≤400 lines — split before exceeding
-- **Functions:** ≤30 lines target, 50 hard max — extract helpers
-- **Positional params:** ≤3 — use options object beyond that
+**Business logic lives in `apps/api` only.** Web and CLI are thin clients.
 
-## Dependency Injection (`_deps`)
+### Data Integrity
 
-All external calls (Bun.spawn, Bun.file, Bun.which, fetch) MUST go through an exported `_deps` object for testability:
+- Soft deletes only — never hard-delete `Ticket` or `Project`
+- Ticket numbers: `MAX(number)+1` in a transaction — never `autoincrement()`; include soft-deleted rows
+- Never import enums from `@prisma/client` — use `src/common/enums.ts`
+- All ticket transitions go through `validateTransition()` — never update status directly via Prisma
 
-```typescript
-export const _myDeps = {
-  spawn(cmd: string[], opts: SpawnOpts) { return Bun.spawn(cmd, opts) as any; },
-  which(name: string) { return Bun.which(name); },
-};
-```
+### Auth
 
-Tests override `_deps` — never monkey-patch Bun globals. See `src/agents/adapters/gemini.ts` as reference.
+- Use `@nathapp/nestjs-auth` v3 — never `nestjs-iam`
+- API key hashing: HMAC-SHA256 (deterministic); password hashing: bcrypt (rounds: 12)
 
-## Async Patterns (Critical)
+### Code Generation
 
-**Always read stdout/stderr concurrently with proc.exited — sequential reads deadlock on >64KB:**
+- Run `bun run generate` after any API contract change — before touching CLI code
+- Never manually edit `apps/cli/src/generated/`
+- Never manually edit generated `AGENTS.md` — edit the matching `context.md` and run `nax generate`
 
-```typescript
-// ✅ Correct
-const [exitCode, stdout, stderr] = await Promise.all([
-  proc.exited, new Response(proc.stdout).text(), new Response(proc.stderr).text()
-]);
+### Testing
 
-// ❌ Deadlocks
-const exitCode = await proc.exited;
-const stdout = await new Response(proc.stdout).text();
-```
+- NAX acceptance tests go in `.nax/features/<feature>/` — never in `apps/*/test/`
+- Do not create `us-XXX` folders in any app `test/` directory
 
-- `Bun.sleep()` is uncancellable — use `setTimeout` pattern when cancellation is needed
-- `Promise.race`: always `.catch(() => {})` on the losing promise
-- Prefer `Promise.all` batch over sequential `for await` when items are independent
+### Boundaries
 
-## Error Messages
-
-Always include `[stage]` prefix and identifiers:
-
-```typescript
-throw new Error(`[routing] LLM strategy failed for story ${story.id}: ${err.message}`);
-```
-
-Wrap external errors with `{ cause: err }`. Never swallow errors silently.
-
-## Type Safety
-
-- No `any` in public APIs — use `unknown` + type guards
-- Explicit return types on all exported functions
-- Use discriminated unions for state, not stringly-typed objects
-- Use `satisfies` for config objects
-
-## Testing
-
-- Mock via `_deps` pattern, not global monkey-patching
-- Use `test.each()` for 3+ similar test cases
-- Test names describe behavior: "returns null when file is missing"
-- One `describe` per exported function
-- Place acceptance tests in `nax/features/<feature>/acceptance.test.ts`, NOT in `apps/api/test/`
-- Do NOT create `us-XXX` folders in app test directories
-
-## Logging
-
-Use structured logger — never `console.log`:
-
-```typescript
-const logger = getLogger();
-logger?.info("stage-name", "Human-readable message", { storyId, key: value });
-```
-
-Levels: `debug` (internal state), `info` (lifecycle), `warn` (recoverable), `error` (failures).
-
-## Bun-Native
-
-- Runtime: Bun — no Node.js equivalents (no `child_process`, no `fs.promises` — use `Bun.spawn`, `Bun.file`)
-- Package manager: `bun` (never npm/yarn)
-- Test runner: `bun:test` (describe/test/expect)
-
-## Design Patterns
-
-**Prefer plain functions** — only use patterns when you need state, multiple implementations, or complex construction. See `docs/ARCHITECTURE.md` §11 for details and decision guide.
-
-Established patterns (use when appropriate):
-- **Builder:** multi-step construction (`PromptBuilder`, `DecomposeBuilder`)
-- **Adapter:** multiple backends, one interface (`AgentAdapter`)
-- **Registry:** typed collection lookup (`PluginRegistry`)
-- **Strategy:** interchangeable algorithms (`IVerificationStrategy`)
-- **Chain:** priority-ordered dispatch (`InteractionChain`)
-- **Singleton:** global services (`getLogger()` / `getSafeLogger()`)
-
-## Boundaries
-
-- Never modify `docs/ROADMAP.md` unless the story explicitly requires it
-- Never modify CI config (`.gitlab-ci.yml`) unless the story explicitly requires it
+- Never push to remote — the human reviews and pushes
 - Never add dependencies without justification in acceptance criteria
