@@ -20,6 +20,7 @@ import {
   vcsControllerTestConnection,
   vcsControllerSyncConnection,
   vcsControllerImportIssue,
+  vcsControllerSyncPr,
 } from '../vcs-client.stub';
 
 /**
@@ -375,6 +376,45 @@ export function vcsCommand(program: Command): void {
         });
 
         console.log(VCS_MESSAGES.ISSUE_IMPORTED(result.ticketRef));
+
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err);
+      }
+    });
+
+  vcs
+    .command('sync-pr')
+    .description('Sync PR status for all active pull requests')
+    .option('--project <slug>', 'Project slug (uses config if not provided)')
+    .action(async (options) => {
+      try {
+        // Check authentication
+        const auth = resolveAuth({});
+        if (!auth.apiKey || !auth.apiUrl) {
+          error(VCS_MESSAGES.MISSING_AUTH);
+          process.exit(2);
+          return;
+        }
+
+        // Get project slug from context
+        const ctx = await resolveContext({ projectSlug: options.project });
+        if (!ctx.projectSlug) {
+          error(VCS_MESSAGES.MISSING_PROJECT);
+          process.exit(3);
+          return;
+        }
+
+        // Set API client configuration
+        OpenAPI.BASE = auth.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = auth.apiKey;
+
+        // Call API
+        const result = await vcsControllerSyncPr({
+          slug: ctx.projectSlug,
+        });
+
+        console.log(`PR sync complete: ${result.updated} PR(s) updated`);
 
         process.exit(0);
       } catch (err: unknown) {

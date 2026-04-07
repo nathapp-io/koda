@@ -1,5 +1,5 @@
 import { IVcsProvider } from './vcs-provider';
-import { VcsIssue, VcsPullRequest, CreatePrParams } from './types';
+import { VcsIssue, VcsPullRequest, VcsPrStatus, CreatePrParams } from './types';
 
 describe('VcsIssue Type', () => {
   describe('VcsIssue type structure', () => {
@@ -158,6 +158,14 @@ describe('IVcsProvider Interface', () => {
         async createPullRequest(params: CreatePrParams): Promise<VcsPullRequest> {
           throw new Error('Not implemented');
         }
+
+        async getPullRequestStatus(prNumber: number): Promise<VcsPrStatus> {
+          throw new Error('Not implemented');
+        }
+
+        async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
+          return [];
+        }
       }
 
       const provider = new MockVcsProvider();
@@ -196,6 +204,14 @@ describe('IVcsProvider Interface', () => {
         async createPullRequest(params: CreatePrParams): Promise<VcsPullRequest> {
           throw new Error('Not implemented');
         }
+
+        async getPullRequestStatus(prNumber: number): Promise<VcsPrStatus> {
+          throw new Error('Not implemented');
+        }
+
+        async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
+          return [];
+        }
       }
 
       const provider = new MockVcsProvider();
@@ -227,6 +243,14 @@ describe('IVcsProvider Interface', () => {
 
         async createPullRequest(params: CreatePrParams): Promise<VcsPullRequest> {
           throw new Error('Not implemented');
+        }
+
+        async getPullRequestStatus(prNumber: number): Promise<VcsPrStatus> {
+          throw new Error('Not implemented');
+        }
+
+        async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
+          return [];
         }
       }
 
@@ -265,6 +289,14 @@ describe('IVcsProvider Interface', () => {
         async createPullRequest(params: CreatePrParams): Promise<VcsPullRequest> {
           throw new Error('Not implemented');
         }
+
+        async getPullRequestStatus(prNumber: number): Promise<VcsPrStatus> {
+          throw new Error('Not implemented');
+        }
+
+        async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
+          return [];
+        }
       }
 
       const provider = new MockVcsProvider();
@@ -300,6 +332,14 @@ describe('IVcsProvider Interface', () => {
         async createPullRequest(params: CreatePrParams): Promise<VcsPullRequest> {
           throw new Error('Not implemented');
         }
+
+        async getPullRequestStatus(prNumber: number): Promise<VcsPrStatus> {
+          throw new Error('Not implemented');
+        }
+
+        async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
+          return [];
+        }
       }
 
       const provider = new MockVcsProvider();
@@ -329,6 +369,14 @@ describe('IVcsProvider Interface', () => {
         async createPullRequest(params: CreatePrParams): Promise<VcsPullRequest> {
           throw new Error('Not implemented');
         }
+
+        async getPullRequestStatus(prNumber: number): Promise<VcsPrStatus> {
+          throw new Error('Not implemented');
+        }
+
+        async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
+          return [];
+        }
       }
 
       const provider = new MockVcsProvider();
@@ -355,6 +403,14 @@ describe('IVcsProvider Interface', () => {
 
         async createPullRequest(params: CreatePrParams): Promise<VcsPullRequest> {
           throw new Error('Not implemented');
+        }
+
+        async getPullRequestStatus(prNumber: number): Promise<VcsPrStatus> {
+          throw new Error('Not implemented');
+        }
+
+        async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
+          return [];
         }
       }
 
@@ -384,6 +440,14 @@ describe('IVcsProvider Interface', () => {
 
         async createPullRequest(params: CreatePrParams): Promise<VcsPullRequest> {
           throw new Error('Not implemented');
+        }
+
+        async getPullRequestStatus(prNumber: number): Promise<VcsPrStatus> {
+          throw new Error('Not implemented');
+        }
+
+        async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
+          return [];
         }
       }
 
@@ -429,6 +493,14 @@ describe('VcsIssue and IVcsProvider exports', () => {
 
       async createPullRequest(params: CreatePrParams): Promise<VcsPullRequest> {
         throw new Error('Not implemented');
+      }
+
+      async getPullRequestStatus(prNumber: number): Promise<VcsPrStatus> {
+        throw new Error('Not implemented');
+      }
+
+      async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
+        return [];
       }
     }
     expect(TestProvider).toBeDefined();

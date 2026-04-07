@@ -1,0 +1,36 @@
+Timestamp: 2026-04-07T02:23:44.358Z
+Session:   nax-5166d743-vcs-phase3-pr-status-sync-vcs-p3-001-c-refine
+Type:      complete
+StoryId:   VCS-P3-001-C
+Feature:   vcs-phase3-pr-status-sync
+Stage:     complete
+---
+IMPORTANT: Your entire response must be a single JSON object or array. Do not explain your reasoning. Do not use markdown formatting. Output ONLY the JSON.
+
+You are an acceptance criteria refinement assistant. Your task is to convert raw acceptance criteria into concrete, machine-verifiable assertions.
+
+CODEBASE CONTEXT:
+
+
+ACCEPTANCE CRITERIA TO REFINE:
+1. When createPullRequest() succeeds, the TicketLink record is updated with prNumber from the returned VcsPullRequest
+2. When createPullRequest() succeeds, the TicketLink record prState is set to 'draft' (PRs are always created as draft)
+3. The TicketLink update uses prisma.client.ticketLink.update with where: { id } and the new prNumber/prState values
+4. If the PR creation API call fails, prNumber and prState remain null on the TicketLink (no partial update)
+
+For each criterion, produce a refined version that is concrete and automatically testable where possible.
+Respond with a JSON array:
+[{
+  "original": "<exact original criterion text>",
+  "refined": "<concrete, machine-verifiable description>",
+  "testable": true,
+  "storyId": ""
+}]
+
+Rules:
+- "original" must match the input criterion text exactly
+- "refined" must be a concrete assertion (e.g., "Array of length N returned", "HTTP status 200 returned")
+- "testable" is false only if the criterion cannot be automatically verified (e.g., "UX feels responsive", "design looks good")
+- "storyId" leave as empty string — it will be assigned by the caller
+
+YOUR RESPONSE MUST START WITH { OR [ AND END WITH } OR ]. No other text.

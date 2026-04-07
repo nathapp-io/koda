@@ -1,7 +1,14 @@
 {
   "pr": {
     "created": "拉取请求创建成功",
-    "createFailed": "创建拉取请求失败：{error}"
+    "createFailed": "创建拉取请求失败：{error}",
+    "status": {
+      "merged": "已合并",
+      "open": "打开",
+      "draft": "草稿",
+      "closed": "关闭"
+    },
+    "mergedActivity": "PR 已合并：{repo}#{number}，合并者：@{author}"
   },
   "connection": {
     "created": "VCS 连接创建成功",

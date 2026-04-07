@@ -19,6 +19,7 @@ import { createHmac, timingSafeEqual, randomBytes } from 'crypto';
 import { VcsController } from '../../../src/vcs/vcs.controller';
 import { VcsConnectionService } from '../../../src/vcs/vcs-connection.service';
 import { VcsSyncService } from '../../../src/vcs/vcs-sync.service';
+import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
 import { VcsWebhookService, GitHubWebhookPayload } from '../../../src/vcs/vcs-webhook.service';
 import { ProjectsService } from '../../../src/projects/projects.service';
 import { ConfigService } from '@nestjs/config';
@@ -126,6 +127,11 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
       filterByAllowedAuthors: jest.fn((issues) => issues),
     };
 
+    const mockPrSyncServiceInstance = {
+      syncPrStatus: jest.fn(),
+      handleMergedPrAutoTransition: jest.fn(),
+    };
+
     const mockWebhookServiceInstance = {
       verifySignature: jest.fn(),
       handleWebhook: jest.fn(),
@@ -147,6 +153,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
       providers: [
         { provide: VcsConnectionService, useValue: mockVcsServiceInstance },
         { provide: VcsSyncService, useValue: mockSyncServiceInstance },
+        { provide: VcsPrSyncService, useValue: mockPrSyncServiceInstance },
         { provide: VcsWebhookService, useValue: mockWebhookServiceInstance },
         { provide: ProjectsService, useValue: mockProjectsServiceInstance },
         { provide: ConfigService, useValue: mockConfigServiceInstance },
@@ -188,7 +195,12 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
       webhookService.verifySignature.mockReturnValue(true);
       webhookService.handleWebhook.mockResolvedValue(syncResult);
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      const result = await controller.handleWebhook(
+        mockProject.slug,
+        validSignature,
+        payload,
+        'issues',
+      );
 
       expect(webhookService.verifySignature).toHaveBeenCalledWith(
         payloadString,
@@ -220,7 +232,12 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
       webhookService.verifySignature.mockReturnValue(true);
       webhookService.handleWebhook.mockResolvedValue(syncResult);
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      const result = await controller.handleWebhook(
+        mockProject.slug,
+        validSignature,
+        payload,
+        'issues',
+      );
 
       expect(result.success).toBe(true);
       expect(result.ignored).toBe(false);

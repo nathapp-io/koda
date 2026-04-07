@@ -146,7 +146,14 @@
     },
     "pr": {
       "created": "PR 已创建：{repo}#{number}",
-      "badge": "PR #{number}"
+      "badge": "PR #{number}",
+      "status": {
+        "merged": "已合并",
+        "open": "打开",
+        "draft": "草稿",
+        "closed": "关闭"
+      },
+      "mergedActivity": "PR 已合并：{repo}#{number}，合并者：{author}"
     },
     "actions": {
       "verify": "验证",

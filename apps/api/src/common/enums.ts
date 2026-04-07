@@ -45,6 +45,7 @@ export const ActivityType = {
   COMMENT: 'COMMENT',
   LABEL_CHANGE: 'LABEL_CHANGE',
   VCS_PR_CREATED: 'VCS_PR_CREATED',
+  VCS_PR_MERGED: 'VCS_PR_MERGED',
 } as const;
 export type ActivityType = (typeof ActivityType)[keyof typeof ActivityType];
 

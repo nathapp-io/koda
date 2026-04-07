@@ -1,0 +1,334 @@
+Timestamp: 2026-04-06T15:28:13.361Z
+Session:   nax-94a823bd-vcs-phase2-auto-create-pr-vcs-p2-001-implementer
+Type:      run / turn 1
+StoryId:   (none)
+Feature:   (none)
+Stage:     run
+---
+IMPORTANT: Your entire response must be a single JSON object or array. Do not explain your reasoning. Do not use markdown formatting. Output ONLY the JSON.
+
+You are a semantic code reviewer with access to the repository files. Your job is to verify that the implementation satisfies the story's acceptance criteria (ACs). You are NOT a linter or style checker — lint, typecheck, and convention checks are handled separately.
+
+## Story: Branch name utility + extend IVcsProvider + GitHub PR creation
+
+### Description
+Implement the branch name utility function, extend the VCS provider interface with PR creation methods, and implement GitHub provider methods for creating branches and draft pull requests.
+
+### Acceptance Criteria
+1. buildBranchName('KODA', 42, 'Fix login redirect bug') returns 'koda/KODA-42/fix-login-redirect-bug'
+2. buildBranchName('PROJ', 1, 'A very long title that exceeds the maximum allowed length for branch names') returns a branch name that is at most 100 characters
+3. buildBranchName('PROJ', 1, 'Special chars: @#$%^&*()') returns a branch name with only alphanumeric characters and hyphens in the slug portion
+4. buildBranchName('PROJ', 1, 'trailing---hyphens---') returns a branch name with no trailing hyphens in the slug portion
+5. IVcsProvider interface includes createPullRequest(CreatePrParams): Promise<VcsPullRequest> method signature
+6. IVcsProvider interface includes getDefaultBranch(): Promise<string> method signature
+7. GitHubProvider.getDefaultBranch() returns the repository's default branch name via GET /repos/{owner}/{repo}
+8. GitHubProvider.createPullRequest() creates a new branch from the repo's default branch HEAD via POST /repos/{owner}/{repo}/git/refs
+9. GitHubProvider.createPullRequest() opens a draft PR targeting the default branch via POST /repos/{owner}/{repo}/pulls
+10. GitHubProvider.createPullRequest() returns VcsPullRequest with number, url, branchName, state, and draft fields
+11. GitHubProvider.createPullRequest() when branch already exists (HTTP 422 on ref creation) skips branch creation and proceeds to create PR
+12. HttpClient interface includes post() method for GitHub API calls
+13. VcsProviderConfig httpClient includes post() method in factory
+
+## Git Diff (production code only — test files excluded)
+
+```diff
+diff --git a/apps/api/src/common/utils/branch-name.util.ts b/apps/api/src/common/utils/branch-name.util.ts
+new file mode 100644
+index 0000000..272c290
+--- /dev/null
++++ b/apps/api/src/common/utils/branch-name.util.ts
+@@ -0,0 +1,26 @@
++/**
++ * Builds a branch name from project key, ticket number, and title
++ * Format: {projectLower}/{projectKey}-{ticketNumber}/{slug}
++ */
++export function buildBranchName(
++  projectKey: string,
++  ticketNumber: number,
++  title: string,
++): string {
++  const projectLower = projectKey.toLowerCase();
++  const ticketPortion = `${projectKey}-${ticketNumber}`;
++  const prefix = `${projectLower}/${ticketPortion}`;
++
++  const slug = title
++    .toLowerCase()
++    .replace(/\s+/g, '-')
++    .replace(/[^a-z0-9-]/g, '')
++    .replace(/-+/g, '-')
++    .replace(/-+$/, '');
++
++  const maxSlugLength = 100 - prefix.length - 1;
++  const truncatedSlug = slug.slice(0, Math.max(0, maxSlugLength));
++  const finalSlug = truncatedSlug.replace(/-+$/, '');
++
++  return `${prefix}/${finalSlug}`;
++}
+diff --git a/apps/api/src/vcs/factory.ts b/apps/api/src/vcs/factory.ts
+index 7afc89c..dd9f82b 100644
+--- a/apps/api/src/vcs/factory.ts
++++ b/apps/api/src/vcs/factory.ts
+@@ -7,6 +7,7 @@ import { GitHubProvider } from './providers/github.provider';
+  */
+ export interface HttpClient {
+   get(url: string, config: { headers: Record<string, string>; params?: Record<string, unknown> }): Promise<{ data: unknown }>;
++  post(url: string, config: { headers: Record<string, string>; body: unknown }): Promise<{ data: unknown }>;
+ }
+ 
+ /**
+@@ -44,6 +45,22 @@ function createDefaultHttpClient(): HttpClient {
+         throw error;
+       }
+ 
++      const data = await response.json();
++      return { data };
++    },
++    async post(url: string, config: { headers: Record<string, string>; body: unknown }): Promise<{ data: unknown }> {
++      const response = await fetch(url, {
++        method: 'POST',
++        headers: config.headers,
++        body: JSON.stringify(config.body),
++      });
++
++      if (!response.ok) {
++        const error = new Error(`HTTP ${response.status}`);
++        (error as unknown as Record<string, unknown>).response = { status: response.status };
++        throw error;
++      }
++
+       const data = await response.json();
+       return { data };
+     },
+diff --git a/apps/api/src/vcs/index.ts b/apps/api/src/vcs/index.ts
+index 2b6d25e..8da68f3 100644
+--- a/apps/api/src/vcs/index.ts
++++ b/apps/api/src/vcs/index.ts
+@@ -5,3 +5,4 @@
+ 
+ export { IVcsProvider } from './vcs-provider';
+ export type { VcsIssue } from './types';
++export type { VcsPullRequest, CreatePrParams } from './types';
+diff --git a/apps/api/src/vcs/providers/github.provider.ts b/apps/api/src/vcs/providers/github.provider.ts
+index e0948b4..8a733c2 100644
+--- a/apps/api/src/vcs/providers/github.provider.ts
++++ b/apps/api/src/vcs/providers/github.provider.ts
+@@ -1,6 +1,6 @@
+ import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+ import { IVcsProvider } from '../vcs-provider';
+-import { VcsIssue } from '../types';
++import { VcsIssue, VcsPullRequest, CreatePrParams } from '../types';
+ import { HttpClient } from '../factory';
+ 
+ /**
+@@ -19,6 +19,33 @@ interface GitHubIssueResponse {
+   pull_request?: unknown;
+ }
+ 
++/**
++ * GitHub REST API response for a repository
++ */
++interface GitHubRepoResponse {
++  default_branch: string;
++}
++
++/**
++ * GitHub REST API response for ref creation
++ */
++interface GitHubRefResponse {
++  ref: string;
++  object: {
++    sha: string;
++  };
++}
++
++/**
++ * GitHub REST API response for PR creation
++ */
++interface GitHubPullRequestResponse {
++  number: number;
++  html_url: string;
++  state: string;
++  draft: boolean;
++}
++
+ /**
+  * GitHub VCS provider implementation
+  */
+@@ -94,6 +121,85 @@ export class GitHubProvider implements IVcsProvider {
+     }
+   }
+ 
++  async getDefaultBranch(): Promise<string> {
++    const url = `https://api.github.com/repos/${this.repoOwner}/${this.repoName}`;
++
++    const response = await this.httpClient.get(url, {
++      headers: {
++        Authorization: `Bearer ${this.token}`,
++      },
++    });
++
++    const data = response.data as { default_branch: string };
++    return data.default_branch;
++  }
++
++  async createPullRequest(params: CreatePrParams): Promise<VcsPullRequest> {
++    const repoResponse = await this.httpClient.get(
++      `https://api.github.com/repos/${this.repoOwner}/${this.repoName}`,
++      {
++        headers: {
++          Authorization: `Bearer ${this.token}`,
++        },
++      },
++    );
++
++    const repoData = repoResponse.data as GitHubRepoResponse;
++    const defaultBranch = repoData.default_branch;
++
++    let branchSha: string;
++    try {
++      const refResponse = await this.httpClient.post(
++        `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/git/refs`,
++        {
++          headers: {
++            Authorization: `Bearer ${this.token}`,
++          },
++          body: {
++            ref: `refs/heads/${params.headBranch}`,
++            sha: defaultBranch,
++          },
++        },
++      );
++      const refData = refResponse.data as GitHubRefResponse;
++      branchSha = refData.object.sha;
++    } catch (error: unknown) {
++      const errorObj = error as Record<string, unknown>;
++      const status = (errorObj?.response as Record<string, unknown>)?.status;
++      if (status === 422) {
++        // Branch already exists, proceed to PR creation
++      } else {
++        throw error;
++      }
++    }
++
++    const prResponse = await this.httpClient.post(
++      `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/pulls`,
++      {
++        headers: {
++          Authorization: `Bearer ${this.token}`,
++        },
++        body: {
++          title: params.title,
++          body: params.body,
++          head: params.headBranch,
++          base: defaultBranch,
++          draft: true,
++        },
++      },
++    );
++
++    const prData = prResponse.data as GitHubPullRequestResponse;
++
++    return {
++      number: prData.number,
++      url: prData.html_url,
++      branchName: params.headBranch,
++      state: prData.state,
++      draft: prData.draft,
++    };
++  }
++
+   private mapGitHubIssueToVcsIssue(gitHubIssue: GitHubIssueResponse): VcsIssue {
+     return {
+       number: gitHubIssue.number,
+diff --git a/apps/api/src/vcs/types.ts b/apps/api/src/vcs/types.ts
+index cf16ad3..76fe684 100644
+--- a/apps/api/src/vcs/types.ts
++++ b/apps/api/src/vcs/types.ts
+@@ -10,3 +10,24 @@ export interface VcsIssue {
+   labels: string[];
+   createdAt: Date;
+ }
++
++/**
++ * Parameters for creating a pull request
++ */
++export interface CreatePrParams {
++  title: string;
++  body: string;
++  headBranch: string;
++  baseBranch: string;
++}
++
++/**
++ * Represents a VCS pull request from any provider
++ */
++export interface VcsPullRequest {
++  number: number;
++  url: string;
++  branchName: string;
++  state: string;
++  draft: boolean;
++}
+diff --git a/apps/api/src/vcs/vcs-provider.ts b/apps/api/src/vcs/vcs-provider.ts
+index 4ddf3a7..dd8b55b 100644
+--- a/apps/api/src/vcs/vcs-provider.ts
++++ b/apps/api/src/vcs/vcs-provider.ts
+@@ -1,4 +1,4 @@
+-import { VcsIssue } from './types';
++import { VcsIssue, VcsPullRequest, CreatePrParams } from './types';
+ 
+ /**
+  * Interface for VCS providers (GitHub, GitLab, etc.)
+@@ -19,4 +19,15 @@ export interface IVcsProvider {
+    * Test the connection to the VCS service
+    */
+   testConnection(): Promise<{ ok: boolean; error?: string }>;
++
++  /**
++   * Get the default branch name for the repository
++   */
++  getDefaultBranch(): Promise<string>;
++
++  /**
++   * Create a pull request
++   * @param params The pull request parameters
++   */
++  createPullRequest(params: CreatePrParams): Promise<VcsPullRequest>;
+ }
+```
+
+## Instructions
+
+For each acceptance criterion, verify the diff implements it correctly.
+
+**Before reporting any finding as "error", you MUST verify it using your tools:**
+- If you suspect a key, function, import, or variable is missing, READ the relevant file to confirm before flagging.
+- If you suspect a code path is not wired in, GREP for its usage to confirm.
+- Do NOT flag something as missing based solely on its absence from the diff — it may already exist in the codebase. Check the actual file first.
+- If you cannot verify a claim even after checking, use "unverifiable" severity instead of "error".
+
+Flag issues only when you have confirmed:
+1. An AC is not implemented or partially implemented (verified by reading the actual files)
+2. The implementation contradicts what the AC specifies
+3. New code has dead paths that will never execute (stubs, noops, unreachable branches)
+4. New code is not wired into callers/exports (verified by grepping for usage)
+
+Do NOT flag: style issues, naming conventions, import ordering, file length, or anything lint handles.
+
+Respond with JSON only — no explanation text before or after:
+{
+  "passed": boolean,
+  "findings": [
+    {
+      "severity": "error" | "warn" | "info" | "unverifiable",
+      "file": "path/to/file",
+      "line": 42,
+      "issue": "description of the issue",
+      "suggestion": "how to fix it"
+    }
+  ]
+}
+
+If all ACs are correctly implemented, respond with { "passed": true, "findings": [] }.
+
+YOUR RESPONSE MUST START WITH { OR [ AND END WITH } OR ]. No other text.

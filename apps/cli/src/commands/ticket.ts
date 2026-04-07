@@ -43,7 +43,15 @@ type TicketDetail = TicketRow & {
   links?: TicketLink[];
 };
 
-type TicketLink = { id: string; url: string; provider: string; externalRef: string };
+type TicketLink = {
+  id: string;
+  url: string;
+  provider: string;
+  externalRef: string;
+  prState?: string | null;
+  prNumber?: number | null;
+  prUpdatedAt?: string | null;
+};
 
 export function ticketCommand(program: Command): void {
   const ticket = program.command('ticket');
@@ -271,7 +279,14 @@ export function ticketCommand(program: Command): void {
           if (ticketData.links && ticketData.links.length > 0) {
             console.log(`\nLinks:`);
             for (const link of ticketData.links) {
-              console.log(`  - ${link.url} (${link.provider})${link.externalRef ? ` [${link.externalRef}]` : ''}`);
+              let linkStr = `  - ${link.url} (${link.provider})`;
+              if (link.externalRef) {
+                linkStr += ` [${link.externalRef}]`;
+              }
+              if (link.prState) {
+                linkStr += ` [${link.prState}]`;
+              }
+              console.log(linkStr);
             }
           }
         }

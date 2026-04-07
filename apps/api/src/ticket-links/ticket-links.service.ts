@@ -89,6 +89,44 @@ export class TicketLinksService {
     return TicketLinkResponseDto.fromMany(links);
   }
 
+  /**
+   * Update TicketLink.prState from a pull_request webhook event.
+   * Used by VcsWebhookService when handling pull_request events.
+   */
+  async updatePrStateFromWebhook(
+    linkId: string,
+    state: string,
+  ): Promise<void> {
+    await this.db.ticketLink.update({
+      where: { id: linkId },
+      data: { prState: state, prUpdatedAt: new Date() },
+    });
+  }
+
+  /**
+   * Find a TicketLink by PR number and project ID.
+   * Used by VcsWebhookService to match pull_request webhook events to TicketLinks.
+   */
+  async findByPrNumber(prNumber: number, projectId: string) {
+    return this.db.ticketLink.findFirst({
+      where: {
+        prNumber,
+        ticket: { projectId },
+      },
+    });
+  }
+
+  /**
+   * Stub for webhook actions that should be ignored.
+   * No update occurs; this is a no-op placeholder for dispatcher routing.
+   */
+  async updatePrStateFromIgnoredAction(
+    _linkId: string,
+    _action: string,
+  ): Promise<void> {
+    // No-op: these actions do not update TicketLink state
+  }
+
   async remove(slug: string, ref: string, linkId: string): Promise<void> {
     const ticket = await this.resolveTicket(slug, ref);
 

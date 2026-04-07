@@ -1,0 +1,41 @@
+Timestamp: 2026-04-07T02:25:29.062Z
+Session:   nax-5166d743-vcs-phase3-pr-status-sync-vcs-p3-003-refine
+Type:      complete
+StoryId:   VCS-P3-003
+Feature:   vcs-phase3-pr-status-sync
+Stage:     complete
+---
+IMPORTANT: Your entire response must be a single JSON object or array. Do not explain your reasoning. Do not use markdown formatting. Output ONLY the JSON.
+
+You are an acceptance criteria refinement assistant. Your task is to convert raw acceptance criteria into concrete, machine-verifiable assertions.
+
+CODEBASE CONTEXT:
+
+
+ACCEPTANCE CRITERIA TO REFINE:
+1. Web TicketCard component shows PR status badge (colored dot/label) when TicketLink has prState: green for 'merged', blue for 'open', gray for 'draft', red for 'closed'
+2. Web ticket detail page shows PR status section with PR number (linked to GitHub), current state badge, and merge info (SHA, author, time) when merged
+3. Web ticket detail activity timeline shows 'PR merged: owner/repo#12 by @user' for VCS_PR_MERGED activity type
+4. koda ticket show <ref> displays linked PR number and state in the output when prState is present on a TicketLink
+5. koda ticket show <ref> --json includes prState, prNumber, prUpdatedAt in links[] entries
+6. POST /projects/:slug/vcs/sync-pr triggers manual PR status sync and returns { updated: number }
+7. koda vcs sync-pr calls the manual PR sync endpoint and prints the count of updated PRs
+8. i18n keys exist in apps/api/src/i18n/en/vcs.json and zh/vcs.json for PR status labels and merge notification strings
+9. i18n keys exist in apps/web/i18n/locales/en.json and zh.json for PR status display labels
+
+For each criterion, produce a refined version that is concrete and automatically testable where possible.
+Respond with a JSON array:
+[{
+  "original": "<exact original criterion text>",
+  "refined": "<concrete, machine-verifiable description>",
+  "testable": true,
+  "storyId": ""
+}]
+
+Rules:
+- "original" must match the input criterion text exactly
+- "refined" must be a concrete assertion (e.g., "Array of length N returned", "HTTP status 200 returned")
+- "testable" is false only if the criterion cannot be automatically verified (e.g., "UX feels responsive", "design looks good")
+- "storyId" leave as empty string — it will be assigned by the caller
+
+YOUR RESPONSE MUST START WITH { OR [ AND END WITH } OR ]. No other text.

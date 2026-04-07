@@ -16,6 +16,15 @@ export class TicketLinkResponseDto {
   @ApiProperty({ nullable: true, type: String })
   externalRef!: string | null;
 
+  @ApiProperty({ nullable: true })
+  prState!: string | null;
+
+  @ApiProperty({ nullable: true })
+  prNumber!: number | null;
+
+  @ApiProperty({ nullable: true })
+  prUpdatedAt!: Date | null;
+
   @ApiProperty()
   createdAt!: Date;
 
@@ -27,6 +36,9 @@ export class TicketLinkResponseDto {
       url: link.url,
       provider: link.provider,
       externalRef: link.externalRef,
+      prState: link.prState ?? null,
+      prNumber: link.prNumber ?? null,
+      prUpdatedAt: link.prUpdatedAt ?? null,
       createdAt: link.createdAt,
     };
   }

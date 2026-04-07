@@ -5,6 +5,15 @@ interface Assignee {
   email?: string
 }
 
+interface TicketLink {
+  id: string
+  url: string
+  provider: string
+  externalRef: string | null
+  prState?: string | null
+  prNumber?: number | null
+}
+
 interface Ticket {
   id: string
   ref: string
@@ -13,6 +22,7 @@ interface Ticket {
   priority: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
   assignee?: Assignee | null
   externalVcsUrl?: string | null
+  links?: TicketLink[]
 }
 
 const props = defineProps<{ ticket: Ticket }>()
@@ -52,6 +62,19 @@ function extractIssueNumber(url: string): string {
   const parts = url.split('/')
   return parts[parts.length - 1] || ''
 }
+
+const githubPrWithState = computed(() => {
+  if (!props.ticket.links) return null
+  return props.ticket.links.find(link => link.provider === 'github' && link.prState)
+})
+
+function prStateVariant(state: string): string {
+  if (state === 'merged') return 'bg-green-500'
+  if (state === 'open') return 'bg-blue-500'
+  if (state === 'draft') return 'bg-gray-400'
+  if (state === 'closed') return 'bg-red-500'
+  return 'bg-gray-400'
+}
 </script>
 
 <template>
@@ -76,6 +99,10 @@ function extractIssueNumber(url: string): string {
             </Badge>
             <Badge v-if="ticket.externalVcsUrl" variant="outline">
               {{ t('tickets.vcs.github') }} #{{ extractIssueNumber(ticket.externalVcsUrl) }}
+            </Badge>
+            <Badge v-if="githubPrWithState" variant="outline" class="gap-1">
+              <span class="w-2 h-2 rounded-full" :class="prStateVariant(githubPrWithState.prState!)"></span>
+              {{ t(`tickets.pr.status.${githubPrWithState.prState}`) }}
             </Badge>
           </div>
         </div>

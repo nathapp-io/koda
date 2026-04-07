@@ -18,6 +18,9 @@ interface TicketLink {
   provider: string
   externalRef: string | null
   createdAt: string
+  prState?: string | null
+  prNumber?: number | null
+  prUpdatedAt?: string | null
 }
 
 interface Ticket {
@@ -161,6 +164,19 @@ function extractPrNumber(externalRef: string | null): string {
   const parts = externalRef.split('#')
   return parts[parts.length - 1] || ''
 }
+
+const githubPrLinksWithState = computed(() => {
+  if (!ticket.value?.links) return []
+  return ticket.value.links.filter(link => link.provider === 'github' && link.prState)
+})
+
+function prStateClass(state: string | null | undefined): string {
+  if (state === 'merged') return 'bg-green-100 text-green-800'
+  if (state === 'open') return 'bg-blue-100 text-blue-800'
+  if (state === 'draft') return 'bg-gray-100 text-gray-800'
+  if (state === 'closed') return 'bg-red-100 text-red-800'
+  return 'bg-gray-100 text-gray-800'
+}
 </script>
 
 <template>
@@ -232,7 +248,23 @@ function extractPrNumber(externalRef: string | null): string {
             >
               <span>{{ t('tickets.pr.badge', { number: extractPrNumber(link.externalRef) }) }}</span>
             </a>
+            <Badge v-if="link.prState" variant="outline" :class="prStateClass(link.prState)">
+              {{ t(`tickets.pr.status.${link.prState}`) }}
+            </Badge>
           </template>
+        </div>
+
+        <!-- PR Status Section -->
+        <div v-for="link in githubPrLinksWithState" :key="link.id">
+          <div v-if="link.prState === 'merged'" class="mt-4 p-4 border rounded-md bg-green-50">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="w-2 h-2 rounded-full bg-green-500"></span>
+              <span class="text-sm font-medium">{{ t('tickets.pr.status.merged') }}</span>
+            </div>
+            <p class="text-sm text-muted-foreground">
+              {{ t('tickets.pr.mergedActivity', { repo: link.externalRef?.split('#')[0] || '', number: link.prNumber || extractPrNumber(link.externalRef), author: 'system' }) }}
+            </p>
+          </div>
         </div>
 
         <div v-if="ticket.description || editState.isEditing">

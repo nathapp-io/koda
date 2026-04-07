@@ -49,6 +49,9 @@ describe('TicketLinksService', () => {
     url: 'https://github.com/owner/repo/pull/1',
     provider: 'github',
     externalRef: 'owner/repo#1',
+    prState: null,
+    prNumber: null,
+    prUpdatedAt: null,
     createdAt: new Date(),
   };
 
