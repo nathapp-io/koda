@@ -393,11 +393,13 @@ describe('CreatePrParams type', () => {
         body: 'Body',
         headBranch: 'feature-branch',
         baseBranch: 'main',
+        draft: false,
       };
       expect(params.title).toBeDefined();
       expect(params.body).toBeDefined();
       expect(params.headBranch).toBeDefined();
       expect(params.baseBranch).toBeDefined();
+      expect(params.draft).toBeDefined();
     });
 
     it('should allow empty strings for optional fields', () => {

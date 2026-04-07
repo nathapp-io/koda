@@ -127,7 +127,17 @@ describe('VcsPrSyncService.syncPrStatus', () => {
 
   const mockClient = {
     ticketLink: { ...mockTicketLinkDelegate },
-    $transaction: jest.fn(),
+    ticket: {
+      findUnique: jest.fn(),
+      update: jest.fn(),
+    },
+    comment: {
+      create: jest.fn(),
+    },
+    ticketActivity: {
+      create: jest.fn(),
+    },
+    $transaction: jest.fn((fn) => fn(mockClient)),
   } as any;
 
   beforeEach(async () => {

@@ -120,18 +120,17 @@ export class TicketTransitionsService {
   private createPrForTicket(
     project: { id: string; key: string },
     ticket: Ticket,
-  ): void {
-    if (!this.vcsConnectionService || !this.ticketLinksService) return;
+  ): Promise<void> {
+    if (!this.vcsConnectionService || !this.ticketLinksService) return Promise.resolve();
 
     const vcsService = this.vcsConnectionService;
-    const ticketLinksService = this.ticketLinksService;
     const projectId = project.id;
     const ticketId = ticket.id;
     const projectKey = project.key;
 
-    vcsService.getFullByProject(projectId)
-      .then((connection) => {
-        if (!connection.isActive) return;
+    return vcsService.getFullByProject(projectId)
+      .then((connection): Promise<void> => {
+        if (!connection.isActive) return Promise.resolve();
 
         const repoUrl = `https://github.com/${connection.repoOwner}/${connection.repoName}`;
         const provider = createVcsProvider(connection.provider, {
@@ -140,7 +139,7 @@ export class TicketTransitionsService {
           repoUrl,
         });
 
-        return provider.getDefaultBranch().then((baseBranch) => {
+        return provider.getDefaultBranch().then((baseBranch): Promise<void> => {
           const branchName = buildBranchName(projectKey, ticket.number, ticket.title);
           const prTitle = `${projectKey}-${ticket.number}: ${ticket.title}`;
           const prBody = ticket.description ?? '';
@@ -152,14 +151,14 @@ export class TicketTransitionsService {
               provider: 'github',
               externalRef: `${connection.repoOwner}/${connection.repoName}#pending`,
             },
-          }).then((link) => {
+          }).then((link): Promise<void> => {
             return provider.createPullRequest({
               title: prTitle,
               body: prBody,
               headBranch: branchName,
               baseBranch,
               draft: true,
-            }).then((pr) => {
+            }).then((pr): Promise<void> => {
               return this.db.ticketLink.update({
                 where: { id: link.id },
                 data: {
@@ -169,24 +168,26 @@ export class TicketTransitionsService {
                   prState: 'draft',
                   prUpdatedAt: new Date(),
                 },
-              });
+              }) as unknown as Promise<void>;
             });
-          }).then(() => {
+          }).then((): Promise<void> => {
             return this.db.ticketActivity.create({
               data: {
                 ticketId,
                 action: ActivityType.VCS_PR_CREATED,
               },
-            });
+            }) as unknown as Promise<void>;
           }).catch((err) => {
             this.logger.warn(
               `[vcs] Failed to create PR for ticket ${projectKey}-${ticket.number}: ${err instanceof Error ? err.message : String(err)}`,
             );
+            return Promise.resolve();
           });
         });
       })
       .catch(() => {
         // suppress VCS errors — ticket transition must always succeed
+        return Promise.resolve();
       });
   }
 
@@ -461,7 +462,7 @@ export class TicketTransitionsService {
         ticket: updatedTicket,
         activity,
       } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-    }).then((result: TransitionResult) => {
+    }).then(async (result: TransitionResult) => {
       // Auto-index when a ticket transitions to CLOSED via normal state machine
       if (toStatus === TicketStatus.CLOSED) {
         this.autoIndexTicket(project, result.ticket);
@@ -470,7 +471,7 @@ export class TicketTransitionsService {
       this.dispatchStatusChangeWebhook(project.id, result.ticket, ticket.status, toStatus);
       // Auto-create PR when ticket transitions to VERIFIED
       if (toStatus === TicketStatus.VERIFIED) {
-        this.createPrForTicket(project, result.ticket);
+        await this.createPrForTicket(project, result.ticket);
       }
       return result;
     });

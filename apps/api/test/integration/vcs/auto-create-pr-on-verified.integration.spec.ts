@@ -24,6 +24,14 @@ import { buildBranchName } from '../../../src/vcs/branch-name.util';
 import enVcsMessages from '../../../src/i18n/en/vcs.json';
 import zhVcsMessages from '../../../src/i18n/zh/vcs.json';
 
+// Module-level reference for factory mock that can be updated
+let mockVcsProviderInstance: any;
+const mockCreateVcsProvider = jest.fn().mockImplementation(() => mockVcsProviderInstance);
+
+jest.mock('../../../src/vcs/factory', () => ({
+  createVcsProvider: mockCreateVcsProvider,
+}));
+
 describe('Auto-create PR on VERIFIED Transition', () => {
   let transitionsService: TicketTransitionsService;
   let mockPrismaService: any;
@@ -311,18 +319,9 @@ describe('AC14: prNumber and prState persisted on TicketLink after successful PR
             create: jest.fn().mockResolvedValue({}),
           },
           ticketLink: {
-            create: jest.fn().mockResolvedValue({
-              id: 'link-1',
-              ticketId: 'ticket-1',
-              url: 'https://github.com/test-owner/test-repo/pull/123',
-              provider: 'github',
-              externalRef: 'test-owner/test-repo#123',
-              prState: 'draft',
-              prNumber: 123,
-              prUpdatedAt: expect.any(Date),
-              createdAt: new Date(),
-            }),
+            create: jest.fn(),
             findFirst: jest.fn(),
+            update: jest.fn(),
           },
           vcsConnection: {
             findUnique: jest.fn(),
@@ -347,10 +346,9 @@ describe('AC14: prNumber and prState persisted on TicketLink after successful PR
         createPullRequest: jest.fn(),
       };
 
-      // Mock the VCS factory to return our mock provider
-      jest.mock('../../../src/vcs/factory', () => ({
-        createVcsProvider: jest.fn().mockReturnValue(mockVcsProvider),
-      }));
+      // Update the module-level factory mock to return our mock provider
+      mockVcsProviderInstance = mockVcsProvider;
+      mockCreateVcsProvider.mockReturnValue(mockVcsProvider);
 
       transitionsService = new TicketTransitionsService(
         mockPrismaService as any,
@@ -370,13 +368,35 @@ describe('AC14: prNumber and prState persisted on TicketLink after successful PR
         draft: true,
       };
 
+      // Reset mock call counts for this specific test
+      mockCreateVcsProvider.mockClear();
       mockVcsProvider.createPullRequest.mockResolvedValue(mockPrResponse);
+      mockPrismaService.client.ticketLink.create.mockResolvedValue({
+        id: 'link-1',
+        ticketId: 'ticket-1',
+        url: 'https://github.com/test-owner/test-repo/pull/pending',
+        provider: 'github',
+        externalRef: 'test-owner/test-repo#pending',
+        createdAt: new Date(),
+      });
+      mockPrismaService.client.ticketLink.update.mockResolvedValue({
+        id: 'link-1',
+        ticketId: 'ticket-1',
+        url: mockPrResponse.url,
+        provider: 'github',
+        externalRef: 'test-owner/test-repo#123',
+        prState: 'draft',
+        prNumber: 123,
+        prUpdatedAt: new Date(),
+        createdAt: new Date(),
+      });
 
       await transitionsService.verify('test-project', 'KODA-42', 'Verified', testUser, 'user');
 
-      // Verify ticketLink.create was called with prNumber and prState
-      expect(mockPrismaService.client.ticketLink.create).toHaveBeenCalledWith(
+      // Verify ticketLink.update was called with prNumber and prState (AC1, AC2, AC3)
+      expect(mockPrismaService.client.ticketLink.update).toHaveBeenCalledWith(
         expect.objectContaining({
+          where: { id: 'link-1' },
           data: expect.objectContaining({
             prNumber: 123,
             prState: 'draft',
@@ -398,18 +418,27 @@ describe('AC14: prNumber and prState persisted on TicketLink after successful PR
       mockPrismaService.client.ticketLink.create.mockResolvedValue({
         id: 'link-1',
         ticketId: 'ticket-1',
+        url: 'https://github.com/test-owner/test-repo/pull/pending',
+        provider: 'github',
+        externalRef: 'test-owner/test-repo#pending',
+        createdAt: new Date(),
+      });
+      mockPrismaService.client.ticketLink.update.mockResolvedValue({
+        id: 'link-1',
+        ticketId: 'ticket-1',
         url: mockPrResponse.url,
         provider: 'github',
         externalRef: 'test-owner/test-repo#456',
         prState: 'draft',
         prNumber: 456,
-        prUpdatedAt: expect.any(Date),
+        prUpdatedAt: new Date(),
         createdAt: new Date(),
       });
 
       await transitionsService.verify('test-project', 'KODA-42', 'Verified', testUser, 'user');
 
-      expect(mockPrismaService.client.ticketLink.create).toHaveBeenCalledWith(
+      // Verify ticketLink.update was called with prState: 'draft' (AC2)
+      expect(mockPrismaService.client.ticketLink.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             prState: 'draft',
@@ -418,13 +447,23 @@ describe('AC14: prNumber and prState persisted on TicketLink after successful PR
       );
     });
 
-    it('TicketLink is not created when PR creation fails', async () => {
+    it('TicketLink is not updated when PR creation fails', async () => {
       mockVcsProvider.createPullRequest.mockRejectedValue(new Error('GitHub API error'));
+      mockPrismaService.client.ticketLink.create.mockResolvedValue({
+        id: 'link-1',
+        ticketId: 'ticket-1',
+        url: 'https://github.com/test-owner/test-repo/pull/pending',
+        provider: 'github',
+        externalRef: 'test-owner/test-repo#pending',
+        createdAt: new Date(),
+      });
 
       await transitionsService.verify('test-project', 'KODA-42', 'Verified', testUser, 'user');
 
-      // When PR creation fails, ticketLink.create should NOT be called at all
-      expect(mockPrismaService.client.ticketLink.create).not.toHaveBeenCalled();
+      // When PR creation fails, ticketLink.update should NOT be called (AC4)
+      // ticketLink.create is still called (creates pending link), but update is skipped
+      expect(mockPrismaService.client.ticketLink.create).toHaveBeenCalled();
+      expect(mockPrismaService.client.ticketLink.update).not.toHaveBeenCalled();
     });
   });
 
