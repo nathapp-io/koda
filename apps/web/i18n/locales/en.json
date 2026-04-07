@@ -146,7 +146,14 @@
     },
     "pr": {
       "created": "PR created: {repo}#{number}",
-      "badge": "PR #{number}"
+      "badge": "PR #{number}",
+      "status": {
+        "merged": "Merged",
+        "open": "Open",
+        "draft": "Draft",
+        "closed": "Closed"
+      },
+      "mergedActivity": "PR merged: {repo}#{number} by @{author}"
     },
     "actions": {
       "verify": "Verify",

@@ -91,3 +91,13 @@ export async function vcsControllerImportIssue(_options: {
 }): Promise<VcsImportResultDto> {
   throw new Error('Not implemented - stub only');
 }
+
+export interface SyncPrResultDto {
+  updated: number;
+}
+
+export async function vcsControllerSyncPr(_options: {
+  slug: string;
+}): Promise<SyncPrResultDto> {
+  throw new Error('Not implemented - stub only');
+}

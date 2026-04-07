@@ -59,6 +59,7 @@ interface TicketLinkData {
   prNumber: number | null
   prState: string | null
   url: string
+  externalRef: string | null
   ticket?: {
     id: string
     status: string

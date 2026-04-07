@@ -50,6 +50,7 @@ interface TicketLinkData {
   prNumber: number | null
   prState: string | null
   url: string
+  externalRef: string | null
   ticket?: {
     id: string
     status: string
@@ -236,6 +237,8 @@ export class VcsPrSyncService {
         });
 
         // Log VCS_PR_MERGED activity
+        // Store PR info in newValue field for activity display: "owner/repo#number by @author"
+        const prInfo = `${link.externalRef || prStatus.url} by @${mergeAuthor}`;
         await tx.ticketActivity.create({
           data: {
             ticketId: link.ticketId,
@@ -244,6 +247,7 @@ export class VcsPrSyncService {
             toStatus: TicketStatus.VERIFY_FIX,
             actorUserId: null,
             actorAgentId: null,
+            newValue: prInfo,
           },
         });
       });

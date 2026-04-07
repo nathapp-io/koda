@@ -1,7 +1,14 @@
 {
   "pr": {
     "created": "Pull request created successfully",
-    "createFailed": "Failed to create pull request: {error}"
+    "createFailed": "Failed to create pull request: {error}",
+    "status": {
+      "merged": "merged",
+      "open": "open",
+      "draft": "draft",
+      "closed": "closed"
+    },
+    "mergedActivity": "PR merged: {repo}#{number} by @{author}"
   },
   "connection": {
     "created": "VCS connection created successfully",

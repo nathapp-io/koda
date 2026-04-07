@@ -22,6 +22,7 @@ import { AuthException, ValidationAppException } from '@nathapp/nestjs-common';
 import { Project } from '@prisma/client';
 import { VcsConnectionService } from './vcs-connection.service';
 import { VcsSyncService } from './vcs-sync.service';
+import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { VcsWebhookService, GitHubWebhookPayload } from './vcs-webhook.service';
 import { ProjectsService } from '../projects/projects.service';
 import { CreateVcsConnectionDto } from './dto/create-vcs-connection.dto';
@@ -39,6 +40,7 @@ export class VcsController {
   constructor(
     private readonly vcsService: VcsConnectionService,
     private readonly syncService: VcsSyncService,
+    private readonly prSyncService: VcsPrSyncService,
     private readonly webhookService: VcsWebhookService,
     private readonly projectsService: ProjectsService,
     private readonly configService: ConfigService,
@@ -293,5 +295,35 @@ export class VcsController {
       })),
       errors: result.errors.length > 0 ? result.errors : undefined,
     };
+  }
+
+  /**
+   * POST /projects/:slug/vcs/sync-pr
+   * Trigger manual PR status sync for all active PRs
+   */
+  @Post('/sync-pr')
+  @ApiOperation({ summary: 'Manually sync PR status for all active pull requests' })
+  @ApiResponse({ status: 200, description: 'PR sync completed', type: Object })
+  @ApiResponse({ status: 404, description: 'Project or VCS connection not found' })
+  async syncPr(
+    @Param('slug') slug: string,
+    @Principal('userId') userId?: string,
+  ): Promise<{ updated: number }> {
+    // Get project by slug
+    const project = await this.projectsService.findBySlug(slug);
+
+    // Get encryption key from config
+    const encryptionKey = this.configService.get<string>('vcs.encryptionKey');
+    if (!encryptionKey) {
+      this.throwEncryptionKeyNotConfigured();
+    }
+
+    // Get the full connection with all fields
+    const connection = await this.vcsService.getFullByProject(project.id);
+
+    // Run PR sync
+    const result = await this.prSyncService.syncPrStatus(project as Project, connection, encryptionKey);
+
+    return { updated: result.updated };
   }
 }
