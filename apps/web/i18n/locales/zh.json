@@ -153,7 +153,7 @@
         "draft": "草稿",
         "closed": "关闭"
       },
-      "mergedActivity": "PR 已合并：{repo}#{number}，合并者：@{author}"
+      "mergedActivity": "PR 已合并：{repo}#{number}，合并者：{author}"
     },
     "actions": {
       "verify": "验证",
