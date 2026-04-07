@@ -62,6 +62,7 @@ apps/api/smoke-result.txt
 .nax/**/status.json
 .nax/**/*.jsonl
 .nax/**/runs/
+.nax/prompt-audit/
 .nax/**/acp-sessions.json
 .nax/**/progress.txt
 .nax/**/acceptance-meta.json
@@ -83,3 +84,4 @@ lancedb/
 ## cli test will create .koda on apps/cli
 ## we not ignore the project level .koda
 apps/**/.koda/
+.codex
