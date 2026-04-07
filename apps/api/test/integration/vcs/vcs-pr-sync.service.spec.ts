@@ -17,6 +17,19 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { VcsPrStatus } from '../../../src/vcs/types';
 
+// Mock the decryptToken utility
+jest.mock('../../../src/common/utils/encryption.util', () => ({
+  decryptToken: jest.fn((token: string) => {
+    // Mock decryption - just return a dummy token
+    return 'decrypted-token';
+  }),
+}));
+
+// Mock the VCS factory
+jest.mock('../../../src/vcs/factory', () => ({
+  createVcsProvider: jest.fn(),
+}));
+
 // Import the service - will fail to compile if service doesn't exist yet
 import { VcsPrSyncService, SyncPrStatusResult } from '../../../src/vcs/vcs-pr-sync.service';
 
@@ -121,6 +134,10 @@ describe('VcsPrSyncService.syncPrStatus', () => {
     jest.clearAllMocks();
     jest.restoreAllMocks();
 
+    // Set up factory mock to return mockVcsProvider
+    const { createVcsProvider } = require('../../../src/vcs/factory');
+    createVcsProvider.mockReturnValue(mockVcsProvider);
+
     module = await Test.createTestingModule({
       providers: [
         VcsPrSyncService,
@@ -200,11 +217,6 @@ describe('VcsPrSyncService.syncPrStatus', () => {
   describe('AC3: Calls VCS provider to fetch current PR status', () => {
     it('should call getPullRequestStatus for each matching TicketLink', async () => {
       mockTicketLinkDelegate.findMany.mockResolvedValueOnce(mockTicketLinks);
-
-      // Mock provider factory to return our mock
-      jest.mock('../../../src/vcs/factory', () => ({
-        createVcsProvider: jest.fn().mockReturnValue(mockVcsProvider),
-      }));
 
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce({
         number: 101,
