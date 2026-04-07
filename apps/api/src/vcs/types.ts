@@ -35,6 +35,7 @@ export interface VcsPrStatus {
   mergeSha: string | null;
   url: string;
   title: string;
+  branchName?: string;
 }
 
 /**

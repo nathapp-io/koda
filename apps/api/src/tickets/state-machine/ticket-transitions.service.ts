@@ -1,4 +1,5 @@
 import { Injectable, Optional, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import {
@@ -14,6 +15,8 @@ import { WebhookDispatcherService } from '../../webhook/webhook-dispatcher.servi
 import { VcsConnectionService } from '../../vcs/vcs-connection.service';
 import { buildBranchName } from '../../vcs/branch-name.util';
 import { createVcsProvider, VcsProviderConfig } from '../../vcs/factory';
+import { VcsLinkExtractorService } from '../../vcs/vcs-link-extractor.service';
+import { decryptToken } from '../../common/utils/encryption.util';
 import { TicketLinksService } from '../../ticket-links/ticket-links.service';
 import { IVcsProvider, VcsPullRequest } from '../../vcs';
 
@@ -45,6 +48,8 @@ export class TicketTransitionsService {
     @Optional() private readonly webhookDispatcher?: WebhookDispatcherService,
     @Optional() private readonly vcsConnectionService?: VcsConnectionService,
     @Optional() private readonly ticketLinksService?: TicketLinksService,
+    @Optional() private readonly vcsLinkExtractorService?: VcsLinkExtractorService,
+    @Optional() private readonly configService?: ConfigService,
   ) {}
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private get db() { return this.prisma.client; }
@@ -121,9 +126,13 @@ export class TicketTransitionsService {
     project: { id: string; key: string },
     ticket: Ticket,
   ): Promise<void> {
-    if (!this.vcsConnectionService || !this.ticketLinksService) return Promise.resolve();
+    if (!this.vcsConnectionService || !this.ticketLinksService || !this.vcsLinkExtractorService || !this.configService) return Promise.resolve();
 
     const vcsService = this.vcsConnectionService;
+    const vcsLinkExtractor = this.vcsLinkExtractorService;
+    const encryptionKey = this.configService.get<string>('vcs.encryptionKey');
+    if (!encryptionKey) return Promise.resolve();
+
     const projectId = project.id;
     const ticketId = ticket.id;
     const projectKey = project.key;
@@ -132,10 +141,11 @@ export class TicketTransitionsService {
       .then((connection): Promise<void> => {
         if (!connection.isActive) return Promise.resolve();
 
+        const token = decryptToken(connection.encryptedToken, encryptionKey);
         const repoUrl = `https://github.com/${connection.repoOwner}/${connection.repoName}`;
         const provider = createVcsProvider(connection.provider, {
           provider: connection.provider,
-          token: '',
+          token,
           repoUrl,
         });
 
@@ -177,6 +187,15 @@ export class TicketTransitionsService {
                 action: ActivityType.VCS_PR_CREATED,
               },
             }) as unknown as Promise<void>;
+          }).then((): Promise<void> => {
+            // AC5: After createPrForTicket() completes, extractLinksFromPr() is called
+            return vcsLinkExtractor.extractLinksFromPr(
+              project,
+              ticket,
+              connection,
+              encryptionKey,
+              branchName,
+            );
           }).catch((err) => {
             this.logger.warn(
               `[vcs] Failed to create PR for ticket ${projectKey}-${ticket.number}: ${err instanceof Error ? err.message : String(err)}`,

@@ -26,7 +26,7 @@ jest.mock('../../../src/vcs/factory', () => ({
 
 // Mock decryptToken utility
 jest.mock('../../../src/common/utils/encryption.util', () => ({
-  decryptToken: jest.fn((token: string) => 'decrypted-token'),
+  decryptToken: jest.fn(() => 'decrypted-token'),
 }));
 
 // Import after mocks are set up
@@ -53,7 +53,7 @@ const mockTicket = {
   assignedToUserId: null,
   assignedToAgentId: null,
   createdByUserId: 'user-1',
-  externalVcsId: null,
+  externalVcsId: 'test-owner/test-repo#123',
   externalVcsUrl: null,
   vcsSyncedAt: null,
   deletedAt: null,

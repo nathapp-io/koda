@@ -64,6 +64,9 @@ interface TicketLinkData {
   ticket?: {
     id: string
     status: string
+    projectId: string
+    number: number
+    externalVcsId: string | null
   }
 }
 
@@ -487,6 +490,9 @@ export class VcsWebhookService {
           select: {
             id: true,
             status: true,
+            projectId: true,
+            number: true,
+            externalVcsId: true,
           },
         },
       },

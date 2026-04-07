@@ -1,15 +1,17 @@
 /**
  * VcsPrSyncService - Syncs PR status from VCS provider to TicketLink records
  */
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { Project, VcsConnection } from '@prisma/client';
+import { ConfigService } from '@nestjs/config';
+import { Project, Ticket, VcsConnection } from '@prisma/client';
 import { decryptToken } from '../common/utils/encryption.util';
 import { createVcsProvider } from './factory';
 import { VcsPrStatus } from './types';
 import { TicketStatus, CommentType, ActivityType } from '../common/enums';
 import { validateTransition } from '../tickets/state-machine/ticket-transitions';
+import { VcsLinkExtractorService } from './vcs-link-extractor.service';
 
 // PrismaClientLike from @nathapp/nestjs-prisma doesn't expose VCS models,
 // but they exist at runtime. Define a delegate interface for proper typing.
@@ -54,6 +56,9 @@ interface TicketLinkData {
   ticket?: {
     id: string
     status: string
+    projectId: string
+    number: number
+    externalVcsId: string | null
   }
 }
 
@@ -66,7 +71,11 @@ export interface SyncPrStatusResult {
 export class VcsPrSyncService {
   private readonly logger = new Logger(VcsPrSyncService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly vcsLinkExtractorService?: VcsLinkExtractorService,
+    @Optional() private readonly configService?: ConfigService,
+  ) {}
 
   private get db() {
     return this.prisma as unknown as ExtendedPrismaClient;
@@ -119,6 +128,9 @@ export class VcsPrSyncService {
           select: {
             id: true,
             status: true,
+            projectId: true,
+            number: true,
+            externalVcsId: true,
           },
         },
       },
@@ -164,6 +176,43 @@ export class VcsPrSyncService {
             },
           });
           updated++;
+
+          // AC6: After syncPrStatus() updates a TicketLink, extractLinksFromPr() is called
+          // to pick up new commits from the PR
+          if (this.vcsLinkExtractorService && link.ticket && prStatus.branchName) {
+            const ticketData = link.ticket;
+            const ticketForExtraction = {
+              id: ticketData.id,
+              projectId: ticketData.projectId,
+              number: ticketData.number,
+              type: 'BUG' as const, // dummy value, not used by extractLinksFromPr
+              title: '',
+              description: null,
+              status: ticketData.status as TicketStatus,
+              priority: 'HIGH' as const, // dummy value, not used by extractLinksFromPr
+              assignedToUserId: null,
+              assignedToAgentId: null,
+              createdByUserId: '',
+              externalVcsId: ticketData.externalVcsId,
+              externalVcsUrl: null,
+              vcsSyncedAt: null,
+              deletedAt: null,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            } as Ticket;
+
+            this.vcsLinkExtractorService.extractLinksFromPr(
+              { id: project.id, key: project.key },
+              ticketForExtraction,
+              connection,
+              encryptionKey,
+              prStatus.branchName,
+            ).catch((err) => {
+              this.logger.warn(
+                `[vcs-pr-sync] Failed to extract links for ticket ${ticketData.id}: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            });
+          }
         }
       } catch (error) {
         if (error instanceof NotFoundAppException) {

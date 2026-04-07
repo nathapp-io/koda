@@ -59,6 +59,10 @@ interface GitHubPrStatusResponse {
   merge_commit_sha: string | null;
   html_url: string;
   title: string;
+  head: {
+    ref: string;
+    sha: string;
+  };
 }
 
 /**
@@ -314,6 +318,7 @@ export class GitHubProvider implements IVcsProvider {
       mergeSha: gitHubPr.merge_commit_sha,
       url: gitHubPr.html_url,
       title: gitHubPr.title,
+      branchName: gitHubPr.head?.ref,
     };
   }
 
