@@ -1,0 +1,156 @@
+Timestamp: 2026-04-06T16:21:51.089Z
+Session:   nax-732a0292-vcs-phase2-auto-create-pr-vcs-p2-003-implementer
+Type:      run / turn 1
+StoryId:   (none)
+Feature:   (none)
+Stage:     run
+---
+IMPORTANT: Your entire response must be a single JSON object or array. Do not explain your reasoning. Do not use markdown formatting. Output ONLY the JSON.
+
+You are a semantic code reviewer with access to the repository files. Your job is to verify that the implementation satisfies the story's acceptance criteria (ACs). You are NOT a linter or style checker — lint, typecheck, and convention checks are handled separately.
+
+## Story: Web ticket detail PR link display + CLI ticket show PR info
+
+### Description
+Display linked PR information in the web ticket detail page and CLI ticket show command.
+
+### Acceptance Criteria
+1. Web ticket detail page shows linked PR as a clickable badge with PR number and status when a TicketLink with provider 'github' and externalRef containing a PR number exists
+2. Web ticket activity timeline shows 'PR created: owner/repo#12' entry for VCS_PR_CREATED activity type
+3. koda ticket show <ref> output includes linked PR URL and external ref in the links section
+4. koda ticket show <ref> --json output includes links[] with PR TicketLink entries
+5. i18n keys for PR-related display strings exist in both apps/web/i18n/locales/en.json and zh.json
+
+## Git Diff (production code only — test files excluded)
+
+```diff
+diff --git a/apps/web/i18n/locales/en.json b/apps/web/i18n/locales/en.json
+index 7c8069f..516a34f 100644
+--- a/apps/web/i18n/locales/en.json
++++ b/apps/web/i18n/locales/en.json
+@@ -144,6 +144,10 @@
+     "vcs": {
+       "github": "GitHub"
+     },
++    "pr": {
++      "created": "PR created: {repo}#{number}",
++      "badge": "PR #{number}"
++    },
+     "actions": {
+       "verify": "Verify",
+       "reject": "Reject",
+diff --git a/apps/web/i18n/locales/zh.json b/apps/web/i18n/locales/zh.json
+index 7470565..6bff8ab 100644
+--- a/apps/web/i18n/locales/zh.json
++++ b/apps/web/i18n/locales/zh.json
+@@ -144,6 +144,10 @@
+     "vcs": {
+       "github": "GitHub"
+     },
++    "pr": {
++      "created": "PR 已创建：{repo}#{number}",
++      "badge": "PR #{number}"
++    },
+     "actions": {
+       "verify": "验证",
+       "reject": "拒绝",
+diff --git a/apps/web/pages/[project]/tickets/[ref].vue b/apps/web/pages/[project]/tickets/[ref].vue
+index f2e75b2..03c892b 100644
+--- a/apps/web/pages/[project]/tickets/[ref].vue
++++ b/apps/web/pages/[project]/tickets/[ref].vue
+@@ -11,6 +11,15 @@ interface Assignee {
+   email?: string
+ }
+ 
++interface TicketLink {
++  id: string
++  ticketId: string
++  url: string
++  provider: string
++  externalRef: string | null
++  createdAt: string
++}
++
+ interface Ticket {
+   id: string
+   ref: string
+@@ -25,6 +34,7 @@ interface Ticket {
+   gitRefLine?: number | null
+   gitRefUrl?: string | null
+   externalVcsUrl?: string | null
++  links?: TicketLink[]
+   [key: string]: unknown
+ }
+ 
+@@ -140,6 +150,17 @@ function extractIssueNumber(url: string): string {
+   const parts = url.split('/')
+   return parts[parts.length - 1] || ''
+ }
++
++const githubPrLinks = computed(() => {
++  if (!ticket.value?.links) return []
++  return ticket.value.links.filter(link => link.provider === 'github' && link.externalRef)
++})
++
++function extractPrNumber(externalRef: string | null): string {
++  if (!externalRef) return ''
++  const parts = externalRef.split('#')
++  return parts[parts.length - 1] || ''
++}
+ </script>
+ 
+ <template>
+@@ -202,6 +223,16 @@ function extractIssueNumber(url: string): string {
+           <Badge variant="outline" :class="typeClass(ticket.type)">
+             {{ t(`tickets.type.${ticket.type}`) }}
+           </Badge>
++          <template v-for="link in githubPrLinks" :key="link.id">
++            <a
++              :href="link.url"
++              target="_blank"
++              rel="noopener noreferrer"
++              class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md bg-github-link-bg text-gitHub-link-text hover:bg-gitHub-link-bg/80 border border-gitHub-link-border"
++            >
++              <span>{{ t('tickets.pr.badge', { number: extractPrNumber(link.externalRef) }) }}</span>
++            </a>
++          </template>
+         </div>
+ 
+         <div v-if="ticket.description || editState.isEditing">
+```
+
+## Instructions
+
+For each acceptance criterion, verify the diff implements it correctly.
+
+**Before reporting any finding as "error", you MUST verify it using your tools:**
+- If you suspect a key, function, import, or variable is missing, READ the relevant file to confirm before flagging.
+- If you suspect a code path is not wired in, GREP for its usage to confirm.
+- Do NOT flag something as missing based solely on its absence from the diff — it may already exist in the codebase. Check the actual file first.
+- If you cannot verify a claim even after checking, use "unverifiable" severity instead of "error".
+
+Flag issues only when you have confirmed:
+1. An AC is not implemented or partially implemented (verified by reading the actual files)
+2. The implementation contradicts what the AC specifies
+3. New code has dead paths that will never execute (stubs, noops, unreachable branches)
+4. New code is not wired into callers/exports (verified by grepping for usage)
+
+Do NOT flag: style issues, naming conventions, import ordering, file length, or anything lint handles.
+
+Respond with JSON only — no explanation text before or after:
+{
+  "passed": boolean,
+  "findings": [
+    {
+      "severity": "error" | "warn" | "info" | "unverifiable",
+      "file": "path/to/file",
+      "line": 42,
+      "issue": "description of the issue",
+      "suggestion": "how to fix it"
+    }
+  ]
+}
+
+If all ACs are correctly implemented, respond with { "passed": true, "findings": [] }.
+
+YOUR RESPONSE MUST START WITH { OR [ AND END WITH } OR ]. No other text.

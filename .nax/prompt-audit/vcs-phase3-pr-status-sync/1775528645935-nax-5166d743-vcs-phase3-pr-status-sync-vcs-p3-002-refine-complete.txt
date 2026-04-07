@@ -1,0 +1,47 @@
+Timestamp: 2026-04-07T02:24:05.935Z
+Session:   nax-5166d743-vcs-phase3-pr-status-sync-vcs-p3-002-refine
+Type:      complete
+StoryId:   VCS-P3-002
+Feature:   vcs-phase3-pr-status-sync
+Stage:     complete
+---
+IMPORTANT: Your entire response must be a single JSON object or array. Do not explain your reasoning. Do not use markdown formatting. Output ONLY the JSON.
+
+You are an acceptance criteria refinement assistant. Your task is to convert raw acceptance criteria into concrete, machine-verifiable assertions.
+
+CODEBASE CONTEXT:
+
+
+ACCEPTANCE CRITERIA TO REFINE:
+1. VcsPrSyncService.syncPrStatus() queries TicketLink entries where prNumber IS NOT NULL and prState NOT IN ('merged', 'closed') for the project
+2. syncPrStatus() updates TicketLink.prState and prUpdatedAt when GitHub PR state has changed
+3. When PR state changes to 'merged' and ticket.status === 'IN_PROGRESS', the ticket transitions to 'VERIFY_FIX'
+4. Auto-transition creates a Comment with type FIX_REPORT containing PR URL, merge commit SHA, and merge author
+5. Auto-transition logs a TicketActivity with action 'VCS_PR_MERGED'
+6. When PR state changes to 'merged' and ticket.status !== 'IN_PROGRESS', prState is updated but no transition is attempted
+7. When GitHub API returns an error for a specific PR, that PR is skipped and sync continues with remaining PRs
+8. When GitHub API returns 404 for a PR, prState is marked as 'closed'
+9. VcsPollingService.poll() runs PR status sync after issue sync on each polling tick
+10. VcsWebhookService.handleWebhook() handles 'pull_request' event with action 'opened' updating prState to 'open' or 'draft'
+11. VcsWebhookService.handleWebhook() handles 'pull_request' event with action 'closed' where merged=true updating prState to 'merged' and triggering auto-transition
+12. VcsWebhookService.handleWebhook() handles 'pull_request' event with action 'closed' where merged=false updating prState to 'closed'
+13. VcsWebhookService.handleWebhook() handles 'pull_request' event with action 'ready_for_review' updating prState from 'draft' to 'open'
+14. Webhook matches PR to TicketLink via prNumber field
+15. ActivityType.VCS_PR_MERGED is added to the ActivityType enum
+
+For each criterion, produce a refined version that is concrete and automatically testable where possible.
+Respond with a JSON array:
+[{
+  "original": "<exact original criterion text>",
+  "refined": "<concrete, machine-verifiable description>",
+  "testable": true,
+  "storyId": ""
+}]
+
+Rules:
+- "original" must match the input criterion text exactly
+- "refined" must be a concrete assertion (e.g., "Array of length N returned", "HTTP status 200 returned")
+- "testable" is false only if the criterion cannot be automatically verified (e.g., "UX feels responsive", "design looks good")
+- "storyId" leave as empty string — it will be assigned by the caller
+
+YOUR RESPONSE MUST START WITH { OR [ AND END WITH } OR ]. No other text.

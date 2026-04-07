@@ -1,0 +1,108 @@
+Timestamp: 2026-04-07T02:26:30.289Z
+Session:   nax-94a823bd-vcs-phase3-pr-status-sync-acceptance-gen
+Type:      complete
+StoryId:   (none)
+Feature:   vcs-phase3-pr-status-sync
+Stage:     complete
+---
+You are a senior test engineer. Your task is to generate a complete acceptance test file for the "vcs-phase3-pr-status-sync" feature.
+
+## Step 1: Understand and Classify the Acceptance Criteria
+
+Read each AC below and classify its verification type (prefer runtime-check):
+- **runtime-check** (PREFERRED): Import the module, call the function, assert on return values, thrown errors, or observable side effects. This is the strongest verification — use it whenever possible.
+- **integration-check**: Requires a running service (e.g. HTTP endpoint returns 200, database query succeeds). Use setup blocks.
+- **file-check** (LAST RESORT): Only for ACs that genuinely cannot be verified at runtime (e.g. "no banned imports in file X", "config file exists"). Never use file-check when a runtime import + assertion would work.
+
+ACCEPTANCE CRITERIA:
+AC-1: Prisma schema defines TicketLink with prState String? field and @Default('draft') annotation; enum values validated via Zod schema
+AC-2: Prisma schema defines TicketLink with prNumber Int? field without default value
+AC-3: Prisma schema defines TicketLink with prUpdatedAt DateTime? field, optional and nullable
+AC-4: IVcsProvider interface defines method signature: getPullRequestStatus(prNumber: number): Promise<VcsPrStatus>; TypeScript compiles without errors
+AC-5: IVcsProvider interface defines method signature: listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]>; TypeScript compiles without errors
+AC-6: VcsPrStatus interface defines all 9 fields: number: number, state: string, draft: boolean, merged: boolean, mergedAt: string | null, mergedBy: string | null, mergeSha: string | null, url: string, title: string; TypeScript compiles without errors
+AC-7: When GitHubProvider.getPullRequestStatus(42) is called, HTTP GET request is made to /repos/{owner}/{repo}/pulls/42; nock intercepts and returns VcsPrStatus object with number=42; method returns without throwing
+AC-8: When GitHub API returns PR with state='merged', getPullRequestStatus returns object where merged===true, mergedAt===string, mergedBy===string, mergeSha===string (all non-null)
+AC-9: When GitHub API returns HTTP 404 for PR 99999, getPullRequestStatus(99999) throws NotFoundAppException with error code 'PR_NOT_FOUND' or similar; exception is caught and handled gracefully
+AC-10: When listPullRequests('open') is called, HTTP GET request is made to /repos/{owner}/{repo}/pulls?state=open; returns array with length >= 0; each element is VcsPrStatus with state='open'
+AC-11: TicketLinkResponseDto class/interface defines prState, prNumber, prUpdatedAt properties; JSON.stringify returns object with these keys present (even if null)
+AC-12: After calling createPullRequest(), the returned TicketLink has non-null prNumber (positive integer) and prState matching the created PR state ('open' | 'draft'); database query confirms persisted values
+AC-13: Prisma schema defines TicketLink with prState field: String? with enum ['draft', 'open', 'merged', 'closed']
+AC-14: Prisma schema defines TicketLink with prNumber field: Int?
+AC-15: Prisma schema defines TicketLink with prUpdatedAt field: DateTime?
+AC-16: Command `bun run db:migrate` exits with code 0 and creates migration file in apps/api/prisma/migrations/
+AC-17: DTO class has three optional properties: prState?: string, prNumber?: number, prUpdatedAt?: Date
+AC-18: from() method body includes assignments for prState, prNumber, prUpdatedAt from record parameter
+AC-19: grep returns 3 matches for /@ApiProperty\(\{ nullable: true \}\)[\s\n]*prState|prNumber|prUpdatedAt/
+AC-20: VcsPrStatus interface contains all 9 fields: number (number), state (string), draft (boolean), merged (boolean), mergedAt (Date | null), mergedBy (string | null), mergeSha (string | null), url (string), title (string)
+AC-21: IVcsProvider interface declares method: getPullRequestStatus(prNumber: number): Promise<VcsPrStatus>
+AC-22: IVcsProvider interface declares method: listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]>
+AC-23: When GitHubProvider.getPullRequestStatus(42) is called, HTTP request is made to GET /repos/{owner}/{repo}/pulls/42 with status 200, response body is mapped to VcsPrStatus object with all 9 fields populated
+AC-24: When GitHub API response contains merged=true, returned VcsPrStatus has merged=true, mergedAt=Date, mergedBy=string, mergeSha=string (all non-null)
+AC-25: When GitHub API returns HTTP 404, getPullRequestStatus throws NotFoundAppException with error code P404
+AC-26: When listPullRequests('open') is called, HTTP request is made to GET /repos/{owner}/{repo}/pulls?state=open, returns array of VcsPrStatus objects
+AC-27: When listPullRequests() is called with no arguments, HTTP request is made to GET /repos/{owner}/{repo}/pulls?state=open (not 'closed' or 'all')
+AC-28: After createPullRequest() returns success, prisma.ticketLink.update must be called with where: { id: ticketLinkId } and data.prNumber equal to the number field from the returned VcsPullRequest object, and the database record must reflect this prNumber value
+AC-29: After createPullRequest() returns success, prisma.ticketLink.update must be called with data.prState equal to 'draft', and the database record prState field must equal 'draft'
+AC-30: The prisma.ticketLink.update mock must be called exactly once with arguments matching { where: { id: ticketLink.id }, data: { prNumber: <vcsPullRequest.number>, prState: 'draft' } }
+AC-31: When the VCS provider createPullRequest throws an error, prisma.ticketLink.update must never be called, and the TicketLink record in the database must retain null values for both prNumber and prState
+AC-32: Repository.findMany() is called with filter: { prNumber: { not: null }, prState: { notIn: ['merged', 'closed'] }, projectId: <projectId> }. Returns array of TicketLink entities matching criteria.
+AC-33: When GitHub PR state differs from TicketLink.prState, repository.update() is called with { prState: <newState>, prUpdatedAt: <timestamp> }. verify updated entity has correct prState and prUpdatedAt set to current timestamp.
+AC-34: Given ticket.status === 'IN_PROGRESS', when GitHub returns merged=true for linked PR: ticket.status transitions to 'VERIFY_FIX' via ticketService.transitionTo('VERIFY_FIX'). Verify ticket.status === 'VERIFY_FIX' in database.
+AC-35: Following auto-transition to VERIFY_FIX: commentRepository.create() is called with { type: 'FIX_REPORT', ticketId: <id>, body: contains(<prUrl>, <mergeSha>, <mergeAuthor>) }. Verify Comment record exists with type=FIX_REPORT and body containing PR URL, merge commit SHA, and merge author fields.
+AC-36: Following auto-transition to VERIFY_FIX: ticketActivityRepository.create() is called with { action: 'VCS_PR_MERGED', ticketId: <id> }. Verify TicketActivity record exists with action === 'VCS_PR_MERGED'.
+AC-37: Given ticket.status === 'DONE' (not 'IN_PROGRESS'), when GitHub returns merged=true: repository.update() sets prState='merged' but transitionTo() is NOT called. Verify ticket.status remains unchanged, only TicketLink.prState updated.
+AC-38: When GitHub client throws for PR #123: loop continues processing remaining PRs. Sync completes successfully with error logged for failed PR but no thrown exception. verify remaining PRs were processed and updated.
+AC-39: When GitHub client returns 404 for PR #123: repository.update() is called with { prState: 'closed' } for the matching TicketLink. Verify TicketLink.prState === 'closed'.
+AC-40: On each poll() invocation: issueSyncService.syncIssueStatus() executes first, then vcsPrSyncService.syncPrStatus() executes second. Verify order of execution and both methods are called exactly once per poll cycle.
+AC-41: When webhook payload contains { event: 'pull_request', action: 'opened', pr: { draft: false } }: repository.update() sets prState='open'. When draft=true: repository.update() sets prState='draft'. Verify TicketLink.prState matches PR draft state.
+AC-42: When webhook payload contains { event: 'pull_request', action: 'closed', merged: true }: repository.update() sets prState='merged'. If linked ticket.status === 'IN_PROGRESS', transitionTo('VERIFY_FIX') is called. Verify both updates occur.
+AC-43: When webhook payload contains { event: 'pull_request', action: 'closed', merged: false }: repository.update() is called with { prState: 'closed' }. Verify TicketLink.prState === 'closed' and no ticket transition occurs.
+AC-44: When webhook payload contains { event: 'pull_request', action: 'ready_for_review' }: repository.update() is called with { prState: 'open' }. Verify TicketLink.prState changes from 'draft' to 'open'.
+AC-45: Given webhook payload with pr.number=456: repository.findFirst() is called with filter { prNumber: 456, projectId: <projectContext> }. Verify correct TicketLink is retrieved and updated based on prNumber match.
+AC-46: ActivityType enum includes 'VCS_PR_MERGED' value. Build succeeds without errors referencing undefined ActivityType.VCS_PR_MERGED. TypeScript compilation confirms ActivityType.VCS_PR_MERGED is a valid union member.
+AC-47: ActivityType enum contains a member named 'VCS_PR_MERGED'
+AC-48: When syncPrStatus(projectId) is called, TicketLink.findMany is invoked with where clause containing: { prNumber: { not: null }, prState: { notIn: ['merged', 'closed'] }, projectId: <givenProjectId> }
+AC-49: For each TicketLink returned by the query, vcsProvider.getPrStatus(prNumber) is called exactly once with the correct prNumber
+AC-50: When vcsProvider.getPrStatus returns a prState different from TicketLink.prState, TicketLink.update is called with { prState: <fetchedState>, prUpdatedAt: <currentTimestamp> }
+AC-51: When vcsProvider.getPrStatus throws a non-404 Error for a PR, that PR's TicketLink is not updated and processing continues to the next TicketLink; skipped count increments by 1
+AC-52: When vcsProvider.getPrStatus throws a 404-style error (NotFoundError or status 404), TicketLink.update is called with { prState: 'closed', prUpdatedAt: <currentTimestamp> }
+AC-53: syncPrStatus() returns an object containing numeric fields: { updated: <number>, skipped: <number> }
+AC-54: After prState update to 'merged' where ticket.status was 'IN_PROGRESS', calling getTicket(ticketId) returns ticket.status === 'VERIFY_FIX'
+AC-55: After prState update to 'merged' with ticket.status === 'IN_PROGRESS', findCommentByTicketId(ticketId) returns an object where comment.type === 'FIX_REPORT' AND comment.content includes PR URL AND comment.content includes mergeCommitSha AND comment.content includes mergeAuthor
+AC-56: After prState update to 'merged' with ticket.status === 'IN_PROGRESS', findTicketActivityByTicketId(ticketId) returns an object where activity.action === 'VCS_PR_MERGED'
+AC-57: After prState update to 'merged' where ticket.status was not 'IN_PROGRESS', calling getTicket(ticketId) returns ticket.prState === 'merged' AND findCommentByTicketId(ticketId) returns no comment of type 'FIX_REPORT' AND ticket.status remains unchanged
+AC-58: When prState changes to 'merged' with ticket.status === 'IN_PROGRESS', the transition to 'VERIFY_FIX' passes validateTransition(ticketId, 'VERIFY_FIX') returning truthy AND no exception is thrown from the state machine
+AC-59: When auto-transition fails with an error after prState is set to 'merged', calling getTicket(ticketId) still returns ticket.prState === 'merged' (prState persisted despite transition failure)
+AC-60: On each polling tick, verify: (1) issue sync completes before syncPrStatus is invoked, (2) syncPrStatus is called exactly once per tick after issue sync finishes, (3) no concurrent parallel execution of issue sync and pr sync
+AC-61: When webhook payload contains {event:'pull_request', action:'opened'}: if payload.draft===true, TicketLink.prState becomes 'draft'; if payload.draft===false, TicketLink.prState becomes 'open'
+AC-62: When webhook payload contains {event:'pull_request', action:'closed', merged:true}: (1) TicketLink.prState becomes 'merged', (2) auto-transition logic from VCS-P3-002-B is invoked with the corresponding TicketLink
+AC-63: When webhook payload contains {event:'pull_request', action:'closed', merged:false}, TicketLink.prState becomes 'closed'
+AC-64: When webhook payload contains {event:'pull_request', action:'ready_for_review'}, TicketLink.prState becomes 'open'
+AC-65: For any pull_request webhook event, the handler performs a database lookup using webhookPayload.pull_request.number as the prNumber field to find the matching TicketLink record
+AC-66: When TicketLink.findFirst({where: {prNumber: payload.pull_request.number}}) returns null, no state update occurs, no error is thrown, and the handler returns normally
+AC-67: When webhook payload contains {event:'pull_request', action: 'synchronize'|'edited'|'converted_to_draft'|'unlocked'|'reopened'}, no TicketLink state update occurs and the handler returns without throwing an error
+
+## Step 2: Explore the Project
+
+Before writing any tests, examine the project to understand:
+1. **Language and test framework** — check dependency manifests (package.json, go.mod, Gemfile, pyproject.toml, Cargo.toml, build.gradle, etc.) to identify the language and test runner
+2. **Existing test patterns** — read 1-2 existing test files to understand import style, describe/test/it conventions, and available helpers
+3. **Project structure** — identify relevant source directories to determine correct import or load paths
+
+
+
+## Step 3: Generate the Acceptance Test File
+
+Write the complete acceptance test file using the framework identified in Step 2.
+
+Rules:
+- **One test per AC**, named exactly "AC-N: <description>"
+- **runtime-check ACs** (default) → import the module directly, call functions with test inputs, assert on return values or observable side effects (log calls, thrown errors, state changes)
+- **integration-check ACs** → use the language's HTTP client or existing test helpers; add a clear setup block (beforeAll/setup/TestMain/etc.) explaining what must be running
+- **file-check ACs** (last resort only) → read source files using the language's standard file I/O, assert with string or regex checks. Only use when the AC explicitly asks about file contents or imports — never use file-check to verify behavior that can be tested by calling the function
+- **NEVER use placeholder assertions** — no always-passing or always-failing stubs, no TODO comments as the only content, no empty test bodies
+- Every test MUST have real assertions that PASS when the feature is correctly implemented and FAIL when it is broken
+- **Prefer behavioral tests** — import functions and call them rather than reading source files. For example, to verify "getPostRunActions() returns empty array", import PluginRegistry and call getPostRunActions(), don't grep the source file for the method name.
+- **File output (REQUIRED)**: Write the acceptance test file DIRECTLY to the path shown below. Do NOT output the test code in your response. After writing the file, reply with a brief confirmation.
+- **Path anchor (CRITICAL)**: Write the test file to this exact path: `/Users/subrinaai/Desktop/workspace/subrina-coder/projects/koda/repos/koda/apps/api/.nax/features/vcs-phase3-pr-status-sync/.nax-acceptance.test.ts`. Import from package sources using relative paths like `../../../src/...` (3 levels up from `.nax/features/<name>/` to the package root).

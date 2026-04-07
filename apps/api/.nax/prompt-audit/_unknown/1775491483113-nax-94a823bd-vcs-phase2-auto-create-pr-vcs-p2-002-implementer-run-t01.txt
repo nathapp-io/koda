@@ -1,0 +1,287 @@
+Timestamp: 2026-04-06T16:04:43.113Z
+Session:   nax-94a823bd-vcs-phase2-auto-create-pr-vcs-p2-002-implementer
+Type:      run / turn 1
+StoryId:   (none)
+Feature:   (none)
+Stage:     run
+---
+IMPORTANT: Your entire response must be a single JSON object or array. Do not explain your reasoning. Do not use markdown formatting. Output ONLY the JSON.
+
+You are a semantic code reviewer with access to the repository files. Your job is to verify that the implementation satisfies the story's acceptance criteria (ACs). You are NOT a linter or style checker — lint, typecheck, and convention checks are handled separately.
+
+## Story: Auto-create PR on VERIFIED transition + TicketLink + activity log
+
+### Description
+Hook into the ticket status transition flow to automatically create a GitHub PR when a ticket transitions to VERIFIED status. Creates TicketLink record and logs VCS_PR_CREATED activity.
+
+### Acceptance Criteria
+1. When a ticket transitions to VERIFIED and the project has an active VCS connection, vcsService.createPrForTicket() is called
+2. createPrForTicket() builds branch name via buildBranchName(project.key, ticket.number, ticket.title)
+3. createPrForTicket() builds PR title as '{KEY}-{number}: {ticket.title}'
+4. createPrForTicket() builds PR body from ticket.description (or empty string if null)
+5. createPrForTicket() calls provider.createPullRequest() with draft: true
+6. createPrForTicket() creates TicketLink with url: pr.url, provider: 'github', externalRef: '{owner}/{repo}#{pr.number}'
+7. createPrForTicket() logs TicketActivity with action: 'VCS_PR_CREATED'
+8. ActivityType.VCS_PR_CREATED is added to the ActivityType enum in src/common/enums.ts
+9. When ticket transitions to VERIFIED and project has no VCS connection, no PR creation is attempted
+10. When ticket transitions to VERIFIED and GitHub API returns an error, the ticket transition still succeeds (fire-and-forget)
+11. When ticket transitions to VERIFIED and GitHub API returns an error, a warning is logged with the error details
+12. When ticket transitions to a status other than VERIFIED, no PR creation is attempted
+13. i18n keys 'pr.created' and 'pr.createFailed' exist in apps/api/src/i18n/en/vcs.json and zh/vcs.json
+
+## Git Diff (production code only — test files excluded)
+
+```diff
+diff --git a/apps/api/src/common/enums.ts b/apps/api/src/common/enums.ts
+index 6e4e3fd..894dd1c 100644
+--- a/apps/api/src/common/enums.ts
++++ b/apps/api/src/common/enums.ts
+@@ -44,6 +44,7 @@ export const ActivityType = {
+   ASSIGNMENT: 'ASSIGNMENT',
+   COMMENT: 'COMMENT',
+   LABEL_CHANGE: 'LABEL_CHANGE',
++  VCS_PR_CREATED: 'VCS_PR_CREATED',
+ } as const;
+ export type ActivityType = (typeof ActivityType)[keyof typeof ActivityType];
+ 
+diff --git a/apps/api/src/i18n/en/vcs.json b/apps/api/src/i18n/en/vcs.json
+index 594bc0d..410f3a5 100644
+--- a/apps/api/src/i18n/en/vcs.json
++++ b/apps/api/src/i18n/en/vcs.json
+@@ -1,4 +1,8 @@
+ {
++  "pr": {
++    "created": "Pull request created successfully",
++    "createFailed": "Failed to create pull request: {error}"
++  },
+   "connection": {
+     "created": "VCS connection created successfully",
+     "updated": "VCS connection updated successfully",
+diff --git a/apps/api/src/i18n/zh/vcs.json b/apps/api/src/i18n/zh/vcs.json
+index ef5cebb..6e1f5e4 100644
+--- a/apps/api/src/i18n/zh/vcs.json
++++ b/apps/api/src/i18n/zh/vcs.json
+@@ -1,4 +1,8 @@
+ {
++  "pr": {
++    "created": "拉取请求创建成功",
++    "createFailed": "创建拉取请求失败：{error}"
++  },
+   "connection": {
+     "created": "VCS 连接创建成功",
+     "updated": "VCS 连接更新成功",
+diff --git a/apps/api/src/tickets/state-machine/ticket-transitions.service.ts b/apps/api/src/tickets/state-machine/ticket-transitions.service.ts
+index 7f16831..60424c5 100644
+--- a/apps/api/src/tickets/state-machine/ticket-transitions.service.ts
++++ b/apps/api/src/tickets/state-machine/ticket-transitions.service.ts
+@@ -1,4 +1,4 @@
+-import { Injectable, Optional } from '@nestjs/common';
++import { Injectable, Optional, Logger } from '@nestjs/common';
+ import { PrismaService } from '@nathapp/nestjs-prisma';
+ import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+ import {
+@@ -11,6 +11,11 @@ import { TicketStatus, CommentType, ActivityType } from '../../common/enums';
+ import { validateTransition } from './ticket-transitions';
+ import { RagService } from '../../rag/rag.service';
+ import { WebhookDispatcherService } from '../../webhook/webhook-dispatcher.service';
++import { VcsConnectionService } from '../../vcs/vcs-connection.service';
++import { buildBranchName } from '../../vcs/branch-name.util';
++import { createVcsProvider, VcsProviderConfig } from '../../vcs/factory';
++import { TicketLinksService } from '../../ticket-links/ticket-links.service';
++import { IVcsProvider, VcsPullRequest } from '../../vcs';
+ 
+ export interface CurrentUser {
+   id: string;
+@@ -32,10 +37,14 @@ export type TransitionResult = TransitionResultWithComment | TransitionResultWit
+ 
+ @Injectable()
+ export class TicketTransitionsService {
++  private readonly logger = new Logger(TicketTransitionsService.name);
++
+   constructor(
+     private readonly prisma: PrismaService<PrismaClient>,
+     @Optional() private readonly ragService?: RagService,
+     @Optional() private readonly webhookDispatcher?: WebhookDispatcherService,
++    @Optional() private readonly vcsConnectionService?: VcsConnectionService,
++    @Optional() private readonly ticketLinksService?: TicketLinksService,
+   ) {}
+   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   private get db() { return this.prisma.client; }
+@@ -104,6 +113,72 @@ export class TicketTransitionsService {
+       });
+   }
+ 
++  /**
++   * Fire-and-forget: create a GitHub PR when ticket transitions to VERIFIED.
++   * Only runs when VCS connection exists and VcsConnectionService/TicketLinksService are available.
++   */
++  private createPrForTicket(
++    project: { id: string; key: string },
++    ticket: Ticket,
++  ): void {
++    if (!this.vcsConnectionService || !this.ticketLinksService) return;
++
++    const vcsService = this.vcsConnectionService;
++    const ticketLinksService = this.ticketLinksService;
++    const projectId = project.id;
++    const ticketId = ticket.id;
++    const projectKey = project.key;
++
++    vcsService.getFullByProject(projectId)
++      .then((connection) => {
++        if (!connection.isActive) return;
++
++        const repoUrl = `https://github.com/${connection.repoOwner}/${connection.repoName}`;
++        const provider = createVcsProvider(connection.provider, {
++          provider: connection.provider,
++          token: '',
++          repoUrl,
++        });
++
++        return provider.getDefaultBranch().then((baseBranch) => {
++          const branchName = buildBranchName(projectKey, ticket.number, ticket.title);
++          const prTitle = `${projectKey}-${ticket.number}: ${ticket.title}`;
++          const prBody = ticket.description ?? '';
++
++          return provider.createPullRequest({
++            title: prTitle,
++            body: prBody,
++            headBranch: branchName,
++            baseBranch,
++            draft: true,
++          }).then((pr) => {
++            return this.db.ticketLink.create({
++              data: {
++                ticketId,
++                url: pr.url,
++                provider: 'github',
++                externalRef: `${connection.repoOwner}/${connection.repoName}#${pr.number}`,
++              },
++            });
++          }).then(() => {
++            return this.db.ticketActivity.create({
++              data: {
++                ticketId,
++                action: ActivityType.VCS_PR_CREATED,
++              },
++            });
++          }).catch((err) => {
++            this.logger.warn(
++              `[vcs] Failed to create PR for ticket ${projectKey}-${ticket.number}: ${err instanceof Error ? err.message : String(err)}`,
++            );
++          });
++        });
++      })
++      .catch(() => {
++        // suppress VCS errors — ticket transition must always succeed
++      });
++  }
++
+ 
+   /**
+    * Transition CREATED → VERIFIED, or VERIFY_FIX → CLOSED (if ticket is already in VERIFY_FIX)
+@@ -382,6 +457,10 @@ export class TicketTransitionsService {
+       }
+       // Dispatch webhook for status change
+       this.dispatchStatusChangeWebhook(project.id, result.ticket, ticket.status, toStatus);
++      // Auto-create PR when ticket transitions to VERIFIED
++      if (toStatus === TicketStatus.VERIFIED) {
++        this.createPrForTicket(project, result.ticket);
++      }
+       return result;
+     });
+   }
+diff --git a/apps/api/src/tickets/tickets.module.ts b/apps/api/src/tickets/tickets.module.ts
+index 7a75422..3099a52 100644
+--- a/apps/api/src/tickets/tickets.module.ts
++++ b/apps/api/src/tickets/tickets.module.ts
+@@ -6,9 +6,11 @@ import { TicketsService } from './tickets.service';
+ import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
+ import { RagModule } from '../rag/rag.module';
+ import { WebhookModule } from '../webhook/webhook.module';
++import { VcsModule } from '../vcs/vcs.module';
++import { TicketLinksModule } from '../ticket-links/ticket-links.module';
+ 
+ @Module({
+-  imports: [RagModule, WebhookModule],
++  imports: [RagModule, WebhookModule, VcsModule, TicketLinksModule],
+   controllers: [TicketsController],
+   providers: [
+     TicketsService,
+diff --git a/apps/api/src/vcs/branch-name.util.ts b/apps/api/src/vcs/branch-name.util.ts
+new file mode 100644
+index 0000000..b7caeb3
+--- /dev/null
++++ b/apps/api/src/vcs/branch-name.util.ts
+@@ -0,0 +1,22 @@
++/**
++ * Branch name building utility for VCS integration.
++ * Creates standardized branch names from project key, ticket number, and title.
++ */
++export function buildBranchName(
++  projectKey: string,
++  ticketNumber: number,
++  ticketTitle: string,
++): string {
++  const slug = ticketTitle
++    .toLowerCase()
++    .replace(/[^a-z0-9\s-]/g, '')
++    .replace(/\s+/g, '-')
++    .replace(/-+/g, '-')
++    .replace(/^-+|-+$/g, '')
++    .slice(0, 100 - projectKey.length - ticketNumber.toString().length - 10);
++
++  const prefix = projectKey.toLowerCase();
++  const ticketRef = `${projectKey}-${ticketNumber}`;
++
++  return `${prefix}/${ticketRef}/${slug}`;
++}
+diff --git a/apps/api/src/vcs/types.ts b/apps/api/src/vcs/types.ts
+index 76fe684..f1586a2 100644
+--- a/apps/api/src/vcs/types.ts
++++ b/apps/api/src/vcs/types.ts
+@@ -19,6 +19,7 @@ export interface CreatePrParams {
+   body: string;
+   headBranch: string;
+   baseBranch: string;
++  draft?: boolean;
+ }
+ 
+ /**
+```
+
+## Instructions
+
+For each acceptance criterion, verify the diff implements it correctly.
+
+**Before reporting any finding as "error", you MUST verify it using your tools:**
+- If you suspect a key, function, import, or variable is missing, READ the relevant file to confirm before flagging.
+- If you suspect a code path is not wired in, GREP for its usage to confirm.
+- Do NOT flag something as missing based solely on its absence from the diff — it may already exist in the codebase. Check the actual file first.
+- If you cannot verify a claim even after checking, use "unverifiable" severity instead of "error".
+
+Flag issues only when you have confirmed:
+1. An AC is not implemented or partially implemented (verified by reading the actual files)
+2. The implementation contradicts what the AC specifies
+3. New code has dead paths that will never execute (stubs, noops, unreachable branches)
+4. New code is not wired into callers/exports (verified by grepping for usage)
+
+Do NOT flag: style issues, naming conventions, import ordering, file length, or anything lint handles.
+
+Respond with JSON only — no explanation text before or after:
+{
+  "passed": boolean,
+  "findings": [
+    {
+      "severity": "error" | "warn" | "info" | "unverifiable",
+      "file": "path/to/file",
+      "line": 42,
+      "issue": "description of the issue",
+      "suggestion": "how to fix it"
+    }
+  ]
+}
+
+If all ACs are correctly implemented, respond with { "passed": true, "findings": [] }.
+
+YOUR RESPONSE MUST START WITH { OR [ AND END WITH } OR ]. No other text.
