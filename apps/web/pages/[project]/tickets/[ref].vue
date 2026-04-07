@@ -21,6 +21,8 @@ interface TicketLink {
   prState?: string | null
   prNumber?: number | null
   prUpdatedAt?: string | null
+  linkType?: string
+  title?: string
 }
 
 interface Ticket {
@@ -177,6 +179,35 @@ function prStateClass(state: string | null | undefined): string {
   if (state === 'closed') return 'bg-red-100 text-red-800'
   return 'bg-gray-100 text-gray-800'
 }
+
+// VCS Link filtering by linkType
+const vcsPullRequestLinks = computed(() => {
+  if (!ticket.value?.links) return []
+  return ticket.value.links.filter(link => link.linkType === 'pull_request' || (!link.linkType && link.provider === 'github' && link.externalRef))
+})
+
+const vcsBranchLinks = computed(() => {
+  if (!ticket.value?.links) return []
+  return ticket.value.links.filter(link => link.linkType === 'branch')
+})
+
+const vcsCommitLinks = computed(() => {
+  if (!ticket.value?.links) return []
+  return ticket.value.links
+    .filter(link => link.linkType === 'commit')
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+})
+
+function extractBranchName(url: string): string {
+  const parts = url.split('/')
+  return parts[parts.length - 1] || ''
+}
+
+function extractCommitSha(url: string): string {
+  // Extract SHA from commit URL like https://github.com/owner/repo/commit/abc123
+  const parts = url.split('/')
+  return parts[parts.length - 1]?.substring(0, 7) || ''
+}
 </script>
 
 <template>
@@ -282,6 +313,60 @@ function prStateClass(state: string | null | undefined): string {
           :ticket-ref="ref"
           @comment-added="onCommentAdded"
         />
+
+        <!-- VCS Links Section grouped by linkType -->
+        <div v-if="vcsPullRequestLinks.length > 0 || vcsBranchLinks.length > 0 || vcsCommitLinks.length > 0" class="mt-6">
+          <h3 class="text-lg font-semibold mb-3">VCS Links</h3>
+
+          <!-- Pull Requests Subsection -->
+          <div v-if="vcsPullRequestLinks.length > 0" class="mb-4" data-link-type="pull_request">
+            <h4 class="text-sm font-medium text-muted-foreground mb-2">{{ t('vcs.links.pull_request') }}s</h4>
+            <div v-for="link in vcsPullRequestLinks" :key="link.id" class="flex items-center gap-2 mb-2">
+              <a
+                :href="link.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-blue-500 hover:underline"
+              >
+                {{ t('tickets.pr.badge', { number: link.prNumber || extractPrNumber(link.externalRef) }) }}
+              </a>
+              <Badge v-if="link.prState" variant="outline" :class="prStateClass(link.prState)">
+                {{ t(`tickets.pr.status.${link.prState}`) }}
+              </Badge>
+            </div>
+          </div>
+
+          <!-- Branches Subsection -->
+          <div v-if="vcsBranchLinks.length > 0" class="mb-4" data-link-type="branch">
+            <h4 class="text-sm font-medium text-muted-foreground mb-2">{{ t('vcs.links.branch') }}es</h4>
+            <div v-for="link in vcsBranchLinks" :key="link.id" class="mb-2">
+              <a
+                :href="link.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-blue-500 hover:underline"
+              >
+                {{ extractBranchName(link.url) }}
+              </a>
+            </div>
+          </div>
+
+          <!-- Commits Subsection -->
+          <div v-if="vcsCommitLinks.length > 0" data-link-type="commit">
+            <h4 class="text-sm font-medium text-muted-foreground mb-2">{{ t('vcs.links.commit') }}s</h4>
+            <div v-for="link in vcsCommitLinks" :key="link.id" class="mb-2">
+              <a
+                :href="link.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-blue-500 hover:underline font-mono text-sm"
+              >
+                {{ extractCommitSha(link.url) }}
+              </a>
+              <span v-if="link.title" class="text-sm text-muted-foreground ml-2">{{ link.title }}</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Sidebar: 1/3 width on desktop, stacks below on mobile -->

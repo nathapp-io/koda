@@ -1,9 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { VcsConnection, Project } from '@prisma/client';
 import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
+import { VcsLinkExtractorService } from './vcs-link-extractor.service';
 import { VcsIssue } from './types';
 
 /**
@@ -49,8 +51,13 @@ interface TicketLinkDelegate {
   update(options: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<unknown>
 }
 
+interface TicketDelegate {
+  findUnique(options: { where: Record<string, unknown>; include?: unknown }): Promise<unknown>
+}
+
 interface ExtendedPrismaClient {
   ticketLink: TicketLinkDelegate
+  ticket: TicketDelegate
   [key: string]: unknown
 }
 
@@ -78,6 +85,8 @@ export class VcsWebhookService {
     private readonly prisma: PrismaService,
     private readonly syncService: VcsSyncService,
     private readonly prSyncService: VcsPrSyncService,
+    @Optional() private readonly vcsLinkExtractorService?: VcsLinkExtractorService,
+    @Optional() private readonly configService?: ConfigService,
   ) {}
 
   // PrismaClientLike from @nathapp/nestjs-prisma doesn't expose VCS models,
@@ -223,6 +232,9 @@ export class VcsWebhookService {
 
       case 'converted_to_draft':
         return this.handlePullRequestConvertedToDraft(connection, pr);
+
+      case 'synchronize':
+        return this.handlePullRequestSynchronize(connection, pr);
 
       default:
         // AC8: Unhandled pull_request actions are ignored without error
@@ -463,6 +475,72 @@ export class VcsWebhookService {
         prUpdatedAt: new Date(),
       },
     });
+
+    return {
+      success: true,
+      ignored: false,
+    };
+  }
+
+  /**
+   * Handle pull_request synchronize action
+   * AC-24: Calls extractLinksFromPr to capture new commits
+   */
+  private async handlePullRequestSynchronize(
+    connection: VcsConnection & { project: Project },
+    pr: NonNullable<GitHubWebhookPayload['pull_request']>,
+  ): Promise<WebhookHandleResult> {
+    const prNumber = pr.number;
+
+    // Find TicketLink by prNumber to get the associated ticket
+    const ticketLink = await this.findTicketLinkByPrNumber(connection.project.id, prNumber);
+
+    if (!ticketLink) {
+      return {
+        success: true,
+        ignored: true,
+        reason: 'No TicketLink found for PR number',
+      };
+    }
+
+    // Get the full ticket data including project
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fullTicket = (await this.db.ticket.findUnique({
+      where: { id: ticketLink.ticketId },
+      include: { project: true },
+    })) as { id: string; externalVcsId: string | null; project: { id: string; key: string } } | null;
+
+    if (!fullTicket) {
+      return {
+        success: true,
+        ignored: true,
+        reason: 'Ticket not found',
+      };
+    }
+
+    // Call extractLinksFromPr to capture new commits
+    // The head.ref contains the branch name that was pushed
+    if (this.vcsLinkExtractorService && this.configService) {
+      const encryptionKey = this.configService.get<string>('vcs.encryptionKey');
+      if (encryptionKey) {
+        try {
+          await this.vcsLinkExtractorService.extractLinksFromPr(
+            { id: fullTicket.project.id, key: fullTicket.project.key },
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            fullTicket as any,
+            connection,
+            encryptionKey,
+            pr.head.ref,
+          );
+          this.logger.debug(`extractLinksFromPr called for PR #${prNumber} with branch ${pr.head.ref}`);
+        } catch (err) {
+          this.logger.warn(
+            `[webhook] Failed to extract links from PR #${prNumber}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+          // Don't fail the webhook - just log the error
+        }
+      }
+    }
 
     return {
       success: true,
