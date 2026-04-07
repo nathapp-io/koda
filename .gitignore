@@ -82,4 +82,4 @@ lancedb/
 
 ## cli test will create .koda on apps/cli
 ## we not ignore the project level .koda
-apps/**/.koda/
+apps/**/.koda/.nax/features/
