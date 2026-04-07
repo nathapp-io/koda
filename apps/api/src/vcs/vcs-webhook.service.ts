@@ -31,6 +31,7 @@ export interface GitHubWebhookPayload {
     merged: boolean;
     merged_at: string | null;
     merged_by: { login: string } | null;
+    merge_commit_sha?: string | null;
     base: { ref: string; repo: { full_name: string } };
     head: { ref: string; repo: { full_name: string } };
   };
@@ -214,6 +215,12 @@ export class VcsWebhookService {
       case 'ready_for_review':
         return this.handlePullRequestReadyForReview(connection, pr);
 
+      case 'reopened':
+        return this.handlePullRequestReopened(connection, pr);
+
+      case 'converted_to_draft':
+        return this.handlePullRequestConvertedToDraft(connection, pr);
+
       default:
         // AC8: Unhandled pull_request actions are ignored without error
         return {
@@ -296,7 +303,7 @@ export class VcsWebhookService {
         merged: pr.merged,
         mergedAt: pr.merged_at ? new Date(pr.merged_at) : null,
         mergedBy: pr.merged_by?.login ?? null,
-        mergeSha: pr.merged_at ?? null,
+        mergeSha: pr.merge_commit_sha ?? null,
         url: pr.html_url,
         title: pr.title,
       },
@@ -388,6 +395,71 @@ export class VcsWebhookService {
     });
 
     this.logger.debug(`Updated TicketLink ${ticketLink.id} prState to 'open' for PR #${prNumber}`);
+
+    return {
+      success: true,
+      ignored: false,
+    };
+  }
+
+  /**
+   * Handle pull_request reopened action
+   * Reopened PRs should return to open state.
+   */
+  private async handlePullRequestReopened(
+    connection: VcsConnection & { project: Project },
+    pr: NonNullable<GitHubWebhookPayload['pull_request']>,
+  ): Promise<WebhookHandleResult> {
+    const prNumber = pr.number;
+    const ticketLink = await this.findTicketLinkByPrNumber(connection.project.id, prNumber);
+
+    if (!ticketLink) {
+      return {
+        success: true,
+        ignored: true,
+        reason: 'No TicketLink found for PR number',
+      };
+    }
+
+    await this.db.ticketLink.update({
+      where: { id: ticketLink.id },
+      data: {
+        prState: 'open',
+        prUpdatedAt: new Date(),
+      },
+    });
+
+    return {
+      success: true,
+      ignored: false,
+    };
+  }
+
+  /**
+   * Handle pull_request converted_to_draft action
+   */
+  private async handlePullRequestConvertedToDraft(
+    connection: VcsConnection & { project: Project },
+    pr: NonNullable<GitHubWebhookPayload['pull_request']>,
+  ): Promise<WebhookHandleResult> {
+    const prNumber = pr.number;
+    const ticketLink = await this.findTicketLinkByPrNumber(connection.project.id, prNumber);
+
+    if (!ticketLink) {
+      return {
+        success: true,
+        ignored: true,
+        reason: 'No TicketLink found for PR number',
+      };
+    }
+
+    await this.db.ticketLink.update({
+      where: { id: ticketLink.id },
+      data: {
+        prState: 'draft',
+        prUpdatedAt: new Date(),
+      },
+    });
 
     return {
       success: true,

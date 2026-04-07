@@ -163,6 +163,7 @@ export class VcsController {
     @Param('slug') slug: string,
     @Headers('x-hub-signature-256') signature: string,
     @Body() payload: GitHubWebhookPayload,
+    @Headers('x-github-event') githubEvent: string | undefined,
   ): Promise<{ success: boolean; ignored?: boolean; reason?: string }> {
     // Get project by slug
     const project = await this.projectsService.findBySlug(slug);
@@ -181,15 +182,19 @@ export class VcsController {
       throw new AuthException({}, 'vcs_webhook');
     }
 
-    // Get event type
-    const event = payload.action || 'unknown';
+    // Prefer the GitHub event header; fall back to payload shape for direct/controller tests
+    const eventType = githubEvent
+      || (payload.pull_request ? 'pull_request' : payload.issue ? 'issues' : 'unknown');
+    const event = eventType === 'issues'
+      ? `issues.${payload.action || 'unknown'}`
+      : eventType;
 
     // Handle webhook
     const result = await this.webhookService.handleWebhook(
       { ...connection, project, id: connection.id } as Parameters<
         typeof this.webhookService.handleWebhook
       >[0],
-      `issues.${event}`,
+      event,
       payload,
     );
 

@@ -199,6 +199,11 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
       const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
 
       expect(mockHandleWebhook).toHaveBeenCalled();
+      expect(mockHandleWebhook).toHaveBeenCalledWith(
+        expect.any(Object),
+        'pull_request',
+        payload,
+      );
       // Verify the payload contains the prNumber for TicketLink lookup
       expect(payload.pull_request.number).toBe(42);
       expect(result.success).toBe(true);

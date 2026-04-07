@@ -102,6 +102,9 @@ export class TicketResponseDto {
       url: l.url,
       provider: l.provider,
       externalRef: l.externalRef,
+      prState: l.prState ?? null,
+      prNumber: l.prNumber ?? null,
+      prUpdatedAt: l.prUpdatedAt ?? null,
       createdAt: l.createdAt,
     }));
 

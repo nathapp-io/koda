@@ -259,6 +259,28 @@ describe('VcsPrSyncService.syncPrStatus', () => {
   });
 
   describe('AC4: Updates TicketLink when state differs', () => {
+    it('should map open draft PRs to prState="draft"', async () => {
+      const draftPrStatus: VcsPrStatus = {
+        number: 102,
+        state: 'open',
+        draft: true,
+        merged: false,
+        mergedAt: null,
+        mergedBy: null,
+        mergeSha: null,
+        url: 'https://github.com/owner/repo/pull/102',
+        title: 'PR 102',
+      };
+
+      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinks[1]]);
+      mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(draftPrStatus);
+
+      const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
+
+      expect(mockTicketLinkDelegate.update).not.toHaveBeenCalled();
+      expect(result.updated).toBe(0);
+    });
+
     it('should update prState and prUpdatedAt when fetched state differs from stored', async () => {
       // PR 101 changed from 'open' to 'merged'
       const mergedPrStatus: VcsPrStatus = {

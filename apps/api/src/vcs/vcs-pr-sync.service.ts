@@ -273,6 +273,9 @@ export class VcsPrSyncService {
     if (prStatus.merged) {
       return 'merged';
     }
-    return prStatus.state;
+    if (prStatus.state === 'open') {
+      return prStatus.draft ? 'draft' : 'open';
+    }
+    return prStatus.state === 'closed' ? 'closed' : prStatus.state;
   }
 }
