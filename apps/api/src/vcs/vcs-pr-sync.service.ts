@@ -1,15 +1,34 @@
 /**
- * VcsPrSyncService - Stub for test compilation
- *
- * This stub allows tests to compile. The actual implementation will be added
- * by the implementer to make the tests pass.
- *
- * TODO: Implement syncPrStatus() method
+ * VcsPrSyncService - Syncs PR status from VCS provider to TicketLink records
  */
 import { Injectable } from '@nestjs/common';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Project, VcsConnection } from '@prisma/client';
+import { decryptToken } from '../common/utils/encryption.util';
+import { createVcsProvider } from './factory';
 import { VcsPrStatus } from './types';
+
+// PrismaClientLike from @nathapp/nestjs-prisma doesn't expose VCS models,
+// but they exist at runtime. Define a delegate interface for proper typing.
+interface TicketLinkDelegate {
+  findMany(options: { where: Record<string, unknown> }): Promise<unknown[]>
+  update(options: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<unknown>
+}
+
+interface ExtendedPrismaClient {
+  ticketLink: TicketLinkDelegate
+  [key: string]: unknown
+}
+
+/**
+ * TicketLink data returned from findMany
+ */
+interface TicketLinkData {
+  id: string
+  prNumber: number | null
+  prState: string | null
+}
 
 export interface SyncPrStatusResult {
   updated: number;
@@ -19,6 +38,10 @@ export interface SyncPrStatusResult {
 @Injectable()
 export class VcsPrSyncService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private get db() {
+    return this.prisma.client as unknown as ExtendedPrismaClient;
+  }
 
   /**
    * Sync PR status from VCS provider to TicketLink records
@@ -42,13 +65,83 @@ export class VcsPrSyncService {
     connection: VcsConnection,
     encryptionKey: string,
   ): Promise<SyncPrStatusResult> {
-    // TODO: Implement this method
-    // 1. Query TicketLink entries where prNumber IS NOT NULL AND prState NOT IN ('merged', 'closed')
-    //    scoped to the given project via ticket relation
-    // 2. For each TicketLink, call VCS provider.getPullRequestStatus(prNumber)
-    // 3. If fetched state differs from stored, update TicketLink.prState and prUpdatedAt
-    // 4. Handle errors per AC5/AC6
-    // 5. Return { updated, skipped } counts
-    throw new Error('Not implemented yet');
+    // Decrypt the token
+    const decryptedToken = decryptToken(connection.encryptedToken, encryptionKey);
+
+    // Create VCS provider
+    const provider = createVcsProvider(connection.provider, {
+      provider: connection.provider,
+      token: decryptedToken,
+      repoUrl: `https://github.com/${connection.repoOwner}/${connection.repoName}`,
+    });
+
+    // Query TicketLink entries with active PRs
+    const ticketLinks = (await this.db.ticketLink.findMany({
+      where: {
+        prNumber: { not: null },
+        prState: { notIn: ['merged', 'closed'] },
+        ticket: {
+          projectId: project.id,
+          deletedAt: null,
+        },
+      },
+    })) as TicketLinkData[];
+
+    let updated = 0;
+    let skipped = 0;
+
+    // Process each TicketLink
+    for (const link of ticketLinks) {
+      if (link.prNumber === null || link.prNumber === undefined) {
+        continue;
+      }
+      const prNumber = link.prNumber;
+
+      try {
+        const prStatus = await provider.getPullRequestStatus(prNumber);
+
+        // Map VcsPrStatus to prState
+        const newPrState = this.mapPrState(prStatus);
+
+        // Update if state differs
+        if (newPrState !== link.prState) {
+          await this.db.ticketLink.update({
+            where: { id: link.id },
+            data: {
+              prState: newPrState,
+              prUpdatedAt: new Date(),
+            },
+          });
+          updated++;
+        }
+      } catch (error) {
+        if (error instanceof NotFoundAppException) {
+          // 404: mark as closed
+          await this.db.ticketLink.update({
+            where: { id: link.id },
+            data: {
+              prState: 'closed',
+              prUpdatedAt: new Date(),
+            },
+          });
+          updated++;
+        } else {
+          // General API error: skip this PR
+          skipped++;
+        }
+      }
+    }
+
+    return { updated, skipped };
+  }
+
+  /**
+   * Maps VcsPrStatus to a prState string
+   */
+  private mapPrState(prStatus: VcsPrStatus): string {
+    if (prStatus.merged) {
+      return 'merged';
+    }
+    return prStatus.state;
   }
 }
