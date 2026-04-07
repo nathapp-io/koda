@@ -5,6 +5,7 @@ import { VcsConnection, Project } from '@prisma/client';
 import { decryptToken } from '../common/utils/encryption.util';
 import { createVcsProvider } from './factory';
 import { VcsSyncService } from './vcs-sync.service';
+import { VcsPrSyncService } from './vcs-pr-sync.service';
 
 // PrismaClientLike from @nathapp/nestjs-prisma doesn't expose VCS models,
 // but they exist at runtime. Define a delegate interface for proper typing.
@@ -34,6 +35,7 @@ export class VcsPollingService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly schedulerRegistry: SchedulerRegistry,
     private readonly syncService: VcsSyncService,
+    private readonly prSyncService: VcsPrSyncService,
   ) {}
 
   private get db() {
@@ -156,6 +158,17 @@ export class VcsPollingService implements OnModuleInit {
 
       this.logger.debug(
         `Polling complete for connection ${connection.id}: synced=${issuesSynced}, skipped=${issuesSkipped}`,
+      );
+
+      // Sync PR statuses after issue sync completes
+      // Note: encryptionKey is already validated above
+      const prResult = await this.prSyncService.syncPrStatus(
+        connection.project,
+        connection,
+        encryptionKey,
+      );
+      this.logger.debug(
+        `PR sync complete for connection ${connection.id}: updated=${prResult.updated}, skipped=${prResult.skipped}`,
       );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';

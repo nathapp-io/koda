@@ -196,7 +196,7 @@ export class VcsPrSyncService {
    * Note: Failures in this auto-transition do NOT prevent the caller
    * from updating prState - this method handles its own errors internally.
    */
-  private async handleMergedPrAutoTransition(
+  async handleMergedPrAutoTransition(
     link: TicketLinkData,
     prStatus: VcsPrStatus,
   ): Promise<void> {
