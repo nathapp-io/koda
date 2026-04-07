@@ -43,6 +43,7 @@ export interface WebhookHandleResult {
 }
 
 interface TicketLinkDelegate {
+  findFirst(options: { where: Record<string, unknown>; select?: unknown; include?: unknown }): Promise<unknown>
   findUnique(options: { where: Record<string, unknown>; select?: unknown; include?: unknown }): Promise<unknown>
   update(options: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<unknown>
 }
@@ -401,8 +402,13 @@ export class VcsWebhookService {
     projectId: string,
     prNumber: number,
   ): Promise<TicketLinkData | null> {
-    const ticketLink = (await this.db.ticketLink.findUnique({
-      where: { projectId_prNumber: { projectId, prNumber } },
+    const ticketLink = (await this.db.ticketLink.findFirst({
+      where: {
+        prNumber: prNumber,
+        ticket: {
+          projectId: projectId,
+        },
+      },
       include: {
         ticket: {
           select: {
