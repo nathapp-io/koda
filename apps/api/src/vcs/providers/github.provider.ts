@@ -47,6 +47,21 @@ interface GitHubPullRequestResponse {
 }
 
 /**
+ * GitHub REST API response for a pull request (from GET /repos/{owner}/{repo}/pulls/{pr_number})
+ */
+interface GitHubPrStatusResponse {
+  number: number;
+  state: string;
+  draft: boolean;
+  merged: boolean;
+  merged_at: string | null;
+  merged_by: { login: string } | null;
+  merge_commit_sha: string | null;
+  html_url: string;
+  title: string;
+}
+
+/**
  * GitHub VCS provider implementation
  */
 export class GitHubProvider implements IVcsProvider {
@@ -201,11 +216,39 @@ export class GitHubProvider implements IVcsProvider {
   }
 
   async getPullRequestStatus(prNumber: number): Promise<VcsPrStatus> {
-    throw new Error('Method not implemented');
+    const url = `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/pulls/${prNumber}`;
+
+    try {
+      const response = await this.httpClient.get(url, {
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+        },
+      });
+
+      return this.mapGitHubPrToVcsPrStatus(response.data as GitHubPrStatusResponse);
+    } catch (error: unknown) {
+      const errorObj = error as Record<string, unknown>;
+      if ((errorObj?.response as Record<string, unknown>)?.status === 404) {
+        throw new NotFoundAppException(`PR #${prNumber} not found`);
+      }
+      throw error;
+    }
   }
 
-  async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
-    throw new Error('Method not implemented');
+  async listPullRequests(state: 'open' | 'closed' | 'all' = 'open'): Promise<VcsPrStatus[]> {
+    const url = `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/pulls`;
+
+    const response = await this.httpClient.get(url, {
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
+      params: {
+        state,
+      },
+    });
+
+    const data = response.data as GitHubPrStatusResponse[];
+    return data.map((pr) => this.mapGitHubPrToVcsPrStatus(pr));
   }
 
   private mapGitHubIssueToVcsIssue(gitHubIssue: GitHubIssueResponse): VcsIssue {
@@ -217,6 +260,20 @@ export class GitHubProvider implements IVcsProvider {
       url: gitHubIssue.html_url,
       labels: gitHubIssue.labels.map((label) => label.name),
       createdAt: new Date(gitHubIssue.created_at),
+    };
+  }
+
+  private mapGitHubPrToVcsPrStatus(gitHubPr: GitHubPrStatusResponse): VcsPrStatus {
+    return {
+      number: gitHubPr.number,
+      state: gitHubPr.state,
+      draft: gitHubPr.draft,
+      merged: gitHubPr.merged,
+      mergedAt: gitHubPr.merged_at ? new Date(gitHubPr.merged_at) : null,
+      mergedBy: gitHubPr.merged_by?.login ?? null,
+      mergeSha: gitHubPr.merge_commit_sha,
+      url: gitHubPr.html_url,
+      title: gitHubPr.title,
     };
   }
 }
