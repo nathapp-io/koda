@@ -8,7 +8,6 @@ import {
   Body,
   HttpCode,
   HttpStatus,
-  Headers,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -18,12 +17,11 @@ import {
 } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
 import { ConfigService } from '@nestjs/config';
-import { AuthException, ValidationAppException } from '@nathapp/nestjs-common';
+import { ValidationAppException } from '@nathapp/nestjs-common';
 import { Project } from '@prisma/client';
 import { VcsConnectionService } from './vcs-connection.service';
 import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
-import { VcsWebhookService, GitHubWebhookPayload } from './vcs-webhook.service';
 import { ProjectsService } from '../projects/projects.service';
 import { CreateVcsConnectionDto } from './dto/create-vcs-connection.dto';
 import { UpdateVcsConnectionDto } from './dto/update-vcs-connection.dto';
@@ -41,7 +39,6 @@ export class VcsController {
     private readonly vcsService: VcsConnectionService,
     private readonly syncService: VcsSyncService,
     private readonly prSyncService: VcsPrSyncService,
-    private readonly webhookService: VcsWebhookService,
     private readonly projectsService: ProjectsService,
     private readonly configService: ConfigService,
   ) {}
@@ -144,61 +141,7 @@ export class VcsController {
       this.throwEncryptionKeyNotConfigured();
     }
 
-    const result = await this.vcsService.testConnection(project.id, encryptionKey);
-
-    return {
-      success: result.success,
-      latencyMs: result.latencyMs,
-      error: result.error,
-    };
-  }
-
-  /**
-   * POST /projects/:slug/vcs-webhook
-   * Handle GitHub webhook events
-   */
-  @Post('/../vcs-webhook')
-  @HttpCode(HttpStatus.OK)
-  async handleWebhook(
-    @Param('slug') slug: string,
-    @Headers('x-hub-signature-256') signature: string,
-    @Body() payload: GitHubWebhookPayload,
-    @Headers('x-github-event') githubEvent: string | undefined,
-  ): Promise<{ success: boolean; ignored?: boolean; reason?: string }> {
-    // Get project by slug
-    const project = await this.projectsService.findBySlug(slug);
-
-    // Get VCS connection
-    const connection = await this.vcsService.findByProject(project.id);
-
-    // Verify signature using timing-safe comparison
-    const isValid = this.webhookService.verifySignature(
-      JSON.stringify(payload),
-      signature || '',
-      connection.webhookSecret || '',
-    );
-
-    if (!isValid) {
-      throw new AuthException({}, 'vcs_webhook');
-    }
-
-    // Prefer the GitHub event header; fall back to payload shape for direct/controller tests
-    const eventType = githubEvent
-      || (payload.pull_request ? 'pull_request' : payload.issue ? 'issues' : 'unknown');
-    const event = eventType === 'issues'
-      ? `issues.${payload.action || 'unknown'}`
-      : eventType;
-
-    // Handle webhook
-    const result = await this.webhookService.handleWebhook(
-      { ...connection, project, id: connection.id } as Parameters<
-        typeof this.webhookService.handleWebhook
-      >[0],
-      event,
-      payload,
-    );
-
-    return result;
+    return this.vcsService.testConnection(project.id, encryptionKey);
   }
 
   /**
@@ -246,17 +189,18 @@ export class VcsController {
       throw new ValidationAppException({}, 'vcs');
     }
 
-    // Issue was successfully created
+    const ref = result.ticketNumber ? `${project.key}-${result.ticketNumber}` : undefined;
+
     return {
+      syncType: 'manual',
       issuesSynced: 1,
       issuesSkipped: 0,
-      createdTickets:
-        result.ticketId && result.ticketNumber
+      tickets:
+        ref
           ? [
               {
-                id: result.ticketId,
-                projectKey: project.key,
-                number: result.ticketNumber,
+                ref,
+                title: issue.title,
               },
             ]
           : [],
@@ -291,14 +235,13 @@ export class VcsController {
     const result = await this.syncService.fullSync(project as Project, connection, encryptionKey);
 
     return {
+      syncType: 'manual',
       issuesSynced: result.issuesSynced,
       issuesSkipped: result.issuesSkipped,
-      createdTickets: result.createdTickets.map((ticket) => ({
-        id: ticket.id,
-        projectKey: project.key,
-        number: ticket.number,
+      tickets: result.createdTickets.map((ticket) => ({
+        ref: `${project.key}-${ticket.number}`,
+        title: ticket.title,
       })),
-      errors: result.errors.length > 0 ? result.errors : undefined,
     };
   }
 

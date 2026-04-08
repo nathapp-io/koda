@@ -13,6 +13,7 @@ export interface SyncIssueResult {
   action: 'created' | 'skipped';
   ticketId?: string;
   ticketNumber?: number;
+  ticketTitle?: string;
   reason?: string;
 }
 
@@ -98,6 +99,7 @@ export class VcsSyncService {
       action: 'created',
       ticketId: result.id,
       ticketNumber: result.number,
+      ticketTitle: result.title,
     };
   }
 
@@ -131,10 +133,10 @@ export class VcsSyncService {
   ): Promise<{
     issuesSynced: number;
     issuesSkipped: number;
-    createdTickets: Array<{ id: string; number: number }>;
+    createdTickets: Array<{ id: string; number: number; title: string }>;
     errors: string[];
   }> {
-    const createdTickets: Array<{ id: string; number: number }> = [];
+    const createdTickets: Array<{ id: string; number: number; title: string }> = [];
     const errors: string[] = [];
     let issuesSynced = 0;
     let issuesSkipped = 0;
@@ -166,6 +168,7 @@ export class VcsSyncService {
               createdTickets.push({
                 id: result.ticketId,
                 number: result.ticketNumber,
+                title: result.ticketTitle ?? issue.title,
               });
             }
           } else {

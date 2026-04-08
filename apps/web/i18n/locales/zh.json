@@ -362,8 +362,6 @@
       "provider": "提供商",
       "providerPlaceholder": "选择提供商",
       "providerGithub": "GitHub",
-      "providerGitlab": "GitLab",
-      "providerBitbucket": "Bitbucket",
       "owner": "仓库所有者",
       "ownerPlaceholder": "例如 octocat",
       "repo": "仓库名称",
@@ -371,10 +369,11 @@
       "token": "个人访问令牌",
       "tokenPlaceholder": "••••••••",
       "syncMode": "同步模式",
+      "syncModeOff": "关闭（仅手动导入）",
       "syncModePolling": "轮询（定期自动同步）",
       "syncModeWebhook": "Webhook（基于事件的同步）",
-      "pollingInterval": "轮询间隔（秒）",
-      "pollingIntervalPlaceholder": "300",
+      "pollingInterval": "轮询间隔（毫秒）",
+      "pollingIntervalPlaceholder": "600000",
       "authors": "筛选作者（逗号分隔，可选）",
       "authorsPlaceholder": "例如 john,jane,bot",
       "testConnection": "测试连接",
@@ -392,8 +391,8 @@
       "tokenRequired": "个人访问令牌必填",
       "syncModeRequired": "请选择同步模式",
       "pollingIntervalRequired": "轮询间隔必填",
-      "pollingIntervalMin": "轮询间隔最少 60 秒",
-      "pollingIntervalMax": "轮询间隔不超过 86400 秒"
+      "pollingIntervalMin": "轮询间隔最少 60000 毫秒",
+      "pollingIntervalMax": "轮询间隔不超过 86400000 毫秒"
     },
     "toast": {
       "connectionSuccess": "VCS 连接配置成功",

@@ -16,6 +16,9 @@ const envSchema = Joi.object({
   JWT_REFRESH_SECRET: Joi.string().required(),
   JWT_REFRESH_EXPIRES_IN: Joi.string().default('30d'),
   API_KEY_SECRET: Joi.string().required(),
+  VCS_ENCRYPTION_KEY: Joi.string().hex().length(64).optional(),
+  VCS_DEFAULT_POLLING_INTERVAL_MS: Joi.number().integer().min(60000).optional(),
+  GITHUB_API_URL: Joi.string().uri().optional(),
   RAG_IN_MEMORY_ONLY: Joi.boolean()
     .truthy('true')
     .falsy('false')
