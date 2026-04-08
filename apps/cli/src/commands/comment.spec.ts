@@ -27,6 +27,9 @@ jest.mock('conf', () => {
 // Mock the generated client
 jest.mock('../generated', () => ({
   commentsControllerCreateFromHttp: jest.fn(),
+  commentsControllerListByTicketFromHttp: jest.fn(),
+  commentsControllerUpdateFromHttp: jest.fn(),
+  commentsControllerDeleteFromHttp: jest.fn(),
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
@@ -57,7 +60,12 @@ jest.mock('../config', () => ({
 
 import { Command } from 'commander';
 import { commentCommand } from './comment';
-import { commentsControllerCreateFromHttp } from '../generated';
+import {
+  commentsControllerCreateFromHttp,
+  commentsControllerListByTicketFromHttp,
+  commentsControllerUpdateFromHttp,
+  commentsControllerDeleteFromHttp,
+} from '../generated';
 
 describe('commentCommand', () => {
   let program: Command;
@@ -80,6 +88,9 @@ describe('commentCommand', () => {
 
     jest.clearAllMocks();
     (commentsControllerCreateFromHttp as jest.Mock).mockReset();
+    (commentsControllerListByTicketFromHttp as jest.Mock).mockReset();
+    (commentsControllerUpdateFromHttp as jest.Mock).mockReset();
+    (commentsControllerDeleteFromHttp as jest.Mock).mockReset();
   });
 
   afterEach(() => {
@@ -278,6 +289,70 @@ describe('commentCommand', () => {
       }
 
       expect(exitSpy).toHaveBeenCalledWith(2);
+    });
+  });
+
+  describe('comment list', () => {
+    it('lists comments for ticket', async () => {
+      const mockComments = [{ id: 'c1', type: 'GENERAL', body: 'Hello' }];
+      (commentsControllerListByTicketFromHttp as jest.Mock).mockResolvedValue({ ret: 0, data: { items: mockComments } });
+
+      const commentCmd = program.commands.find((cmd) => cmd.name() === 'comment');
+      const listCmd = commentCmd?.commands.find((cmd) => cmd.name() === 'list');
+
+      await listCmd?.parseAsync(['node', 'test', 'KODA-42']).catch(() => undefined);
+
+      expect(commentsControllerListByTicketFromHttp).toHaveBeenCalledWith(
+        expect.objectContaining({ slug: 'koda', ref: 'KODA-42' })
+      );
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+  });
+
+  describe('comment update', () => {
+    it('updates comment by id', async () => {
+      (commentsControllerUpdateFromHttp as jest.Mock).mockResolvedValue({
+        ret: 0,
+        data: { id: 'comment-1', body: 'Updated' },
+      });
+
+      const commentCmd = program.commands.find((cmd) => cmd.name() === 'comment');
+      const updateCmd = commentCmd?.commands.find((cmd) => cmd.name() === 'update');
+
+      await updateCmd?.parseAsync(['node', 'test', '--id', 'comment-1', '--body', 'Updated']).catch(() => undefined);
+
+      expect(commentsControllerUpdateFromHttp).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'comment-1',
+          requestBody: { body: 'Updated' },
+        })
+      );
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+  });
+
+  describe('comment delete', () => {
+    it('deletes comment with --force', async () => {
+      (commentsControllerDeleteFromHttp as jest.Mock).mockResolvedValue({ ret: 0, data: {} });
+
+      const commentCmd = program.commands.find((cmd) => cmd.name() === 'comment');
+      const deleteCmd = commentCmd?.commands.find((cmd) => cmd.name() === 'delete');
+
+      await deleteCmd?.parseAsync(['node', 'test', '--id', 'comment-1', '--force']).catch(() => undefined);
+
+      expect(commentsControllerDeleteFromHttp).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'comment-1' })
+      );
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('requires --force for deletion', async () => {
+      const commentCmd = program.commands.find((cmd) => cmd.name() === 'comment');
+      const deleteCmd = commentCmd?.commands.find((cmd) => cmd.name() === 'delete');
+
+      await deleteCmd?.parseAsync(['node', 'test', '--id', 'comment-1']).catch(() => undefined);
+
+      expect(exitSpy).toHaveBeenCalledWith(1);
     });
   });
 });

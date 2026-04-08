@@ -210,6 +210,7 @@ assert "koda project list"         "koda\|KODA\|Koda"  "$(koda project list)"
 assert "koda project list --json"  '"slug"'             "$(koda project list --json)"
 assert "koda project show koda"    "koda\|KODA\|Koda"  "$(koda project show koda)"
 assert "koda project show --json"  '"slug"'             "$(koda project show koda --json)"
+assert "koda project update"       "Koda Smoke Updated\|updated\|success" "$(koda project update koda --name 'Koda Smoke Updated' --desc 'Updated by smoke test')"
 
 # =============================================================================
 # STEP 7: Label CRUD
@@ -221,6 +222,7 @@ LABEL_ID=$(echo "$LABEL_CREATE_OUT" | python3 -c "import json,sys; d=json.load(s
 
 assert "koda label list"       "smoke-bug"    "$(koda label list --project koda)"
 assert "koda label list --json" '"name"'      "$(koda label list --project koda --json)"
+assert "koda label update"     "smoke-bug-updated\|updated\|success" "$(koda label update --project koda --id "$LABEL_ID" --name 'smoke-bug-updated' --color '#22c55e')"
 
 # =============================================================================
 # STEP 8: Ticket lifecycle
@@ -312,7 +314,17 @@ assert "koda ticket delete --force"      "delet\|success\|removed" "$(koda ticke
 # =============================================================================
 log "Step 16: Comment & agent..."
 koda ticket create --project koda --type ENHANCEMENT --title "Comment ticket" > /dev/null
-assert "koda comment add"   "success\|comment\|added\|Comment"  "$(koda comment add KODA-7 --body 'Great ticket')"
+COMMENT_CREATE_OUT=$(koda comment add KODA-7 --body 'Great ticket' --json)
+assert "koda comment add"   "success\|comment\|added\|Comment\|\"id\""  "$COMMENT_CREATE_OUT"
+COMMENT_ID=$(echo "$COMMENT_CREATE_OUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('id', d.get('data',{}).get('id','')))" 2>/dev/null || true)
+assert "koda comment list"  "Great ticket\|GENERAL\|comment" "$(koda comment list KODA-7 --project koda)"
+if [[ -n "$COMMENT_ID" ]]; then
+  assert "koda comment update" "updated\|Edited by smoke\|success" "$(koda comment update --id "$COMMENT_ID" --body 'Edited by smoke')"
+  assert "koda comment delete" "deleted\|success\|removed" "$(koda comment delete --id "$COMMENT_ID" --force)"
+else
+  fail "koda comment update — skipped (no COMMENT_ID)"
+  fail "koda comment delete — skipped (no COMMENT_ID)"
+fi
 assert "koda agent me"      "smoke-agent\|Smoke Agent"          "$(koda agent me)"
 assert "koda agent me --json" '"slug"\|"name"'                  "$(koda agent me --json)"
 
@@ -339,6 +351,10 @@ assert "KB add via API"      '"id"\|"ret"\|success\|doc'  "$KB_ADD"
 
 assert "koda kb list"        "manual\|smoke\|Source\|ID"   "$(koda kb list --project koda)"
 assert "koda kb search"      "result\|score\|deploy\|no\|found\|No"  "$(koda kb search --project koda --query 'deployment')"
+# NOTE: kb optimize/delete are admin-only endpoints. Smoke CLI runs with agent API key,
+# so expected behavior here is authorization failure, not success.
+assert "koda kb optimize (agent unauthorized)" "access denied\|forbidden" "$(koda kb optimize --project koda)"
+assert "koda kb delete (agent unauthorized)"   "access denied\|forbidden" "$(koda kb delete --project koda --source-id smoke-doc-1 --force)"
 
 # =============================================================================
 # STEP 18: Label delete

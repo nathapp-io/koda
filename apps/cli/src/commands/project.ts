@@ -6,6 +6,7 @@ import {
   projectsControllerFindBySlug,
   projectsControllerCreate,
   projectsControllerRemove,
+  projectsControllerUpdate,
 } from '../generated';
 import { table, error } from '../utils/output';
 import { unwrap } from '../utils/api';
@@ -170,6 +171,62 @@ export function projectCommand(program: Command): void {
         await projectsControllerRemove({ slug });
 
         console.log(`Project '${slug}' deleted.`);
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err, { notFoundMessage: `Project not found: ${slug}` });
+      }
+    });
+
+  project
+    .command('update <slug>')
+    .description('Update a project')
+    .option('--name <name>', 'Project name')
+    .option('--key <key>', 'Project key (2-6 uppercase letters)')
+    .option('--desc <description>', 'Project description')
+    .option('--json', 'Output as JSON')
+    .action(async (slug: string, options) => {
+      if (!options.name && !options.key && !options.desc) {
+        handleApiError(new Error('Must provide at least one option: --name, --key, or --desc'), { validationError: true });
+      }
+
+      if (options.key && !/^[A-Z]{2,6}$/.test(options.key)) {
+        error('Invalid key format. Must be 2-6 uppercase letters (e.g. KODA)');
+        process.exit(3);
+        return;
+      }
+
+      try {
+        const auth = resolveAuth({});
+
+        if (!auth.apiKey || !auth.apiUrl) {
+          error('API key or URL not configured. Run: koda login --api-key <key>');
+          process.exit(2);
+          return;
+        }
+
+        OpenAPI.BASE = auth.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = auth.apiKey;
+
+        const requestBody: { name?: string; key?: string; description?: string } = {};
+        if (options.name) requestBody.name = options.name;
+        if (options.key) requestBody.key = options.key;
+        if (options.desc) requestBody.description = options.desc;
+
+        const response = await projectsControllerUpdate({ slug, requestBody });
+        const proj = unwrap<{ name: string; key: string; slug: string; description?: string }>(response);
+
+        if (options.json) {
+          console.log(JSON.stringify(proj, null, 2));
+        } else {
+          const rows = [
+            ['Name', proj.name],
+            ['Key', proj.key],
+            ['Slug', proj.slug],
+            ['Description', proj.description ?? ''],
+          ];
+          table(['Field', 'Value'], rows);
+        }
+
         process.exit(0);
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Project not found: ${slug}` });

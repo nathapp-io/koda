@@ -3,7 +3,13 @@ import { readFile } from 'fs/promises';
 import { basename } from 'path';
 import { resolveContext } from '../config';
 import { OpenAPI } from '../generated/core/OpenAPI';
-import { ragControllerSearch, ragControllerListDocuments, ragControllerAddDocument } from '../generated';
+import {
+  ragControllerSearch,
+  ragControllerListDocuments,
+  ragControllerAddDocument,
+  ragControllerDeleteDocument,
+  ragControllerOptimizeTable,
+} from '../generated';
 import { error } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
@@ -175,6 +181,97 @@ export function kbCommand(program: Command): void {
           console.log(JSON.stringify(data, null, 2));
         } else {
           console.log(`Added ${fileName} to knowledge base. Total documents: ${data.docCount}`);
+        }
+
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err);
+      }
+    });
+
+  kb
+    .command('delete')
+    .description('Delete documents by sourceId from the knowledge base')
+    .option('--project <slug>', 'Project slug')
+    .requiredOption('--source-id <sourceId>', 'Document source ID')
+    .option('--force', 'Confirm deletion')
+    .option('--json', 'Output as JSON')
+    .action(async (options) => {
+      if (!options.force) {
+        error('Use --force to confirm deletion');
+        process.exit(1);
+        return;
+      }
+
+      try {
+        const ctx = await resolveContext({ projectSlug: options.project });
+
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey) {
+          error('API key or URL not configured. Run: koda login --api-key <key>');
+          process.exit(2);
+          return;
+        }
+
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
+
+        const response = await ragControllerDeleteDocument({
+          slug: ctx.projectSlug,
+          sourceId: options.sourceId,
+        });
+        const data = unwrap<Record<string, unknown> | undefined>(response);
+
+        if (options.json) {
+          console.log(JSON.stringify(data ?? { sourceId: options.sourceId, deleted: true }, null, 2));
+        } else {
+          console.log(`Deleted documents for sourceId '${options.sourceId}'.`);
+        }
+
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err);
+      }
+    });
+
+  kb
+    .command('optimize')
+    .description('Optimize the knowledge base table')
+    .option('--project <slug>', 'Project slug')
+    .option('--json', 'Output as JSON')
+    .action(async (options) => {
+      try {
+        const ctx = await resolveContext({ projectSlug: options.project });
+
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey) {
+          error('API key or URL not configured. Run: koda login --api-key <key>');
+          process.exit(2);
+          return;
+        }
+
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
+
+        const response = await ragControllerOptimizeTable({
+          slug: ctx.projectSlug,
+        });
+        const data = unwrap<Record<string, unknown>>(response);
+
+        if (options.json) {
+          console.log(JSON.stringify(data, null, 2));
+        } else {
+          console.log('Knowledge base optimization completed.');
         }
 
         process.exit(0);
