@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { VcsController } from './vcs.controller';
+import { VcsWebhookController } from './vcs-webhook.controller';
 import { VcsConnectionService } from './vcs-connection.service';
 import { VcsSyncService } from './vcs-sync.service';
 import { VcsWebhookService } from './vcs-webhook.service';
@@ -11,7 +12,7 @@ import { ProjectsService } from '../projects/projects.service';
 
 @Module({
   imports: [ScheduleModule.forRoot()],
-  controllers: [VcsController],
+  controllers: [VcsController, VcsWebhookController],
   providers: [
     VcsConnectionService,
     VcsSyncService,

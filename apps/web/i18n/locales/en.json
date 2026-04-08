@@ -365,8 +365,6 @@
       "provider": "Provider",
       "providerPlaceholder": "Select a provider",
       "providerGithub": "GitHub",
-      "providerGitlab": "GitLab",
-      "providerBitbucket": "Bitbucket",
       "owner": "Repository Owner",
       "ownerPlaceholder": "e.g. octocat",
       "repo": "Repository Name",
@@ -374,10 +372,11 @@
       "token": "Personal Access Token",
       "tokenPlaceholder": "••••••••",
       "syncMode": "Sync Mode",
+      "syncModeOff": "Off (manual import only)",
       "syncModePolling": "Polling (automatic periodic sync)",
       "syncModeWebhook": "Webhook (event-based sync)",
-      "pollingInterval": "Polling Interval (seconds)",
-      "pollingIntervalPlaceholder": "300",
+      "pollingInterval": "Polling Interval (milliseconds)",
+      "pollingIntervalPlaceholder": "600000",
       "authors": "Filter Authors (comma-separated, optional)",
       "authorsPlaceholder": "e.g. john,jane,bot",
       "testConnection": "Test Connection",
@@ -395,8 +394,8 @@
       "tokenRequired": "Personal access token is required",
       "syncModeRequired": "Please select a sync mode",
       "pollingIntervalRequired": "Polling interval is required",
-      "pollingIntervalMin": "Polling interval must be at least 60 seconds",
-      "pollingIntervalMax": "Polling interval must not exceed 86400 seconds"
+      "pollingIntervalMin": "Polling interval must be at least 60000 ms",
+      "pollingIntervalMax": "Polling interval must not exceed 86400000 ms"
     },
     "toast": {
       "connectionSuccess": "VCS connection configured successfully",

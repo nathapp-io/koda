@@ -93,6 +93,30 @@ export class VcsPollingService implements OnModuleInit {
     this.logger.debug(`Scheduled polling for connection ${connection.id} every ${connection.pollingIntervalMs}ms`);
   }
 
+  unschedulePolling(connectionId: string): void {
+    const scheduleName = `vcs-polling-${connectionId}`;
+    try {
+      this.schedulerRegistry.deleteInterval(scheduleName);
+    } catch {
+      // Nothing to remove.
+    }
+  }
+
+  async refreshConnectionSchedule(connectionId: string): Promise<void> {
+    this.unschedulePolling(connectionId);
+
+    const connection = (await this.db.vcsConnection.findUnique({
+      where: { id: connectionId },
+      include: { project: true },
+    })) as (VcsConnection & { project: Project }) | null;
+
+    if (!connection || connection.syncMode !== 'polling' || !connection.isActive) {
+      return;
+    }
+
+    this.schedulePolling(connection);
+  }
+
   /**
    * Poll a single connection for new issues
    */
@@ -148,7 +172,7 @@ export class VcsPollingService implements OnModuleInit {
       await this.db.vcsSyncLog.create({
         data: {
           vcsConnectionId: connection.id,
-          syncType: 'issues',
+          syncType: 'polling',
           issuesSynced,
           issuesSkipped,
           startedAt: startTime,
@@ -177,7 +201,7 @@ export class VcsPollingService implements OnModuleInit {
       await this.db.vcsSyncLog.create({
         data: {
           vcsConnectionId: connection.id,
-          syncType: 'issues',
+          syncType: 'polling',
           issuesSynced: 0,
           issuesSkipped: 0,
           errorMessage,

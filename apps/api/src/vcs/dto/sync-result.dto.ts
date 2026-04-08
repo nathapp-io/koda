@@ -2,6 +2,12 @@ import { ApiProperty } from '@nestjs/swagger';
 
 export class SyncResultDto {
   @ApiProperty({
+    description: 'How this sync was triggered',
+    example: 'manual',
+  })
+  syncType: string;
+
+  @ApiProperty({
     description: 'Number of issues successfully synced',
     example: 3,
   })
@@ -14,29 +20,18 @@ export class SyncResultDto {
   issuesSkipped: number;
 
   @ApiProperty({
-    description: 'List of created ticket references',
+    description: 'List of created ticket refs',
     type: 'array',
     items: {
       type: 'object',
       properties: {
-        id: { type: 'string', example: 'ticket-123' },
-        projectKey: { type: 'string', example: 'PROJ' },
-        number: { type: 'number', example: 1 },
+        ref: { type: 'string', example: 'PROJ-1' },
+        title: { type: 'string', example: 'Imported GitHub issue' },
       },
     },
   })
-  createdTickets: Array<{
-    id: string;
-    projectKey: string;
-    number: number;
+  tickets: Array<{
+    ref: string;
+    title: string;
   }>;
-
-  @ApiProperty({
-    description: 'List of errors encountered during sync (optional)',
-    type: 'array',
-    items: { type: 'string' },
-    required: false,
-    example: ['Issue 100: Network timeout'],
-  })
-  errors?: string[];
 }

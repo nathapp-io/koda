@@ -8,18 +8,18 @@ definePageMeta({ layout: 'default' })
 
 interface VcsConnection {
   provider: string
-  owner: string
-  repo: string
-  token?: string
-  syncMode: 'polling' | 'webhook'
-  pollingInterval: number
-  authors?: string
+  repoOwner: string
+  repoName: string
+  syncMode: 'off' | 'polling' | 'webhook'
+  pollingIntervalMs: number
+  allowedAuthors: string[]
 }
 
 interface SyncResult {
-  created: number
-  updated: number
-  skipped: number
+  syncType: string
+  issuesSynced: number
+  issuesSkipped: number
+  tickets: Array<{ ref: string; title: string }>
 }
 
 const route = useRoute()
@@ -27,11 +27,21 @@ const slug = route.params.project as string
 const { $api } = useApi()
 const { t } = useI18n()
 const toast = useAppToast()
+type ApiError = { response?: { status?: number } }
 
 // Fetch existing VCS connection
 const { data: connectionData, pending: loadingConnection, error: connectionError, refresh: refreshConnection } = useAsyncData(
   `vcs-connection-${slug}`,
-  () => $api.get(`/projects/${slug}/vcs`) as Promise<VcsConnection>,
+  async () => {
+    try {
+      return await $api.get(`/projects/${slug}/vcs`) as VcsConnection
+    } catch (error) {
+      if ((error as ApiError).response?.status === 404) {
+        return null
+      }
+      throw error
+    }
+  },
   { immediate: true }
 )
 
@@ -42,9 +52,9 @@ const formSchema = toTypedSchema(z.object({
   provider: z.string().min(1, t('vcs.validation.providerRequired')),
   owner: z.string().min(1, t('vcs.validation.ownerRequired')),
   repo: z.string().min(1, t('vcs.validation.repoRequired')),
-  token: z.string().min(1, t('vcs.validation.tokenRequired')),
-  syncMode: z.enum(['polling', 'webhook']),
-  pollingInterval: z.number().min(60, t('vcs.validation.pollingIntervalMin')).max(86400, t('vcs.validation.pollingIntervalMax')).optional(),
+  token: z.string().optional(),
+  syncMode: z.enum(['off', 'polling', 'webhook']),
+  pollingInterval: z.number().min(60000, t('vcs.validation.pollingIntervalMin')).max(86400000, t('vcs.validation.pollingIntervalMax')).optional(),
   authors: z.string().optional(),
 }))
 
@@ -55,8 +65,8 @@ const { handleSubmit, setValues, isSubmitting } = useForm({
     owner: '',
     repo: '',
     token: '',
-    syncMode: 'polling',
-    pollingInterval: 300,
+    syncMode: 'off',
+    pollingInterval: 600000,
     authors: '',
   },
 })
@@ -66,12 +76,12 @@ watch(existingConnection, (connection) => {
   if (connection) {
     setValues({
       provider: connection.provider || '',
-      owner: connection.owner || '',
-      repo: connection.repo || '',
+      owner: connection.repoOwner || '',
+      repo: connection.repoName || '',
       token: '',
-      syncMode: connection.syncMode || 'polling',
-      pollingInterval: connection.pollingInterval || 300,
-      authors: connection.authors || '',
+      syncMode: connection.syncMode || 'off',
+      pollingInterval: connection.pollingIntervalMs || 600000,
+      authors: connection.allowedAuthors?.join(', ') || '',
     })
   }
 }, { immediate: true })
@@ -79,14 +89,21 @@ watch(existingConnection, (connection) => {
 // Form submission handler
 const onSubmit = handleSubmit(async (values) => {
   try {
+    if (!existingConnection.value && !values.token) {
+      toast.error(t('vcs.validation.tokenRequired'))
+      return
+    }
+
     const payload = {
       provider: values.provider,
-      owner: values.owner,
-      repo: values.repo,
-      token: values.token,
+      repoOwner: values.owner,
+      repoName: values.repo,
+      ...(values.token ? { token: values.token } : {}),
       syncMode: values.syncMode,
-      pollingInterval: values.syncMode === 'polling' ? values.pollingInterval : undefined,
-      authors: values.authors || undefined,
+      pollingIntervalMs: values.syncMode === 'polling' ? values.pollingInterval : undefined,
+      allowedAuthors: values.authors
+        ? values.authors.split(',').map(author => author.trim()).filter(Boolean)
+        : undefined,
     }
 
     if (existingConnection.value) {
@@ -124,15 +141,25 @@ async function syncNow() {
   try {
     const result = await $api.post<SyncResult>(`/projects/${slug}/vcs/sync`)
     toast.success(t('vcs.toast.syncComplete', {
-      created: result.created,
-      updated: result.updated,
-      skipped: result.skipped,
+      created: result.issuesSynced,
+      updated: 0,
+      skipped: result.issuesSkipped,
     }))
   } catch (err) {
     const errorMsg = extractApiError(err)
     toast.error(t('vcs.toast.syncFailed', { error: errorMsg }))
   } finally {
     syncing.value = false
+  }
+}
+
+async function disconnect() {
+  try {
+    await $api.delete(`/projects/${slug}/vcs`)
+    toast.success(t('vcs.toast.disconnectSuccess'))
+    await refreshConnection()
+  } catch (err) {
+    toast.error(t('vcs.toast.disconnectFailed'))
   }
 }
 </script>
@@ -174,8 +201,6 @@ async function syncNow() {
                 </FormControl>
                 <SelectContent>
                   <SelectItem value="github">{{ t('vcs.form.providerGithub') }}</SelectItem>
-                  <SelectItem value="gitlab">{{ t('vcs.form.providerGitlab') }}</SelectItem>
-                  <SelectItem value="bitbucket">{{ t('vcs.form.providerBitbucket') }}</SelectItem>
                 </SelectContent>
               </Select>
               <FormMessage />
@@ -206,6 +231,10 @@ async function syncNow() {
             <FormField name="syncMode" v-slot="{ componentField }">
               <FormLabel>{{ t('vcs.form.syncMode') }}</FormLabel>
               <RadioGroup v-bind="componentField" class="space-y-2">
+                <div class="flex items-center space-x-2">
+                  <RadioGroupItem value="off" />
+                  <label>{{ t('vcs.form.syncModeOff') }}</label>
+                </div>
                 <div class="flex items-center space-x-2">
                   <RadioGroupItem value="polling" />
                   <label>{{ t('vcs.form.syncModePolling') }}</label>
@@ -260,6 +289,7 @@ async function syncNow() {
                 v-if="existingConnection"
                 type="button"
                 variant="destructive"
+                @click="disconnect"
               >
                 {{ t('vcs.form.disconnect') }}
               </Button>

@@ -92,20 +92,20 @@ describe('vcsConfig', () => {
   });
 
   describe('githubApiUrl', () => {
-    it('reads githubApiUrl from VCS_GITHUB_API_URL environment variable', () => {
+    it('reads githubApiUrl from GITHUB_API_URL environment variable', () => {
       const testUrl = 'https://api.github.com';
-      process.env['VCS_GITHUB_API_URL'] = testUrl;
+      process.env['GITHUB_API_URL'] = testUrl;
 
       try {
         const config = vcsConfig();
         expect(config.githubApiUrl).toBe(testUrl);
       } finally {
-        delete process.env['VCS_GITHUB_API_URL'];
+        delete process.env['GITHUB_API_URL'];
       }
     });
 
-    it('returns default value when VCS_GITHUB_API_URL is not set', () => {
-      delete process.env['VCS_GITHUB_API_URL'];
+    it('returns default value when GITHUB_API_URL is not set', () => {
+      delete process.env['GITHUB_API_URL'];
       const config = vcsConfig();
 
       // Should default to public GitHub API
@@ -115,25 +115,25 @@ describe('vcsConfig', () => {
 
     it('preserves the exact URL value from environment variable', () => {
       const testUrl = 'https://github.enterprise.com/api/v3';
-      process.env['VCS_GITHUB_API_URL'] = testUrl;
+      process.env['GITHUB_API_URL'] = testUrl;
 
       try {
         const config = vcsConfig();
         expect(config.githubApiUrl).toBe(testUrl);
       } finally {
-        delete process.env['VCS_GITHUB_API_URL'];
+        delete process.env['GITHUB_API_URL'];
       }
     });
 
     it('allows for enterprise GitHub URLs', () => {
       const enterpriseUrl = 'https://my-github.company.com/api/v3';
-      process.env['VCS_GITHUB_API_URL'] = enterpriseUrl;
+      process.env['GITHUB_API_URL'] = enterpriseUrl;
 
       try {
         const config = vcsConfig();
         expect(config.githubApiUrl).toBe(enterpriseUrl);
       } finally {
-        delete process.env['VCS_GITHUB_API_URL'];
+        delete process.env['GITHUB_API_URL'];
       }
     });
   });

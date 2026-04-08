@@ -24,15 +24,16 @@ jest.mock('conf', () => {
   return jest.fn(() => mockStore);
 });
 
-// Mock the generated client using stubs
-jest.mock('../vcs-client.stub', () => ({
+// Mock generated API client
+jest.mock('../generated/services.gen', () => ({
   vcsControllerCreateConnection: jest.fn(),
   vcsControllerGetConnection: jest.fn(),
   vcsControllerDeleteConnection: jest.fn(),
   vcsControllerUpdateConnection: jest.fn(),
   vcsControllerTestConnection: jest.fn(),
-  vcsControllerSyncConnection: jest.fn(),
-  vcsControllerImportIssue: jest.fn(),
+  vcsControllerSyncAll: jest.fn(),
+  vcsControllerSyncIssue: jest.fn(),
+  vcsControllerSyncPr: jest.fn(),
 }));
 
 jest.mock('../generated/core/OpenAPI', () => ({
@@ -64,7 +65,7 @@ import {
   vcsControllerCreateConnection,
   vcsControllerGetConnection,
   vcsControllerDeleteConnection,
-} from '../vcs-client.stub';
+} from '../generated/services.gen';
 
 describe('vcsCommand', () => {
   let program: Command;
@@ -113,7 +114,7 @@ describe('vcsCommand', () => {
         repoOwner: 'octocat',
         repoName: 'Hello-World',
         syncMode: 'polling',
-        allowedAuthors: '',
+        allowedAuthors: [],
         pollingIntervalMs: 3600000,
         isActive: true,
         createdAt: new Date('2026-04-06T10:00:00Z'),
@@ -157,7 +158,7 @@ describe('vcsCommand', () => {
         repoOwner: 'octocat',
         repoName: 'Hello-World',
         syncMode: 'polling',
-        allowedAuthors: '',
+        allowedAuthors: [],
         pollingIntervalMs: 3600000,
         isActive: true,
         createdAt: new Date('2026-04-06T10:00:00Z'),
@@ -202,7 +203,7 @@ describe('vcsCommand', () => {
         repoOwner: 'octocat',
         repoName: 'Hello-World',
         syncMode: 'polling',
-        allowedAuthors: '',
+        allowedAuthors: [],
         pollingIntervalMs: 3600000,
         isActive: true,
         createdAt: new Date('2026-04-06T10:00:00Z'),
@@ -247,7 +248,7 @@ describe('vcsCommand', () => {
         repoOwner: 'octocat',
         repoName: 'Hello-World',
         syncMode: 'polling',
-        allowedAuthors: '',
+        allowedAuthors: [],
         pollingIntervalMs: 3600000,
         isActive: true,
         createdAt: new Date('2026-04-06T10:00:00Z'),
@@ -372,7 +373,7 @@ describe('vcsCommand', () => {
         repoOwner: 'octocat',
         repoName: 'Hello-World',
         syncMode: 'polling',
-        allowedAuthors: '',
+        allowedAuthors: [],
         pollingIntervalMs: 3600000,
         isActive: true,
         lastSyncedAt: new Date('2026-04-06T09:00:00Z'),
@@ -405,7 +406,7 @@ describe('vcsCommand', () => {
         repoOwner: 'octocat',
         repoName: 'Hello-World',
         syncMode: 'polling',
-        allowedAuthors: '',
+        allowedAuthors: [],
         pollingIntervalMs: 3600000,
         isActive: true,
         lastSyncedAt: new Date('2026-04-06T09:00:00Z'),
@@ -436,7 +437,7 @@ describe('vcsCommand', () => {
         repoOwner: 'octocat',
         repoName: 'Hello-World',
         syncMode: 'polling',
-        allowedAuthors: '',
+        allowedAuthors: [],
         pollingIntervalMs: 3600000,
         isActive: true,
         lastSyncedAt: new Date('2026-04-06T09:00:00Z'),
@@ -487,7 +488,7 @@ describe('vcsCommand', () => {
         repoOwner: 'octocat',
         repoName: 'Hello-World',
         syncMode: 'polling',
-        allowedAuthors: '',
+        allowedAuthors: [],
         pollingIntervalMs: 3600000,
         isActive: true,
         lastSyncedAt: new Date('2026-04-06T09:00:00Z'),
@@ -520,7 +521,7 @@ describe('vcsCommand', () => {
         repoOwner: 'octocat',
         repoName: 'Hello-World',
         syncMode: 'polling',
-        allowedAuthors: '',
+        allowedAuthors: [],
         pollingIntervalMs: 3600000,
         isActive: true,
         lastSyncedAt: new Date('2026-04-06T09:00:00Z'),

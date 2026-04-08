@@ -154,9 +154,9 @@ describe('VCS-P1-005-C: Token masked input field', () => {
     expect(fieldContent).toMatch(/type=["']password["']/)
   })
 
-  test('source includes z.string().min(1) validation for token field', () => {
+  test('source includes z.string().optional() validation for token field', () => {
     const source = getSource()
-    expect(source).toMatch(/token\s*:\s*z\.string\(\)\.min\(1/)
+    expect(source).toMatch(/token\s*:\s*z\.string\(\)\.optional\(\)/)
   })
 
   test('source includes FormMessage for token field error display', () => {
@@ -168,7 +168,7 @@ describe('VCS-P1-005-C: Token masked input field', () => {
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC6 — Sync mode radio group (polling/webhook)
+// AC6 — Sync mode radio group (off/polling/webhook)
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('VCS-P1-005-C: Sync mode radio group field', () => {
@@ -184,18 +184,19 @@ describe('VCS-P1-005-C: Sync mode radio group field', () => {
     expect(syncModeFieldMatch![0]).toContain('RadioGroup')
   })
 
-  test('source includes polling and webhook radio options', () => {
+  test('source includes off, polling, and webhook radio options', () => {
     const source = getSource()
     const syncModeFieldMatch = source.match(/<FormField[^>]*name="syncMode"[\s\S]{0,1000}<\/FormField>/)
     expect(syncModeFieldMatch).not.toBeNull()
     const fieldContent = syncModeFieldMatch![0]
+    expect(fieldContent).toContain('off')
     expect(fieldContent).toContain('polling')
     expect(fieldContent).toContain('webhook')
   })
 
   test('source includes z.enum validation for sync mode field', () => {
     const source = getSource()
-    expect(source).toMatch(/syncMode\s*:\s*z\.enum\(\s*\[\s*["']polling["']\s*,\s*["']webhook["']\s*\]\s*\)/)
+    expect(source).toMatch(/syncMode\s*:\s*z\.enum\(\s*\[\s*["']off["']\s*,\s*["']polling["']\s*,\s*["']webhook["']\s*\]\s*\)/)
   })
 
   test('source includes FormMessage for syncMode field error display', () => {

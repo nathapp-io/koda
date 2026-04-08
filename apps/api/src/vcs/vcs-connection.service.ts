@@ -1,12 +1,15 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { VcsConnection } from '@prisma/client';
+import { randomBytes } from 'crypto';
 import { encryptToken, decryptToken } from '../common/utils/encryption.util';
 import { CreateVcsConnectionDto } from './dto/create-vcs-connection.dto';
 import { UpdateVcsConnectionDto } from './dto/update-vcs-connection.dto';
 import { VcsConnectionResponseDto } from './dto/vcs-connection-response.dto';
 import { createVcsProvider } from './factory';
+import { VcsPollingService } from './vcs-polling.service';
 
 // PrismaClientLike from @nathapp/nestjs-prisma doesn't expose VCS models,
 // but they exist at runtime. Define a delegate interface for proper typing.
@@ -27,7 +30,11 @@ interface ExtendedPrismaClient {
 
 @Injectable()
 export class VcsConnectionService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+    private readonly vcsPollingService: VcsPollingService,
+  ) {}
 
   private get db() {
     return this.prisma.client as unknown as ExtendedPrismaClient;
@@ -62,30 +69,29 @@ export class VcsConnectionService {
     // Encrypt the token
     const encryptedToken = encryptToken(dto.token, encryptionKey);
 
-    // Parse repo URL to extract owner and name
-    const urlMatch = dto.repoUrl?.match(/github\.com\/([^/]+)\/([^/]+)/) || [];
-    const repoOwner = urlMatch[1];
-    const repoName = urlMatch[2];
-
-    if (!repoOwner || !repoName) {
-      throw new ValidationAppException({}, 'vcs');
-    }
+    const syncMode = dto.syncMode ?? 'off';
+    const pollingIntervalMs =
+      dto.pollingIntervalMs
+      ?? this.configService.get<number>('vcs.defaultPollingIntervalMs')
+      ?? 600000;
 
     // Create connection
     const connection = (await this.db.vcsConnection.create({
       data: {
         projectId,
         provider: dto.provider.toLowerCase(),
-        repoOwner,
-        repoName,
+        repoOwner: dto.repoOwner,
+        repoName: dto.repoName,
         encryptedToken,
-        syncMode: dto.syncMode || 'polling',
-        allowedAuthors: '[]',
-        pollingIntervalMs: 3600000,
-        webhookSecret: dto.webhookSecret,
+        syncMode,
+        allowedAuthors: JSON.stringify(dto.allowedAuthors ?? []),
+        pollingIntervalMs,
+        webhookSecret: syncMode === 'webhook' ? randomBytes(16).toString('hex') : null,
         isActive: true,
       },
     })) as VcsConnection;
+
+    await this.vcsPollingService.refreshConnectionSchedule(connection.id);
 
     return this.mapToResponseDto(connection);
   }
@@ -134,9 +140,20 @@ export class VcsConnectionService {
       updateData.syncMode = dto.syncMode;
     }
 
-    // Update webhookSecret if provided
-    if (dto.webhookSecret !== undefined) {
-      updateData.webhookSecret = dto.webhookSecret;
+    if (dto.allowedAuthors !== undefined) {
+      updateData.allowedAuthors = JSON.stringify(dto.allowedAuthors);
+    }
+
+    if (dto.pollingIntervalMs !== undefined) {
+      updateData.pollingIntervalMs = dto.pollingIntervalMs;
+    }
+
+    if (dto.syncMode === 'webhook') {
+      updateData.webhookSecret = connection.webhookSecret ?? randomBytes(16).toString('hex');
+    }
+
+    if (dto.syncMode && dto.syncMode !== 'webhook') {
+      updateData.webhookSecret = null;
     }
 
     // Only update if there are changes
@@ -148,6 +165,8 @@ export class VcsConnectionService {
       where: { projectId },
       data: updateData,
     })) as VcsConnection;
+
+    await this.vcsPollingService.refreshConnectionSchedule(updated.id);
 
     return this.mapToResponseDto(updated);
   }
@@ -167,6 +186,8 @@ export class VcsConnectionService {
     await this.db.vcsConnection.delete({
       where: { projectId },
     });
+
+    this.vcsPollingService.unschedulePolling(connection.id);
   }
 
   /**
@@ -175,7 +196,7 @@ export class VcsConnectionService {
   async testConnection(
     projectId: string,
     encryptionKey: string,
-  ): Promise<{ success: boolean; latencyMs: number; error?: string }> {
+  ): Promise<{ ok: boolean; error?: string }> {
     const connection = (await this.db.vcsConnection.findUnique({
       where: { projectId },
     })) as VcsConnection | null;
@@ -193,8 +214,6 @@ export class VcsConnectionService {
     }
 
     // Create provider and test connection
-    const startTime = Date.now();
-
     try {
       const provider = createVcsProvider(connection.provider, {
         provider: connection.provider,
@@ -203,26 +222,11 @@ export class VcsConnectionService {
       });
 
       const result = await provider.testConnection();
-      const latencyMs = Date.now() - startTime;
-
-      if (result.ok) {
-        return {
-          success: true,
-          latencyMs,
-        };
-      } else {
-        return {
-          success: false,
-          latencyMs,
-          error: result.error,
-        };
-      }
+      return result.ok ? { ok: true } : { ok: false, error: result.error };
     } catch (error) {
-      const latencyMs = Date.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return {
-        success: false,
-        latencyMs,
+        ok: false,
         error: errorMessage,
       };
     }
@@ -249,18 +253,25 @@ export class VcsConnectionService {
   private mapToResponseDto(connection: VcsConnection): VcsConnectionResponseDto {
     return {
       id: connection.id,
-      projectId: connection.projectId,
       provider: connection.provider,
       repoOwner: connection.repoOwner,
       repoName: connection.repoName,
       syncMode: connection.syncMode,
-      allowedAuthors: connection.allowedAuthors,
+      allowedAuthors: this.parseAllowedAuthors(connection.allowedAuthors),
       pollingIntervalMs: connection.pollingIntervalMs,
-      webhookSecret: connection.webhookSecret ?? undefined,
-      lastSyncedAt: connection.lastSyncedAt ?? undefined,
+      lastSyncedAt: connection.lastSyncedAt?.toISOString() ?? null,
       isActive: connection.isActive,
-      createdAt: connection.createdAt,
-      updatedAt: connection.updatedAt,
+      createdAt: connection.createdAt.toISOString(),
+      updatedAt: connection.updatedAt.toISOString(),
     };
+  }
+
+  private parseAllowedAuthors(allowedAuthors: string): string[] {
+    try {
+      const parsed = JSON.parse(allowedAuthors) as unknown;
+      return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === 'string') : [];
+    } catch {
+      return [];
+    }
   }
 }

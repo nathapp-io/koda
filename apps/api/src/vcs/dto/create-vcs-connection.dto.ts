@@ -1,7 +1,13 @@
-import { IsString, IsEnum, IsOptional, IsUrl } from 'class-validator';
+import { IsArray, IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
 
 export enum VcsProviderType {
   GITHUB = 'github',
+}
+
+export enum VcsSyncModeType {
+  OFF = 'off',
+  POLLING = 'polling',
+  WEBHOOK = 'webhook',
 }
 
 export class CreateVcsConnectionDto {
@@ -9,16 +15,25 @@ export class CreateVcsConnectionDto {
   provider: VcsProviderType;
 
   @IsString()
+  repoOwner: string;
+
+  @IsString()
+  repoName: string;
+
+  @IsString()
   token: string;
 
-  @IsUrl()
-  repoUrl: string;
+  @IsOptional()
+  @IsEnum(VcsSyncModeType)
+  syncMode?: VcsSyncModeType;
 
   @IsOptional()
-  @IsString()
-  syncMode?: string;
+  @IsArray()
+  @IsString({ each: true })
+  allowedAuthors?: string[];
 
   @IsOptional()
-  @IsString()
-  webhookSecret?: string;
+  @IsInt()
+  @Min(60000)
+  pollingIntervalMs?: number;
 }

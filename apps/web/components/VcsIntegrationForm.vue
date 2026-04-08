@@ -11,8 +11,6 @@
         </FormControl>
         <SelectContent>
           <SelectItem value="github">{{ t('vcs.form.providerGithub') }}</SelectItem>
-          <SelectItem value="gitlab">{{ t('vcs.form.providerGitlab') }}</SelectItem>
-          <SelectItem value="bitbucket">{{ t('vcs.form.providerBitbucket') }}</SelectItem>
         </SelectContent>
       </Select>
       <FormMessage />
@@ -43,6 +41,10 @@
     <FormField name="syncMode" v-slot="{ componentField }">
       <FormLabel>{{ t('vcs.form.syncMode') }}</FormLabel>
       <RadioGroup v-bind="componentField" class="space-y-2">
+        <div class="flex items-center space-x-2">
+          <RadioGroupItem value="off" />
+          <label>{{ t('vcs.form.syncModeOff') }}</label>
+        </div>
         <div class="flex items-center space-x-2">
           <RadioGroupItem value="polling" />
           <label>{{ t('vcs.form.syncModePolling') }}</label>
@@ -97,6 +99,7 @@
         v-if="hasExisting"
         type="button"
         variant="destructive"
+        @click="emit('disconnect')"
       >
         {{ t('vcs.form.disconnect') }}
       </Button>
@@ -114,18 +117,18 @@ import { useAppToast } from '~/composables/useAppToast'
 
 interface VcsConnection {
   provider: string
-  owner: string
-  repo: string
-  token?: string
-  syncMode: 'polling' | 'webhook'
-  pollingInterval: number
-  authors?: string
+  repoOwner: string
+  repoName: string
+  syncMode: 'off' | 'polling' | 'webhook'
+  pollingIntervalMs: number
+  allowedAuthors: string[]
 }
 
 interface SyncResult {
-  created: number
-  updated: number
-  skipped: number
+  syncType: string
+  issuesSynced: number
+  issuesSkipped: number
+  tickets: Array<{ ref: string; title: string }>
 }
 
 const { t } = useI18n()
@@ -143,6 +146,7 @@ const emit = defineEmits<{
   testError: [error: string]
   syncComplete: [result: SyncResult]
   syncError: [error: string]
+  disconnect: []
 }>()
 
 const hasExisting = computed(() => !!props.existingConnection)
@@ -152,9 +156,9 @@ const formSchema = toTypedSchema(z.object({
   provider: z.string().min(1, t('vcs.validation.providerRequired')),
   owner: z.string().min(1, t('vcs.validation.ownerRequired')),
   repo: z.string().min(1, t('vcs.validation.repoRequired')),
-  token: z.string().min(1, t('vcs.validation.tokenRequired')),
-  syncMode: z.enum(['polling', 'webhook']),
-  pollingInterval: z.number().min(60, t('vcs.validation.pollingIntervalMin')).max(86400, t('vcs.validation.pollingIntervalMax')).optional(),
+  token: z.string().optional(),
+  syncMode: z.enum(['off', 'polling', 'webhook']),
+  pollingInterval: z.number().min(60000, t('vcs.validation.pollingIntervalMin')).max(86400000, t('vcs.validation.pollingIntervalMax')).optional(),
   authors: z.string().optional(),
 }))
 
@@ -162,12 +166,12 @@ const { handleSubmit, setValues, isSubmitting } = useForm({
   validationSchema: formSchema,
   initialValues: {
     provider: props.existingConnection?.provider || '',
-    owner: props.existingConnection?.owner || '',
-    repo: props.existingConnection?.repo || '',
+    owner: props.existingConnection?.repoOwner || '',
+    repo: props.existingConnection?.repoName || '',
     token: '',
-    syncMode: props.existingConnection?.syncMode || 'polling',
-    pollingInterval: props.existingConnection?.pollingInterval || 300,
-    authors: props.existingConnection?.authors || '',
+    syncMode: props.existingConnection?.syncMode || 'off',
+    pollingInterval: props.existingConnection?.pollingIntervalMs || 600000,
+    authors: props.existingConnection?.allowedAuthors?.join(', ') || '',
   },
 })
 
@@ -176,12 +180,12 @@ watch(() => props.existingConnection, (connection) => {
   if (connection) {
     setValues({
       provider: connection.provider || '',
-      owner: connection.owner || '',
-      repo: connection.repo || '',
+      owner: connection.repoOwner || '',
+      repo: connection.repoName || '',
       token: '',
-      syncMode: connection.syncMode || 'polling',
-      pollingInterval: connection.pollingInterval || 300,
-      authors: connection.authors || '',
+      syncMode: connection.syncMode || 'off',
+      pollingInterval: connection.pollingIntervalMs || 600000,
+      authors: connection.allowedAuthors?.join(', ') || '',
     })
   }
 }, { immediate: true })
@@ -189,14 +193,21 @@ watch(() => props.existingConnection, (connection) => {
 // Form submission handler
 const onSubmit = handleSubmit(async (values) => {
   try {
+    if (!hasExisting.value && !values.token) {
+      toast.error(t('vcs.validation.tokenRequired'))
+      return
+    }
+
     const payload = {
       provider: values.provider,
-      owner: values.owner,
-      repo: values.repo,
-      token: values.token,
+      repoOwner: values.owner,
+      repoName: values.repo,
+      ...(values.token ? { token: values.token } : {}),
       syncMode: values.syncMode,
-      pollingInterval: values.syncMode === 'polling' ? values.pollingInterval : undefined,
-      authors: values.authors || undefined,
+      pollingIntervalMs: values.syncMode === 'polling' ? values.pollingInterval : undefined,
+      allowedAuthors: values.authors
+        ? values.authors.split(',').map(author => author.trim()).filter(Boolean)
+        : undefined,
     }
 
     if (hasExisting.value) {
@@ -236,9 +247,9 @@ async function handleSyncNow() {
   try {
     const result = await $api.post<SyncResult>(`/projects/${props.slug}/vcs/sync`)
     toast.success(t('vcs.toast.syncComplete', {
-      created: result.created,
-      updated: result.updated,
-      skipped: result.skipped,
+      created: result.issuesSynced,
+      updated: 0,
+      skipped: result.issuesSkipped,
     }))
     emit('syncComplete', result)
   } catch (err) {

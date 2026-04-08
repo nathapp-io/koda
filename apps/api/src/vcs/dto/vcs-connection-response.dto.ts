@@ -1,16 +1,13 @@
 export class VcsConnectionResponseDto {
   id: string;
-  projectId: string;
   provider: string;
   repoOwner: string;
   repoName: string;
   syncMode: string;
-  allowedAuthors: string;
+  allowedAuthors: string[];
   pollingIntervalMs: number;
-  webhookSecret?: string;
-  lastSyncedAt?: Date;
+  lastSyncedAt: string | null;
   isActive: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-  // Note: encryptedToken is intentionally not included in the response DTO
+  createdAt: string;
+  updatedAt: string;
 }

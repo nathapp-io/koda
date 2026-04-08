@@ -72,10 +72,10 @@ const { $api } = useApi()
 const onSubmit = handleSubmit(async (formValues) => {
   try {
     const issueNumber = formValues.issueNumber as number
-    const response = await $api.post<{ ref: string }>(
+    const response = await $api.post<{ tickets: Array<{ ref: string }> }>(
       `/projects/${props.projectSlug}/vcs/sync/${issueNumber}`
     )
-    toast.success(t('vcs.importIssue.success', { ref: response.ref }))
+    toast.success(t('vcs.importIssue.success', { ref: response.tickets[0]?.ref || `${props.projectSlug}-${issueNumber}` }))
     emit('update:open', false)
     resetForm()
   } catch (error: unknown) {

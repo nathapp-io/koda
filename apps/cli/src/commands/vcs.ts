@@ -18,10 +18,10 @@ import {
   vcsControllerDeleteConnection,
   vcsControllerUpdateConnection,
   vcsControllerTestConnection,
-  vcsControllerSyncConnection,
-  vcsControllerImportIssue,
+  vcsControllerSyncAll,
+  vcsControllerSyncIssue,
   vcsControllerSyncPr,
-} from '../vcs-client.stub';
+} from '../generated/services.gen';
 
 /**
  * Format a connection for display
@@ -51,7 +51,7 @@ export function vcsCommand(program: Command): void {
     .option('--repo <repo>', 'Repository name')
     .option('--token <token>', 'API token for provider')
     .option('--project <slug>', 'Project slug (uses config if not provided)')
-    .option('--sync-mode <mode>', 'Sync mode (polling, webhook, manual)')
+    .option('--sync-mode <mode>', 'Sync mode (off, polling, webhook)')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
@@ -85,9 +85,10 @@ export function vcsCommand(program: Command): void {
         // Prepare request
         const requestBody = {
           provider: options.provider,
+          repoOwner: options.owner,
+          repoName: options.repo,
           token: options.token,
-          repoUrl: `${options.owner}/${options.repo}`,
-          syncMode: options.syncMode || 'polling',
+          syncMode: options.syncMode || 'off',
         };
 
         // Call API
@@ -204,8 +205,9 @@ export function vcsCommand(program: Command): void {
 
   vcs
     .command('update')
-    .option('--sync-mode <mode>', 'Sync mode (polling, webhook, manual)')
+    .option('--sync-mode <mode>', 'Sync mode (off, polling, webhook)')
     .option('--authors <authors>', 'Comma-separated list of allowed authors')
+    .option('--polling-interval-ms <ms>', 'Polling interval in milliseconds')
     .option('--project <slug>', 'Project slug (uses config if not provided)')
     .action(async (options) => {
       try {
@@ -230,18 +232,24 @@ export function vcsCommand(program: Command): void {
         OpenAPI.TOKEN = auth.apiKey;
 
         // Build request body
-        const requestBody: Record<string, string> = {};
+        const requestBody: Record<string, unknown> = {};
         if (options.syncMode) {
           requestBody.syncMode = options.syncMode;
         }
         if (options.authors) {
-          requestBody.allowedAuthors = options.authors;
+          requestBody.allowedAuthors = String(options.authors)
+            .split(',')
+            .map((author) => author.trim())
+            .filter(Boolean);
+        }
+        if (options.pollingIntervalMs) {
+          requestBody.pollingIntervalMs = Number(options.pollingIntervalMs);
         }
 
         // Call API
         await vcsControllerUpdateConnection({
           slug: ctx.projectSlug,
-          requestBody: requestBody as Record<string, string>,
+          requestBody,
         });
 
         console.log(VCS_MESSAGES.SETTINGS_UPDATED(ctx.projectSlug));
@@ -282,10 +290,10 @@ export function vcsCommand(program: Command): void {
           slug: ctx.projectSlug,
         });
 
-        if (result.success) {
+        if (result.ok) {
           console.log(VCS_MESSAGES.CONNECTION_OK);
         } else {
-          error(result.message || VCS_MESSAGES.CONNECTION_TEST_FAILED);
+          error(result.error || VCS_MESSAGES.CONNECTION_TEST_FAILED);
           process.exit(1);
           return;
         }
@@ -322,12 +330,12 @@ export function vcsCommand(program: Command): void {
         OpenAPI.TOKEN = auth.apiKey;
 
         // Call API
-        const result = await vcsControllerSyncConnection({
+        const result = await vcsControllerSyncAll({
           slug: ctx.projectSlug,
         });
 
         console.log(
-          `Sync complete: created ${result.created}, updated ${result.updated}, skipped ${result.skipped}`
+          `Sync complete: created ${result.issuesSynced}, skipped ${result.issuesSkipped}`
         );
 
         process.exit(0);
@@ -370,12 +378,13 @@ export function vcsCommand(program: Command): void {
         OpenAPI.TOKEN = auth.apiKey;
 
         // Call API
-        const result = await vcsControllerImportIssue({
+        const result = await vcsControllerSyncIssue({
           slug: ctx.projectSlug,
-          issueNumber: issueNumber,
+          issueNumber: String(issueNumber),
         });
 
-        console.log(VCS_MESSAGES.ISSUE_IMPORTED(result.ticketRef));
+        const firstTicket = result.tickets[0];
+        console.log(VCS_MESSAGES.ISSUE_IMPORTED(firstTicket?.ref || `${ctx.projectSlug}-${issueNumber}`));
 
         process.exit(0);
       } catch (err: unknown) {

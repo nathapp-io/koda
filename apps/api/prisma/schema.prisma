@@ -224,9 +224,9 @@ model VcsConnection {
   repoOwner            String
   repoName             String
   encryptedToken       String    // encrypted access token
-  syncMode             String    // manual | webhook | polling
-  allowedAuthors       String    // JSON string of allowed authors
-  pollingIntervalMs    Int       // polling interval in milliseconds
+  syncMode             String    @default("off") // off | webhook | polling
+  allowedAuthors       String    @default("[]") // JSON string of allowed authors
+  pollingIntervalMs    Int       @default(600000) // polling interval in milliseconds
   webhookSecret        String?   // secret for validating webhook payloads
   lastSyncedAt         DateTime?
   isActive             Boolean   @default(true)
@@ -240,11 +240,11 @@ model VcsConnection {
 model VcsSyncLog {
   id              String   @id @default(cuid())
   vcsConnectionId String
-  syncType        String   // issues | prs | comments | etc
+  syncType        String   // polling | webhook | manual
   issuesSynced    Int      @default(0)
   issuesSkipped   Int      @default(0)
   errorMessage    String?
-  startedAt       DateTime
+  startedAt       DateTime @default(now())
   completedAt     DateTime?
 
   vcsConnection   VcsConnection @relation(fields: [vcsConnectionId], references: [id], onDelete: Cascade)

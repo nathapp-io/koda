@@ -1814,50 +1814,6 @@
         ]
       }
     },
-    "/api/projects/{slug}/vcs/../vcs-webhook": {
-      "post": {
-        "operationId": "VcsController_handleWebhook",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "x-hub-signature-256",
-            "required": true,
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "x-github-event",
-            "required": true,
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "tags": [
-          "vcs"
-        ]
-      }
-    },
     "/api/projects/{slug}/vcs/sync/{issueNumber}": {
       "post": {
         "operationId": "VcsController_syncIssue",
@@ -2004,6 +1960,49 @@
           }
         ],
         "summary": "Manually sync PR status for all active pull requests",
+        "tags": [
+          "vcs"
+        ]
+      }
+    },
+    "/api/projects/{slug}/vcs-webhook": {
+      "post": {
+        "operationId": "VcsWebhookController_handleWebhook",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-hub-signature-256",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-github-event",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Webhook processed"
+          },
+          "401": {
+            "description": "Invalid webhook signature"
+          }
+        },
+        "summary": "Receive GitHub VCS issue webhook",
         "tags": [
           "vcs"
         ]
@@ -3412,33 +3411,45 @@
               "github"
             ]
           },
+          "repoOwner": {
+            "type": "string"
+          },
+          "repoName": {
+            "type": "string"
+          },
           "token": {
             "type": "string"
           },
-          "repoUrl": {
-            "type": "string",
-            "format": "uri"
-          },
           "syncMode": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "off",
+              "polling",
+              "webhook"
+            ]
           },
-          "webhookSecret": {
-            "type": "string"
+          "allowedAuthors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pollingIntervalMs": {
+            "type": "number",
+            "minimum": 60000
           }
         },
         "required": [
           "provider",
-          "token",
-          "repoUrl"
+          "repoOwner",
+          "repoName",
+          "token"
         ]
       },
       "VcsConnectionResponseDto": {
         "type": "object",
         "properties": {
           "id": {
-            "type": "string"
-          },
-          "projectId": {
             "type": "string"
           },
           "provider": {
@@ -3454,39 +3465,37 @@
             "type": "string"
           },
           "allowedAuthors": {
-            "type": "string"
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "pollingIntervalMs": {
             "type": "number"
           },
-          "webhookSecret": {
-            "type": "string"
-          },
           "lastSyncedAt": {
-            "format": "date-time",
-            "type": "string"
+            "type": "string",
+            "nullable": true
           },
           "isActive": {
             "type": "boolean"
           },
           "createdAt": {
-            "format": "date-time",
             "type": "string"
           },
           "updatedAt": {
-            "format": "date-time",
             "type": "string"
           }
         },
         "required": [
           "id",
-          "projectId",
           "provider",
           "repoOwner",
           "repoName",
           "syncMode",
           "allowedAuthors",
           "pollingIntervalMs",
+          "lastSyncedAt",
           "isActive",
           "createdAt",
           "updatedAt"
@@ -3499,34 +3508,47 @@
             "type": "string"
           },
           "syncMode": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "off",
+              "polling",
+              "webhook"
+            ]
           },
-          "webhookSecret": {
-            "type": "string"
+          "allowedAuthors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pollingIntervalMs": {
+            "type": "number",
+            "minimum": 60000
           }
         }
       },
       "TestConnectionResultDto": {
         "type": "object",
         "properties": {
-          "success": {
+          "ok": {
             "type": "boolean"
-          },
-          "latencyMs": {
-            "type": "number"
           },
           "error": {
             "type": "string"
           }
         },
         "required": [
-          "success",
-          "latencyMs"
+          "ok"
         ]
       },
       "SyncResultDto": {
         "type": "object",
         "properties": {
+          "syncType": {
+            "type": "string",
+            "description": "How this sync was triggered",
+            "example": "manual"
+          },
           "issuesSynced": {
             "type": "number",
             "description": "Number of issues successfully synced",
@@ -3537,42 +3559,29 @@
             "description": "Number of issues skipped (already synced or filtered)",
             "example": 2
           },
-          "createdTickets": {
+          "tickets": {
             "type": "array",
-            "description": "List of created ticket references",
+            "description": "List of created ticket refs",
             "items": {
               "type": "object",
               "properties": {
-                "id": {
+                "ref": {
                   "type": "string",
-                  "example": "ticket-123"
+                  "example": "PROJ-1"
                 },
-                "projectKey": {
+                "title": {
                   "type": "string",
-                  "example": "PROJ"
-                },
-                "number": {
-                  "type": "number",
-                  "example": 1
+                  "example": "Imported GitHub issue"
                 }
               }
             }
-          },
-          "errors": {
-            "type": "array",
-            "description": "List of errors encountered during sync (optional)",
-            "items": {
-              "type": "string"
-            },
-            "example": [
-              "Issue 100: Network timeout"
-            ]
           }
         },
         "required": [
+          "syncType",
           "issuesSynced",
           "issuesSkipped",
-          "createdTickets"
+          "tickets"
         ]
       },
       "CreateTicketLinkDto": {
