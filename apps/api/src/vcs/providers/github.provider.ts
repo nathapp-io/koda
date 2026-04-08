@@ -30,7 +30,6 @@ interface GitHubRepoResponse {
  * GitHub REST API response for ref creation
  */
 interface GitHubRefResponse {
-  ref: string;
   object: {
     sha: string;
   };
@@ -173,6 +172,11 @@ export class GitHubProvider implements IVcsProvider {
   }
 
   async createPullRequest(params: CreatePrParams): Promise<VcsPullRequest> {
+    const branchName = params.branchName ?? params.headBranch;
+    if (!branchName) {
+      throw new ValidationAppException({}, 'vcs');
+    }
+
     const repoResponse = await this.httpClient.get(
       `https://api.github.com/repos/${this.repoOwner}/${this.repoName}`,
       {
@@ -184,23 +188,32 @@ export class GitHubProvider implements IVcsProvider {
 
     const repoData = repoResponse.data as GitHubRepoResponse;
     const defaultBranch = repoData.default_branch;
+    const baseBranch = params.baseBranch ?? defaultBranch;
 
-    let branchSha: string;
+    const defaultBranchRefResponse = await this.httpClient.get(
+      `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/git/ref/heads/${defaultBranch}`,
+      {
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+        },
+      },
+    );
+    const defaultBranchRefData = defaultBranchRefResponse.data as Partial<GitHubRefResponse>;
+    const defaultBranchSha = defaultBranchRefData.object?.sha ?? defaultBranch;
+
     try {
-      const refResponse = await this.httpClient.post(
+      await this.httpClient.post(
         `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/git/refs`,
         {
           headers: {
             Authorization: `Bearer ${this.token}`,
           },
           body: {
-            ref: `refs/heads/${params.headBranch}`,
-            sha: defaultBranch,
+            ref: `refs/heads/${branchName}`,
+            sha: defaultBranchSha,
           },
         },
       );
-      const refData = refResponse.data as GitHubRefResponse;
-      branchSha = refData.object.sha;
     } catch (error: unknown) {
       const errorObj = error as Record<string, unknown>;
       const status = (errorObj?.response as Record<string, unknown>)?.status;
@@ -220,9 +233,9 @@ export class GitHubProvider implements IVcsProvider {
         body: {
           title: params.title,
           body: params.body,
-          head: params.headBranch,
-          base: defaultBranch,
-          draft: true,
+          head: branchName,
+          base: baseBranch,
+          draft: params.draft ?? true,
         },
       },
     );
@@ -232,7 +245,7 @@ export class GitHubProvider implements IVcsProvider {
     return {
       number: prData.number,
       url: prData.html_url,
-      branchName: params.headBranch,
+      branchName,
       state: prData.state,
       draft: prData.draft,
     };

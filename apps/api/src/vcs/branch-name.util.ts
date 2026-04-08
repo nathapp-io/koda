@@ -7,16 +7,18 @@ export function buildBranchName(
   ticketNumber: number,
   ticketTitle: string,
 ): string {
+  const ticketRef = `${projectKey}-${ticketNumber}`;
+  const prefix = `koda/${ticketRef}`;
+  const maxSlugLength = Math.max(0, 100 - prefix.length - 1);
+
   const slug = ticketTitle
     .toLowerCase()
     .replace(/[^a-z0-9\s-]/g, '')
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, 100 - projectKey.length - ticketNumber.toString().length - 10);
+    .slice(0, maxSlugLength)
+    .replace(/-+$/g, '');
 
-  const prefix = projectKey.toLowerCase();
-  const ticketRef = `${projectKey}-${ticketNumber}`;
-
-  return `${prefix}/${ticketRef}/${slug}`;
+  return `${prefix}/${slug}`;
 }

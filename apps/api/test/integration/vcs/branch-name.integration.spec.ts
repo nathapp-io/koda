@@ -27,7 +27,7 @@ describe('buildBranchName', () => {
     it('includes project prefix and ticket number in length count', () => {
       const longTitle = 'A very long title that exceeds the maximum allowed length for branch names';
       const result = buildBranchName('PROJ', 1, longTitle);
-      expect(result).toMatch(/^proj\/PROJ-1\//);
+      expect(result).toMatch(/^koda\/PROJ-1\//);
     });
   });
 
@@ -62,7 +62,7 @@ describe('buildBranchName', () => {
   });
 
   describe('project key formatting', () => {
-    it('converts project key to lowercase in prefix', () => {
+    it('uses koda as fixed prefix', () => {
       const result = buildBranchName('KODA', 1, 'Test');
       expect(result).toMatch(/^koda\//);
     });
@@ -117,9 +117,9 @@ describe('buildBranchName', () => {
   });
 
   describe('branch name format', () => {
-    it('returns branch name in format {projectLower}/{projectKey}-{ticketNumber}/{slug}', () => {
+    it('returns branch name in format koda/{projectKey}-{ticketNumber}/{slug}', () => {
       const result = buildBranchName('KODA', 42, 'Fix bug');
-      expect(result).toMatch(/^[a-z]+\/KODA-\d+\/[a-z0-9-]+$/);
+      expect(result).toMatch(/^koda\/KODA-\d+\/[a-z0-9-]+$/);
     });
 
     it('always has three parts separated by slashes', () => {

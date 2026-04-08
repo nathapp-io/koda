@@ -167,6 +167,12 @@ function extractPrNumber(externalRef: string | null): string {
   return parts[parts.length - 1] || ''
 }
 
+function extractRepoRef(externalRef: string | null): string {
+  if (!externalRef) return ''
+  const parts = externalRef.split('#')
+  return parts[0] || ''
+}
+
 const githubPrLinksWithState = computed(() => {
   if (!ticket.value?.links) return []
   return ticket.value.links.filter(link => (link.linkType === 'pr' || (!link.linkType && link.provider === 'github' && link.prNumber)) && link.prState)
@@ -306,6 +312,16 @@ function extractCommitSha(url: string): string {
             class="whitespace-pre-wrap text-sm"
             v-html="renderedDescription"
           />
+        </div>
+
+        <div v-if="githubPrLinks.length > 0" class="space-y-1">
+          <p
+            v-for="link in githubPrLinks"
+            :key="`pr-created-${link.id}`"
+            class="text-sm text-muted-foreground"
+          >
+            {{ t('tickets.pr.created', { repo: extractRepoRef(link.externalRef), number: extractPrNumber(link.externalRef) }) }}
+          </p>
         </div>
 
         <CommentThread
