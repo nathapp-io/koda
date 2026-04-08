@@ -59,6 +59,7 @@ test.describe('VCS-P1-005-C: Settings page VCS Integration tab E2E', () => {
   async function openSettingsWithoutConnection(page: Page) {
     await clearVcsConnection()
     await page.goto(`/${projectSlug}/settings`)
+    await openVcsTab(page)
   }
 
   async function openSettingsWithConnection(
@@ -76,6 +77,25 @@ test.describe('VCS-P1-005-C: Settings page VCS Integration tab E2E', () => {
     await clearVcsConnection()
     await createVcsConnection(overrides)
     await page.goto(`/${projectSlug}/settings`)
+    await openVcsTab(page)
+  }
+
+  async function openVcsTab(page: Page) {
+    const vcsTab = page.locator('[role="tab"]', { hasText: /VCS|vcs|集成/i })
+    await expect(vcsTab.first()).toBeVisible()
+    // Click and wait for navigation/load
+    await Promise.all([
+      page.waitForLoadState('domcontentloaded'),
+      vcsTab.first().click()
+    ])
+    // Wait for Vue reactivity
+    await page.waitForTimeout(1500)
+    // Ensure we're on the right tabpanel by clicking again if needed
+    const ownerField = page.getByTestId('owner')
+    if (!(await ownerField.isVisible().catch(() => false))) {
+      await vcsTab.first().click()
+      await page.waitForTimeout(1000)
+    }
   }
 
   test.beforeAll(async () => {

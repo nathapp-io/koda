@@ -101,6 +101,17 @@ async function saveEdit(comment: Comment) {
     toast.error(extractApiError(err))
   }
 }
+
+async function deleteComment(comment: Comment) {
+  if (!window.confirm(t('comments.confirmDelete'))) return
+  try {
+    await $api.delete(`/comments/${comment.id}`)
+    await refreshComments()
+    toast.success(t('comments.toast.deleted'))
+  } catch (err: unknown) {
+    toast.error(extractApiError(err))
+  }
+}
 </script>
 
 <template>
@@ -138,6 +149,9 @@ async function saveEdit(comment: Comment) {
           <p class="text-sm whitespace-pre-wrap">{{ comment.body }}</p>
           <Button size="sm" variant="ghost" @click="startEdit(comment)">
             {{ t('common.edit') }}
+          </Button>
+          <Button size="sm" variant="ghost" class="text-destructive" @click="deleteComment(comment)">
+            {{ t('common.delete') }}
           </Button>
         </template>
       </div>

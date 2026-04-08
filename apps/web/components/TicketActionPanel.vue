@@ -83,17 +83,20 @@ async function handleDialogSubmit() {
     <!-- VERIFIED: Start -->
     <template v-else-if="ticket.status === 'VERIFIED'">
       <Button class="w-full" @click="handleStart">{{ t('tickets.actions.start') }}</Button>
+      <Button class="w-full" variant="outline" @click="performAction('close')">{{ t('tickets.actions.close') }}</Button>
     </template>
 
     <!-- IN_PROGRESS: Submit Fix + Reject -->
     <template v-else-if="ticket.status === 'IN_PROGRESS'">
       <Button class="w-full" @click="openDialog('fix')">{{ t('tickets.actions.submitFix') }}</Button>
+      <Button class="w-full" variant="outline" @click="performAction('close')">{{ t('tickets.actions.close') }}</Button>
       <Button class="w-full" variant="destructive" @click="openDialog('reject')">{{ t('tickets.actions.reject') }}</Button>
     </template>
 
     <!-- VERIFY_FIX: Approve Fix + Fail Fix -->
     <template v-else-if="ticket.status === 'VERIFY_FIX'">
       <Button class="w-full" @click="handleApproveFix">{{ t('tickets.actions.approveFix') }}</Button>
+      <Button class="w-full" variant="outline" @click="performAction('close')">{{ t('tickets.actions.close') }}</Button>
       <Button class="w-full" variant="outline" @click="openDialog('verify-fix-fail')">{{ t('tickets.actions.failFix') }}</Button>
     </template>
 
