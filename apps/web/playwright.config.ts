@@ -41,6 +41,7 @@ export default defineConfig({
       env: {
         DATABASE_URL: `file:${E2E_DB}`,
         API_PORT: String(API_PORT),
+        VCS_ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
       },
     },
     {

@@ -2,7 +2,7 @@
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { extractApiError } from '~/composables/useApi'
+import { ApiError, extractApiError } from '~/composables/useApi'
 
 definePageMeta({ layout: 'default' })
 
@@ -27,7 +27,6 @@ const slug = route.params.project as string
 const { $api } = useApi()
 const { t } = useI18n()
 const toast = useAppToast()
-type ApiError = { response?: { status?: number } }
 
 // Fetch existing VCS connection
 const { data: connectionData, pending: loadingConnection, error: connectionError, refresh: refreshConnection } = useAsyncData(
@@ -36,7 +35,9 @@ const { data: connectionData, pending: loadingConnection, error: connectionError
     try {
       return await $api.get(`/projects/${slug}/vcs`) as VcsConnection
     } catch (error) {
-      if ((error as ApiError).response?.status === 404) {
+      const fetchStatus = (error as { response?: { status?: number } }).response?.status
+      const appCode = error instanceof ApiError ? error.code : undefined
+      if (fetchStatus === 404 || appCode === 404) {
         return null
       }
       throw error
@@ -195,7 +196,7 @@ async function disconnect() {
               <FormLabel>{{ t('vcs.form.provider') }}</FormLabel>
               <Select v-bind="componentField">
                 <FormControl>
-                  <SelectTrigger>
+                  <SelectTrigger data-testid="provider">
                     <SelectValue :placeholder="t('vcs.form.providerPlaceholder')" />
                   </SelectTrigger>
                 </FormControl>
@@ -209,28 +210,28 @@ async function disconnect() {
             <!-- Owner Field -->
             <FormField name="owner" v-slot="{ componentField }">
               <FormLabel>{{ t('vcs.form.owner') }}</FormLabel>
-              <Input :placeholder="t('vcs.form.ownerPlaceholder')" v-bind="componentField" type="text" />
+              <Input data-testid="owner" :placeholder="t('vcs.form.ownerPlaceholder')" v-bind="componentField" type="text" />
               <FormMessage />
             </FormField>
 
             <!-- Repo Field -->
             <FormField name="repo" v-slot="{ componentField }">
               <FormLabel>{{ t('vcs.form.repo') }}</FormLabel>
-              <Input :placeholder="t('vcs.form.repoPlaceholder')" v-bind="componentField" type="text" />
+              <Input data-testid="repo" :placeholder="t('vcs.form.repoPlaceholder')" v-bind="componentField" type="text" />
               <FormMessage />
             </FormField>
 
             <!-- Token Field -->
             <FormField name="token" v-slot="{ componentField }">
               <FormLabel>{{ t('vcs.form.token') }}</FormLabel>
-              <Input :placeholder="t('vcs.form.tokenPlaceholder')" v-bind="componentField" type="password" />
+              <Input data-testid="token" :placeholder="t('vcs.form.tokenPlaceholder')" v-bind="componentField" type="password" />
               <FormMessage />
             </FormField>
 
             <!-- Sync Mode Field (RadioGroup) -->
             <FormField name="syncMode" v-slot="{ componentField }">
               <FormLabel>{{ t('vcs.form.syncMode') }}</FormLabel>
-              <RadioGroup v-bind="componentField" class="space-y-2">
+              <RadioGroup data-testid="syncMode" v-bind="componentField" class="space-y-2">
                 <div class="flex items-center space-x-2">
                   <RadioGroupItem value="off" />
                   <label>{{ t('vcs.form.syncModeOff') }}</label>
@@ -250,14 +251,14 @@ async function disconnect() {
             <!-- Polling Interval Field -->
             <FormField name="pollingInterval" v-slot="{ componentField }">
               <FormLabel>{{ t('vcs.form.pollingInterval') }}</FormLabel>
-              <Input :placeholder="t('vcs.form.pollingIntervalPlaceholder')" v-bind="componentField" type="number" />
+              <Input data-testid="pollingInterval" :placeholder="t('vcs.form.pollingIntervalPlaceholder')" v-bind="componentField" type="number" />
               <FormMessage />
             </FormField>
 
             <!-- Authors Field -->
             <FormField name="authors" v-slot="{ componentField }">
               <FormLabel>{{ t('vcs.form.authors') }}</FormLabel>
-              <Input :placeholder="t('vcs.form.authorsPlaceholder')" v-bind="componentField" type="text" />
+              <Input data-testid="authors" :placeholder="t('vcs.form.authorsPlaceholder')" v-bind="componentField" type="text" />
               <FormMessage />
             </FormField>
 
