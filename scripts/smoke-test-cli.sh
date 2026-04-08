@@ -351,6 +351,8 @@ assert "KB add via API"      '"id"\|"ret"\|success\|doc'  "$KB_ADD"
 
 assert "koda kb list"        "manual\|smoke\|Source\|ID"   "$(koda kb list --project koda)"
 assert "koda kb search"      "result\|score\|deploy\|no\|found\|No"  "$(koda kb search --project koda --query 'deployment')"
+# NOTE: kb optimize/delete are admin-only endpoints. Smoke CLI runs with agent API key,
+# so expected behavior here is authorization failure, not success.
 assert "koda kb optimize (agent unauthorized)" "access denied\|forbidden" "$(koda kb optimize --project koda)"
 assert "koda kb delete (agent unauthorized)"   "access denied\|forbidden" "$(koda kb delete --project koda --source-id smoke-doc-1 --force)"
 
