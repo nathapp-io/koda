@@ -207,6 +207,7 @@ export class VcsPrSyncService {
               connection,
               encryptionKey,
               prStatus.branchName,
+              prStatus.number,
             ).catch((err) => {
               this.logger.warn(
                 `[vcs-pr-sync] Failed to extract links for ticket ${ticketData.id}: ${err instanceof Error ? err.message : String(err)}`,

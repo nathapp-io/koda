@@ -29,6 +29,10 @@ paths:
 - Inject `PrismaService<PrismaClient>` from `@nathapp/nestjs-prisma`
 - Access client via `this.prisma.client`
 - Schema lives at `apps/api/prisma/schema.prisma` — never at monorepo root
+- In tests, use official Prisma testing utilities from `@nathapp/nestjs-prisma`:
+  ```ts
+  import { createMockPrismaClient, createMockPrismaService } from '@nathapp/nestjs-prisma';
+  ```
 
 ## Responses & Exceptions
 - Controllers return `JsonResponse.Ok<T>(data)` — never double-cast
@@ -43,7 +47,9 @@ paths:
 - E2E file is the single source of truth for API lifecycle — do not split it
 - Test both happy path AND at least one error case per endpoint
 - Assert exact status codes — no range checks
-- **Mock at service boundary** — don't mock Prisma directly; use Prisma test client pattern
+- For unit/integration tests that mock DB access, must use `createMockPrismaService()` as the provider value for `PrismaService`
+- Use `createMockPrismaClient()` when you need direct client-level mocking behavior
+- Avoid hand-rolled Prisma mock objects unless there is a clear gap in the provided utilities
 
 ## Quality Gates (run before completing any story)
 ```bash

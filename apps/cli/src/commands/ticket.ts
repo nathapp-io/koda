@@ -52,6 +52,7 @@ type TicketLink = {
   prNumber?: number | null;
   prUpdatedAt?: string | null;
   linkType?: string;
+  title?: string | null;
 };
 
 export function ticketCommand(program: Command): void {
@@ -281,19 +282,21 @@ export function ticketCommand(program: Command): void {
             // Group links by linkType
             const branches = ticketData.links.filter(l => l.linkType === 'branch');
             const commits = ticketData.links.filter(l => l.linkType === 'commit');
-            const pullRequests = ticketData.links.filter(l => l.linkType === 'pull_request' || !l.linkType);
+            const pullRequests = ticketData.links.filter(l => l.linkType === 'pr' || (!l.linkType && l.prNumber));
 
             if (branches.length > 0) {
               console.log(`\nBranches:`);
               for (const link of branches) {
-                console.log(`  - ${link.url}`);
+                console.log(`  - ${link.externalRef || link.url}`);
               }
             }
 
             if (commits.length > 0) {
               console.log(`\nCommits:`);
               for (const link of commits) {
-                console.log(`  - ${link.url}`);
+                const sha = link.url.split('/').pop()?.slice(0, 7) || link.url;
+                const summary = link.title || link.externalRef || link.url;
+                console.log(`  - ${sha} - ${summary}`);
               }
             }
 

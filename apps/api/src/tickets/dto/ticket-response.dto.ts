@@ -105,6 +105,8 @@ export class TicketResponseDto {
       prState: l.prState ?? null,
       prNumber: l.prNumber ?? null,
       prUpdatedAt: l.prUpdatedAt ?? null,
+      linkType: l.linkType ?? 'url',
+      title: l.linkType === 'commit' ? l.externalRef ?? null : null,
       createdAt: l.createdAt,
     }));
 

@@ -158,7 +158,7 @@ function extractIssueNumber(url: string): string {
 
 const githubPrLinks = computed(() => {
   if (!ticket.value?.links) return []
-  return ticket.value.links.filter(link => link.provider === 'github' && link.externalRef)
+  return ticket.value.links.filter(link => link.linkType === 'pr' || (!link.linkType && link.provider === 'github' && link.prNumber))
 })
 
 function extractPrNumber(externalRef: string | null): string {
@@ -169,7 +169,7 @@ function extractPrNumber(externalRef: string | null): string {
 
 const githubPrLinksWithState = computed(() => {
   if (!ticket.value?.links) return []
-  return ticket.value.links.filter(link => link.provider === 'github' && link.prState)
+  return ticket.value.links.filter(link => (link.linkType === 'pr' || (!link.linkType && link.provider === 'github' && link.prNumber)) && link.prState)
 })
 
 function prStateClass(state: string | null | undefined): string {
@@ -183,7 +183,7 @@ function prStateClass(state: string | null | undefined): string {
 // VCS Link filtering by linkType
 const vcsPullRequestLinks = computed(() => {
   if (!ticket.value?.links) return []
-  return ticket.value.links.filter(link => link.linkType === 'pull_request' || (!link.linkType && link.provider === 'github' && link.externalRef))
+  return ticket.value.links.filter(link => link.linkType === 'pr' || (!link.linkType && link.provider === 'github' && link.prNumber))
 })
 
 const vcsBranchLinks = computed(() => {
@@ -316,11 +316,11 @@ function extractCommitSha(url: string): string {
 
         <!-- VCS Links Section grouped by linkType -->
         <div v-if="vcsPullRequestLinks.length > 0 || vcsBranchLinks.length > 0 || vcsCommitLinks.length > 0" class="mt-6">
-          <h3 class="text-lg font-semibold mb-3">VCS Links</h3>
+          <h3 class="text-lg font-semibold mb-3">{{ t('tickets.vcs.title') }}</h3>
 
           <!-- Pull Requests Subsection -->
-          <div v-if="vcsPullRequestLinks.length > 0" class="mb-4" data-link-type="pull_request">
-            <h4 class="text-sm font-medium text-muted-foreground mb-2">{{ t('vcs.links.pull_request') }}s</h4>
+          <div v-if="vcsPullRequestLinks.length > 0" class="mb-4" data-link-type="pr">
+            <h4 class="text-sm font-medium text-muted-foreground mb-2">{{ t('tickets.vcs.pullRequests') }}</h4>
             <div v-for="link in vcsPullRequestLinks" :key="link.id" class="flex items-center gap-2 mb-2">
               <a
                 :href="link.url"
@@ -338,7 +338,7 @@ function extractCommitSha(url: string): string {
 
           <!-- Branches Subsection -->
           <div v-if="vcsBranchLinks.length > 0" class="mb-4" data-link-type="branch">
-            <h4 class="text-sm font-medium text-muted-foreground mb-2">{{ t('vcs.links.branch') }}es</h4>
+            <h4 class="text-sm font-medium text-muted-foreground mb-2">{{ t('tickets.vcs.branches') }}</h4>
             <div v-for="link in vcsBranchLinks" :key="link.id" class="mb-2">
               <a
                 :href="link.url"
@@ -353,7 +353,7 @@ function extractCommitSha(url: string): string {
 
           <!-- Commits Subsection -->
           <div v-if="vcsCommitLinks.length > 0" data-link-type="commit">
-            <h4 class="text-sm font-medium text-muted-foreground mb-2">{{ t('vcs.links.commit') }}s</h4>
+            <h4 class="text-sm font-medium text-muted-foreground mb-2">{{ t('tickets.vcs.commits') }}</h4>
             <div v-for="link in vcsCommitLinks" :key="link.id" class="mb-2">
               <a
                 :href="link.url"

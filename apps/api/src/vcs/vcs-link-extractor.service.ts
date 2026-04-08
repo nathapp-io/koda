@@ -39,6 +39,7 @@ export class VcsLinkExtractorService {
     connection: VcsConnection,
     encryptionKey: string,
     branchName: string,
+    prNumber?: number,
   ): Promise<void> {
     const provider = createVcsProvider(connection.provider, {
       provider: connection.provider,
@@ -48,22 +49,22 @@ export class VcsLinkExtractorService {
 
     // Get PR number from externalVcsId (format: "owner/repo#123" or just "123")
     // Extract any trailing digits as the PR number
-    let prNumber = 0;
-    if (ticket.externalVcsId) {
+    let resolvedPrNumber = prNumber ?? 0;
+    if (!resolvedPrNumber && ticket.externalVcsId) {
       const match = ticket.externalVcsId.match(/(\d+)$/);
       if (match) {
-        prNumber = parseInt(match[1], 10);
+        resolvedPrNumber = parseInt(match[1], 10);
       }
     }
 
     // Get PR status to obtain the actual PR number and verify the PR exists
-    const prStatus = await provider.getPullRequestStatus(prNumber);
+    const prStatus = await provider.getPullRequestStatus(resolvedPrNumber);
 
     // Create branch link URL: https://github.com/{owner}/{repo}/tree/{branchName}
     const branchUrl = `https://github.com/${connection.repoOwner}/${connection.repoName}/tree/${branchName}`;
 
     // Upsert branch link
-    await this.upsertTicketLink(ticket.id, branchUrl, 'github', 'branch');
+    await this.upsertTicketLink(ticket.id, branchUrl, 'github', 'branch', branchName);
 
     // Try to list commits and create commit links
     let commits: { sha: string; message: string; authorLogin: string; url: string; date: Date }[] = [];
@@ -92,7 +93,7 @@ export class VcsLinkExtractorService {
 
     // Create commit links for matching commits
     for (const commit of uniqueCommits) {
-      await this.upsertTicketLink(ticket.id, commit.url, 'github', 'commit');
+      await this.upsertTicketLink(ticket.id, commit.url, 'github', 'commit', commit.message, commit.date);
     }
   }
 
@@ -107,6 +108,8 @@ export class VcsLinkExtractorService {
     url: string,
     provider: string,
     linkType: string,
+    externalRef?: string,
+    createdAt?: Date,
   ): Promise<void> {
     const existing = await this.db.ticketLink.findFirst({
       where: { ticketId, url },
@@ -116,12 +119,29 @@ export class VcsLinkExtractorService {
       // Use upsert for existing links to satisfy AC3 test
       await this.db.ticketLink.upsert({
         where: { ticketId_url: { ticketId, url } },
-        create: { ticketId, url, provider, linkType },
-        update: { linkType },
+        create: {
+          ticketId,
+          url,
+          provider,
+          linkType,
+          externalRef: externalRef ?? null,
+          ...(createdAt ? { createdAt } : {}),
+        },
+        update: {
+          linkType,
+          externalRef: externalRef ?? null,
+        },
       });
     } else {
       await this.db.ticketLink.create({
-        data: { ticketId, url, provider, linkType },
+        data: {
+          ticketId,
+          url,
+          provider,
+          linkType,
+          externalRef: externalRef ?? null,
+          ...(createdAt ? { createdAt } : {}),
+        },
       });
     }
   }

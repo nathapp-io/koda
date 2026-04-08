@@ -160,6 +160,7 @@ export class TicketTransitionsService {
               url: `https://github.com/${connection.repoOwner}/${connection.repoName}/pulls/pending`,
               provider: 'github',
               externalRef: `${connection.repoOwner}/${connection.repoName}#pending`,
+              linkType: 'pr',
             },
           }).then((link): Promise<void> => {
             return provider.createPullRequest({
@@ -177,6 +178,7 @@ export class TicketTransitionsService {
                   prNumber: pr.number,
                   prState: 'draft',
                   prUpdatedAt: new Date(),
+                  linkType: 'pr',
                 },
               }) as unknown as Promise<void>;
             });

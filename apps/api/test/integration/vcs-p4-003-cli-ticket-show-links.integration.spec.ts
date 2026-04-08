@@ -5,7 +5,7 @@
  *        'Links' or 'VCS Links' section. Branch links appear under a 'branch' or 'branches'
  *        heading. Commit links appear under a 'commit' or 'commits' heading.
  * AC-23: CLI: `koda ticket show <ref> --json` returns valid JSON where the `links` array
- *        contains objects each having a `linkType` property with value 'pull_request',
+ *        contains objects each having a `linkType` property with value 'pr',
  *        'branch', or 'commit'.
  */
 import { readFileSync } from 'fs';
@@ -39,6 +39,7 @@ describe('VCS-P4-003 AC6: ticket show displays links grouped by type', () => {
     const hasLinkTypeHandling =
       source.includes("linkType === 'branch'") ||
       source.includes("linkType === 'commit'") ||
+      source.includes("linkType === 'pr'") ||
       source.includes("link.linkType") ||
       (source.includes('branch') && source.includes('commit'));
     expect(hasLinkTypeHandling).toBe(true);
@@ -71,7 +72,7 @@ describe('VCS-P4-003 AC7: ticket show --json includes linkType field', () => {
     const ticketLinkBlock = ticketLinkMatch ? ticketLinkMatch[0] : '';
     expect(ticketLinkBlock).toContain('linkType');
     // Verify TicketDetail references TicketLink for links
-    const ticketDetailMatch = source.match(/type TicketDetail = \{[\s\S]+?\n\};/m);
+    const ticketDetailMatch = source.match(/type TicketDetail = TicketRow & \{[\s\S]+?\n\};/m);
     expect(ticketDetailMatch).not.toBeNull();
     const ticketDetailBlock = ticketDetailMatch ? ticketDetailMatch[0] : '';
     expect(ticketDetailBlock).toContain('TicketLink');

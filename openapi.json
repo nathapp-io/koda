@@ -1632,6 +1632,549 @@
         ]
       }
     },
+    "/api/projects/{slug}/vcs": {
+      "post": {
+        "operationId": "VcsController_createConnection",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateVcsConnectionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VcsConnectionResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "vcs"
+        ]
+      },
+      "get": {
+        "operationId": "VcsController_getConnection",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VcsConnectionResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "vcs"
+        ]
+      },
+      "patch": {
+        "operationId": "VcsController_updateConnection",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateVcsConnectionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VcsConnectionResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "vcs"
+        ]
+      },
+      "delete": {
+        "operationId": "VcsController_deleteConnection",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "vcs"
+        ]
+      }
+    },
+    "/api/projects/{slug}/vcs/test": {
+      "post": {
+        "operationId": "VcsController_testConnection",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestConnectionResultDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "vcs"
+        ]
+      }
+    },
+    "/api/projects/{slug}/vcs/../vcs-webhook": {
+      "post": {
+        "operationId": "VcsController_handleWebhook",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-hub-signature-256",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-github-event",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "vcs"
+        ]
+      }
+    },
+    "/api/projects/{slug}/vcs/sync/{issueNumber}": {
+      "post": {
+        "operationId": "VcsController_syncIssue",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "issueNumber",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Issue synced successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncResultDto"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncResultDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Project or VCS connection not found"
+          },
+          "409": {
+            "description": "Issue already synced (externalVcsId exists)"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Manually sync a specific issue by number",
+        "tags": [
+          "vcs"
+        ]
+      }
+    },
+    "/api/projects/{slug}/vcs/sync": {
+      "post": {
+        "operationId": "VcsController_syncAll",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Full sync completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncResultDto"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncResultDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Project or VCS connection not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Trigger a full sync of all issues from the VCS provider",
+        "tags": [
+          "vcs"
+        ]
+      }
+    },
+    "/api/projects/{slug}/vcs/sync-pr": {
+      "post": {
+        "operationId": "VcsController_syncPr",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "PR sync completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": ""
+          },
+          "404": {
+            "description": "Project or VCS connection not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Manually sync PR status for all active pull requests",
+        "tags": [
+          "vcs"
+        ]
+      }
+    },
+    "/api/projects/{slug}/tickets/{ref}/links": {
+      "post": {
+        "operationId": "TicketLinksController_create",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTicketLinkDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketLinkResponseDto"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketLinkResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid URL"
+          },
+          "404": {
+            "description": "Ticket not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create or return existing link for a ticket",
+        "tags": [
+          "ticket-links"
+        ]
+      },
+      "get": {
+        "operationId": "TicketLinksController_findAll",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TicketLinkResponseDto"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Ticket not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List all links for a ticket",
+        "tags": [
+          "ticket-links"
+        ]
+      }
+    },
+    "/api/projects/{slug}/tickets/{ref}/links/{linkId}": {
+      "delete": {
+        "operationId": "TicketLinksController_remove",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ref",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "linkId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Link deleted"
+          },
+          "404": {
+            "description": "Link not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a ticket link by id",
+        "tags": [
+          "ticket-links"
+        ]
+      }
+    },
     "/api/projects/{slug}/tickets/{ref}/comments": {
       "post": {
         "operationId": "CommentsController_createFromHttp",
@@ -2074,172 +2617,6 @@
         "summary": "Remove a label from a ticket",
         "tags": [
           "labels"
-        ]
-      }
-    },
-    "/api/projects/{slug}/tickets/{ref}/links": {
-      "post": {
-        "operationId": "TicketLinksController_create",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "ref",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateTicketLinkDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TicketLinkResponseDto"
-                }
-              }
-            }
-          },
-          "201": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TicketLinkResponseDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid URL"
-          },
-          "404": {
-            "description": "Ticket not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Create or return existing link for a ticket",
-        "tags": [
-          "ticket-links"
-        ]
-      },
-      "get": {
-        "operationId": "TicketLinksController_findAll",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "ref",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/TicketLinkResponseDto"
-                  }
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Ticket not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "List all links for a ticket",
-        "tags": [
-          "ticket-links"
-        ]
-      }
-    },
-    "/api/projects/{slug}/tickets/{ref}/links/{linkId}": {
-      "delete": {
-        "operationId": "TicketLinksController_remove",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "ref",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "linkId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Link deleted"
-          },
-          "404": {
-            "description": "Link not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Delete a ticket link by id",
-        "tags": [
-          "ticket-links"
         ]
       }
     },
@@ -2692,6 +3069,26 @@
             "type": "string",
             "nullable": true
           },
+          "prState": {
+            "type": "string",
+            "nullable": true
+          },
+          "prNumber": {
+            "type": "number",
+            "nullable": true
+          },
+          "prUpdatedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "linkType": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string",
+            "nullable": true
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
@@ -2703,6 +3100,11 @@
           "url",
           "provider",
           "externalRef",
+          "prState",
+          "prNumber",
+          "prUpdatedAt",
+          "linkType",
+          "title",
           "createdAt"
         ]
       },
@@ -3001,6 +3403,195 @@
           "events"
         ]
       },
+      "CreateVcsConnectionDto": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "github"
+            ]
+          },
+          "token": {
+            "type": "string"
+          },
+          "repoUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "syncMode": {
+            "type": "string"
+          },
+          "webhookSecret": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "token",
+          "repoUrl"
+        ]
+      },
+      "VcsConnectionResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "repoOwner": {
+            "type": "string"
+          },
+          "repoName": {
+            "type": "string"
+          },
+          "syncMode": {
+            "type": "string"
+          },
+          "allowedAuthors": {
+            "type": "string"
+          },
+          "pollingIntervalMs": {
+            "type": "number"
+          },
+          "webhookSecret": {
+            "type": "string"
+          },
+          "lastSyncedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "provider",
+          "repoOwner",
+          "repoName",
+          "syncMode",
+          "allowedAuthors",
+          "pollingIntervalMs",
+          "isActive",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "UpdateVcsConnectionDto": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "syncMode": {
+            "type": "string"
+          },
+          "webhookSecret": {
+            "type": "string"
+          }
+        }
+      },
+      "TestConnectionResultDto": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "latencyMs": {
+            "type": "number"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "success",
+          "latencyMs"
+        ]
+      },
+      "SyncResultDto": {
+        "type": "object",
+        "properties": {
+          "issuesSynced": {
+            "type": "number",
+            "description": "Number of issues successfully synced",
+            "example": 3
+          },
+          "issuesSkipped": {
+            "type": "number",
+            "description": "Number of issues skipped (already synced or filtered)",
+            "example": 2
+          },
+          "createdTickets": {
+            "type": "array",
+            "description": "List of created ticket references",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "example": "ticket-123"
+                },
+                "projectKey": {
+                  "type": "string",
+                  "example": "PROJ"
+                },
+                "number": {
+                  "type": "number",
+                  "example": 1
+                }
+              }
+            }
+          },
+          "errors": {
+            "type": "array",
+            "description": "List of errors encountered during sync (optional)",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "Issue 100: Network timeout"
+            ]
+          }
+        },
+        "required": [
+          "issuesSynced",
+          "issuesSkipped",
+          "createdTickets"
+        ]
+      },
+      "CreateTicketLinkDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://github.com/owner/repo/pull/1"
+          },
+          "linkType": {
+            "type": "string",
+            "example": "url"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      },
       "CreateCommentDto": {
         "type": "object",
         "properties": {
@@ -3074,19 +3665,6 @@
         },
         "required": [
           "labelId"
-        ]
-      },
-      "CreateTicketLinkDto": {
-        "type": "object",
-        "properties": {
-          "url": {
-            "type": "string",
-            "format": "uri",
-            "example": "https://github.com/owner/repo/pull/1"
-          }
-        },
-        "required": [
-          "url"
         ]
       },
       "CiPipelineDto": {

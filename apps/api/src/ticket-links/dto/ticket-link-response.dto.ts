@@ -28,6 +28,9 @@ export class TicketLinkResponseDto {
   @ApiProperty()
   linkType!: string;
 
+  @ApiProperty({ nullable: true })
+  title!: string | null;
+
   @ApiProperty()
   createdAt!: Date;
 
@@ -43,6 +46,7 @@ export class TicketLinkResponseDto {
       prNumber: link.prNumber ?? null,
       prUpdatedAt: link.prUpdatedAt ?? null,
       linkType: link.linkType ?? 'url',
+      title: link.linkType === 'commit' ? link.externalRef ?? null : null,
       createdAt: link.createdAt,
     };
   }

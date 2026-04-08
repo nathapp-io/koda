@@ -1,61 +1,55 @@
 /**
  * VCS-P4-003 AC-25: i18n keys for branch/commit link display labels
  *
- * AC-25 refined: Files apps/api/src/i18n/en/vcs.json and apps/api/src/i18n/zh/vcs.json
- * both contain keys for VCS link display labels (e.g., 'vcs.links.branch', 'vcs.links.commit',
- * 'vcs.links.pull_request' or equivalent keys). Each key exists in both files with non-empty string values.
+ * AC-25 refined: Files apps/web/i18n/locales/en.json and apps/web/i18n/locales/zh.json
+ * both contain keys for web VCS link display labels.
  */
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
-const apiI18nEnPath = join(__dirname, '../../src/i18n/en/vcs.json');
-const apiI18nZhPath = join(__dirname, '../../src/i18n/zh/vcs.json');
+const webI18nEnPath = join(__dirname, '../../../web/i18n/locales/en.json');
+const webI18nZhPath = join(__dirname, '../../../web/i18n/locales/zh.json');
 
 describe('VCS-P4-003 AC-25: i18n keys for branch/commit link display labels', () => {
-  describe('API i18n (apps/api/src/i18n/en/vcs.json and zh/vcs.json)', () => {
-    test('en/vcs.json has vcs.links section with branch, commit, and pull_request keys', () => {
-      const content = readFileSync(apiI18nEnPath, 'utf-8');
-      const vcs = JSON.parse(content);
+  describe('Web i18n (apps/web/i18n/locales/en.json and zh.json)', () => {
+    test('en.json has tickets.vcs section with title, pullRequests, branches, and commits', () => {
+      const content = readFileSync(webI18nEnPath, 'utf-8');
+      const locale = JSON.parse(content);
 
-      // Should have vcs.links section with branch, commit, pull_request keys
-      expect(vcs.links).toBeDefined();
-      expect(typeof vcs.links).toBe('object');
-      expect(vcs.links.branch).toBeDefined();
-      expect(typeof vcs.links.branch).toBe('string');
-      expect(vcs.links.commit).toBeDefined();
-      expect(typeof vcs.links.commit).toBe('string');
-      expect(vcs.links.pull_request).toBeDefined();
-      expect(typeof vcs.links.pull_request).toBe('string');
+      expect(locale.tickets?.vcs).toBeDefined();
+      expect(typeof locale.tickets.vcs.title).toBe('string');
+      expect(typeof locale.tickets.vcs.pullRequests).toBe('string');
+      expect(typeof locale.tickets.vcs.branches).toBe('string');
+      expect(typeof locale.tickets.vcs.commits).toBe('string');
     });
 
-    test('en/vcs.json link label values are non-empty strings', () => {
-      const content = readFileSync(apiI18nEnPath, 'utf-8');
-      const vcs = JSON.parse(content);
+    test('en.json VCS label values are non-empty strings', () => {
+      const content = readFileSync(webI18nEnPath, 'utf-8');
+      const locale = JSON.parse(content);
 
-      expect(vcs.links.branch.length).toBeGreaterThan(0);
-      expect(vcs.links.commit.length).toBeGreaterThan(0);
-      expect(vcs.links.pull_request.length).toBeGreaterThan(0);
+      expect(locale.tickets.vcs.title.length).toBeGreaterThan(0);
+      expect(locale.tickets.vcs.pullRequests.length).toBeGreaterThan(0);
+      expect(locale.tickets.vcs.branches.length).toBeGreaterThan(0);
+      expect(locale.tickets.vcs.commits.length).toBeGreaterThan(0);
     });
 
-    test('zh/vcs.json has matching vcs.links structure with non-empty values', () => {
-      const enContent = readFileSync(apiI18nEnPath, 'utf-8');
-      const zhContent = readFileSync(apiI18nZhPath, 'utf-8');
-      const enVcs = JSON.parse(enContent);
-      const zhVcs = JSON.parse(zhContent);
+    test('zh.json has matching tickets.vcs structure with non-empty values', () => {
+      const enContent = readFileSync(webI18nEnPath, 'utf-8');
+      const zhContent = readFileSync(webI18nZhPath, 'utf-8');
+      const enLocale = JSON.parse(enContent);
+      const zhLocale = JSON.parse(zhContent);
 
-      // Both should have links section
-      expect(enVcs.links).toBeDefined();
-      expect(zhVcs.links).toBeDefined();
+      expect(enLocale.tickets?.vcs).toBeDefined();
+      expect(zhLocale.tickets?.vcs).toBeDefined();
 
-      // Both should have same keys
-      const enKeys = Object.keys(enVcs.links || {});
-      const zhKeys = Object.keys(zhVcs.links || {});
+      const enKeys = Object.keys(enLocale.tickets.vcs || {});
+      const zhKeys = Object.keys(zhLocale.tickets.vcs || {});
       expect(zhKeys).toEqual(enKeys);
 
-      // Both should have non-empty values
-      expect(zhVcs.links.branch.length).toBeGreaterThan(0);
-      expect(zhVcs.links.commit.length).toBeGreaterThan(0);
-      expect(zhVcs.links.pull_request.length).toBeGreaterThan(0);
+      expect(zhLocale.tickets.vcs.title.length).toBeGreaterThan(0);
+      expect(zhLocale.tickets.vcs.pullRequests.length).toBeGreaterThan(0);
+      expect(zhLocale.tickets.vcs.branches.length).toBeGreaterThan(0);
+      expect(zhLocale.tickets.vcs.commits.length).toBeGreaterThan(0);
     });
   });
 });

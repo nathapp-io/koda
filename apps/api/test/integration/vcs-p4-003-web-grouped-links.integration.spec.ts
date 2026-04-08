@@ -2,7 +2,7 @@
  * VCS-P4-003 AC-17 through AC-21: Web ticket detail page VCS section groups links by linkType
  *
  * AC-17: Web UI: VCS section renders 3 distinct subsection containers with data-link-type
- *        values 'pull_request', 'branch', and 'commit' respectively
+ *        values 'pr', 'branch', and 'commit' respectively
  * AC-18: Web UI: Each PR item contains a visible PR number, a status badge, and clickable link
  * AC-19: Web UI: Each branch item contains a clickable link with branch name
  * AC-20: Web UI: Each commit item contains SHA (7 chars), commit message, and clickable link
@@ -38,9 +38,11 @@ describe('VCS-P4-003 AC1-5: Web grouped VCS links display', () => {
       // Should have computed properties that separate links by linkType
       const hasTypeFiltering =
         (source.includes("linkType === 'branch'") ||
-         source.includes("linkType === 'commit'") ||
+        source.includes("linkType === 'commit'") ||
+        source.includes("linkType === 'pr'") ||
          source.includes('linkType === "branch"') ||
          source.includes('linkType === "commit"') ||
+         source.includes('linkType === "pr"') ||
          source.includes('filter(link => link.provider'));
       expect(hasTypeFiltering).toBeTruthy();
     });
@@ -155,10 +157,8 @@ describe('VCS-P4-003 AC1-5: Web grouped VCS links display', () => {
 
       // Should sort commits by date
       const hasDateSorting =
-        source.includes('sort') ||
-        source.includes('reverse') ||
-        source.includes('createdAt') ||
-        source.includes('date');
+        source.includes('sort') &&
+        source.includes('createdAt');
       expect(hasDateSorting).toBeTruthy();
     });
   });

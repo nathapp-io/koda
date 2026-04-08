@@ -1,12 +1,8 @@
-import { Test, TestingModule } from '@nestjs/testing';
 import { TicketLinksService } from './ticket-links.service';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
 import { CreateTicketLinkDto } from './dto/create-ticket-link.dto';
 
 describe('TicketLinksService', () => {
   let service: TicketLinksService;
-  let prismaService: PrismaService<PrismaClient>;
 
   const mockProject = {
     id: 'proj-123',
@@ -75,16 +71,8 @@ describe('TicketLinksService', () => {
     },
   };
 
-  beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        TicketLinksService,
-        { provide: PrismaService, useValue: mockPrismaService },
-      ],
-    }).compile();
-
-    service = module.get<TicketLinksService>(TicketLinksService);
-    prismaService = module.get<PrismaService<PrismaClient>>(PrismaService);
+  beforeEach(() => {
+    service = new TicketLinksService(mockPrismaService as never);
   });
 
   afterEach(() => {
@@ -122,7 +110,7 @@ describe('TicketLinksService', () => {
 
       const result = await service.create('koda', 'KODA-1', dto);
 
-      expect(prismaService.client.ticketLink.create).toHaveBeenCalledWith(
+      expect(mockPrismaService.client.ticketLink.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             url: dto.url,
@@ -147,8 +135,11 @@ describe('TicketLinksService', () => {
       const result = await service.create('koda', 'KODA-1', dto);
 
       expect(result.status).toBe(200);
-      expect(result.link).toEqual(mockLink);
-      expect(prismaService.client.ticketLink.create).not.toHaveBeenCalled();
+      expect(result.link).toEqual({
+        ...mockLink,
+        title: null,
+      });
+      expect(mockPrismaService.client.ticketLink.create).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundException when ticket ref does not exist', async () => {
@@ -193,7 +184,7 @@ describe('TicketLinksService', () => {
 
       const result = await service.create('koda', 'KODA-1', dto);
 
-      expect(prismaService.client.ticketLink.create).toHaveBeenCalledWith(
+      expect(mockPrismaService.client.ticketLink.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             provider: 'other',
@@ -225,8 +216,14 @@ describe('TicketLinksService', () => {
       const result = await service.findByTicket('koda', 'KODA-1');
 
       expect(result).toHaveLength(2);
-      expect(result[0]).toEqual(mockLink);
-      expect(result[1]).toEqual(secondLink);
+      expect(result[0]).toEqual({
+        ...mockLink,
+        title: null,
+      });
+      expect(result[1]).toEqual({
+        ...secondLink,
+        title: null,
+      });
     });
 
     it('returns an empty array when ticket has no links', async () => {
@@ -263,7 +260,7 @@ describe('TicketLinksService', () => {
 
       await service.findByTicket('koda', 'KODA-1');
 
-      expect(prismaService.client.ticketLink.findMany).toHaveBeenCalledWith(
+      expect(mockPrismaService.client.ticketLink.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({ ticketId: mockTicket.id }),
         }),
@@ -280,7 +277,7 @@ describe('TicketLinksService', () => {
 
       await service.remove('koda', 'KODA-1', 'link-123');
 
-      expect(prismaService.client.ticketLink.delete).toHaveBeenCalledWith({
+      expect(mockPrismaService.client.ticketLink.delete).toHaveBeenCalledWith({
         where: { id: 'link-123' },
       });
     });
@@ -305,7 +302,7 @@ describe('TicketLinksService', () => {
         service.remove('koda', 'KODA-1', 'link-other-ticket'),
       ).rejects.toThrow();
 
-      expect(prismaService.client.ticketLink.delete).not.toHaveBeenCalled();
+      expect(mockPrismaService.client.ticketLink.delete).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundException when project slug does not exist', async () => {

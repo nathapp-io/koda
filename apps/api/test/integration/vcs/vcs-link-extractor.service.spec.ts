@@ -12,9 +12,6 @@
  * Run: npx jest test/integration/vcs/vcs-link-extractor.service.spec.ts --forceExit
  */
 
-import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import { Logger } from '@nestjs/common';
 import { VcsCommit, VcsPrStatus } from '../../../src/vcs/types';
 import { containsTicketRef } from '../../../src/vcs/ticket-ref-matcher.util';
 
@@ -128,7 +125,7 @@ describe('VcsLinkExtractorService', () => {
   let mockPrismaService: any;
   let mockVcsProvider: any;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     mockVcsProvider = {
       fetchIssues: jest.fn(),
       fetchIssue: jest.fn(),
@@ -163,21 +160,10 @@ describe('VcsLinkExtractorService', () => {
       },
     };
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        VcsLinkExtractorService,
-        {
-          provide: PrismaService,
-          useValue: mockPrismaService,
-        },
-        Logger,
-      ],
-    }).compile();
-
-    service = module.get<VcsLinkExtractorService>(VcsLinkExtractorService);
+    service = new VcsLinkExtractorService(mockPrismaService);
   });
 
-  afterEach(async () => {
+  afterEach(() => {
     jest.clearAllMocks();
   });
 
@@ -468,7 +454,7 @@ describe('VcsLinkExtractorService', () => {
           'encryption-key',
           mockBranchName,
         ),
-      ).resolves.not.toThrow();
+      ).resolves.toBeUndefined();
 
       // Branch link should still be created
       const branchCalls = mockPrismaService.client.ticketLink.create.mock.calls.filter(

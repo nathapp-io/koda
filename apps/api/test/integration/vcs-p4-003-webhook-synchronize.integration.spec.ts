@@ -3,8 +3,7 @@
  *
  * AC-24 refined: API: When POST /projects/:slug/vcs-webhook receives payload with
  * action='synchronize' and pull_request object, the extractLinksFromPr() function
- * is invoked with the PR data as argument. Unit test verifies extractLinksFromPr
- * was called with pull_request parameter.
+ * is invoked with the PR number and branch data.
  */
 import { readFileSync } from 'fs';
 import { join } from 'path';

@@ -531,6 +531,7 @@ export class VcsWebhookService {
             connection,
             encryptionKey,
             pr.head.ref,
+            pr.number,
           );
           this.logger.debug(`extractLinksFromPr called for PR #${prNumber} with branch ${pr.head.ref}`);
         } catch (err) {
