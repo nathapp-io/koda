@@ -30,6 +30,7 @@ jest.mock('../generated', () => ({
   projectsControllerFindBySlug: jest.fn(),
   projectsControllerCreate: jest.fn(),
   projectsControllerRemove: jest.fn(),
+  projectsControllerUpdate: jest.fn(),
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
@@ -58,6 +59,7 @@ import {
   projectsControllerFindBySlug,
   projectsControllerCreate,
   projectsControllerRemove,
+  projectsControllerUpdate,
 } from '../generated';
 
 describe('projectCommand', () => {
@@ -88,6 +90,7 @@ describe('projectCommand', () => {
     (projectsControllerFindBySlug as jest.Mock).mockReset();
     (projectsControllerCreate as jest.Mock).mockReset();
     (projectsControllerRemove as jest.Mock).mockReset();
+    (projectsControllerUpdate as jest.Mock).mockReset();
   });
 
   afterEach(() => {
@@ -489,6 +492,55 @@ describe('projectCommand', () => {
       const allCalls = logSpy.mock.calls.flat().join(' ');
       expect(allCalls).toContain('Description');
       expect(allCalls).toContain('A nice project description');
+    });
+  });
+
+  describe('project update', () => {
+    it('updates project with provided fields', async () => {
+      const mockProject = {
+        id: '1',
+        name: 'Updated',
+        key: 'UPD',
+        slug: 'project-a',
+        description: 'Updated description',
+      };
+
+      (projectsControllerUpdate as jest.Mock).mockResolvedValue({ ret: 0, data: mockProject });
+
+      const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
+      const updateCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'update');
+
+      await updateCmd?.parseAsync(['node', 'test', 'project-a', '--name', 'Updated', '--key', 'UPD', '--desc', 'Updated description']);
+
+      expect(projectsControllerUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slug: 'project-a',
+          requestBody: expect.objectContaining({
+            name: 'Updated',
+            key: 'UPD',
+            description: 'Updated description',
+          }),
+        })
+      );
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('exits 3 when no update fields are provided', async () => {
+      const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
+      const updateCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'update');
+
+      await updateCmd?.parseAsync(['node', 'test', 'project-a']).catch(() => undefined);
+
+      expect(exitSpy).toHaveBeenCalledWith(3);
+    });
+
+    it('exits 3 when --key is invalid', async () => {
+      const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
+      const updateCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'update');
+
+      await updateCmd?.parseAsync(['node', 'test', 'project-a', '--key', 'bad-key']).catch(() => undefined);
+
+      expect(exitSpy).toHaveBeenCalledWith(3);
     });
   });
 });

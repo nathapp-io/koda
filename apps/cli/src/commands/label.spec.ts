@@ -29,6 +29,7 @@ jest.mock('../generated', () => ({
   labelsControllerCreateFromHttp: jest.fn(),
   labelsControllerFindByProjectFromHttp: jest.fn(),
   labelsControllerDeleteFromHttp: jest.fn(),
+  labelsControllerUpdateFromHttp: jest.fn(),
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
@@ -57,6 +58,7 @@ import {
   labelsControllerCreateFromHttp,
   labelsControllerFindByProjectFromHttp,
   labelsControllerDeleteFromHttp,
+  labelsControllerUpdateFromHttp,
 } from '../generated';
 import { resolveContext } from '../config';
 
@@ -87,6 +89,7 @@ describe('labelCommand', () => {
     (labelsControllerCreateFromHttp as jest.Mock).mockReset();
     (labelsControllerFindByProjectFromHttp as jest.Mock).mockReset();
     (labelsControllerDeleteFromHttp as jest.Mock).mockReset();
+    (labelsControllerUpdateFromHttp as jest.Mock).mockReset();
   });
 
   afterEach(() => {
@@ -272,6 +275,40 @@ describe('labelCommand', () => {
       ]);
 
       expect(exitSpy).toHaveBeenCalledWith(1);
+    });
+  });
+
+  describe('label update', () => {
+    it('updates a label by id', async () => {
+      const mockLabel = { id: 'lbl-1', name: 'Bug Updated', color: '#123456' };
+      (labelsControllerUpdateFromHttp as jest.Mock).mockResolvedValue({ ret: 0, data: mockLabel });
+
+      const labelCmd = program.commands.find((cmd) => cmd.name() === 'label');
+      const updateCmd = labelCmd?.commands.find((cmd) => cmd.name() === 'update');
+
+      await updateCmd?.parseAsync([
+        'node', 'test', '--project', 'koda', '--id', 'lbl-1', '--name', 'Bug Updated',
+      ]);
+
+      expect(labelsControllerUpdateFromHttp).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slug: 'koda',
+          id: 'lbl-1',
+          requestBody: expect.objectContaining({ name: 'Bug Updated' }),
+        })
+      );
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('exits 3 when no update fields are provided', async () => {
+      const labelCmd = program.commands.find((cmd) => cmd.name() === 'label');
+      const updateCmd = labelCmd?.commands.find((cmd) => cmd.name() === 'update');
+
+      await updateCmd?.parseAsync([
+        'node', 'test', '--project', 'koda', '--id', 'lbl-1',
+      ]).catch(() => undefined);
+
+      expect(exitSpy).toHaveBeenCalledWith(3);
     });
   });
 });

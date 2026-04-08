@@ -32,6 +32,8 @@ jest.mock('../generated', () => ({
   ragControllerSearch: jest.fn(),
   ragControllerListDocuments: jest.fn(),
   ragControllerAddDocument: jest.fn(),
+  ragControllerDeleteDocument: jest.fn(),
+  ragControllerOptimizeTable: jest.fn(),
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
@@ -63,7 +65,13 @@ jest.mock('fs', () => ({
 
 import { Command } from 'commander';
 import { kbCommand } from './kb';
-import { ragControllerSearch, ragControllerListDocuments, ragControllerAddDocument } from '../generated';
+import {
+  ragControllerSearch,
+  ragControllerListDocuments,
+  ragControllerAddDocument,
+  ragControllerDeleteDocument,
+  ragControllerOptimizeTable,
+} from '../generated';
 import { resolveContext } from '../config';
 
 describe('kbCommand', () => {
@@ -101,6 +109,8 @@ describe('kbCommand', () => {
       apiUrl: 'http://localhost:3100/api',
       projectSlug: 'koda',
     });
+    (ragControllerDeleteDocument as jest.Mock).mockReset();
+    (ragControllerOptimizeTable as jest.Mock).mockReset();
   });
 
   afterEach(() => {
@@ -634,6 +644,53 @@ describe('kbCommand', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // kb delete
+  // ---------------------------------------------------------------------------
+  describe('kb delete', () => {
+    it('deletes documents by sourceId with --force', async () => {
+      (ragControllerDeleteDocument as jest.Mock).mockResolvedValue({ ret: 0, data: { deletedCount: 2 } });
+
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const deleteCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'delete');
+
+      await deleteCmd?.parseAsync(['node', 'test', '--project', 'koda', '--source-id', 'README.md', '--force']).catch(() => undefined);
+
+      expect(ragControllerDeleteDocument).toHaveBeenCalledWith(
+        expect.objectContaining({ slug: 'koda', sourceId: 'README.md' })
+      );
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('requires --force for delete', async () => {
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const deleteCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'delete');
+
+      await deleteCmd?.parseAsync(['node', 'test', '--project', 'koda', '--source-id', 'README.md']).catch(() => undefined);
+
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // kb optimize
+  // ---------------------------------------------------------------------------
+  describe('kb optimize', () => {
+    it('calls optimize endpoint and exits 0', async () => {
+      (ragControllerOptimizeTable as jest.Mock).mockResolvedValue({ ret: 0, data: { optimized: true } });
+
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const optimizeCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'optimize');
+
+      await optimizeCmd?.parseAsync(['node', 'test', '--project', 'koda']).catch(() => undefined);
+
+      expect(ragControllerOptimizeTable).toHaveBeenCalledWith(
+        expect.objectContaining({ slug: 'koda' })
+      );
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // Command registration
   // ---------------------------------------------------------------------------
   describe('command registration', () => {
@@ -658,6 +715,18 @@ describe('kbCommand', () => {
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const addCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'add');
       expect(addCmd).toBeDefined();
+    });
+
+    it('registers kb delete sub-command', () => {
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const deleteCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'delete');
+      expect(deleteCmd).toBeDefined();
+    });
+
+    it('registers kb optimize sub-command', () => {
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const optimizeCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'optimize');
+      expect(optimizeCmd).toBeDefined();
     });
   });
 });
