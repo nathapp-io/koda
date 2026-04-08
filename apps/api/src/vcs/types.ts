@@ -17,8 +17,9 @@ export interface VcsIssue {
 export interface CreatePrParams {
   title: string;
   body: string;
-  headBranch: string;
-  baseBranch: string;
+  branchName?: string;
+  headBranch?: string;
+  baseBranch?: string;
   draft?: boolean;
 }
 

@@ -346,7 +346,7 @@ describe('CreatePrParams type', () => {
       const params: CreatePrParams = {
         title: 'Fix login redirect bug',
         body: 'This PR fixes the login redirect bug',
-        headBranch: 'koda/KODA-42/fix-login-redirect-bug',
+        branchName: 'koda/KODA-42/fix-login-redirect-bug',
         baseBranch: 'main',
       };
       expect(typeof params.title).toBe('string');
@@ -357,47 +357,55 @@ describe('CreatePrParams type', () => {
       const params: CreatePrParams = {
         title: 'Fix bug',
         body: 'This PR fixes the bug',
-        headBranch: 'feature-branch',
-        baseBranch: 'main',
+        branchName: 'feature-branch',
       };
       expect(typeof params.body).toBe('string');
     });
 
-    it('should have headBranch field as string', () => {
+    it('should support branchName field as string', () => {
       const params: CreatePrParams = {
         title: 'Fix bug',
         body: 'Description',
-        headBranch: 'koda/KODA-42/fix-login-redirect-bug',
-        baseBranch: 'main',
+        branchName: 'koda/KODA-42/fix-login-redirect-bug',
       };
-      expect(typeof params.headBranch).toBe('string');
+      expect(typeof params.branchName).toBe('string');
     });
 
-    it('should have baseBranch field as string', () => {
+    it('should allow optional baseBranch field', () => {
       const params: CreatePrParams = {
         title: 'Fix bug',
         body: 'Description',
-        headBranch: 'feature-branch',
+        branchName: 'feature-branch',
         baseBranch: 'main',
       };
       expect(typeof params.baseBranch).toBe('string');
       expect(params.baseBranch).toBe('main');
     });
+
+    it('should support legacy headBranch for backward compatibility', () => {
+      const params: CreatePrParams = {
+        title: 'Fix bug',
+        body: 'Description',
+        headBranch: 'feature-branch',
+      };
+      expect(typeof params.headBranch).toBe('string');
+    });
   });
 
   describe('field requirements', () => {
-    it('should require all fields', () => {
+    it('should require title/body and at least one branch field', () => {
       type RequiredParams = Required<CreatePrParams>;
       const params: RequiredParams = {
         title: 'Title',
         body: 'Body',
+        branchName: 'feature-branch',
         headBranch: 'feature-branch',
         baseBranch: 'main',
         draft: false,
       };
       expect(params.title).toBeDefined();
       expect(params.body).toBeDefined();
-      expect(params.headBranch).toBeDefined();
+      expect(params.branchName || params.headBranch).toBeDefined();
       expect(params.baseBranch).toBeDefined();
       expect(params.draft).toBeDefined();
     });
@@ -406,8 +414,7 @@ describe('CreatePrParams type', () => {
       const params: CreatePrParams = {
         title: 'Title',
         body: '',
-        headBranch: 'feature-branch',
-        baseBranch: 'main',
+        branchName: 'feature-branch',
       };
       expect(params.body).toBe('');
     });

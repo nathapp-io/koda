@@ -166,7 +166,7 @@ export class TicketTransitionsService {
             return provider.createPullRequest({
               title: prTitle,
               body: prBody,
-              headBranch: branchName,
+              branchName,
               baseBranch,
               draft: true,
             }).then((pr): Promise<void> => {
