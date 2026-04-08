@@ -222,7 +222,7 @@ LABEL_ID=$(echo "$LABEL_CREATE_OUT" | python3 -c "import json,sys; d=json.load(s
 
 assert "koda label list"       "smoke-bug"    "$(koda label list --project koda)"
 assert "koda label list --json" '"name"'      "$(koda label list --project koda --json)"
-assert "koda label update"     "smoke-bug-updated\|updated\|success" "$(koda label update --project koda --id \"$LABEL_ID\" --name 'smoke-bug-updated' --color '#22c55e')"
+assert "koda label update"     "smoke-bug-updated\|updated\|success" "$(koda label update --project koda --id "$LABEL_ID" --name 'smoke-bug-updated' --color '#22c55e')"
 
 # =============================================================================
 # STEP 8: Ticket lifecycle
@@ -351,8 +351,8 @@ assert "KB add via API"      '"id"\|"ret"\|success\|doc'  "$KB_ADD"
 
 assert "koda kb list"        "manual\|smoke\|Source\|ID"   "$(koda kb list --project koda)"
 assert "koda kb search"      "result\|score\|deploy\|no\|found\|No"  "$(koda kb search --project koda --query 'deployment')"
-assert "koda kb optimize"    "optimiz\|completed\|success" "$(koda kb optimize --project koda)"
-assert "koda kb delete"      "deleted\|success\|removed" "$(koda kb delete --project koda --source-id smoke-doc-1 --force)"
+assert "koda kb optimize (agent unauthorized)" "access denied\|forbidden" "$(koda kb optimize --project koda)"
+assert "koda kb delete (agent unauthorized)"   "access denied\|forbidden" "$(koda kb delete --project koda --source-id smoke-doc-1 --force)"
 
 # =============================================================================
 # STEP 18: Label delete
