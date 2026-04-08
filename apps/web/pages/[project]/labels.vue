@@ -30,6 +30,9 @@ const { data: labelsData, pending, error, refresh } = useAsyncData(
 )
 
 const labels = computed(() => labelsData.value ?? [])
+const editingId = ref<string | null>(null)
+const editName = ref('')
+const editColor = ref('#6366F1')
 
 const formSchema = toTypedSchema(z.object({
   name: z.string().min(1, 'Name is required'),
@@ -59,6 +62,45 @@ async function deleteLabel(labelId: string) {
   try {
     await $api.delete(`/projects/${slug}/labels/${labelId}`)
     toast.success(t('labels.toast.deleted'))
+    await refresh()
+  } catch (err) {
+    toast.error(extractApiError(err))
+  }
+}
+
+function startEdit(label: Label) {
+  editingId.value = label.id
+  editName.value = label.name
+  editColor.value = normalizeHexColor(label.color || '#6366F1')
+}
+
+function cancelEdit() {
+  editingId.value = null
+  editName.value = ''
+  editColor.value = '#6366F1'
+}
+
+async function saveEdit(label: Label) {
+  const nextName = editName.value.trim()
+  const nextColor = normalizeHexColor(editColor.value || '#6366F1')
+  if (!nextName) {
+    toast.error(t('labels.validation.nameRequired'))
+    return
+  }
+
+  const payload: Record<string, unknown> = {}
+  if (nextName !== label.name) payload.name = nextName
+  if (nextColor !== normalizeHexColor(label.color || '#6366F1')) payload.color = nextColor
+  if (Object.keys(payload).length === 0) {
+    toast.success(t('labels.toast.noChanges'))
+    cancelEdit()
+    return
+  }
+
+  try {
+    await $api.patch(`/projects/${slug}/labels/${label.id}`, payload)
+    toast.success(t('labels.toast.updated'))
+    cancelEdit()
     await refresh()
   } catch (err) {
     toast.error(extractApiError(err))
@@ -116,14 +158,31 @@ async function deleteLabel(labelId: string) {
           <TableCell>
             <span
               class="inline-block w-4 h-4 rounded-sm"
-              :style="{ backgroundColor: isValidColor(label.color) ? label.color : fallbackColor }"
+              :style="{ backgroundColor: isValidColor(editingId === label.id ? editColor : label.color) ? (editingId === label.id ? editColor : label.color) : fallbackColor }"
             />
           </TableCell>
-          <TableCell>{{ label.name }}</TableCell>
           <TableCell>
-            <Button variant="destructive" size="sm" @click="deleteLabel(label.id)">
-              {{ t('labels.actions.delete') }}
-            </Button>
+            <div v-if="editingId === label.id" class="flex items-center gap-2">
+              <Input v-model="editName" class="max-w-[200px]" />
+              <ColorPicker v-model="editColor" defaultColor="#6366F1" />
+            </div>
+            <span v-else>{{ label.name }}</span>
+          </TableCell>
+          <TableCell>
+            <div class="flex items-center gap-2">
+              <template v-if="editingId === label.id">
+                <Button size="sm" @click="saveEdit(label)">{{ t('common.save') }}</Button>
+                <Button size="sm" variant="outline" @click="cancelEdit">{{ t('common.cancel') }}</Button>
+              </template>
+              <template v-else>
+                <Button size="sm" variant="outline" @click="startEdit(label)">
+                  {{ t('common.edit') }}
+                </Button>
+                <Button variant="destructive" size="sm" @click="deleteLabel(label.id)">
+                  {{ t('labels.actions.delete') }}
+                </Button>
+              </template>
+            </div>
           </TableCell>
         </TableRow>
       </TableBody>

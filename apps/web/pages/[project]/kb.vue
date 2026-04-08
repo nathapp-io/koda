@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ApiError, extractApiError } from '~/composables/useApi'
+
 definePageMeta({ layout: 'default' })
 
 const route = useRoute()
@@ -72,6 +74,38 @@ function formatDate(dateStr: string) {
 
 function onDocumentAdded() {
   refresh()
+}
+
+const optimizing = ref(false)
+async function optimizeKb() {
+  optimizing.value = true
+  try {
+    await $api.post(`/projects/${slug}/kb/optimize`)
+    toast.success(t('kb.toast.optimizeSuccess'))
+  } catch (err: unknown) {
+    if (err instanceof ApiError && err.code === 403) {
+      toast.error(t('kb.toast.adminOnly'))
+      return
+    }
+    toast.error(extractApiError(err))
+  } finally {
+    optimizing.value = false
+  }
+}
+
+async function deleteDocument(sourceId: string) {
+  if (!window.confirm(t('kb.documents.deleteConfirm'))) return
+  try {
+    await $api.delete(`/projects/${slug}/kb/documents/${sourceId}`)
+    toast.success(t('kb.toast.deleted'))
+    await refresh()
+  } catch (err: unknown) {
+    if (err instanceof ApiError && err.code === 403) {
+      toast.error(t('kb.toast.adminOnly'))
+      return
+    }
+    toast.error(extractApiError(err))
+  }
 }
 </script>
 
@@ -147,7 +181,12 @@ function onDocumentAdded() {
         <template v-else>
           <div class="flex items-center justify-between">
             <p class="text-sm text-muted-foreground">{{ t('kb.documents.indexed', { count: docs.length }) }}</p>
-            <KbAddDocumentDialog :project-slug="slug" @added="onDocumentAdded" />
+            <div class="flex items-center gap-2">
+              <Button variant="outline" :disabled="optimizing" @click="optimizeKb">
+                {{ optimizing ? t('common.loading') : t('kb.documents.optimize') }}
+              </Button>
+              <KbAddDocumentDialog :project-slug="slug" @added="onDocumentAdded" />
+            </div>
           </div>
 
           <!-- Empty state -->
@@ -166,6 +205,7 @@ function onDocumentAdded() {
                   <th class="px-4 py-3 text-left font-medium text-muted-foreground">{{ t('kb.documents.columns.source') }}</th>
                   <th class="px-4 py-3 text-left font-medium text-muted-foreground">{{ t('kb.documents.columns.content') }}</th>
                   <th class="px-4 py-3 text-left font-medium text-muted-foreground">{{ t('kb.documents.columns.created') }}</th>
+                  <th class="px-4 py-3 text-left font-medium text-muted-foreground">{{ t('labels.columns.actions') }}</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-border">
@@ -176,6 +216,11 @@ function onDocumentAdded() {
                   </td>
                   <td class="max-w-xs truncate px-4 py-3 text-muted-foreground">{{ truncate(doc.content, 80) }}</td>
                   <td class="whitespace-nowrap px-4 py-3 text-muted-foreground">{{ formatDate(doc.createdAt) }}</td>
+                  <td class="px-4 py-3">
+                    <Button size="sm" variant="destructive" @click="deleteDocument(doc.sourceId)">
+                      {{ t('common.delete') }}
+                    </Button>
+                  </td>
                 </tr>
               </tbody>
             </table>

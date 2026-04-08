@@ -18,7 +18,8 @@
     "loadFailed": "加载失败",
     "retry": "重试",
     "edit": "编辑",
-    "save": "保存"
+    "save": "保存",
+    "delete": "删除"
   },
   "auth": {
     "login": {
@@ -92,6 +93,18 @@
     "toast": {
       "created": "项目创建成功",
       "createFailed": "创建项目失败"
+    },
+    "settings": {
+      "title": "项目设置",
+      "description": "管理项目详情。",
+      "projectDescription": "描述",
+      "projectDescriptionPlaceholder": "输入项目描述",
+      "save": "保存项目",
+      "delete": "删除项目",
+      "updated": "项目更新成功",
+      "deleted": "项目删除成功",
+      "deleteConfirm": "确认删除此项目？此操作不可撤销。",
+      "noChanges": "没有可保存的变更"
     }
   },
   "tickets": {
@@ -165,14 +178,40 @@
       "start": "开始",
       "submitFix": "提交修复",
       "approveFix": "批准修复",
-      "failFix": "修复失败"
+      "failFix": "修复失败",
+      "close": "关闭"
+    },
+    "assign": {
+      "userIdPlaceholder": "用户 ID",
+      "assign": "指派",
+      "unassign": "取消指派"
+    },
+    "labels": {
+      "select": "选择标签",
+      "add": "添加标签"
+    },
+    "links": {
+      "title": "链接",
+      "placeholder": "https://...",
+      "add": "添加链接",
+      "toast": {
+        "added": "链接已添加",
+        "deleted": "链接已移除"
+      }
+    },
+    "delete": {
+      "button": "删除工单",
+      "confirm": "确认删除此工单？",
+      "success": "工单删除成功"
     },
     "toast": {
       "created": "工单创建成功",
       "createFailed": "创建工单失败",
       "updated": "工单更新成功",
       "updateFailed": "更新工单失败",
-      "actionFailed": "操作失败"
+      "actionFailed": "操作失败",
+      "assigned": "工单已指派",
+      "unassigned": "工单已取消指派"
     }
   },
   "comments": {
@@ -189,11 +228,13 @@
     "toast": {
       "added": "评论已添加",
       "addFailed": "添加评论失败",
-      "updated": "评论已更新"
+      "updated": "评论已更新",
+      "deleted": "评论已删除"
     },
     "validation": {
       "bodyRequired": "评论内容不能为空"
-    }
+    },
+    "confirmDelete": "确认删除此评论？"
   },
   "agents": {
     "title": "代理",
@@ -298,6 +339,8 @@
       "addButton": "添加文档",
       "addTitle": "添加文档",
       "addDescription": "将文档添加到该项目的知识库。",
+      "optimize": "优化",
+      "deleteConfirm": "确认从知识库删除该来源文档？",
       "empty": "暂无文档。",
       "indexed": "{count} 个文档已索引",
       "columns": {
@@ -323,7 +366,10 @@
     "toast": {
       "searchFailed": "搜索失败",
       "docAdded": "文档已添加",
-      "addFailed": "添加文档失败"
+      "addFailed": "添加文档失败",
+      "optimizeSuccess": "知识库优化完成",
+      "deleted": "文档来源已删除",
+      "adminOnly": "仅管理员可执行"
     }
   },
   "labels": {
@@ -348,10 +394,15 @@
       "created": "标签创建成功",
       "createFailed": "创建标签失败",
       "deleted": "标签删除成功",
-      "deleteFailed": "删除标签失败"
+      "deleteFailed": "删除标签失败",
+      "updated": "标签更新成功",
+      "noChanges": "没有可保存的变更",
+      "assigned": "标签已分配",
+      "unassigned": "标签已移除"
     },
     "validation": {
-      "colorInvalid": "无效的十六进制颜色格式。必须是 # 开头后跟 6 位十六进制数字"
+      "colorInvalid": "无效的十六进制颜色格式。必须是 # 开头后跟 6 位十六进制数字",
+      "nameRequired": "名称为必填项"
     }
   },
   "vcs": {
@@ -378,6 +429,7 @@
       "authorsPlaceholder": "例如 john,jane,bot",
       "testConnection": "测试连接",
       "syncNow": "立即同步",
+      "syncPr": "同步 PR 状态",
       "submit": "保存连接",
       "update": "更新连接",
       "disconnect": "断开连接",
@@ -402,6 +454,8 @@
       "syncStarted": "开始同步",
       "syncComplete": "同步完成：{created} 个新增，{updated} 个更新，{skipped} 个跳过",
       "syncFailed": "同步失败：{error}",
+      "syncPrComplete": "PR 状态同步完成：更新 {updated} 条",
+      "syncPrFailed": "PR 状态同步失败：{error}",
       "disconnectSuccess": "VCS 连接已移除",
       "disconnectFailed": "移除 VCS 连接失败"
     },

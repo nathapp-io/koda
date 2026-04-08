@@ -23,10 +23,19 @@ interface SyncResult {
 }
 
 const route = useRoute()
+const router = useRouter()
 const slug = route.params.project as string
 const { $api } = useApi()
 const { t } = useI18n()
 const toast = useAppToast()
+
+interface ProjectDetails {
+  id: string
+  name: string
+  slug: string
+  key: string
+  description?: string | null
+}
 
 // Fetch existing VCS connection
 const { data: connectionData, pending: loadingConnection, error: connectionError, refresh: refreshConnection } = useAsyncData(
@@ -47,6 +56,64 @@ const { data: connectionData, pending: loadingConnection, error: connectionError
 )
 
 const existingConnection = computed(() => connectionData.value)
+
+const { data: projectData, pending: loadingProject, error: projectError, refresh: refreshProject } = useAsyncData(
+  `project-${slug}`,
+  () => $api.get(`/projects/${slug}`) as Promise<ProjectDetails>,
+)
+
+const projectForm = reactive({
+  name: '',
+  key: '',
+  description: '',
+})
+const savingProject = ref(false)
+
+watch(projectData, (project) => {
+  if (!project) return
+  projectForm.name = project.name
+  projectForm.key = project.key
+  projectForm.description = project.description ?? ''
+}, { immediate: true })
+
+async function saveProject() {
+  if (!projectData.value) return
+  const payload: Record<string, unknown> = {}
+  if (projectForm.name !== projectData.value.name) payload.name = projectForm.name
+  if (projectForm.key !== projectData.value.key) payload.key = projectForm.key
+  if ((projectForm.description || '') !== (projectData.value.description ?? '')) payload.description = projectForm.description
+
+  if (Object.keys(payload).length === 0) {
+    toast.success(t('projects.settings.noChanges'))
+    return
+  }
+
+  savingProject.value = true
+  try {
+    await $api.patch(`/projects/${slug}`, payload)
+    toast.success(t('projects.settings.updated'))
+    await refreshProject()
+  } catch (err) {
+    toast.error(extractApiError(err))
+  } finally {
+    savingProject.value = false
+  }
+}
+
+const deletingProject = ref(false)
+async function deleteProject() {
+  if (!window.confirm(t('projects.settings.deleteConfirm'))) return
+  deletingProject.value = true
+  try {
+    await $api.delete(`/projects/${slug}`)
+    toast.success(t('projects.settings.deleted'))
+    await router.push('/')
+  } catch (err) {
+    toast.error(extractApiError(err))
+  } finally {
+    deletingProject.value = false
+  }
+}
 
 // Form validation schema
 const formSchema = toTypedSchema(z.object({
@@ -154,6 +221,20 @@ async function syncNow() {
   }
 }
 
+const syncingPr = ref(false)
+async function syncPrStatus() {
+  syncingPr.value = true
+  try {
+    const result = await $api.post<{ updated: number }>(`/projects/${slug}/vcs/sync-pr`)
+    toast.success(t('vcs.toast.syncPrComplete', { updated: result.updated }))
+  } catch (err) {
+    const errorMsg = extractApiError(err)
+    toast.error(t('vcs.toast.syncPrFailed', { error: errorMsg }))
+  } finally {
+    syncingPr.value = false
+  }
+}
+
 async function disconnect() {
   try {
     await $api.delete(`/projects/${slug}/vcs`)
@@ -170,12 +251,51 @@ async function disconnect() {
     <PageHeader :title="t('vcs.title')" />
 
     <!-- Tabs Container -->
-    <Tabs default-value="vcs" class="w-full">
-      <TabsList class="grid w-full max-w-md grid-cols-1">
+    <Tabs default-value="project" class="w-full">
+      <TabsList class="grid w-full max-w-md grid-cols-2">
+        <TabsTrigger value="project">
+          {{ t('projects.title') }}
+        </TabsTrigger>
         <TabsTrigger value="vcs">
           {{ t('vcs.tab') }}
         </TabsTrigger>
       </TabsList>
+
+      <TabsContent value="project" class="space-y-4">
+        <div class="rounded-md border border-border p-6 space-y-6">
+          <div>
+            <h2 class="text-lg font-semibold">{{ t('projects.settings.title') }}</h2>
+            <p class="text-sm text-muted-foreground">{{ t('projects.settings.description') }}</p>
+          </div>
+
+          <LoadingState v-if="loadingProject" />
+          <ErrorState v-else-if="projectError" @retry="refreshProject()" />
+
+          <form v-else class="space-y-4" @submit.prevent="saveProject">
+            <div class="space-y-2">
+              <FormLabel>{{ t('projects.form.name') }}</FormLabel>
+              <Input v-model="projectForm.name" :placeholder="t('projects.form.namePlaceholder')" />
+            </div>
+            <div class="space-y-2">
+              <FormLabel>{{ t('projects.form.key') }}</FormLabel>
+              <Input v-model="projectForm.key" :placeholder="t('projects.form.keyPlaceholder')" />
+            </div>
+            <div class="space-y-2">
+              <FormLabel>{{ t('projects.settings.projectDescription') }}</FormLabel>
+              <Textarea v-model="projectForm.description" :placeholder="t('projects.settings.projectDescriptionPlaceholder')" />
+            </div>
+
+            <div class="flex flex-wrap gap-3">
+              <Button type="submit" :disabled="savingProject">
+                {{ savingProject ? t('common.loading') : t('projects.settings.save') }}
+              </Button>
+              <Button type="button" variant="destructive" :disabled="deletingProject" @click="deleteProject">
+                {{ deletingProject ? t('common.loading') : t('projects.settings.delete') }}
+              </Button>
+            </div>
+          </form>
+        </div>
+      </TabsContent>
 
       <!-- VCS Integration Tab -->
       <TabsContent value="vcs" class="space-y-4">
@@ -284,6 +404,15 @@ async function disconnect() {
                 :disabled="syncing"
               >
                 {{ syncing ? t('vcs.form.syncing') : t('vcs.form.syncNow') }}
+              </Button>
+
+              <Button
+                type="button"
+                variant="outline"
+                @click="syncPrStatus"
+                :disabled="syncingPr"
+              >
+                {{ syncingPr ? t('common.loading') : t('vcs.form.syncPr') }}
               </Button>
 
               <Button

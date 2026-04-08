@@ -6,7 +6,7 @@ Source of truth: `openapi.json` (63 operations)
 ## Summary
 
 - CLI missing operations: 1
-- Web missing operations: 18
+- Web missing operations: 0
 
 ## CLI Missing Operations
 
@@ -20,47 +20,6 @@ Source of truth: `openapi.json` (63 operations)
 
 ## Web Missing Operations
 
-### Auth
+Note: `POST /projects/{slug}/vcs-webhook` is not applicable to Web UI (external webhook ingestion endpoint).
 
-- `POST /auth/refresh`
-
-### Projects
-
-- `GET /projects/{slug}`
-- `PATCH /projects/{slug}`
-- `DELETE /projects/{slug}`
-
-### Comments
-
-- `DELETE /comments/{id}`
-
-### Labels
-
-- `PATCH /projects/{slug}/labels/{id}`
-
-### Tickets
-
-- `DELETE /projects/{slug}/tickets/{ref}`
-- `POST /projects/{slug}/tickets/{ref}/assign`
-- `POST /projects/{slug}/tickets/{ref}/close`
-
-### Ticket Labels
-
-- `POST /projects/{slug}/tickets/{ref}/labels`
-- `DELETE /projects/{slug}/tickets/{ref}/labels/{labelId}`
-
-### Ticket Links
-
-- `GET /projects/{slug}/tickets/{ref}/links`
-- `POST /projects/{slug}/tickets/{ref}/links`
-- `DELETE /projects/{slug}/tickets/{ref}/links/{linkId}`
-
-### KB
-
-- `DELETE /projects/{slug}/kb/documents/{sourceId}`
-- `POST /projects/{slug}/kb/optimize`
-
-### VCS
-
-- `POST /projects/{slug}/vcs/sync-pr`
-- `POST /projects/{slug}/vcs-webhook`
+- None (all applicable operations implemented)

@@ -18,7 +18,8 @@
     "loadFailed": "Failed to load data",
     "retry": "Retry",
     "edit": "Edit",
-    "save": "Save"
+    "save": "Save",
+    "delete": "Delete"
   },
   "auth": {
     "login": {
@@ -92,6 +93,18 @@
     "toast": {
       "created": "Project created successfully",
       "createFailed": "Failed to create project"
+    },
+    "settings": {
+      "title": "Project Settings",
+      "description": "Manage project details.",
+      "projectDescription": "Description",
+      "projectDescriptionPlaceholder": "Short project description",
+      "save": "Save Project",
+      "delete": "Delete Project",
+      "updated": "Project updated successfully",
+      "deleted": "Project deleted successfully",
+      "deleteConfirm": "Delete this project? This action cannot be undone.",
+      "noChanges": "No changes to save"
     }
   },
   "tickets": {
@@ -165,14 +178,40 @@
       "start": "Start",
       "submitFix": "Submit Fix",
       "approveFix": "Approve Fix",
-      "failFix": "Fail Fix"
+      "failFix": "Fail Fix",
+      "close": "Close"
+    },
+    "assign": {
+      "userIdPlaceholder": "User ID",
+      "assign": "Assign",
+      "unassign": "Unassign"
+    },
+    "labels": {
+      "select": "Select label",
+      "add": "Add Label"
+    },
+    "links": {
+      "title": "Links",
+      "placeholder": "https://...",
+      "add": "Add Link",
+      "toast": {
+        "added": "Link added",
+        "deleted": "Link removed"
+      }
+    },
+    "delete": {
+      "button": "Delete Ticket",
+      "confirm": "Delete this ticket?",
+      "success": "Ticket deleted successfully"
     },
     "toast": {
       "created": "Ticket created successfully",
       "createFailed": "Failed to create ticket",
       "updated": "Ticket updated successfully",
       "updateFailed": "Failed to update ticket",
-      "actionFailed": "Action failed"
+      "actionFailed": "Action failed",
+      "assigned": "Ticket assigned",
+      "unassigned": "Ticket unassigned"
     }
   },
   "comments": {
@@ -189,11 +228,13 @@
     "toast": {
       "added": "Comment added",
       "addFailed": "Failed to add comment",
-      "updated": "Comment updated"
+      "updated": "Comment updated",
+      "deleted": "Comment deleted"
     },
     "validation": {
       "bodyRequired": "Comment body is required"
-    }
+    },
+    "confirmDelete": "Delete this comment?"
   },
   "agents": {
     "title": "Agents",
@@ -301,6 +342,8 @@
       "addButton": "Add Document",
       "addTitle": "Add Document",
       "addDescription": "Index a document into the knowledge base for this project.",
+      "optimize": "Optimize",
+      "deleteConfirm": "Delete this document source from KB?",
       "empty": "No documents yet.",
       "indexed": "{count} document(s) indexed",
       "columns": {
@@ -326,7 +369,10 @@
     "toast": {
       "searchFailed": "Search failed",
       "docAdded": "Document added",
-      "addFailed": "Failed to add document"
+      "addFailed": "Failed to add document",
+      "optimizeSuccess": "Knowledge base optimized",
+      "deleted": "Document source deleted",
+      "adminOnly": "Admin only operation"
     }
   },
   "labels": {
@@ -351,10 +397,15 @@
       "created": "Label created successfully",
       "createFailed": "Failed to create label",
       "deleted": "Label deleted successfully",
-      "deleteFailed": "Failed to delete label"
+      "deleteFailed": "Failed to delete label",
+      "updated": "Label updated successfully",
+      "noChanges": "No changes to save",
+      "assigned": "Label assigned",
+      "unassigned": "Label removed"
     },
     "validation": {
-      "colorInvalid": "Invalid hex color format. Must be # followed by 6 hex digits"
+      "colorInvalid": "Invalid hex color format. Must be # followed by 6 hex digits",
+      "nameRequired": "Name is required"
     }
   },
   "vcs": {
@@ -381,6 +432,7 @@
       "authorsPlaceholder": "e.g. john,jane,bot",
       "testConnection": "Test Connection",
       "syncNow": "Sync Now",
+      "syncPr": "Sync PR Status",
       "submit": "Save Connection",
       "update": "Update Connection",
       "disconnect": "Disconnect",
@@ -405,6 +457,8 @@
       "syncStarted": "Sync started",
       "syncComplete": "Sync complete: {created} created, {updated} updated, {skipped} skipped",
       "syncFailed": "Sync failed: {error}",
+      "syncPrComplete": "PR status synced: {updated} updated",
+      "syncPrFailed": "PR sync failed: {error}",
       "disconnectSuccess": "VCS connection removed",
       "disconnectFailed": "Failed to remove VCS connection"
     },

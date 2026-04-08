@@ -2,6 +2,7 @@
 import { marked } from 'marked'
 import { computed, reactive } from 'vue'
 import MarkdownEditor from '~/components/MarkdownEditor.vue'
+import { extractApiError } from '~/composables/useApi'
 
 definePageMeta({ layout: 'default' })
 
@@ -40,6 +41,7 @@ interface Ticket {
   gitRefUrl?: string | null
   externalVcsUrl?: string | null
   links?: TicketLink[]
+  labels?: Array<{ id: string; name: string; color: string }>
   [key: string]: unknown
 }
 
@@ -47,17 +49,36 @@ const route = useRoute()
 const { t, locale } = useI18n()
 
 const slug = route.params.project as string
-const ref = route.params.ref as string
+const ticketRef = route.params.ref as string
 
 const { $api } = useApi()
 const toast = useAppToast()
 
 const { data: ticketData, pending, error, refresh } = useAsyncData(
-  `ticket-${slug}-${ref}`,
-  () => $api.get(`/projects/${slug}/tickets/${ref}`) as Promise<Ticket>,
+  `ticket-${slug}-${ticketRef}`,
+  () => $api.get(`/projects/${slug}/tickets/${ticketRef}`) as Promise<Ticket>,
+)
+
+const { data: ticketLinksData, refresh: refreshTicketLinks } = useAsyncData(
+  `ticket-links-${slug}-${ticketRef}`,
+  () => $api.get(`/projects/${slug}/tickets/${ticketRef}/links`) as Promise<TicketLink[]>,
+)
+
+interface Label {
+  id: string
+  name: string
+  color: string
+}
+
+const { data: allLabelsData, refresh: refreshAllLabels } = useAsyncData(
+  `labels-for-ticket-${slug}`,
+  () => $api.get(`/projects/${slug}/labels`) as Promise<Label[]>,
 )
 
 const ticket = computed(() => ticketData.value ?? null)
+const ticketLinks = computed(() => ticketLinksData.value ?? [])
+const ticketLabels = computed(() => ticket.value?.labels ?? [])
+const allLabels = computed(() => allLabelsData.value ?? [])
 
 const editState = reactive({
   isEditing: false,
@@ -81,7 +102,7 @@ function cancelEdit() {
 async function saveEdit() {
   if (!ticket.value) return
   try {
-    await $api.patch(`/projects/${slug}/tickets/${ref}`, {
+    await $api.patch(`/projects/${slug}/tickets/${ticketRef}`, {
       title: editState.title,
       description: editState.description,
       priority: editState.priority,
@@ -157,8 +178,8 @@ function extractIssueNumber(url: string): string {
 }
 
 const githubPrLinks = computed(() => {
-  if (!ticket.value?.links) return []
-  return ticket.value.links.filter(link => link.linkType === 'pr' || (!link.linkType && link.provider === 'github' && link.prNumber))
+  if (!ticketLinks.value) return []
+  return ticketLinks.value.filter(link => link.linkType === 'pr' || (!link.linkType && link.provider === 'github' && link.prNumber))
 })
 
 function extractPrNumber(externalRef: string | null): string {
@@ -174,8 +195,8 @@ function extractRepoRef(externalRef: string | null): string {
 }
 
 const githubPrLinksWithState = computed(() => {
-  if (!ticket.value?.links) return []
-  return ticket.value.links.filter(link => (link.linkType === 'pr' || (!link.linkType && link.provider === 'github' && link.prNumber)) && link.prState)
+  if (!ticketLinks.value) return []
+  return ticketLinks.value.filter(link => (link.linkType === 'pr' || (!link.linkType && link.provider === 'github' && link.prNumber)) && link.prState)
 })
 
 function prStateClass(state: string | null | undefined): string {
@@ -188,18 +209,18 @@ function prStateClass(state: string | null | undefined): string {
 
 // VCS Link filtering by linkType
 const vcsPullRequestLinks = computed(() => {
-  if (!ticket.value?.links) return []
-  return ticket.value.links.filter(link => link.linkType === 'pr' || (!link.linkType && link.provider === 'github' && link.prNumber))
+  if (!ticketLinks.value) return []
+  return ticketLinks.value.filter(link => link.linkType === 'pr' || (!link.linkType && link.provider === 'github' && link.prNumber))
 })
 
 const vcsBranchLinks = computed(() => {
-  if (!ticket.value?.links) return []
-  return ticket.value.links.filter(link => link.linkType === 'branch')
+  if (!ticketLinks.value) return []
+  return ticketLinks.value.filter(link => link.linkType === 'branch')
 })
 
 const vcsCommitLinks = computed(() => {
-  if (!ticket.value?.links) return []
-  return ticket.value.links
+  if (!ticketLinks.value) return []
+  return ticketLinks.value
     .filter(link => link.linkType === 'commit')
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 })
@@ -213,6 +234,113 @@ function extractCommitSha(url: string): string {
   // Extract SHA from commit URL like https://github.com/owner/repo/commit/abc123
   const parts = url.split('/')
   return parts[parts.length - 1]?.substring(0, 7) || ''
+}
+
+const assigneeUserId = ref('')
+const assigning = ref(false)
+
+async function assignTicket() {
+  if (!assigneeUserId.value.trim()) return
+  assigning.value = true
+  try {
+    await $api.post(`/projects/${slug}/tickets/${ticketRef}/assign`, { userId: assigneeUserId.value.trim() })
+    toast.success(t('tickets.toast.assigned'))
+    await refresh()
+  } catch (err: unknown) {
+    toast.error(extractApiError(err))
+  } finally {
+    assigning.value = false
+  }
+}
+
+async function unassignTicket() {
+  assigning.value = true
+  try {
+    await $api.post(`/projects/${slug}/tickets/${ticketRef}/assign`, {})
+    toast.success(t('tickets.toast.unassigned'))
+    await refresh()
+  } catch (err: unknown) {
+    toast.error(extractApiError(err))
+  } finally {
+    assigning.value = false
+  }
+}
+
+const deletingTicket = ref(false)
+async function deleteTicket() {
+  if (!window.confirm(t('tickets.delete.confirm'))) return
+  deletingTicket.value = true
+  try {
+    await $api.delete(`/projects/${slug}/tickets/${ticketRef}`)
+    toast.success(t('tickets.delete.success'))
+    await navigateTo(`/${slug}`)
+  } catch (err: unknown) {
+    toast.error(extractApiError(err))
+  } finally {
+    deletingTicket.value = false
+  }
+}
+
+const selectedLabelId = ref('')
+const assigningLabel = ref(false)
+
+async function assignLabel() {
+  if (!selectedLabelId.value) return
+  assigningLabel.value = true
+  try {
+    await $api.post(`/projects/${slug}/tickets/${ticketRef}/labels`, { labelId: selectedLabelId.value })
+    selectedLabelId.value = ''
+    toast.success(t('labels.toast.assigned'))
+    await refresh()
+    await refreshAllLabels()
+  } catch (err: unknown) {
+    toast.error(extractApiError(err))
+  } finally {
+    assigningLabel.value = false
+  }
+}
+
+async function removeLabel(labelId: string) {
+  try {
+    await $api.delete(`/projects/${slug}/tickets/${ticketRef}/labels/${labelId}`)
+    toast.success(t('labels.toast.unassigned'))
+    await refresh()
+    await refreshAllLabels()
+  } catch (err: unknown) {
+    toast.error(extractApiError(err))
+  }
+}
+
+const newLinkUrl = ref('')
+const newLinkType = ref('pr')
+const addingLink = ref(false)
+
+async function addLink() {
+  if (!newLinkUrl.value.trim()) return
+  addingLink.value = true
+  try {
+    await $api.post(`/projects/${slug}/tickets/${ticketRef}/links`, {
+      url: newLinkUrl.value.trim(),
+      linkType: newLinkType.value,
+    })
+    newLinkUrl.value = ''
+    toast.success(t('tickets.links.toast.added'))
+    await refreshTicketLinks()
+  } catch (err: unknown) {
+    toast.error(extractApiError(err))
+  } finally {
+    addingLink.value = false
+  }
+}
+
+async function removeLink(linkId: string) {
+  try {
+    await $api.delete(`/projects/${slug}/tickets/${ticketRef}/links/${linkId}`)
+    toast.success(t('tickets.links.toast.deleted'))
+    await refreshTicketLinks()
+  } catch (err: unknown) {
+    toast.error(extractApiError(err))
+  }
 }
 </script>
 
@@ -326,7 +454,7 @@ function extractCommitSha(url: string): string {
 
         <CommentThread
           :project-slug="slug"
-          :ticket-ref="ref"
+          :ticket-ref="ticketRef"
           @comment-added="onCommentAdded"
         />
 
@@ -403,6 +531,17 @@ function extractCommitSha(url: string): string {
                 <span class="text-sm">{{ ticket.assignee.name }}</span>
               </div>
               <p v-else class="text-sm text-muted-foreground">{{ t('common.unassigned') }}</p>
+              <div class="mt-2 space-y-2">
+                <Input v-model="assigneeUserId" :placeholder="t('tickets.assign.userIdPlaceholder')" />
+                <div class="flex items-center gap-2">
+                  <Button size="sm" :disabled="assigning || !assigneeUserId.trim()" @click="assignTicket">
+                    {{ t('tickets.assign.assign') }}
+                  </Button>
+                  <Button size="sm" variant="outline" :disabled="assigning" @click="unassignTicket">
+                    {{ t('tickets.assign.unassign') }}
+                  </Button>
+                </div>
+              </div>
             </div>
 
             <Separator />
@@ -443,6 +582,71 @@ function extractCommitSha(url: string): string {
                 {{ t('tickets.detail.syncedFromGithub', { issue: extractIssueNumber(ticket.externalVcsUrl) }) }}
               </a>
             </div>
+
+            <Separator />
+
+            <div class="space-y-2">
+              <p class="text-xs text-muted-foreground">{{ t('labels.title') }}</p>
+              <div class="flex flex-wrap gap-2">
+                <Badge
+                  v-for="label in ticketLabels"
+                  :key="label.id"
+                  variant="outline"
+                  class="cursor-pointer"
+                  :style="{ borderColor: label.color, color: label.color }"
+                  @click="removeLabel(label.id)"
+                >
+                  {{ label.name }}
+                </Badge>
+                <span v-if="ticketLabels.length === 0" class="text-xs text-muted-foreground">{{ t('labels.empty') }}</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <Select v-model="selectedLabelId">
+                  <SelectTrigger class="w-[180px]">
+                    <SelectValue :placeholder="t('tickets.labels.select')" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="label in allLabels" :key="label.id" :value="label.id">{{ label.name }}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button size="sm" :disabled="assigningLabel || !selectedLabelId" @click="assignLabel">
+                  {{ t('tickets.labels.add') }}
+                </Button>
+              </div>
+            </div>
+
+            <Separator />
+
+            <div class="space-y-2">
+              <p class="text-xs text-muted-foreground">{{ t('tickets.links.title') }}</p>
+              <div class="space-y-1">
+                <div v-for="link in ticketLinks" :key="link.id" class="flex items-center justify-between gap-2 text-sm">
+                  <a :href="link.url" target="_blank" rel="noopener noreferrer" class="truncate text-blue-500 hover:underline">
+                    {{ link.url }}
+                  </a>
+                  <Button size="sm" variant="ghost" class="text-destructive" @click="removeLink(link.id)">
+                    {{ t('common.delete') }}
+                  </Button>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <Input v-model="newLinkUrl" :placeholder="t('tickets.links.placeholder')" />
+                <Select v-model="newLinkType">
+                  <SelectTrigger class="w-[120px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pr">pr</SelectItem>
+                    <SelectItem value="branch">branch</SelectItem>
+                    <SelectItem value="commit">commit</SelectItem>
+                    <SelectItem value="url">url</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button size="sm" :disabled="addingLink || !newLinkUrl.trim()" @click="addLink">
+                  {{ t('tickets.links.add') }}
+                </Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
@@ -451,6 +655,9 @@ function extractCommitSha(url: string): string {
           :project-slug="slug"
           @transition="onTransition"
         />
+        <Button variant="destructive" class="w-full" :disabled="deletingTicket" @click="deleteTicket">
+          {{ deletingTicket ? t('common.loading') : t('tickets.delete.button') }}
+        </Button>
       </div>
     </div>
   </div>
