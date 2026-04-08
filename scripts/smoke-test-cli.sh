@@ -12,7 +12,7 @@ API_DIR="$REPO_ROOT/apps/api"
 CLI_DIR="$REPO_ROOT/apps/cli"
 TEST_DB="/tmp/koda-smoke-$$.db"
 API_LOG="/tmp/koda-smoke-$$.log"
-API_URL="http://127.0.0.1:13100"
+API_URL="http://localhost:13100"
 API_PORT=13100
 API_PID=""
 SMOKE_HOME=""
@@ -84,30 +84,7 @@ fi
 # STEP 2: Migrate DB
 # =============================================================================
 log "Step 2: Running migrations..."
-if DATABASE_URL_PATH="$TEST_DB" API_MIGRATIONS_DIR="$API_DIR/prisma/migrations" python3 - <<'PY' > /dev/null 2>&1
-import os
-import sqlite3
-from pathlib import Path
-
-db_path = os.environ["DATABASE_URL_PATH"]
-migrations_dir = Path(os.environ["API_MIGRATIONS_DIR"])
-
-conn = sqlite3.connect(db_path)
-try:
-    for migration in sorted(migrations_dir.iterdir()):
-        if not migration.is_dir():
-            continue
-        sql_file = migration / "migration.sql"
-        if not sql_file.exists():
-            continue
-        sql = sql_file.read_text(encoding="utf-8")
-        if sql.strip():
-            conn.executescript(sql)
-    conn.commit()
-finally:
-    conn.close()
-PY
-then
+if (cd "$API_DIR" && DATABASE_URL="file:${TEST_DB}" npx prisma migrate deploy > /dev/null 2>&1); then
   ok "DB migrations"
 else
   fail "DB migrations failed"; exit 1
@@ -125,7 +102,6 @@ JWT_EXPIRES_IN="1h" \
 JWT_REFRESH_EXPIRES_IN="7d" \
 API_KEY_SECRET="smoke-api-key-secret" \
 API_PORT=$API_PORT \
-SERVER_HOST="127.0.0.1" \
 GLOBAL_PROJECT_SLUG="koda" \
 node dist/main > "$API_LOG" 2>&1 &
 API_PID=$!
@@ -174,24 +150,11 @@ JWT=$(echo "$REGISTER" | python3 -c "import json,sys; d=json.load(sys.stdin); pr
 USER_ID=$(echo "$REGISTER" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',d)['user']['id'])" 2>/dev/null)
 
 # Promote user to ADMIN (first user is MEMBER by default)
-if ! USER_ID="$USER_ID" DATABASE_URL_PATH="$TEST_DB" python3 - <<'PY' > /dev/null 2>&1
-import os
-import sqlite3
-
-db_path = os.environ["DATABASE_URL_PATH"]
-user_id = os.environ["USER_ID"]
-
-conn = sqlite3.connect(db_path)
-try:
-    cursor = conn.execute('UPDATE "User" SET "role" = ? WHERE "id" = ?', ("ADMIN", user_id))
-    conn.commit()
-    if cursor.rowcount < 1:
-        raise SystemExit(1)
-finally:
-    conn.close()
-PY
-then
-  fail "ADMIN promotion failed"; exit 1
+PROMOTE_OUT=$(cd "$API_DIR" && DATABASE_URL="file:${TEST_DB}" npx prisma db execute \
+  --schema prisma/schema.prisma --stdin <<< \
+  "UPDATE \"User\" SET \"role\" = 'ADMIN' WHERE \"id\" = '${USER_ID}';" 2>&1) || true
+if ! echo "$PROMOTE_OUT" | grep -qi "success\|executed"; then
+  fail "ADMIN promotion failed: $PROMOTE_OUT"; exit 1
 fi
 
 # Re-login to get a fresh JWT with ADMIN role
@@ -247,6 +210,7 @@ assert "koda project list"         "koda\|KODA\|Koda"  "$(koda project list)"
 assert "koda project list --json"  '"slug"'             "$(koda project list --json)"
 assert "koda project show koda"    "koda\|KODA\|Koda"  "$(koda project show koda)"
 assert "koda project show --json"  '"slug"'             "$(koda project show koda --json)"
+assert "koda project update"       "Koda Smoke Updated\|updated\|success" "$(koda project update koda --name 'Koda Smoke Updated' --desc 'Updated by smoke test')"
 
 # =============================================================================
 # STEP 7: Label CRUD
@@ -258,6 +222,7 @@ LABEL_ID=$(echo "$LABEL_CREATE_OUT" | python3 -c "import json,sys; d=json.load(s
 
 assert "koda label list"       "smoke-bug"    "$(koda label list --project koda)"
 assert "koda label list --json" '"name"'      "$(koda label list --project koda --json)"
+assert "koda label update"     "smoke-bug-updated\|updated\|success" "$(koda label update --project koda --id \"$LABEL_ID\" --name 'smoke-bug-updated' --color '#22c55e')"
 
 # =============================================================================
 # STEP 8: Ticket lifecycle
@@ -349,7 +314,17 @@ assert "koda ticket delete --force"      "delet\|success\|removed" "$(koda ticke
 # =============================================================================
 log "Step 16: Comment & agent..."
 koda ticket create --project koda --type ENHANCEMENT --title "Comment ticket" > /dev/null
-assert "koda comment add"   "success\|comment\|added\|Comment"  "$(koda comment add KODA-7 --body 'Great ticket')"
+COMMENT_CREATE_OUT=$(koda comment add KODA-7 --body 'Great ticket' --json)
+assert "koda comment add"   "success\|comment\|added\|Comment\|\"id\""  "$COMMENT_CREATE_OUT"
+COMMENT_ID=$(echo "$COMMENT_CREATE_OUT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('id', d.get('data',{}).get('id','')))" 2>/dev/null || true)
+assert "koda comment list"  "Great ticket\|GENERAL\|comment" "$(koda comment list KODA-7 --project koda)"
+if [[ -n "$COMMENT_ID" ]]; then
+  assert "koda comment update" "updated\|Edited by smoke\|success" "$(koda comment update --id "$COMMENT_ID" --body 'Edited by smoke')"
+  assert "koda comment delete" "deleted\|success\|removed" "$(koda comment delete --id "$COMMENT_ID" --force)"
+else
+  fail "koda comment update — skipped (no COMMENT_ID)"
+  fail "koda comment delete — skipped (no COMMENT_ID)"
+fi
 assert "koda agent me"      "smoke-agent\|Smoke Agent"          "$(koda agent me)"
 assert "koda agent me --json" '"slug"\|"name"'                  "$(koda agent me --json)"
 
@@ -376,6 +351,8 @@ assert "KB add via API"      '"id"\|"ret"\|success\|doc'  "$KB_ADD"
 
 assert "koda kb list"        "manual\|smoke\|Source\|ID"   "$(koda kb list --project koda)"
 assert "koda kb search"      "result\|score\|deploy\|no\|found\|No"  "$(koda kb search --project koda --query 'deployment')"
+assert "koda kb optimize"    "optimiz\|completed\|success" "$(koda kb optimize --project koda)"
+assert "koda kb delete"      "deleted\|success\|removed" "$(koda kb delete --project koda --source-id smoke-doc-1 --force)"
 
 # =============================================================================
 # STEP 18: Label delete
