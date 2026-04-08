@@ -33,6 +33,7 @@ describe('TicketResponseDto', () => {
           prState: 'merged',
           prNumber: 42,
           prUpdatedAt: new Date('2026-04-07T01:00:00Z'),
+          linkType: 'pr',
           createdAt: new Date('2026-04-07T00:30:00Z'),
         },
       ],
@@ -44,6 +45,8 @@ describe('TicketResponseDto', () => {
         prState: 'merged',
         prNumber: 42,
         prUpdatedAt: new Date('2026-04-07T01:00:00Z'),
+        linkType: 'pr',
+        title: null,
       }),
     ]);
   });

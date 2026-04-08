@@ -205,6 +205,7 @@ model TicketLink {
   prState     String?   // draft | open | merged | closed
   prNumber    Int?      // direct PR lookup
   prUpdatedAt DateTime? // tracking last sync time
+  linkType    String    @default("url") // url | pr | commit | branch
   createdAt   DateTime  @default(now())
 
   ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)

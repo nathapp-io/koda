@@ -26,6 +26,12 @@ export class TicketLinkResponseDto {
   prUpdatedAt!: Date | null;
 
   @ApiProperty()
+  linkType!: string;
+
+  @ApiProperty({ nullable: true })
+  title!: string | null;
+
+  @ApiProperty()
   createdAt!: Date;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -39,6 +45,8 @@ export class TicketLinkResponseDto {
       prState: link.prState ?? null,
       prNumber: link.prNumber ?? null,
       prUpdatedAt: link.prUpdatedAt ?? null,
+      linkType: link.linkType ?? 'url',
+      title: link.linkType === 'commit' ? link.externalRef ?? null : null,
       createdAt: link.createdAt,
     };
   }

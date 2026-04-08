@@ -51,6 +51,8 @@ type TicketLink = {
   prState?: string | null;
   prNumber?: number | null;
   prUpdatedAt?: string | null;
+  linkType?: string;
+  title?: string | null;
 };
 
 export function ticketCommand(program: Command): void {
@@ -277,16 +279,39 @@ export function ticketCommand(program: Command): void {
           }
 
           if (ticketData.links && ticketData.links.length > 0) {
-            console.log(`\nLinks:`);
-            for (const link of ticketData.links) {
-              let linkStr = `  - ${link.url} (${link.provider})`;
-              if (link.externalRef) {
-                linkStr += ` [${link.externalRef}]`;
+            // Group links by linkType
+            const branches = ticketData.links.filter(l => l.linkType === 'branch');
+            const commits = ticketData.links.filter(l => l.linkType === 'commit');
+            const pullRequests = ticketData.links.filter(l => l.linkType === 'pr' || (!l.linkType && l.prNumber));
+
+            if (branches.length > 0) {
+              console.log(`\nBranches:`);
+              for (const link of branches) {
+                console.log(`  - ${link.externalRef || link.url}`);
               }
-              if (link.prState) {
-                linkStr += ` [${link.prState}]`;
+            }
+
+            if (commits.length > 0) {
+              console.log(`\nCommits:`);
+              for (const link of commits) {
+                const sha = link.url.split('/').pop()?.slice(0, 7) || link.url;
+                const summary = link.title || link.externalRef || link.url;
+                console.log(`  - ${sha} - ${summary}`);
               }
-              console.log(linkStr);
+            }
+
+            if (pullRequests.length > 0) {
+              console.log(`\nPull Requests:`);
+              for (const link of pullRequests) {
+                let linkStr = `  - ${link.url} (${link.provider})`;
+                if (link.externalRef) {
+                  linkStr += ` [${link.externalRef}]`;
+                }
+                if (link.prState) {
+                  linkStr += ` [${link.prState}]`;
+                }
+                console.log(linkStr);
+              }
             }
           }
         }

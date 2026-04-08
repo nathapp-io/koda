@@ -1,4 +1,9 @@
 {
+  "links": {
+    "branch": "Branch",
+    "commit": "Commit",
+    "pull_request": "Pull Request"
+  },
   "pr": {
     "created": "Pull request created successfully",
     "createFailed": "Failed to create pull request: {error}",

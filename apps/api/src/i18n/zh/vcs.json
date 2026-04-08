@@ -1,4 +1,9 @@
 {
+  "links": {
+    "branch": "分支",
+    "commit": "提交",
+    "pull_request": "拉取请求"
+  },
   "pr": {
     "created": "拉取请求创建成功",
     "createFailed": "创建拉取请求失败：{error}",

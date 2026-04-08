@@ -142,7 +142,11 @@
       "syncedFromGithub": "同步自 GitHub #{issue}"
     },
     "vcs": {
-      "github": "GitHub"
+      "github": "GitHub",
+      "title": "VCS 链接",
+      "pullRequests": "拉取请求",
+      "branches": "分支",
+      "commits": "提交"
     },
     "pr": {
       "created": "PR 已创建：{repo}#{number}",

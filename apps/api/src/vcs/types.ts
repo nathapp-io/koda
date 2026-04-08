@@ -35,6 +35,7 @@ export interface VcsPrStatus {
   mergeSha: string | null;
   url: string;
   title: string;
+  branchName?: string;
 }
 
 /**
@@ -46,4 +47,15 @@ export interface VcsPullRequest {
   branchName: string;
   state: string;
   draft: boolean;
+}
+
+/**
+ * Represents a VCS commit from any provider
+ */
+export interface VcsCommit {
+  sha: string;
+  message: string;
+  authorLogin: string;
+  url: string;
+  date: Date;
 }

@@ -142,7 +142,11 @@
       "syncedFromGithub": "Synced from GitHub #{issue}"
     },
     "vcs": {
-      "github": "GitHub"
+      "github": "GitHub",
+      "title": "VCS Links",
+      "pullRequests": "Pull Requests",
+      "branches": "Branches",
+      "commits": "Commits"
     },
     "pr": {
       "created": "PR created: {repo}#{number}",

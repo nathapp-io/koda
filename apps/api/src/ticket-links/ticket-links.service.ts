@@ -49,6 +49,18 @@ export class TicketLinksService {
     return ticket;
   }
 
+  private inferLinkType(url: string, explicitLinkType?: string): string {
+    if (explicitLinkType) {
+      return explicitLinkType;
+    }
+
+    if (/\/pull\/\d+/.test(url) || /\/merge_requests\/\d+/.test(url) || /\/pull-requests\/\d+/.test(url)) {
+      return 'pr';
+    }
+
+    return 'url';
+  }
+
   async create(
     slug: string,
     ref: string,
@@ -72,6 +84,7 @@ export class TicketLinksService {
         url: dto.url,
         provider,
         externalRef,
+        linkType: this.inferLinkType(dto.url, dto.linkType),
       },
     });
 

@@ -1,5 +1,5 @@
 import { IVcsProvider } from './vcs-provider';
-import { VcsIssue, VcsPullRequest, VcsPrStatus, CreatePrParams } from './types';
+import { VcsIssue, VcsPullRequest, VcsPrStatus, CreatePrParams, VcsCommit } from './types';
 
 describe('VcsIssue Type', () => {
   describe('VcsIssue type structure', () => {
@@ -166,6 +166,10 @@ describe('IVcsProvider Interface', () => {
         async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
           return [];
         }
+
+        async listPrCommits(prNumber: number): Promise<VcsCommit[]> {
+          return [];
+        }
       }
 
       const provider = new MockVcsProvider();
@@ -212,6 +216,10 @@ describe('IVcsProvider Interface', () => {
         async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
           return [];
         }
+
+        async listPrCommits(prNumber: number): Promise<VcsCommit[]> {
+          return [];
+        }
       }
 
       const provider = new MockVcsProvider();
@@ -250,6 +258,10 @@ describe('IVcsProvider Interface', () => {
         }
 
         async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
+          return [];
+        }
+
+        async listPrCommits(prNumber: number): Promise<VcsCommit[]> {
           return [];
         }
       }
@@ -297,6 +309,10 @@ describe('IVcsProvider Interface', () => {
         async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
           return [];
         }
+
+        async listPrCommits(prNumber: number): Promise<VcsCommit[]> {
+          return [];
+        }
       }
 
       const provider = new MockVcsProvider();
@@ -340,6 +356,10 @@ describe('IVcsProvider Interface', () => {
         async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
           return [];
         }
+
+        async listPrCommits(prNumber: number): Promise<VcsCommit[]> {
+          return [];
+        }
       }
 
       const provider = new MockVcsProvider();
@@ -377,6 +397,10 @@ describe('IVcsProvider Interface', () => {
         async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
           return [];
         }
+
+        async listPrCommits(prNumber: number): Promise<VcsCommit[]> {
+          return [];
+        }
       }
 
       const provider = new MockVcsProvider();
@@ -410,6 +434,10 @@ describe('IVcsProvider Interface', () => {
         }
 
         async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
+          return [];
+        }
+
+        async listPrCommits(prNumber: number): Promise<VcsCommit[]> {
           return [];
         }
       }
@@ -447,6 +475,10 @@ describe('IVcsProvider Interface', () => {
         }
 
         async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
+          return [];
+        }
+
+        async listPrCommits(prNumber: number): Promise<VcsCommit[]> {
           return [];
         }
       }
@@ -500,6 +532,10 @@ describe('VcsIssue and IVcsProvider exports', () => {
       }
 
       async listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]> {
+        return [];
+      }
+
+      async listPrCommits(prNumber: number): Promise<VcsCommit[]> {
         return [];
       }
     }

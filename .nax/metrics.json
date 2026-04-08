@@ -2038,5 +2038,96 @@
       "output_tokens": 62260,
       "cache_read_input_tokens": 7998521
     }
+  },
+  {
+    "runId": "run-2026-04-07T12-45-38-712Z",
+    "feature": "vcs-phase4-branch-commit-links",
+    "startedAt": "2026-04-07T12:45:38.712Z",
+    "completedAt": "2026-04-07T13:27:10.840Z",
+    "totalCost": 0,
+    "totalStories": 0,
+    "storiesCompleted": 0,
+    "storiesFailed": 0,
+    "totalDurationMs": 2492128,
+    "stories": []
+  },
+  {
+    "runId": "run-2026-04-07T13-30-32-898Z",
+    "feature": "vcs-phase4-branch-commit-links",
+    "startedAt": "2026-04-07T13:30:32.898Z",
+    "completedAt": "2026-04-07T13:30:33.591Z",
+    "totalCost": 0,
+    "totalStories": 0,
+    "storiesCompleted": 0,
+    "storiesFailed": 0,
+    "totalDurationMs": 693,
+    "stories": []
+  },
+  {
+    "runId": "run-2026-04-07T13-32-29-676Z",
+    "feature": "vcs-phase4-branch-commit-links",
+    "startedAt": "2026-04-07T13:32:29.676Z",
+    "completedAt": "2026-04-07T15:28:29.404Z",
+    "totalCost": 0,
+    "totalStories": 3,
+    "storiesCompleted": 3,
+    "storiesFailed": 0,
+    "totalDurationMs": 6959728,
+    "stories": [
+      {
+        "storyId": "VCS-P4-001",
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "modelUsed": "haiku",
+        "agentUsed": "claude",
+        "attempts": 1,
+        "finalTier": "balanced",
+        "success": true,
+        "cost": 39.21370625,
+        "durationMs": 0,
+        "firstPassSuccess": true,
+        "startedAt": "2026-04-07T13:32:30.302Z",
+        "completedAt": "2026-04-07T13:47:57.036Z",
+        "fullSuiteGatePassed": false,
+        "runtimeCrashes": 0
+      },
+      {
+        "storyId": "VCS-P4-002",
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "modelUsed": "haiku",
+        "agentUsed": "claude",
+        "attempts": 1,
+        "finalTier": "balanced",
+        "success": true,
+        "cost": 47.07274625000001,
+        "durationMs": 0,
+        "firstPassSuccess": true,
+        "startedAt": "2026-04-07T13:47:59.813Z",
+        "completedAt": "2026-04-07T14:52:52.166Z",
+        "fullSuiteGatePassed": true,
+        "runtimeCrashes": 0
+      },
+      {
+        "storyId": "VCS-P4-003",
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "modelTier": "balanced",
+        "modelUsed": "haiku",
+        "agentUsed": "claude",
+        "attempts": 1,
+        "finalTier": "balanced",
+        "success": true,
+        "cost": 40.520089500000005,
+        "durationMs": 0,
+        "firstPassSuccess": true,
+        "startedAt": "2026-04-07T14:52:54.964Z",
+        "completedAt": "2026-04-07T15:27:50.695Z",
+        "fullSuiteGatePassed": true,
+        "runtimeCrashes": 0
+      }
+    ]
   }
 ]

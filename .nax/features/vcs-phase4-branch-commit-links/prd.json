@@ -1,0 +1,146 @@
+{
+  "project": "koda",
+  "feature": "vcs-phase4-branch-commit-links",
+  "branchName": "feat/vcs-phase4-branch-commit-links",
+  "createdAt": "2026-04-07T00:00:00.000Z",
+  "updatedAt": "2026-04-07T15:27:50.696Z",
+  "userStories": [
+    {
+      "id": "VCS-P4-001",
+      "title": "Extend TicketLink schema + IVcsProvider commits method + ticket ref matcher utility",
+      "description": "Add `linkType` field to `TicketLink` model with default `\"url\"`. Add `VcsCommit` interface and `listPrCommits()` method to `IVcsProvider`. Implement `containsTicketRef()` and `extractTicketRefs()` in a ticket ref matcher utility.",
+      "acceptanceCriteria": [
+        "TicketLink model has a new field `linkType` with default `\"url\"` - existing entries unaffected by migration",
+        "`GitHubProvider.listPrCommits(12)` calls `GET /repos/{owner}/{repo}/pulls/12/commits` and returns array of `VcsCommit` with `sha`, `message`, `authorLogin`, `url`, `date`",
+        "`GitHubProvider.listPrCommits(99999)` throws `NotFoundAppException` when GitHub returns 404",
+        "`containsTicketRef('KODA-42: fix bug', 'KODA', 42)` returns `true`",
+        "`containsTicketRef('koda-42 fix bug', 'KODA', 42)` returns `true` (case-insensitive)",
+        "`containsTicketRef('fix bug in KODA-43', 'KODA', 42)` returns `false` (different number)",
+        "`containsTicketRef('fix bug', 'KODA', 42)` returns `false` (no reference)",
+        "`containsTicketRef('prefixKODA-42suffix', 'KODA', 42)` returns `false` (not a word boundary match)",
+        "`extractTicketRefs('KODA-42 and PROJ-7 mentioned')` returns `[{ key: 'KODA', number: 42 }, { key: 'PROJ', number: 7 }]`"
+      ],
+      "tags": [
+        "api",
+        "schema",
+        "vcs"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 1,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/vcs/vcs-provider.ts",
+        "apps/api/src/vcs/types.ts",
+        "apps/api/src/vcs/providers/github.provider.ts",
+        "apps/api/src/ticket-links/ticket-links.service.ts"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "041a717bd110639cfdda2c9230f118f2f9ab393a"
+    },
+    {
+      "id": "VCS-P4-002",
+      "title": "Link extractor service + integration with PR creation and PR status sync",
+      "description": "Create `vcs-link-extractor.service.ts` with `extractLinksFromPr()` that: (1) Gets PR head branch from `provider.getPullRequestStatus()`, (2) Creates `TicketLink` with `linkType='branch'`, (3) Gets PR commits via `provider.listPrCommits()`, (4) Filters commits matching ticket ref pattern, (5) Creates `TicketLink` entries with `linkType='commit'` for each match. Integrate after `createPrForTicket()` and after `syncPrStatus()`.",
+      "acceptanceCriteria": [
+        "`extractLinksFromPr()` creates a `TicketLink` with `linkType='branch'` for the PR's head branch URL `https://github.com/{owner}/{repo}/tree/{branchName}`",
+        "`extractLinksFromPr()` creates `TicketLink` entries with `linkType='commit'` for each PR commit whose message contains the ticket ref (case-insensitive `{KEY}-{NUMBER}` pattern)",
+        "`extractLinksFromPr()` does not create duplicate links - upserts on `@@unique([ticketId, url])`",
+        "`extractLinksFromPr()` skips commits whose message does not contain the ticket ref",
+        "After `createPrForTicket()` completes, `extractLinksFromPr()` is called to create the branch link",
+        "After `syncPrStatus()` updates a `TicketLink`, `extractLinksFromPr()` is called to pick up new commits",
+        "When GitHub API fails during commit listing, the branch link is still created and the error is logged as a warning"
+      ],
+      "tags": [
+        "api",
+        "vcs",
+        "integration"
+      ],
+      "dependencies": [
+        "VCS-P4-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/vcs/vcs-pr-sync.service.ts",
+        "apps/api/src/vcs/vcs-provider.ts",
+        "apps/api/src/vcs/providers/github.provider.ts",
+        "apps/api/src/ticket-links/ticket-links.service.ts",
+        "apps/api/src/vcs/vcs-sync.service.ts"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "690a87436df075f617bfe592b226aea2637a3dc7"
+    },
+    {
+      "id": "VCS-P4-003",
+      "title": "Web grouped VCS links display + CLI ticket show links + webhook synchronize handler",
+      "description": "Display grouped VCS links on web ticket detail page (PRs, branches, commits sections). Update CLI `ticket show` to display links grouped by type. Handle `pull_request.synchronize` webhook action to capture new commits. Add i18n keys for en and zh.",
+      "acceptanceCriteria": [
+        "Web ticket detail page VCS section groups links by `linkType`: PRs, branches, and commits displayed in separate subsections",
+        "Web PR subsection shows PR number, status badge, and clickable link",
+        "Web branch subsection shows branch name as a clickable link to GitHub",
+        "Web commit subsection shows abbreviated SHA (7 chars) and commit message as a clickable link to GitHub",
+        "Web commit subsection shows commits in reverse chronological order (newest first)",
+        "`koda ticket show <ref>` output displays linked branches and commits in the links section, grouped by type",
+        "`koda ticket show <ref> --json` output includes `linkType` field on each entry in `links[]`",
+        "`POST /projects/:slug/vcs-webhook` with `pull_request.synchronize` event calls `extractLinksFromPr()` to capture new commits",
+        "i18n keys exist in both `en` and `zh` for branch/commit link display labels"
+      ],
+      "tags": [
+        "web",
+        "cli",
+        "vcs",
+        "i18n"
+      ],
+      "dependencies": [
+        "VCS-P4-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/vcs/vcs-webhook.service.ts",
+        "apps/cli/src/commands/ticket.ts",
+        "apps/api/src/ticket-links/ticket-links.service.ts"
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "c3ed714a6f86113a6c14b7a46123761d0d2699d4"
+    }
+  ],
+  "analysis": "## Key Files\n\n### API - Schema & Models\n- `apps/api/prisma/schema.prisma`: `TicketLink` model (lines 199-213) with `@@unique([ticketId, url])`. Need to add `linkType` field with default `\"url\"`.\n- `apps/api/src/vcs/types.ts`: `VcsIssue`, `CreatePrParams`, `VcsPrStatus`, `VcsPullRequest` interfaces. Need to add `VcsCommit` interface with `sha`, `message`, `authorLogin`, `url`, `date`.\n\n### API - VCS Provider\n- `apps/api/src/vcs/vcs-provider.ts`: `IVcsProvider` interface. Need to add `listPrCommits(prNumber: number): Promise<VcsCommit[]>` method.\n- `apps/api/src/vcs/providers/github.provider.ts`: Implements `IVcsProvider`. `getPullRequestStatus()` exists at lines 218-236. Need to implement `listPrCommits()` calling `GET /repos/{owner}/{repo}/pulls/{pr_number}/commits`.\n- `apps/api/src/vcs/branch-name.util.ts`: Existing utility that may inform branch URL building.\n\n### API - VCS Services\n- `apps/api/src/vcs/vcs-pr-sync.service.ts`: `syncPrStatus()` syncs PR state (lines 100-187), `handleMergedPrAutoTransition()` (lines 200-267). After updating PR state, need to call `extractLinksFromPr()` to pick up new commits.\n- `apps/api/src/vcs/vcs-webhook.service.ts`: `handlePullRequest()` routes events (lines 189-232). Handles: opened, closed, merged, ready_for_review, reopened, converted_to_draft. Missing: `synchronize` action should call `extractLinksFromPr()`.\n- `apps/api/src/ticket-links/ticket-links.service.ts`: `create()` method with upsert on `(ticketId, url)` (lines 52-79), `findByTicket()` (lines 81-90). Need to add `linkType` parameter.\n\n\n### API - i18n\n- `apps/api/src/i18n/{en,zh}/`: Need new i18n keys for branch/commit link display labels.\n\n### CLI\n- `apps/cli/src/commands/ticket.ts`: `show` subcommand. Need to display links grouped by `linkType`.\n- `apps/cli/src/commands/ticket-show.spec.ts`: Existing test file pattern.\n\n### Web\n- Web ticket detail page location needs verification. Searched `apps/web/pages/**/[ref].vue` - no match. Check `apps/web/pages/` structure for ticket detail page.\n- `apps/web/i18n/locales/{en,zh}.json`: Need i18n keys for branch/commit link display labels.\n\n## Architecture Decisions\n\n1. **linkType values**: `\"url\"` (default, existing links), `\"pr\"` (Phase 2), `\"branch\"` (Phase 4), `\"commit\"` (Phase 4)\n2. **Upsert strategy**: `@@unique([ticketId, url])` already exists - upsert on duplicate URL per ticket\n3. **Commit filtering**: Match `{KEY}-{NUMBER}` pattern case-insensitively in commit message using word boundary regex\n4. **GitHub API limit**: 250 commits max (pagination limit) - fetch first page only, log if truncated\n5. **Error handling**: On GitHub API error during commit listing, branch link still created, error logged as warning\n\n6. **Webhook `synchronize`**: Fires when new commits pushed - call `extractLinksFromPr()` to capture them\n\n## Migration Notes\n- Prisma migration: Add `linkType` field with default `\"url\"` - existing links unaffected\n- No breaking changes to existing API contracts\n- `VcsCommit` interface is additive - no existing code affected\n\n## Risks\n- `synchronize` webhook action not currently handled - need to add case in `handlePullRequest()` switch\n- `listPrCommits` GitHub API response structure needs verification\n- Web ticket detail page path needs confirmation"
+}

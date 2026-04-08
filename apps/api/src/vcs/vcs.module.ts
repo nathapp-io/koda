@@ -6,6 +6,7 @@ import { VcsSyncService } from './vcs-sync.service';
 import { VcsWebhookService } from './vcs-webhook.service';
 import { VcsPollingService } from './vcs-polling.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
+import { VcsLinkExtractorService } from './vcs-link-extractor.service';
 import { ProjectsService } from '../projects/projects.service';
 
 @Module({
@@ -17,8 +18,9 @@ import { ProjectsService } from '../projects/projects.service';
     VcsWebhookService,
     VcsPollingService,
     VcsPrSyncService,
+    VcsLinkExtractorService,
     ProjectsService,
   ],
-  exports: [VcsConnectionService, VcsSyncService, VcsWebhookService, VcsPollingService, VcsPrSyncService],
+  exports: [VcsConnectionService, VcsSyncService, VcsWebhookService, VcsPollingService, VcsPrSyncService, VcsLinkExtractorService],
 })
 export class VcsModule {}

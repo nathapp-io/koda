@@ -1,4 +1,4 @@
-import { VcsIssue, VcsPullRequest, VcsPrStatus, CreatePrParams } from './types';
+import { VcsIssue, VcsPullRequest, VcsPrStatus, VcsCommit, CreatePrParams } from './types';
 
 /**
  * Interface for VCS providers (GitHub, GitLab, etc.)
@@ -42,4 +42,10 @@ export interface IVcsProvider {
    * @param state Optional filter - 'open', 'closed', or 'all' (defaults to 'open')
    */
   listPullRequests(state?: 'open' | 'closed' | 'all'): Promise<VcsPrStatus[]>;
+
+  /**
+   * List commits for a specific pull request
+   * @param prNumber The pull request number
+   */
+  listPrCommits(prNumber: number): Promise<VcsCommit[]>;
 }
