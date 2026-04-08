@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { marked } from 'marked'
-import { computed, reactive } from 'vue'
+import { computed, reactive, ref as vueRef } from 'vue'
 import MarkdownEditor from '~/components/MarkdownEditor.vue'
 import { extractApiError } from '~/composables/useApi'
 
@@ -49,19 +49,19 @@ const route = useRoute()
 const { t, locale } = useI18n()
 
 const slug = route.params.project as string
-const ticketRef = route.params.ref as string
+const ref = route.params.ref as string
 
 const { $api } = useApi()
 const toast = useAppToast()
 
 const { data: ticketData, pending, error, refresh } = useAsyncData(
-  `ticket-${slug}-${ticketRef}`,
-  () => $api.get(`/projects/${slug}/tickets/${ticketRef}`) as Promise<Ticket>,
+  `ticket-${slug}-${ref}`,
+  () => $api.get(`/projects/${slug}/tickets/${ref}`) as Promise<Ticket>,
 )
 
 const { data: ticketLinksData, refresh: refreshTicketLinks } = useAsyncData(
-  `ticket-links-${slug}-${ticketRef}`,
-  () => $api.get(`/projects/${slug}/tickets/${ticketRef}/links`) as Promise<TicketLink[]>,
+  `ticket-links-${slug}-${ref}`,
+  () => $api.get(`/projects/${slug}/tickets/${ref}/links`) as Promise<TicketLink[]>,
 )
 
 interface Label {
@@ -102,7 +102,7 @@ function cancelEdit() {
 async function saveEdit() {
   if (!ticket.value) return
   try {
-    await $api.patch(`/projects/${slug}/tickets/${ticketRef}`, {
+    await $api.patch(`/projects/${slug}/tickets/${ref}`, {
       title: editState.title,
       description: editState.description,
       priority: editState.priority,
@@ -236,14 +236,14 @@ function extractCommitSha(url: string): string {
   return parts[parts.length - 1]?.substring(0, 7) || ''
 }
 
-const assigneeUserId = ref('')
-const assigning = ref(false)
+const assigneeUserId = vueRef('')
+const assigning = vueRef(false)
 
 async function assignTicket() {
   if (!assigneeUserId.value.trim()) return
   assigning.value = true
   try {
-    await $api.post(`/projects/${slug}/tickets/${ticketRef}/assign`, { userId: assigneeUserId.value.trim() })
+    await $api.post(`/projects/${slug}/tickets/${ref}/assign`, { userId: assigneeUserId.value.trim() })
     toast.success(t('tickets.toast.assigned'))
     await refresh()
   } catch (err: unknown) {
@@ -256,7 +256,7 @@ async function assignTicket() {
 async function unassignTicket() {
   assigning.value = true
   try {
-    await $api.post(`/projects/${slug}/tickets/${ticketRef}/assign`, {})
+    await $api.post(`/projects/${slug}/tickets/${ref}/assign`, {})
     toast.success(t('tickets.toast.unassigned'))
     await refresh()
   } catch (err: unknown) {
@@ -266,12 +266,12 @@ async function unassignTicket() {
   }
 }
 
-const deletingTicket = ref(false)
+const deletingTicket = vueRef(false)
 async function deleteTicket() {
   if (!window.confirm(t('tickets.delete.confirm'))) return
   deletingTicket.value = true
   try {
-    await $api.delete(`/projects/${slug}/tickets/${ticketRef}`)
+    await $api.delete(`/projects/${slug}/tickets/${ref}`)
     toast.success(t('tickets.delete.success'))
     await navigateTo(`/${slug}`)
   } catch (err: unknown) {
@@ -281,14 +281,14 @@ async function deleteTicket() {
   }
 }
 
-const selectedLabelId = ref('')
-const assigningLabel = ref(false)
+const selectedLabelId = vueRef('')
+const assigningLabel = vueRef(false)
 
 async function assignLabel() {
   if (!selectedLabelId.value) return
   assigningLabel.value = true
   try {
-    await $api.post(`/projects/${slug}/tickets/${ticketRef}/labels`, { labelId: selectedLabelId.value })
+    await $api.post(`/projects/${slug}/tickets/${ref}/labels`, { labelId: selectedLabelId.value })
     selectedLabelId.value = ''
     toast.success(t('labels.toast.assigned'))
     await refresh()
@@ -302,7 +302,7 @@ async function assignLabel() {
 
 async function removeLabel(labelId: string) {
   try {
-    await $api.delete(`/projects/${slug}/tickets/${ticketRef}/labels/${labelId}`)
+    await $api.delete(`/projects/${slug}/tickets/${ref}/labels/${labelId}`)
     toast.success(t('labels.toast.unassigned'))
     await refresh()
     await refreshAllLabels()
@@ -311,15 +311,15 @@ async function removeLabel(labelId: string) {
   }
 }
 
-const newLinkUrl = ref('')
-const newLinkType = ref('pr')
-const addingLink = ref(false)
+const newLinkUrl = vueRef('')
+const newLinkType = vueRef('pr')
+const addingLink = vueRef(false)
 
 async function addLink() {
   if (!newLinkUrl.value.trim()) return
   addingLink.value = true
   try {
-    await $api.post(`/projects/${slug}/tickets/${ticketRef}/links`, {
+    await $api.post(`/projects/${slug}/tickets/${ref}/links`, {
       url: newLinkUrl.value.trim(),
       linkType: newLinkType.value,
     })
@@ -335,7 +335,7 @@ async function addLink() {
 
 async function removeLink(linkId: string) {
   try {
-    await $api.delete(`/projects/${slug}/tickets/${ticketRef}/links/${linkId}`)
+    await $api.delete(`/projects/${slug}/tickets/${ref}/links/${linkId}`)
     toast.success(t('tickets.links.toast.deleted'))
     await refreshTicketLinks()
   } catch (err: unknown) {
@@ -454,7 +454,7 @@ async function removeLink(linkId: string) {
 
         <CommentThread
           :project-slug="slug"
-          :ticket-ref="ticketRef"
+          :ticket-ref="ref"
           @comment-added="onCommentAdded"
         />
 

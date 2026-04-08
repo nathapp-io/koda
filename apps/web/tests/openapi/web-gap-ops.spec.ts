@@ -35,21 +35,21 @@ describe('Web OpenAPI gap operations are wired in source', () => {
   test('ticket detail uses delete/assign endpoints and action panel uses close endpoint', () => {
     const source = src(ticketPath)
     const panelSource = src(actionPanelPath)
-    expect(source).toContain('/tickets/${ticketRef}/assign')
-    expect(source).toContain('/tickets/${ticketRef}')
+    expect(source).toContain('/tickets/${ref}/assign')
+    expect(source).toContain('/tickets/${ref}')
     expect(panelSource).toContain("performAction('close')")
   })
 
   test('ticket detail uses ticket label assign/remove endpoints', () => {
     const source = src(ticketPath)
-    expect(source).toContain('/tickets/${ticketRef}/labels')
-    expect(source).toContain('/tickets/${ticketRef}/labels/${labelId}')
+    expect(source).toContain('/tickets/${ref}/labels')
+    expect(source).toContain('/tickets/${ref}/labels/${labelId}')
   })
 
   test('ticket detail uses ticket link list/create/delete endpoints', () => {
     const source = src(ticketPath)
-    expect(source).toContain('/tickets/${ticketRef}/links')
-    expect(source).toContain('/tickets/${ticketRef}/links/${linkId}')
+    expect(source).toContain('/tickets/${ref}/links')
+    expect(source).toContain('/tickets/${ref}/links/${linkId}')
   })
 
   test('kb page uses delete source and optimize endpoints', () => {
