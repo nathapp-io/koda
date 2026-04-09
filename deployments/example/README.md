@@ -5,7 +5,7 @@ This example deploys Koda from published Docker images and includes a dedicated 
 ## Files
 
 - `docker-compose.yml` — `migrate`, `api`, `web` services
-- `deploy.sh` — one-command deploy wrapper
+- `deploy.sh` — one-command deploy wrapper (runs pre-deploy backup by default)
 - `backup-db.sh` — backup SQLite data volume before risky changes
 - `rollback.sh` — rollback app version (optionally restore DB backup)
 
@@ -38,9 +38,18 @@ chmod +x deploy.sh backup-db.sh rollback.sh
 ```
 
 This runs:
-1) `docker compose pull`
-2) `docker compose run --rm migrate`
-3) `docker compose up -d api web`
+1) pre-deploy safety checks
+2) backup SQLite volume (default)
+3) `docker compose pull`
+4) `docker compose run --rm migrate`
+5) `docker compose up -d api web`
+6) post-deploy health checks
+
+To skip backup explicitly:
+
+```bash
+./deploy.sh --no-backup
+```
 
 ## Manual migration only
 
