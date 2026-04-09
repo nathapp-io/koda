@@ -82,6 +82,12 @@ RUN --mount=type=cache,id=bun-install,target=/root/.bun/install/cache \
 COPY --from=builder /app/packages ./packages
 COPY --from=builder /app/apps/${BUILD_APP}/dist ./apps/runtime/dist
 
+# Prisma runtime assets for in-container migration commands:
+# - /app/prisma/schema.prisma
+# - /app/prisma/migrations/*
+COPY --from=builder /app/apps/${BUILD_APP}/prisma/schema.prisma ./prisma/schema.prisma
+COPY --from=builder /app/apps/${BUILD_APP}/prisma/migrations ./prisma/migrations
+
 # Copy bun module store from builder — includes the Prisma generated client
 # (bun stores the generated .prisma/client inside .bun/@prisma+client@.../node_modules/.prisma/)
 # Production bun install creates .bun but without the prisma generate output.
