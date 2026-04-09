@@ -1485,4 +1485,174 @@ describeIntegration('API Integration Tests', () => {
       expect(res.body).toHaveProperty('ret');
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────
+  // Knowledge Base — Documents CRUD
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('Knowledge Base — Documents', () => {
+    let documentSourceId: string;
+
+    it('POST /api/projects/:slug/kb/documents — adds a document', async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/kb/documents`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({
+          source: 'manual',
+          sourceId: 'doc-manual-001',
+          content: 'This is a test document for knowledge base indexing.',
+          metadata: { author: 'test', category: 'integration' },
+        })
+        .expect(201);
+
+      const data = body<{ indexed: boolean }>(res);
+      expect(data.indexed).toBe(true);
+      documentSourceId = 'doc-manual-001';
+    });
+
+    it('POST /api/projects/:slug/kb/documents — returns 404 for nonexistent project', async () => {
+      await request(httpServer)
+        .post('/api/projects/nonexistent/kb/documents')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({
+          source: 'manual',
+          sourceId: 'doc-404',
+          content: 'Test content',
+        })
+        .expect(404);
+    });
+
+    it('GET /api/projects/:slug/kb/documents — lists indexed documents', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/kb/documents`)
+        .query({ limit: '10' })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const data = body<unknown>(res);
+      expect(Array.isArray(data)).toBe(true);
+    });
+
+    it('GET /api/projects/:slug/kb/documents — returns 404 for nonexistent project', async () => {
+      await request(httpServer)
+        .get('/api/projects/nonexistent/kb/documents')
+        .query({ limit: '10' })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(404);
+    });
+
+    it('DELETE /api/projects/:slug/kb/documents/:sourceId — removes document by sourceId', async () => {
+      await request(httpServer)
+        .delete(`/api/projects/${projectSlug}/kb/documents/${documentSourceId}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+    });
+
+    it('DELETE /api/projects/:slug/kb/documents/:sourceId — returns 200 even for nonexistent sourceId (idempotent delete)', async () => {
+      // Delete is idempotent — returns 200 even if sourceId doesn't exist
+      await request(httpServer)
+        .delete(`/api/projects/${projectSlug}/kb/documents/nonexistent-source`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+    });
+
+    it('POST /api/projects/:slug/kb/search — performs hybrid search', async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/kb/search`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ query: 'authentication secure APIs', limit: 5 })
+        .expect(200);
+
+      const data = body<unknown>(res);
+      expect(data).toBeTruthy();
+    });
+
+    it('POST /api/projects/:slug/kb/search — returns 404 for nonexistent project', async () => {
+      await request(httpServer)
+        .post('/api/projects/nonexistent/kb/search')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ query: 'test query', limit: 5 })
+        .expect(404);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // VCS — Sync PR (requires VCS connection setup, skipped without it)
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('VCS — Sync PR', () => {
+    it('POST /api/projects/:slug/vcs/sync-pr — returns 404 when project has no VCS connection', async () => {
+      // Without a VCS connection configured, getFullByProject throws 404
+      await request(httpServer)
+        .post('/api/projects/nonexistent/vcs/sync-pr')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(404);
+    });
+
+    it('POST /api/projects/:slug/vcs-webhook — returns 404 when project has no VCS connection', async () => {
+      // Without a VCS connection configured, the project lookup via getFullByProject fails
+      // Note: This endpoint requires webhook secret to be configured, returns 404 if no connection
+      await request(httpServer)
+        .post(`/api/projects/${projectSlug}/vcs-webhook`)
+        .set('x-github-event', 'push')
+        .set('x-hub-signature-256', 'sha256=invalid')
+        .send({ action: 'push', ref: 'refs/heads/main' })
+        .expect(404); // Returns 404 because VCS connection not found
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // CI Webhooks
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('CI Webhooks', () => {
+    it('POST /api/projects/:slug/ci-webhook — creates ticket on pipeline failure', async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/ci-webhook`)
+        .send({
+          event: 'pipeline_failed',
+          pipeline: {
+            id: '12345',
+            url: 'https://github.com/org/repo/actions/runs/12345',
+          },
+          commit: {
+            sha: 'abc123def456',
+            message: 'feat: add CI webhook support',
+          },
+          failures: [
+            { test: 'AuthService.validateToken', file: 'apps/api/src/auth/auth.service.ts', line: 87 },
+          ],
+        })
+        .expect(200);
+
+      const data = body<{ success: boolean; ticketRef: string; message: string }>(res);
+      expect(data.success).toBe(true);
+      expect(data.ticketRef).toMatch(/^KT-\d+$/);
+      expect(data.message).toBeTruthy();
+    });
+
+    it('POST /api/projects/:slug/ci-webhook — returns 400 for invalid payload', async () => {
+      await request(httpServer)
+        .post(`/api/projects/${projectSlug}/ci-webhook`)
+        .send({
+          event: 'invalid_event',
+          pipeline: { id: '12345' },
+          commit: { sha: 'abc123' },
+          failures: [],
+        })
+        .expect(400);
+    });
+
+    it('POST /api/projects/:slug/ci-webhook — returns 404 for nonexistent project', async () => {
+      await request(httpServer)
+        .post('/api/projects/nonexistent/ci-webhook')
+        .send({
+          event: 'pipeline_failed',
+          pipeline: { id: '99999' },
+          commit: { sha: 'deadbeef' },
+          failures: [{ test: 'AlwaysFail' }],
+        })
+        .expect(404);
+    });
+  });
 });
