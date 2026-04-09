@@ -1,25 +1,6 @@
 name: koda-local
 
 services:
-  migrate:
-    image: nathapp/koda-api:${KODA_VERSION:-latest}
-    environment:
-      DATABASE_PROVIDER: ${DATABASE_PROVIDER:-sqlite}
-      DATABASE_URL: ${DATABASE_URL:-file:/data/koda.db}
-      JWT_SECRET: ${JWT_SECRET:-change-me}
-      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-refresh}
-      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-30d}
-      API_KEY_SECRET: ${API_KEY_SECRET:-change-me-api-key}
-      API_PORT: 3100
-      API_PREFIX: api
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      LANCEDB_PATH: /data/lancedb
-    command: ["sh", "-lc", "bunx prisma migrate deploy"]
-    volumes:
-      - koda_data:/data
-    restart: "no"
-
   api:
     image: nathapp/koda-api:${KODA_VERSION:-latest}
     ports:
