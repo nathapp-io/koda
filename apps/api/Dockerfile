@@ -12,7 +12,8 @@ COPY apps/${BUILD_APP}/package.json /tmp/app-pkg.json
 
 # Remove .version fields to avoid cache invalidation
 RUN jq 'del(.version)' /tmp/package.json > /tmp/deps.json && \
-    jq 'del(.version)' /tmp/app-pkg.json > /tmp/app-deps.json
+    jq 'del(.version)' /tmp/app-pkg.json > /tmp/app-deps.json && \
+    jq 'del(.version, .devDependencies)' /tmp/app-pkg.json > /tmp/app-runtime-deps.json
 
 
 # Prune dependencies using Turbo
@@ -62,24 +63,35 @@ COPY --from=prune /app/out/full .
 RUN --mount=type=secret,id=TURBO_TOKEN \
     TURBO_TOKEN=$(cat /run/secrets/TURBO_TOKEN) \
     bun run db:generate && \
-    bun run build
+    bun run build && \
+    prisma_client_dir=$(find /app/node_modules/.bun -type d -path '*/node_modules/.prisma/client' | head -n 1) && \
+    test -n "$prisma_client_dir" && \
+    mkdir -p /tmp/prisma-generated && \
+    cp -R "$prisma_client_dir" /tmp/prisma-generated/client
 
 # Final image
 FROM base
 WORKDIR /app/
 ARG BUILD_APP=api
 
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/apps/${BUILD_APP}/package.json ./apps/${BUILD_APP}/package.json
 COPY --from=builder /app/bun.lock ./bun.lock
-COPY --from=prune /app/out/json/packages ./packages
+COPY --from=deps /tmp/app-runtime-deps.json ./apps/runtime/package.json
 
-# Install only production dependencies
+# Install only production dependencies for the runtime app package
 RUN --mount=type=cache,id=bun-install,target=/root/.bun/install/cache \
+    cd /app/apps/runtime && \
     bun install --frozen-lockfile --production && \
-    mv /app/apps/${BUILD_APP} ./apps/runtime
+    rm -rf /app/node_modules/.bun/@lancedb+lancedb-linux-x64-gnu@* \
+           /app/apps/runtime/node_modules/.bun/@lancedb+lancedb-linux-x64-gnu@* \
+           /app/apps/runtime/node_modules/@lancedb/lancedb-linux-x64-gnu && \
+    find /app/apps/runtime/node_modules -type f -name '*.map' -delete && \
+    find /app/apps/runtime/node_modules -type d \
+      \( -name test -o -name tests -o -name __tests__ -o -name docs -o -name doc -o -name examples -o -name example \) \
+      -prune -exec rm -rf '{}' + && \
+    find /app/apps/runtime/node_modules/@prisma/client/runtime -type f \
+      \( -name 'edge*' -o -name 'react-native*' -o -name 'index-browser*' -o -name 'wasm-*' -o -name 'query_*wasm-base64*' \) \
+      -delete
 
-COPY --from=builder /app/packages ./packages
 COPY --from=builder /app/apps/${BUILD_APP}/dist ./apps/runtime/dist
 
 # Prisma runtime assets for in-container migration commands:
@@ -88,10 +100,14 @@ COPY --from=builder /app/apps/${BUILD_APP}/dist ./apps/runtime/dist
 COPY --from=builder /app/apps/${BUILD_APP}/prisma/schema.prisma ./prisma/schema.prisma
 COPY --from=builder /app/apps/${BUILD_APP}/prisma/migrations ./prisma/migrations
 
-# Copy bun module store from builder — includes the Prisma generated client
-# (bun stores the generated .prisma/client inside .bun/@prisma+client@.../node_modules/.prisma/)
-# Production bun install creates .bun but without the prisma generate output.
-COPY --from=builder /app/node_modules/.bun ./node_modules/.bun
+# Copy only Prisma generated runtime artifacts instead of the full Bun package store.
+RUN --mount=from=builder,source=/tmp/prisma-generated,target=/tmp/prisma-generated,ro \
+    prisma_client_pkg_dir=$(find /app -type d -path '*/node_modules/@prisma/client' | head -n 1) && \
+    test -n "$prisma_client_pkg_dir" && \
+    prisma_node_modules_dir=$(dirname "$(dirname "$prisma_client_pkg_dir")") && \
+    mkdir -p "$prisma_node_modules_dir/.prisma" && \
+    rm -rf "$prisma_node_modules_dir/.prisma/client" && \
+    cp -R /tmp/prisma-generated/client "$prisma_node_modules_dir/.prisma/client"
 
 ENV ENV_NAME=production
 
