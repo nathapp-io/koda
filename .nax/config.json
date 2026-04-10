@@ -10,7 +10,12 @@
             "fast": "minimax/MiniMax-M2.7",
             "balanced": "minimax/MiniMax-M2.7",
             "powerful": "minimax/MiniMax-M2.7"
-        }        
+        },
+        "codex": {
+            "fast": "gpt-5.4-mini",
+            "balanced": "gpt-5.3-codex",
+            "powerful": "gpt-5.4"
+        }                 
     },
     "autoMode": {
         "enabled": true,
