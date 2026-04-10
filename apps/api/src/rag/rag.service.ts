@@ -543,11 +543,57 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     await table.optimize();
   }
 
-  async deleteAllBySourceType(_projectId: string, _sourceType: string): Promise<number> {
-    throw new Error('Not implemented');
+  async deleteAllBySourceType(projectId: string, sourceType: string): Promise<number> {
+    const table = await this.getOrCreateTable(projectId);
+    const allRows: LanceRecord[] = await table.query().limit(10000).toArray();
+    const matching = allRows.filter((r) => r.source === sourceType);
+    if (matching.length === 0) return 0;
+    const ids = matching.map((r) => `'${r.id}'`).join(', ');
+    await table.delete(`id IN (${ids})`);
+    return matching.length;
   }
 
-  async importGraphify(_projectId: string, _nodes: GraphifyNode[], _links: GraphifyLink[]): Promise<ImportGraphifyResult> {
-    throw new Error('Not implemented');
+  async importGraphify(projectId: string, nodes: GraphifyNode[], links: GraphifyLink[]): Promise<ImportGraphifyResult> {
+    const cleared = await this.deleteAllBySourceType(projectId, 'code');
+
+    const targetIndex = new Map<string, GraphifyNode>();
+    for (const node of nodes) {
+      targetIndex.set(node.id, node);
+    }
+
+    for (const node of nodes) {
+      const nodeType = node.type ?? 'node';
+      let content = `${nodeType} ${node.label}`;
+      if (node.source_file) {
+        content += ` in ${node.source_file}`;
+      }
+
+      const outgoing = links.filter((l) => l.source === node.id);
+      if (outgoing.length > 0) {
+        const relations = outgoing
+          .map((l) => {
+            const target = targetIndex.get(l.target);
+            return target ? `${l.relation} ${target.label}` : null;
+          })
+          .filter((s): s is string => s !== null);
+        if (relations.length > 0) {
+          content += `: ${relations.join(', ')}`;
+        }
+      }
+
+      await this.indexDocument(projectId, {
+        source: 'code',
+        sourceId: node.id,
+        content,
+        metadata: {
+          label: node.label,
+          type: node.type,
+          source_file: node.source_file,
+          community: node.community,
+        },
+      });
+    }
+
+    return { imported: nodes.length, cleared };
   }
 }
