@@ -29,6 +29,8 @@ import {
   simpleFtsScore,
   getSimilarityTier,
   getVerdict,
+  type GraphifyNode,
+  type GraphifyLink,
 } from './rag.service';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -844,5 +846,208 @@ describe('RagService.optimizeTable (US-004)', () => {
     await ragService.optimizeTable('test-project');
 
     expect(mockTable.optimize).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// graphify-kb-cc: deleteAllBySourceType and importGraphify
+// ---------------------------------------------------------------------------
+
+describe('RagService.deleteAllBySourceType (graphify-kb-cc)', () => {
+  const mockConfigService = {
+    get: (key: string): unknown => {
+      const config: Record<string, unknown> = {
+        'rag.lancedbPath': './lancedb',
+        'rag.similarityHigh': 0.85,
+        'rag.similarityMedium': 0.70,
+        'rag.similarityLow': 0.50,
+        'rag.ftsIndexMode': 'simple',
+      };
+      return config[key];
+    },
+  };
+
+  it('returns the count of matching records and calls delete (AC1)', async () => {
+    const ragService = new RagService(mockConfigService as never);
+
+    const codeRec1 = { ...makeMockRecord('code-1', 'code content 1'), source: 'code' };
+    const codeRec2 = { ...makeMockRecord('code-2', 'code content 2'), source: 'code' };
+    const ticketRec = makeMockRecord('ticket-1', 'ticket content');
+
+    const mockTable = {
+      query: jest.fn().mockReturnValue({
+        limit: jest.fn().mockReturnThis(),
+        toArray: jest.fn().mockResolvedValue([codeRec1, codeRec2, ticketRec]),
+      }),
+      delete: jest.fn().mockResolvedValue(undefined),
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_proj-1', mockTable]]);
+
+    const count = await ragService.deleteAllBySourceType('proj-1', 'code');
+
+    expect(count).toBe(2);
+    expect(mockTable.delete).toHaveBeenCalled();
+  });
+
+  it('returns 0 when no source:code records exist for the project (AC2)', async () => {
+    const ragService = new RagService(mockConfigService as never);
+
+    const ticketRec = makeMockRecord('ticket-1', 'ticket content');
+
+    const mockTable = {
+      query: jest.fn().mockReturnValue({
+        limit: jest.fn().mockReturnThis(),
+        toArray: jest.fn().mockResolvedValue([ticketRec]),
+      }),
+      delete: jest.fn().mockResolvedValue(undefined),
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_proj-1', mockTable]]);
+
+    const count = await ragService.deleteAllBySourceType('proj-1', 'code');
+
+    expect(count).toBe(0);
+  });
+});
+
+describe('RagService.importGraphify (graphify-kb-cc)', () => {
+  const mockConfigService = {
+    get: (key: string): unknown => {
+      const config: Record<string, unknown> = {
+        'rag.lancedbPath': './lancedb',
+        'rag.similarityHigh': 0.85,
+        'rag.similarityMedium': 0.70,
+        'rag.similarityLow': 0.50,
+        'rag.ftsIndexMode': 'simple',
+      };
+      return config[key];
+    },
+  };
+
+  it('calls deleteAllBySourceType(projectId, "code") before any indexDocument call (AC3)', async () => {
+    const ragService = new RagService(mockConfigService as never);
+    const callOrder: string[] = [];
+
+    jest.spyOn(ragService, 'deleteAllBySourceType').mockImplementation(async () => {
+      callOrder.push('deleteAllBySourceType');
+      return 0;
+    });
+    jest.spyOn(ragService, 'indexDocument').mockImplementation(async () => {
+      callOrder.push('indexDocument');
+    });
+
+    const nodes: GraphifyNode[] = [{ id: 'n1', label: 'SomeClass' }];
+    await ragService.importGraphify('proj-1', nodes, []);
+
+    const deleteIdx = callOrder.indexOf('deleteAllBySourceType');
+    const indexIdx = callOrder.indexOf('indexDocument');
+    expect(deleteIdx).toBeGreaterThanOrEqual(0);
+    expect(indexIdx).toBeGreaterThanOrEqual(0);
+    expect(deleteIdx).toBeLessThan(indexIdx);
+  });
+
+  it('calls indexDocument with content "{type} {label} in {source_file}" when all fields present and no links (AC4)', async () => {
+    const ragService = new RagService(mockConfigService as never);
+    const indexDocSpy = jest.spyOn(ragService, 'indexDocument').mockResolvedValue(undefined);
+    jest.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(0);
+
+    const nodes: GraphifyNode[] = [
+      { id: 'n1', type: 'class', label: 'AuthService', source_file: 'src/auth/auth.service.ts' },
+    ];
+    await ragService.importGraphify('proj-1', nodes, []);
+
+    expect(indexDocSpy).toHaveBeenCalledWith(
+      'proj-1',
+      expect.objectContaining({ content: 'class AuthService in src/auth/auth.service.ts' }),
+    );
+  });
+
+  it('omits the "in ..." clause when source_file is absent (AC5)', async () => {
+    const ragService = new RagService(mockConfigService as never);
+    const indexDocSpy = jest.spyOn(ragService, 'indexDocument').mockResolvedValue(undefined);
+    jest.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(0);
+
+    const nodes: GraphifyNode[] = [
+      { id: 'n1', type: 'class', label: 'AuthService' },
+    ];
+    await ragService.importGraphify('proj-1', nodes, []);
+
+    const calledWith = indexDocSpy.mock.calls[0]?.[1];
+    expect(calledWith?.content).toBe('class AuthService');
+  });
+
+  it('uses "node" as the default type when type field is absent (AC6)', async () => {
+    const ragService = new RagService(mockConfigService as never);
+    const indexDocSpy = jest.spyOn(ragService, 'indexDocument').mockResolvedValue(undefined);
+    jest.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(0);
+
+    const nodes: GraphifyNode[] = [
+      { id: 'n1', label: 'SomeLabel', source_file: 'src/some.ts' },
+    ];
+    await ragService.importGraphify('proj-1', nodes, []);
+
+    const calledWith = indexDocSpy.mock.calls[0]?.[1];
+    expect(calledWith?.content).toMatch(/^node SomeLabel/);
+  });
+
+  it('includes "{relation} {neighbor_label}" for each outgoing link in the content (AC7)', async () => {
+    const ragService = new RagService(mockConfigService as never);
+    const indexDocSpy = jest.spyOn(ragService, 'indexDocument').mockResolvedValue(undefined);
+    jest.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(0);
+
+    const nodes: GraphifyNode[] = [
+      { id: 'n1', type: 'class', label: 'AuthService', source_file: 'src/auth.ts' },
+      { id: 'n2', type: 'function', label: 'validateToken' },
+    ];
+    const links: GraphifyLink[] = [
+      { source: 'n1', target: 'n2', relation: 'contains' },
+    ];
+    await ragService.importGraphify('proj-1', nodes, links);
+
+    const n1Call = indexDocSpy.mock.calls.find(([, doc]) => doc.sourceId === 'n1');
+    expect(n1Call).toBeDefined();
+    expect(n1Call![1].content).toContain('contains validateToken');
+  });
+
+  it('calls indexDocument with source:"code", sourceId:node.id, and metadata with label/type/source_file/community (AC8)', async () => {
+    const ragService = new RagService(mockConfigService as never);
+    const indexDocSpy = jest.spyOn(ragService, 'indexDocument').mockResolvedValue(undefined);
+    jest.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(0);
+
+    const nodes: GraphifyNode[] = [
+      { id: 'node-abc', type: 'class', label: 'MyService', source_file: 'src/my.ts', community: 42 },
+    ];
+    await ragService.importGraphify('proj-1', nodes, []);
+
+    expect(indexDocSpy).toHaveBeenCalledWith(
+      'proj-1',
+      expect.objectContaining({
+        source: 'code',
+        sourceId: 'node-abc',
+        metadata: expect.objectContaining({
+          label: 'MyService',
+          type: 'class',
+          source_file: 'src/my.ts',
+          community: 42,
+        }),
+      }),
+    );
+  });
+
+  it('returns { imported: 0, cleared: N } when called with empty nodes and links (AC9)', async () => {
+    const ragService = new RagService(mockConfigService as never);
+    jest.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(5);
+    jest.spyOn(ragService, 'indexDocument').mockResolvedValue(undefined);
+
+    const result = await ragService.importGraphify('proj-1', [], []);
+
+    expect(result).toEqual({ imported: 0, cleared: 5 });
   });
 });

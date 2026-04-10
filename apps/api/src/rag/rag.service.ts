@@ -13,6 +13,25 @@ export interface IndexDocumentInput {
   metadata: Record<string, unknown>;
 }
 
+export interface GraphifyNode {
+  id: string;
+  type?: string;
+  label: string;
+  source_file?: string;
+  community?: unknown;
+}
+
+export interface GraphifyLink {
+  source: string;
+  target: string;
+  relation: string;
+}
+
+export interface ImportGraphifyResult {
+  imported: number;
+  cleared: number;
+}
+
 interface LanceRecord {
   id: string;
   source: string;
@@ -522,5 +541,13 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
 
     const table = await this.getOrCreateTable(projectId);
     await table.optimize();
+  }
+
+  async deleteAllBySourceType(_projectId: string, _sourceType: string): Promise<number> {
+    throw new Error('Not implemented');
+  }
+
+  async importGraphify(_projectId: string, _nodes: GraphifyNode[], _links: GraphifyLink[]): Promise<ImportGraphifyResult> {
+    throw new Error('Not implemented');
   }
 }
