@@ -10,12 +10,13 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { ForbiddenAppException, JsonResponse, NotFoundAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, JsonResponse, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
 import { RagService } from './rag.service';
 import { AddDocumentDto } from './dto/add-document.dto';
 import { SearchKbDto } from './dto/search-kb.dto';
+import { ImportGraphifyDto } from './dto/import-graphify.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 
 @ApiTags('knowledge-base')
@@ -96,6 +97,30 @@ export class RagController {
     const project = await this.resolveProject(slug);
     const data = await this.ragService.search(project.id, dto.query, dto.limit ?? 5);
     return JsonResponse.Ok(data);
+  }
+
+  @Post('import/graphify')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Import graphify knowledge base nodes and links (admin only)' })
+  @ApiResponse({ status: 200, description: 'Import result with imported and cleared counts' })
+  @ApiResponse({ status: 400, description: 'Graphify is disabled for this project' })
+  @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
+  @ApiResponse({ status: 404, description: 'Project not found' })
+  async importGraphify(
+    @Param('slug') slug: string,
+    @Body() dto: ImportGraphifyDto,
+    @CurrentUser() currentUser: { extra?: { role?: string } } | null,
+  ) {
+    if (currentUser?.extra?.role !== 'ADMIN') throw new ForbiddenAppException({}, 'rag');
+    const project = await this.resolveProject(slug);
+    if (!project.graphifyEnabled) throw new ValidationAppException({}, 'rag.graphifyDisabled');
+    if (dto.nodes.length === 0) return JsonResponse.Ok({ imported: 0, cleared: 0 });
+    const result = await this.ragService.importGraphify(project.id, dto.nodes, dto.links ?? []);
+    await this.db.project.update({
+      where: { id: project.id },
+      data: { graphifyLastImportedAt: new Date() },
+    });
+    return JsonResponse.Ok(result);
   }
 
   @Post('optimize')
