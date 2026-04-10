@@ -34,6 +34,7 @@ jest.mock('../generated', () => ({
   ragControllerAddDocument: jest.fn(),
   ragControllerDeleteDocument: jest.fn(),
   ragControllerOptimizeTable: jest.fn(),
+  ragControllerImportGraphify: jest.fn(),
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
@@ -73,6 +74,7 @@ import {
   ragControllerOptimizeTable,
 } from '../generated';
 import { resolveContext } from '../config';
+import { readFile } from 'fs/promises';
 
 describe('kbCommand', () => {
   let program: Command;
@@ -687,6 +689,193 @@ describe('kbCommand', () => {
         expect.objectContaining({ slug: 'koda' })
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // kb import
+  // ---------------------------------------------------------------------------
+  describe('kb import', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mockImportFn = (): jest.Mock => (jest.requireMock('../generated') as any).ragControllerImportGraphify;
+
+    const validGraphJson = JSON.stringify({
+      nodes: [
+        { id: 'n1', label: 'FooClass', type: 'class', filePath: 'src/foo.ts', startLine: 1, endLine: 10 },
+        { id: 'n2', label: 'barFn', type: 'function', filePath: 'src/bar.ts', startLine: 5, endLine: 20 },
+      ],
+      links: [{ source: 'n1', target: 'n2', type: 'calls' }],
+      extraKey: 'should be ignored',
+    });
+
+    const mockImportResponse = {
+      ret: 0,
+      data: { imported: 2, cleared: 5 },
+    };
+
+    beforeEach(() => {
+      mockImportFn().mockReset();
+      (readFile as jest.Mock).mockResolvedValue(validGraphJson);
+    });
+
+    // AC1: success exits 0 and prints human-readable message
+    it('exits 0 and prints success message with imported and cleared counts (AC1)', async () => {
+      mockImportFn().mockResolvedValue(mockImportResponse);
+
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const importCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'import');
+
+      await importCmd?.parseAsync(['node', 'test', '--project', 'koda', '--graphify', './graph.json']);
+
+      expect(exitSpy).toHaveBeenCalledWith(0);
+      const allLogs = logSpy.mock.calls.map((call) => call.join(' ')).join('\n');
+      expect(allLogs).toContain('Graphify import complete');
+      expect(allLogs).toContain('2');
+      expect(allLogs).toContain('5');
+    });
+
+    // AC2: --json flag outputs raw JSON
+    it('exits 0 and prints raw JSON response when --json flag is provided (AC2)', async () => {
+      mockImportFn().mockResolvedValue(mockImportResponse);
+
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const importCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'import');
+
+      await importCmd?.parseAsync(['node', 'test', '--project', 'koda', '--graphify', './graph.json', '--json']);
+
+      expect(exitSpy).toHaveBeenCalledWith(0);
+      const jsonCall = logSpy.mock.calls.find((call) => {
+        try { JSON.parse(call[0]); return true; } catch { return false; }
+      });
+      expect(jsonCall).toBeDefined();
+      if (!jsonCall) throw new Error('Expected jsonCall to be defined');
+      const parsed = JSON.parse(jsonCall[0]);
+      expect(parsed).toHaveProperty('imported', 2);
+      expect(parsed).toHaveProperty('cleared', 5);
+    });
+
+    // AC3: file not found exits 1 with stderr message
+    it('exits 1 and writes file-not-found message to stderr when file does not exist (AC3)', async () => {
+      const fileError = Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+      (readFile as jest.Mock).mockRejectedValue(fileError);
+
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const importCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'import');
+
+      await importCmd?.parseAsync(['node', 'test', '--project', 'koda', '--graphify', './missing.json']);
+
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(mockImportFn()).not.toHaveBeenCalled();
+    });
+
+    // AC4: invalid JSON file exits 1 with stderr parse-error message
+    it('exits 1 and writes parse-error message to stderr when file contains non-JSON content (AC4)', async () => {
+      (readFile as jest.Mock).mockResolvedValue('this is not valid json {{{');
+
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const importCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'import');
+
+      await importCmd?.parseAsync(['node', 'test', '--project', 'koda', '--graphify', './invalid.json']);
+
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(mockImportFn()).not.toHaveBeenCalled();
+    });
+
+    // AC5: missing --graphify exits 3
+    it('exits 3 when --graphify flag is not provided (AC5)', async () => {
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const importCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'import');
+
+      try {
+        await importCmd?.parseAsync(['node', 'test', '--project', 'koda']);
+      } catch {
+        // Commander may throw
+      }
+
+      expect(exitSpy).toHaveBeenCalledWith(3);
+    });
+
+    // AC6: missing --project exits 3
+    it('exits 3 when --project flag is not provided (AC6)', async () => {
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const importCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'import');
+
+      try {
+        await importCmd?.parseAsync(['node', 'test', '--graphify', './graph.json']);
+      } catch {
+        // Commander may throw
+      }
+
+      expect(exitSpy).toHaveBeenCalledWith(3);
+    });
+
+    // AC7: auth config absent exits 2 without calling API
+    it('exits 2 without calling the API when auth config is absent (AC7)', async () => {
+      (resolveContext as jest.Mock).mockResolvedValue({
+        apiKey: undefined,
+        apiUrl: 'http://localhost:3100/api',
+        projectSlug: 'koda',
+      });
+
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const importCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'import');
+
+      try {
+        await importCmd?.parseAsync(['node', 'test', '--project', 'koda', '--graphify', './graph.json']);
+      } catch {
+        // Expected
+      }
+
+      expect(exitSpy).toHaveBeenCalledWith(2);
+      expect(mockImportFn()).not.toHaveBeenCalled();
+    });
+
+    // AC8: sends only { nodes, links } from the file, ignoring other top-level keys
+    it('sends only { nodes, links } extracted from the file and ignores other top-level keys (AC8)', async () => {
+      mockImportFn().mockResolvedValue(mockImportResponse);
+
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const importCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'import');
+
+      await importCmd?.parseAsync(['node', 'test', '--project', 'koda', '--graphify', './graph.json']);
+
+      expect(mockImportFn()).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slug: 'koda',
+          requestBody: expect.objectContaining({
+            nodes: expect.any(Array),
+            links: expect.any(Array),
+          }),
+        })
+      );
+      // Must not include extraKey
+      const callArg = mockImportFn().mock.calls[0][0];
+      expect(callArg.requestBody).not.toHaveProperty('extraKey');
+    });
+
+    // Command registration
+    it('registers kb import sub-command', () => {
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const importCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'import');
+      expect(importCmd).toBeDefined();
+    });
+
+    // API error handling
+    it('calls handleApiError on API error', async () => {
+      const apiError = new Error('Internal Server Error');
+      (apiError as any).response = { status: 500, data: { message: 'Internal Server Error' } };
+      mockImportFn().mockRejectedValue(apiError);
+
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const importCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'import');
+
+      try {
+        await importCmd?.parseAsync(['node', 'test', '--project', 'koda', '--graphify', './graph.json']);
+      } catch {
+        // Expected
+      }
+
+      expect(exitSpy).toHaveBeenCalledWith(1);
     });
   });
 
