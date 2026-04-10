@@ -1013,7 +1013,9 @@ describe('RagService.importGraphify (graphify-kb-cc)', () => {
 
     const n1Call = indexDocSpy.mock.calls.find(([, doc]) => doc.sourceId === 'n1');
     expect(n1Call).toBeDefined();
-    expect(n1Call![1].content).toContain('contains validateToken');
+    if (n1Call) {
+      expect(n1Call[1].content).toContain('contains validateToken');
+    }
   });
 
   it('calls indexDocument with source:"code", sourceId:node.id, and metadata with label/type/source_file/community (AC8)', async () => {
