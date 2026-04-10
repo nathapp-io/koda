@@ -2129,5 +2129,17 @@
         "runtimeCrashes": 0
       }
     ]
+  },
+  {
+    "runId": "run-2026-04-10T09-44-08-705Z",
+    "feature": "graphify-kb-cd",
+    "startedAt": "2026-04-10T09:44:08.705Z",
+    "completedAt": "2026-04-10T09:58:36.797Z",
+    "totalCost": 0,
+    "totalStories": 0,
+    "storiesCompleted": 0,
+    "storiesFailed": 0,
+    "totalDurationMs": 868092,
+    "stories": []
   }
 ]
