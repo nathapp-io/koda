@@ -158,12 +158,12 @@ Response 403: caller is not ADMIN
 
 | File | Change |
 |:-----|:-------|
-| `apps/api/prisma/schema.prisma` | Add `graphifyEnabled Boolean @default(false)` to `Project` |
+| `apps/api/prisma/schema.prisma` | Add `graphifyEnabled Boolean @default(false)` and `graphifyLastImportedAt DateTime?` to `Project` |
 | `apps/api/src/rag/rag.service.ts` | Extend `source` union in `IndexDocumentInput` to include `'code'`; add `deleteAllBySourceType()` and `importGraphify()` |
 | `apps/api/src/rag/dto/add-document.dto.ts` | Extend `source` `@IsIn` array to include `'code'` |
 | `apps/api/src/rag/rag.controller.ts` | Add `POST kb/import/graphify` route |
 | `apps/api/src/projects/dto/update-project.dto.ts` | Add optional `graphifyEnabled?: boolean` |
-| `apps/api/src/projects/dto/project-response.dto.ts` | Add `graphifyEnabled: boolean`; update `from()` |
+| `apps/api/src/projects/dto/project-response.dto.ts` | Add `graphifyEnabled: boolean`, `graphifyLastImportedAt: Date \| null`; update `from()` |
 | `apps/api/src/projects/projects.service.ts` | Inject `RagService`; on `graphifyEnabled` flip to `false`, call `deleteAllBySourceType` |
 | `apps/api/src/projects/projects.module.ts` | Import `RagModule` |
 | `apps/api/src/i18n/en/rag.json` | Add `"graphifyDisabled"` and `"graphifyImportSuccess"` keys |
@@ -205,13 +205,14 @@ No-nodes output:
 
 ## Stories
 
-### US-001 — Schema, Type Extensions & RagService Methods
+### US-001 — Schema, DTO & i18n Extensions
 
 No dependencies.
 
 Add `graphifyEnabled` to the Project model, extend the `source` union with
-`'code'`, surface the flag in project DTOs, and add the two new `RagService`
-methods (`deleteAllBySourceType`, `importGraphify`) with their unit tests.
+`'code'`, surface the flag in project DTOs, and add the i18n key for the
+disabled-feature error. This story lays the type foundation all other stories
+depend on — no service logic here.
 
 **Files to create/modify:**
 
@@ -222,8 +223,6 @@ apps/api/
 │   └── migrations/                            ← NEW migration
 └── src/
     ├── rag/
-    │   ├── rag.service.ts                     ← MODIFY — source union + 2 new methods
-    │   ├── rag.service.spec.ts                ← MODIFY — tests for new methods
     │   └── dto/
     │       └── add-document.dto.ts            ← MODIFY — add 'code' to IsIn
     ├── projects/
@@ -237,11 +236,9 @@ apps/api/
 
 ### Context Files
 - `apps/api/prisma/schema.prisma` — Project model; add field beside `autoIndexOnClose`
-- `apps/api/src/rag/rag.service.ts` — `IndexDocumentInput`, `deleteBySource()`, `indexDocument()` patterns to follow
-- `apps/api/src/rag/rag.service.spec.ts` — existing unit test patterns for RagService
 - `apps/api/src/rag/dto/add-document.dto.ts` — source union to extend
-- `apps/api/src/projects/dto/update-project.dto.ts` — `autoIndexOnClose` pattern to follow
-- `apps/api/src/projects/dto/project-response.dto.ts` — `from()` pattern to follow
+- `apps/api/src/projects/dto/update-project.dto.ts` — `autoIndexOnClose` / `autoAssign` pattern to follow
+- `apps/api/src/projects/dto/project-response.dto.ts` — `from()` mapping pattern to follow
 - `apps/api/src/i18n/en/rag.json` — existing i18n keys
 
 ### Acceptance Criteria
@@ -250,6 +247,34 @@ apps/api/
 - `AddDocumentDto` accepts `source: 'code'` without a validation error
 - `AddDocumentDto` rejects any `source` value not in `['ticket', 'doc', 'manual', 'code']` with a 400
 - `IndexDocumentInput.source` type includes `'code'` as a valid literal
+- `ProjectResponseDto.from(project)` maps `project.graphifyEnabled` to `dto.graphifyEnabled`
+- `ProjectResponseDto.from(project)` maps `project.graphifyLastImportedAt` to `dto.graphifyLastImportedAt` as `Date | null`
+- `UpdateProjectDto` accepts `graphifyEnabled: true` without a validation error
+- i18n key `rag.graphifyDisabled` exists in both `en/rag.json` and `zh/rag.json`
+
+---
+
+### US-002 — RagService Methods
+
+Depends on **US-001**.
+
+Add `deleteAllBySourceType()` and `importGraphify()` to `RagService` with
+unit tests. No controller or endpoint work here — service logic only.
+
+**Files to create/modify:**
+
+```
+apps/api/src/rag/
+├── rag.service.ts                             ← MODIFY — source union + 2 new methods
+└── rag.service.spec.ts                        ← MODIFY — tests for new methods
+```
+
+### Context Files
+- `apps/api/src/rag/rag.service.ts` — `IndexDocumentInput`, `deleteBySource()`, `indexDocument()` patterns to follow
+- `apps/api/src/rag/rag.service.spec.ts` — existing unit test patterns for RagService
+
+### Acceptance Criteria
+
 - `RagService.deleteAllBySourceType(projectId, 'code')` deletes all records where `source = 'code'` for the given project and returns the count of records deleted
 - `RagService.deleteAllBySourceType(projectId, 'code')` returns `0` when no `source:'code'` records exist
 - `RagService.importGraphify(projectId, nodes, links)` calls `deleteAllBySourceType(projectId, 'code')` before indexing any nodes
@@ -257,15 +282,12 @@ apps/api/
 - `RagService.importGraphify(projectId, nodes, links)` builds content that includes `"{relation} {neighbor_label}"` for each link where the node is the source
 - `RagService.importGraphify(projectId, nodes, links)` calls `indexDocument()` with `source: 'code'`, `sourceId: node.id`, and `metadata` containing `label`, `type`, `source_file`, `community`
 - `RagService.importGraphify(projectId, [], [])` returns `{ imported: 0, cleared: N }` where `N` is the count from `deleteAllBySourceType`
-- `ProjectResponseDto.from(project)` maps `project.graphifyEnabled` to `dto.graphifyEnabled`
-- `UpdateProjectDto` accepts `graphifyEnabled: true` without a validation error
-- i18n key `rag.graphifyDisabled` exists in both `en/rag.json` and `zh/rag.json`
 
 ---
 
-### US-002 — Import Endpoint
+### US-003 — Import Endpoint
 
-Depends on **US-001**.
+Depends on **US-002**.
 
 Add `POST /projects/:slug/kb/import/graphify` to `RagController`. Guard it to
 ADMIN role. Wire through `RagService.importGraphify()`. Update the e2e spec.
@@ -285,7 +307,7 @@ apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts  ← MODIFY — add import e
 ### Context Files
 - `apps/api/src/rag/rag.controller.ts` — existing admin-guarded routes (`deleteDocument`, `optimizeTable`) to follow for ADMIN check pattern
 - `apps/api/src/rag/dto/add-document.dto.ts` — DTO structure to follow
-- `apps/api/src/rag/rag.service.ts` — `importGraphify()` signature (added in US-001)
+- `apps/api/src/rag/rag.service.ts` — `importGraphify()` signature (added in US-002)
 - `apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts` — e2e test patterns to follow
 
 ### Acceptance Criteria
@@ -298,13 +320,15 @@ apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts  ← MODIFY — add import e
 - `ImportGraphifyDto` rejects a body missing `nodes` with a 400 validation error
 - `ImportGraphifyDto` accepts a body with `nodes` present and `links` absent (links optional)
 - The import route calls `ragService.importGraphify(project.id, dto.nodes, dto.links ?? [])` and returns its result
+- After a successful import, the controller updates `project.graphifyLastImportedAt` to the current UTC timestamp via Prisma
+- `POST /projects/:slug/kb/import/graphify` response includes `graphifyLastImportedAt` in the project's next `GET /projects/:slug` response
 - e2e spec covers: happy-path import, 403 non-admin, 400 graphify disabled
 
 ---
 
-### US-003 — Toggle Enforcement & Cleanup in ProjectsService
+### US-004 — Toggle Enforcement & Cleanup in ProjectsService
 
-Depends on **US-001**.
+Depends on **US-002**.
 
 When a project update sets `graphifyEnabled` from `true` to `false`,
 `ProjectsService.update()` must call
@@ -337,9 +361,9 @@ apps/api/src/projects/
 
 ---
 
-### US-004 — CLI `koda kb import --graphify`
+### US-005 — CLI `koda kb import --graphify`
 
-Depends on **US-002**.
+Depends on **US-003**.
 
 Add an `import` sub-command to `apps/cli/src/commands/kb.ts` that reads a
 `graph.json` file and POSTs its nodes/links to the import endpoint.
@@ -399,32 +423,33 @@ Steps the command takes:
 ## Dependency Order
 
 ```
-US-001 (schema + types + RagService methods — no dependencies)
-  ├→ US-002 (import endpoint — needs source:'code' type and importGraphify())
-  ├→ US-003 (toggle cleanup — needs deleteAllBySourceType())
-  └→ US-004 (CLI command — needs US-002 endpoint to exist)
+US-001 (schema + DTOs + i18n — no dependencies)
+  └→ US-002 (RagService methods — needs source:'code' type)
+       ├→ US-003 (import endpoint — needs importGraphify())
+       ├→ US-004 (toggle cleanup — needs deleteAllBySourceType())
+       └→ US-005 (CLI command — needs US-003 endpoint)
 ```
 
-US-002 and US-003 can run in parallel after US-001. US-004 depends on US-002.
+US-003 and US-004 can run in parallel after US-002. US-005 depends on US-003.
 
 ## Files Summary
 
 | File | Action | Story |
 |:-----|:-------|:------|
-| `apps/api/prisma/schema.prisma` | MODIFY — add `graphifyEnabled` | US-001 |
+| `apps/api/prisma/schema.prisma` | MODIFY — add `graphifyEnabled`, `graphifyLastImportedAt` | US-001 |
 | `apps/api/prisma/migrations/` | NEW migration | US-001 |
-| `apps/api/src/rag/rag.service.ts` | MODIFY — source union, `deleteAllBySourceType`, `importGraphify` | US-001 |
-| `apps/api/src/rag/rag.service.spec.ts` | MODIFY — tests for new methods | US-001 |
 | `apps/api/src/rag/dto/add-document.dto.ts` | MODIFY — add `'code'` to `IsIn` | US-001 |
 | `apps/api/src/projects/dto/update-project.dto.ts` | MODIFY — add `graphifyEnabled` | US-001 |
 | `apps/api/src/projects/dto/project-response.dto.ts` | MODIFY — add `graphifyEnabled`, update `from()` | US-001 |
 | `apps/api/src/i18n/en/rag.json` | MODIFY — add `graphifyDisabled` | US-001 |
 | `apps/api/src/i18n/zh/rag.json` | MODIFY — add `graphifyDisabled` | US-001 |
-| `apps/api/src/rag/dto/import-graphify.dto.ts` | CREATE — `ImportGraphifyDto`, `GraphifyNodeDto`, `GraphifyLinkDto` | US-002 |
-| `apps/api/src/rag/rag.controller.ts` | MODIFY — add import route | US-002 |
-| `apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts` | MODIFY — add import endpoint e2e tests | US-002 |
-| `apps/api/src/projects/projects.service.ts` | MODIFY — inject `RagService`, purge on toggle-off | US-003 |
-| `apps/api/src/projects/projects.module.ts` | MODIFY — import `RagModule` | US-003 |
-| `apps/api/src/projects/projects.service.spec.ts` | MODIFY — toggle-off purge tests | US-003 |
-| `apps/cli/src/commands/kb.ts` | MODIFY — add `import` sub-command | US-004 |
-| `apps/cli/src/commands/kb.spec.ts` | MODIFY — add import command tests | US-004 |
+| `apps/api/src/rag/rag.service.ts` | MODIFY — source union, `deleteAllBySourceType`, `importGraphify` | US-002 |
+| `apps/api/src/rag/rag.service.spec.ts` | MODIFY — tests for new methods | US-002 |
+| `apps/api/src/rag/dto/import-graphify.dto.ts` | CREATE — `ImportGraphifyDto`, `GraphifyNodeDto`, `GraphifyLinkDto` | US-003 |
+| `apps/api/src/rag/rag.controller.ts` | MODIFY — add import route | US-003 |
+| `apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts` | MODIFY — add import endpoint e2e tests | US-003 |
+| `apps/api/src/projects/projects.service.ts` | MODIFY — inject `RagService`, purge on toggle-off | US-004 |
+| `apps/api/src/projects/projects.module.ts` | MODIFY — import `RagModule` | US-004 |
+| `apps/api/src/projects/projects.service.spec.ts` | MODIFY — toggle-off purge tests | US-004 |
+| `apps/cli/src/commands/kb.ts` | MODIFY — add `import` sub-command | US-005 |
+| `apps/cli/src/commands/kb.spec.ts` | MODIFY — add import command tests | US-005 |
