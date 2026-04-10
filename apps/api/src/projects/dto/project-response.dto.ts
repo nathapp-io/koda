@@ -73,6 +73,18 @@ export class ProjectResponseDto {
   })
   autoAssign?: string | null;
 
+  @ApiProperty({
+    description: 'Whether Graphify KB import is enabled for this project',
+    example: false,
+  })
+  graphifyEnabled?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Timestamp of the last successful Graphify KB import',
+    required: false,
+  })
+  graphifyLastImportedAt?: Date | null;
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   static from(project: any): ProjectResponseDto {
     return {
