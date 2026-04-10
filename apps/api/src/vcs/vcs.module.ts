@@ -8,10 +8,10 @@ import { VcsWebhookService } from './vcs-webhook.service';
 import { VcsPollingService } from './vcs-polling.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { VcsLinkExtractorService } from './vcs-link-extractor.service';
-import { ProjectsService } from '../projects/projects.service';
+import { ProjectsModule } from '../projects/projects.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot()],
+  imports: [ScheduleModule.forRoot(), ProjectsModule],
   controllers: [VcsController, VcsWebhookController],
   providers: [
     VcsConnectionService,
@@ -20,7 +20,6 @@ import { ProjectsService } from '../projects/projects.service';
     VcsPollingService,
     VcsPrSyncService,
     VcsLinkExtractorService,
-    ProjectsService,
   ],
   exports: [VcsConnectionService, VcsSyncService, VcsWebhookService, VcsPollingService, VcsPrSyncService, VcsLinkExtractorService],
 })
