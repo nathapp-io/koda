@@ -84,4 +84,13 @@ export class UpdateProjectDto {
   @IsOptional()
   @IsString({ message: '$t(common.validation.isString)' })
   ciWebhookToken?: string;
+
+  @ApiPropertyOptional({
+    description: 'Whether Graphify KB import is enabled for this project',
+    example: true,
+    required: false,
+  })
+  @IsOptional()
+  @IsBoolean({ message: '$t(common.validation.isBoolean)' })
+  graphifyEnabled?: boolean;
 }

@@ -82,9 +82,11 @@ model Project {
   key              String    @unique // e.g. KODA — used in ticket refs
   description      String?
   gitRemoteUrl     String?
-  autoIndexOnClose Boolean   @default(true)
-  autoAssign       String    @default("OFF")
-  deletedAt        DateTime?
+  autoIndexOnClose      Boolean   @default(true)
+  autoAssign            String    @default("OFF")
+  graphifyEnabled       Boolean   @default(false)
+  graphifyLastImportedAt DateTime?
+  deletedAt             DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 

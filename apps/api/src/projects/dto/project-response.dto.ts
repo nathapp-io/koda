@@ -100,6 +100,8 @@ export class ProjectResponseDto {
       deletedAt: project.deletedAt,
       ciWebhookToken: project.ciWebhookToken,
       autoAssign: project.autoAssign,
+      graphifyEnabled: project.graphifyEnabled,
+      graphifyLastImportedAt: project.graphifyLastImportedAt,
     };
   }
 
