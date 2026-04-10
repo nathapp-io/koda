@@ -1,0 +1,97 @@
+{
+    "autoMode": {
+        "defaultAgent": "opencode",
+        "fallbackOrder": ["opencode"]
+    },    
+    "review": {
+        "dialogue": {
+            "enabled": true
+        }
+    },
+    "debate": {
+        "enabled": true,
+        "agents": 3,
+        "stages": {
+            "plan": {
+                "enabled": true,
+                "rounds": 2,
+                "sessionMode": "stateful",
+                "mode": "hybrid",
+                "autoPersona": true,
+                "resolver": {
+                    "type": "synthesis",
+                    "agent": "claude",
+                    "model": "sonnet"
+                },
+                "debaters": [
+                    {
+                        "agent": "claude",
+                        "model": "haiku"
+                    },
+                    {
+                        "agent": "opencode",
+                        "model": "minimax/MiniMax-M2.7"
+                    },
+                    {
+                        "agent": "opencode",
+                        "model": "minimax/MiniMax-M2.7"
+                    }
+                ]
+            },
+            "review": {
+                "enabled": true,
+                "rounds": 2,
+                "sessionMode": "stateful",
+                "autoPersona": true,
+                "resolver": {
+                    "type": "majority-fail-closed",
+                    "agent": "claude",
+                    "model": "haiku"                    
+                },
+                "debaters": [
+                    {
+                        "agent": "claude",
+                        "model": "haiku"
+                    },
+                    {
+                        "agent": "opencode",
+                        "model": "minimax/MiniMax-M2.7"
+                    },
+                    {
+                        "agent": "opencode",
+                        "model": "minimax/MiniMax-M2.7"
+                    }
+                ]
+            },
+            "acceptance": {
+                "enabled": false,
+                "rounds": 1,
+                "sessionMode": "one-shot",
+                "resolver": {
+                    "type": "majority-fail-closed"
+                }
+            },
+            "rectification": {
+                "enabled": false,
+                "rounds": 1,
+                "sessionMode": "one-shot",
+                "resolver": {
+                    "type": "majority-fail-closed"
+                }
+            },
+            "escalation": {
+                "enabled": false,
+                "rounds": 1,
+                "sessionMode": "one-shot",
+                "resolver": {
+                    "type": "majority-fail-closed"
+                }
+            }
+        }
+    },
+    "agent": {
+        "promptAudit": {
+            "enabled": true
+        }
+    }
+}
