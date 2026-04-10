@@ -1,0 +1,58 @@
+[
+  {
+    "acId": "AC-1",
+    "original": "When `koda kb import --project koda --graphify ./graph.json` succeeds, it exits with code 0 and prints `✓ Graphify import complete: {imported} code nodes indexed ({cleared} cleared)` to stdout",
+    "refined": "Exit code is 0. stdout contains message matching pattern: `✓ Graphify import complete: <integer> code nodes indexed (<integer> cleared)` where both integers are positive numbers representing imported and cleared node counts.",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-2",
+    "original": "When `koda kb import --project koda --graphify ./graph.json --json` succeeds, it exits 0 and prints raw JSON response to stdout",
+    "refined": "Exit code is 0. stdout contains valid JSON object that parses without error. JSON object has 'nodes' and 'links' fields at minimum.",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-3",
+    "original": "When `koda kb import --project koda --graphify ./missing.json` is run with a non-existent file path, it exits 1 and writes a file-not-found message to stderr",
+    "refined": "Exit code is 1. stderr contains error message indicating file does not exist (e.g., 'file not found', 'ENOENT', 'no such file').",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-4",
+    "original": "When `koda kb import --project koda --graphify ./invalid.json` is run with non-JSON file content, it exits 1 and writes a parse-error message to stderr",
+    "refined": "Exit code is 1. stderr contains error message indicating JSON parse failure (e.g., 'invalid JSON', 'parse error', 'SyntaxError').",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-5",
+    "original": "When `koda kb import --project koda` is run without `--graphify`, it exits 3",
+    "refined": "Exit code is 3 when the --graphify flag is not provided in the command arguments.",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-6",
+    "original": "When `koda kb import --graphify ./graph.json` is run without `--project`, it exits 3",
+    "refined": "Exit code is 3 when the --project flag is not provided in the command arguments.",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-7",
+    "original": "When auth config is absent, `koda kb import` exits 2 without calling the API",
+    "refined": "Exit code is 2 when auth configuration is missing or invalid. No HTTP request is made to any API endpoint. stderr contains auth-related error message.",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-8",
+    "original": "The command sends `{ nodes, links }` extracted from the parsed file and does not send other top-level keys from `graph.json`",
+    "refined": "API request payload contains exactly two top-level fields: 'nodes' and 'links'. No other top-level keys from the source graph.json file are included in the transmitted request body.",
+    "testable": true,
+    "storyId": "US-005"
+  }
+]
