@@ -680,6 +680,254 @@
         ]
       }
     },
+    "/api/projects/{slug}/kb/documents": {
+      "post": {
+        "operationId": "RagController_addDocument",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddDocumentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Document indexed"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add a document to the project knowledge base",
+        "tags": [
+          "knowledge-base"
+        ]
+      },
+      "get": {
+        "operationId": "RagController_listDocuments",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Documents listed"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List indexed documents in the project knowledge base",
+        "tags": [
+          "knowledge-base"
+        ]
+      }
+    },
+    "/api/projects/{slug}/kb/documents/{sourceId}": {
+      "delete": {
+        "operationId": "RagController_deleteDocument",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sourceId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Delete documents by sourceId"
+          },
+          "403": {
+            "description": "Forbidden - admin role required"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete documents by sourceId from the knowledge base (admin only)",
+        "tags": [
+          "knowledge-base"
+        ]
+      }
+    },
+    "/api/projects/{slug}/kb/search": {
+      "post": {
+        "operationId": "RagController_search",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchKbDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Search results with RRF merge and similarity tiers"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Hybrid search the project knowledge base",
+        "tags": [
+          "knowledge-base"
+        ]
+      }
+    },
+    "/api/projects/{slug}/kb/import/graphify": {
+      "post": {
+        "operationId": "RagController_importGraphify",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportGraphifyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Import result with imported and cleared counts"
+          },
+          "400": {
+            "description": "Graphify is disabled for this project"
+          },
+          "403": {
+            "description": "Forbidden - admin role required"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Import graphify knowledge base nodes and links (admin only)",
+        "tags": [
+          "knowledge-base"
+        ]
+      }
+    },
+    "/api/projects/{slug}/kb/optimize": {
+      "post": {
+        "operationId": "RagController_optimizeTable",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Table optimized"
+          },
+          "403": {
+            "description": "Forbidden - admin role required"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Optimize the LanceDB table for a project (admin only)",
+        "tags": [
+          "knowledge-base"
+        ]
+      }
+    },
     "/api/projects/{slug}/tickets": {
       "post": {
         "operationId": "TicketsController_create",
@@ -1337,206 +1585,6 @@
         "summary": "Reject a ticket (CREATED or VERIFIED → REJECTED)",
         "tags": [
           "tickets"
-        ]
-      }
-    },
-    "/api/projects/{slug}/kb/documents": {
-      "post": {
-        "operationId": "RagController_addDocument",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AddDocumentDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Document indexed"
-          },
-          "404": {
-            "description": "Project not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Add a document to the project knowledge base",
-        "tags": [
-          "knowledge-base"
-        ]
-      },
-      "get": {
-        "operationId": "RagController_listDocuments",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Documents listed"
-          },
-          "404": {
-            "description": "Project not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "List indexed documents in the project knowledge base",
-        "tags": [
-          "knowledge-base"
-        ]
-      }
-    },
-    "/api/projects/{slug}/kb/documents/{sourceId}": {
-      "delete": {
-        "operationId": "RagController_deleteDocument",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "sourceId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Delete documents by sourceId"
-          },
-          "403": {
-            "description": "Forbidden - admin role required"
-          },
-          "404": {
-            "description": "Project not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Delete documents by sourceId from the knowledge base (admin only)",
-        "tags": [
-          "knowledge-base"
-        ]
-      }
-    },
-    "/api/projects/{slug}/kb/search": {
-      "post": {
-        "operationId": "RagController_search",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SearchKbDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Search results with RRF merge and similarity tiers"
-          },
-          "404": {
-            "description": "Project not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Hybrid search the project knowledge base",
-        "tags": [
-          "knowledge-base"
-        ]
-      }
-    },
-    "/api/projects/{slug}/kb/optimize": {
-      "post": {
-        "operationId": "RagController_optimizeTable",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Table optimized"
-          },
-          "403": {
-            "description": "Forbidden - admin role required"
-          },
-          "404": {
-            "description": "Project not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Optimize the LanceDB table for a project (admin only)",
-        "tags": [
-          "knowledge-base"
         ]
       }
     },
@@ -3003,8 +3051,135 @@
             "type": "string",
             "description": "CI webhook token for authentication",
             "example": "ci_webhook_token_123"
+          },
+          "graphifyEnabled": {
+            "type": "boolean",
+            "description": "Whether Graphify KB import is enabled for this project",
+            "example": true
           }
         }
+      },
+      "AddDocumentDto": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "ticket",
+              "doc",
+              "manual",
+              "code"
+            ],
+            "description": "Source type"
+          },
+          "sourceId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Source record ID (e.g. ticket CUID)"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Full text content to embed and index"
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Arbitrary metadata stored with the document"
+          }
+        },
+        "required": [
+          "source",
+          "sourceId",
+          "content"
+        ]
+      },
+      "SearchKbDto": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Natural language search query"
+          },
+          "limit": {
+            "type": "number",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "GraphifyNodeDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique identifier for this node"
+          },
+          "label": {
+            "type": "string",
+            "description": "Display label for the node"
+          },
+          "type": {
+            "type": "string",
+            "description": "Node type (e.g. class, function)"
+          },
+          "source_file": {
+            "type": "string",
+            "description": "Source file path"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ]
+      },
+      "GraphifyLinkDto": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Source node id"
+          },
+          "target": {
+            "type": "string",
+            "description": "Target node id"
+          },
+          "relation": {
+            "type": "string",
+            "description": "Relation type (e.g. depends_on, calls)"
+          }
+        },
+        "required": [
+          "source",
+          "target",
+          "relation"
+        ]
+      },
+      "ImportGraphifyDto": {
+        "type": "object",
+        "properties": {
+          "nodes": {
+            "description": "Graph nodes to import",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GraphifyNodeDto"
+            }
+          },
+          "links": {
+            "description": "Graph links to import",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GraphifyLinkDto"
+            }
+          }
+        },
+        "required": [
+          "nodes"
+        ]
       },
       "CreateTicketDto": {
         "type": "object",
@@ -3326,58 +3501,6 @@
             "example": "This ticket has been verified and is ready to work on"
           }
         }
-      },
-      "AddDocumentDto": {
-        "type": "object",
-        "properties": {
-          "source": {
-            "type": "string",
-            "enum": [
-              "ticket",
-              "doc",
-              "manual"
-            ],
-            "description": "Source type"
-          },
-          "sourceId": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Source record ID (e.g. ticket CUID)"
-          },
-          "content": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Full text content to embed and index"
-          },
-          "metadata": {
-            "type": "object",
-            "description": "Arbitrary metadata stored with the document"
-          }
-        },
-        "required": [
-          "source",
-          "sourceId",
-          "content"
-        ]
-      },
-      "SearchKbDto": {
-        "type": "object",
-        "properties": {
-          "query": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Natural language search query"
-          },
-          "limit": {
-            "type": "number",
-            "default": 5,
-            "minimum": 1,
-            "maximum": 50
-          }
-        },
-        "required": [
-          "query"
-        ]
       },
       "CreateWebhookDto": {
         "type": "object",

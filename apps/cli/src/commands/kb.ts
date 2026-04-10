@@ -9,6 +9,9 @@ import {
   ragControllerAddDocument,
   ragControllerDeleteDocument,
   ragControllerOptimizeTable,
+  ragControllerImportGraphify,
+  type GraphifyNodeDto,
+  type GraphifyLinkDto,
 } from '../generated';
 import { error } from '../utils/output';
 import { unwrap } from '../utils/api';
@@ -272,6 +275,73 @@ export function kbCommand(program: Command): void {
           console.log(JSON.stringify(data, null, 2));
         } else {
           console.log('Knowledge base optimization completed.');
+        }
+
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err);
+      }
+    });
+
+  kb
+    .command('import')
+    .description('Import a graphify knowledge graph into the knowledge base')
+    .option('--project <slug>', 'Project slug')
+    .option('--graphify <path>', 'Path to graphify JSON file')
+    .option('--json', 'Output as JSON')
+    .action(async (options) => {
+      if (!options.project) {
+        error('Missing required option: --project is required');
+        process.exit(3);
+        return;
+      }
+
+      if (!options.graphify) {
+        error('Missing required option: --graphify is required');
+        process.exit(3);
+        return;
+      }
+
+      let parsedNodes: GraphifyNodeDto[];
+      let parsedLinks: GraphifyLinkDto[];
+      try {
+        const raw = await readFile(options.graphify, 'utf-8');
+        const obj = JSON.parse(raw) as { nodes?: GraphifyNodeDto[]; links?: GraphifyLinkDto[] };
+        parsedNodes = obj.nodes ?? [];
+        parsedLinks = obj.links ?? [];
+      } catch (err: unknown) {
+        const nodeErr = err as NodeJS.ErrnoException;
+        if (nodeErr.code === 'ENOENT') {
+          error(`File not found: ${options.graphify}`);
+        } else {
+          error(`Failed to parse JSON file: ${options.graphify}`);
+        }
+        process.exit(1);
+        return;
+      }
+
+      try {
+        const ctx = await resolveContext({ projectSlug: options.project });
+
+        if (!ctx.apiKey) {
+          error('API key or URL not configured. Run: koda login --api-key <key>');
+          process.exit(2);
+          return;
+        }
+
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
+
+        const response = await ragControllerImportGraphify({
+          slug: options.project,
+          requestBody: { nodes: parsedNodes, links: parsedLinks },
+        });
+        const data = unwrap<{ imported: number; cleared: number }>(response);
+
+        if (options.json) {
+          console.log(JSON.stringify(data, null, 2));
+        } else {
+          console.log(`✓ Graphify import complete: ${data.imported} code nodes indexed (${data.cleared} cleared)`);
         }
 
         process.exit(0);
