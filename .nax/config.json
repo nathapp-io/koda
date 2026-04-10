@@ -116,5 +116,12 @@
     "acceptance": {
         "enabled": true,
         "maxRetries": 3
+    },
+  "precheck": {
+    "storySizeGate": {
+      "enabled": true,
+      "maxAcCount": 15,
+      "maxBulletPoints": 15
     }
+  }    
 }
