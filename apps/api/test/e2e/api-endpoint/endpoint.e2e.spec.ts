@@ -1602,6 +1602,182 @@ describeIntegration('API Integration Tests', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────
+  // Knowledge Base — Graphify Import (feat/graphify-kb-cc)
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('Knowledge Base — Graphify Import', () => {
+    let graphifyProjectSlug: string;
+
+    beforeAll(async () => {
+      if (!DATABASE_URL) return;
+
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+
+      // Create a dedicated project for graphify tests (graphifyEnabled defaults to false)
+      const res = await request(httpServer)
+        .post('/api/projects')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: 'Graphify KB Test', slug: 'graphify-kb-test', key: 'GKT' })
+        .expect(201);
+
+      graphifyProjectSlug = body<{ slug: string }>(res).slug;
+
+      // Verify project was created with graphifyEnabled=false (default)
+      const project = await prisma.client.project.findUnique({ where: { slug: graphifyProjectSlug } });
+      expect(project).toBeTruthy();
+      expect((project as NonNullable<typeof project>).graphifyEnabled).toBe(false);
+    }, 15_000);
+
+    // AC-2: non-admin returns 403
+    it('POST /api/projects/:slug/kb/import/graphify — returns 403 for non-admin user', async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${graphifyProjectSlug}/kb/import/graphify`)
+        .set('Authorization', `Bearer ${nonAdminUserAccessToken}`)
+        .send({ nodes: [] })
+        .expect(403);
+
+      expect(res.body).toHaveProperty('ret');
+    });
+
+    // AC-3: nonexistent project slug returns 404
+    it('POST /api/projects/:slug/kb/import/graphify — returns 404 for nonexistent project slug', async () => {
+      await request(httpServer)
+        .post('/api/projects/no-such-project-slug/kb/import/graphify')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ nodes: [] })
+        .expect(404);
+    });
+
+    // AC-4: graphifyEnabled=false returns 400
+    it('POST /api/projects/:slug/kb/import/graphify — returns 400 when graphify is disabled on project', async () => {
+      // graphifyEnabled defaults to false — import should be rejected
+      const res = await request(httpServer)
+        .post(`/api/projects/${graphifyProjectSlug}/kb/import/graphify`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ nodes: [{ id: 'n1', label: 'SomeNode', type: 'class' }] })
+        .expect(400);
+
+      expect(res.body).toHaveProperty('ret');
+    });
+
+    describe('when graphify is enabled on the project', () => {
+      beforeAll(async () => {
+        if (!DATABASE_URL) return;
+
+        // Enable graphify for the test project via Prisma
+        const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+        await prisma.client.project.update({
+          where: { slug: graphifyProjectSlug },
+          data: { graphifyEnabled: true },
+        });
+      }, 10_000);
+
+      // AC-6: missing nodes field → 400 validation error
+      it('POST /api/projects/:slug/kb/import/graphify — returns 400 when nodes is absent from body', async () => {
+        await request(httpServer)
+          .post(`/api/projects/${graphifyProjectSlug}/kb/import/graphify`)
+          .set('Authorization', `Bearer ${userAccessToken}`)
+          .send({})
+          .expect(400);
+      });
+
+      // AC-7: nodes present, links absent → valid (no error)
+      it('POST /api/projects/:slug/kb/import/graphify — returns 200 when nodes present and links absent', async () => {
+        const res = await request(httpServer)
+          .post(`/api/projects/${graphifyProjectSlug}/kb/import/graphify`)
+          .set('Authorization', `Bearer ${userAccessToken}`)
+          .send({
+            nodes: [{ id: 'node-no-links', label: 'OrphanService', type: 'class', source_file: 'src/orphan.service.ts' }],
+          })
+          .expect(200);
+
+        const data = body<{ imported: number; cleared: number }>(res);
+        expect(typeof data.imported).toBe('number');
+        expect(typeof data.cleared).toBe('number');
+      });
+
+      // AC-5: empty nodes array → imported=0, cleared=0
+      it('POST /api/projects/:slug/kb/import/graphify — returns imported=0 cleared=0 when nodes is empty array', async () => {
+        const res = await request(httpServer)
+          .post(`/api/projects/${graphifyProjectSlug}/kb/import/graphify`)
+          .set('Authorization', `Bearer ${userAccessToken}`)
+          .send({ nodes: [] })
+          .expect(200);
+
+        const data = body<{ imported: number; cleared: number }>(res);
+        expect(data.imported).toBe(0);
+        expect(data.cleared).toBe(0);
+      });
+
+      // AC-1: happy path — valid nodes + links → 200 with imported/cleared counts
+      it('POST /api/projects/:slug/kb/import/graphify — returns 200 with imported and cleared counts (happy path)', async () => {
+        const res = await request(httpServer)
+          .post(`/api/projects/${graphifyProjectSlug}/kb/import/graphify`)
+          .set('Authorization', `Bearer ${userAccessToken}`)
+          .send({
+            nodes: [
+              { id: 'svc-a', label: 'UserService', type: 'class', source_file: 'src/user/user.service.ts' },
+              { id: 'svc-b', label: 'AuthService', type: 'class', source_file: 'src/auth/auth.service.ts' },
+              { id: 'svc-c', label: 'TokenHelper', type: 'function', source_file: 'src/auth/token.helper.ts' },
+            ],
+            links: [
+              { source: 'svc-a', target: 'svc-b', relation: 'depends_on' },
+              { source: 'svc-b', target: 'svc-c', relation: 'calls' },
+            ],
+          })
+          .expect(200);
+
+        const data = body<{ imported: number; cleared: number }>(res);
+        expect(typeof data.imported).toBe('number');
+        expect(typeof data.cleared).toBe('number');
+        expect(data.imported).toBeGreaterThanOrEqual(0);
+        expect(data.cleared).toBeGreaterThanOrEqual(0);
+      });
+
+      // AC-9: result is returned as the response data (structure check)
+      it('POST /api/projects/:slug/kb/import/graphify — response data contains only imported and cleared fields', async () => {
+        const res = await request(httpServer)
+          .post(`/api/projects/${graphifyProjectSlug}/kb/import/graphify`)
+          .set('Authorization', `Bearer ${userAccessToken}`)
+          .send({
+            nodes: [{ id: 'check-node', label: 'CheckService' }],
+            links: [],
+          })
+          .expect(200);
+
+        expect(res.body).toHaveProperty('ret', 0);
+        expect(res.body).toHaveProperty('data');
+        expect(typeof res.body.data.imported).toBe('number');
+        expect(typeof res.body.data.cleared).toBe('number');
+      });
+
+      // AC-8: graphifyLastImportedAt is set to a non-null ISO timestamp after successful import
+      it('GET /api/projects/:slug — graphifyLastImportedAt is non-null ISO timestamp after successful import', async () => {
+        // Perform an import to update graphifyLastImportedAt
+        await request(httpServer)
+          .post(`/api/projects/${graphifyProjectSlug}/kb/import/graphify`)
+          .set('Authorization', `Bearer ${userAccessToken}`)
+          .send({
+            nodes: [{ id: 'ts-check', label: 'TimestampService', type: 'class' }],
+          })
+          .expect(200);
+
+        // Retrieve project and check graphifyLastImportedAt
+        const res = await request(httpServer)
+          .get(`/api/projects/${graphifyProjectSlug}`)
+          .set('Authorization', `Bearer ${userAccessToken}`)
+          .expect(200);
+
+        const data = body<{ graphifyLastImportedAt: string | null }>(res);
+        expect(data.graphifyLastImportedAt).not.toBeNull();
+        // Must be a valid ISO timestamp (parseable as Date)
+        const ts = new Date(data.graphifyLastImportedAt as string);
+        expect(ts.getTime()).not.toBeNaN();
+      });
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
   // CI Webhooks
   // ─────────────────────────────────────────────────────────────────
 
