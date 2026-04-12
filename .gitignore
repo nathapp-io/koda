@@ -66,12 +66,8 @@ apps/api/smoke-result.txt
 .nax/prompt-audit/
 .nax/**/acp-sessions.json
 .nax/**/progress.txt
-.nax/**/acceptance-meta.json
-.nax/**/acceptance.test.ts
-.nax/**/acceptance-refined.json
 .nax/**/*.bak
 .nax/**/acp-sessions.json
-apps/**/.nax/
 
 out/
 apps/web/playwright-report/
