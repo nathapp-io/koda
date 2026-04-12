@@ -17,7 +17,7 @@
   "review": {
     "checks": ["build", "typecheck", "lint", "semantic", "adversarial"],
     "semantic": {
-      "diffMode": "ref"
+      "diffMode": "embedded"
     },
     "adversarial": {
       "parallel": true

@@ -1,0 +1,227 @@
+{
+  "project": "koda",
+  "feature": "graphify-kb",
+  "branchName": "feat/graphify-kb",
+  "createdAt": "2026-04-12T00:00:00Z",
+  "updatedAt": "2026-04-12T08:16:19.040Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Schema, DTO & i18n Extensions",
+      "description": "Add graphifyEnabled and graphifyLastImportedAt to the Project Prisma model, create a migration, extend the AddDocumentDto source union with 'code', add graphifyEnabled/graphifyLastImportedAt to UpdateProjectDto and ProjectResponseDto (including the from() factory), and add graphifyDisabled + graphifyImportSuccess i18n keys to both en and zh rag.json files. This story lays the type foundation all other stories depend on — no service logic here.",
+      "acceptanceCriteria": [
+        "Project.graphifyEnabled defaults to false when a project is created with no graphifyEnabled field",
+        "AddDocumentDto accepts source: 'code' without a validation error",
+        "AddDocumentDto rejects any source value not in ['ticket', 'doc', 'manual', 'code'] with a 400 validation error",
+        "IndexDocumentInput.source type includes 'code' as a valid literal",
+        "ProjectResponseDto.from(project) maps project.graphifyEnabled to dto.graphifyEnabled",
+        "ProjectResponseDto.from(project) maps project.graphifyLastImportedAt to dto.graphifyLastImportedAt as Date | null",
+        "UpdateProjectDto accepts graphifyEnabled: true without a validation error",
+        "i18n key rag.graphifyDisabled exists in apps/api/src/i18n/en/rag.json with a non-empty English value",
+        "i18n key rag.graphifyDisabled exists in apps/api/src/i18n/zh/rag.json with a non-empty Chinese value"
+      ],
+      "tags": [
+        "feature",
+        "schema",
+        "dto",
+        "i18n"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/rag/dto/add-document.dto.ts",
+        "apps/api/src/projects/dto/update-project.dto.ts",
+        "apps/api/src/projects/dto/project-response.dto.ts",
+        "apps/api/src/i18n/en/rag.json"
+      ],
+      "suggestedCriteria": [
+        "graphifyLastImportedAt defaults to null in the Prisma schema and resolves to null in ProjectResponseDto.from() when the field is null on the project record",
+        "i18n key rag.graphifyImportSuccess exists in both en/rag.json and zh/rag.json with non-empty values",
+        "UpdateProjectDto rejects a non-boolean value for graphifyEnabled with a 400 validation error"
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "RagService: deleteAllBySourceType and importGraphify Methods",
+      "description": "Add two new methods to RagService: deleteAllBySourceType(projectId, sourceType) which deletes all LanceDB records of a given source type for a project and returns the pre-delete row count; and importGraphify(projectId, nodes, links) which clears existing code nodes, builds embeddable text for each graph node incorporating its neighbor links, and calls indexDocument() for each node with source:'code'. Add unit tests for both methods in rag.service.spec.ts.",
+      "acceptanceCriteria": [
+        "RagService.deleteAllBySourceType(projectId, 'code') deletes all records where source = 'code' for the given project and returns the count of records deleted",
+        "RagService.deleteAllBySourceType(projectId, 'code') returns 0 when no source:'code' records exist for the project",
+        "RagService.importGraphify(projectId, nodes, links) calls deleteAllBySourceType(projectId, 'code') before indexing any nodes",
+        "RagService.importGraphify(projectId, nodes, []) with an empty links array indexes each node with content '{type} {label} in {source_file}'",
+        "RagService.importGraphify(projectId, nodes, links) builds content that includes '{relation} {neighbor_label}' for each link where the node is the source",
+        "RagService.importGraphify(projectId, nodes, links) calls indexDocument() with source: 'code', sourceId: node.id, and metadata containing label, type, source_file, and community",
+        "RagService.importGraphify(projectId, [], []) returns { imported: 0, cleared: N } where N is the count returned by deleteAllBySourceType"
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "rag"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/rag/rag.service.ts",
+        "apps/api/src/rag/rag.service.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "RagService.importGraphify() builds content '{type} {label}' (without 'in ...' part) for a node that has no source_file field",
+        "RagService.importGraphify() defaults the type field to 'node' when the node has no type field",
+        "RagService.importGraphify() does not include outbound link relations for links where the node is the target (not the source)",
+        "RagService.importGraphify() returns { imported: nodes.length, cleared: N } where imported equals the number of nodes passed in"
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "Import Endpoint: POST /projects/:slug/kb/import/graphify",
+      "description": "Create the ImportGraphifyDto, GraphifyNodeDto, and GraphifyLinkDto classes in a new import-graphify.dto.ts file. Add a POST /projects/:slug/kb/import/graphify route to RagController guarded to ADMIN role. The handler resolves the project by slug, validates graphifyEnabled is true, calls ragService.importGraphify(), updates project.graphifyLastImportedAt to the current UTC timestamp via Prisma, and returns { ret: 0, data: { imported, cleared } }. Add e2e test cases for happy-path, 403 non-admin, and 400 graphify-disabled to endpoint.e2e.spec.ts.",
+      "acceptanceCriteria": [
+        "POST /projects/:slug/kb/import/graphify with a valid body and ADMIN auth returns { ret: 0, data: { imported: number, cleared: number } }",
+        "POST /projects/:slug/kb/import/graphify returns 403 when the caller does not have ADMIN role",
+        "POST /projects/:slug/kb/import/graphify returns 404 when the project slug does not exist",
+        "POST /projects/:slug/kb/import/graphify returns 400 with the rag.graphifyDisabled i18n message when project.graphifyEnabled is false",
+        "POST /projects/:slug/kb/import/graphify with nodes: [] returns { imported: 0, cleared: 0 } and does not call indexDocument",
+        "ImportGraphifyDto rejects a body missing the nodes field with a 400 validation error",
+        "ImportGraphifyDto accepts a body with nodes present and links absent (links is optional)",
+        "The import route calls ragService.importGraphify(project.id, dto.nodes, dto.links ?? []) and returns its result",
+        "After a successful import, the controller updates project.graphifyLastImportedAt to the current UTC timestamp via Prisma",
+        "After a successful import, GET /projects/:slug returns the updated graphifyLastImportedAt value",
+        "The e2e spec includes a test for the happy-path import returning imported and cleared counts",
+        "The e2e spec includes a test that a non-admin caller receives 403",
+        "The e2e spec includes a test that importing to a project with graphifyEnabled: false returns 400"
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "endpoint"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/rag/rag.controller.ts",
+        "apps/api/src/rag/dto/add-document.dto.ts",
+        "apps/api/src/rag/rag.service.ts",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "GraphifyNodeDto id and label fields are required strings; type, source_file, and community are optional",
+        "GraphifyLinkDto source and target fields are required strings; relation is optional",
+        "The import route does not update graphifyLastImportedAt when ragService.importGraphify throws"
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "Toggle Enforcement: Purge Code Nodes When graphifyEnabled Flips to false",
+      "description": "Inject RagService into ProjectsService and extend the update() method so that when graphifyEnabled changes from true to false in the update payload, it calls ragService.deleteAllBySourceType(projectId, 'code') after persisting the flag. If deleteAllBySourceType throws, log a warning and do not re-throw — the flag change is kept regardless. Import RagModule into ProjectsModule to enable DI. Add unit tests for the purge-on-toggle-off behaviour and the no-op cases.",
+      "acceptanceCriteria": [
+        "ProjectsService.update() calls ragService.deleteAllBySourceType(projectId, 'code') when graphifyEnabled changes from true to false in the update payload",
+        "ProjectsService.update() does not call ragService.deleteAllBySourceType when graphifyEnabled is not present in the update payload",
+        "ProjectsService.update() does not call ragService.deleteAllBySourceType when graphifyEnabled changes from false to true",
+        "ProjectsService.update() does not call ragService.deleteAllBySourceType when graphifyEnabled is true in both the current project state and the update payload",
+        "When ragService.deleteAllBySourceType throws, ProjectsService.update() logs a warning at warn level and does not re-throw the error",
+        "When ragService.deleteAllBySourceType throws, ProjectsService.update() still returns the updated project DTO (the flag change is persisted)",
+        "RagModule is listed in the imports array of ProjectsModule so RagService is available via DI in ProjectsService"
+      ],
+      "tags": [
+        "feature",
+        "api"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/projects/projects.service.ts",
+        "apps/api/src/projects/projects.module.ts",
+        "apps/api/src/rag/rag.module.ts",
+        "apps/api/src/projects/projects.service.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "ProjectsService.update() reads the current project record before comparing graphifyEnabled values to detect the true→false transition",
+        "The warn-level log message when deleteAllBySourceType throws includes the projectId for traceability"
+      ]
+    },
+    {
+      "id": "US-005",
+      "title": "CLI: koda kb import --graphify Sub-command",
+      "description": "Add an 'import' sub-command to apps/cli/src/commands/kb.ts. The command reads a graph.json file, extracts nodes and links (ignoring other top-level keys), and POSTs to the import endpoint via the generated client. Follow the existing resolveContext() pattern (NOT resolveAuth() as described in the spec — the codebase uses resolveContext). On success print '✓ Graphify import complete: {imported} code nodes indexed ({cleared} cleared)' or raw JSON with --json. Handle missing/invalid file (exit 1), missing auth (exit 2), and missing flags (exit 3). Add unit tests in kb.spec.ts.",
+      "acceptanceCriteria": [
+        "koda kb import --project koda --graphify ./graph.json exits 0 and prints '✓ Graphify import complete: {imported} code nodes indexed ({cleared} cleared)' to stdout",
+        "koda kb import --project koda --graphify ./graph.json --json exits 0 and prints the raw JSON API response to stdout",
+        "koda kb import --project koda --graphify ./missing.json exits 1 and writes a file-not-found message to stderr",
+        "koda kb import --project koda --graphify ./invalid.json with non-JSON file content exits 1 and writes a parse-error message to stderr",
+        "koda kb import with missing --project exits 3",
+        "koda kb import with missing --graphify exits 3",
+        "When auth config is absent, koda kb import exits 2 without calling the API",
+        "The command sends { nodes, links } extracted from the parsed graph.json and does not include other top-level keys such as directed, multigraph, or graph"
+      ],
+      "tags": [
+        "feature",
+        "cli"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/cli",
+      "contextFiles": [
+        "apps/cli/src/commands/kb.ts",
+        "apps/cli/src/commands/kb.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When graph.json has no top-level 'links' key, the command sends { nodes, links: [] } to the API",
+        "When graph.json has nodes: [], the command sends the empty array and prints '✓ Graphify import complete: 0 code nodes indexed (0 cleared)'"
+      ]
+    }
+  ],
+  "analysis": "Key codebase findings for implementation:\n\n1. PROJECT MODEL: apps/api/prisma/schema.prisma has 'autoIndexOnClose Boolean @default(true)' on the Project model. Follow this exact pattern to add 'graphifyEnabled Boolean @default(false)' and 'graphifyLastImportedAt DateTime?' adjacent to it.\n\n2. SOURCE UNION: apps/api/src/rag/dto/add-document.dto.ts uses @IsIn(['ticket', 'doc', 'manual']) and IndexDocumentInput.source is 'ticket' | 'doc' | 'manual'. Both must be extended with 'code'.\n\n3. ADMIN GUARD PATTERN: apps/api/src/rag/rag.controller.ts checks currentUser?.extra?.role !== 'ADMIN' and throws ForbiddenAppException({}, 'rag'). Follow this exactly for the import route — do not use a NestJS guard decorator.\n\n4. PROJECT DTOs: UpdateProjectDto uses @IsBoolean() + @IsOptional() for boolean flags (see autoIndexOnClose). ProjectResponseDto has a static from(project) factory that maps all fields. Follow both patterns for graphifyEnabled and graphifyLastImportedAt.\n\n5. I18N: Flat JSON per module. en/rag.json and zh/rag.json currently have 'notFound', '404', and '40003'. Add 'graphifyDisabled' and 'graphifyImportSuccess' to both files.\n\n6. LANCEDB DELETION: Existing deleteBySource() in RagService deletes by sourceId. The new deleteAllBySourceType() must delete ALL rows where source = sourceType. LanceDB table.delete() accepts a filter string predicate. Count rows first (e.g., table.search().where('source = ...')).then query count, then delete by that predicate.\n\n7. CLI PATTERN — CRITICAL DISCREPANCY: The spec references 'resolveAuth({})' but the actual codebase uses 'resolveContext({ projectSlug: options.project })' throughout apps/cli/src/commands/kb.ts. All existing kb sub-commands use resolveContext. Implementer MUST follow resolveContext(), not resolveAuth(). Auth absence maps to exit 2 because resolveContext throws/returns falsy when config is missing.\n\n8. PROJECTS MODULE: apps/api/src/projects/projects.module.ts currently has NO imports array — only controllers, providers, exports. Adding RagModule requires adding a new imports array. Verify RagModule does not create a circular dependency (RagModule does not import ProjectsModule).\n\n9. RAGSMODULE EXPORTS: apps/api/src/rag/rag.module.ts exports RagService and FTS_OPTIMIZE_STRATEGY. RagService is ready for cross-module injection.\n\n10. E2E TEST SETUP: endpoint.e2e.spec.ts resets DB with 'bunx prisma db push --force-reset' before all tests. Uses supertest against the full NestJS app. body<T>(res) helper extracts .data from { ret: 0, data: T } responses. To test admin-only endpoints, a test user with role=ADMIN must be seeded — follow the pattern used for existing admin-guarded routes (deleteDocument, optimizeTable).\n\n11. GRAPHIFYLASTIMPORTEDAT UPDATE: US-003 requires the controller to update project.graphifyLastImportedAt after a successful import. This should be done via db.project.update() in the controller or delegated to a thin helper — PrismaService is already injected in RagController.\n\n12. DELETEALLBYSOURCETYPE COUNT: The spec requires returning the count of records deleted. LanceDB does not natively return a delete count. The implementation must query the count before deleting (count = rows matching source predicate) then perform the delete, returning that pre-delete count.\n\n13. DEPENDENCY ORDER: US-001 (schema/DTOs/i18n) → US-002 (RagService methods) → US-003 + US-004 (parallel, endpoint and toggle cleanup) → US-005 (CLI). US-003 and US-004 can be implemented in parallel after US-002."
+}
