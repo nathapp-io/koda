@@ -1,9 +1,9 @@
 {
     "models": {
         "claude": {
-            "fast": "haiku",
-            "balanced": "haiku",
-            "powerful": "sonnet"
+          "fast": "MiniMax-M2.7",
+          "balanced": "MiniMax-M2.7",
+          "powerful": "MiniMax-M2.7"
         }      
     },  
   "autoMode": {
