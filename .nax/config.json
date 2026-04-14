@@ -97,7 +97,7 @@
     },
     "review": {
         "enabled": true,
-        "checks": ["build", "typecheck", "lint", "semantic"],
+        "checks": ["build", "typecheck", "lint", "semantic", "adversarial"],
         "commands": {
             "build": "bun run build",
             "typecheck": "bunx turbo type-check",
