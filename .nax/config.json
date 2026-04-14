@@ -23,7 +23,7 @@
         "fallbackOrder": ["claude"],
         "complexityRouting": {
             "simple": "fast",
-            "medium": "balanced",
+            "medium": "fast",
             "complex": "balanced",
             "expert": "powerful"
         },
@@ -108,6 +108,9 @@
         "semantic": {
             "modelTier": "fast",
             "rules": []
+        },
+        "adversarial": {
+            "modelTier": "fast"
         }
     },
     "plan": {
