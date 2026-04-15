@@ -7,7 +7,7 @@ import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-opt
 import type { KbResultDto, SearchKbResponseDto } from './dto/kb-result.dto';
 
 export interface IndexDocumentInput {
-  source: 'ticket' | 'doc' | 'manual';
+  source: 'ticket' | 'doc' | 'manual' | 'code';
   sourceId: string;
   content: string;
   metadata: Record<string, unknown>;

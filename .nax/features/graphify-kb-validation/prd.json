@@ -3,7 +3,7 @@
   "feature": "graphify-kb-validation",
   "branchName": "feat/graphify-kb-validation",
   "createdAt": "2026-04-13T00:00:00Z",
-  "updatedAt": "2026-04-13T10:47:33.137Z",
+  "updatedAt": "2026-04-15T08:13:23.175Z",
   "userStories": [
     {
       "id": "US-001",
@@ -33,7 +33,9 @@
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "fast"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -49,7 +51,11 @@
         "UpdateProjectDto rejects graphifyEnabled values that are not boolean with a 400 validation error",
         "i18n key rag.graphifyImportSuccess exists in both en/rag.json and zh/rag.json with non-empty values",
         "The Prisma migration is idempotent and can be applied multiple times without error"
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "7fc9ad326509bbf8e8b46025b7d60818114cf65d"
     },
     {
       "id": "US-002",
@@ -94,7 +100,10 @@
         "When importGraphify is called twice with the same nodes and links, the content strings produced are identical (deterministic given same input order)",
         "When indexDocument() throws for a node, importGraphify continues to the next node and does not terminate early; the returned imported count equals nodes.length",
         "deleteAllBySourceType called twice in succession returns the first call's count, then 0"
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -144,7 +153,10 @@
         "The graphifyLastImportedAt timestamp persists across subsequent requests and is not reset by unrelated project updates",
         "Response Content-Type is application/json",
         "ImportGraphifyDto ignores unknown top-level fields in the request body without error"
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -187,7 +199,10 @@
         "The graphifyEnabled flag change is persisted to the database before deleteAllBySourceType is called so that cleanup failure does not roll back the flag",
         "Unit test mocks ragService.deleteAllBySourceType to throw and verifies the error is logged but not propagated to the caller",
         "Unit test confirms deleteAllBySourceType is not called when the update payload omits graphifyEnabled entirely"
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -234,7 +249,10 @@
         "Human-readable output on success includes both the imported count and the cleared count",
         "The --json flag outputs the raw response object without additional wrapping",
         "When graph.json has a links key absent or undefined, the command sends links: [] to the API"
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "This feature extends Koda's knowledge base (LanceDB) to ingest code-structure documents from Graphify's graph.json output. The architecture uses a push model: developers or CI pipelines build graph.json locally via `graphify .`, then push it to Koda via a new CLI command. The API ingests nodes/links, converts them to embeddable text chunks, and stores them with source:'code' in LanceDB alongside existing ticket and manual documents. No changes to the retrieval path are needed — existing hybrid search (RRF + FTS) handles the new source type automatically because source:'code' documents enter the same KB store.\n\n**Source-of-truth discipline**: The current checkout may contain generated artifacts (dist/, apps/cli/src/generated/) that are ahead of the authoritative src/ tree and Prisma schema. Always treat src/ and prisma/schema.prisma as the source of truth. Do not edit generated files. After US-003 is complete, run `bun run api:export-spec && bun run generate` to regenerate openapi.json and the CLI generated client before starting US-005. This regeneration step is a hard prerequisite for US-005 — the CLI depends on the generated import service method.\n\n**Key design decisions**:\n1. Push model keeps the API server stateless and avoids running Python on the server.\n2. source:'code' is added as a union variant in the RAG data model. Existing indexDocument() pipeline is reused with no new embedding provider or vector store.\n3. Idempotent import: each import clears all prior source:'code' nodes for the project before inserting new ones. Re-running produces no duplicates.\n4. Opt-in via Project.graphifyEnabled flag. When toggled from true→false, all code nodes are purged; cleanup failure logs at warn level but does not roll back the flag change (fail-open).\n5. Content generation is deterministic given the same input order: '{type} {label} in {source_file}: {relation} {neighbor_label}, ...' for nodes with outgoing links; '{type} {label} in {source_file}' for isolated nodes; '{type} {label}' when source_file is absent. type defaults to 'node' when absent.\n6. Fail-open per node: if embedding or indexing fails for a node, the existing fallback in indexDocument() stores a zero vector and continues. The import does not abort on partial failure. The returned imported count equals nodes.length (all attempted).\n\n**Payload shape (from spec)**: GraphifyNodeDto requires id (string) and label (string); type, source_file, and community are optional. GraphifyLinkDto requires source and target (node IDs); relation is optional.\n\n**DI cycle risk**: RagService must not depend on ProjectsService or ProjectsModule. The dependency direction is projects → rag only. Verify RagModule exports RagService before importing into ProjectsModule.\n\n**Build order**: US-001 → US-002 → (US-003 ∥ US-004) → [regenerate openapi.json + CLI client] → US-005."

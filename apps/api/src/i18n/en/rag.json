@@ -1,5 +1,6 @@
 {
   "notFound": "Project not found",
   "404": "Project not found",
-  "40003": "Access denied"
+  "40003": "Access denied",
+  "graphifyDisabled": "Graphify is disabled for this project"
 }
