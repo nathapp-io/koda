@@ -523,4 +523,101 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     const table = await this.getOrCreateTable(projectId);
     await table.optimize();
   }
+
+  async deleteAllBySourceType(projectId: string, sourceType: string): Promise<number> {
+    const table = await this.getOrCreateTable(projectId);
+    const rows: LanceRecord[] = await table.query().limit(Number.MAX_SAFE_INTEGER).toArray();
+    const recordsToDelete = rows.filter((r) => r.source === sourceType);
+    const count = recordsToDelete.length;
+
+    if (count > 0) {
+      await table.delete(`source = '${sourceType}'`);
+    }
+
+    return count;
+  }
+
+  async importGraphify(
+    projectId: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    nodes: any[],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    links: any[],
+  ): Promise<{ imported: number; cleared: number }> {
+    const cleared = await this.deleteAllBySourceType(projectId, 'code');
+
+    // Build a map of node id to node for quick lookup
+    const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+
+    // Build a map of source node id to array of outgoing links
+    const outgoingLinks = new Map<string, Array<{ link: unknown; target: unknown }>>();
+    for (const link of links) {
+      const sourceId = link.source;
+      if (!outgoingLinks.has(sourceId)) {
+        outgoingLinks.set(sourceId, []);
+      }
+      outgoingLinks.get(sourceId)!.push({ link, target: nodeMap.get(link.target) });
+    }
+
+    // Index each node
+    for (const node of nodes) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const nodeData = node as any;
+      const type = nodeData.type ?? 'node';
+      const label = nodeData.label;
+      const sourceFile = nodeData.source_file;
+      const community = nodeData.community;
+
+      // Build content string
+      let content = `${type} ${label}`;
+
+      if (sourceFile) {
+        content += ` in ${sourceFile}`;
+      }
+
+      // Add outgoing links if any
+      const nodeLinks = outgoingLinks.get(nodeData.id) ?? [];
+      if (nodeLinks.length > 0) {
+        const linkStrings = nodeLinks
+          .map(({ link, target }) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const linkData = link as any;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const targetData = target as any;
+            const relation = linkData.relation ?? '';
+            const neighborLabel = targetData?.label ?? '';
+            return relation ? `${relation} ${neighborLabel}` : neighborLabel;
+          })
+          .filter((s) => s);
+
+        if (linkStrings.length > 0) {
+          content += ': ' + linkStrings.join(', ');
+        }
+      }
+
+      // Build metadata
+      const metadata: Record<string, unknown> = {
+        label,
+        type,
+      };
+
+      if (sourceFile) {
+        metadata.source_file = sourceFile;
+      }
+
+      if (community) {
+        metadata.community = community;
+      }
+
+      // Index the document
+      await this.indexDocument(projectId, {
+        source: 'code',
+        sourceId: nodeData.id,
+        content,
+        metadata,
+      });
+    }
+
+    return { imported: nodes.length, cleared };
+  }
 }
