@@ -303,7 +303,13 @@ export function kbCommand(program: Command): void {
       try {
         const ctx = await resolveContext({ projectSlug: options.project });
 
-        if (!ctx.apiKey) {
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey || !ctx.apiUrl) {
           error('API key or URL not configured. Run: koda login --api-key <key>');
           process.exit(2);
           return;
@@ -345,7 +351,7 @@ export function kbCommand(program: Command): void {
         OpenAPI.TOKEN = ctx.apiKey;
 
         const response = await ragControllerImportGraphify({
-          slug: options.project,
+          slug: ctx.projectSlug,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           requestBody: { nodes, links } as any,
         });
