@@ -1,7 +1,7 @@
 {
   "project": "koda",
-  "feature": "graphify-kb",
-  "branchName": "feat/graphify-kb",
+  "feature": "graphify-kb-validation",
+  "branchName": "feat/graphify-kb-validation",
   "createdAt": "2026-04-13T00:00:00Z",
   "updatedAt": "2026-04-13T10:47:33.137Z",
   "userStories": [
