@@ -2129,5 +2129,48 @@
         "runtimeCrashes": 0
       }
     ]
+  },
+  {
+    "runId": "run-2026-04-15T08-13-23-121Z",
+    "feature": "graphify-kb-validation",
+    "startedAt": "2026-04-15T08:13:23.121Z",
+    "completedAt": "2026-04-15T08:33:03.961Z",
+    "totalCost": 2.8952331999999994,
+    "totalStories": 1,
+    "storiesCompleted": 1,
+    "storiesFailed": 0,
+    "totalDurationMs": 1180840,
+    "stories": [
+      {
+        "storyId": "US-001",
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "modelUsed": "haiku",
+        "agentUsed": "claude",
+        "attempts": 1,
+        "finalTier": "fast",
+        "success": true,
+        "cost": 0.6957586499999998,
+        "durationMs": 324493,
+        "firstPassSuccess": true,
+        "startedAt": "2026-04-15T08:13:23.174Z",
+        "completedAt": "2026-04-15T08:32:44.766Z",
+        "fullSuiteGatePassed": false,
+        "runtimeCrashes": 0,
+        "tokens": {
+          "input_tokens": 530,
+          "output_tokens": 20354,
+          "cache_read_input_tokens": 4658874,
+          "cache_creation_input_tokens": 102057
+        }
+      }
+    ],
+    "totalTokens": {
+      "input_tokens": 530,
+      "output_tokens": 20354,
+      "cache_read_input_tokens": 4658874,
+      "cache_creation_input_tokens": 102057
+    }
   }
 ]
