@@ -335,6 +335,12 @@ export function kbCommand(program: Command): void {
         const nodes = parsedData.nodes;
         const links = parsedData.links;
 
+        if (!Array.isArray(nodes) || !Array.isArray(links)) {
+          error('Invalid graph.json format: must contain arrays "nodes" and "links"');
+          process.exit(1);
+          return;
+        }
+
         OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
         OpenAPI.TOKEN = ctx.apiKey;
 
