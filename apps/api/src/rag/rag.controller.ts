@@ -10,7 +10,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { ForbiddenAppException, JsonResponse, NotFoundAppException } from '@nathapp/nestjs-common';
+import { AppException, ForbiddenAppException, JsonResponse, NotFoundAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
 import { RagService } from './rag.service';
@@ -18,7 +18,6 @@ import { AddDocumentDto } from './dto/add-document.dto';
 import { SearchKbDto } from './dto/search-kb.dto';
 import { ImportGraphifyDto } from './dto/import-graphify.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { ValidationAppException } from '@nathapp/nestjs-common';
 
 @ApiTags('knowledge-base')
 @ApiBearerAuth()
@@ -114,7 +113,7 @@ export class RagController {
   ) {
     if (currentUser?.extra?.role !== 'ADMIN') throw new ForbiddenAppException({}, 'rag');
     const project = await this.resolveProject(slug);
-    if (!project.graphifyEnabled) throw new ValidationAppException({}, 'rag');
+    if (!project.graphifyEnabled) throw new AppException('graphifyDisabled' as unknown as number, {}, 'rag', 400);
     if (dto.nodes.length === 0) return JsonResponse.Ok({ imported: 0, cleared: 0 });
     const result = await this.db.$transaction(async (tx) => {
       const importResult = await this.ragService.importGraphify(project.id, dto.nodes, dto.links ?? []);
