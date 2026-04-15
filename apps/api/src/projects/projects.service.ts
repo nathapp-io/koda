@@ -1,14 +1,20 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
 import { ValidationAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { ProjectResponseDto } from './dto/project-response.dto';
+import { RagService } from '../rag/rag.service';
 
 @Injectable()
 export class ProjectsService {
-  constructor(private prisma: PrismaService<PrismaClient>) {}
+  private readonly logger = new Logger(ProjectsService.name);
+
+  constructor(
+    private prisma: PrismaService<PrismaClient>,
+    private ragService: RagService,
+  ) {}
   private get db() { return this.prisma.client; }
 
 
@@ -133,7 +139,7 @@ export class ProjectsService {
     }
 
     // Update project
-    return ProjectResponseDto.from(await this.db.project.update({
+    const updatedProject = await this.db.project.update({
       where: { slug },
       data: {
         name: updateProjectDto.name,
@@ -146,7 +152,25 @@ export class ProjectsService {
         ciWebhookToken: updateProjectDto.ciWebhookToken,
         graphifyEnabled: updateProjectDto.graphifyEnabled,
       },
-    }));
+    });
+
+    // Handle graphifyEnabled toggle from true to false
+    if (
+      updateProjectDto.graphifyEnabled !== undefined &&
+      currentProject.graphifyEnabled === true &&
+      updateProjectDto.graphifyEnabled === false
+    ) {
+      try {
+        await this.ragService.deleteAllBySourceType(currentProject.id, 'code');
+      } catch (error) {
+        this.logger.warn(
+          `Failed to delete code nodes for project ${currentProject.id}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        // Do not re-throw - the flag change persists regardless
+      }
+    }
+
+    return ProjectResponseDto.from(updatedProject);
   }
 
   async softDelete(slug: string) {
