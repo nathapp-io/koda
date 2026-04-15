@@ -43,5 +43,10 @@
     "sessionName": "nax-4749de77-graphify-kb-validation-us-004-implementer",
     "agentName": "claude",
     "status": "open"
+  },
+  "US-004:reviewer-adversarial": {
+    "sessionName": "nax-4749de77-graphify-kb-validation-us-004-reviewer-adversarial",
+    "agentName": "claude",
+    "status": "open"
   }
 }
