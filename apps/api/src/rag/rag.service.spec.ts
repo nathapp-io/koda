@@ -903,6 +903,49 @@ describe('RagService.deleteAllBySourceType (US-002)', () => {
 
     expect(result).toBe(0);
   });
+
+  it('supports source-based deletes for the in-memory fallback table', async () => {
+    const mockEmbeddingService = {
+      embed: jest.fn().mockResolvedValue(new Float32Array(384).fill(0)),
+      providerName: 'ollama',
+      modelName: 'nomic-embed-text',
+      dimensions: 384,
+    };
+
+    const ragService = new RagService({
+      get: (key: string): unknown => {
+        const config: Record<string, unknown> = {
+          'rag.lancedbPath': './lancedb',
+          'rag.similarityHigh': 0.85,
+          'rag.similarityMedium': 0.70,
+          'rag.similarityLow': 0.50,
+          'rag.ftsIndexMode': 'simple',
+          'rag.inMemoryOnly': true,
+        };
+        return config[key];
+      },
+    } as never, mockEmbeddingService as never);
+
+    await ragService.indexDocument('proj-1', {
+      source: 'code',
+      sourceId: 'node-1',
+      content: 'class ExampleNode',
+      metadata: {},
+    });
+    await ragService.indexDocument('proj-1', {
+      source: 'manual',
+      sourceId: 'doc-1',
+      content: 'manual ExampleDoc',
+      metadata: {},
+    });
+
+    const deleted = await ragService.deleteAllBySourceType('proj-1', 'code');
+    const remaining = await ragService.listDocuments('proj-1', 10);
+
+    expect(deleted).toBe(1);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].source).toBe('manual');
+  });
 });
 
 describe('RagService.importGraphify (US-002)', () => {
@@ -1009,7 +1052,7 @@ describe('RagService.importGraphify (US-002)', () => {
     const indexDocumentSpy = jest.spyOn(ragService, 'indexDocument').mockResolvedValue(undefined);
 
     const nodes = [
-      { id: 'node-1', label: 'MyClass', type: 'class', source_file: 'app.ts', community: 'com-1' },
+      { id: 'node-1', label: 'MyClass', type: 'class', source_file: 'app.ts', community: 0 },
     ];
 
     await ragService.importGraphify('proj-1', nodes, []);
@@ -1022,7 +1065,7 @@ describe('RagService.importGraphify (US-002)', () => {
         label: 'MyClass',
         type: 'class',
         source_file: 'app.ts',
-        community: 'com-1',
+        community: 0,
       },
     });
   });

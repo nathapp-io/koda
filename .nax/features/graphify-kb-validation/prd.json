@@ -3,7 +3,7 @@
   "feature": "graphify-kb-validation",
   "branchName": "feat/graphify-kb-validation",
   "createdAt": "2026-04-13T00:00:00Z",
-  "updatedAt": "2026-04-15T13:25:43.401Z",
+  "updatedAt": "2026-04-15T14:14:02.348Z",
   "userStories": [
     {
       "id": "US-001",
@@ -195,8 +195,8 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "failed",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 1,
       "escalations": [],
       "routing": {
@@ -267,14 +267,16 @@
       "dependencies": [
         "US-003"
       ],
-      "status": "paused",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "fast"
       },
       "workdir": "apps/cli",
       "contextFiles": [
@@ -292,7 +294,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "e3392559bd138c7b21a52eb57b69772b038bc2a0"
     }
   ],
   "analysis": "This feature extends Koda's knowledge base (LanceDB) to ingest code-structure documents from Graphify's graph.json output. The architecture uses a push model: developers or CI pipelines build graph.json locally via `graphify .`, then push it to Koda via a new CLI command. The API ingests nodes/links, converts them to embeddable text chunks, and stores them with source:'code' in LanceDB alongside existing ticket and manual documents. No changes to the retrieval path are needed — existing hybrid search (RRF + FTS) handles the new source type automatically because source:'code' documents enter the same KB store.\n\n**Source-of-truth discipline**: The current checkout may contain generated artifacts (dist/, apps/cli/src/generated/) that are ahead of the authoritative src/ tree and Prisma schema. Always treat src/ and prisma/schema.prisma as the source of truth. Do not edit generated files. After US-003 is complete, run `bun run api:export-spec && bun run generate` to regenerate openapi.json and the CLI generated client before starting US-005. This regeneration step is a hard prerequisite for US-005 — the CLI depends on the generated import service method.\n\n**Key design decisions**:\n1. Push model keeps the API server stateless and avoids running Python on the server.\n2. source:'code' is added as a union variant in the RAG data model. Existing indexDocument() pipeline is reused with no new embedding provider or vector store.\n3. Idempotent import: each import clears all prior source:'code' nodes for the project before inserting new ones. Re-running produces no duplicates.\n4. Opt-in via Project.graphifyEnabled flag. When toggled from true→false, all code nodes are purged; cleanup failure logs at warn level but does not roll back the flag change (fail-open).\n5. Content generation is deterministic given the same input order: '{type} {label} in {source_file}: {relation} {neighbor_label}, ...' for nodes with outgoing links; '{type} {label} in {source_file}' for isolated nodes; '{type} {label}' when source_file is absent. type defaults to 'node' when absent.\n6. Fail-open per node: if embedding or indexing fails for a node, the existing fallback in indexDocument() stores a zero vector and continues. The import does not abort on partial failure. The returned imported count equals nodes.length (all attempted).\n\n**Payload shape (from spec)**: GraphifyNodeDto requires id (string) and label (string); type, source_file, and community are optional. GraphifyLinkDto requires source and target (node IDs); relation is optional.\n\n**DI cycle risk**: RagService must not depend on ProjectsService or ProjectsModule. The dependency direction is projects → rag only. Verify RagModule exports RagService before importing into ProjectsModule.\n\n**Build order**: US-001 → US-002 → (US-003 ∥ US-004) → [regenerate openapi.json + CLI client] → US-005."

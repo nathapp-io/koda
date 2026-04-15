@@ -105,10 +105,27 @@ class InMemoryTable {
   async countRows(): Promise<number> { return this.records.length; }
   async delete(filter: string): Promise<void> {
     const sourceIdFilter = /^source_id\s*=\s*'([a-zA-Z0-9_-]+)'$/.exec(filter);
-    if (!sourceIdFilter) return;
+    if (sourceIdFilter) {
+      const sourceId = sourceIdFilter[1];
+      this.records = this.records.filter((record) => record.source_id !== sourceId);
+      return;
+    }
 
-    const sourceId = sourceIdFilter[1];
-    this.records = this.records.filter((record) => record.source_id !== sourceId);
+    const sourceFilter = /^source\s*=\s*'([a-zA-Z0-9_-]+)'$/.exec(filter);
+    if (sourceFilter) {
+      const source = sourceFilter[1];
+      this.records = this.records.filter((record) => record.source !== source);
+      return;
+    }
+
+    const idInFilter = /^id\s+IN\s+\((.+)\)$/.exec(filter);
+    if (idInFilter) {
+      const ids = idInFilter[1]
+        .split(',')
+        .map((part) => part.trim().replace(/^'|'$/g, ''));
+      const idSet = new Set(ids);
+      this.records = this.records.filter((record) => !idSet.has(record.id));
+    }
   }
   vectorSearch() { return { distanceType: () => ({ limit: (n) => ({ toArray: () => this.records.slice(0, n) }) }) }; }
   query() { return { limit: (n) => ({ toArray: () => this.records.slice(0, n) }) }; }
@@ -613,7 +630,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         metadata.source_file = sourceFile;
       }
 
-      if (community) {
+      if (community !== undefined) {
         metadata.community = community;
       }
 

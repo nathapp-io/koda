@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsNumber,
   IsOptional,
   IsString,
   ValidateNested,
@@ -28,8 +29,8 @@ export class GraphifyNodeDto {
 
   @ApiPropertyOptional({ description: 'Community identifier' })
   @IsOptional()
-  @IsString()
-  community?: string;
+  @IsNumber()
+  community?: number;
 }
 
 export class GraphifyLinkDto {

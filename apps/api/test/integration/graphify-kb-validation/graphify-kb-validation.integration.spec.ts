@@ -10,6 +10,7 @@ import type { IndexDocumentInput } from '../../../src/rag/rag.service';
 import { RagController } from '../../../src/rag/rag.controller';
 import { RagService } from '../../../src/rag/rag.service';
 import { PrismaService } from '@nathapp/nestjs-prisma';
+import { ValidationAppException } from '@nathapp/nestjs-common';
 import { ImportGraphifyDto, GraphifyNodeDto, GraphifyLinkDto } from '../../../src/rag/dto/import-graphify.dto';
 
 // Variable-path require helper for the not-yet-existing ImportGraphifyDto (US-003).
@@ -428,6 +429,19 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
       expect(errors).toHaveLength(0);
     });
 
+    it('GraphifyNodeDto: community accepts numeric values', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { ImportGraphifyDto } = loadImportGraphifyModule() as { ImportGraphifyDto: new() => any };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dto = plainToClass(ImportGraphifyDto as any, {
+        nodes: [{ id: 'n1', label: 'WithCommunity', community: 0 }],
+      });
+
+      const errors = await validate(dto as object);
+
+      expect(errors).toHaveLength(0);
+    });
+
     it('GraphifyLinkDto: relation field is optional', async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { ImportGraphifyDto } = loadImportGraphifyModule() as { ImportGraphifyDto: new() => any };
@@ -636,7 +650,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
     });
 
     // AC4: throws 400 when graphifyEnabled is false
-    it('AC4: throws AppException (400) when project.graphifyEnabled is false', async () => {
+    it('AC4: throws ValidationAppException when project.graphifyEnabled is false', async () => {
       mockPrismaClient.project.findUnique.mockResolvedValue({
         ...mockProject,
         graphifyEnabled: false,
@@ -645,7 +659,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
 
       await expect(
         controller.importGraphify('test-project', dto, adminUser),
-      ).rejects.toThrow();
+      ).rejects.toThrow(ValidationAppException);
     });
 
     // AC3: throws 404 when project does not exist
