@@ -8,5 +8,10 @@
     "sessionName": "nax-54ac9175-graphify-kb-validation-us-005-reviewer-semantic",
     "agentName": "claude",
     "status": "open"
+  },
+  "US-005:reviewer-adversarial": {
+    "sessionName": "nax-54ac9175-graphify-kb-validation-us-005-reviewer-adversarial",
+    "agentName": "claude",
+    "status": "open"
   }
 }
