@@ -116,10 +116,13 @@ export class RagController {
     const project = await this.resolveProject(slug);
     if (!project.graphifyEnabled) throw new ValidationAppException({}, 'rag');
     if (dto.nodes.length === 0) return JsonResponse.Ok({ imported: 0, cleared: 0 });
-    const result = await this.ragService.importGraphify(project.id, dto.nodes, dto.links ?? []);
-    await this.db.project.update({
-      where: { id: project.id },
-      data: { graphifyLastImportedAt: new Date() },
+    const result = await this.db.$transaction(async (tx) => {
+      const importResult = await this.ragService.importGraphify(project.id, dto.nodes, dto.links ?? []);
+      await tx.project.update({
+        where: { id: project.id },
+        data: { graphifyLastImportedAt: new Date() },
+      });
+      return importResult;
     });
     return JsonResponse.Ok(result);
   }
