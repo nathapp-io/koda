@@ -1602,6 +1602,155 @@ describeIntegration('API Integration Tests', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────
+  // Knowledge Base — Graphify Import (US-003)
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('Knowledge Base — Graphify Import (US-003)', () => {
+    let graphifyEnabledSlug: string;
+    let graphifyDisabledSlug: string;
+
+    const validNodes = [
+      { id: 'node-1', label: 'AuthService', type: 'class', source_file: 'src/auth/auth.service.ts' },
+      { id: 'node-2', label: 'UserService', type: 'class', source_file: 'src/users/user.service.ts' },
+    ];
+    const validLinks = [
+      { source: 'node-1', target: 'node-2', relation: 'depends_on' },
+    ];
+
+    beforeAll(async () => {
+      if (!DATABASE_URL) return;
+
+      // Create a project for happy-path tests (graphify will be enabled)
+      const enabledRes = await request(httpServer)
+        .post('/api/projects')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: 'Graphify Enabled Project', slug: 'graphify-enabled', key: 'GFE' })
+        .expect(201);
+      graphifyEnabledSlug = body<{ slug: string }>(enabledRes).slug;
+
+      // Enable graphify on the project
+      await request(httpServer)
+        .patch(`/api/projects/${graphifyEnabledSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ graphifyEnabled: true })
+        .expect(200);
+
+      // Create a project with graphifyEnabled: false (the default, no PATCH needed)
+      const disabledRes = await request(httpServer)
+        .post('/api/projects')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: 'Graphify Disabled Project', slug: 'graphify-disabled', key: 'GFD' })
+        .expect(201);
+      graphifyDisabledSlug = body<{ slug: string }>(disabledRes).slug;
+    });
+
+    // AC1: Happy path — ADMIN with valid nodes and links returns { imported, cleared }
+    it('POST /kb/import/graphify — 200 with { imported, cleared } for ADMIN with valid nodes and links', async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${graphifyEnabledSlug}/kb/import/graphify`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ nodes: validNodes, links: validLinks })
+        .expect(200);
+
+      const data = body<{ imported: number; cleared: number }>(res);
+      expect(typeof data.imported).toBe('number');
+      expect(typeof data.cleared).toBe('number');
+      expect(data.imported).toBe(validNodes.length);
+    });
+
+    // AC2: 403 when caller does not have ADMIN role
+    it('POST /kb/import/graphify — 403 when caller is not ADMIN', async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${graphifyEnabledSlug}/kb/import/graphify`)
+        .set('Authorization', `Bearer ${nonAdminUserAccessToken}`)
+        .send({ nodes: validNodes, links: validLinks })
+        .expect(403);
+
+      expect(res.body).toHaveProperty('ret');
+    });
+
+    // AC3: 404 when project slug does not exist
+    it('POST /kb/import/graphify — 404 when project slug does not exist', async () => {
+      const res = await request(httpServer)
+        .post('/api/projects/nonexistent-graphify-slug/kb/import/graphify')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ nodes: validNodes, links: validLinks })
+        .expect(404);
+
+      expect(res.body).toHaveProperty('ret');
+    });
+
+    // AC4: 400 when project.graphifyEnabled is false
+    it('POST /kb/import/graphify — 400 when project.graphifyEnabled is false', async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${graphifyDisabledSlug}/kb/import/graphify`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ nodes: validNodes, links: validLinks })
+        .expect(400);
+
+      expect(res.body).toHaveProperty('ret');
+    });
+
+    // AC5: Empty nodes returns { imported: 0, cleared: 0 }
+    it('POST /kb/import/graphify — { imported: 0, cleared: 0 } when nodes is empty', async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${graphifyEnabledSlug}/kb/import/graphify`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ nodes: [] })
+        .expect(200);
+
+      const data = body<{ imported: number; cleared: number }>(res);
+      expect(data.imported).toBe(0);
+      expect(data.cleared).toBe(0);
+    });
+
+    // AC6: 400 when nodes field is missing
+    it('POST /kb/import/graphify — 400 when nodes field is missing (DTO validation)', async () => {
+      await request(httpServer)
+        .post(`/api/projects/${graphifyEnabledSlug}/kb/import/graphify`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ links: validLinks })
+        .expect(400);
+    });
+
+    // AC7: links is optional — 200 when links is absent
+    it('POST /kb/import/graphify — 200 when links field is absent (links is optional)', async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${graphifyEnabledSlug}/kb/import/graphify`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ nodes: validNodes })
+        .expect(200);
+
+      const data = body<{ imported: number; cleared: number }>(res);
+      expect(data.imported).toBe(validNodes.length);
+    });
+
+    // AC9 + AC10: After successful import, graphifyLastImportedAt is updated and visible on GET
+    it('GET /api/projects/:slug — graphifyLastImportedAt is updated after a successful import', async () => {
+      const beforeTs = new Date();
+
+      // Perform an import
+      await request(httpServer)
+        .post(`/api/projects/${graphifyEnabledSlug}/kb/import/graphify`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ nodes: validNodes, links: validLinks })
+        .expect(200);
+
+      // Fetch the project and verify graphifyLastImportedAt is set
+      const projectRes = await request(httpServer)
+        .get(`/api/projects/${graphifyEnabledSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const projectData = body<{ graphifyLastImportedAt: string | null }>(projectRes);
+      expect(projectData.graphifyLastImportedAt).not.toBeNull();
+
+      const importedAt = new Date(projectData.graphifyLastImportedAt as string);
+      expect(importedAt.getTime()).toBeGreaterThanOrEqual(beforeTs.getTime());
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
   // CI Webhooks
   // ─────────────────────────────────────────────────────────────────
 

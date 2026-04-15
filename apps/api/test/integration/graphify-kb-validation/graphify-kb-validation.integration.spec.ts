@@ -7,6 +7,18 @@ import { ProjectResponseDto } from '../../../src/projects/dto/project-response.d
 import { UpdateProjectDto } from '../../../src/projects/dto/update-project.dto';
 import type { IndexDocumentInput } from '../../../src/rag/rag.service';
 
+// Variable-path require helper for the not-yet-existing ImportGraphifyDto (US-003).
+// TypeScript only statically resolves string-literal require() paths.
+// Using a runtime-computed path compiles cleanly and throws "Cannot find module"
+// at test execution time — the correct RED-phase failure signal.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function loadImportGraphifyModule(): any {
+  // Non-literal path: TypeScript returns `any`, no static resolution error.
+  const modulePath = path.join(__dirname, '../../../src/rag/dto/import-graphify.dto');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-return
+  return require(modulePath);
+}
+
 describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
   describe('AC1: Project.graphifyEnabled defaults to false when a project is created with no graphifyEnabled field', () => {
     it('should map graphifyEnabled as false from project data to DTO', () => {
@@ -294,6 +306,139 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
 
       expect(enContent).toHaveProperty('graphifyDisabled');
       expect(zhContent).toHaveProperty('graphifyDisabled');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // US-003: ImportGraphifyDto, GraphifyNodeDto, GraphifyLinkDto
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('US-003: ImportGraphifyDto — DTO structure and validation', () => {
+    // AC6: ImportGraphifyDto rejects a request body missing the nodes field
+    it('AC6: should reject a body missing the nodes field with a validation error', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { ImportGraphifyDto } = loadImportGraphifyModule() as { ImportGraphifyDto: new() => any };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dto = plainToClass(ImportGraphifyDto as any, { links: [] });
+
+      const errors = await validate(dto as object);
+
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors.some((e) => e.property === 'nodes')).toBe(true);
+    });
+
+    // AC7: links is optional — no validation error when links is absent
+    it('AC7: should accept a body with nodes present and links absent (links is optional)', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { ImportGraphifyDto } = loadImportGraphifyModule() as { ImportGraphifyDto: new() => any };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dto = plainToClass(ImportGraphifyDto as any, {
+        nodes: [{ id: 'node-1', label: 'MyClass', type: 'class', source_file: 'src/my.ts' }],
+      });
+
+      const errors = await validate(dto as object);
+
+      expect(errors).toHaveLength(0);
+    });
+
+    it('should accept a body with both nodes and links present', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { ImportGraphifyDto } = loadImportGraphifyModule() as { ImportGraphifyDto: new() => any };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dto = plainToClass(ImportGraphifyDto as any, {
+        nodes: [
+          { id: 'node-1', label: 'AuthService', type: 'class', source_file: 'src/auth.service.ts' },
+          { id: 'node-2', label: 'UserService', type: 'class', source_file: 'src/user.service.ts' },
+        ],
+        links: [{ source: 'node-1', target: 'node-2', relation: 'depends_on' }],
+      });
+
+      const errors = await validate(dto as object);
+
+      expect(errors).toHaveLength(0);
+    });
+
+    it('should accept nodes: [] with links: [] (empty import)', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { ImportGraphifyDto } = loadImportGraphifyModule() as { ImportGraphifyDto: new() => any };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dto = plainToClass(ImportGraphifyDto as any, { nodes: [], links: [] });
+
+      const errors = await validate(dto as object);
+
+      expect(errors).toHaveLength(0);
+    });
+
+    it('should accept nodes: [] with links absent (empty import, links optional)', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { ImportGraphifyDto } = loadImportGraphifyModule() as { ImportGraphifyDto: new() => any };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dto = plainToClass(ImportGraphifyDto as any, { nodes: [] });
+
+      const errors = await validate(dto as object);
+
+      expect(errors).toHaveLength(0);
+    });
+
+    it('GraphifyNodeDto: should require id and label fields on each node', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { ImportGraphifyDto } = loadImportGraphifyModule() as { ImportGraphifyDto: new() => any };
+      // Node missing both id and label
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dto = plainToClass(ImportGraphifyDto as any, {
+        nodes: [{ type: 'class', source_file: 'src/foo.ts' }],
+      });
+
+      const errors = await validate(dto as object);
+
+      expect(errors.length).toBeGreaterThan(0);
+    });
+
+    it('GraphifyLinkDto: should require source and target fields on each link', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { ImportGraphifyDto } = loadImportGraphifyModule() as { ImportGraphifyDto: new() => any };
+      // Link missing source and target
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dto = plainToClass(ImportGraphifyDto as any, {
+        nodes: [{ id: 'n1', label: 'Foo' }],
+        links: [{ relation: 'depends_on' }],
+      });
+
+      const errors = await validate(dto as object);
+
+      expect(errors.length).toBeGreaterThan(0);
+    });
+
+    it('GraphifyNodeDto: type, source_file, and community fields are optional', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { ImportGraphifyDto } = loadImportGraphifyModule() as { ImportGraphifyDto: new() => any };
+      // Minimal node: only id and label
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dto = plainToClass(ImportGraphifyDto as any, {
+        nodes: [{ id: 'n1', label: 'Minimal' }],
+      });
+
+      const errors = await validate(dto as object);
+
+      expect(errors).toHaveLength(0);
+    });
+
+    it('GraphifyLinkDto: relation field is optional', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { ImportGraphifyDto } = loadImportGraphifyModule() as { ImportGraphifyDto: new() => any };
+      // Link without relation
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dto = plainToClass(ImportGraphifyDto as any, {
+        nodes: [
+          { id: 'n1', label: 'A' },
+          { id: 'n2', label: 'B' },
+        ],
+        links: [{ source: 'n1', target: 'n2' }],
+      });
+
+      const errors = await validate(dto as object);
+
+      expect(errors).toHaveLength(0);
     });
   });
 });
