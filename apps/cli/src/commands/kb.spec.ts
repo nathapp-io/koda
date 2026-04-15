@@ -34,6 +34,7 @@ jest.mock('../generated', () => ({
   ragControllerAddDocument: jest.fn(),
   ragControllerDeleteDocument: jest.fn(),
   ragControllerOptimizeTable: jest.fn(),
+  ragControllerImportGraphify: jest.fn(),
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
@@ -71,8 +72,10 @@ import {
   ragControllerAddDocument,
   ragControllerDeleteDocument,
   ragControllerOptimizeTable,
+  ragControllerImportGraphify,
 } from '../generated';
 import { resolveContext } from '../config';
+import { readFile } from 'fs/promises';
 
 describe('kbCommand', () => {
   let program: Command;
@@ -111,6 +114,7 @@ describe('kbCommand', () => {
     });
     (ragControllerDeleteDocument as jest.Mock).mockReset();
     (ragControllerOptimizeTable as jest.Mock).mockReset();
+    (ragControllerImportGraphify as jest.Mock).mockReset();
   });
 
   afterEach(() => {
@@ -691,6 +695,174 @@ describe('kbCommand', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // kb import
+  // ---------------------------------------------------------------------------
+  describe('kb import', () => {
+    const mockValidGraphJson = JSON.stringify({
+      nodes: [
+        { id: 'node1', label: 'Node 1', type: 'class' },
+        { id: 'node2', label: 'Node 2', type: 'function' },
+      ],
+      links: [
+        { source: 'node1', target: 'node2', relation: 'calls' },
+      ],
+    });
+
+    const mockImportResponse = {
+      ret: 0,
+      data: {
+        imported: 2,
+        cleared: 0,
+      },
+    };
+
+    beforeEach(() => {
+      (readFile as jest.Mock).mockImplementation((path: string) => {
+        if (path === './graph.json') {
+          return Promise.resolve(mockValidGraphJson);
+        }
+        if (path === './invalid.json') {
+          return Promise.resolve('not valid json {{{');
+        }
+        if (path === './missing.json') {
+          const error = new Error('ENOENT: no such file or directory');
+          (error as any).code = 'ENOENT';
+          return Promise.reject(error);
+        }
+        return Promise.resolve('{}');
+      });
+    });
+
+    it('exits 0 and prints success message on successful import', async () => {
+      (ragControllerImportGraphify as jest.Mock).mockResolvedValue(mockImportResponse);
+
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const importCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'import');
+
+      await importCmd?.parseAsync(['node', 'test', '--project', 'koda', '--graphify', './graph.json']);
+
+      expect(ragControllerImportGraphify).toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('prints human-readable success message with imported and cleared counts', async () => {
+      (ragControllerImportGraphify as jest.Mock).mockResolvedValue(mockImportResponse);
+
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const importCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'import');
+
+      await importCmd?.parseAsync(['node', 'test', '--project', 'koda', '--graphify', './graph.json']);
+
+      const allLogs = logSpy.mock.calls.map((call) => call.join(' ')).join('\n');
+      expect(allLogs).toMatch(/✓ Graphify import complete:/);
+      expect(allLogs).toContain('2');
+      expect(allLogs).toContain('0');
+    });
+
+    it('sends only nodes and links from graph.json to the API', async () => {
+      (ragControllerImportGraphify as jest.Mock).mockResolvedValue(mockImportResponse);
+
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const importCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'import');
+
+      await importCmd?.parseAsync(['node', 'test', '--project', 'koda', '--graphify', './graph.json']);
+
+      const callArgs = (ragControllerImportGraphify as jest.Mock).mock.calls[0][0];
+      expect(callArgs.requestBody.nodes).toBeDefined();
+      expect(callArgs.requestBody.links).toBeDefined();
+      // Verify it doesn't include other top-level keys from the JSON
+      expect(Object.keys(callArgs.requestBody)).toEqual(expect.arrayContaining(['nodes', 'links']));
+    });
+
+    it('outputs JSON with --json flag', async () => {
+      (ragControllerImportGraphify as jest.Mock).mockResolvedValue(mockImportResponse);
+
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const importCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'import');
+
+      await importCmd?.parseAsync(['node', 'test', '--project', 'koda', '--graphify', './graph.json', '--json']);
+
+      const jsonCall = logSpy.mock.calls.find((call) => {
+        try { JSON.parse(call[0]); return true; } catch { return false; }
+      });
+      expect(jsonCall).toBeDefined();
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('exits 1 and writes to stderr when file is not found', async () => {
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const importCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'import');
+
+      try {
+        await importCmd?.parseAsync(['node', 'test', '--project', 'koda', '--graphify', './missing.json']);
+      } catch {
+        // Expected
+      }
+
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    });
+
+    it('exits 1 and writes to stderr when JSON is invalid', async () => {
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const importCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'import');
+
+      try {
+        await importCmd?.parseAsync(['node', 'test', '--project', 'koda', '--graphify', './invalid.json']);
+      } catch {
+        // Expected
+      }
+
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    });
+
+    it('exits 3 when --project flag is missing', async () => {
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const importCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'import');
+
+      try {
+        await importCmd?.parseAsync(['node', 'test', '--graphify', './graph.json']);
+      } catch {
+        // Expected
+      }
+
+      expect(exitSpy).toHaveBeenCalledWith(3);
+    });
+
+    it('exits 3 when --graphify flag is missing', async () => {
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const importCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'import');
+
+      try {
+        await importCmd?.parseAsync(['node', 'test', '--project', 'koda']);
+      } catch {
+        // Expected
+      }
+
+      expect(exitSpy).toHaveBeenCalledWith(3);
+    });
+
+    it('exits 2 when auth is missing without calling the API', async () => {
+      (resolveContext as jest.Mock).mockResolvedValue({
+        apiKey: undefined,
+        apiUrl: 'http://localhost:3100/api',
+        projectSlug: 'koda',
+      });
+
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const importCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'import');
+
+      try {
+        await importCmd?.parseAsync(['node', 'test', '--project', 'koda', '--graphify', './graph.json']);
+      } catch {
+        // Expected
+      }
+
+      expect(ragControllerImportGraphify).not.toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(2);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // Command registration
   // ---------------------------------------------------------------------------
   describe('command registration', () => {
@@ -727,6 +899,12 @@ describe('kbCommand', () => {
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
       const optimizeCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'optimize');
       expect(optimizeCmd).toBeDefined();
+    });
+
+    it('registers kb import sub-command', () => {
+      const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
+      const importCmd = kbCmd?.commands.find((cmd) => cmd.name() === 'import');
+      expect(importCmd).toBeDefined();
     });
   });
 });
