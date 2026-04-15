@@ -2215,5 +2215,17 @@
       "cache_read_input_tokens": 1996181,
       "cache_creation_input_tokens": 61601
     }
+  },
+  {
+    "runId": "run-2026-04-15T10-51-41-006Z",
+    "feature": "graphify-kb-validation",
+    "startedAt": "2026-04-15T10:51:41.006Z",
+    "completedAt": "2026-04-15T10:51:41.567Z",
+    "totalCost": 0,
+    "totalStories": 0,
+    "storiesCompleted": 0,
+    "storiesFailed": 0,
+    "totalDurationMs": 561,
+    "stories": []
   }
 ]

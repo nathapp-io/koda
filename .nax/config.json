@@ -131,6 +131,9 @@
       "modelTier": "fast"
     }
   },
+  "context": {
+    "fileInjection": "keyword"
+  },
   "plan": {
     "model": "balanced"
   },

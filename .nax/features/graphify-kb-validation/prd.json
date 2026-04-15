@@ -3,7 +3,7 @@
   "feature": "graphify-kb-validation",
   "branchName": "feat/graphify-kb-validation",
   "createdAt": "2026-04-13T00:00:00Z",
-  "updatedAt": "2026-04-15T09:38:02.912Z",
+  "updatedAt": "2026-04-15T10:14:12.618Z",
   "userStories": [
     {
       "id": "US-001",
@@ -145,8 +145,8 @@
       },
       "workdir": "apps/api",
       "contextFiles": [
+        ".nax/features/graphify-kb/context.md",
         "apps/api/src/rag/rag.controller.ts",
-        "apps/api/src/rag/dto/import-graphify.dto.ts",
         "apps/api/src/rag/rag.service.ts",
         "apps/api/src/rag/dto/add-document.dto.ts",
         "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts"
@@ -192,6 +192,7 @@
       },
       "workdir": "apps/api",
       "contextFiles": [
+        ".nax/features/graphify-kb/context.md",
         "apps/api/src/projects/projects.service.ts",
         "apps/api/src/projects/projects.module.ts",
         "apps/api/src/projects/projects.service.spec.ts",
@@ -240,12 +241,11 @@
       },
       "workdir": "apps/cli",
       "contextFiles": [
+        ".nax/features/graphify-kb/context.md",
         "apps/cli/src/commands/kb.ts",
         "apps/cli/src/commands/kb.spec.ts",
         "apps/cli/src/utils/auth.ts",
-        "apps/cli/src/utils/api.ts",
-        "apps/cli/src/utils/error.ts",
-        "apps/cli/src/generated/index.ts"
+        "apps/cli/src/utils/error.ts"
       ],
       "suggestedCriteria": [
         "The command reads the entire file and validates JSON before making the API call, failing fast on file errors",
