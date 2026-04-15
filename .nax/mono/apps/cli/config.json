@@ -1,13 +1,21 @@
 {
-    "quality": {
-        "commands": {
-            "build": "bun run build",               
-            "test": "bun run test",
-            "testScoped": "bunx jest {{files}} --forceExit --passWithNoTests",
-            "typecheck": "bun run type-check",
-            "lint": "bun run lint",
-            "lintFix": "bun run lint:fix",
-            "formatFix": "bun run lint:fix"
-        }
+  "quality": {
+    "commands": {
+      "build": "bun run build",
+      "test": "bun run test",
+      "testScoped": "bunx jest {{files}} --forceExit --passWithNoTests",
+      "typecheck": "bun run type-check",
+      "lint": "bun run lint",
+      "lintFix": "bun run lint:fix",
+      "formatFix": "bun run lint:fix"
     }
+  },
+  "execution": {
+    "smartTestRunner": {
+      "testFilePatterns": [
+        "**/__tests__/**/*.[jt]s?(x)",
+        "**/?(*.)+(spec|test).[jt]s?(x)"
+      ]
+    }
+  }
 }

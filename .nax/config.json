@@ -1,130 +1,148 @@
 {
-    "version": 1,
-    "models": {
-        "claude": {
-            "fast": "haiku",
-            "balanced": "sonnet",
-            "powerful": "opus"
-        },
-        "opencode": {
-            "fast": "minimax/MiniMax-M2.7",
-            "balanced": "minimax/MiniMax-M2.7",
-            "powerful": "minimax/MiniMax-M2.7"
-        },
-        "codex": {
-            "fast": "gpt-5.4-mini",
-            "balanced": "gpt-5.3-codex",
-            "powerful": "gpt-5.4"
-        }                 
+  "version": 1,
+  "models": {
+    "claude": {
+      "fast": "haiku",
+      "balanced": "sonnet",
+      "powerful": "opus"
     },
-    "autoMode": {
-        "enabled": true,
-        "defaultAgent": "claude",
-        "fallbackOrder": ["claude"],
-        "complexityRouting": {
-            "simple": "fast",
-            "medium": "fast",
-            "complex": "balanced",
-            "expert": "powerful"
+    "opencode": {
+      "fast": "minimax/MiniMax-M2.7",
+      "balanced": "minimax/MiniMax-M2.7",
+      "powerful": "minimax/MiniMax-M2.7"
+    },
+    "codex": {
+      "fast": "gpt-5.4-mini",
+      "balanced": "gpt-5.3-codex",
+      "powerful": "gpt-5.4"
+    }
+  },
+  "autoMode": {
+    "enabled": true,
+    "defaultAgent": "claude",
+    "fallbackOrder": [
+      "claude"
+    ],
+    "complexityRouting": {
+      "simple": "fast",
+      "medium": "fast",
+      "complex": "balanced",
+      "expert": "powerful"
+    },
+    "escalation": {
+      "enabled": true,
+      "tierOrder": [
+        {
+          "tier": "fast",
+          "attempts": 3
         },
-        "escalation": {
-            "enabled": true,
-            "tierOrder": [
-                {
-                    "tier": "fast",
-                    "attempts": 3
-                },
-                {
-                    "tier": "balanced",
-                    "attempts": 2
-                },
-                {
-                    "tier": "powerful",
-                    "attempts": 1
-                }
-            ],
-            "escalateEntireBatch": false
+        {
+          "tier": "balanced",
+          "attempts": 2
+        },
+        {
+          "tier": "powerful",
+          "attempts": 1
         }
+      ],
+      "escalateEntireBatch": false
+    }
+  },
+  "generate": {
+    "agents": [
+      "claude",
+      "codex",
+      "opencode",
+      "gemini"
+    ]
+  },
+  "agent": {
+    "protocol": "acp"
+  },
+  "routing": {
+    "strategy": "llm",
+    "llm": {
+      "model": "fast",
+      "fallbackToKeywords": true,
+      "cacheDecisions": true,
+      "mode": "hybrid",
+      "timeoutMs": 60000
+    }
+  },
+  "execution": {
+    "permissionProfile": "unrestricted",
+    "maxIterations": 6,
+    "iterationDelayMs": 2000,
+    "costLimit": 50,
+    "rectification": {
+      "enabled": true,
+      "maxRetries": 2,
+      "fullSuiteTimeoutSeconds": 600,
+      "maxFailureSummaryChars": 2000,
+      "abortOnIncreasingFailures": true
     },
-    "generate": {
-        "agents": ["claude", "codex", "opencode", "gemini"]
+    "regressionGate": {
+      "enabled": true,
+      "mode": "deferred",
+      "timeoutSeconds": 600,
+      "acceptOnTimeout": true,
+      "maxRectificationAttempts": 2
     },
-    "agent": {
-        "protocol": "acp"
+    "smartTestRunner": {
+      "testFilePatterns": [
+        "**/*.spec.ts"
+      ]
+    }
+  },
+  "quality": {
+    "requireTypecheck": true,
+    "requireLint": true,
+    "requireTests": true,
+    "commands": {
+      "test": "npx turbo test",
+      "testScoped": "npx turbo test --filter=[HEAD^1]",
+      "typecheck": "bunx turbo type-check",
+      "lint": "bunx turbo lint",
+      "lintFix": "bunx turbo lint:fix",
+      "formatFix": "bunx turbo lint:fix"
+    }
+  },
+  "review": {
+    "enabled": true,
+    "checks": [
+      "build",
+      "typecheck",
+      "lint",
+      "semantic",
+      "adversarial"
+    ],
+    "commands": {
+      "build": "bun run build",
+      "typecheck": "bunx turbo type-check",
+      "lint": "bunx turbo lint",
+      "lintFix": "bunx turbo lint:fix"
     },
-    "routing": {
-        "strategy": "llm",
-        "llm": {
-            "model": "fast",
-            "fallbackToKeywords": true,
-            "cacheDecisions": true,
-            "mode": "hybrid",
-            "timeoutMs": 60000
-        }
+    "pluginMode": "deferred",
+    "semantic": {
+      "modelTier": "fast",
+      "rules": []
     },
-    "execution": {
-        "permissionProfile": "unrestricted",
-        "maxIterations": 6,
-        "iterationDelayMs": 2000,
-        "costLimit": 50.0,
-        "rectification": {
-            "enabled": true,
-            "maxRetries": 2,
-            "fullSuiteTimeoutSeconds": 600,
-            "maxFailureSummaryChars": 2000,
-            "abortOnIncreasingFailures": true
-        },
-        "regressionGate": {
-            "enabled": true,
-            "mode": "deferred",
-            "timeoutSeconds": 600,
-            "acceptOnTimeout": true,
-            "maxRectificationAttempts": 2
-        }
-    },
-    "quality": {
-        "requireTypecheck": true,
-        "requireLint": true,
-        "requireTests": true,
-        "commands": {
-            "test": "npx turbo test",
-            "testScoped": "npx turbo test --filter=[HEAD^1]",
-            "typecheck": "bunx turbo type-check",
-            "lint": "bunx turbo lint",
-            "lintFix": "bunx turbo lint:fix",
-            "formatFix": "bunx turbo lint:fix"
-        }
-    },
-    "review": {
-        "enabled": true,
-        "checks": ["build", "typecheck", "lint", "semantic", "adversarial"],
-        "commands": {
-            "build": "bun run build",
-            "typecheck": "bunx turbo type-check",
-            "lint": "bunx turbo lint",
-            "lintFix": "bunx turbo lint:fix"
-        },
-        "pluginMode": "deferred",
-        "semantic": {
-            "modelTier": "fast",
-            "rules": []
-        },
-        "adversarial": {
-            "modelTier": "fast"
-        }
-    },
-    "plan": {
-        "model": "balanced"
-    },
-    "acceptance": {
-        "enabled": true,
-        "maxRetries": 3
-    },
+    "adversarial": {
+      "modelTier": "fast"
+    }
+  },
+  "plan": {
+    "model": "balanced"
+  },
+  "acceptance": {
+    "enabled": true,
+    "maxRetries": 3
+  },
   "precheck": {
     "storySizeGate": {
       "enabled": true,
       "maxAcCount": 15,
       "maxBulletPoints": 15
     }
-  }    
+  }
 }
