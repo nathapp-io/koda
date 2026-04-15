@@ -18,5 +18,10 @@
     "sessionName": "nax-4749de77-graphify-kb-validation-us-002-implementer",
     "agentName": "claude",
     "status": "open"
+  },
+  "US-002:reviewer-semantic": {
+    "sessionName": "nax-4749de77-graphify-kb-validation-us-002-reviewer-semantic",
+    "agentName": "claude",
+    "status": "open"
   }
 }
