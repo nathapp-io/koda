@@ -23,10 +23,7 @@ describe('ProjectsService', () => {
       deleteAllBySourceType: jest.fn(),
     } as any;
 
-    service = new ProjectsService(
-      mockPrismaService as any,
-      ragService,
-    );
+    service = new ProjectsService(mockPrismaService as any, ragService);
   });
 
   afterEach(() => {
@@ -52,7 +49,9 @@ describe('ProjectsService', () => {
     };
 
     it('should call deleteAllBySourceType when graphifyEnabled changes from true to false', async () => {
-      mockPrismaService.client.project.findUnique.mockResolvedValueOnce(mockProject);
+      mockPrismaService.client.project.findUnique.mockResolvedValueOnce(
+        mockProject
+      );
       mockPrismaService.client.project.update.mockResolvedValueOnce({
         ...mockProject,
         graphifyEnabled: false,
@@ -62,12 +61,14 @@ describe('ProjectsService', () => {
 
       expect(ragService.deleteAllBySourceType).toHaveBeenCalledWith(
         'project-1',
-        'code',
+        'code'
       );
     });
 
     it('should not call deleteAllBySourceType when graphifyEnabled is not present in update payload', async () => {
-      mockPrismaService.client.project.findUnique.mockResolvedValueOnce(mockProject);
+      mockPrismaService.client.project.findUnique.mockResolvedValueOnce(
+        mockProject
+      );
       mockPrismaService.client.project.update.mockResolvedValueOnce(mockProject);
 
       await service.update('test-project', { name: 'Updated Name' });
@@ -81,7 +82,7 @@ describe('ProjectsService', () => {
         graphifyEnabled: false,
       };
       mockPrismaService.client.project.findUnique.mockResolvedValueOnce(
-        projectWithGraphifyDisabled,
+        projectWithGraphifyDisabled
       );
       mockPrismaService.client.project.update.mockResolvedValueOnce(mockProject);
 
@@ -91,7 +92,9 @@ describe('ProjectsService', () => {
     });
 
     it('should not call deleteAllBySourceType when graphifyEnabled is true in both current and update payload', async () => {
-      mockPrismaService.client.project.findUnique.mockResolvedValueOnce(mockProject);
+      mockPrismaService.client.project.findUnique.mockResolvedValueOnce(
+        mockProject
+      );
       mockPrismaService.client.project.update.mockResolvedValueOnce(mockProject);
 
       await service.update('test-project', { graphifyEnabled: true });
@@ -100,13 +103,15 @@ describe('ProjectsService', () => {
     });
 
     it('should log at warn level when deleteAllBySourceType throws, and not re-throw', async () => {
-      mockPrismaService.client.project.findUnique.mockResolvedValueOnce(mockProject);
+      mockPrismaService.client.project.findUnique.mockResolvedValueOnce(
+        mockProject
+      );
       mockPrismaService.client.project.update.mockResolvedValueOnce({
         ...mockProject,
         graphifyEnabled: false,
       });
       ragService.deleteAllBySourceType.mockRejectedValueOnce(
-        new Error('RAG service error'),
+        new Error('RAG service error')
       );
 
       const warnSpy = jest.spyOn(service['logger'], 'warn');
@@ -117,7 +122,7 @@ describe('ProjectsService', () => {
 
       expect(ragService.deleteAllBySourceType).toHaveBeenCalledWith(
         'project-1',
-        'code',
+        'code'
       );
       expect(warnSpy).toHaveBeenCalled();
       expect(result).toBeDefined();
@@ -129,7 +134,7 @@ describe('ProjectsService', () => {
       mockPrismaService.client.project.findUnique.mockResolvedValueOnce(null);
 
       await expect(
-        service.update('non-existent', { name: 'Updated' }),
+        service.update('non-existent', { name: 'Updated' })
       ).rejects.toThrow(NotFoundAppException);
     });
   });

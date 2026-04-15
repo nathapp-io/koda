@@ -15,8 +15,10 @@ export class ProjectsService {
     private prisma: PrismaService<PrismaClient>,
     private ragService: RagService,
   ) {}
-  private get db() { return this.prisma.client; }
 
+  private get db() {
+    return this.prisma.client;
+  }
 
   async create(createProjectDto: CreateProjectDto) {
     // Validate name
@@ -53,25 +55,29 @@ export class ProjectsService {
     }
 
     // Create project
-    return ProjectResponseDto.from(await this.db.project.create({
-      data: {
-        name: createProjectDto.name,
-        slug: createProjectDto.slug,
-        key: createProjectDto.key,
-        description: createProjectDto.description,
-        gitRemoteUrl: createProjectDto.gitRemoteUrl,
-        autoIndexOnClose: createProjectDto.autoIndexOnClose ?? true,
-        autoAssign: createProjectDto.autoAssign ?? 'OFF'
-      },
-    }));
+    return ProjectResponseDto.from(
+      await this.db.project.create({
+        data: {
+          name: createProjectDto.name,
+          slug: createProjectDto.slug,
+          key: createProjectDto.key,
+          description: createProjectDto.description,
+          gitRemoteUrl: createProjectDto.gitRemoteUrl,
+          autoIndexOnClose: createProjectDto.autoIndexOnClose ?? true,
+          autoAssign: createProjectDto.autoAssign ?? 'OFF',
+        },
+      })
+    );
   }
 
   async findAll() {
-    return ProjectResponseDto.fromMany(await this.db.project.findMany({
-      where: {
-        deletedAt: null,
-      },
-    }));
+    return ProjectResponseDto.fromMany(
+      await this.db.project.findMany({
+        where: {
+          deletedAt: null,
+        },
+      })
+    );
   }
 
   async findBySlug(slug: string) {
@@ -98,7 +104,10 @@ export class ProjectsService {
     }
 
     // Validate name if provided
-    if (updateProjectDto.name !== undefined && updateProjectDto.name.length < 2) {
+    if (
+      updateProjectDto.name !== undefined &&
+      updateProjectDto.name.length < 2
+    ) {
       throw new ValidationAppException({}, 'projects');
     }
 
@@ -154,7 +163,7 @@ export class ProjectsService {
       },
     });
 
-    // Handle graphifyEnabled toggle from true to false
+    // Handle graphifyEnabled transition from true to false
     if (
       updateProjectDto.graphifyEnabled !== undefined &&
       currentProject.graphifyEnabled === true &&
@@ -164,7 +173,7 @@ export class ProjectsService {
         await this.ragService.deleteAllBySourceType(currentProject.id, 'code');
       } catch (error) {
         this.logger.warn(
-          `Failed to delete code nodes for project ${currentProject.id}: ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to delete code nodes for project ${currentProject.id}: ${error instanceof Error ? error.message : String(error)}`
         );
         // Do not re-throw - the flag change persists regardless
       }
@@ -184,11 +193,13 @@ export class ProjectsService {
     }
 
     // Soft delete by setting deletedAt
-    return ProjectResponseDto.from(await this.db.project.update({
-      where: { slug },
-      data: {
-        deletedAt: new Date(),
-      },
-    }));
+    return ProjectResponseDto.from(
+      await this.db.project.update({
+        where: { slug },
+        data: {
+          deletedAt: new Date(),
+        },
+      })
+    );
   }
 }
