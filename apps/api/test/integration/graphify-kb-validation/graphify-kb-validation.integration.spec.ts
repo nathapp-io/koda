@@ -2,10 +2,15 @@ import { plainToClass } from 'class-transformer';
 import { validate } from 'class-validator';
 import * as fs from 'fs';
 import * as path from 'path';
+import { Test, TestingModule } from '@nestjs/testing';
 import { AddDocumentDto } from '../../../src/rag/dto/add-document.dto';
 import { ProjectResponseDto } from '../../../src/projects/dto/project-response.dto';
 import { UpdateProjectDto } from '../../../src/projects/dto/update-project.dto';
 import type { IndexDocumentInput } from '../../../src/rag/rag.service';
+import { RagController } from '../../../src/rag/rag.controller';
+import { RagService } from '../../../src/rag/rag.service';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { ImportGraphifyDto, GraphifyNodeDto, GraphifyLinkDto } from '../../../src/rag/dto/import-graphify.dto';
 
 // Variable-path require helper for the not-yet-existing ImportGraphifyDto (US-003).
 // TypeScript only statically resolves string-literal require() paths.
@@ -439,6 +444,230 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
       const errors = await validate(dto as object);
 
       expect(errors).toHaveLength(0);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // US-003: RagController.importGraphify — controller unit tests
+  // Covers AC5 (does not call indexDocument for empty nodes) and
+  // AC8 (calls ragService.importGraphify with correct args).
+  // These behavioral assertions require mocked dependencies and
+  // cannot be verified via e2e tests alone.
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('US-003: RagController.importGraphify — controller behavior with mocked services', () => {
+    let controller: RagController;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let mockRagService: Record<string, jest.Mock>;
+    let mockTxClient: { project: { update: jest.Mock } };
+    let mockPrismaClient: { project: { findUnique: jest.Mock }; $transaction: jest.Mock };
+
+    const mockProject = {
+      id: 'proj-cuid-abc123',
+      name: 'Test Project',
+      slug: 'test-project',
+      key: 'TEST',
+      description: null,
+      graphifyEnabled: true,
+      graphifyLastImportedAt: null,
+      deletedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const sampleNodes: GraphifyNodeDto[] = [
+      { id: 'n1', label: 'AuthService', type: 'class', source_file: 'src/auth.service.ts' },
+      { id: 'n2', label: 'UserService', type: 'class', source_file: 'src/users/user.service.ts' },
+    ];
+
+    const sampleLinks: GraphifyLinkDto[] = [
+      { source: 'n1', target: 'n2', relation: 'depends_on' },
+    ];
+
+    const adminUser = { extra: { role: 'ADMIN' } };
+
+    beforeEach(async () => {
+      mockTxClient = {
+        project: {
+          update: jest.fn().mockResolvedValue(mockProject),
+        },
+      };
+
+      mockPrismaClient = {
+        project: {
+          findUnique: jest.fn().mockResolvedValue(mockProject),
+        },
+        $transaction: jest.fn().mockImplementation(
+          async (fn: (tx: typeof mockTxClient) => Promise<unknown>) => fn(mockTxClient),
+        ),
+      };
+
+      mockRagService = {
+        importGraphify: jest.fn().mockResolvedValue({ imported: sampleNodes.length, cleared: 0 }),
+        indexDocument: jest.fn().mockResolvedValue(undefined),
+        deleteBySource: jest.fn().mockResolvedValue(undefined),
+        deleteAllBySourceType: jest.fn().mockResolvedValue(0),
+        search: jest.fn().mockResolvedValue([]),
+        listDocuments: jest.fn().mockResolvedValue([]),
+        optimizeTable: jest.fn().mockResolvedValue(undefined),
+      };
+
+      const mockPrismaService = { client: mockPrismaClient };
+
+      const module: TestingModule = await Test.createTestingModule({
+        controllers: [RagController],
+        providers: [
+          { provide: RagService, useValue: mockRagService },
+          { provide: PrismaService, useValue: mockPrismaService },
+        ],
+      }).compile();
+
+      controller = module.get<RagController>(RagController);
+    });
+
+    afterEach(() => {
+      jest.clearAllMocks();
+    });
+
+    // AC8: import route calls ragService.importGraphify with correct args
+    it('AC8: calls ragService.importGraphify with project.id (not slug), dto.nodes, and dto.links', async () => {
+      const dto: ImportGraphifyDto = { nodes: sampleNodes, links: sampleLinks };
+
+      await controller.importGraphify('test-project', dto, adminUser);
+
+      expect(mockRagService.importGraphify).toHaveBeenCalledWith(
+        mockProject.id,
+        sampleNodes,
+        sampleLinks,
+      );
+    });
+
+    it('AC8: calls ragService.importGraphify with empty array when dto.links is undefined (links ?? [])', async () => {
+      const dto: ImportGraphifyDto = { nodes: sampleNodes };
+
+      await controller.importGraphify('test-project', dto, adminUser);
+
+      expect(mockRagService.importGraphify).toHaveBeenCalledWith(
+        mockProject.id,
+        sampleNodes,
+        [],
+      );
+    });
+
+    it('AC8: returns the result from ragService.importGraphify wrapped in JsonResponse', async () => {
+      mockRagService.importGraphify.mockResolvedValue({ imported: 3, cleared: 5 });
+      const dto: ImportGraphifyDto = { nodes: sampleNodes };
+
+      const result = await controller.importGraphify('test-project', dto, adminUser);
+
+      expect(result).toMatchObject({ ret: 0, data: { imported: 3, cleared: 5 } });
+    });
+
+    // AC5: empty nodes does NOT call ragService at all
+    it('AC5: does NOT call ragService.importGraphify when nodes is empty', async () => {
+      const dto: ImportGraphifyDto = { nodes: [] };
+
+      await controller.importGraphify('test-project', dto, adminUser);
+
+      expect(mockRagService.importGraphify).not.toHaveBeenCalled();
+    });
+
+    it('AC5: does NOT call ragService.indexDocument when nodes is empty', async () => {
+      const dto: ImportGraphifyDto = { nodes: [] };
+
+      await controller.importGraphify('test-project', dto, adminUser);
+
+      expect(mockRagService.indexDocument).not.toHaveBeenCalled();
+    });
+
+    it('AC5: returns { imported: 0, cleared: 0 } when nodes is empty', async () => {
+      const dto: ImportGraphifyDto = { nodes: [] };
+
+      const result = await controller.importGraphify('test-project', dto, adminUser);
+
+      expect(result).toMatchObject({ ret: 0, data: { imported: 0, cleared: 0 } });
+    });
+
+    // AC5: empty nodes does NOT trigger Prisma transaction (no graphifyLastImportedAt update)
+    it('AC5: does NOT update graphifyLastImportedAt when nodes is empty', async () => {
+      const dto: ImportGraphifyDto = { nodes: [] };
+
+      await controller.importGraphify('test-project', dto, adminUser);
+
+      expect(mockTxClient.project.update).not.toHaveBeenCalled();
+    });
+
+    // AC9: updates graphifyLastImportedAt to current UTC timestamp after successful import
+    it('AC9: updates project.graphifyLastImportedAt to current UTC timestamp after successful import', async () => {
+      const beforeTs = Date.now();
+      const dto: ImportGraphifyDto = { nodes: sampleNodes, links: sampleLinks };
+
+      await controller.importGraphify('test-project', dto, adminUser);
+
+      expect(mockTxClient.project.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: mockProject.id },
+          data: expect.objectContaining({
+            graphifyLastImportedAt: expect.any(Date),
+          }),
+        }),
+      );
+
+      const updateCall = mockTxClient.project.update.mock.calls[0] as [{ data: { graphifyLastImportedAt: Date } }];
+      const updatedAt = updateCall[0].data.graphifyLastImportedAt;
+      expect(updatedAt.getTime()).toBeGreaterThanOrEqual(beforeTs);
+    });
+
+    // AC2: throws 403 for non-ADMIN callers
+    it('AC2: throws ForbiddenAppException when caller role is not ADMIN', async () => {
+      const dto: ImportGraphifyDto = { nodes: sampleNodes };
+
+      await expect(
+        controller.importGraphify('test-project', dto, { extra: { role: 'MEMBER' } }),
+      ).rejects.toThrow();
+    });
+
+    it('AC2: throws ForbiddenAppException when currentUser is null', async () => {
+      const dto: ImportGraphifyDto = { nodes: sampleNodes };
+
+      await expect(
+        controller.importGraphify('test-project', dto, null),
+      ).rejects.toThrow();
+    });
+
+    // AC4: throws 400 when graphifyEnabled is false
+    it('AC4: throws AppException (400) when project.graphifyEnabled is false', async () => {
+      mockPrismaClient.project.findUnique.mockResolvedValue({
+        ...mockProject,
+        graphifyEnabled: false,
+      });
+      const dto: ImportGraphifyDto = { nodes: sampleNodes };
+
+      await expect(
+        controller.importGraphify('test-project', dto, adminUser),
+      ).rejects.toThrow();
+    });
+
+    // AC3: throws 404 when project does not exist
+    it('AC3: throws NotFoundAppException when project slug does not exist', async () => {
+      mockPrismaClient.project.findUnique.mockResolvedValue(null);
+      const dto: ImportGraphifyDto = { nodes: sampleNodes };
+
+      await expect(
+        controller.importGraphify('test-project', dto, adminUser),
+      ).rejects.toThrow();
+    });
+
+    it('AC3: throws NotFoundAppException for soft-deleted project', async () => {
+      mockPrismaClient.project.findUnique.mockResolvedValue({
+        ...mockProject,
+        deletedAt: new Date(),
+      });
+      const dto: ImportGraphifyDto = { nodes: sampleNodes };
+
+      await expect(
+        controller.importGraphify('test-project', dto, adminUser),
+      ).rejects.toThrow();
     });
   });
 });
