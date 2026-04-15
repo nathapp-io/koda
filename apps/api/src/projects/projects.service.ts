@@ -144,6 +144,7 @@ export class ProjectsService {
         autoIndexOnClose: updateProjectDto.autoIndexOnClose,
         autoAssign: updateProjectDto.autoAssign,
         ciWebhookToken: updateProjectDto.ciWebhookToken,
+        graphifyEnabled: updateProjectDto.graphifyEnabled,
       },
     }));
   }

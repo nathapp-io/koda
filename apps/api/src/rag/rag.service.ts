@@ -430,7 +430,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
 
         const result: KbResultDto = {
           id: record.id as string,
-          source: record.source as string,
+          source: record.source as 'ticket' | 'doc' | 'manual' | 'code',
           sourceId: record.source_id as string,
           content: record.content as string,
           score,
@@ -460,7 +460,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       const meta = (() => { try { return JSON.parse(r.metadata as string) as Record<string, unknown>; } catch { return {}; } })();
       return {
         id: r.id as string,
-        source: r.source as string,
+        source: r.source as 'ticket' | 'doc' | 'manual' | 'code',
         sourceId: r.source_id as string,
         content: r.content as string,
         score: 0,

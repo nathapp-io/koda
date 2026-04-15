@@ -2,7 +2,7 @@
   "US-001:implementer": {
     "sessionName": "nax-4749de77-graphify-kb-validation-us-001-implementer",
     "agentName": "claude",
-    "status": "open"
+    "status": "in-flight"
   },
   "US-001:reviewer-semantic": {
     "sessionName": "nax-4749de77-graphify-kb-validation-us-001-reviewer-semantic",
