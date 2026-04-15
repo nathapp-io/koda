@@ -3,7 +3,7 @@
   "feature": "graphify-kb-validation",
   "branchName": "feat/graphify-kb-validation",
   "createdAt": "2026-04-13T00:00:00Z",
-  "updatedAt": "2026-04-15T12:41:01.255Z",
+  "updatedAt": "2026-04-15T13:25:43.401Z",
   "userStories": [
     {
       "id": "US-001",
@@ -195,14 +195,16 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
+      "status": "failed",
       "passes": false,
-      "attempts": 0,
+      "attempts": 1,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "powerful"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -218,9 +220,30 @@
         "Unit test mocks ragService.deleteAllBySourceType to throw and verifies the error is logged but not propagated to the caller",
         "Unit test confirms deleteAllBySourceType is not called when the update payload omits graphifyEnabled entirely"
       ],
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1
+      "priorErrors": [
+        "Attempt 1 failed with model tier: fast: Autofix exhausted: review still failing after fix attempts",
+        "Attempt 1 failed with model tier: balanced: Autofix exhausted: review still failing after fix attempts"
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "fast",
+          "stage": "escalation",
+          "summary": "Failed with tier fast, escalating to next tier",
+          "cost": 0.05559355,
+          "timestamp": "2026-04-15T13:23:23.901Z"
+        },
+        {
+          "attempt": 1,
+          "modelTier": "balanced",
+          "stage": "escalation",
+          "summary": "Failed with tier balanced, escalating to next tier",
+          "cost": 0.22279515,
+          "timestamp": "2026-04-15T13:24:33.697Z"
+        }
+      ],
+      "storyPoints": 1,
+      "storyGitRef": "f0b9f25d77236493fce38d11d5c68fb3199206b6"
     },
     {
       "id": "US-005",

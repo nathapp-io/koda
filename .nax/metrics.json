@@ -2258,5 +2258,17 @@
         "runtimeCrashes": 0
       }
     ]
+  },
+  {
+    "runId": "run-2026-04-15T13-12-07-156Z",
+    "feature": "graphify-kb-validation",
+    "startedAt": "2026-04-15T13:12:07.156Z",
+    "completedAt": "2026-04-15T13:27:55.926Z",
+    "totalCost": 3.7957672,
+    "totalStories": 0,
+    "storiesCompleted": 0,
+    "storiesFailed": 1,
+    "totalDurationMs": 948770,
+    "stories": []
   }
 ]
