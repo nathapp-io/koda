@@ -3,7 +3,7 @@
   "feature": "graphify-kb-validation",
   "branchName": "feat/graphify-kb-validation",
   "createdAt": "2026-04-13T00:00:00Z",
-  "updatedAt": "2026-04-15T11:56:54.054Z",
+  "updatedAt": "2026-04-15T12:41:01.255Z",
   "userStories": [
     {
       "id": "US-001",
@@ -195,7 +195,7 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "paused",
+      "status": "pending",
       "passes": false,
       "attempts": 0,
       "escalations": [],
