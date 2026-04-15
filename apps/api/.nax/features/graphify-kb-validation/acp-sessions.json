@@ -3,5 +3,15 @@
     "sessionName": "nax-4749de77-graphify-kb-validation-us-001-implementer",
     "agentName": "claude",
     "status": "open"
+  },
+  "US-001:reviewer-semantic": {
+    "sessionName": "nax-4749de77-graphify-kb-validation-us-001-reviewer-semantic",
+    "agentName": "claude",
+    "status": "open"
+  },
+  "US-001:reviewer-adversarial": {
+    "sessionName": "nax-4749de77-graphify-kb-validation-us-001-reviewer-adversarial",
+    "agentName": "claude",
+    "status": "open"
   }
 }
