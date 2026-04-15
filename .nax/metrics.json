@@ -2227,5 +2227,36 @@
     "storiesFailed": 0,
     "totalDurationMs": 561,
     "stories": []
+  },
+  {
+    "runId": "run-2026-04-15T10-52-49-297Z",
+    "feature": "graphify-kb-validation",
+    "startedAt": "2026-04-15T10:52:49.297Z",
+    "completedAt": "2026-04-15T11:56:54.066Z",
+    "totalCost": 7.43672465,
+    "totalStories": 1,
+    "storiesCompleted": 1,
+    "storiesFailed": 0,
+    "totalDurationMs": 3844769,
+    "stories": [
+      {
+        "storyId": "US-003",
+        "complexity": "complex",
+        "initialComplexity": "complex",
+        "modelTier": "powerful",
+        "modelUsed": "opus",
+        "agentUsed": "claude",
+        "attempts": 2,
+        "finalTier": "powerful",
+        "success": true,
+        "cost": 5.022242950000001,
+        "durationMs": 0,
+        "firstPassSuccess": false,
+        "startedAt": "2026-04-15T11:38:42.624Z",
+        "completedAt": "2026-04-15T11:56:54.052Z",
+        "fullSuiteGatePassed": true,
+        "runtimeCrashes": 0
+      }
+    ]
   }
 ]
