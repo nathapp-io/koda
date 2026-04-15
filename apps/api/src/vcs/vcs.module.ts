@@ -9,9 +9,10 @@ import { VcsPollingService } from './vcs-polling.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { VcsLinkExtractorService } from './vcs-link-extractor.service';
 import { ProjectsService } from '../projects/projects.service';
+import { RagModule } from '../rag/rag.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot()],
+  imports: [ScheduleModule.forRoot(), RagModule],
   controllers: [VcsController, VcsWebhookController],
   providers: [
     VcsConnectionService,
