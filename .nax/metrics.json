@@ -2172,5 +2172,48 @@
       "cache_read_input_tokens": 4658874,
       "cache_creation_input_tokens": 102057
     }
+  },
+  {
+    "runId": "run-2026-04-15T09-19-12-875Z",
+    "feature": "graphify-kb-validation",
+    "startedAt": "2026-04-15T09:19:12.875Z",
+    "completedAt": "2026-04-15T09:38:21.872Z",
+    "totalCost": 0.9934245500000001,
+    "totalStories": 1,
+    "storiesCompleted": 1,
+    "storiesFailed": 0,
+    "totalDurationMs": 1148997,
+    "stories": [
+      {
+        "storyId": "US-002",
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "modelUsed": "haiku",
+        "agentUsed": "claude",
+        "attempts": 1,
+        "finalTier": "fast",
+        "success": true,
+        "cost": 0.33922135000000003,
+        "durationMs": 251898,
+        "firstPassSuccess": true,
+        "startedAt": "2026-04-15T09:19:12.930Z",
+        "completedAt": "2026-04-15T09:38:02.910Z",
+        "fullSuiteGatePassed": false,
+        "runtimeCrashes": 0,
+        "tokens": {
+          "input_tokens": 242,
+          "output_tokens": 12472,
+          "cache_read_input_tokens": 1996181,
+          "cache_creation_input_tokens": 61601
+        }
+      }
+    ],
+    "totalTokens": {
+      "input_tokens": 242,
+      "output_tokens": 12472,
+      "cache_read_input_tokens": 1996181,
+      "cache_creation_input_tokens": 61601
+    }
   }
 ]
