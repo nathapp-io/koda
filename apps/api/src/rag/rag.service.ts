@@ -525,6 +525,11 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
   }
 
   async deleteAllBySourceType(projectId: string, sourceType: string): Promise<number> {
+    const validSources = ['ticket', 'doc', 'manual', 'code'];
+    if (!validSources.includes(sourceType)) {
+      throw new ValidationAppException();
+    }
+
     const table = await this.getOrCreateTable(projectId);
     const rows: LanceRecord[] = await table.query().limit(Number.MAX_SAFE_INTEGER).toArray();
     const recordsToDelete = rows.filter((r) => r.source === sourceType);
@@ -556,7 +561,10 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       if (!outgoingLinks.has(sourceId)) {
         outgoingLinks.set(sourceId, []);
       }
-      outgoingLinks.get(sourceId)!.push({ link, target: nodeMap.get(link.target) });
+      const linkArray = outgoingLinks.get(sourceId);
+      if (linkArray) {
+        linkArray.push({ link, target: nodeMap.get(link.target) });
+      }
     }
 
     // Index each node
