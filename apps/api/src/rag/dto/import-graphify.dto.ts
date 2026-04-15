@@ -41,9 +41,10 @@ export class GraphifyLinkDto {
   @IsString()
   target!: string;
 
-  @ApiProperty({ description: 'Relation type (e.g. depends_on)' })
+  @ApiPropertyOptional({ description: 'Relation type (e.g. depends_on)' })
+  @IsOptional()
   @IsString()
-  relation!: string;
+  relation?: string;
 }
 
 export class ImportGraphifyDto {
