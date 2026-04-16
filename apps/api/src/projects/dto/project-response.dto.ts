@@ -73,6 +73,18 @@ export class ProjectResponseDto {
   })
   autoAssign?: string | null;
 
+  @ApiProperty({
+    description: 'Graphify feature enabled for this project',
+    example: false,
+  })
+  graphifyEnabled!: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Last timestamp when graphify KB was imported',
+    required: false,
+  })
+  graphifyLastImportedAt?: Date | null;
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   static from(project: any): ProjectResponseDto {
     return {
@@ -88,6 +100,8 @@ export class ProjectResponseDto {
       deletedAt: project.deletedAt,
       ciWebhookToken: project.ciWebhookToken,
       autoAssign: project.autoAssign,
+      graphifyEnabled: project.graphifyEnabled,
+      graphifyLastImportedAt: project.graphifyLastImportedAt,
     };
   }
 

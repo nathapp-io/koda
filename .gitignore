@@ -45,6 +45,8 @@ Thumbs.db
 
 # nax runtime
 .nax/prompt-audit/
+.nax/review-verdicts/
+.nax/**/semantic-verdicts/
 nax.lock
 nax/metrics.json
 nax/**/status.json

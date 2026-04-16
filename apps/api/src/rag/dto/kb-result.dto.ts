@@ -7,8 +7,8 @@ export class KbResultDto {
   @ApiProperty({ description: 'Document ID' })
   id!: string;
 
-  @ApiProperty({ enum: ['ticket', 'doc', 'manual'], description: 'Source type' })
-  source!: string;
+  @ApiProperty({ enum: ['ticket', 'doc', 'manual', 'code'], description: 'Source type' })
+  source!: 'ticket' | 'doc' | 'manual' | 'code';
 
   @ApiProperty({ description: 'Source record ID' })
   sourceId!: string;

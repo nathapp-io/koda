@@ -9,6 +9,7 @@ import {
   ragControllerAddDocument,
   ragControllerDeleteDocument,
   ragControllerOptimizeTable,
+  ragControllerImportGraphify,
 } from '../generated';
 import { error } from '../utils/output';
 import { unwrap } from '../utils/api';
@@ -272,6 +273,96 @@ export function kbCommand(program: Command): void {
           console.log(JSON.stringify(data, null, 2));
         } else {
           console.log('Knowledge base optimization completed.');
+        }
+
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err);
+      }
+    });
+
+  kb
+    .command('import')
+    .description('Import a graphified knowledge base')
+    .option('--project <slug>', 'Project slug')
+    .option('--graphify <path>', 'Path to graph.json file')
+    .option('--json', 'Output as JSON')
+    .action(async (options) => {
+      if (!options.project) {
+        error('Missing required option: --project is required');
+        process.exit(3);
+        return;
+      }
+
+      if (!options.graphify) {
+        error('Missing required option: --graphify is required');
+        process.exit(3);
+        return;
+      }
+
+      try {
+        const ctx = await resolveContext({ projectSlug: options.project });
+
+        if (!ctx.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+          return;
+        }
+
+        if (!ctx.apiKey || !ctx.apiUrl) {
+          error('API key or URL not configured. Run: koda login --api-key <key>');
+          process.exit(2);
+          return;
+        }
+
+        let fileContent: string;
+        try {
+          fileContent = await readFile(options.graphify, 'utf-8');
+        } catch (err: unknown) {
+          const fileError = err as { code?: string };
+          if (fileError.code === 'ENOENT') {
+            error(`File not found: ${options.graphify}`);
+          } else {
+            error(`Failed to read file: ${options.graphify}`);
+          }
+          process.exit(1);
+          return;
+        }
+
+        let parsedData: Record<string, unknown>;
+        try {
+          parsedData = JSON.parse(fileContent);
+        } catch {
+          error(`Invalid JSON in file: ${options.graphify}`);
+          process.exit(1);
+          return;
+        }
+
+        const nodes = parsedData.nodes;
+        const links = parsedData.links;
+
+        if (!Array.isArray(nodes) || !Array.isArray(links)) {
+          error('Invalid graph.json format: must contain arrays "nodes" and "links"');
+          process.exit(1);
+          return;
+        }
+
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
+
+        const response = await ragControllerImportGraphify({
+          slug: ctx.projectSlug,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          requestBody: { nodes, links } as any,
+        });
+        const data = unwrap<{ imported: number; cleared: number }>(response);
+
+        if (options.json) {
+          console.log(JSON.stringify(data, null, 2));
+        } else {
+          console.log(
+            `✓ Graphify import complete: ${data.imported} code nodes indexed (${data.cleared} cleared)`
+          );
         }
 
         process.exit(0);

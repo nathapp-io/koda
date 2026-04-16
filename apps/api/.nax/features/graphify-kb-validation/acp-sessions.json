@@ -1,0 +1,52 @@
+{
+  "US-001:implementer": {
+    "sessionName": "nax-4749de77-graphify-kb-validation-us-001-implementer",
+    "agentName": "claude",
+    "status": "open"
+  },
+  "US-001:reviewer-semantic": {
+    "sessionName": "nax-4749de77-graphify-kb-validation-us-001-reviewer-semantic",
+    "agentName": "claude",
+    "status": "open"
+  },
+  "US-001:reviewer-adversarial": {
+    "sessionName": "nax-4749de77-graphify-kb-validation-us-001-reviewer-adversarial",
+    "agentName": "claude",
+    "status": "open"
+  },
+  "US-002:implementer": {
+    "sessionName": "nax-4749de77-graphify-kb-validation-us-002-implementer",
+    "agentName": "claude",
+    "status": "open"
+  },
+  "US-002:reviewer-semantic": {
+    "sessionName": "nax-4749de77-graphify-kb-validation-us-002-reviewer-semantic",
+    "agentName": "claude",
+    "status": "open"
+  },
+  "US-003:reviewer-semantic": {
+    "sessionName": "nax-4749de77-graphify-kb-validation-us-003-reviewer-semantic",
+    "agentName": "claude",
+    "status": "open"
+  },
+  "US-003:reviewer-adversarial": {
+    "sessionName": "nax-4749de77-graphify-kb-validation-us-003-reviewer-adversarial",
+    "agentName": "claude",
+    "status": "open"
+  },
+  "US-003:implementer": {
+    "sessionName": "nax-4749de77-graphify-kb-validation-us-003-implementer",
+    "agentName": "claude",
+    "status": "open"
+  },
+  "US-004:reviewer-adversarial": {
+    "sessionName": "nax-4749de77-graphify-kb-validation-us-004-reviewer-adversarial",
+    "agentName": "claude",
+    "status": "open"
+  },
+  "US-004:implementer": {
+    "sessionName": "nax-4749de77-graphify-kb-validation-us-004-implementer",
+    "agentName": "claude",
+    "status": "open"
+  }
+}

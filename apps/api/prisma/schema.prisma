@@ -84,6 +84,8 @@ model Project {
   gitRemoteUrl     String?
   autoIndexOnClose Boolean   @default(true)
   autoAssign       String    @default("OFF")
+  graphifyEnabled  Boolean   @default(false)
+  graphifyLastImportedAt DateTime?
   deletedAt        DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt

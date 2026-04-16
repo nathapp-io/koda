@@ -7,7 +7,7 @@ import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-opt
 import type { KbResultDto, SearchKbResponseDto } from './dto/kb-result.dto';
 
 export interface IndexDocumentInput {
-  source: 'ticket' | 'doc' | 'manual';
+  source: 'ticket' | 'doc' | 'manual' | 'code';
   sourceId: string;
   content: string;
   metadata: Record<string, unknown>;
@@ -105,10 +105,27 @@ class InMemoryTable {
   async countRows(): Promise<number> { return this.records.length; }
   async delete(filter: string): Promise<void> {
     const sourceIdFilter = /^source_id\s*=\s*'([a-zA-Z0-9_-]+)'$/.exec(filter);
-    if (!sourceIdFilter) return;
+    if (sourceIdFilter) {
+      const sourceId = sourceIdFilter[1];
+      this.records = this.records.filter((record) => record.source_id !== sourceId);
+      return;
+    }
 
-    const sourceId = sourceIdFilter[1];
-    this.records = this.records.filter((record) => record.source_id !== sourceId);
+    const sourceFilter = /^source\s*=\s*'([a-zA-Z0-9_-]+)'$/.exec(filter);
+    if (sourceFilter) {
+      const source = sourceFilter[1];
+      this.records = this.records.filter((record) => record.source !== source);
+      return;
+    }
+
+    const idInFilter = /^id\s+IN\s+\((.+)\)$/.exec(filter);
+    if (idInFilter) {
+      const ids = idInFilter[1]
+        .split(',')
+        .map((part) => part.trim().replace(/^'|'$/g, ''));
+      const idSet = new Set(ids);
+      this.records = this.records.filter((record) => !idSet.has(record.id));
+    }
   }
   vectorSearch() { return { distanceType: () => ({ limit: (n) => ({ toArray: () => this.records.slice(0, n) }) }) }; }
   query() { return { limit: (n) => ({ toArray: () => this.records.slice(0, n) }) }; }
@@ -430,7 +447,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
 
         const result: KbResultDto = {
           id: record.id as string,
-          source: record.source as string,
+          source: record.source as 'ticket' | 'doc' | 'manual' | 'code',
           sourceId: record.source_id as string,
           content: record.content as string,
           score,
@@ -460,7 +477,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       const meta = (() => { try { return JSON.parse(r.metadata as string) as Record<string, unknown>; } catch { return {}; } })();
       return {
         id: r.id as string,
-        source: r.source as string,
+        source: r.source as 'ticket' | 'doc' | 'manual' | 'code',
         sourceId: r.source_id as string,
         content: r.content as string,
         score: 0,
@@ -522,5 +539,110 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
 
     const table = await this.getOrCreateTable(projectId);
     await table.optimize();
+  }
+
+  async deleteAllBySourceType(projectId: string, sourceType: string): Promise<number> {
+    const validSources = ['ticket', 'doc', 'manual', 'code'];
+    if (!validSources.includes(sourceType)) {
+      throw new ValidationAppException();
+    }
+
+    const table = await this.getOrCreateTable(projectId);
+    const rows: LanceRecord[] = await table.query().limit(Number.MAX_SAFE_INTEGER).toArray();
+    const recordsToDelete = rows.filter((r) => r.source === sourceType);
+    const count = recordsToDelete.length;
+
+    if (count > 0) {
+      await table.delete(`source = '${sourceType}'`);
+    }
+
+    return count;
+  }
+
+  async importGraphify(
+    projectId: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    nodes: any[],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    links: any[],
+  ): Promise<{ imported: number; cleared: number }> {
+    const cleared = await this.deleteAllBySourceType(projectId, 'code');
+
+    // Build a map of node id to node for quick lookup
+    const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+
+    // Build a map of source node id to array of outgoing links
+    const outgoingLinks = new Map<string, Array<{ link: unknown; target: unknown }>>();
+    for (const link of links) {
+      const sourceId = link.source;
+      if (!outgoingLinks.has(sourceId)) {
+        outgoingLinks.set(sourceId, []);
+      }
+      const linkArray = outgoingLinks.get(sourceId);
+      if (linkArray) {
+        linkArray.push({ link, target: nodeMap.get(link.target) });
+      }
+    }
+
+    // Index each node
+    for (const node of nodes) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const nodeData = node as any;
+      const type = nodeData.type ?? 'node';
+      const label = nodeData.label;
+      const sourceFile = nodeData.source_file;
+      const community = nodeData.community;
+
+      // Build content string
+      let content = `${type} ${label}`;
+
+      if (sourceFile) {
+        content += ` in ${sourceFile}`;
+      }
+
+      // Add outgoing links if any
+      const nodeLinks = outgoingLinks.get(nodeData.id) ?? [];
+      if (nodeLinks.length > 0) {
+        const linkStrings = nodeLinks
+          .map(({ link, target }) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const linkData = link as any;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const targetData = target as any;
+            const relation = linkData.relation ?? '';
+            const neighborLabel = targetData?.label ?? '';
+            return relation ? `${relation} ${neighborLabel}` : neighborLabel;
+          })
+          .filter((s) => s);
+
+        if (linkStrings.length > 0) {
+          content += ': ' + linkStrings.join(', ');
+        }
+      }
+
+      // Build metadata
+      const metadata: Record<string, unknown> = {
+        label,
+        type,
+      };
+
+      if (sourceFile) {
+        metadata.source_file = sourceFile;
+      }
+
+      if (community !== undefined) {
+        metadata.community = community;
+      }
+
+      // Index the document
+      await this.indexDocument(projectId, {
+        source: 'code',
+        sourceId: nodeData.id,
+        content,
+        metadata,
+      });
+    }
+
+    return { imported: nodes.length, cleared };
   }
 }
