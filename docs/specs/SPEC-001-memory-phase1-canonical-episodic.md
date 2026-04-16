@@ -191,10 +191,12 @@ model OutboxEvent {
 
 Koda is multi-tenant. All access is scoped to a `projectId`. This spec defines only the access-control model; individual endpoints opt in to specific roles.
 
+**Bridge from current repo state:** Today Koda has global `User.role` values (`ADMIN` / `MEMBER`), agent role/capability tables, and project routes that usually key by `slug`. This phase introduces a project-scoped actor abstraction for memory features, but it must be implemented as a resolver/mapping layer first rather than assuming the normalized role model already exists everywhere.
+
 ```ts
 // apps/api/src/auth/auth.types.ts
 
-// Role hierarchy
+// Role hierarchy used by the memory subsystem after resolution from current auth state
 type ActorRole = 'admin' | 'developer' | 'agent' | 'viewer';
 
 interface Actor {
@@ -230,9 +232,17 @@ type Permission = keyof typeof Permissions;
 function can(role: ActorRole, permission: Permission): boolean {
   return (Permissions[permission] as ActorRole[]).includes(role);
 }
+
+interface ActorResolver {
+  resolveFromRequest(input: {
+    userRole?: 'ADMIN' | 'MEMBER';
+    agentId?: string;
+    projectSlug?: string;
+  }): Promise<Actor>;
+}
 ```
 
-**Actor extraction:** `actorId` and `projectId` are extracted from the request context (JWT claims or API key metadata). Agents identify themselves via an `X-Agent-Id` header.
+**Actor extraction:** `actorId` and resolved `projectId` are extracted from the request context (JWT claims or API key metadata) plus project slug resolution. Agents identify themselves via an `X-Agent-Id` header. `ActorResolver` is responsible for mapping current Koda auth into the phase role model before permission checks run.
 
 **Error response envelope (standardized across all endpoints):**
 ```ts
@@ -296,6 +306,7 @@ interface ErrorEnvelope {
 - All three services are called by `KodaDomainWriter` after relevant operations (ticket actions → TicketEvent, agent queries → AgentEvent, explicit decisions → DecisionEvent)
 - Event creation is included in the `WriteResult.provenance` output
 - Creating an event with a non-existent `projectId` throws `ForbiddenError` (`code: 'PROJECT_NOT_FOUND'`)
+- `ActorResolver` maps current Koda auth (`User.role`, agent credentials, and project slug context) into the phase actor model before any permission check runs
 - Only actors with role `admin`, `developer`, or `agent` on the target project can call event write operations (role checked before `KodaDomainWriter` entry)
 - `GET /admin/outbox` requires role `admin` and returns 403 for all other roles
 
@@ -316,13 +327,13 @@ interface ErrorEnvelope {
 **Size:** Medium | **AC count:** 7 | **Files:** 3 | **Depends on:** US-001
 
 **ACs:**
-- `GET /projects/:projectId/timeline` returns events filtered by `from`, `to`, `actorId`, `eventTypes` (query params)
-- `GET /projects/:projectId/timeline?ticketId=X` returns all TicketEvents for that ticket, newest first
-- `GET /projects/:projectId/timeline?actorId=X` returns all events by that actor
+- `GET /projects/:slug/timeline` returns events filtered by `from`, `to`, `actorId`, `eventTypes` (query params)
+- `GET /projects/:slug/timeline?ticketId=X` returns all TicketEvents for that ticket, newest first
+- `GET /projects/:slug/timeline?actorId=X` returns all events by that actor
 - Results are paginated via `cursor` (last event ID returned as `nextCursor`)
-- `GET /projects/:projectId/timeline` without filters returns the last 50 events
+- `GET /projects/:slug/timeline` without filters returns the last 50 events
 - Timeline results include all fields from the event record plus a computed `eventType` field
-- Requesting timeline for a non-existent or unauthorized `projectId` returns 403
+- Requesting timeline for a non-existent or unauthorized project returns 403 after slug resolution
 
 ### US-006: Outbox Fan-Out Registry + Phase 2–4 Handler Wiring
 **Size:** Complex | **AC count:** 8 | **Files:** 5 | **Depends on:** US-003, SPEC-002/US-001, SPEC-002/US-002, SPEC-003/US-001, SPEC-004/US-001

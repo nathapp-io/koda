@@ -8,6 +8,10 @@ Establish hard project namespace isolation and domain write gates before any new
 
 Koda currently has no enforcement layer preventing cross-project data access or unauthorized writes. Agent prompts can accidentally query or mutate tickets/docs from other projects. As episodic and semantic memory layers are added, this risk grows. We need guardrails that make leakage impossible — not just improbable.
 
+Current repo baseline to preserve while adding guardrails:
+- internal project identifiers are Prisma `cuid()` values, not UUIDs
+- public API routes typically resolve projects by `slug`, then fan into internal `projectId`
+
 ## Design
 
 ### 1. Project ID Enforcement
@@ -15,11 +19,11 @@ Koda currently has no enforcement layer preventing cross-project data access or 
 All repository and service methods that accept `projectId` must validate it before any operation.
 
 **Changes:**
-- `rag.service.ts` — `getOrCreateTable(projectId)` already exists; add guard that throws `ForbiddenException` if `projectId` is falsy or not a valid UUID.
+- `rag.service.ts` — `getOrCreateTable(projectId)` already exists; add guard that throws `ForbiddenException` if `projectId` is falsy, malformed, or not a valid existing Koda project ID.
 - `rag.repository.ts` — all methods accept `projectId string`; add assertion at method entry.
 - `tickets.service.ts`, `docs.service.ts`, `rag.service.ts` — every public method that accepts `projectId` must validate it exists and belongs to the caller org.
 
-**Validation rule:** `projectId` must be a non-empty UUID that exists in the `projects` table.
+**Validation rule:** `projectId` must be a non-empty Koda project identifier. In the current schema this is a Prisma CUID that exists in the `projects` table.
 
 ### 2. Domain Write Gate — `KodaDomainWriter`
 
@@ -109,11 +113,11 @@ class ItemProvenance {
 
 **ACs:**
 - `RagService.getOrCreateTable('')` throws `ForbiddenException` with message `Project ID is required`
-- `RagService.getOrCreateTable('not-a-uuid')` throws `ForbiddenException`
-- `RagService.getOrCreateTable('00000000-0000-0000-0000-000000000000')` throws `ForbiddenException` (non-existent project)
-- `RagService.searchKb()` returns 0 results when called with an invalid projectId (no exception, empty array)
+- `RagService.getOrCreateTable('not-a-project-id')` throws `ForbiddenException`
+- `RagService.getOrCreateTable('cm_invalid_but_well_shaped')` throws `ForbiddenException` when the project does not exist
+- `RagService.search()` rejects an invalid `projectId` before any table access occurs
 - Every service method that accepts `projectId` has a doc comment `@throws ForbiddenException if projectId is invalid`
-- API controller endpoints that accept `projectId` as a path/query param return 400 when the value is missing or invalid
+- Current slug-routed API endpoints resolve `slug -> projectId` before calling guarded services; any new endpoint that accepts raw `projectId` as a path/query param returns 400 when the value is missing or malformed
 
 ### US-002: KodaDomainWriter — Write Gate Service
 **Size:** Complex | **AC count:** 8 | **Files:** 5 | **Depends on:** US-001

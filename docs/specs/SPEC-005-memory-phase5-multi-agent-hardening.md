@@ -197,7 +197,7 @@ interface SloMetrics {
 - `TruthConsistencyGate` picks 10 random canonical ticket IDs, queries both canonical store and derived store, asserts content matches
 - `GraphifyEnabledGate` runs 10 queries on a project with `graphifyEnabled=false`, asserts zero results have `source='code'`
 - `TokenBudgetGate` calls `getProjectContext` with `tokenBudget=1000`, measures `meta.tokensUsed`, asserts `tokensUsed <= 1050` (5% tolerance)
-- All gates are runnable via `npm run policy:gates -- --projectId=X`
+- All gates are runnable via `bun run policy:gates -- --project=X`
 - When any gate fails, `PolicyGateResult.blockedReason` is non-null and describes the failure
 - Gate results are written to `apps/api/test/policy-gates/results.json` for CI artifact capture
 
@@ -228,7 +228,7 @@ interface SloMetrics {
 **Size:** Simple | **AC count:** 4 | **Files:** 2 | **Depends on:** US-002, US-004
 
 **ACs:**
-- CI pipeline runs `npm run policy:gates -- --projectId=test-project` on every PR
+- CI pipeline runs `bun run policy:gates -- --project=test-project` on every PR
 - CI pipeline fails (exit code 1) when `PolicyGateResult.passed === false`
-- `npm run policy:gates` outputs a summary table to stdout (PASS/FAIL per gate)
+- `bun run policy:gates` outputs a summary table to stdout (PASS/FAIL per gate)
 - SLO metrics are exported to a JSON artifact after each CI run

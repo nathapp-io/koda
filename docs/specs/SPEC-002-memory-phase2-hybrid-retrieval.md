@@ -11,7 +11,7 @@ Vector similarity retrieval alone suffers from:
 - No entity-aware ranking (a query about "auth service" should boost entities tagged "auth")
 - No recency bias (old irrelevant results dominate over fresh ones)
 
-The graphify PR added code graph content but did not change how results are retrieved. Phase 2 upgrades the retrieval engine itself.
+The graphify PR added code graph content but did not change how results are retrieved. Today the live KB path still uses `RagService.search()` with vector search plus native/in-memory FTS merged by RRF. Phase 2 upgrades that retrieval engine into a true hybrid pipeline.
 
 ## Design
 
@@ -78,7 +78,7 @@ interface ScoreBreakdown {
 | `update` | 0.2 | 0.4 | 0.2 | 0.2 |
 | `search` | 0.3 | 0.4 | 0.1 | 0.2 |
 
-**BM25** — in-memory BM25 over stored document content. `k1=1.5, b=0.75`. Built lazily on first query, rebuilt on `document_indexed` outbox event (full project rebuild), updated incrementally on `document_added` outbox event.
+**BM25** — in-memory BM25 over stored document content. `k1=1.5, b=0.75`. Built lazily on first query, rebuilt on `document_indexed` and `graphify_import` outbox events, and incrementally updated only once dedicated add/remove events exist for the lexical store.
 
 **Persistence:** The BM25 index is kept in-memory only. On API startup, a warmup job rebuilds the index for all active projects (projects with ≥1 document) in the background, before accepting traffic. If warmup is still running, the first search triggers a synchronous lazy build (degraded but functional).
 
@@ -149,13 +149,14 @@ interface EntityRecord {
 
 ## Stories
 
-### US-001: HybridRetrieverService — Pipeline Skeleton
+### US-001: HybridRetrieverService — Pipeline Skeleton + Live Search Compatibility
 **Size:** Medium | **AC count:** 8 | **Files:** 3
 
 **ACs:**
 - `HybridRetrieverService.search()` accepts `HybridSearchQuery` and returns `HybridSearchResult`
 - `HybridSearchResult.scores` contains one `ScoreBreakdown` per result with all four scores populated
 - `HybridRetrieverService` is injected into `RagController` or a new `RetrievalController` as the primary search path
+- Until the controller fully cuts over, the existing `/projects/:slug/kb/search` path applies any required compatibility filters (including `graphifyEnabled`) so the live behavior matches the future hybrid contract
 - When `intent` is not recognized, it defaults to `answer` weights
 - When `timeWindow` is provided, results are filtered to only include documents indexed within the window before scoring
 - `HybridSearchResult.retrievedAt` is set to the server timestamp at query time
@@ -163,7 +164,7 @@ interface EntityRecord {
 - `HybridSearchResult` is never returned with `results` from a different `projectId` than the request (hard enforcement)
 
 ### US-002: BM25 Lexical Index + Warmup
-**Size:** Complex | **AC count:** 10 | **Files:** 3 | **Depends on:** US-001
+**Size:** Complex | **AC count:** 11 | **Files:** 3 | **Depends on:** US-001
 
 **ACs:**
 - `LexicalIndex.buildIndex(projectId, docs)` builds a BM25 index for all documents in the project
@@ -208,14 +209,15 @@ interface EntityRecord {
 - `EvaluationService.runQueries()` returns a summary: `{ precision@5_avg, precision@5_p50, precision@5_p95, totalQueries }`
 - A seed dataset of 50 evaluation queries is stored in `apps/api/src/retrieval/fixtures/eval-queries.json`
 - Running the full evaluation harness prints a table to stdout (for CI capture)
-- `EvaluationService` is callable via `npm run evaluate:retrieval` CLI script
+- `EvaluationService` is callable via `bun run evaluate:retrieval` CLI script
 - The harness is integrated into the CI pipeline and fails if `precision@5_avg` drops below 0.70
 
 ### US-006: graphifyEnabled Retrieval Guard
-**Size:** Medium | **AC count:** 6 | **Files:** 3 | **Depends on:** US-001
+**Size:** Medium | **AC count:** 7 | **Files:** 3 | **Depends on:** US-001
 
 **ACs:**
 - When `HybridRetrieverService.search()` is called for a project where `Project.graphifyEnabled = false`, results with `source = 'code'` are silently excluded from the response
+- The same guard is enforced on the current live `/projects/:slug/kb/search` path until that endpoint fully migrates to `HybridRetrieverService`
 - When `Project.graphifyEnabled = true`, results with `source = 'code'` are included as normal
 - The guard is applied after scoring and before the `HybridSearchResult` is returned (does not affect scoring)
 - A project with `graphifyEnabled = false` that has never run `importGraphify` returns 0 code results (same as any other empty result — no error)

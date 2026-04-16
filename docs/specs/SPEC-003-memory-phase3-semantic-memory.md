@@ -181,9 +181,9 @@ interface GovernanceResult {
 **Size:** Medium | **AC count:** 6 | **Files:** 3 | **Depends on:** US-001
 
 **ACs:**
-- `GET /projects/:projectId/memory` returns all `status=active` memories for the project
-- `GET /projects/:projectId/memory?kind=FACT` returns only FACT memories
-- `GET /projects/:projectId/memory?subjects=ticket:123` returns memories with subject starting with `ticket:123`
+- `GET /projects/:slug/memory` returns all `status=active` memories for the project
+- `GET /projects/:slug/memory?kind=FACT` returns only FACT memories
+- `GET /projects/:slug/memory?subjects=ticket:123` returns memories with subject starting with `ticket:123`
 - `MemoryResponse` includes `inheritedFrom` field when a memory was superseded by a newer one
 - Memory retrieval respects `projectId` isolation (cannot access another project's memories)
 - `getProjectMemory()` is called internally by `getProjectContext()` and results appear in the `semanticMemory` block

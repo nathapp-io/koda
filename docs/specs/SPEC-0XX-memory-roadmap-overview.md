@@ -1,9 +1,9 @@
 # Koda Memory Architecture — Phase Roadmap Overview
 
 **Project:** Koda  
-**Parent:** `memory/20260416-plan-koda-memory-gap-analysis-v2.md`  
+**Parent:** `docs/specs/20260416-plan-koda-memory-gap-analysis-v2.md`  
 **Phases:** 6 (SPEC-000 → SPEC-005)  
-**Total stories:** 29 | **Total ACs:** ~185
+**Total stories:** 32 | **Total ACs:** ~185
 
 ---
 
@@ -110,6 +110,11 @@ SPEC-005 (Multi-Agent Consistency)
 ## Quick-Start Recommendation
 
 If running nax on this roadmap, start with **SPEC-000** (Phase 0) — it lays the foundation for everything else. Phase 0's guardrails must be in place before Phase 1's outbox can safely fan out.
+
+Before or alongside that phase work, there are two post-PR `#81` fast-follow items worth treating as near-term patches on the current implementation:
+- add a `graphifyEnabled` guard on the existing `/projects/:slug/kb/search` path, not just the future hybrid retriever
+- remove the current `deleteAllBySourceType()` full-table in-memory scan before graphify usage grows
+- add the auth/actor bridge that maps current Koda auth into the later memory-role model
 
 If running sequentially, each phase's exit criteria should gate the next:
 - Phase 0 exit: isolation test suite passes + no write path bypasses `KodaDomainWriter`

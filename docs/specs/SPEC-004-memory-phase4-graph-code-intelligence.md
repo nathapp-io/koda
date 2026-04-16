@@ -6,7 +6,7 @@ Address the gaps left by graphify's initial implementation: incremental graph di
 
 ## Motivation
 
-Graphify (PR #81) delivered the *first* code graph via adjacency text. Three critical gaps remain:
+Graphify (PR #81) delivered the *first* code graph via adjacency text and code-document indexing in LanceDB. Three critical gaps remain:
 
 1. **Full re-import is unscalable** — every new commit requires re-indexing all nodes
 2. **No AST/symbol index** — adjacency text is not true symbol-level metadata
@@ -146,12 +146,12 @@ interface ImpactAnalysis {
 **Entity node types:**
 - `ticket`: extracted from `TicketEvent`
 - `service`: extracted from graphify node `type=code_module` (file path = service boundary)
-- `owner`: extracted from ticket `assigneeId`
+- `owner`: extracted from ticket `assignedToUserId` or `assignedToAgentId`
 - `incident`: extracted from tickets with `priority=critical` or `priority=high`
 
 **Link creation:**
-- `ticket → service`: from ticket `serviceId` field or inferred from linked code files
-- `ticket → owner`: from ticket `assigneeId`
+- `ticket → service`: inferred from `gitRefFile`, linked code files, graphified `source_file`, labels, or a future explicit `serviceId` if that field is later added
+- `ticket → owner`: from `assignedToUserId` or `assignedToAgentId`
 - `service → service`: from graphify links with `relation='depends_on'`
 - `incident → ticket`: from incident ticket linking events
 
@@ -200,7 +200,7 @@ impactScore = 0.3 * (affectedSymbols / totalSymbols * 100)
 - `apps/api/src/rag/rag.service.ts` — existing `importGraphify` to modify
 - `apps/api/src/rag/dto/import-graphify.dto.ts` — DTOs to extend
 - `apps/api/src/memory/outbox.service.ts` — outbox event to hook AST indexing into
-- `apps/api/src/memory/entity-store.service.ts` — Phase 2 entity store to extend
+- `apps/api/src/retrieval/entity-store.service.ts` — Phase 2 entity store to extend
 
 ### 5. GraphNode + Symbol Prisma Schema
 
@@ -283,7 +283,8 @@ interface CanonicalSnapshot {
     title: string;
     status: string;
     priority: string;
-    assigneeId: string | null;
+    assignedToUserId: string | null;
+    assignedToAgentId: string | null;
     createdAt: Date;
     updatedAt: Date;
   }>;
@@ -348,30 +349,31 @@ interface CanonicalSnapshot {
 - `EntityGraphService.rebuildGraph(projectId)` rebuilds all entity nodes and links for a project
 - `onTicketEvent(status_changed)` updates the entity node for that ticket (if it exists)
 - `onGraphifyImport()` extracts `service` entities from graphify nodes with `type=code_module`
+- The initial implementation does not require a `Ticket.serviceId` column; service linkage works from current Koda fields (`gitRefFile`, labels, linked code/module references) until an explicit service relation exists
 - `getRelatedEntities(projectId, entityId, depth=2)` returns all entities reachable within 2 hops
 - `getIncidentImpact(projectId, incidentTicketId)` returns all entities linked to the incident
 - Service entities extracted from graphify inherit `tags` from the graphify node (e.g. `['backend', 'auth']`)
 - Entity graph is updated incrementally via outbox fan-out (no full rebuild on every event)
 - A graph with 500 nodes and 2000 edges returns `getRelatedEntities` in under 50ms
 
-### US-005: VCS Webhook Handler → code_commit Outbox Event
+### US-004: VCS Webhook Handler → code_commit Outbox Event
 **Size:** Medium | **AC count:** 7 | **Files:** 3 | **Depends on:** US-001, US-002
 
 **ACs:**
-- `VcsWebhookController` receives POST `/webhooks/vcs/push` from GitHub/GitLab
+- `VcsWebhookController` extends the existing project-scoped webhook surface at `POST /projects/:slug/vcs-webhook` to handle push/code-intel events
 - Webhook payload is validated: presence of `repository.id`, `ref`, `commits[]`, and `sender.account_id` (or `sender.id`)
 - For each commit in the push, `AstIndexService.indexCommit()` is called with `{ repoId, commitHash, files: [{path, content}] }`
 - A `code_commit` outbox event is enqueued after each `AstIndexService.indexCommit()` call (fire-and-forget)
 - If `AstIndexService.indexCommit()` throws, the outbox event is NOT enqueued and the error is logged
-- Webhook endpoint requires an `X-Vcs-Secret` header matching the configured webhook secret; mismatches return 401
-- The webhook secret is stored in `APP_WEBHOOK_SECRET` env var (never in code or DB)
+- GitHub webhook signature verification reuses the existing `x-hub-signature-256` flow already used by Koda VCS webhooks; invalid signatures return 401
+- The webhook secret continues to come from the project's VCS connection record (never hard-coded)
 - Webhook handler is idempotent: pushing the same `commitHash` twice does not create duplicate outbox events (dedup by `commitHash` within a 5-minute window)
 
-### US-006: getChangeImpact API
+### US-005: getChangeImpact API
 **Size:** Medium | **AC count:** 7 | **Files:** 3 | **Depends on:** US-001, US-002, US-003
 
 **ACs:**
-- `GET /projects/:projectId/codeintel/impact?repoId=X&commitHash=Y&changedFiles=file1,file2` returns a `ChangeImpactResult`
+- `GET /projects/:slug/codeintel/impact?repoId=X&commitHash=Y&changedFiles=file1,file2` returns a `ChangeImpactResult`
 - `impactedSymbols` contains symbols whose `file` matches any entry in `changedFiles`
 - `impactedServices` contains service entities linked to any `impactedSymbols`
 - `impactedTickets` contains tickets linked to any `impactedServices`
