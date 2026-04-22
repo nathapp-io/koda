@@ -390,16 +390,25 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     query: string,
     limit = 5,
   ): Promise<SearchKbResponseDto> {
+    const searchStartTime = new Date();
     await this.validateProjectId(projectId);
 
     if (!this.embeddingService) {
-      return { results: [], verdict: 'no_match' };
+      return {
+        results: [],
+        verdict: 'no_match',
+        provenance: { retrievedAt: searchStartTime.toISOString(), sources: [] },
+      };
     }
 
     const table = await this.getOrCreateTable(projectId);
     const rowCount: number = await table.countRows();
     if (rowCount === 0) {
-      return { results: [], verdict: 'no_match' };
+      return {
+        results: [],
+        verdict: 'no_match',
+        provenance: { retrievedAt: searchStartTime.toISOString(), sources: [] },
+      };
     }
 
     const fetchLimit = Math.min(rowCount, limit * 4);
@@ -514,6 +523,10 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
           similarity,
           metadata: meta,
           createdAt: record.created_at as string,
+          provenance: {
+            indexedAt: record.created_at as string,
+            sourceProjectId: projectId,
+          },
         };
         return result;
       })
@@ -522,7 +535,28 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     const topScore = results[0]?.score ?? 0;
     const verdict = getVerdict(topScore, this.similarityHigh, this.similarityMedium);
 
-    return { results, verdict };
+    // Build unique sources from results
+    const sourceSet = new Set<string>();
+    const sources: Array<{ sourceType: 'ticket' | 'doc' | 'manual' | 'code'; sourceId: string }> = [];
+    for (const result of results) {
+      const sourceKey = `${result.source}:${result.sourceId}`;
+      if (!sourceSet.has(sourceKey)) {
+        sourceSet.add(sourceKey);
+        sources.push({
+          sourceType: result.source,
+          sourceId: result.sourceId,
+        });
+      }
+    }
+
+    return {
+      results,
+      verdict,
+      provenance: {
+        retrievedAt: searchStartTime.toISOString(),
+        sources,
+      },
+    };
   }
 
   /**
@@ -550,6 +584,10 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         similarity: 'none' as const,
         metadata: meta,
         createdAt: r.created_at as string,
+        provenance: {
+          indexedAt: r.created_at as string,
+          sourceProjectId: projectId,
+        },
       };
     });
   }
