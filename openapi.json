@@ -500,186 +500,6 @@
         ]
       }
     },
-    "/api/projects": {
-      "post": {
-        "operationId": "ProjectsController_create",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateProjectDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Project created successfully"
-          },
-          "400": {
-            "description": "Invalid request data"
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Forbidden - admin role required"
-          },
-          "409": {
-            "description": "Conflict - duplicate slug or key"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Create a new project (admin only)",
-        "tags": [
-          "projects"
-        ]
-      },
-      "get": {
-        "operationId": "ProjectsController_findAll",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "List of projects"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "List all projects (excluding soft-deleted)",
-        "tags": [
-          "projects"
-        ]
-      }
-    },
-    "/api/projects/{slug}": {
-      "get": {
-        "operationId": "ProjectsController_findBySlug",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Project found"
-          },
-          "404": {
-            "description": "Project not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Get a project by slug",
-        "tags": [
-          "projects"
-        ]
-      },
-      "patch": {
-        "operationId": "ProjectsController_update",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateProjectDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Project updated successfully"
-          },
-          "400": {
-            "description": "Invalid request data"
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Forbidden - admin role required"
-          },
-          "404": {
-            "description": "Project not found"
-          },
-          "409": {
-            "description": "Conflict - duplicate slug or key"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Update a project (admin only)",
-        "tags": [
-          "projects"
-        ]
-      },
-      "delete": {
-        "operationId": "ProjectsController_remove",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Project soft deleted successfully"
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Forbidden - admin role required"
-          },
-          "404": {
-            "description": "Project not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Soft delete a project (admin only)",
-        "tags": [
-          "projects"
-        ]
-      }
-    },
     "/api/projects/{slug}/kb/documents": {
       "post": {
         "operationId": "RagController_addDocument",
@@ -925,6 +745,209 @@
         "summary": "Optimize the LanceDB table for a project (admin only)",
         "tags": [
           "knowledge-base"
+        ]
+      }
+    },
+    "/api/admin/outbox": {
+      "get": {
+        "operationId": "AdminController_getOutbox",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Returns pending outbox events"
+          },
+          "403": {
+            "description": "Forbidden - requires admin role"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get pending outbox events",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/projects": {
+      "post": {
+        "operationId": "ProjectsController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProjectDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Project created successfully"
+          },
+          "400": {
+            "description": "Invalid request data"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - admin role required"
+          },
+          "409": {
+            "description": "Conflict - duplicate slug or key"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a new project (admin only)",
+        "tags": [
+          "projects"
+        ]
+      },
+      "get": {
+        "operationId": "ProjectsController_findAll",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "List of projects"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List all projects (excluding soft-deleted)",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/projects/{slug}": {
+      "get": {
+        "operationId": "ProjectsController_findBySlug",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project found"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a project by slug",
+        "tags": [
+          "projects"
+        ]
+      },
+      "patch": {
+        "operationId": "ProjectsController_update",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProjectDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Project updated successfully"
+          },
+          "400": {
+            "description": "Invalid request data"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - admin role required"
+          },
+          "404": {
+            "description": "Project not found"
+          },
+          "409": {
+            "description": "Conflict - duplicate slug or key"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update a project (admin only)",
+        "tags": [
+          "projects"
+        ]
+      },
+      "delete": {
+        "operationId": "ProjectsController_remove",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project soft deleted successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - admin role required"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Soft delete a project (admin only)",
+        "tags": [
+          "projects"
         ]
       }
     },
@@ -2944,121 +2967,6 @@
           "capabilities"
         ]
       },
-      "CreateProjectDto": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string",
-            "minLength": 2,
-            "description": "Project name",
-            "example": "Koda"
-          },
-          "slug": {
-            "type": "string",
-            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
-            "description": "Project slug - lowercase alphanumeric with hyphens",
-            "example": "koda"
-          },
-          "key": {
-            "type": "string",
-            "pattern": "^[A-Z]{2,6}$",
-            "description": "Project key - 2-6 uppercase letters for ticket references",
-            "example": "KODA"
-          },
-          "description": {
-            "type": "string",
-            "description": "Project description",
-            "example": "Dev ticket tracker"
-          },
-          "gitRemoteUrl": {
-            "type": "string",
-            "format": "uri",
-            "description": "Git remote repository URL",
-            "example": "https://github.com/nathapp-io/koda"
-          },
-          "autoIndexOnClose": {
-            "type": "boolean",
-            "description": "Automatically index commits on ticket close",
-            "example": true,
-            "default": true
-          },
-          "autoAssign": {
-            "type": "string",
-            "enum": [
-              "OFF",
-              "SUGGEST",
-              "AUTO"
-            ],
-            "description": "Auto-assign mode for tickets: OFF, SUGGEST, or AUTO",
-            "example": "OFF",
-            "default": "OFF"
-          }
-        },
-        "required": [
-          "name",
-          "slug",
-          "key"
-        ]
-      },
-      "UpdateProjectDto": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string",
-            "minLength": 2,
-            "description": "Project name",
-            "example": "Updated Project Name"
-          },
-          "slug": {
-            "type": "string",
-            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
-            "description": "Project slug - lowercase alphanumeric with hyphens",
-            "example": "updated-project"
-          },
-          "key": {
-            "type": "string",
-            "pattern": "^[A-Z]{2,6}$",
-            "description": "Project key - 2-6 uppercase letters",
-            "example": "UPDATED"
-          },
-          "description": {
-            "type": "string",
-            "description": "Project description",
-            "example": "Updated description"
-          },
-          "gitRemoteUrl": {
-            "type": "string",
-            "format": "uri",
-            "description": "Git remote repository URL",
-            "example": "https://github.com/nathapp-io/updated-repo"
-          },
-          "autoIndexOnClose": {
-            "type": "boolean",
-            "description": "Automatically index commits on ticket close",
-            "example": false
-          },
-          "autoAssign": {
-            "type": "string",
-            "enum": [
-              "OFF",
-              "SUGGEST",
-              "AUTO"
-            ],
-            "description": "Auto-assign mode for tickets: OFF, SUGGEST, or AUTO",
-            "example": "SUGGEST"
-          },
-          "ciWebhookToken": {
-            "type": "string",
-            "description": "CI webhook token for authentication",
-            "example": "ci_webhook_token_123"
-          },
-          "graphifyEnabled": {
-            "type": "boolean",
-            "description": "Enable graphify feature for this project",
-            "example": false
-          }
-        }
-      },
       "AddDocumentDto": {
         "type": "object",
         "properties": {
@@ -3183,6 +3091,121 @@
         "required": [
           "nodes"
         ]
+      },
+      "CreateProjectDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 2,
+            "description": "Project name",
+            "example": "Koda"
+          },
+          "slug": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+            "description": "Project slug - lowercase alphanumeric with hyphens",
+            "example": "koda"
+          },
+          "key": {
+            "type": "string",
+            "pattern": "^[A-Z]{2,6}$",
+            "description": "Project key - 2-6 uppercase letters for ticket references",
+            "example": "KODA"
+          },
+          "description": {
+            "type": "string",
+            "description": "Project description",
+            "example": "Dev ticket tracker"
+          },
+          "gitRemoteUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Git remote repository URL",
+            "example": "https://github.com/nathapp-io/koda"
+          },
+          "autoIndexOnClose": {
+            "type": "boolean",
+            "description": "Automatically index commits on ticket close",
+            "example": true,
+            "default": true
+          },
+          "autoAssign": {
+            "type": "string",
+            "enum": [
+              "OFF",
+              "SUGGEST",
+              "AUTO"
+            ],
+            "description": "Auto-assign mode for tickets: OFF, SUGGEST, or AUTO",
+            "example": "OFF",
+            "default": "OFF"
+          }
+        },
+        "required": [
+          "name",
+          "slug",
+          "key"
+        ]
+      },
+      "UpdateProjectDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 2,
+            "description": "Project name",
+            "example": "Updated Project Name"
+          },
+          "slug": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+            "description": "Project slug - lowercase alphanumeric with hyphens",
+            "example": "updated-project"
+          },
+          "key": {
+            "type": "string",
+            "pattern": "^[A-Z]{2,6}$",
+            "description": "Project key - 2-6 uppercase letters",
+            "example": "UPDATED"
+          },
+          "description": {
+            "type": "string",
+            "description": "Project description",
+            "example": "Updated description"
+          },
+          "gitRemoteUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Git remote repository URL",
+            "example": "https://github.com/nathapp-io/updated-repo"
+          },
+          "autoIndexOnClose": {
+            "type": "boolean",
+            "description": "Automatically index commits on ticket close",
+            "example": false
+          },
+          "autoAssign": {
+            "type": "string",
+            "enum": [
+              "OFF",
+              "SUGGEST",
+              "AUTO"
+            ],
+            "description": "Auto-assign mode for tickets: OFF, SUGGEST, or AUTO",
+            "example": "SUGGEST"
+          },
+          "ciWebhookToken": {
+            "type": "string",
+            "description": "CI webhook token for authentication",
+            "example": "ci_webhook_token_123"
+          },
+          "graphifyEnabled": {
+            "type": "boolean",
+            "description": "Enable graphify feature for this project",
+            "example": false
+          }
+        }
       },
       "CreateTicketDto": {
         "type": "object",

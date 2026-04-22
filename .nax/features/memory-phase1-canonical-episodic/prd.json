@@ -3,7 +3,7 @@
   "feature": "memory-phase1-canonical-episodic",
   "branchName": "feat/memory-phase1-canonical-episodic",
   "createdAt": "2026-04-22T12:00:00.000Z",
-  "updatedAt": "2026-04-22T14:21:13.054Z",
+  "updatedAt": "2026-04-22T16:32:41.592Z",
   "userStories": [
     {
       "id": "US-001",
@@ -85,9 +85,9 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
+      "status": "failed",
       "passes": false,
-      "attempts": 0,
+      "attempts": 1,
       "escalations": [],
       "routing": {
         "complexity": "medium",
@@ -312,14 +312,16 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "fast"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -329,7 +331,8 @@
       ],
       "storyPoints": 1,
       "priorErrors": [],
-      "priorFailures": []
+      "priorFailures": [],
+      "storyGitRef": "974c74f016a5575f8396d9683303826bfc9ea4ac"
     },
     {
       "id": "US-005",
@@ -358,14 +361,16 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "fast"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -374,7 +379,8 @@
       ],
       "storyPoints": 1,
       "priorErrors": [],
-      "priorFailures": []
+      "priorFailures": [],
+      "storyGitRef": "974c74f016a5575f8396d9683303826bfc9ea4ac"
     },
     {
       "id": "US-006",
@@ -454,14 +460,16 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "simple",
         "testStrategy": "tdd-simple",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "simple",
+        "modelTier": "balanced"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -469,8 +477,20 @@
         "apps/api/src/outbox/outbox.service.ts"
       ],
       "storyPoints": 1,
-      "priorErrors": [],
-      "priorFailures": []
+      "priorErrors": [
+        "Attempt 1 failed with model tier: fast: Reviewer contradiction: The test file `outbox-event-schema.validation.integration.spec.ts` has a pre-existing bug in its AC5 `prisma validate` test: it runs `bunx prisma validate` with `cwd: path.resolve(__dirname, '../../../..')` which resolves to the monorepo root (4 levels up from `test/integration/...`) instead of `apps/api` where the schema lives. This causes the test to fail with \"Could not find Prisma Schema\". I was instructed not to modify test behavior, but the test itself is broken and cannot pass as written. The schema is valid when run from the correct directory."
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "fast",
+          "stage": "escalation",
+          "summary": "Failed with tier fast, escalating to next tier",
+          "cost": 0.08706234,
+          "timestamp": "2026-04-22T16:20:46.063Z"
+        }
+      ],
+      "storyGitRef": "74aecd133e6a9641d89f2bf751f66d31909572cb"
     }
   ],
   "analysis": "Phase 1 should evolve the Phase 0 guardrail work instead of replacing it. The current repo already enforces `projectId` validation in the RAG boundary, already has a `KodaDomainWriter` seam for agent-initiated writes, already persists `OutboxEvent` rows, and already returns provenance on KB reads. Those are the right foundations. The next phase must turn them into a canonical operational memory substrate: richer event tables, actor-aware write services, real outbox dispatch, and a timeline API that later semantic and hybrid-retrieval phases can consume.\n\nThe biggest implementation trap is assuming Phase 0 rollout is complete. It is not. There are still direct write bypasses around the write gate, outbox fan-out is still stubbed, and current event/outbox payloads are simpler than the Phase 1 contract. Phase 1 should therefore proceed in this order: lock schema, align write services, align outbox persistence and processing, then expose temporal read APIs. Keep dependencies local to this PRD and treat later-phase handler consumers as downstream integrations, not blockers for the Phase 1 fan-out registry itself.\n\nAll work in this feature should target `apps/api`. Preserve project isolation, canonical-first writes, provenance, and derived-store failure tolerance throughout."
