@@ -13,6 +13,7 @@ describe('OutboxService', () => {
         outboxEvent: {
           create: jest.fn(),
           findMany: jest.fn(),
+          updateMany: jest.fn(),
           update: jest.fn(),
         },
       },
@@ -34,9 +35,9 @@ describe('OutboxService', () => {
   describe('enqueue', () => {
     it('should persist an outbox event with status pending', async () => {
       const event = {
-        aggregateId: 'ticket-123',
-        aggregateType: 'ticket',
-        eventType: 'CREATED',
+        projectId: 'proj-123',
+        eventType: 'ticket_event',
+        eventId: 'ticket-event-123',
         payload: { title: 'Test Ticket' },
       };
 
@@ -44,7 +45,9 @@ describe('OutboxService', () => {
         id: 'outbox-1',
         ...event,
         status: 'pending',
-        retryCount: 0,
+        attempts: 0,
+        lastError: null,
+        processedAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       });
@@ -58,9 +61,9 @@ describe('OutboxService', () => {
 
       expect(mockPrisma.client.outboxEvent.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          aggregateId: event.aggregateId,
-          aggregateType: event.aggregateType,
+          projectId: event.projectId,
           eventType: event.eventType,
+          eventId: event.eventId,
           payload: JSON.stringify(event.payload),
           status: 'pending',
         }),
@@ -69,9 +72,9 @@ describe('OutboxService', () => {
 
     it('should return the created outbox event', async () => {
       const event = {
-        aggregateId: 'agent-456',
-        aggregateType: 'agent',
-        eventType: 'UPDATED',
+        projectId: 'proj-123',
+        eventType: 'agent_event',
+        eventId: 'agent-event-456',
         payload: { status: 'ACTIVE' },
       };
 
@@ -80,7 +83,7 @@ describe('OutboxService', () => {
         ...event,
         payload: JSON.stringify(event.payload),
         status: 'pending',
-        retryCount: 0,
+        attempts: 0,
         lastError: null,
         processedAt: null,
         createdAt: new Date(),
@@ -101,50 +104,71 @@ describe('OutboxService', () => {
       const pendingEvents = [
         {
           id: 'outbox-1',
-          aggregateId: 'ticket-123',
-          aggregateType: 'ticket',
-          eventType: 'CREATED',
+          projectId: 'proj-123',
+          eventType: 'ticket_event',
+          eventId: 'event-1',
           payload: '{}',
           status: 'pending',
-          retryCount: 0,
+          attempts: 0,
+          lastError: null,
+          processedAt: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
         },
         {
           id: 'outbox-2',
-          aggregateId: 'ticket-124',
-          aggregateType: 'ticket',
-          eventType: 'UPDATED',
+          projectId: 'proj-123',
+          eventType: 'ticket_event',
+          eventId: 'event-2',
           payload: '{}',
           status: 'pending',
-          retryCount: 1,
+          attempts: 1,
+          lastError: null,
+          processedAt: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
         },
       ];
 
       mockPrisma.client.outboxEvent.findMany.mockResolvedValue(pendingEvents);
-      mockPrisma.client.outboxEvent.update.mockResolvedValue({
-        status: 'completed',
-      });
+      mockPrisma.client.outboxEvent.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.client.outboxEvent.update.mockResolvedValue({ status: 'completed' });
 
       await service.processPending();
 
       expect(mockPrisma.client.outboxEvent.findMany).toHaveBeenCalledWith({
         where: { status: 'pending' },
+        orderBy: { createdAt: 'asc' },
+        take: 50,
+      });
+      expect(mockPrisma.client.outboxEvent.updateMany).toHaveBeenNthCalledWith(1, {
+        where: {
+          status: 'processing',
+          updatedAt: { lt: expect.any(Date) },
+        },
+        data: { status: 'pending' },
       });
     });
 
-    it('should mark processed records as completed', async () => {
+    it('should claim and mark processed records as completed', async () => {
       const pendingEvents = [
         {
           id: 'outbox-1',
-          aggregateId: 'ticket-123',
-          aggregateType: 'ticket',
-          eventType: 'CREATED',
+          projectId: 'proj-123',
+          eventType: 'ticket_event',
+          eventId: 'event-1',
           payload: '{}',
           status: 'pending',
-          retryCount: 0,
+          attempts: 0,
+          lastError: null,
+          processedAt: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
         },
       ];
 
       mockPrisma.client.outboxEvent.findMany.mockResolvedValue(pendingEvents);
+      mockPrisma.client.outboxEvent.updateMany.mockResolvedValue({ count: 1 });
       mockPrisma.client.outboxEvent.update.mockResolvedValue({
         id: 'outbox-1',
         status: 'completed',
@@ -153,35 +177,58 @@ describe('OutboxService', () => {
 
       await service.processPending();
 
+      expect(mockPrisma.client.outboxEvent.updateMany).toHaveBeenNthCalledWith(2, {
+        where: { id: 'outbox-1', status: 'pending' },
+        data: { status: 'processing' },
+      });
+
       expect(mockPrisma.client.outboxEvent.update).toHaveBeenCalledWith({
         where: { id: 'outbox-1' },
         data: {
           status: 'completed',
           processedAt: expect.any(Date),
+          lastError: null,
         },
       });
     });
 
-    it('should mark failed records as failed', async () => {
+    it('should increment attempts and return failed records to pending', async () => {
       const pendingEvents = [
         {
           id: 'outbox-1',
-          aggregateId: 'ticket-123',
-          aggregateType: 'ticket',
-          eventType: 'CREATED',
+          projectId: 'proj-123',
+          eventType: 'ticket_event',
+          eventId: 'event-1',
           payload: '{}',
           status: 'pending',
-          retryCount: 0,
+          attempts: 0,
+          lastError: null,
+          processedAt: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
         },
       ];
 
       mockPrisma.client.outboxEvent.findMany.mockResolvedValue(pendingEvents);
+      mockPrisma.client.outboxEvent.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.client.outboxEvent.update.mockResolvedValue({ attempts: 1, status: 'pending' });
 
-      // Simulate failure during processing
+      const processEventSpy = jest
+        .spyOn(service as unknown as { processEvent: (event: unknown) => Promise<void> }, 'processEvent')
+        .mockRejectedValue(new Error('boom'));
+
       await service.processPending();
 
-      // Should be able to mark as failed
-      expect(mockPrisma.client.outboxEvent.update).toHaveBeenCalled();
+      processEventSpy.mockRestore();
+
+      expect(mockPrisma.client.outboxEvent.update).toHaveBeenNthCalledWith(1, {
+        where: { id: 'outbox-1' },
+        data: {
+          attempts: 1,
+          lastError: 'boom',
+          status: 'pending',
+        },
+      });
     });
   });
 
@@ -189,12 +236,12 @@ describe('OutboxService', () => {
     it('should retry failed events up to 3 times', async () => {
       const event = {
         id: 'outbox-1',
-        aggregateId: 'ticket-123',
-        aggregateType: 'ticket',
-        eventType: 'CREATED',
+        projectId: 'proj-123',
+        eventType: 'ticket_event',
+        eventId: 'event-1',
         payload: '{}',
         status: 'failed',
-        retryCount: 0,
+        attempts: 0,
         lastError: null,
         processedAt: null,
         createdAt: new Date(),
@@ -203,7 +250,7 @@ describe('OutboxService', () => {
 
       mockPrisma.client.outboxEvent.update.mockResolvedValue({
         ...event,
-        retryCount: 1,
+        attempts: 1,
         lastError: null,
         processedAt: null,
         createdAt: event.createdAt,
@@ -212,12 +259,12 @@ describe('OutboxService', () => {
 
       // First retry
       const retry1 = await service.retry(event);
-      expect(retry1.retryCount).toBe(1);
+      expect(retry1.attempts).toBe(1);
 
       // Update mock for second retry
       mockPrisma.client.outboxEvent.update.mockResolvedValue({
         ...event,
-        retryCount: 2,
+        attempts: 2,
         lastError: null,
         processedAt: null,
         createdAt: event.createdAt,
@@ -225,13 +272,13 @@ describe('OutboxService', () => {
       });
 
       // Second retry
-      const retry2 = await service.retry({ ...event, retryCount: 1 });
-      expect(retry2.retryCount).toBe(2);
+      const retry2 = await service.retry({ ...event, attempts: 1 });
+      expect(retry2.attempts).toBe(2);
 
       // Update mock for third retry
       mockPrisma.client.outboxEvent.update.mockResolvedValue({
         ...event,
-        retryCount: 3,
+        attempts: 3,
         lastError: null,
         processedAt: null,
         createdAt: event.createdAt,
@@ -239,19 +286,19 @@ describe('OutboxService', () => {
       });
 
       // Third retry
-      const retry3 = await service.retry({ ...event, retryCount: 2 });
-      expect(retry3.retryCount).toBe(3);
+      const retry3 = await service.retry({ ...event, attempts: 2 });
+      expect(retry3.attempts).toBe(3);
     });
 
     it('should move to dead_letter after 3 failed retries', async () => {
       const event = {
         id: 'outbox-1',
-        aggregateId: 'ticket-123',
-        aggregateType: 'ticket',
-        eventType: 'CREATED',
+        projectId: 'proj-123',
+        eventType: 'ticket_event',
+        eventId: 'event-1',
         payload: '{}',
         status: 'failed',
-        retryCount: 3,
+        attempts: 3,
         lastError: null,
         processedAt: null,
         createdAt: new Date(),

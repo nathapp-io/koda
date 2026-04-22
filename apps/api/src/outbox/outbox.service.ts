@@ -3,20 +3,20 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
 
 export interface OutboxEventInput {
-  aggregateId: string;
-  aggregateType: string;
+  projectId: string;
   eventType: string;
+  eventId: string;
   payload: unknown;
 }
 
 export interface OutboxEventData {
   id: string;
-  aggregateId: string;
-  aggregateType: string;
+  projectId: string;
   eventType: string;
+  eventId: string;
   payload: string;
   status: string;
-  retryCount: number;
+  attempts: number;
   lastError: string | null;
   processedAt: Date | null;
   createdAt: Date;
@@ -24,6 +24,7 @@ export interface OutboxEventData {
 }
 
 const MAX_RETRIES = 3;
+const PROCESSING_STALE_MS = 60_000;
 
 @Injectable()
 export class OutboxService {
@@ -34,9 +35,9 @@ export class OutboxService {
   async enqueue(event: OutboxEventInput): Promise<OutboxEventData> {
     const createdEvent = await this.prisma.client.outboxEvent.create({
       data: {
-        aggregateId: event.aggregateId,
-        aggregateType: event.aggregateType,
+        projectId: event.projectId,
         eventType: event.eventType,
+        eventId: event.eventId,
         payload: JSON.stringify(event.payload),
         status: 'pending',
       },
@@ -45,74 +46,120 @@ export class OutboxService {
     return this.mapToOutboxEventData(createdEvent);
   }
 
-  async processPending(): Promise<void> {
+  async processPending(limit = 50): Promise<void> {
+    await this.requeueStaleProcessingEvents();
+
     const pendingEvents = await this.prisma.client.outboxEvent.findMany({
       where: { status: 'pending' },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
     });
 
     for (const event of pendingEvents) {
-      try {
-        // Process the event (placeholder for actual processing logic)
-        await this.processEvent();
+      // Claim event to reduce duplicate processing across concurrent workers.
+      const claimResult = await this.prisma.client.outboxEvent.updateMany({
+        where: { id: event.id, status: 'pending' },
+        data: { status: 'processing' },
+      });
+      if (claimResult.count === 0) {
+        continue;
+      }
 
-        // Mark as completed
-        await this.prisma.client.outboxEvent.update({
-          where: { id: event.id },
-          data: {
-            status: 'completed',
-            processedAt: new Date(),
-          },
-        });
+      try {
+        await this.processEvent(this.mapToOutboxEventData(event));
+        await this.markCompleted(event.id);
 
         this.logger.log(`Outbox event ${event.id} processed successfully`);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         this.logger.error(`Error processing outbox event ${event.id}: ${errorMessage}`);
-
-        // Mark as failed and update last error
-        const failedEvent = await this.prisma.client.outboxEvent.update({
-          where: { id: event.id },
-          data: {
-            status: 'failed',
-            lastError: errorMessage,
-          },
-        });
-
-        // Call retry state machine: resets to 'pending' for retry or moves to 'dead_letter'
-        await this.retry(this.mapToOutboxEventData(failedEvent));
+        await this.markFailed(event.id, errorMessage, Number(event.attempts ?? 0));
       }
     }
   }
 
   async retry(event: OutboxEventData): Promise<OutboxEventData> {
-    if (event.retryCount >= MAX_RETRIES) {
-      // Move to dead letter
-      const updated = await this.prisma.client.outboxEvent.update({
-        where: { id: event.id },
-        data: {
-          status: 'dead_letter',
-          lastError: `Failed after ${MAX_RETRIES} retries`,
-        },
-      });
-
-      this.logger.error(`Outbox event ${event.id} moved to dead_letter after ${MAX_RETRIES} retries`);
-      return this.mapToOutboxEventData(updated);
+    if (event.attempts >= MAX_RETRIES) {
+      return this.markDeadLetter(event.id, `Failed after ${MAX_RETRIES} retries`);
     }
 
-    // Increment retry count
     const updated = await this.prisma.client.outboxEvent.update({
       where: { id: event.id },
       data: {
-        retryCount: event.retryCount + 1,
+        attempts: event.attempts + 1,
         status: 'pending',
       },
     });
 
-    this.logger.log(`Outbox event ${event.id} retried (attempt ${updated.retryCount})`);
+    this.logger.log(`Outbox event ${event.id} retried (attempt ${updated.attempts})`);
     return this.mapToOutboxEventData(updated);
   }
 
-  private async processEvent(): Promise<void> {
+  async markCompleted(eventId: string): Promise<void> {
+    await this.prisma.client.outboxEvent.update({
+      where: { id: eventId },
+      data: {
+        status: 'completed',
+        processedAt: new Date(),
+        lastError: null,
+      },
+    });
+  }
+
+  async markFailed(eventId: string, error: string, currentAttempts: number): Promise<void> {
+    const nextAttempts = currentAttempts + 1;
+    const nextStatus = nextAttempts >= MAX_RETRIES ? 'dead_letter' : 'pending';
+
+    await this.prisma.client.outboxEvent.update({
+      where: { id: eventId },
+      data: {
+        attempts: nextAttempts,
+        lastError: error,
+        status: nextStatus,
+      },
+    });
+
+    if (nextStatus === 'dead_letter') {
+      this.logger.error(`Outbox event ${eventId} moved to dead_letter: ${error}`);
+    }
+  }
+
+  async markDeadLetter(eventId: string, reason: string): Promise<OutboxEventData> {
+    const updated = await this.prisma.client.outboxEvent.update({
+      where: { id: eventId },
+      data: {
+        status: 'dead_letter',
+        lastError: reason,
+      },
+    });
+
+    this.logger.error(`Outbox event ${eventId} moved to dead_letter: ${reason}`);
+    return this.mapToOutboxEventData(updated);
+  }
+
+  async retryEvent(eventId: string): Promise<void> {
+    await this.prisma.client.outboxEvent.update({
+      where: { id: eventId },
+      data: {
+        status: 'pending',
+        lastError: null,
+      },
+    });
+  }
+
+  private async requeueStaleProcessingEvents(): Promise<void> {
+    const staleThreshold = new Date(Date.now() - PROCESSING_STALE_MS);
+
+    await this.prisma.client.outboxEvent.updateMany({
+      where: {
+        status: 'processing',
+        updatedAt: { lt: staleThreshold },
+      },
+      data: { status: 'pending' },
+    });
+  }
+
+  private async processEvent(_event: OutboxEventData): Promise<void> {
     // Placeholder for actual event processing logic
     // This could dispatch to handlers based on event type
     // For now, just resolve successfully
@@ -121,12 +168,16 @@ export class OutboxService {
   private mapToOutboxEventData(event: OutboxEventData | Record<string, unknown>): OutboxEventData {
     return {
       id: String(event.id),
-      aggregateId: String(event.aggregateId),
-      aggregateType: String(event.aggregateType),
+      projectId: String(event.projectId),
       eventType: String(event.eventType),
+      eventId: String(event.eventId),
       payload: String(event.payload),
       status: String(event.status),
-      retryCount: Number(event.retryCount),
+      attempts: Number(
+        (event.attempts as number | undefined)
+          ?? (event as { retryCount?: number }).retryCount
+          ?? 0,
+      ),
       lastError: (event.lastError as string | null) ?? null,
       processedAt: (event.processedAt as Date | null) ?? null,
       createdAt: event.createdAt as Date,

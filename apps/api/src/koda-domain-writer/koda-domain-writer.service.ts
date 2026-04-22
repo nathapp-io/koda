@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import type { PrismaClient } from '@prisma/client';
@@ -15,6 +15,8 @@ import type {
 
 @Injectable()
 export class KodaDomainWriter {
+  private readonly logger = new Logger(KodaDomainWriter.name);
+
   constructor(
     private readonly prisma: PrismaService<PrismaClient>,
     private readonly ragService: RagService,
@@ -66,9 +68,9 @@ export class KodaDomainWriter {
 
     // Fire-and-forget: enqueue outbox event for follow-up work
     this.outboxService.enqueue({
-      aggregateId: event.id,
-      aggregateType: 'ticket',
-      eventType: data.action,
+      projectId: data.projectId,
+      eventType: 'ticket_event',
+      eventId: event.id,
       payload: {
         ticketId: data.ticketId,
         projectId: data.projectId,
@@ -77,7 +79,7 @@ export class KodaDomainWriter {
       },
     }).catch(err => {
       // Log but don't block the canonical write
-      console.error('Failed to enqueue outbox event:', err);
+      this.logger.error(`Failed to enqueue outbox event for ticket ${event.id}: ${String(err)}`);
     });
 
     return {
@@ -106,9 +108,9 @@ export class KodaDomainWriter {
 
     // Fire-and-forget: enqueue outbox event for follow-up work
     this.outboxService.enqueue({
-      aggregateId: event.id,
-      aggregateType: 'agent',
-      eventType: data.action,
+      projectId: data.projectId,
+      eventType: 'agent_event',
+      eventId: event.id,
       payload: {
         agentId: data.agentId,
         projectId: data.projectId,
@@ -117,7 +119,7 @@ export class KodaDomainWriter {
       },
     }).catch(err => {
       // Log but don't block the canonical write
-      console.error('Failed to enqueue outbox event:', err);
+      this.logger.error(`Failed to enqueue outbox event for agent ${event.id}: ${String(err)}`);
     });
 
     return {
@@ -131,26 +133,39 @@ export class KodaDomainWriter {
     this.assertNonEmpty(data.sourceId, 'sourceId');
     this.assertNonEmpty(data.content, 'content');
 
+    if (data.source !== 'ticket') {
+      throw new ValidationAppException({ source: 'source must be ticket for canonical indexing events' });
+    }
+
     await this.assertProjectExists(data.projectId);
 
-    let canonicalId: string | undefined;
-    try {
-      const event = await this.prisma.client.ticketEvent.create({
-        data: {
-          ticketId: data.sourceId,
-          projectId: data.projectId,
-          action: 'INDEX_DOCUMENT',
-          actorId: data.actorId,
-          actorType: 'agent',
-          source: 'api',
-          data: JSON.stringify({ source: data.source, metadata: data.metadata }),
-          timestamp: data.timestamp ?? new Date(),
-        },
-      });
-      canonicalId = event?.id;
-    } catch {
-      // Canonical write failure is surfaced via missing canonicalId; RAG error takes precedence in error field
-    }
+    const event = await this.prisma.client.ticketEvent.create({
+      data: {
+        ticketId: data.sourceId,
+        projectId: data.projectId,
+        action: 'INDEX_DOCUMENT',
+        actorId: data.actorId,
+        actorType: 'agent',
+        source: 'api',
+        data: JSON.stringify({ source: data.source, metadata: data.metadata }),
+        timestamp: data.timestamp ?? new Date(),
+      },
+    });
+
+    // Fire-and-forget: canonical write succeeded, queue derived indexing follow-up
+    this.outboxService.enqueue({
+      projectId: data.projectId,
+      eventType: 'document_indexed',
+      eventId: event.id,
+      payload: {
+        source: data.source,
+        sourceId: data.sourceId,
+        actorId: data.actorId,
+        metadata: data.metadata,
+      },
+    }).catch(err => {
+      this.logger.error(`Failed to enqueue document_indexed outbox event ${event.id}: ${String(err)}`);
+    });
 
     let ragError: string | undefined;
     try {
@@ -165,7 +180,7 @@ export class KodaDomainWriter {
     }
 
     return {
-      canonicalId,
+      canonicalId: event.id,
       derivedIds: [],
       error: ragError,
       provenance: this.buildProvenance(data.actorId, data.projectId, 'INDEX_DOCUMENT', 'api'),

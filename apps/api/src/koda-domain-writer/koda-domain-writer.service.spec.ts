@@ -264,6 +264,20 @@ describe('KodaDomainWriter Unit Tests', () => {
 
       await expect(service.indexDocument(data)).rejects.toThrow();
     });
+
+    it('should reject non-ticket source for canonical indexing event', async () => {
+      const data = {
+        projectId: 'proj-123',
+        source: 'doc' as const,
+        sourceId: 'doc-001',
+        content: 'Test',
+        metadata: {},
+        actorId: 'agent-001',
+        timestamp: new Date(),
+      };
+
+      await expect(service.indexDocument(data)).rejects.toThrow();
+    });
   });
 
   describe('importGraphify', () => {
@@ -350,6 +364,13 @@ describe('KodaDomainWriter Unit Tests', () => {
       expect(result.provenance).toHaveProperty('action');
       expect(result.provenance).toHaveProperty('timestamp');
       expect(result.provenance).toHaveProperty('source');
+      expect(mockOutboxService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: 'proj-123',
+          eventType: 'ticket_event',
+          eventId: 'event-123',
+        }),
+      );
     });
 
     it('writeAgentAction result should include all required fields', async () => {
@@ -384,6 +405,13 @@ describe('KodaDomainWriter Unit Tests', () => {
       expect(result.provenance).toHaveProperty('action');
       expect(result.provenance).toHaveProperty('timestamp');
       expect(result.provenance).toHaveProperty('source');
+      expect(mockOutboxService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: 'proj-123',
+          eventType: 'agent_event',
+          eventId: 'event-123',
+        }),
+      );
     });
 
     it('indexDocument result should include derivedIds array', async () => {
@@ -398,6 +426,18 @@ describe('KodaDomainWriter Unit Tests', () => {
       };
 
       mockPrismaService.client.project.findUnique.mockResolvedValue({ id: 'proj-123' });
+      mockPrismaService.client.ticketEvent.create.mockResolvedValue({
+        id: 'event-index-001',
+        ticketId: 'ticket-001',
+        projectId: 'proj-123',
+        action: 'INDEX_DOCUMENT',
+        actorId: 'agent-001',
+        actorType: 'agent',
+        source: 'api',
+        data: '{}',
+        timestamp: new Date(),
+        createdAt: new Date(),
+      });
       mockRagService.indexDocument.mockResolvedValue(undefined);
 
       const result = await service.indexDocument(data);
@@ -405,6 +445,14 @@ describe('KodaDomainWriter Unit Tests', () => {
       expect(result).toHaveProperty('derivedIds');
       expect(Array.isArray(result.derivedIds)).toBe(true);
       expect(result).toHaveProperty('provenance');
+      expect(result.canonicalId).toBe('event-index-001');
+      expect(mockOutboxService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: 'proj-123',
+          eventType: 'document_indexed',
+          eventId: 'event-index-001',
+        }),
+      );
     });
 
     it('importGraphify result should include metadata about import', async () => {
@@ -459,6 +507,18 @@ describe('KodaDomainWriter Unit Tests', () => {
       };
 
       mockPrismaService.client.project.findUnique.mockResolvedValue({ id: 'proj-123' });
+      mockPrismaService.client.ticketEvent.create.mockResolvedValue({
+        id: 'event-index-001',
+        ticketId: 'ticket-001',
+        projectId: 'proj-123',
+        action: 'INDEX_DOCUMENT',
+        actorId: 'agent-001',
+        actorType: 'agent',
+        source: 'api',
+        data: '{}',
+        timestamp: new Date(),
+        createdAt: new Date(),
+      });
       mockRagService.indexDocument.mockRejectedValue(new Error('RAG error'));
 
       // Should not throw, but return error in result
@@ -466,6 +526,24 @@ describe('KodaDomainWriter Unit Tests', () => {
       await expect(indexPromise).resolves.toBeDefined();
       const result = await indexPromise;
       expect(result).toBeDefined();
+      expect(result.error).toBe('RAG error');
+    });
+
+    it('should bubble canonical write failures in indexDocument', async () => {
+      const data = {
+        projectId: 'proj-123',
+        source: 'ticket' as const,
+        sourceId: 'ticket-001',
+        content: 'Test',
+        metadata: {},
+        actorId: 'agent-001',
+        timestamp: new Date(),
+      };
+
+      mockPrismaService.client.project.findUnique.mockResolvedValue({ id: 'proj-123' });
+      mockPrismaService.client.ticketEvent.create.mockRejectedValue(new Error('Canonical write failed'));
+
+      await expect(service.indexDocument(data)).rejects.toThrow('Canonical write failed');
     });
   });
 });
