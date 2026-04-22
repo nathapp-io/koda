@@ -1,11 +1,13 @@
 -- CreatePhase1OutboxEvent
 -- Creates the canonical OutboxEvent table with all Phase 1 fields and indexes.
--- This migration is idempotent: it uses CREATE TABLE IF NOT EXISTS for the main table
--- and CREATE INDEX IF NOT EXISTS for indexes to allow safe re-application.
+-- Uses CREATE TABLE IF NOT EXISTS for idempotent application.
+-- FK constraint is managed via schema.prisma relations, not raw SQL in migrations.
 
 BEGIN TRANSACTION;
 
 -- CreateTable: OutboxEvent with Phase 1 contract fields
+-- Note: Foreign key constraint is defined in schema.prisma, not here, to ensure
+-- migration idempotency (SQLite inline FK constraints cannot use IF NOT EXISTS).
 CREATE TABLE IF NOT EXISTS "OutboxEvent" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "projectId" TEXT NOT NULL,
@@ -17,10 +19,7 @@ CREATE TABLE IF NOT EXISTS "OutboxEvent" (
     "lastError" TEXT,
     "processedAt" DATETIME,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "OutboxEvent_projectId_fkey"
-        FOREIGN KEY ("projectId") REFERENCES "Project" ("id")
-        ON DELETE CASCADE ON UPDATE CASCADE
+    "updatedAt" DATETIME NOT NULL
 );
 
 -- CreateIndex: @@index([status, createdAt])
