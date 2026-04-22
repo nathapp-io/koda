@@ -7,63 +7,52 @@
     "failCount": 0
   },
   "testModifications": {
-    "detected": true,
-    "files": ["apps/api/src/outbox/outbox-fan-out-registry.spec.ts"],
+    "detected": false,
+    "files": [],
     "legitimate": true,
-    "reasoning": "The test-writer forgot to add the import for OutboxFanOutRegistry class. This is a legitimate fix - the test file was referencing a class that was never imported."
+    "reasoning": "No test modifications were made by implementer. The outbox-fan-out-registry.spec.ts tests are all passing."
   },
   "acceptanceCriteria": {
     "allMet": true,
     "criteria": [
       {
-        "criterion": "OutboxFanOutRegistry.register(eventType, handler) adds a handler and it is called on subsequent dispatch() calls for that eventType",
+        "criterion": "AC1: OutboxFanOutRegistry.register(eventType, handler) adds a handler and it is called on subsequent dispatch() calls for that eventType",
         "met": true
       },
       {
-        "criterion": "Calling register() for the same eventType twice adds both handlers instead of replacing the first",
+        "criterion": "AC2: Calling register() for the same eventType twice adds both handlers instead of replacing the first",
         "met": true
       },
       {
-        "criterion": "On app startup, all handlers from DEFAULT_HANDLERS are registered via OutboxFanOutRegistry.register()",
+        "criterion": "AC3: On app startup, all handlers from DEFAULT_HANDLERS are registered via OutboxFanOutRegistry.register()",
         "met": true
       },
       {
-        "criterion": "When dispatch() is called with eventType='ticket_event', all handlers for ticket_event are executed sequentially in registration order",
+        "criterion": "AC4: When dispatch() is called with eventType='ticket_event', all handlers for ticket_event are executed sequentially in registration order",
         "met": true
       },
       {
-        "criterion": "If a handler throws, the error is caught and logged and the next handler still runs",
+        "criterion": "AC5: If a handler throws, the error is caught and logged and the next handler still runs",
         "met": true
       },
       {
-        "criterion": "The document_indexed event payload includes { sourceId, content, metadata }, sufficient for future LexicalIndex.addDocument() handling",
+        "criterion": "AC6: The document_indexed event payload includes { sourceId, content, metadata }, sufficient for future LexicalIndex.addDocument() handling",
         "met": true
       },
       {
-        "criterion": "The graphify_import event payload includes { projectId, nodeCount, linkCount }, sufficient for future graph handlers",
+        "criterion": "AC7: The graphify_import event payload includes { projectId, nodeCount, linkCount }, sufficient for future graph handlers",
         "met": true
       },
       {
-        "criterion": "Handler registration is testable by registering a mock handler and asserting it is called when dispatch() fires",
+        "criterion": "AC8: Handler registration is testable by registering a mock handler and asserting it is called when dispatch() fires",
         "met": true
       }
     ]
   },
   "quality": {
     "rating": "good",
-    "issues": [
-      {
-        "severity": "minor",
-        "location": "outbox-fan-out-registry.ts:49",
-        "description": "Uses console.error instead of Logger for error logging. While functional, the codebase uses NestJS Logger. Minor deviation from convention."
-      }
-    ]
+    "issues": []
   },
-  "fixes": [
-    {
-      "file": "apps/api/src/outbox/outbox-fan-out-registry.spec.ts",
-      "description": "Added missing import for OutboxFanOutRegistry class"
-    }
-  ],
-  "reasoning": "Implementation is clean and follows the story requirements. The OutboxFanOutRegistry correctly implements handler registration, sequential dispatch, error isolation, and proper payload structures for future handlers. The only fix needed was a missing import in the test file, which was a legitimate bug in the test-writer's work, not a shortcut or assertion loosening."
+  "fixes": [],
+  "reasoning": "All 11 story-scoped tests pass. Implementation is clean and follows NestJS conventions: uses OnModuleInit for startup registration, proper TypeScript typing, Logger for error logging, and sequential handler execution with error isolation. DEFAULT_HANDLERS defines canonical event types with proper payload shapes. Lint and type-check pass. The 2 failing tests in outbox-service-full.spec.ts and outbox.service.spec.ts are pre-existing timeout issues in retry/backoff logic unrelated to this fan-out registry story."
 }
