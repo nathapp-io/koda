@@ -56,9 +56,6 @@ export class KodaDomainWriter {
   }
 
   private assertActorHasEventRole(actor: { projectRoles: string[] }): void {
-    if (actor.projectRoles.length === 0) {
-      return;
-    }
     const allowedRoles = ['ADMIN', 'DEVELOPER', 'AGENT'];
     const hasRole = actor.projectRoles.some((role) => allowedRoles.includes(role));
     if (!hasRole) {

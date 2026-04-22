@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
 
@@ -16,6 +16,8 @@ export interface Actor {
 
 @Injectable()
 export class ActorResolver {
+  private readonly logger = new Logger(ActorResolver.name);
+
   constructor(private readonly prisma: PrismaService<PrismaClient>) {}
 
   async resolve(request: ActorRequest): Promise<Actor> {
@@ -46,6 +48,10 @@ export class ActorResolver {
 
     if (projectRoles.length === 0 && userRole) {
       projectRoles = [userRole];
+    }
+
+    if (projectRoles.length === 0) {
+      this.logger.debug?.(`No agent role entries found for actor ${actorId} (type: ${actorType}). User actors rely on JWT role; agent actors should have agentRoleEntry records.`);
     }
 
     return {
