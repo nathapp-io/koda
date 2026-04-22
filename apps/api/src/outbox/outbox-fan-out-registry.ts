@@ -46,7 +46,7 @@ export class OutboxFanOutRegistry implements OnModuleInit {
       try {
         await Promise.resolve(handler(input.payload));
       } catch (error) {
-        console.error(`Handler for ${input.eventType} failed:`, error);
+        this.logger.error(`Handler for ${input.eventType} failed`, error);
       }
     }
   }
