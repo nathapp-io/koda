@@ -484,7 +484,7 @@ describeIntegration('OutboxEvent Phase 1 Schema Validation', () => {
       try {
         execSync('bunx prisma validate', {
           stdio: 'pipe',
-          cwd: path.resolve(__dirname, '../../../..'),
+          cwd: path.resolve(__dirname, '../../..'),
         });
       } catch (error) {
         throw new Error(`prisma validate failed: ${error}`);
