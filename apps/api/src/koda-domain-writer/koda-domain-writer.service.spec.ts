@@ -10,10 +10,13 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 
-// This service doesn't exist yet - tests will fail initially (RED phase)
 import { KodaDomainWriter } from './koda-domain-writer.service';
 import { RagService } from '../rag/rag.service';
 import { OutboxService } from '../outbox/outbox.service';
+import { ActorResolver } from '../events/actor-resolver.service';
+import { TicketEventService } from '../events/ticket-event.service';
+import { AgentEventService } from '../events/agent-event.service';
+import { DecisionEventService } from '../events/decision-event.service';
 
 describe('KodaDomainWriter Unit Tests', () => {
   let service: KodaDomainWriter;
@@ -32,6 +35,9 @@ describe('KodaDomainWriter Unit Tests', () => {
       agentEvent: {
         create: jest.fn(),
       },
+      agentRoleEntry: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
     },
   };
 
@@ -44,6 +50,15 @@ describe('KodaDomainWriter Unit Tests', () => {
     enqueue: jest.fn().mockResolvedValue({ id: 'outbox-1', status: 'pending' }),
   };
 
+  const mockActorResolver = {
+    resolve: jest.fn().mockResolvedValue({
+      actorType: 'agent',
+      actorId: 'agent-001',
+      projectRoles: ['AGENT'],
+      resourceRoles: [],
+    }),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -51,6 +66,10 @@ describe('KodaDomainWriter Unit Tests', () => {
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: RagService, useValue: mockRagService },
         { provide: OutboxService, useValue: mockOutboxService },
+        { provide: ActorResolver, useValue: mockActorResolver },
+        TicketEventService,
+        AgentEventService,
+        DecisionEventService,
       ],
     }).compile();
 
