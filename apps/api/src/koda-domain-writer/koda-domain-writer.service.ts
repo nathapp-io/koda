@@ -4,6 +4,7 @@ import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-c
 import type { PrismaClient } from '@prisma/client';
 import { RagService } from '../rag/rag.service';
 import { OutboxService } from '../outbox/outbox.service';
+import { ActorResolver, ActorRequest } from '../events/actor-resolver.service';
 import type {
   WriteResult,
   WriteTicketEventInput,
@@ -21,6 +22,7 @@ export class KodaDomainWriter {
     private readonly prisma: PrismaService<PrismaClient>,
     private readonly ragService: RagService,
     private readonly outboxService: OutboxService,
+    private readonly actorResolver: ActorResolver,
   ) {}
 
   private assertNonEmpty(value: string, field: string): void {
@@ -45,6 +47,17 @@ export class KodaDomainWriter {
     return { actorId, projectId, action, timestamp: new Date(), source };
   }
 
+  private assertActorHasEventRole(actor: { projectRoles: string[] }): void {
+    if (actor.projectRoles.length === 0) {
+      return;
+    }
+    const allowedRoles = ['ADMIN', 'DEVELOPER', 'AGENT'];
+    const hasRole = actor.projectRoles.some((role) => allowedRoles.includes(role));
+    if (!hasRole) {
+      throw new ForbiddenAppException({}, 'koda-domain-writer');
+    }
+  }
+
   async writeTicketEvent(data: WriteTicketEventInput): Promise<WriteResult> {
     this.assertNonEmpty(data.projectId, 'projectId');
     this.assertNonEmpty(data.ticketId, 'ticketId');
@@ -52,6 +65,13 @@ export class KodaDomainWriter {
     this.assertNonEmpty(data.actorId, 'actorId');
 
     await this.assertProjectExists(data.projectId);
+
+    const mockRequest: ActorRequest = {
+      user: data.actorType === 'user' ? { id: data.actorId, sub: data.actorId } : null,
+      agent: data.actorType === 'agent' ? { id: data.actorId, sub: data.actorId } : null,
+    };
+    const actor = await this.actorResolver.resolve(mockRequest);
+    this.assertActorHasEventRole(actor);
 
     const event = await this.prisma.client.ticketEvent.create({
       data: {
@@ -93,6 +113,13 @@ export class KodaDomainWriter {
     this.assertNonEmpty(data.agentId, 'agentId');
 
     await this.assertProjectExists(data.projectId);
+
+    const mockRequest: ActorRequest = {
+      user: null,
+      agent: { id: data.agentId, sub: data.agentId },
+    };
+    const actor = await this.actorResolver.resolve(mockRequest);
+    this.assertActorHasEventRole(actor);
 
     const event = await this.prisma.client.agentEvent.create({
       data: {

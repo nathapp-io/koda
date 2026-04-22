@@ -3,7 +3,7 @@
   "feature": "memory-phase1-canonical-episodic",
   "branchName": "feat/memory-phase1-canonical-episodic",
   "createdAt": "2026-04-22T12:00:00.000Z",
-  "updatedAt": "2026-04-22T12:00:00.000Z",
+  "updatedAt": "2026-04-22T13:18:48.721Z",
   "userStories": [
     {
       "id": "US-001",
@@ -33,14 +33,16 @@
         "persistence"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "simple",
         "testStrategy": "tdd-simple",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "simple",
+        "modelTier": "fast"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -49,7 +51,8 @@
       ],
       "storyPoints": 1,
       "priorErrors": [],
-      "priorFailures": []
+      "priorFailures": [],
+      "storyGitRef": "0eec2e06bdb280c54efadfd16fe3151d2d199ade"
     },
     {
       "id": "US-002",
@@ -89,7 +92,9 @@
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "fast"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -100,7 +105,8 @@
       ],
       "storyPoints": 1,
       "priorErrors": [],
-      "priorFailures": []
+      "priorFailures": [],
+      "storyGitRef": "38611d0c90f1979ca69146b471727af215524548"
     },
     {
       "id": "US-003",
