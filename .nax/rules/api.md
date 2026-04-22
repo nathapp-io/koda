@@ -1,3 +1,5 @@
+<!-- NOTE: 6 neutralization(s) applied — review before committing -->
+
 ---
 paths:
   - "apps/api/**/*"
@@ -67,11 +69,11 @@ cd apps/api && DATABASE_URL=file:./koda-test.db npx jest --forceExit test/e2e
 ## Request Context Anti-Patterns
 - **Never use `@Req() req: any`** — extract user/agent from typed request context
   ```ts
-  // ❌ Wrong
+  //  Wrong
   @Req() req: any
   const actorType = req.user?.extra?.role
 
-  // ✅ Correct — use @CurrentUser() decorator with proper typing
+  //  Correct — use @CurrentUser() decorator with proper typing
   ```
 - **Never pass `actorType` through method chains** — extract from request context at controller entry point
 - **Never use `@Optional()` for required dependencies** — inject normally, don't null-check everywhere
@@ -79,20 +81,20 @@ cd apps/api && DATABASE_URL=file:./koda-test.db npx jest --forceExit test/e2e
 ## Dependency Injection Anti-Patterns
 - **Use constructor injection with types** — never string-based DI tokens
   ```ts
-  // ❌ Wrong
+  //  Wrong
   @Inject('PrismaService') private prisma: PrismaService
 
-  // ✅ Correct
+  //  Correct
   constructor(private readonly prisma: PrismaService) {}
   ```
 
 ## Prisma Anti-Patterns
 - **Return DTOs, not raw Prisma objects** — map to response DTOs before returning
   ```ts
-  // ❌ Wrong
+  //  Wrong
   return this.prisma.ticket.findUnique({ where: { id } })
 
-  // ✅ Correct
+  //  Correct
   return JsonResponse.Ok(TicketDTO.from(ticket))
   ```
 - **Use Prisma error codes (`err.code`)** — not string matching on error messages

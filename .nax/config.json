@@ -30,7 +30,14 @@
     }
   },
   "context": {
-    "fileInjection": "keyword"
+    "fileInjection": "keyword",
+    "v2": {
+      "enabled": true,
+      "minScore": 0.1,
+      "rules": {
+        "allowLegacyClaudeMd": false
+      }
+    }    
   },
   "plan": {
     "model": "balanced"

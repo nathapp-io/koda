@@ -48,6 +48,8 @@ Thumbs.db
 .nax/review-audit/
 .nax/review-verdicts/
 .nax/**/semantic-verdicts/
+.nax/**/verdicts/
+.nax/**/sessions/
 nax.lock
 .nax-wt/
 .nax-pids

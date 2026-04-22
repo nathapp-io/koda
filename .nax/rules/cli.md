@@ -1,3 +1,5 @@
+<!-- NOTE: 10 neutralization(s) applied — review before committing -->
+
 ---
 paths:
   - "apps/cli/**/*"
@@ -44,10 +46,10 @@ paths:
 - **`--json` flag must be on ALL data-returning commands** — inconsistency breaks agent workflows
 - **`warn()` outputs to stderr** — not stdout
   ```ts
-  // ❌ Wrong
+  //  Wrong
   console.warn('message')  // pollutes stdout
 
-  // ✅ Correct
+  //  Correct
   console.error('message')
   ```
 - **No hardcoded URLs** — use resolved API URL from config
@@ -55,10 +57,10 @@ paths:
 ## Validation Anti-Patterns
 - **Exit code 3 for validation errors** — exit code 1 is for API/network errors only
   ```ts
-  // ❌ Wrong
+  //  Wrong
   if (!input) { error('Invalid'); process.exit(1) }
 
-  // ✅ Correct
+  //  Correct
   if (!input) { error('Invalid'); process.exit(3) }
   ```
 - **Use shared validation utilities** — don't scatter inline manual checks across commands
@@ -67,31 +69,31 @@ paths:
 ## File System Anti-Patterns
 - **Use async file operations** — never `readFileSync` in production code
   ```ts
-  // ❌ Wrong
+  //  Wrong
   const data = JSON.parse(readFileSync(path, 'utf-8'))
 
-  // ✅ Correct
+  //  Correct
   const data = JSON.parse(await readFile(path, 'utf-8'))
   ```
 
 ## Network Anti-Patterns
 - **Never use `configureClient()` or raw `AxiosInstance`** — use generated functions with `OpenAPI.BASE`
   ```ts
-  // ❌ Wrong
+  //  Wrong
   const client = configureClient(ctx.apiUrl, ctx.apiKey)
   await TicketsService.create(client, slug, payload)
 
-  // ✅ Correct
+  //  Correct
   OpenAPI.BASE = ctx.apiUrl
   OpenAPI.TOKEN = ctx.apiKey
   await ticketsControllerCreate({ requestBody: payload })
   ```
 - **Never include `/api` in `--api-url`** — generated service paths already include it; double prefix causes 404
   ```ts
-  // ❌ Wrong — results in http://host/api/api/tickets
+  //  Wrong — results in http://host/api/api/tickets
   OpenAPI.BASE = 'http://localhost:3100/api'
 
-  // ✅ Correct
+  //  Correct
   OpenAPI.BASE = 'http://localhost:3100'
   ```
 - **Retry transient failures** — HTTP calls should retry on 5xx with backoff

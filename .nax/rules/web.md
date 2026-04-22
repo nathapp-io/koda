@@ -1,3 +1,5 @@
+<!-- NOTE: 14 neutralization(s) applied — review before committing -->
+
 ---
 paths:
   - "apps/web/**/*"
@@ -38,23 +40,23 @@ paths:
 ## Anti-Patterns
 - **No hardcoded strings in templates** — always use `t('key')`, never raw text like `"Cancel"` or `"Deleting..."`
   ```vue
-  <!-- ❌ Wrong -->
+  <!--  Wrong -->
   <Button>Cancel</Button>
   <p>Are you sure you want to delete agent "{{ agent.name }}"?</p>
 
-  <!-- ✅ Correct -->
+  <!--  Correct -->
   <Button>{{ t('common.cancel') }}</Button>
   <p>{{ t('agents.deleteConfirm', { name: agent.name }) }}</p>
   ```
 - **No native HTML form elements** — use Shadcn components instead
   ```vue
-  <!-- ❌ Wrong -->
+  <!--  Wrong -->
   <input type="text" />
   <textarea />
   <select>...</select>
   <button>Save</button>
 
-  <!-- ✅ Correct -->
+  <!--  Correct -->
   <Input />
   <Textarea />
   <Select>...</Select>
@@ -62,10 +64,10 @@ paths:
   ```
 - **Never use raw `v-model` without vee-validate** — all forms must use validation schema
   ```vue
-  <!-- ❌ Wrong -->
+  <!--  Wrong -->
   <Input v-model="form.name" />
 
-  <!-- ✅ Correct -->
+  <!--  Correct -->
   <FormField name="name" v-slot="{ componentField }">
     <Input v-bind="componentField" />
   </FormField>
@@ -74,18 +76,18 @@ paths:
 ## Form Validation Anti-Patterns
 - **Zod schemas must use i18n keys for error messages** — never hardcoded English
   ```ts
-  // ❌ Wrong
+  //  Wrong
   z.string().min(1, 'Name is required')
 
-  // ✅ Correct — use t() or i18n key
+  //  Correct — use t() or i18n key
   z.string().min(1, t('validation.nameRequired'))
   ```
 - **Never use raw `$fetch` in components** — always use `$api` from `useApi()`
   ```ts
-  // ❌ Wrong
+  //  Wrong
   const data = await $fetch('/api/tickets', { method: 'POST' })
 
-  // ✅ Correct
+  //  Correct
   const { $api } = useApi()
   const data = await $api.post('/tickets', payload)
   ```
@@ -93,22 +95,22 @@ paths:
 ## API Error Handling Anti-Patterns
 - **Always use `extractApiError()` for API errors** — don't call `toast.error(err)` directly
   ```ts
-  // ❌ Wrong
+  //  Wrong
   toast.error(err.message)
 
-  // ✅ Correct
+  //  Correct
   toast.error(extractApiError(err))
   ```
 
 ## Component Anti-Patterns
 - **Extract inline color/helper functions** — don't define `typeBadgeClass()` inside components
   ```ts
-  // ❌ Wrong — inline in TicketCard.vue
+  //  Wrong — inline in TicketCard.vue
   const typeBadgeClass = (type: string) => {
     return type === 'open' ? 'text-red-500' : 'text-green-500'
   }
 
-  // ✅ Correct — extract to composable or use CSS classes
+  //  Correct — extract to composable or use CSS classes
   ```
 - **Use generated types** — don't redefine interfaces that exist in `generated/types.gen.ts`
 - **Don't duplicate page logic** — extract shared logic to composables (e.g., agents list logic)

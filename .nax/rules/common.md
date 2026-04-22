@@ -1,3 +1,5 @@
+<!-- NOTE: 5 neutralization(s) applied — review before committing -->
+
 # Common Rules — All Apps
 
 ## Package Manager
@@ -30,10 +32,10 @@
 - Test files must follow the naming conventions in each app's context.md (unit: `*.spec.ts`, integration: `*.integration.spec.ts`, E2E: `*.e2e.spec.ts`)
 - **No hardcoded absolute paths in test files** — never use paths like `/Users/...` or `/home/...`. Use `__dirname` + `path.join()` for file references so tests run on any machine (VPS, Mac01, CI):
   ```ts
-  // ❌ Wrong — breaks on any machine except the author's dev environment
+  //  Wrong — breaks on any machine except the author's dev environment
   const labelsPagePath = '/Users/subrinaai/Desktop/workspace/.../labels.vue'
 
-  // ✅ Correct — portable across all environments
+  //  Correct — portable across all environments
   const webDir = join(__dirname, '../..')
   const labelsPagePath = join(webDir, 'pages/[project]/labels.vue')
   ```
@@ -52,13 +54,13 @@
 ## Error Handling
 - **Use error codes over string matching** — never check `error.message.includes('...')`
   ```ts
-  // ❌ Wrong
+  //  Wrong
   if (err.message.includes('Unique constraint')) { ... }
 
-  // ✅ Correct
+  //  Correct
   if (err.ret === '2000') { ... }  
   
-  // ✅ Correct
+  //  Correct
   if (err.code === 'P2002') { ... }  
   ```
 - **Never swallow errors** — always handle, re-throw, or log
