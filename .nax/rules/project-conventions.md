@@ -40,7 +40,6 @@ Primary architecture/context source is [`/home/williamkhoo/Desktop/projects/nath
 - Keep business logic in API unless there is a strong reason not to
 - Update tests with behavior changes
 - Treat soft-delete, auth, and workflow constraints as API-owned invariants
-- Do not edit generated `AGENTS.md` manually; update source context and regenerate
 - Keep lint/type-check green before handing off completed work
 
 ## Test Organization

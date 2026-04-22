@@ -1,7 +1,9 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional, Inject } from '@nestjs/common';
 import { mkdirSync } from 'node:fs';
 import { ConfigService } from '@nestjs/config';
-import { ValidationAppException } from '@nathapp/nestjs-common';
+import { ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaClient } from '@prisma/client';
 import { EmbeddingService } from './embedding.service';
 import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interface';
 import type { KbResultDto, SearchKbResponseDto } from './dto/kb-result.dto';
@@ -149,6 +151,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     private readonly configService: ConfigService,
     @Optional() private readonly embeddingService?: EmbeddingService,
     @Optional() @Inject(FTS_OPTIMIZE_STRATEGY) private readonly optimizeStrategy?: FtsOptimizeStrategy,
+    @Optional() private readonly prisma?: PrismaService<PrismaClient>,
   ) {
     this.lancedbPath = configService.get<string>('rag.lancedbPath') ?? './lancedb';
     this.similarityHigh = configService.get<number>('rag.similarityHigh') ?? 0.85;
@@ -197,6 +200,45 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     this.db = null;
   }
 
+  /**
+   * Validates project ID format and existence.
+   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   */
+  private async validateProjectId(projectId: string): Promise<void> {
+    // Check if projectId is empty or whitespace-only
+    if (!projectId || typeof projectId !== 'string' || projectId.trim().length === 0) {
+      const exception = new ForbiddenAppException({}, 'rag');
+      exception.message = 'Project ID is required';
+      throw exception;
+    }
+
+    // Only perform format and existence validation when Prisma is available
+    // This ensures that the RAG service can still be used in tests or contexts without the database
+    if (!this.prisma?.client) {
+      return;
+    }
+
+    // Check if projectId matches CUID format: lowercase alphanumeric, 21+ characters
+    // CUIDs are typically 24-25 characters and contain only lowercase letters and numbers
+    if (!/^[a-z0-9]{21,}$/.test(projectId)) {
+      const exception = new ForbiddenAppException({}, 'rag');
+      exception.message = 'Project ID is invalid';
+      throw exception;
+    }
+
+    // Verify project exists in the database
+    const project = await this.prisma.client.project.findUnique({
+      where: { id: projectId },
+      select: { id: true, deletedAt: true },
+    });
+
+    if (!project || project.deletedAt !== null) {
+      const exception = new ForbiddenAppException({}, 'rag');
+      exception.message = 'Project not found or deleted';
+      throw exception;
+    }
+  }
+
   private async connect(): Promise<LanceConnection | null> {
     if (this.inMemoryOnly) {
       return null;
@@ -217,7 +259,13 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     return this.db;
   }
 
+  /**
+   * Gets or creates a LanceDB table for a project.
+   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   */
   async getOrCreateTable(projectId: string): Promise<LanceTable> {
+    await this.validateProjectId(projectId);
+
     if (this.ftsIndexMode === 'eager') {
       this.logger.warn('FTS_INDEX_MODE=eager is not yet implemented — using in-memory FTS fallback');
     }
@@ -281,7 +329,13 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     return table;
   }
 
+  /**
+   * Indexes a document in the knowledge base for a project.
+   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   */
   async indexDocument(projectId: string, doc: IndexDocumentInput): Promise<void> {
+    await this.validateProjectId(projectId);
+
     if (!this.embeddingService) {
       this.logger.warn('EmbeddingService not available — skipping RAG indexing');
       return;
@@ -327,145 +381,197 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Searches the knowledge base for a project.
+   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   */
   async search(
     projectId: string,
     query: string,
     limit = 5,
   ): Promise<SearchKbResponseDto> {
-    if (!this.embeddingService) {
-      return { results: [], verdict: 'no_match' };
-    }
+    const searchStartTime = new Date();
+    const emptyResponse = (): SearchKbResponseDto => ({
+      results: [],
+      verdict: 'no_match',
+      provenance: { retrievedAt: searchStartTime.toISOString(), sources: [] },
+    });
 
-    const table = await this.getOrCreateTable(projectId);
-    const rowCount: number = await table.countRows();
-    if (rowCount === 0) {
-      return { results: [], verdict: 'no_match' };
-    }
+    try {
+      await this.validateProjectId(projectId);
 
-    const fetchLimit = Math.min(rowCount, limit * 4);
-    const scanLimit = Math.min(rowCount, 500);
-    const allRows: LanceRecord[] = await table.query().limit(scanLimit).toArray();
-
-    // Native FTS path when LanceDB is available; fall back to in-memory simpleFtsScore
-    let nativeFtsRows: LanceRecord[] = [];
-    let ftsRanked: { id: string; score: number }[];
-
-    if (this.lanceAvailable) {
-      let nativeFtsFailed = false;
-      try {
-        const nativeFtsResult = await table.search(query, 'fts', 'content');
-
-        if (Array.isArray(nativeFtsResult)) {
-          nativeFtsRows = nativeFtsResult as LanceRecord[];
-        } else if (
-          nativeFtsResult &&
-          typeof nativeFtsResult === 'object' &&
-          'toArray' in nativeFtsResult &&
-          typeof (nativeFtsResult as { toArray?: unknown }).toArray === 'function'
-        ) {
-          nativeFtsRows = await (nativeFtsResult as { toArray: () => Promise<LanceRecord[]> }).toArray();
-        } else {
-          nativeFtsFailed = true;
-          this.logger.warn('Native FTS returned unsupported shape — using in-memory FTS');
-        }
-      } catch (err) {
-        nativeFtsFailed = true;
-        this.logger.warn(`Native FTS search failed (${(err as Error).message}) — using in-memory FTS`);
+      if (!this.embeddingService) {
+        return emptyResponse();
       }
-      if (nativeFtsFailed) {
-        // Fall back to in-memory FTS when native FTS is unavailable
+
+      const table = await this.getOrCreateTable(projectId);
+      const rowCount: number = await table.countRows();
+      if (rowCount === 0) {
+        return emptyResponse();
+      }
+
+      const fetchLimit = Math.min(rowCount, limit * 4);
+      const scanLimit = Math.min(rowCount, 500);
+      const allRows: LanceRecord[] = await table.query().limit(scanLimit).toArray();
+
+      // Native FTS path when LanceDB is available; fall back to in-memory simpleFtsScore
+      let nativeFtsRows: LanceRecord[] = [];
+      let ftsRanked: { id: string; score: number }[];
+
+      if (this.lanceAvailable) {
+        let nativeFtsFailed = false;
+        try {
+          const nativeFtsResult = await table.search(query, 'fts', 'content');
+
+          if (Array.isArray(nativeFtsResult)) {
+            nativeFtsRows = nativeFtsResult as LanceRecord[];
+          } else if (
+            nativeFtsResult &&
+            typeof nativeFtsResult === 'object' &&
+            'toArray' in nativeFtsResult &&
+            typeof (nativeFtsResult as { toArray?: unknown }).toArray === 'function'
+          ) {
+            nativeFtsRows = await (nativeFtsResult as { toArray: () => Promise<LanceRecord[]> }).toArray();
+          } else {
+            nativeFtsFailed = true;
+            this.logger.warn('Native FTS returned unsupported shape — using in-memory FTS');
+          }
+        } catch (err) {
+          nativeFtsFailed = true;
+          this.logger.warn(`Native FTS search failed (${(err as Error).message}) — using in-memory FTS`);
+        }
+        if (nativeFtsFailed) {
+          // Fall back to in-memory FTS when native FTS is unavailable
+          ftsRanked = allRows
+            .map((r) => ({ id: r.id as string, score: simpleFtsScore(r.content as string, query) }))
+            .filter((r) => r.score > 0)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, fetchLimit);
+        } else {
+          // Score by reciprocal position: 1/(i+1)
+          ftsRanked = nativeFtsRows.map((r, i) => ({ id: r.id as string, score: 1 / (i + 1) }));
+        }
+      } else {
         ftsRanked = allRows
           .map((r) => ({ id: r.id as string, score: simpleFtsScore(r.content as string, query) }))
           .filter((r) => r.score > 0)
           .sort((a, b) => b.score - a.score)
           .slice(0, fetchLimit);
-      } else {
-        // Score by reciprocal position: 1/(i+1)
-        ftsRanked = nativeFtsRows.map((r, i) => ({ id: r.id as string, score: 1 / (i + 1) }));
       }
-    } else {
-      ftsRanked = allRows
-        .map((r) => ({ id: r.id as string, score: simpleFtsScore(r.content as string, query) }))
-        .filter((r) => r.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, fetchLimit);
-    }
 
-    const ftsScoreMap = new Map<string, number>(ftsRanked.map((r) => [r.id, r.score]));
+      const ftsScoreMap = new Map<string, number>(ftsRanked.map((r) => [r.id, r.score]));
 
-    // Skip vector search when LanceDB is unavailable — use pure FTS
-    let vectorRows: LanceRecord[] = [];
-    if (this.lanceAvailable) {
-      try {
-        const queryVector = await this.embeddingService.embed(query);
-        vectorRows = await table
-          .vectorSearch(queryVector)
-          .distanceType('cosine')
-          .limit(fetchLimit)
-          .toArray();
-      } catch (err) {
-        this.logger.warn(`Vector search failed (${(err as Error).message}) — using FTS only`);
+      // Skip vector search when LanceDB is unavailable — use pure FTS
+      let vectorRows: LanceRecord[] = [];
+      if (this.lanceAvailable) {
+        try {
+          const queryVector = await this.embeddingService.embed(query);
+          vectorRows = await table
+            .vectorSearch(queryVector)
+            .distanceType('cosine')
+            .limit(fetchLimit)
+            .toArray();
+        } catch (err) {
+          this.logger.warn(`Vector search failed (${(err as Error).message}) — using FTS only`);
+        }
       }
+
+      // RRF merge (or pure FTS when vector unavailable)
+      const merged = vectorRows.length > 0
+        ? reciprocalRankFusion(
+            vectorRows.map((r) => ({ id: r.id as string })),
+            ftsRanked.map((r) => ({ id: r.id })),
+          )
+        : ftsRanked.slice(0, limit).map((r) => ({ id: r.id, score: r.score }));
+
+      // Build id → record lookup (include nativeFtsRows so FTS-only records resolve)
+      const recordMap = new Map<string, LanceRecord>();
+      allRows.forEach((r) => recordMap.set(r.id as string, r));
+      vectorRows.forEach((r) => recordMap.set(r.id as string, r));
+      nativeFtsRows.forEach((r) => recordMap.set(r.id as string, r));
+
+      // Build vectorSimilarity lookup (1 - cosine_distance)
+      const simMap = new Map<string, number>();
+      vectorRows.forEach((r) => {
+        const dist = typeof r._distance === 'number' ? r._distance : 1;
+        simMap.set(r.id as string, Math.max(0, 1 - dist));
+      });
+
+      const results: KbResultDto[] = merged
+        .slice(0, limit)
+        .map(({ id }) => {
+          const record = recordMap.get(id);
+          if (!record) return null;
+
+          const score = simMap.get(id) ?? ftsScoreMap.get(id) ?? 0;
+          const similarity = getSimilarityTier(
+            score,
+            this.similarityHigh,
+            this.similarityMedium,
+            this.similarityLow,
+          );
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const meta = (() => { try { return JSON.parse(record.metadata as string) as Record<string, unknown>; } catch { return {}; } })();
+
+          const result: KbResultDto = {
+            id: record.id as string,
+            source: record.source as 'ticket' | 'doc' | 'manual' | 'code',
+            sourceId: record.source_id as string,
+            content: record.content as string,
+            score,
+            similarity,
+            metadata: meta,
+            createdAt: record.created_at as string,
+            provenance: {
+              indexedAt: record.created_at as string,
+              sourceProjectId: projectId,
+            },
+          };
+          return result;
+        })
+        .filter((r): r is KbResultDto => r !== null);
+
+      const topScore = results[0]?.score ?? 0;
+      const verdict = getVerdict(topScore, this.similarityHigh, this.similarityMedium);
+
+      // Build unique sources from recordMap (defensive approach — source of truth is the records)
+      const sourceSet = new Set<string>();
+      const sources: Array<{ sourceType: 'ticket' | 'doc' | 'manual' | 'code'; sourceId: string }> = [];
+      for (const result of results) {
+        const record = recordMap.get(result.id);
+        if (record) {
+          const sourceKey = `${record.source}:${record.source_id}`;
+          if (!sourceSet.has(sourceKey)) {
+            sourceSet.add(sourceKey);
+            sources.push({
+              sourceType: record.source as 'ticket' | 'doc' | 'manual' | 'code',
+              sourceId: record.source_id as string,
+            });
+          }
+        }
+      }
+
+      return {
+        results,
+        verdict,
+        provenance: {
+          retrievedAt: searchStartTime.toISOString(),
+          sources,
+        },
+      };
+    } catch (err) {
+      this.logger.error(`Search failed for project ${projectId}: ${(err as Error).message}`);
+      throw err;
     }
-
-    // RRF merge (or pure FTS when vector unavailable)
-    const merged = vectorRows.length > 0
-      ? reciprocalRankFusion(
-          vectorRows.map((r) => ({ id: r.id as string })),
-          ftsRanked.map((r) => ({ id: r.id })),
-        )
-      : ftsRanked.slice(0, limit).map((r) => ({ id: r.id, score: r.score }));
-
-    // Build id → record lookup (include nativeFtsRows so FTS-only records resolve)
-    const recordMap = new Map<string, LanceRecord>();
-    allRows.forEach((r) => recordMap.set(r.id as string, r));
-    vectorRows.forEach((r) => recordMap.set(r.id as string, r));
-    nativeFtsRows.forEach((r) => recordMap.set(r.id as string, r));
-
-    // Build vectorSimilarity lookup (1 - cosine_distance)
-    const simMap = new Map<string, number>();
-    vectorRows.forEach((r) => {
-      const dist = typeof r._distance === 'number' ? r._distance : 1;
-      simMap.set(r.id as string, Math.max(0, 1 - dist));
-    });
-
-    const results: KbResultDto[] = merged
-      .slice(0, limit)
-      .map(({ id }) => {
-        const record = recordMap.get(id);
-        if (!record) return null;
-
-        const score = simMap.get(id) ?? ftsScoreMap.get(id) ?? 0;
-        const similarity = getSimilarityTier(
-          score,
-          this.similarityHigh,
-          this.similarityMedium,
-          this.similarityLow,
-        );
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const meta = (() => { try { return JSON.parse(record.metadata as string) as Record<string, unknown>; } catch { return {}; } })();
-
-        const result: KbResultDto = {
-          id: record.id as string,
-          source: record.source as 'ticket' | 'doc' | 'manual' | 'code',
-          sourceId: record.source_id as string,
-          content: record.content as string,
-          score,
-          similarity,
-          metadata: meta,
-          createdAt: record.created_at as string,
-        };
-        return result;
-      })
-      .filter((r): r is KbResultDto => r !== null);
-
-    const topScore = results[0]?.score ?? 0;
-    const verdict = getVerdict(topScore, this.similarityHigh, this.similarityMedium);
-
-    return { results, verdict };
   }
 
+  /**
+   * Lists documents in the knowledge base for a project.
+   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   */
   async listDocuments(projectId: string, limit = 100): Promise<KbResultDto[]> {
+    await this.validateProjectId(projectId);
+
     const table = await this.getOrCreateTable(projectId);
     const rowCount: number = await table.countRows();
     if (rowCount === 0) return [];
@@ -484,11 +590,21 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         similarity: 'none' as const,
         metadata: meta,
         createdAt: r.created_at as string,
+        provenance: {
+          indexedAt: r.created_at as string,
+          sourceProjectId: projectId,
+        },
       };
     });
   }
 
+  /**
+   * Deletes documents by source ID in the knowledge base for a project.
+   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   */
   async deleteBySource(projectId: string, sourceId: string): Promise<void> {
+    await this.validateProjectId(projectId);
+
     // Validate sourceId to prevent SQL injection (only allow safe characters)
     if (!/^[a-zA-Z0-9_-]+$/.test(sourceId)) {
       throw new ValidationAppException();
@@ -497,7 +613,13 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     await table.delete(`source_id = '${sourceId}'`);
   }
 
+  /**
+   * Validates the embedding provider for a project's table.
+   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   */
   async validateTableProvider(projectId: string): Promise<{ valid: boolean; message?: string }> {
+    await this.validateProjectId(projectId);
+
     if (!this.embeddingService) return { valid: true };
 
     const db = await this.connect();
@@ -532,7 +654,13 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     return { valid: true };
   }
 
+  /**
+   * Optimizes the LanceDB table for a project.
+   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   */
   async optimizeTable(projectId: string): Promise<void> {
+    await this.validateProjectId(projectId);
+
     if (!this.lanceAvailable) {
       return;
     }
@@ -541,7 +669,13 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     await table.optimize();
   }
 
+  /**
+   * Deletes all documents by source type in the knowledge base for a project.
+   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   */
   async deleteAllBySourceType(projectId: string, sourceType: string): Promise<number> {
+    await this.validateProjectId(projectId);
+
     const validSources = ['ticket', 'doc', 'manual', 'code'];
     if (!validSources.includes(sourceType)) {
       throw new ValidationAppException();
@@ -559,6 +693,10 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     return count;
   }
 
+  /**
+   * Imports a Graphify knowledge graph into the knowledge base for a project.
+   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   */
   async importGraphify(
     projectId: string,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -566,6 +704,8 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     links: any[],
   ): Promise<{ imported: number; cleared: number }> {
+    await this.validateProjectId(projectId);
+
     const cleared = await this.deleteAllBySourceType(projectId, 'code');
 
     // Build a map of node id to node for quick lookup

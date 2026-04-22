@@ -1113,3 +1113,193 @@ describe('RagService.importGraphify (US-002)', () => {
     expect(result).toEqual({ imported: 2, cleared: 3 });
   });
 });
+
+describe('RagService.search — Provenance Envelope (AC-1 through AC-6)', () => {
+  function makeTableWithProvenance(allRows: AnyRecord[]) {
+    return {
+      countRows: jest.fn().mockResolvedValue(allRows.length || 1),
+      query: jest.fn().mockReturnValue({
+        limit: jest.fn().mockReturnThis(),
+        toArray: jest.fn().mockResolvedValue(allRows),
+      }),
+      search: jest.fn().mockResolvedValue(allRows),
+      vectorSearch: jest.fn().mockReturnValue({
+        distanceType: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        toArray: jest.fn().mockResolvedValue(allRows),
+      }),
+    };
+  }
+
+  it('AC-1: SearchKbResponseDto.provenance is non-null on success', async () => {
+    const ragService = new RagService(
+      mockConfigServiceForSearch as never,
+      mockEmbeddingServiceForSearch as never,
+    );
+
+    const doc = makeMockRecord('doc-1', 'authentication error content');
+    const mockTable = makeTableWithProvenance([doc]);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    const result = await ragService.search('test-project', 'authentication error', 5);
+
+    expect(result.provenance).toBeDefined();
+    expect(result.provenance).not.toBeNull();
+  });
+
+  it('AC-2: SearchKbResponseDto.provenance.sources lists unique source_type + source_id pairs only once', async () => {
+    const ragService = new RagService(
+      mockConfigServiceForSearch as never,
+      mockEmbeddingServiceForSearch as never,
+    );
+
+    // Multiple results with the same (source, source_id) pair
+    const createdAt = new Date().toISOString();
+    const doc1: AnyRecord = {
+      id: 'doc-1',
+      source: 'ticket',
+      source_id: 'ticket-123',
+      content: 'error in auth service',
+      vector: [],
+      metadata: '{}',
+      created_at: createdAt,
+      provider: 'ollama',
+      model: 'nomic-embed-text',
+    };
+    const doc2: AnyRecord = {
+      id: 'doc-2',
+      source: 'ticket',
+      source_id: 'ticket-123',
+      content: 'another error in auth service',
+      vector: [],
+      metadata: '{}',
+      created_at: createdAt,
+      provider: 'ollama',
+      model: 'nomic-embed-text',
+    };
+
+    const mockTable = makeTableWithProvenance([doc1, doc2]);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    const result = await ragService.search('test-project', 'error auth', 5);
+
+    // Should have exactly one source entry despite multiple results from same source
+    const sourceEntry = result.provenance?.sources?.find(
+      (s) => s.sourceType === 'ticket' && s.sourceId === 'ticket-123',
+    );
+    expect(sourceEntry).toBeDefined();
+
+    // Count how many times this source appears in provenance.sources
+    const count = result.provenance?.sources?.filter(
+      (s) => s.sourceType === 'ticket' && s.sourceId === 'ticket-123',
+    ).length;
+    expect(count).toBe(1);
+  });
+
+  it('AC-3: KbResultDto.provenance.indexedAt is a valid ISO timestamp', async () => {
+    const ragService = new RagService(
+      mockConfigServiceForSearch as never,
+      mockEmbeddingServiceForSearch as never,
+    );
+
+    const now = new Date().toISOString();
+    const doc = makeMockRecord('doc-1', 'test content');
+    doc.created_at = now;
+
+    const mockTable = makeTableWithProvenance([doc]);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    const result = await ragService.search('test-project', 'test content', 5);
+
+    expect(result.results).toHaveLength(1);
+    const indexedAt = result.results[0].provenance?.indexedAt;
+    expect(indexedAt).toBeDefined();
+    // Check if it's a valid ISO string
+    expect(new Date(indexedAt as string).toISOString()).toBe(now);
+  });
+
+  it('AC-4: KbResultDto.provenance.sourceProjectId equals the request projectId', async () => {
+    const ragService = new RagService(
+      mockConfigServiceForSearch as never,
+      mockEmbeddingServiceForSearch as never,
+    );
+
+    const doc = makeMockRecord('doc-1', 'test content');
+    const mockTable = makeTableWithProvenance([doc]);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    const result = await ragService.search('test-project', 'test content', 5);
+
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].provenance?.sourceProjectId).toBe('test-project');
+  });
+
+  it('AC-5: No cross-project leakage — all results have sourceProjectId matching request', async () => {
+    const ragService = new RagService(
+      mockConfigServiceForSearch as never,
+      mockEmbeddingServiceForSearch as never,
+    );
+
+    // Even if somehow a document from another project slipped in
+    const doc1 = makeMockRecord('doc-1', 'content from project-a');
+    const doc2 = makeMockRecord('doc-2', 'content from project-a');
+
+    const mockTable = makeTableWithProvenance([doc1, doc2]);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_project-a', mockTable]]);
+
+    const result = await ragService.search('project-a', 'content', 5);
+
+    // All results must have sourceProjectId === 'project-a'
+    result.results.forEach((r) => {
+      expect(r.provenance?.sourceProjectId).toBe('project-a');
+    });
+  });
+
+  it('AC-6: SearchKbResponseDto.provenance.retrievedAt is within 1 second of server response', async () => {
+    const ragService = new RagService(
+      mockConfigServiceForSearch as never,
+      mockEmbeddingServiceForSearch as never,
+    );
+
+    const doc = makeMockRecord('doc-1', 'test content');
+    const mockTable = makeTableWithProvenance([doc]);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    const beforeSearch = Date.now();
+    const result = await ragService.search('test-project', 'test content', 5);
+    const afterSearch = Date.now();
+
+    const retrievedAt = result.provenance?.retrievedAt;
+    expect(retrievedAt).toBeDefined();
+
+    const retrievedAtMs = new Date(retrievedAt as string).getTime();
+    const timeDiff = Math.abs(retrievedAtMs - beforeSearch);
+
+    // Should be within 1 second (1000ms) of the search start
+    expect(timeDiff).toBeLessThan(1000);
+  });
+});

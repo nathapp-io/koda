@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IsString, IsOptional, IsNumber, IsArray, MinLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
@@ -9,6 +9,7 @@ import type { PrismaClient } from '@prisma/client';
 import { AgentRole } from '../common/enums';
 import { AgentResponseDto } from './dto/agent-response.dto';
 import { TicketResponseDto } from '../tickets/dto/ticket-response.dto';
+import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
 
 export class CreateAgentDto {
   @ApiProperty({ example: 'Subrina Coder' })
@@ -75,8 +76,31 @@ export class AgentsService {
   constructor(
     private prisma: PrismaService<PrismaClient>,
     private configService: ConfigService,
+    @Optional() private readonly kodaDomainWriter?: KodaDomainWriter,
   ) {}
   private get db() { return this.prisma.client; }
+
+  /**
+   * Records an agent action event through the KodaDomainWriter write gateway.
+   * No-op when KodaDomainWriter is not available (e.g., in isolated unit tests)
+   * or when projectId is absent (agent-management operations have no project scope).
+   */
+  async recordAgentAction(
+    agentId: string,
+    action: string,
+    data: Record<string, unknown> = {},
+    projectId?: string,
+  ): Promise<void> {
+    if (!this.kodaDomainWriter || !projectId) return;
+    await this.kodaDomainWriter.writeAgentAction({
+      agentId,
+      projectId,
+      action,
+      actorId: agentId,
+      source: 'internal',
+      data,
+    });
+  }
 
 
   async generateApiKey(agentId: string): Promise<{ apiKey: string; agent: AgentResponseDto }>;
@@ -107,6 +131,7 @@ export class AgentsService {
         where: { id: agent.id },
         include: { roles: true, capabilities: true },
       });
+      await this.recordAgentAction(agent.id, 'API_KEY_ROTATED', { agentId: agent.id });
       return {
         apiKey: rawKey,
         agent: AgentResponseDto.from(agentWithRelations),
@@ -146,6 +171,7 @@ export class AgentsService {
         roles: createdRoles,
         capabilities: createdCapabilities,
       };
+      await this.recordAgentAction(agent.id, 'AGENT_CREATED', { name: agent.name, slug: agent.slug });
       // Return raw key ONCE to client (never return the hash)
       return {
         apiKey: rawKey,
@@ -326,6 +352,13 @@ export class AgentsService {
       const rankB = AgentsService.PRIORITY_RANK[b.ticket.priority] ?? 0;
       return rankB - rankA;
     });
+
+    await this.recordAgentAction(
+      agent.id,
+      'TICKET_SUGGESTED',
+      { ticketId: scored[0].ticket.id, ticketNumber: scored[0].ticket.number },
+      project.id,
+    );
 
     return scored[0];
   }

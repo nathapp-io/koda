@@ -1,0 +1,121 @@
+[
+  {
+    "acId": "AC-1",
+    "original": "When `RagService.getOrCreateTable()` rejects an invalid `projectId`, it does not create or update any table-cache entry.",
+    "refined": "RagService.getOrCreateTable() with invalid projectId throws ProjectIdValidationError before calling tableCache.set() or tableCache.get(). Verify via spy/mock that cache methods are not invoked.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-2",
+    "original": "When `RagService.search()` rejects an invalid `projectId`, it does not call LanceDB connection logic or embedding generation.",
+    "refined": "RagService.search() with invalid projectId throws ProjectIdValidationError before any calls to lanceDbConnection.connect() or embeddingService.generate(). Verify via spy/mock that neither dependency method is invoked.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-3",
+    "original": "When a project has been soft-deleted, guarded service methods treat its `projectId` as invalid.",
+    "refined": "RagService methods (getOrCreateTable, search) when called with a soft-deleted project's projectId throw ProjectIdValidationError or ProjectNotFoundError. Verify error is thrown regardless of whether project record still exists in database.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-4",
+    "original": "When a malformed `projectId` and a well-formed but non-existent `projectId` are rejected at the service boundary, they produce the same generic forbidden response shape.",
+    "refined": "Both malformed projectId (e.g., invalid UUID format) and valid-but-nonexistent projectId throw the same error class (e.g., ProjectIdValidationError) with identical HTTP status code (403 Forbidden) and error response structure {code, message}.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-5",
+    "original": "When request auth context and project ownership metadata are available, guarded service methods reject a `projectId` that exists but does not belong to the caller org.",
+    "refined": "RagService methods (getOrCreateTable, search) when called with valid projectId that exists but belongs to different organization throw ProjectAccessDeniedError (HTTP 403) before any data access. Verify via authenticated context that caller org != project owner org.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-6",
+    "original": "When `source` is missing or not one of `agent`, `system`, or `manual`, the write is rejected before any canonical or derived write occurs.",
+    "refined": "writeTicketEvent() with missing or invalid source (not in ['agent', 'system', 'manual']) throws ValidationError; zero rows inserted into ticket_events, rag_index, or outbox tables.",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-7",
+    "original": "When canonical write succeeds but derived indexing fails, `canonicalId` remains present and the canonical record is not rolled back.",
+    "refined": "writeTicketEvent() with RagService.index() failing returns WriteResult with canonicalId populated; ticket_events table contains exactly +1 row; no row deletion occurs in ticket_events.",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-8",
+    "original": "When canonical write succeeds but outbox enqueue fails, the canonical record remains committed and the enqueue failure is logged for retry handling.",
+    "refined": "writeTicketEvent() with outbox enqueue failure returns WriteResult with canonical record committed; ticket_events +1 row persists; logger.error() called with retryable error context and event ID.",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-9",
+    "original": "When `writeTicketEvent()` is called with an empty `actorId`, it rejects before attempting any write.",
+    "refined": "writeTicketEvent() with empty or missing actorId throws ValidationError; zero rows inserted into ticket_events, rag_index, or outbox tables.",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-10",
+    "original": "When `RagService.search()` returns zero results, `SearchKbResponseDto.provenance.sources` is an empty array.",
+    "refined": "When search matches zero KB entries, the response includes `provenance.sources` as an empty array `[]`.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-11",
+    "original": "When a result is mapped without explicit index metadata, `provenance.indexMethod` resolves deterministically to one of `manual`, `import`, or `agent`.",
+    "refined": "Each result in the response includes a `provenance.indexMethod` field with a value from the set {`manual`, `import`, `agent`}, determined by the indexing method that created the source record in the KB.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-12",
+    "original": "When a result's `sourceProjectId` does not match the request `projectId`, that result is excluded from the response.",
+    "refined": "Results where `sourceProjectId !== requestProjectId` are filtered out before population of `SearchKbResponseDto.results`; the response contains zero results from other projects.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-13",
+    "original": "When `processPending()` is invoked concurrently, the same outbox event is not processed twice.",
+    "refined": "Concurrent invocations of processPending() must not result in the same outbox event being processed by multiple concurrent calls. Verified by: invoking processPending() from 2+ concurrent threads/processes simultaneously, confirming via database audit log or row-level locks that each event's status transition occurs exactly once, and no duplicate work is enqueued.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-14",
+    "original": "When `processPending()` retries a failed event, `retryCount` increments atomically with the status update.",
+    "refined": "When an outbox event status transitions from 'processing' to 'pending' (retry), retryCount must increment by exactly 1 within the same atomic database transaction. Verified by: capturing the event state before and after retry, confirming retryCount increased by 1 and the transaction timestamp is identical for both updates.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-15",
+    "original": "When an outbox event reaches `dead_letter`, it is no longer selected by subsequent `processPending()` runs.",
+    "refined": "When an outbox event's status is set to 'dead_letter', subsequent invocations of processPending() must return 0 results for that event. Verified by: setting an event to dead_letter, calling processPending(), and asserting the dead_letter event is not present in the result set.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-16",
+    "original": "When an outbox event fails, the last error message is persisted for inspection.",
+    "refined": "When processing an outbox event fails with an error, the error message (up to the column size limit) must be stored in the lastError field of the outbox record within the same transaction. Verified by: triggering a failure, querying the outbox record, and asserting lastError is non-null and contains the expected error text.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-17",
+    "original": "When multiple pending events are processed, they are handled in a stable `createdAt` order.",
+    "refined": "When processPending() selects multiple pending outbox events for processing, events must be processed in ascending createdAt order (FIFO). Verified by: creating 3+ events with different createdAt timestamps, calling processPending(), and asserting the processing log shows events were handled in createdAt-ascending sequence.",
+    "testable": true,
+    "storyId": "US-004"
+  }
+]

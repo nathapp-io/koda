@@ -3,6 +3,14 @@ import { ApiProperty } from '@nestjs/swagger';
 export type SimilarityLevel = 'high' | 'medium' | 'low' | 'none';
 export type VerdictType = 'likely_duplicate' | 'possibly_related' | 'no_match';
 
+export class KbResultProvenanceDto {
+  @ApiProperty({ description: 'ISO timestamp when document was indexed' })
+  indexedAt!: string;
+
+  @ApiProperty({ description: 'Project ID where the document originated' })
+  sourceProjectId!: string;
+}
+
 export class KbResultDto {
   @ApiProperty({ description: 'Document ID' })
   id!: string;
@@ -27,6 +35,26 @@ export class KbResultDto {
 
   @ApiProperty({ description: 'ISO timestamp when indexed' })
   createdAt!: string;
+
+  @ApiProperty({ type: KbResultProvenanceDto, description: 'Provenance information' })
+  provenance!: KbResultProvenanceDto;
+}
+
+export interface SourceReference {
+  sourceType: 'ticket' | 'doc' | 'manual' | 'code';
+  sourceId: string;
+}
+
+export class SearchKbResponseProvenanceDto {
+  @ApiProperty({ description: 'ISO timestamp when search was performed' })
+  retrievedAt!: string;
+
+  @ApiProperty({
+    type: () => Object,
+    isArray: true,
+    description: 'List of unique source references from result set',
+  })
+  sources!: SourceReference[];
 }
 
 export class SearchKbResponseDto {
@@ -38,4 +66,7 @@ export class SearchKbResponseDto {
     description: 'Overall verdict based on top result score',
   })
   verdict!: VerdictType;
+
+  @ApiProperty({ type: SearchKbResponseProvenanceDto, description: 'Response-level provenance' })
+  provenance!: SearchKbResponseProvenanceDto;
 }

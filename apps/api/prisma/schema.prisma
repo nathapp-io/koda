@@ -95,6 +95,7 @@ model Project {
   webhooks Webhook[]
   ciWebhookToken String?
   vcsConnection VcsConnection?
+  outboxEvents OutboxEvent[]
 }
 
 model Ticket {
@@ -250,4 +251,56 @@ model VcsSyncLog {
   completedAt     DateTime?
 
   vcsConnection   VcsConnection @relation(fields: [vcsConnectionId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// Domain Event Models (KodaDomainWriter)
+// ---------------------------------------------------------------------------
+
+model TicketEvent {
+  id        String   @id @default(cuid())
+  ticketId  String
+  projectId String
+  action    String
+  actorId   String
+  actorType String   // user | agent
+  source    String   // api | internal | webhook
+  data      String   @default("{}") // JSON stored as string
+  timestamp DateTime @default(now())
+  createdAt DateTime @default(now())
+}
+
+model AgentEvent {
+  id        String   @id @default(cuid())
+  agentId   String
+  projectId String
+  action    String
+  actorId   String
+  source    String   // api | internal | webhook
+  data      String   @default("{}") // JSON stored as string
+  timestamp DateTime @default(now())
+  createdAt DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Outbox Service Models (Reliability)
+// ---------------------------------------------------------------------------
+
+model OutboxEvent {
+  id           String   @id @default(cuid())
+  projectId    String
+  eventType    String   // ticket_event | agent_event | decision_event | document_indexed | ...
+  eventId      String   // canonical record ID this outbox event originated from
+  payload      String   @default("{}") // JSON stored as string
+  status       String   @default("pending") // pending | processing | completed | failed | dead_letter
+  attempts     Int      @default(0)
+  lastError    String?
+  processedAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([projectId, createdAt])
 }
