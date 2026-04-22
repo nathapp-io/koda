@@ -2270,5 +2270,312 @@
     "storiesFailed": 1,
     "totalDurationMs": 948770,
     "stories": []
+  },
+  {
+    "runId": "run-2026-04-22T06-46-27-457Z",
+    "feature": "memory-guardrails",
+    "startedAt": "2026-04-22T06:46:27.457Z",
+    "completedAt": "2026-04-22T08:56:53.981Z",
+    "totalCost": 18.2433571,
+    "totalStories": 4,
+    "storiesCompleted": 4,
+    "storiesFailed": 0,
+    "totalDurationMs": 7826524,
+    "stories": [
+      {
+        "storyId": "US-001",
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "modelUsed": "haiku",
+        "agentUsed": "claude",
+        "attempts": 1,
+        "finalTier": "fast",
+        "success": true,
+        "cost": 2.9534302,
+        "durationMs": 996323,
+        "firstPassSuccess": true,
+        "startedAt": "2026-04-22T06:46:27.915Z",
+        "completedAt": "2026-04-22T07:15:03.873Z",
+        "fullSuiteGatePassed": true,
+        "runtimeCrashes": 0,
+        "tokens": {
+          "input_tokens": 1022,
+          "output_tokens": 50516,
+          "cache_read_input_tokens": 10322722,
+          "cache_creation_input_tokens": 290352
+        },
+        "context": {
+          "providers": {
+            "static-rules": {
+              "tokensProduced": 11706,
+              "chunksProduced": 18,
+              "chunksKept": 18,
+              "wallClockMs": 20,
+              "timedOut": false,
+              "failed": false
+            },
+            "feature-context": {
+              "tokensProduced": 0,
+              "chunksProduced": 0,
+              "chunksKept": 0,
+              "wallClockMs": 3,
+              "timedOut": false,
+              "failed": false
+            },
+            "session-scratch": {
+              "tokensProduced": 184,
+              "chunksProduced": 1,
+              "chunksKept": 1,
+              "wallClockMs": 6,
+              "timedOut": false,
+              "failed": false
+            },
+            "git-history": {
+              "tokensProduced": 0,
+              "chunksProduced": 0,
+              "chunksKept": 0,
+              "wallClockMs": 290,
+              "timedOut": false,
+              "failed": false
+            },
+            "code-neighbor": {
+              "tokensProduced": 0,
+              "chunksProduced": 0,
+              "chunksKept": 0,
+              "wallClockMs": 113,
+              "timedOut": false,
+              "failed": false
+            }
+          }
+        }
+      },
+      {
+        "storyId": "US-002",
+        "complexity": "complex",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "modelUsed": "sonnet",
+        "agentUsed": "claude",
+        "attempts": 1,
+        "finalTier": "balanced",
+        "success": true,
+        "cost": 5.324665699999999,
+        "durationMs": 1192404,
+        "firstPassSuccess": true,
+        "startedAt": "2026-04-22T07:15:05.898Z",
+        "completedAt": "2026-04-22T08:05:30.109Z",
+        "fullSuiteGatePassed": true,
+        "runtimeCrashes": 0,
+        "tokens": {
+          "input_tokens": 582,
+          "output_tokens": 81310,
+          "cache_read_input_tokens": 7920200,
+          "cache_creation_input_tokens": 283658
+        },
+        "context": {
+          "providers": {
+            "static-rules": {
+              "tokensProduced": 11706,
+              "chunksProduced": 18,
+              "chunksKept": 18,
+              "wallClockMs": 17,
+              "timedOut": false,
+              "failed": false
+            },
+            "feature-context": {
+              "tokensProduced": 0,
+              "chunksProduced": 0,
+              "chunksKept": 0,
+              "wallClockMs": 1,
+              "timedOut": false,
+              "failed": false
+            },
+            "session-scratch": {
+              "tokensProduced": 226,
+              "chunksProduced": 1,
+              "chunksKept": 1,
+              "wallClockMs": 3,
+              "timedOut": false,
+              "failed": false
+            },
+            "git-history": {
+              "tokensProduced": 0,
+              "chunksProduced": 0,
+              "chunksKept": 0,
+              "wallClockMs": 290,
+              "timedOut": false,
+              "failed": false
+            },
+            "code-neighbor": {
+              "tokensProduced": 34,
+              "chunksProduced": 1,
+              "chunksKept": 1,
+              "wallClockMs": 102,
+              "timedOut": false,
+              "failed": false
+            }
+          }
+        }
+      },
+      {
+        "storyId": "US-003",
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "modelUsed": "haiku",
+        "agentUsed": "claude",
+        "attempts": 1,
+        "finalTier": "fast",
+        "success": true,
+        "cost": 0.37751475,
+        "durationMs": 204043,
+        "firstPassSuccess": true,
+        "startedAt": "2026-04-22T08:05:32.158Z",
+        "completedAt": "2026-04-22T08:26:06.846Z",
+        "fullSuiteGatePassed": false,
+        "runtimeCrashes": 0,
+        "tokens": {
+          "input_tokens": 266,
+          "output_tokens": 13286,
+          "cache_read_input_tokens": 2284775,
+          "cache_creation_input_tokens": 65873
+        },
+        "context": {
+          "providers": {
+            "static-rules": {
+              "tokensProduced": 7804,
+              "chunksProduced": 12,
+              "chunksKept": 12,
+              "wallClockMs": 10,
+              "timedOut": false,
+              "failed": false
+            },
+            "feature-context": {
+              "tokensProduced": 0,
+              "chunksProduced": 0,
+              "chunksKept": 0,
+              "wallClockMs": 1,
+              "timedOut": false,
+              "failed": false
+            },
+            "session-scratch": {
+              "tokensProduced": 0,
+              "chunksProduced": 0,
+              "chunksKept": 0,
+              "wallClockMs": 1,
+              "timedOut": false,
+              "failed": false
+            },
+            "git-history": {
+              "tokensProduced": 0,
+              "chunksProduced": 0,
+              "chunksKept": 0,
+              "wallClockMs": 326,
+              "timedOut": false,
+              "failed": false
+            },
+            "code-neighbor": {
+              "tokensProduced": 0,
+              "chunksProduced": 0,
+              "chunksKept": 0,
+              "wallClockMs": 83,
+              "timedOut": false,
+              "failed": false
+            },
+            "plan-digest": {
+              "tokensProduced": 66,
+              "chunksProduced": 3,
+              "chunksKept": 3,
+              "wallClockMs": 0,
+              "timedOut": false,
+              "failed": false
+            }
+          }
+        }
+      },
+      {
+        "storyId": "US-004",
+        "complexity": "simple",
+        "initialComplexity": "simple",
+        "modelTier": "fast",
+        "modelUsed": "haiku",
+        "agentUsed": "claude",
+        "attempts": 1,
+        "finalTier": "fast",
+        "success": true,
+        "cost": 0.5128536000000001,
+        "durationMs": 411541,
+        "firstPassSuccess": true,
+        "startedAt": "2026-04-22T08:26:08.872Z",
+        "completedAt": "2026-04-22T08:43:39.779Z",
+        "fullSuiteGatePassed": false,
+        "runtimeCrashes": 0,
+        "tokens": {
+          "input_tokens": 346,
+          "output_tokens": 15656,
+          "cache_read_input_tokens": 3131151,
+          "cache_creation_input_tokens": 96890
+        },
+        "context": {
+          "providers": {
+            "static-rules": {
+              "tokensProduced": 7804,
+              "chunksProduced": 12,
+              "chunksKept": 12,
+              "wallClockMs": 9,
+              "timedOut": false,
+              "failed": false
+            },
+            "feature-context": {
+              "tokensProduced": 0,
+              "chunksProduced": 0,
+              "chunksKept": 0,
+              "wallClockMs": 0,
+              "timedOut": false,
+              "failed": false
+            },
+            "session-scratch": {
+              "tokensProduced": 0,
+              "chunksProduced": 0,
+              "chunksKept": 0,
+              "wallClockMs": 2,
+              "timedOut": false,
+              "failed": false
+            },
+            "git-history": {
+              "tokensProduced": 0,
+              "chunksProduced": 0,
+              "chunksKept": 0,
+              "wallClockMs": 286,
+              "timedOut": false,
+              "failed": false
+            },
+            "code-neighbor": {
+              "tokensProduced": 34,
+              "chunksProduced": 1,
+              "chunksKept": 1,
+              "wallClockMs": 65,
+              "timedOut": false,
+              "failed": false
+            },
+            "plan-digest": {
+              "tokensProduced": 71,
+              "chunksProduced": 3,
+              "chunksKept": 3,
+              "wallClockMs": 0,
+              "timedOut": false,
+              "failed": false
+            }
+          }
+        }
+      }
+    ],
+    "totalTokens": {
+      "input_tokens": 2216,
+      "output_tokens": 160768,
+      "cache_read_input_tokens": 23658848,
+      "cache_creation_input_tokens": 736773
+    }
   }
 ]

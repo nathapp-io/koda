@@ -96,15 +96,20 @@ describe('US-001: Project ID Hard Enforcement', () => {
       },
     };
 
-    module = await Test.createTestingModule({
-      providers: [
-        RagService,
-        { provide: ConfigService, useValue: mockConfigService },
-        { provide: EmbeddingService, useClass: FakeEmbeddingService },
-      ],
-    }).compile();
+    const mockPrismaService = {
+      client: {
+        project: {
+          findUnique: jest.fn().mockResolvedValue(null),
+        },
+      },
+    };
 
-    ragService = module.get(RagService);
+    ragService = new RagService(
+      mockConfigService as never,
+      new FakeEmbeddingService() as never,
+      undefined,
+      mockPrismaService as never,
+    );
     await ragService.onModuleInit();
   });
 
@@ -907,7 +912,7 @@ describe('AC-3: Project existence validation (Integration)', () => {
   it('AC-3: RagService.getOrCreateTable() with well-formed but non-existent projectId throws ForbiddenAppException', async () => {
     // This test would require a real database connection
     // It should verify that a CUID-shaped project ID that doesn't exist throws
-    const wellFormedId = 'clz1234567890abcdefghijk'; // CUID format
+    const wellFormedId = 'clz1234567890abcdefghijkl'; // CUID format (c + 24 chars = 25 total)
 
     // In a real integration test, this would:
     // 1. Ensure the project doesn't exist in the database
