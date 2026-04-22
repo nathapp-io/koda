@@ -391,172 +391,178 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     limit = 5,
   ): Promise<SearchKbResponseDto> {
     const searchStartTime = new Date();
-    await this.validateProjectId(projectId);
+    const emptyResponse = (): SearchKbResponseDto => ({
+      results: [],
+      verdict: 'no_match',
+      provenance: { retrievedAt: searchStartTime.toISOString(), sources: [] },
+    });
 
-    if (!this.embeddingService) {
-      return {
-        results: [],
-        verdict: 'no_match',
-        provenance: { retrievedAt: searchStartTime.toISOString(), sources: [] },
-      };
-    }
+    try {
+      await this.validateProjectId(projectId);
 
-    const table = await this.getOrCreateTable(projectId);
-    const rowCount: number = await table.countRows();
-    if (rowCount === 0) {
-      return {
-        results: [],
-        verdict: 'no_match',
-        provenance: { retrievedAt: searchStartTime.toISOString(), sources: [] },
-      };
-    }
-
-    const fetchLimit = Math.min(rowCount, limit * 4);
-    const scanLimit = Math.min(rowCount, 500);
-    const allRows: LanceRecord[] = await table.query().limit(scanLimit).toArray();
-
-    // Native FTS path when LanceDB is available; fall back to in-memory simpleFtsScore
-    let nativeFtsRows: LanceRecord[] = [];
-    let ftsRanked: { id: string; score: number }[];
-
-    if (this.lanceAvailable) {
-      let nativeFtsFailed = false;
-      try {
-        const nativeFtsResult = await table.search(query, 'fts', 'content');
-
-        if (Array.isArray(nativeFtsResult)) {
-          nativeFtsRows = nativeFtsResult as LanceRecord[];
-        } else if (
-          nativeFtsResult &&
-          typeof nativeFtsResult === 'object' &&
-          'toArray' in nativeFtsResult &&
-          typeof (nativeFtsResult as { toArray?: unknown }).toArray === 'function'
-        ) {
-          nativeFtsRows = await (nativeFtsResult as { toArray: () => Promise<LanceRecord[]> }).toArray();
-        } else {
-          nativeFtsFailed = true;
-          this.logger.warn('Native FTS returned unsupported shape — using in-memory FTS');
-        }
-      } catch (err) {
-        nativeFtsFailed = true;
-        this.logger.warn(`Native FTS search failed (${(err as Error).message}) — using in-memory FTS`);
+      if (!this.embeddingService) {
+        return emptyResponse();
       }
-      if (nativeFtsFailed) {
-        // Fall back to in-memory FTS when native FTS is unavailable
+
+      const table = await this.getOrCreateTable(projectId);
+      const rowCount: number = await table.countRows();
+      if (rowCount === 0) {
+        return emptyResponse();
+      }
+
+      const fetchLimit = Math.min(rowCount, limit * 4);
+      const scanLimit = Math.min(rowCount, 500);
+      const allRows: LanceRecord[] = await table.query().limit(scanLimit).toArray();
+
+      // Native FTS path when LanceDB is available; fall back to in-memory simpleFtsScore
+      let nativeFtsRows: LanceRecord[] = [];
+      let ftsRanked: { id: string; score: number }[];
+
+      if (this.lanceAvailable) {
+        let nativeFtsFailed = false;
+        try {
+          const nativeFtsResult = await table.search(query, 'fts', 'content');
+
+          if (Array.isArray(nativeFtsResult)) {
+            nativeFtsRows = nativeFtsResult as LanceRecord[];
+          } else if (
+            nativeFtsResult &&
+            typeof nativeFtsResult === 'object' &&
+            'toArray' in nativeFtsResult &&
+            typeof (nativeFtsResult as { toArray?: unknown }).toArray === 'function'
+          ) {
+            nativeFtsRows = await (nativeFtsResult as { toArray: () => Promise<LanceRecord[]> }).toArray();
+          } else {
+            nativeFtsFailed = true;
+            this.logger.warn('Native FTS returned unsupported shape — using in-memory FTS');
+          }
+        } catch (err) {
+          nativeFtsFailed = true;
+          this.logger.warn(`Native FTS search failed (${(err as Error).message}) — using in-memory FTS`);
+        }
+        if (nativeFtsFailed) {
+          // Fall back to in-memory FTS when native FTS is unavailable
+          ftsRanked = allRows
+            .map((r) => ({ id: r.id as string, score: simpleFtsScore(r.content as string, query) }))
+            .filter((r) => r.score > 0)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, fetchLimit);
+        } else {
+          // Score by reciprocal position: 1/(i+1)
+          ftsRanked = nativeFtsRows.map((r, i) => ({ id: r.id as string, score: 1 / (i + 1) }));
+        }
+      } else {
         ftsRanked = allRows
           .map((r) => ({ id: r.id as string, score: simpleFtsScore(r.content as string, query) }))
           .filter((r) => r.score > 0)
           .sort((a, b) => b.score - a.score)
           .slice(0, fetchLimit);
-      } else {
-        // Score by reciprocal position: 1/(i+1)
-        ftsRanked = nativeFtsRows.map((r, i) => ({ id: r.id as string, score: 1 / (i + 1) }));
       }
-    } else {
-      ftsRanked = allRows
-        .map((r) => ({ id: r.id as string, score: simpleFtsScore(r.content as string, query) }))
-        .filter((r) => r.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, fetchLimit);
-    }
 
-    const ftsScoreMap = new Map<string, number>(ftsRanked.map((r) => [r.id, r.score]));
+      const ftsScoreMap = new Map<string, number>(ftsRanked.map((r) => [r.id, r.score]));
 
-    // Skip vector search when LanceDB is unavailable — use pure FTS
-    let vectorRows: LanceRecord[] = [];
-    if (this.lanceAvailable) {
-      try {
-        const queryVector = await this.embeddingService.embed(query);
-        vectorRows = await table
-          .vectorSearch(queryVector)
-          .distanceType('cosine')
-          .limit(fetchLimit)
-          .toArray();
-      } catch (err) {
-        this.logger.warn(`Vector search failed (${(err as Error).message}) — using FTS only`);
+      // Skip vector search when LanceDB is unavailable — use pure FTS
+      let vectorRows: LanceRecord[] = [];
+      if (this.lanceAvailable) {
+        try {
+          const queryVector = await this.embeddingService.embed(query);
+          vectorRows = await table
+            .vectorSearch(queryVector)
+            .distanceType('cosine')
+            .limit(fetchLimit)
+            .toArray();
+        } catch (err) {
+          this.logger.warn(`Vector search failed (${(err as Error).message}) — using FTS only`);
+        }
       }
-    }
 
-    // RRF merge (or pure FTS when vector unavailable)
-    const merged = vectorRows.length > 0
-      ? reciprocalRankFusion(
-          vectorRows.map((r) => ({ id: r.id as string })),
-          ftsRanked.map((r) => ({ id: r.id })),
-        )
-      : ftsRanked.slice(0, limit).map((r) => ({ id: r.id, score: r.score }));
+      // RRF merge (or pure FTS when vector unavailable)
+      const merged = vectorRows.length > 0
+        ? reciprocalRankFusion(
+            vectorRows.map((r) => ({ id: r.id as string })),
+            ftsRanked.map((r) => ({ id: r.id })),
+          )
+        : ftsRanked.slice(0, limit).map((r) => ({ id: r.id, score: r.score }));
 
-    // Build id → record lookup (include nativeFtsRows so FTS-only records resolve)
-    const recordMap = new Map<string, LanceRecord>();
-    allRows.forEach((r) => recordMap.set(r.id as string, r));
-    vectorRows.forEach((r) => recordMap.set(r.id as string, r));
-    nativeFtsRows.forEach((r) => recordMap.set(r.id as string, r));
+      // Build id → record lookup (include nativeFtsRows so FTS-only records resolve)
+      const recordMap = new Map<string, LanceRecord>();
+      allRows.forEach((r) => recordMap.set(r.id as string, r));
+      vectorRows.forEach((r) => recordMap.set(r.id as string, r));
+      nativeFtsRows.forEach((r) => recordMap.set(r.id as string, r));
 
-    // Build vectorSimilarity lookup (1 - cosine_distance)
-    const simMap = new Map<string, number>();
-    vectorRows.forEach((r) => {
-      const dist = typeof r._distance === 'number' ? r._distance : 1;
-      simMap.set(r.id as string, Math.max(0, 1 - dist));
-    });
+      // Build vectorSimilarity lookup (1 - cosine_distance)
+      const simMap = new Map<string, number>();
+      vectorRows.forEach((r) => {
+        const dist = typeof r._distance === 'number' ? r._distance : 1;
+        simMap.set(r.id as string, Math.max(0, 1 - dist));
+      });
 
-    const results: KbResultDto[] = merged
-      .slice(0, limit)
-      .map(({ id }) => {
-        const record = recordMap.get(id);
-        if (!record) return null;
+      const results: KbResultDto[] = merged
+        .slice(0, limit)
+        .map(({ id }) => {
+          const record = recordMap.get(id);
+          if (!record) return null;
 
-        const score = simMap.get(id) ?? ftsScoreMap.get(id) ?? 0;
-        const similarity = getSimilarityTier(
-          score,
-          this.similarityHigh,
-          this.similarityMedium,
-          this.similarityLow,
-        );
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const meta = (() => { try { return JSON.parse(record.metadata as string) as Record<string, unknown>; } catch { return {}; } })();
+          const score = simMap.get(id) ?? ftsScoreMap.get(id) ?? 0;
+          const similarity = getSimilarityTier(
+            score,
+            this.similarityHigh,
+            this.similarityMedium,
+            this.similarityLow,
+          );
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const meta = (() => { try { return JSON.parse(record.metadata as string) as Record<string, unknown>; } catch { return {}; } })();
 
-        const result: KbResultDto = {
-          id: record.id as string,
-          source: record.source as 'ticket' | 'doc' | 'manual' | 'code',
-          sourceId: record.source_id as string,
-          content: record.content as string,
-          score,
-          similarity,
-          metadata: meta,
-          createdAt: record.created_at as string,
-          provenance: {
-            indexedAt: record.created_at as string,
-            sourceProjectId: projectId,
-          },
-        };
-        return result;
-      })
-      .filter((r): r is KbResultDto => r !== null);
+          const result: KbResultDto = {
+            id: record.id as string,
+            source: record.source as 'ticket' | 'doc' | 'manual' | 'code',
+            sourceId: record.source_id as string,
+            content: record.content as string,
+            score,
+            similarity,
+            metadata: meta,
+            createdAt: record.created_at as string,
+            provenance: {
+              indexedAt: record.created_at as string,
+              sourceProjectId: projectId,
+            },
+          };
+          return result;
+        })
+        .filter((r): r is KbResultDto => r !== null);
 
-    const topScore = results[0]?.score ?? 0;
-    const verdict = getVerdict(topScore, this.similarityHigh, this.similarityMedium);
+      const topScore = results[0]?.score ?? 0;
+      const verdict = getVerdict(topScore, this.similarityHigh, this.similarityMedium);
 
-    // Build unique sources from results
-    const sourceSet = new Set<string>();
-    const sources: Array<{ sourceType: 'ticket' | 'doc' | 'manual' | 'code'; sourceId: string }> = [];
-    for (const result of results) {
-      const sourceKey = `${result.source}:${result.sourceId}`;
-      if (!sourceSet.has(sourceKey)) {
-        sourceSet.add(sourceKey);
-        sources.push({
-          sourceType: result.source,
-          sourceId: result.sourceId,
-        });
+      // Build unique sources from recordMap (defensive approach — source of truth is the records)
+      const sourceSet = new Set<string>();
+      const sources: Array<{ sourceType: 'ticket' | 'doc' | 'manual' | 'code'; sourceId: string }> = [];
+      for (const result of results) {
+        const record = recordMap.get(result.id);
+        if (record) {
+          const sourceKey = `${record.source}:${record.source_id}`;
+          if (!sourceSet.has(sourceKey)) {
+            sourceSet.add(sourceKey);
+            sources.push({
+              sourceType: record.source as 'ticket' | 'doc' | 'manual' | 'code',
+              sourceId: record.source_id as string,
+            });
+          }
+        }
       }
-    }
 
-    return {
-      results,
-      verdict,
-      provenance: {
-        retrievedAt: searchStartTime.toISOString(),
-        sources,
-      },
-    };
+      return {
+        results,
+        verdict,
+        provenance: {
+          retrievedAt: searchStartTime.toISOString(),
+          sources,
+        },
+      };
+    } catch (err) {
+      this.logger.error(`Search failed for project ${projectId}: ${(err as Error).message}`);
+      throw err;
+    }
   }
 
   /**
