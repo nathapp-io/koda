@@ -1,4 +1,4 @@
-import { Controller, Get, HttpCode, UseGuards } from '@nestjs/common';
+import { Controller, Get, HttpCode, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { OutboxService, OutboxEventData } from './outbox.service';
 import { JwtAuthGuard } from '@nathapp/nestjs-auth';
@@ -16,14 +16,19 @@ export class AdminController {
 
   @Get('outbox')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Get pending outbox events' })
-  @ApiResponse({ status: 200, description: 'Returns pending outbox events' })
+  @ApiOperation({ summary: 'Get outbox events by status' })
+  @ApiResponse({ status: 200, description: 'Returns outbox events' })
   @ApiResponse({ status: 403, description: 'Forbidden - requires admin role' })
-  async getOutbox(@CurrentUser() currentUser: AdminUser) {
+  async getOutbox(
+    @CurrentUser() currentUser: AdminUser,
+    @Query('status') status?: string,
+  ) {
     if (currentUser?.extra?.role !== 'ADMIN') {
       throw new ForbiddenAppException({}, 'admin');
     }
-    const events = await this.outboxService.getPendingEvents();
+    const events = status
+      ? await this.outboxService.getEventsByStatus(status)
+      : await this.outboxService.getPendingEvents();
     return {
       items: events,
       total: events.length,

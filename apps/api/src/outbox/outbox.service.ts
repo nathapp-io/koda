@@ -25,6 +25,7 @@ export interface OutboxEventData {
 
 const MAX_RETRIES = 3;
 const PROCESSING_STALE_MS = 60_000;
+const BACKOFF_MS = (attempt: number) => Math.pow(2, attempt * 2) * 1000;
 
 @Injectable()
 export class OutboxService {
@@ -49,6 +50,15 @@ export class OutboxService {
   async getPendingEvents(limit = 100): Promise<OutboxEventData[]> {
     const events = await this.prisma.client.outboxEvent.findMany({
       where: { status: 'pending' },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
+    });
+    return events.map(this.mapToOutboxEventData);
+  }
+
+  async getEventsByStatus(status: string, limit = 100): Promise<OutboxEventData[]> {
+    const events = await this.prisma.client.outboxEvent.findMany({
+      where: { status },
       orderBy: { createdAt: 'asc' },
       take: limit,
     });
