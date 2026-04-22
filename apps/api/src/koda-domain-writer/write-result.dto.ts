@@ -19,6 +19,8 @@ export interface Provenance {
   timestamp: Date;
   /** Source of the operation (e.g., 'api', 'internal', 'webhook') */
   source: 'api' | 'internal' | 'webhook';
+  /** ID of the event record created */
+  eventId?: string;
 }
 
 /**

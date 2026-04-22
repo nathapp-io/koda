@@ -49,15 +49,16 @@ export class KodaDomainWriter {
     projectId: string,
     action: string,
     source: 'api' | 'internal' | 'webhook',
+    eventId?: string,
   ): Provenance {
-    return { actorId, projectId, action, timestamp: new Date(), source };
+    return { actorId, projectId, action, timestamp: new Date(), source, eventId };
   }
 
   private assertActorHasEventRole(actor: { projectRoles: string[] }): void {
     if (actor.projectRoles.length === 0) {
       return;
     }
-    const allowedRoles = ['ADMIN', 'DEVELOPER', 'AGENT'];
+    const allowedRoles = ['ADMIN', 'DEVELOPER', 'AGENT', 'VERIFIER', 'REVIEWER'];
     const hasRole = actor.projectRoles.some((role) => allowedRoles.includes(role));
     if (!hasRole) {
       throw new ForbiddenAppException({}, 'koda-domain-writer');
@@ -95,7 +96,7 @@ export class KodaDomainWriter {
 
     return {
       canonicalId: event.id,
-      provenance: this.buildProvenance(data.actorId, data.projectId, data.action, data.source),
+      provenance: this.buildProvenance(data.actorId, data.projectId, data.action, data.source, event.id),
     };
   }
 
@@ -128,7 +129,7 @@ export class KodaDomainWriter {
 
     return {
       canonicalId: event.id,
-      provenance: this.buildProvenance(data.actorId, data.projectId, data.action, data.source),
+      provenance: this.buildProvenance(data.actorId, data.projectId, data.action, data.source, event.id),
     };
   }
 
@@ -181,7 +182,7 @@ export class KodaDomainWriter {
       canonicalId: event.id,
       derivedIds: [],
       error: ragError,
-      provenance: this.buildProvenance(data.actorId, data.projectId, 'INDEX_DOCUMENT', 'api'),
+      provenance: this.buildProvenance(data.actorId, data.projectId, 'INDEX_DOCUMENT', 'api', event.id),
     };
   }
 
