@@ -45,15 +45,10 @@ Thumbs.db
 
 # nax runtime
 .nax/prompt-audit/
+.nax/review-audit/
 .nax/review-verdicts/
 .nax/**/semantic-verdicts/
 nax.lock
-nax/metrics.json
-nax/**/status.json
-nax/**/*.jsonl
-nax/**/runs/
-nax/**/acp-sessions.json
-nax/**/progress.txt
 .nax-wt/
 .nax-pids
 .nax-verifier-verdict.json
@@ -65,7 +60,6 @@ apps/api/smoke-result.txt
 .nax/**/status.json
 .nax/**/*.jsonl
 .nax/**/runs/
-.nax/prompt-audit/
 .nax/**/acp-sessions.json
 .nax/**/progress.txt
 .nax/**/*.bak
@@ -76,9 +70,6 @@ apps/web/playwright-report/
 apps/web/test-results/
 apps/api/lancedb/
 lancedb/
-
-.nax-pids
-.nax-wt/
 
 ## cli test will create .koda on apps/cli
 ## we not ignore the project level .koda
