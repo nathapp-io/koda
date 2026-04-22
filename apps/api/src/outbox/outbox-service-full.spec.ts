@@ -21,6 +21,7 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { OutboxService, OutboxEventInput, OutboxEventData } from './outbox.service';
+import { OutboxFanOutRegistry } from './outbox-fan-out-registry';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
 
@@ -42,17 +43,27 @@ function createMockPrismaClient() {
   };
 }
 
+function createMockFanOutRegistry() {
+  return {
+    dispatch: jest.fn().mockResolvedValue(undefined),
+    register: jest.fn(),
+    getHandlers: jest.fn().mockReturnValue([]),
+  };
+}
+
 describe('OutboxService - AC1: enqueue persists pending OutboxEvent', () => {
   let service: OutboxService;
   let mockPrisma: { client: ReturnType<typeof createMockPrismaClient> };
 
   beforeEach(async () => {
     mockPrisma = { client: createMockPrismaClient() };
+    const mockFanOutRegistry = createMockFanOutRegistry();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OutboxService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: OutboxFanOutRegistry, useValue: mockFanOutRegistry },
       ],
     }).compile();
 
@@ -111,11 +122,13 @@ describe('OutboxService - AC2: processPending with default limit 50 ordered by c
 
   beforeEach(async () => {
     mockPrisma = { client: createMockPrismaClient() };
+    const mockFanOutRegistry = createMockFanOutRegistry();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OutboxService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: OutboxFanOutRegistry, useValue: mockFanOutRegistry },
       ],
     }).compile();
 
@@ -174,11 +187,13 @@ describe('OutboxService - AC3: markCompleted sets status=completed and processed
 
   beforeEach(async () => {
     mockPrisma = { client: createMockPrismaClient() };
+    const mockFanOutRegistry = createMockFanOutRegistry();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OutboxService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: OutboxFanOutRegistry, useValue: mockFanOutRegistry },
       ],
     }).compile();
 
@@ -220,11 +235,13 @@ describe('OutboxService - AC4: markFailed records failure details', () => {
 
   beforeEach(async () => {
     mockPrisma = { client: createMockPrismaClient() };
+    const mockFanOutRegistry = createMockFanOutRegistry();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OutboxService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: OutboxFanOutRegistry, useValue: mockFanOutRegistry },
       ],
     }).compile();
 
@@ -281,11 +298,13 @@ describe('OutboxService - AC5: markDeadLetter sets status=dead_letter and lastEr
 
   beforeEach(async () => {
     mockPrisma = { client: createMockPrismaClient() };
+    const mockFanOutRegistry = createMockFanOutRegistry();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OutboxService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: OutboxFanOutRegistry, useValue: mockFanOutRegistry },
       ],
     }).compile();
 
@@ -340,11 +359,13 @@ describe('OutboxService - AC6: Exponential backoff 1s, 4s, 16s before dead-lette
 
   beforeEach(async () => {
     mockPrisma = { client: createMockPrismaClient() };
+    const mockFanOutRegistry = createMockFanOutRegistry();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OutboxService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: OutboxFanOutRegistry, useValue: mockFanOutRegistry },
       ],
     }).compile();
 
@@ -453,11 +474,13 @@ describe('OutboxService - AC7: retryEvent allows admin reset of dead-letter to p
 
   beforeEach(async () => {
     mockPrisma = { client: createMockPrismaClient() };
+    const mockFanOutRegistry = createMockFanOutRegistry();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OutboxService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: OutboxFanOutRegistry, useValue: mockFanOutRegistry },
       ],
     }).compile();
 
@@ -493,11 +516,13 @@ describe('OutboxService - AC9: Idempotent processing for completed/processing ev
 
   beforeEach(async () => {
     mockPrisma = { client: createMockPrismaClient() };
+    const mockFanOutRegistry = createMockFanOutRegistry();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OutboxService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: OutboxFanOutRegistry, useValue: mockFanOutRegistry },
       ],
     }).compile();
 
@@ -568,11 +593,13 @@ describe('OutboxService - AC10: dispatch throws triggers markFailed not immediat
 
   beforeEach(async () => {
     mockPrisma = { client: createMockPrismaClient() };
+    const mockFanOutRegistry = createMockFanOutRegistry();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OutboxService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: OutboxFanOutRegistry, useValue: mockFanOutRegistry },
       ],
     }).compile();
 
