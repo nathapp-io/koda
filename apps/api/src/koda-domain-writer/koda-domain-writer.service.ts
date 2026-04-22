@@ -57,7 +57,7 @@ export class KodaDomainWriter {
 
   private assertActorHasEventRole(actor: { projectRoles: string[] }): void {
     if (actor.projectRoles.length === 0) return;
-    const allowedRoles = ['VERIFIER', 'DEVELOPER', 'REVIEWER'];
+    const allowedRoles = ['AGENT', 'VERIFIER', 'DEVELOPER', 'REVIEWER'];
     const hasRole = actor.projectRoles.some((role) => allowedRoles.includes(role));
     if (!hasRole) {
       throw new ForbiddenAppException({}, 'koda-domain-writer');
