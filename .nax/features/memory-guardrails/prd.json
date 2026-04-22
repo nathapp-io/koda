@@ -1,0 +1,191 @@
+{
+  "project": "koda",
+  "feature": "memory-guardrails",
+  "branchName": "feat/memory-guardrails",
+  "createdAt": "2026-04-16T16:25:17.803Z",
+  "updatedAt": "2026-04-17T00:00:00.000Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Project ID Hard Enforcement",
+      "description": "Implement strict project namespace validation on the existing RAG read/write boundary so all guarded service methods reject invalid `projectId` values before any data access. Preserve the current `slug -> projectId` controller flow, treat raw `projectId` validation at the controller boundary as a separate HTTP 400 concern, and keep caller-org ownership as an explicit requirement once auth and project-ownership context exist.",
+      "acceptanceCriteria": [
+        "When `RagService.getOrCreateTable('')` is called, it throws `ForbiddenException` with message `Project ID is required`.",
+        "When `RagService.getOrCreateTable('not-a-project-id')` is called, it throws `ForbiddenException`.",
+        "When `RagService.getOrCreateTable('cm_invalid_but_well_shaped')` is called and the project does not exist, it throws `ForbiddenException`.",
+        "When `RagService.search()` is called with an invalid `projectId`, it rejects before any table access occurs.",
+        "Every service method that accepts `projectId` has a doc comment `@throws ForbiddenException if projectId is invalid`.",
+        "Current slug-routed API endpoints resolve `slug -> projectId` before calling guarded services; any new endpoint that accepts raw `projectId` as a path/query param returns 400 when the value is missing or malformed."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "security",
+        "rag",
+        "memory"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/rag/rag.service.ts",
+        "apps/api/src/rag/rag.controller.ts",
+        "apps/api/src/projects/projects.service.ts",
+        "apps/api/src/rag/rag.service.spec.ts",
+        "apps/api/test/integration/rag/rag.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When `RagService.getOrCreateTable()` rejects an invalid `projectId`, it does not create or update any table-cache entry.",
+        "When `RagService.search()` rejects an invalid `projectId`, it does not call LanceDB connection logic or embedding generation.",
+        "When a project has been soft-deleted, guarded service methods treat its `projectId` as invalid.",
+        "When a malformed `projectId` and a well-formed but non-existent `projectId` are rejected at the service boundary, they produce the same generic forbidden response shape.",
+        "When request auth context and project ownership metadata are available, guarded service methods reject a `projectId` that exists but does not belong to the caller org."
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "KodaDomainWriter Write Gate",
+      "description": "Introduce `KodaDomainWriter` as the explicit write gateway for agent-initiated operations. The service should persist canonical ticket/agent events, delegate derived indexing/import work to `RagService`, return provenance-rich `WriteResult` values, and be wired into the existing agent write flow (`AgentsService` in the current codebase) so repositories are no longer called directly from agent write paths.",
+      "acceptanceCriteria": [
+        "When `KodaDomainWriter.writeTicketEvent(data)` is called, it writes a record to `ticket_events` and returns `WriteResult` with `canonicalId`.",
+        "When `KodaDomainWriter.writeAgentAction(data)` is called, it writes a record to `agent_events` and returns `WriteResult` with `canonicalId`.",
+        "When `KodaDomainWriter.indexDocument(data)` is called, it calls `RagService.indexDocument()` and returns `WriteResult` with `derivedIds`.",
+        "When `KodaDomainWriter.importGraphify(data)` is called, it calls `RagService.importGraphify()` and returns `WriteResult`.",
+        "Every `WriteResult` includes a fully populated `provenance` field with `actorId`, `projectId`, `action`, `timestamp`, and `source`.",
+        "When `writeTicketEvent` is called with a non-existent `projectId`, it throws `ForbiddenException`.",
+        "When `RagService.indexDocument()` fails during `indexDocument()`, `WriteResult.error` contains the error message but the canonical write is still committed.",
+        "When `KodaDomainWriter` is injected into the existing agent service flow, it replaces direct repository calls for write operations."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "security",
+        "memory",
+        "persistence"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/agents/agents.service.ts",
+        "apps/api/src/tickets/state-machine/ticket-transitions.service.ts",
+        "apps/api/src/rag/rag.service.ts",
+        "apps/api/src/app.module.ts"
+      ],
+      "suggestedCriteria": [
+        "When `source` is missing or not one of `agent`, `system`, or `manual`, the write is rejected before any canonical or derived write occurs.",
+        "When canonical write succeeds but derived indexing fails, `canonicalId` remains present and the canonical record is not rolled back.",
+        "When canonical write succeeds but outbox enqueue fails, the canonical record remains committed and the enqueue failure is logged for retry handling.",
+        "When `writeTicketEvent()` is called with an empty `actorId`, it rejects before attempting any write."
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "Provenance Envelope on Search Responses",
+      "description": "Extend the KB search response contract so every successful `RagService.search()` response includes response-level provenance and per-result provenance. This should remain additive to the existing response shape while ensuring the returned result set cannot contain cross-project leakage.",
+      "acceptanceCriteria": [
+        "When `RagService.search()` succeeds, `SearchKbResponseDto.provenance` is non-null.",
+        "When `SearchKbResponseDto.results` contains repeated `source_type` + `source_id` pairs, `SearchKbResponseDto.provenance.sources` lists each unique pair only once.",
+        "When `KbResultDto.provenance.indexedAt` is serialized, it is a valid ISO timestamp.",
+        "When a search result is returned, `KbResultDto.provenance.sourceProjectId` equals the request `projectId`.",
+        "When searching with `projectId: 'project-a'`, no returned result reports `provenance.sourceProjectId === 'project-b'`.",
+        "When `SearchKbResponseDto.provenance.retrievedAt` is emitted, it is within 1 second of the server-side response timestamp."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "rag",
+        "memory"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/rag/dto/kb-result.dto.ts",
+        "apps/api/src/rag/rag.service.ts",
+        "apps/api/src/rag/rag.controller.ts",
+        "apps/api/src/rag/rag.service.spec.ts",
+        "apps/api/test/integration/rag/rag.integration.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When `RagService.search()` returns zero results, `SearchKbResponseDto.provenance.sources` is an empty array.",
+        "When a result is mapped without explicit index metadata, `provenance.indexMethod` resolves deterministically to one of `manual`, `import`, or `agent`.",
+        "When a result's `sourceProjectId` does not match the request `projectId`, that result is excluded from the response."
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "Outbox Service Skeleton",
+      "description": "Add an outbox skeleton for derived-store reliability so canonical writes can enqueue follow-up work without blocking the request path. The service should persist pending work, process it through a small retry state machine, and support the new domain writer integration.",
+      "acceptanceCriteria": [
+        "When `OutboxService.enqueue(event)` is called, it persists an `outbox_events` record with status `pending`.",
+        "When `OutboxService.processPending()` runs, it selects all `pending` records and marks each processed record `completed` or `failed`.",
+        "When `KodaDomainWriter` completes a canonical write, it calls `OutboxService.enqueue()` fire-and-forget and does not block the canonical result on outbox completion.",
+        "When an outbox event fails repeatedly, it is retried up to 3 times before moving to `dead_letter`."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "persistence",
+        "memory"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/memory/domain-writer.service.ts",
+        "apps/api/src/app.module.ts",
+        "apps/api/src/agents/agents.service.ts",
+        "apps/api/src/tickets/state-machine/ticket-transitions.service.ts"
+      ],
+      "suggestedCriteria": [
+        "When `processPending()` is invoked concurrently, the same outbox event is not processed twice.",
+        "When `processPending()` retries a failed event, `retryCount` increments atomically with the status update.",
+        "When an outbox event reaches `dead_letter`, it is no longer selected by subsequent `processPending()` runs.",
+        "When an outbox event fails, the last error message is persisted for inspection.",
+        "When multiple pending events are processed, they are handled in a stable `createdAt` order."
+      ]
+    }
+  ],
+  "analysis": "This phase should be executed against the real `apps/api` surface, not against speculative abstractions. The immediate guardrail is in `apps/api/src/rag/rag.service.ts`, with `apps/api/src/rag/rag.controller.ts` already following the intended pattern of resolving `slug -> project.id` before service calls. There is no current `rag.repository.ts`, `docs.service.ts`, or singular `AgentService`; the existing write-path integration point is `apps/api/src/agents/agents.service.ts`, with related mutation behavior also living in ticket transition services. Phase 0 should therefore harden the existing RAG and agent mutation boundaries first, and only introduce new abstractions where the stories explicitly require them.\n\nFor project validation, the enforceable boundary today is: non-empty raw input, CUID-shaped internal project identifier, and an existing non-deleted project record in `projects`. Controller-level raw `projectId` inputs should reject missing or malformed values with HTTP 400 before service entry. Service-level guarded methods should reject invalid or non-existent project ids with `ForbiddenException` before any LanceDB table access, cache mutation, embedding generation, or derived-store activity. The source spec also requires caller-org ownership checks. Because the current schema does not yet expose the org or tenant linkage needed to enforce that cleanly, the PRD should keep this as an explicit schema/auth prerequisite or follow-up decision rather than treating existence-only validation as full completion.\n\nThe provenance and writer work are valid but need pragmatic boundaries. `SearchKbResponseDto` and `KbResultDto` changes are additive at the payload level, but they still change the OpenAPI contract and require `openapi.json` and generated client updates in lockstep. The `sourceProjectId` check should stay as a defensive invariant even if LanceDB is keyed by project today: a mismatched result must never be returned. For `KodaDomainWriter`, provenance `source` should be passed explicitly in write inputs instead of inferred implicitly. Canonical writes should succeed or fail transactionally, and derived failures must not roll back canonical state. The story-level acceptance criteria still allow `indexDocument()` to surface a derived failure in `WriteResult`, but outbox enqueue failures should at minimum be logged and retried rather than blocking canonical completion. Existing tests will need fixture updates because many current RAG tests use ad-hoc project ids rather than real persisted CUID-backed project records."
+}
