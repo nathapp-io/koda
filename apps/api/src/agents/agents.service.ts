@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IsString, IsOptional, IsNumber, IsArray, MinLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
@@ -9,6 +9,7 @@ import type { PrismaClient } from '@prisma/client';
 import { AgentRole } from '../common/enums';
 import { AgentResponseDto } from './dto/agent-response.dto';
 import { TicketResponseDto } from '../tickets/dto/ticket-response.dto';
+import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
 
 export class CreateAgentDto {
   @ApiProperty({ example: 'Subrina Coder' })
@@ -75,8 +76,30 @@ export class AgentsService {
   constructor(
     private prisma: PrismaService<PrismaClient>,
     private configService: ConfigService,
+    @Optional() private readonly kodaDomainWriter?: KodaDomainWriter,
   ) {}
   private get db() { return this.prisma.client; }
+
+  /**
+   * Records an agent action event through the KodaDomainWriter write gateway.
+   * No-op when KodaDomainWriter is not available (e.g., in isolated unit tests).
+   */
+  async recordAgentAction(
+    projectId: string,
+    agentId: string,
+    action: string,
+    data: Record<string, unknown> = {},
+  ): Promise<void> {
+    if (!this.kodaDomainWriter) return;
+    await this.kodaDomainWriter.writeAgentAction({
+      agentId,
+      projectId,
+      action,
+      actorId: agentId,
+      source: 'internal',
+      data,
+    });
+  }
 
 
   async generateApiKey(agentId: string): Promise<{ apiKey: string; agent: AgentResponseDto }>;

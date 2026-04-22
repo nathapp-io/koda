@@ -18,6 +18,7 @@ import { RagModule } from './rag/rag.module';
 import { WebhookModule } from './webhook/webhook.module';
 import { CiWebhookModule } from './ci-webhook/ci-webhook.module';
 import { VcsModule } from './vcs/vcs.module';
+import { KodaDomainWriterModule } from './koda-domain-writer/koda-domain-writer.module';
 import { appConfig } from './config/app.config';
 import { authConfig } from './config/auth.config';
 import { databaseConfig } from './config/database.config';
@@ -62,6 +63,7 @@ import { validate } from './config/env.validation';
     WebhookModule,
     CiWebhookModule,
     VcsModule,
+    KodaDomainWriterModule,
   ],
 })
 export class AppModule {}
