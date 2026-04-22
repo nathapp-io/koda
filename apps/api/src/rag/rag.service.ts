@@ -1,7 +1,9 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional, Inject } from '@nestjs/common';
 import { mkdirSync } from 'node:fs';
 import { ConfigService } from '@nestjs/config';
-import { ValidationAppException } from '@nathapp/nestjs-common';
+import { ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaClient } from '@prisma/client';
 import { EmbeddingService } from './embedding.service';
 import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interface';
 import type { KbResultDto, SearchKbResponseDto } from './dto/kb-result.dto';
@@ -134,7 +136,7 @@ class InMemoryTable {
 @Injectable()
 export class RagService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RagService.name);
-  private db: LanceConnection = null;
+  private lanceDb: LanceConnection = null;
   private readonly tableCache = new Map<string, LanceTable>();
   private lanceAvailable = true;
   private readonly lancedbPath: string;
@@ -149,6 +151,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     private readonly configService: ConfigService,
     @Optional() private readonly embeddingService?: EmbeddingService,
     @Optional() @Inject(FTS_OPTIMIZE_STRATEGY) private readonly optimizeStrategy?: FtsOptimizeStrategy,
+    @Optional() private readonly prisma?: PrismaService<PrismaClient>,
   ) {
     this.lancedbPath = configService.get<string>('rag.lancedbPath') ?? './lancedb';
     this.similarityHigh = configService.get<number>('rag.similarityHigh') ?? 0.85;
@@ -161,6 +164,10 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       this.lanceAvailable = false;
       this.logger.log('RAG is running in in-memory mode; LanceDB native module will not be loaded');
     }
+  }
+
+  private get db() {
+    return this.prisma?.client;
   }
 
   onModuleInit(): void {
@@ -183,9 +190,9 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
 
     this.tableCache.clear();
 
-    if (this.db && typeof this.db.close === 'function') {
+    if (this.lanceDb && typeof this.lanceDb.close === 'function') {
       try {
-        const closeResult = this.db.close();
+        const closeResult = this.lanceDb.close();
         if (closeResult && typeof closeResult.then === 'function') {
           await closeResult;
         }
@@ -194,7 +201,46 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    this.db = null;
+    this.lanceDb = null;
+  }
+
+  /**
+   * Validates project ID format and existence.
+   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   */
+  private async validateProjectId(projectId: string): Promise<void> {
+    // Check if projectId is empty or whitespace-only
+    if (!projectId || typeof projectId !== 'string' || projectId.trim().length === 0) {
+      const exception = new ForbiddenAppException({}, 'rag');
+      exception.message = 'Project ID is required';
+      throw exception;
+    }
+
+    // Only perform format and existence validation when Prisma is available
+    // This ensures that the RAG service can still be used in tests or contexts without the database
+    if (!this.db) {
+      return;
+    }
+
+    // Check if projectId matches CUID format: lowercase alphanumeric, 21+ characters
+    // CUIDs are typically 24-25 characters and contain only lowercase letters and numbers
+    if (!/^[a-z0-9]{21,}$/.test(projectId)) {
+      const exception = new ForbiddenAppException({}, 'rag');
+      exception.message = 'Project ID is invalid';
+      throw exception;
+    }
+
+    // Verify project exists in the database
+    const project = await this.db.project.findUnique({
+      where: { id: projectId },
+      select: { id: true, deletedAt: true },
+    });
+
+    if (!project || project.deletedAt !== null) {
+      const exception = new ForbiddenAppException({}, 'rag');
+      exception.message = 'Project not found or deleted';
+      throw exception;
+    }
   }
 
   private async connect(): Promise<LanceConnection | null> {
@@ -202,22 +248,28 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       return null;
     }
 
-    if (!this.db) {
+    if (!this.lanceDb) {
       try {
         const lancedb = await import('@lancedb/lancedb');
         const connectFn = (lancedb as unknown as { connect: (path: string) => Promise<LanceConnection> }).connect
           ?? (lancedb.default as unknown as { connect: (path: string) => Promise<LanceConnection> })?.connect;
-        this.db = await connectFn(this.lancedbPath);
+        this.lanceDb = await connectFn(this.lancedbPath);
       } catch (err) {
         this.lanceAvailable = false;
         this.logger.warn(`LanceDB unavailable - ${(err as Error).message} - using in-memory fallback`);
         return null;
       }
     }
-    return this.db;
+    return this.lanceDb;
   }
 
+  /**
+   * Gets or creates a LanceDB table for a project.
+   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   */
   async getOrCreateTable(projectId: string): Promise<LanceTable> {
+    await this.validateProjectId(projectId);
+
     if (this.ftsIndexMode === 'eager') {
       this.logger.warn('FTS_INDEX_MODE=eager is not yet implemented — using in-memory FTS fallback');
     }
@@ -281,7 +333,13 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     return table;
   }
 
+  /**
+   * Indexes a document in the knowledge base for a project.
+   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   */
   async indexDocument(projectId: string, doc: IndexDocumentInput): Promise<void> {
+    await this.validateProjectId(projectId);
+
     if (!this.embeddingService) {
       this.logger.warn('EmbeddingService not available — skipping RAG indexing');
       return;
@@ -327,11 +385,17 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Searches the knowledge base for a project.
+   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   */
   async search(
     projectId: string,
     query: string,
     limit = 5,
   ): Promise<SearchKbResponseDto> {
+    await this.validateProjectId(projectId);
+
     if (!this.embeddingService) {
       return { results: [], verdict: 'no_match' };
     }
@@ -465,7 +529,13 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     return { results, verdict };
   }
 
+  /**
+   * Lists documents in the knowledge base for a project.
+   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   */
   async listDocuments(projectId: string, limit = 100): Promise<KbResultDto[]> {
+    await this.validateProjectId(projectId);
+
     const table = await this.getOrCreateTable(projectId);
     const rowCount: number = await table.countRows();
     if (rowCount === 0) return [];
@@ -488,7 +558,13 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /**
+   * Deletes documents by source ID in the knowledge base for a project.
+   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   */
   async deleteBySource(projectId: string, sourceId: string): Promise<void> {
+    await this.validateProjectId(projectId);
+
     // Validate sourceId to prevent SQL injection (only allow safe characters)
     if (!/^[a-zA-Z0-9_-]+$/.test(sourceId)) {
       throw new ValidationAppException();
@@ -497,7 +573,13 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     await table.delete(`source_id = '${sourceId}'`);
   }
 
+  /**
+   * Validates the embedding provider for a project's table.
+   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   */
   async validateTableProvider(projectId: string): Promise<{ valid: boolean; message?: string }> {
+    await this.validateProjectId(projectId);
+
     if (!this.embeddingService) return { valid: true };
 
     const db = await this.connect();
@@ -532,7 +614,13 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     return { valid: true };
   }
 
+  /**
+   * Optimizes the LanceDB table for a project.
+   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   */
   async optimizeTable(projectId: string): Promise<void> {
+    await this.validateProjectId(projectId);
+
     if (!this.lanceAvailable) {
       return;
     }
@@ -541,7 +629,13 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     await table.optimize();
   }
 
+  /**
+   * Deletes all documents by source type in the knowledge base for a project.
+   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   */
   async deleteAllBySourceType(projectId: string, sourceType: string): Promise<number> {
+    await this.validateProjectId(projectId);
+
     const validSources = ['ticket', 'doc', 'manual', 'code'];
     if (!validSources.includes(sourceType)) {
       throw new ValidationAppException();
@@ -559,6 +653,10 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     return count;
   }
 
+  /**
+   * Imports a Graphify knowledge graph into the knowledge base for a project.
+   * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
+   */
   async importGraphify(
     projectId: string,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -566,6 +664,8 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     links: any[],
   ): Promise<{ imported: number; cleared: number }> {
+    await this.validateProjectId(projectId);
+
     const cleared = await this.deleteAllBySourceType(projectId, 'code');
 
     // Build a map of node id to node for quick lookup
