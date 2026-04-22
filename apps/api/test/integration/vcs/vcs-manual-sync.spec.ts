@@ -16,14 +16,13 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConflictException } from '@nestjs/common';
 import { VcsController } from '../../../src/vcs/vcs.controller';
 import { VcsConnectionService } from '../../../src/vcs/vcs-connection.service';
 import { VcsSyncService, SyncIssueResult } from '../../../src/vcs/vcs-sync.service';
 import { VcsWebhookService } from '../../../src/vcs/vcs-webhook.service';
 import { ProjectsService } from '../../../src/projects/projects.service';
 import { ConfigService } from '@nestjs/config';
-import { NotFoundAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { VcsIssue } from '../../../src/vcs/types';
 import { Project, VcsConnection } from '@prisma/client';
 
@@ -223,7 +222,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
     });
 
     describe('AC2: Returns HTTP 409 when issue already synced', () => {
-      it('should throw ConflictException when issue is already synced', async () => {
+      it('should throw ValidationAppException when issue is already synced', async () => {
         const issueNumber = '42';
         const syncResult: SyncIssueResult = {
           action: 'skipped',
@@ -234,7 +233,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         syncService.syncIssue.mockResolvedValue(syncResult);
 
         await expect(controller.syncIssue(mockProject.slug, issueNumber)).rejects.toThrow(
-          ConflictException
+          ValidationAppException
         );
       });
 
@@ -249,7 +248,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         syncService.syncIssue.mockResolvedValue(syncResult);
 
         await expect(controller.syncIssue(mockProject.slug, issueNumber)).rejects.toThrow(
-          ConflictException
+          ValidationAppException
         );
       });
     });

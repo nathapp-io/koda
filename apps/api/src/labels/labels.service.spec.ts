@@ -2,7 +2,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { LabelsService } from './labels.service';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
-import { NotFoundException as _NotFoundException, ForbiddenException as _ForbiddenException, BadRequestException as _BadRequestException } from '@nestjs/common';
 import { CreateLabelDto } from './dto/create-label.dto';
 
 describe('LabelsService', () => {

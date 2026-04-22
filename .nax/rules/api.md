@@ -39,6 +39,12 @@ paths:
 ## Responses & Exceptions
 - Controllers return `JsonResponse.Ok<T>(data)` — never double-cast
 - Use convenience exception classes: `NotFoundAppException`, `ForbiddenAppException`, `AuthException`, `ValidationAppException`
+- Prefer exceptions from `@nathapp/nestjs-common` over `@nestjs/common`
+- **Anti-pattern:** do NOT throw Nest built-ins like `ForbiddenException` for API-domain authorization failures
+- **Anti-pattern:** do NOT import/throw `@nestjs/common` exceptions when an equivalent App exception exists
+- If a required HTTP exception has no supported App exception equivalent, document that exception choice inline at usage site
+- For 403 domain/authz failures, throw `ForbiddenAppException` from `@nathapp/nestjs-common`
+- Tests should assert `ForbiddenAppException` (not `@nestjs/common` `ForbiddenException`) to match runtime conventions
 
 ## Swagger
 - All controllers must have `@ApiTags`, `@ApiBearerAuth`, `@ApiOperation`, `@ApiResponse` decorators

@@ -2,7 +2,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { TicketsService } from './tickets.service';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
-import { BadRequestException as _BadRequestException, NotFoundException as _NotFoundException, ForbiddenException as _ForbiddenException } from '@nestjs/common';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 

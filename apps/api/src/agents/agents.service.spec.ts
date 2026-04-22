@@ -3,7 +3,6 @@ import { AgentsService, CreateAgentDto as _CreateAgentDto } from './agents.servi
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
-import { NotFoundException as _NotFoundException } from '@nestjs/common';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { createHmac } from 'crypto';
 import { randomBytes } from 'crypto';

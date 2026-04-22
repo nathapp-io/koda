@@ -1,7 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { CommentsController } from './comments.controller';
 import { CommentsService } from './comments.service';
-import { ForbiddenException as _ForbiddenException, NotFoundException as _NotFoundException } from '@nestjs/common';
 import { CreateCommentDto, CommentTypeEnum } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 
