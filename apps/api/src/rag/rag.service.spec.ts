@@ -1158,12 +1158,29 @@ describe('RagService.search — Provenance Envelope (AC-1 through AC-6)', () => 
     );
 
     // Multiple results with the same (source, source_id) pair
-    const doc1 = makeMockRecord('doc-1', 'error in auth service');
-    const doc2 = makeMockRecord('doc-2', 'another error in auth service');
-    doc1.source = 'ticket';
-    doc1.source_id = 'ticket-123';
-    doc2.source = 'ticket';
-    doc2.source_id = 'ticket-123';
+    const createdAt = new Date().toISOString();
+    const doc1: AnyRecord = {
+      id: 'doc-1',
+      source: 'ticket',
+      source_id: 'ticket-123',
+      content: 'error in auth service',
+      vector: [],
+      metadata: '{}',
+      created_at: createdAt,
+      provider: 'ollama',
+      model: 'nomic-embed-text',
+    };
+    const doc2: AnyRecord = {
+      id: 'doc-2',
+      source: 'ticket',
+      source_id: 'ticket-123',
+      content: 'another error in auth service',
+      vector: [],
+      metadata: '{}',
+      created_at: createdAt,
+      provider: 'ollama',
+      model: 'nomic-embed-text',
+    };
 
     const mockTable = makeTableWithProvenance([doc1, doc2]);
 
