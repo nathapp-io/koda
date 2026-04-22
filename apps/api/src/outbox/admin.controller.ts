@@ -1,4 +1,4 @@
-import { Controller, Get, HttpCode, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, HttpCode, HttpStatus, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { OutboxService, OutboxEventData } from './outbox.service';
 import { JwtAuthGuard } from '@nathapp/nestjs-auth';
@@ -33,5 +33,21 @@ export class AdminController {
       items: events,
       total: events.length,
     };
+  }
+
+  @Post('outbox/:eventId/retry')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Retry a dead-letter outbox event' })
+  @ApiResponse({ status: 200, description: 'Event reset to pending' })
+  @ApiResponse({ status: 403, description: 'Forbidden - requires admin role' })
+  @ApiResponse({ status: 404, description: 'Event not found' })
+  async retryOutboxEvent(
+    @CurrentUser() currentUser: AdminUser,
+    @Param('eventId') eventId: string,
+  ) {
+    if (currentUser?.extra?.role !== 'ADMIN') {
+      throw new ForbiddenAppException({}, 'admin');
+    }
+    await this.outboxService.retryEvent(eventId);
   }
 }

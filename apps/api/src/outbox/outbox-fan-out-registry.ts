@@ -1,3 +1,6 @@
+import { Injectable } from '@nestjs/common';
+
+@Injectable()
 export class OutboxFanOutRegistry {
   private handlers: Map<string, Array<(payload: unknown) => void>> = new Map();
 

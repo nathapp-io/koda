@@ -79,19 +79,21 @@ export class KodaDomainWriter {
 
     const event = await this.ticketEventService.create(data);
 
-    this.outboxService.enqueue({
-      projectId: data.projectId,
-      eventType: 'ticket_event',
-      eventId: event.id,
-      payload: {
-        ticketId: data.ticketId,
+    try {
+      await this.outboxService.enqueue({
         projectId: data.projectId,
-        actorId: data.actorId,
-        data: data.data,
-      },
-    }).catch(err => {
+        eventType: 'ticket_event',
+        eventId: event.id,
+        payload: {
+          ticketId: data.ticketId,
+          projectId: data.projectId,
+          actorId: data.actorId,
+          data: data.data,
+        },
+      });
+    } catch (err) {
       this.logger.error(`Failed to enqueue outbox event for ticket ${event.id}: ${String(err)}`);
-    });
+    }
 
     return {
       canonicalId: event.id,
@@ -112,19 +114,21 @@ export class KodaDomainWriter {
 
     const event = await this.agentEventService.create(data);
 
-    this.outboxService.enqueue({
-      projectId: data.projectId,
-      eventType: 'agent_event',
-      eventId: event.id,
-      payload: {
-        agentId: data.agentId,
+    try {
+      await this.outboxService.enqueue({
         projectId: data.projectId,
-        actorId: data.actorId,
-        data: data.data,
-      },
-    }).catch(err => {
+        eventType: 'agent_event',
+        eventId: event.id,
+        payload: {
+          agentId: data.agentId,
+          projectId: data.projectId,
+          actorId: data.actorId,
+          data: data.data,
+        },
+      });
+    } catch (err) {
       this.logger.error(`Failed to enqueue outbox event for agent ${event.id}: ${String(err)}`);
-    });
+    }
 
     return {
       canonicalId: event.id,
@@ -146,19 +150,21 @@ export class KodaDomainWriter {
 
     const event = await this.decisionEventService.create(data);
 
-    this.outboxService.enqueue({
-      projectId: data.projectId,
-      eventType: 'decision_event',
-      eventId: event.id,
-      payload: {
+    try {
+      await this.outboxService.enqueue({
         projectId: data.projectId,
-        agentId: data.agentId,
-        decision: data.decision,
-        data: data.data,
-      },
-    }).catch(err => {
+        eventType: 'decision_event',
+        eventId: event.id,
+        payload: {
+          projectId: data.projectId,
+          agentId: data.agentId,
+          decision: data.decision,
+          data: data.data,
+        },
+      });
+    } catch (err) {
       this.logger.error(`Failed to enqueue outbox event for decision ${event.id}: ${String(err)}`);
-    });
+    }
 
     return {
       canonicalId: event.id,
@@ -185,19 +191,21 @@ export class KodaDomainWriter {
       data: { source: data.source, metadata: data.metadata },
     });
 
-    this.outboxService.enqueue({
-      projectId: data.projectId,
-      eventType: 'document_indexed',
-      eventId: event.id,
-      payload: {
-        source: data.source,
-        sourceId: data.sourceId,
-        actorId: data.actorId,
-        metadata: data.metadata,
-      },
-    }).catch(err => {
+    try {
+      await this.outboxService.enqueue({
+        projectId: data.projectId,
+        eventType: 'document_indexed',
+        eventId: event.id,
+        payload: {
+          source: data.source,
+          sourceId: data.sourceId,
+          actorId: data.actorId,
+          metadata: data.metadata,
+        },
+      });
+    } catch (err) {
       this.logger.error(`Failed to enqueue document_indexed outbox event ${event.id}: ${String(err)}`);
-    });
+    }
 
     let ragError: string | undefined;
     try {
