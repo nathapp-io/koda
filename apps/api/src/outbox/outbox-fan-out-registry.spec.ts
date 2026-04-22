@@ -1,3 +1,5 @@
+import { OutboxFanOutRegistry } from './outbox-fan-out-registry';
+
 /**
  * OutboxFanOutRegistry Tests
  *
