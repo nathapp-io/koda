@@ -13,11 +13,13 @@ import { ForbiddenAppException } from '@nathapp/nestjs-common';
 // This service doesn't exist yet - tests will fail initially (RED phase)
 import { KodaDomainWriter } from './koda-domain-writer.service';
 import { RagService } from '../rag/rag.service';
+import { OutboxService } from '../outbox/outbox.service';
 
 describe('KodaDomainWriter Unit Tests', () => {
   let service: KodaDomainWriter;
   let prismaService: PrismaService<PrismaClient>;
   let ragService: RagService;
+  let outboxService: OutboxService;
 
   const mockPrismaService = {
     client: {
@@ -38,18 +40,22 @@ describe('KodaDomainWriter Unit Tests', () => {
     importGraphify: jest.fn(),
   };
 
+  const mockOutboxService = {
+    enqueue: jest.fn().mockResolvedValue({ id: 'outbox-1', status: 'pending' }),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         KodaDomainWriter,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: RagService, useValue: mockRagService },
+        { provide: OutboxService, useValue: mockOutboxService },
       ],
     }).compile();
 
     service = module.get<KodaDomainWriter>(KodaDomainWriter);
-    prismaService = module.get<PrismaService<PrismaClient>>(PrismaService);
-    ragService = module.get<RagService>(RagService);
+    outboxService = module.get<OutboxService>(OutboxService);
   });
 
   afterEach(() => {

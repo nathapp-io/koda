@@ -3,6 +3,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import type { PrismaClient } from '@prisma/client';
 import { RagService } from '../rag/rag.service';
+import { OutboxService } from '../outbox/outbox.service';
 import type {
   WriteResult,
   WriteTicketEventInput,
@@ -17,6 +18,7 @@ export class KodaDomainWriter {
   constructor(
     private readonly prisma: PrismaService<PrismaClient>,
     private readonly ragService: RagService,
+    private readonly outboxService: OutboxService,
   ) {}
 
   private assertNonEmpty(value: string, field: string): void {
@@ -62,6 +64,22 @@ export class KodaDomainWriter {
       },
     });
 
+    // Fire-and-forget: enqueue outbox event for follow-up work
+    this.outboxService.enqueue({
+      aggregateId: event.id,
+      aggregateType: 'ticket',
+      eventType: data.action,
+      payload: {
+        ticketId: data.ticketId,
+        projectId: data.projectId,
+        actorId: data.actorId,
+        data: data.data,
+      },
+    }).catch(err => {
+      // Log but don't block the canonical write
+      console.error('Failed to enqueue outbox event:', err);
+    });
+
     return {
       canonicalId: event.id,
       provenance: this.buildProvenance(data.actorId, data.projectId, data.action, data.source),
@@ -84,6 +102,22 @@ export class KodaDomainWriter {
         data: JSON.stringify(data.data),
         timestamp: new Date(),
       },
+    });
+
+    // Fire-and-forget: enqueue outbox event for follow-up work
+    this.outboxService.enqueue({
+      aggregateId: event.id,
+      aggregateType: 'agent',
+      eventType: data.action,
+      payload: {
+        agentId: data.agentId,
+        projectId: data.projectId,
+        actorId: data.actorId,
+        data: data.data,
+      },
+    }).catch(err => {
+      // Log but don't block the canonical write
+      console.error('Failed to enqueue outbox event:', err);
     });
 
     return {
