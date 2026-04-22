@@ -5,9 +5,8 @@
             "balanced": "haiku",
             "powerful": "haiku"
         }      
-    },  
-  "autoMode": {
-    "defaultAgent": "claude",
-    "fallbackOrder": ["claude"]
-  }
+    },
+    "agent": {
+        "default": "claude"
+    }
 }

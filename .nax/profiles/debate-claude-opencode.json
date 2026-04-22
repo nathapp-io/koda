@@ -1,8 +1,4 @@
 {
-    "autoMode": {
-        "defaultAgent": "opencode",
-        "fallbackOrder": ["opencode"]
-    },    
     "review": {
         "dialogue": {
             "enabled": true
@@ -90,8 +86,6 @@
         }
     },
     "agent": {
-        "promptAudit": {
-            "enabled": true
-        }
+        "default": "opencode"
     }
 }

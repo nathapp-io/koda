@@ -1,0 +1,20 @@
+{
+  "models": {
+      "claude": {
+        "fast": "MiniMax-M2.7",
+        "balanced": "MiniMax-M2.7",
+        "powerful": "MiniMax-M2.7"
+      }      
+  },  
+  "review": {
+    "semantic": {
+      "diffMode": "embedded"
+    },
+    "adversarial": {
+      "parallel": true
+     }
+  },
+  "agent": {
+      "default": "claude"
+  }  
+}

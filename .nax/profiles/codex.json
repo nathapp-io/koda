@@ -1,6 +1,5 @@
 {
-  "autoMode": {
-    "defaultAgent": "codex",
-    "fallbackOrder": ["codex"]
+  "agent": {
+    "default": "codex"
   }
 }

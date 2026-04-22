@@ -1,99 +1,5 @@
 {
   "version": 1,
-  "models": {
-    "claude": {
-      "fast": "haiku",
-      "balanced": "sonnet",
-      "powerful": "opus"
-    },
-    "opencode": {
-      "fast": "minimax/MiniMax-M2.7",
-      "balanced": "minimax/MiniMax-M2.7",
-      "powerful": "minimax/MiniMax-M2.7"
-    },
-    "codex": {
-      "fast": "gpt-5.4-mini",
-      "balanced": "gpt-5.3-codex",
-      "powerful": "gpt-5.4"
-    }
-  },
-  "autoMode": {
-    "enabled": true,
-    "defaultAgent": "claude",
-    "fallbackOrder": [
-      "claude"
-    ],
-    "complexityRouting": {
-      "simple": "fast",
-      "medium": "fast",
-      "complex": "balanced",
-      "expert": "powerful"
-    },
-    "escalation": {
-      "enabled": true,
-      "tierOrder": [
-        {
-          "tier": "fast",
-          "attempts": 3
-        },
-        {
-          "tier": "balanced",
-          "attempts": 2
-        },
-        {
-          "tier": "powerful",
-          "attempts": 1
-        }
-      ],
-      "escalateEntireBatch": false
-    }
-  },
-  "generate": {
-    "agents": [
-      "claude",
-      "codex",
-      "opencode",
-      "gemini"
-    ]
-  },
-  "agent": {
-    "protocol": "acp"
-  },
-  "routing": {
-    "strategy": "llm",
-    "llm": {
-      "model": "fast",
-      "fallbackToKeywords": true,
-      "cacheDecisions": true,
-      "mode": "hybrid",
-      "timeoutMs": 60000
-    }
-  },
-  "execution": {
-    "permissionProfile": "unrestricted",
-    "maxIterations": 6,
-    "iterationDelayMs": 2000,
-    "costLimit": 50,
-    "rectification": {
-      "enabled": true,
-      "maxRetries": 2,
-      "fullSuiteTimeoutSeconds": 600,
-      "maxFailureSummaryChars": 2000,
-      "abortOnIncreasingFailures": true
-    },
-    "regressionGate": {
-      "enabled": true,
-      "mode": "deferred",
-      "timeoutSeconds": 600,
-      "acceptOnTimeout": true,
-      "maxRectificationAttempts": 2
-    },
-    "smartTestRunner": {
-      "testFilePatterns": [
-        "**/*.spec.ts"
-      ]
-    }
-  },
   "quality": {
     "requireTypecheck": true,
     "requireLint": true,
@@ -121,14 +27,6 @@
       "typecheck": "bunx turbo type-check",
       "lint": "bunx turbo lint",
       "lintFix": "bunx turbo lint:fix"
-    },
-    "pluginMode": "deferred",
-    "semantic": {
-      "modelTier": "fast",
-      "rules": []
-    },
-    "adversarial": {
-      "modelTier": "fast"
     }
   },
   "context": {

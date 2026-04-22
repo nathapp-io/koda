@@ -1,6 +1,5 @@
 {
-  "autoMode": {
-    "defaultAgent": "opencode",
-    "fallbackOrder": ["opencode"]
-  }
+    "agent": {
+        "default": "opencode"
+    }
 }

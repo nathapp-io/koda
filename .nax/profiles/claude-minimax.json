@@ -6,21 +6,15 @@
           "powerful": "MiniMax-M2.7"
         }      
     },  
-  "autoMode": {
-    "defaultAgent": "claude",
-    "fallbackOrder": ["claude"]
-  },
-  "agent": { "promptAudit": { "enabled": true } },
-    "plan": {
-        "model": "powerful"
-    },
   "review": {
-    "checks": ["build", "typecheck", "lint", "semantic", "adversarial"],
     "semantic": {
       "diffMode": "ref"
     },
     "adversarial": {
       "parallel": true
      }
-  }
+  },
+  "agent": {
+      "default": "claude"
+  }    
 }
