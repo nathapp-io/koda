@@ -1,8 +1,9 @@
 -- AddPhase1EventTables
--- Create TicketEvent, AgentEvent, and DecisionEvent tables with project-scoped indexes
+-- Create TicketEvent, AgentEvent, and DecisionEvent tables with project-scoped indexes.
+-- Uses IF NOT EXISTS so migration is idempotent and survives re-application.
 
 -- CreateTable: TicketEvent
-CREATE TABLE "TicketEvent" (
+CREATE TABLE IF NOT EXISTS "TicketEvent" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "ticketId" TEXT NOT NULL,
     "projectId" TEXT NOT NULL,
@@ -23,7 +24,7 @@ CREATE INDEX "TicketEvent_projectId_createdAt_idx" ON "TicketEvent"("projectId",
 CREATE INDEX "TicketEvent_projectId_ticketId_idx" ON "TicketEvent"("projectId", "ticketId");
 
 -- CreateTable: AgentEvent
-CREATE TABLE "AgentEvent" (
+CREATE TABLE IF NOT EXISTS "AgentEvent" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "agentId" TEXT NOT NULL,
     "projectId" TEXT NOT NULL,
@@ -43,7 +44,7 @@ CREATE INDEX "AgentEvent_projectId_createdAt_idx" ON "AgentEvent"("projectId", "
 CREATE INDEX "AgentEvent_projectId_actorId_idx" ON "AgentEvent"("projectId", "actorId");
 
 -- CreateTable: DecisionEvent
-CREATE TABLE "DecisionEvent" (
+CREATE TABLE IF NOT EXISTS "DecisionEvent" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "projectId" TEXT NOT NULL,
     "agentId" TEXT NOT NULL,
