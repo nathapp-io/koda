@@ -251,3 +251,32 @@ model VcsSyncLog {
 
   vcsConnection   VcsConnection @relation(fields: [vcsConnectionId], references: [id], onDelete: Cascade)
 }
+
+// ---------------------------------------------------------------------------
+// Domain Event Models (KodaDomainWriter)
+// ---------------------------------------------------------------------------
+
+model TicketEvent {
+  id        String   @id @default(cuid())
+  ticketId  String
+  projectId String
+  action    String
+  actorId   String
+  actorType String   // user | agent
+  source    String   // api | internal | webhook
+  data      String   @default("{}") // JSON stored as string
+  timestamp DateTime @default(now())
+  createdAt DateTime @default(now())
+}
+
+model AgentEvent {
+  id        String   @id @default(cuid())
+  agentId   String
+  projectId String
+  action    String
+  actorId   String
+  source    String   // api | internal | webhook
+  data      String   @default("{}") // JSON stored as string
+  timestamp DateTime @default(now())
+  createdAt DateTime @default(now())
+}
