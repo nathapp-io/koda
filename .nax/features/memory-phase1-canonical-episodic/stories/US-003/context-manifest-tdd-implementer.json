@@ -68,5 +68,22 @@
     "static-rules:common:3fa0b420": "### common.md\n\n# Common Rules — All Apps\n\n## Tooling\n- Use Bun workspace commands (`bun install`, `bun run`), not `npm`/`yarn`\n- Exception: `npx jest` is allowed for targeted Jest runs\n- Prefer repository scripts over ad-hoc one-off command variants\n\n## Git\n- Never push to remote; human reviews and ",
     "static-rules:project-conventions:6fb98908": "### project-conventions.md\n\n# Project Conventions\n\nThis rules file is intentionally brief.\n\nPrimary architecture/context source is [`/home/williamkhoo/Desktop/projects/nathapp/koda/.nax/context.md`](/home/williamkhoo/Desktop/projects/nathapp/koda/.nax/context.md). Keep detailed stack, folder map, an",
     "session-scratch:0c4e7ff6": "**TDD test-writer** at 2026-04-22T17:21:33.261Z: succeeded — changed: apps/api/src/outbox/admin.controller.spec.ts, apps/api/src/outbox/outbox-fan-out-registry.spec.ts, apps/api/src/outbox/outbox-service-full.spec.ts\n```\n- AC42: Sequential dispatch (not parallel)\n- AC43: Handler errors caught, logge"
+  },
+  "chunkEffectiveness": {
+    "static-rules:api:44f0d226": {
+      "signal": "followed",
+      "evidence": "terms found in diff"
+    },
+    "static-rules:common:3fa0b420": {
+      "signal": "ignored"
+    },
+    "static-rules:project-conventions:6fb98908": {
+      "signal": "followed",
+      "evidence": "terms found in diff"
+    },
+    "session-scratch:0c4e7ff6": {
+      "signal": "followed",
+      "evidence": "terms found in diff"
+    }
   }
 }

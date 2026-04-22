@@ -1,7 +1,7 @@
 {
-  "requestId": "cda4d751-a203-4d0d-8525-a906c4c980cc",
-  "stage": "tdd-test-writer",
-  "totalBudgetTokens": 8000,
+  "requestId": "8231f9c2-78ab-4698-a7d2-3b9dcc55c9e3",
+  "stage": "review-adversarial",
+  "totalBudgetTokens": 6000,
   "usedTokens": 1969,
   "includedChunks": [
     "static-rules:api:44f0d226",
@@ -15,13 +15,13 @@
     "static-rules:project-conventions:6fb98908"
   ],
   "digestTokens": 18,
-  "buildMs": 19,
+  "buildMs": 2,
   "providerResults": [
     {
       "providerId": "static-rules",
       "status": "ok",
       "chunkCount": 3,
-      "durationMs": 2,
+      "durationMs": 1,
       "tokensProduced": 1951
     },
     {
@@ -29,20 +29,6 @@
       "status": "empty",
       "chunkCount": 0,
       "durationMs": 0,
-      "tokensProduced": 0
-    },
-    {
-      "providerId": "session-scratch",
-      "status": "empty",
-      "chunkCount": 0,
-      "durationMs": 1,
-      "tokensProduced": 0
-    },
-    {
-      "providerId": "code-neighbor",
-      "status": "empty",
-      "chunkCount": 0,
-      "durationMs": 19,
       "tokensProduced": 0
     }
   ],
@@ -52,18 +38,5 @@
     "static-rules:api:44f0d226": "### api.md\n\n# API Rules — apps/api\n\n## Read-First\n- Follow `nathapp-nestjs-patterns` before implementing NestJS changes\n- Prefer Nathapp patterns over generic alternatives when both exist\n\n## Auth\n- Use `@nathapp/nestjs-auth` v3; do not use `nestjs-iam`\n- API key hashing: deterministic HMAC-SHA256 f",
     "static-rules:common:3fa0b420": "### common.md\n\n# Common Rules — All Apps\n\n## Tooling\n- Use Bun workspace commands (`bun install`, `bun run`), not `npm`/`yarn`\n- Exception: `npx jest` is allowed for targeted Jest runs\n- Prefer repository scripts over ad-hoc one-off command variants\n\n## Git\n- Never push to remote; human reviews and ",
     "static-rules:project-conventions:6fb98908": "### project-conventions.md\n\n# Project Conventions\n\nThis rules file is intentionally brief.\n\nPrimary architecture/context source is [`/home/williamkhoo/Desktop/projects/nathapp/koda/.nax/context.md`](/home/williamkhoo/Desktop/projects/nathapp/koda/.nax/context.md). Keep detailed stack, folder map, an"
-  },
-  "chunkEffectiveness": {
-    "static-rules:api:44f0d226": {
-      "signal": "followed",
-      "evidence": "terms found in diff"
-    },
-    "static-rules:common:3fa0b420": {
-      "signal": "ignored"
-    },
-    "static-rules:project-conventions:6fb98908": {
-      "signal": "followed",
-      "evidence": "terms found in diff"
-    }
   }
 }
