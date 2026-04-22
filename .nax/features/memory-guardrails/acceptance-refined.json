@@ -1,0 +1,170 @@
+[
+  {
+    "acId": "AC-1",
+    "original": "When `RagService.getOrCreateTable('')` is called, it throws `ForbiddenAppException` with message `Project ID is required`.",
+    "refined": "Unit test passes: RagService.getOrCreateTable('') throws ForbiddenAppException with message property equal to 'Project ID is required'",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-2",
+    "original": "When `RagService.getOrCreateTable('not-a-project-id')` is called, it throws `ForbiddenAppException`.",
+    "refined": "Unit test passes: RagService.getOrCreateTable('not-a-project-id') throws ForbiddenAppException (instance check)",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-3",
+    "original": "When `RagService.getOrCreateTable('cm_invalid_but_well_shaped')` is called and the project does not exist, it throws `ForbiddenAppException`.",
+    "refined": "Unit test passes: When database contains no project with ID 'cm_invalid_but_well_shaped', calling RagService.getOrCreateTable('cm_invalid_but_well_shaped') throws ForbiddenAppException",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-4",
+    "original": "When `RagService.search()` is called with an invalid `projectId`, it rejects before any table access occurs.",
+    "refined": "Unit test passes: RagService.search() with invalid projectId throws ForbiddenAppException; database query spy shows zero database calls executed before exception is thrown",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-5",
+    "original": "Every service method that accepts `projectId` has a doc comment `@throws ForbiddenAppException if projectId is invalid`.",
+    "refined": "Code inspection passes: All public methods of RagService with projectId parameter contain JSDoc @throws tag with text containing 'ForbiddenAppException' and 'projectId'",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-6",
+    "original": "Current slug-routed API endpoints resolve `slug -> projectId` before calling guarded services; any new endpoint that accepts raw `projectId` as a path/query param returns 400 when the value is missing or malformed.",
+    "refined": "Integration test passes: API endpoints accepting raw projectId as path or query parameter return HTTP 400 status code when projectId is empty string, undefined, null, or does not match required project ID format",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-7",
+    "original": "When `KodaDomainWriter.writeTicketEvent(data)` is called, it writes a record to `ticket_events` and returns `WriteResult` with `canonicalId`.",
+    "refined": "Calling KodaDomainWriter.writeTicketEvent(data) inserts a record into ticket_events table and returns WriteResult object with non-empty canonicalId property",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-8",
+    "original": "When `KodaDomainWriter.writeAgentAction(data)` is called, it writes a record to `agent_events` and returns `WriteResult` with `canonicalId`.",
+    "refined": "Calling KodaDomainWriter.writeAgentAction(data) inserts a record into agent_events table and returns WriteResult object with non-empty canonicalId property",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-9",
+    "original": "When `KodaDomainWriter.indexDocument(data)` is called, it calls `RagService.indexDocument()` and returns `WriteResult` with `derivedIds`.",
+    "refined": "Calling KodaDomainWriter.indexDocument(data) invokes RagService.indexDocument() and returns WriteResult object with non-empty derivedIds array property",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-10",
+    "original": "When `KodaDomainWriter.importGraphify(data)` is called, it calls `RagService.importGraphify()` and returns `WriteResult`.",
+    "refined": "Calling KodaDomainWriter.importGraphify(data) invokes RagService.importGraphify() and returns WriteResult object",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-11",
+    "original": "Every `WriteResult` includes a fully populated `provenance` field with `actorId`, `projectId`, `action`, `timestamp`, and `source`.",
+    "refined": "All WriteResult objects from KodaDomainWriter methods contain provenance property with non-null/non-empty values for all of: actorId, projectId, action, timestamp, source",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-12",
+    "original": "When `writeTicketEvent` is called with a non-existent `projectId`, it throws `ForbiddenAppException`.",
+    "refined": "Calling KodaDomainWriter.writeTicketEvent() with non-existent projectId throws ForbiddenAppException",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-13",
+    "original": "When `RagService.indexDocument()` fails during `indexDocument()`, `WriteResult.error` contains the error message but the canonical write is still committed.",
+    "refined": "When RagService.indexDocument() throws an error during KodaDomainWriter.indexDocument(), the returned WriteResult contains non-empty error property AND a record is successfully inserted into the database",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-14",
+    "original": "When `KodaDomainWriter` is injected into the existing agent service flow, it replaces direct repository calls for write operations.",
+    "refined": "Agent service write operations call KodaDomainWriter methods instead of repository write methods directly",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-15",
+    "original": "When `RagService.search()` succeeds, `SearchKbResponseDto.provenance` is non-null.",
+    "refined": "When RagService.search() resolves successfully, SearchKbResponseDto.provenance is not null and is an object",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-16",
+    "original": "When `SearchKbResponseDto.results` contains repeated `source_type` + `source_id` pairs, `SearchKbResponseDto.provenance.sources` lists each unique pair only once.",
+    "refined": "For each (source_type, source_id) combination that appears in SearchKbResponseDto.results, SearchKbResponseDto.provenance.sources contains exactly one entry with that combination",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-17",
+    "original": "When `KbResultDto.provenance.indexedAt` is serialized, it is a valid ISO timestamp.",
+    "refined": "KbResultDto.provenance.indexedAt is a string that parses as a valid ISO 8601 timestamp and matches pattern /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{3})?Z?$/",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-18",
+    "original": "When a search result is returned, `KbResultDto.provenance.sourceProjectId` equals the request `projectId`.",
+    "refined": "For every KbResultDto in SearchKbResponseDto.results, KbResultDto.provenance.sourceProjectId === the projectId parameter passed to RagService.search()",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-19",
+    "original": "When searching with `projectId: 'project-a'`, no returned result reports `provenance.sourceProjectId === 'project-b'`.",
+    "refined": "When RagService.search() is called with projectId='project-a', all returned KbResultDto instances have provenance.sourceProjectId === 'project-a'",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-20",
+    "original": "When `SearchKbResponseDto.provenance.retrievedAt` is emitted, it is within 1 second of the server-side response timestamp.",
+    "refined": "Math.abs(new Date(SearchKbResponseDto.provenance.retrievedAt).getTime() - serverResponseTime) <= 1000 milliseconds",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-21",
+    "original": "When `OutboxService.enqueue(event)` is called, it persists an `outbox_events` record with status `pending`.",
+    "refined": "Call OutboxService.enqueue(event), query the outbox_events table, and assert a record exists with matching event payload and status='pending'",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-22",
+    "original": "When `OutboxService.processPending()` runs, it selects all `pending` records and marks each processed record `completed` or `failed`.",
+    "refined": "Insert N>0 outbox_events records with status='pending', call OutboxService.processPending(), query outbox_events, and assert 0 records remain with status='pending' and all are status='completed' or status='failed'",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-23",
+    "original": "When `KodaDomainWriter` completes a canonical write, it calls `OutboxService.enqueue()` fire-and-forget and does not block the canonical result on outbox completion.",
+    "refined": "Spy on OutboxService.enqueue(), call KodaDomainWriter.write(data), assert write result is returned immediately, and assert OutboxService.enqueue() was called asynchronously without awaiting its completion",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-24",
+    "original": "When an outbox event fails repeatedly, it is retried up to 3 times before moving to `dead_letter`.",
+    "refined": "Create an outbox event with a handler that throws on execution, call OutboxService.processPending() 4 times (initial + 3 retries), query outbox_events, and assert the record has status='dead_letter' and attempt_count=4",
+    "testable": true,
+    "storyId": "US-004"
+  }
+]
