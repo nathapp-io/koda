@@ -456,7 +456,9 @@ describe('KodaDomainWriter Unit Tests', () => {
       mockRagService.indexDocument.mockRejectedValue(new Error('RAG error'));
 
       // Should not throw, but return error in result
-      const result = await expect(service.indexDocument(data)).resolves.toBeDefined();
+      const indexPromise = service.indexDocument(data);
+      await expect(indexPromise).resolves.toBeDefined();
+      const result = await indexPromise;
       expect(result).toBeDefined();
     });
   });
