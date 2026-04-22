@@ -85,8 +85,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "failed",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 1,
       "escalations": [],
       "routing": {
@@ -152,7 +152,7 @@
               "severity": "error",
               "file": "apps/api/src/events/agent-event.service.ts",
               "line": 17,
-              "message": "AC-6 cannot be verified: Same issue — ForbiddenAppException thrown without explicit PROJECT_NOT_FOUND code.",
+              "message": "AC-6 cannot be verified: Same issue \u2014 ForbiddenAppException thrown without explicit PROJECT_NOT_FOUND code.",
               "source": "semantic-review"
             },
             {
@@ -160,7 +160,7 @@
               "severity": "error",
               "file": "apps/api/src/events/decision-event.service.ts",
               "line": 26,
-              "message": "AC-6 cannot be verified: Same issue — ForbiddenAppException thrown without explicit PROJECT_NOT_FOUND code.",
+              "message": "AC-6 cannot be verified: Same issue \u2014 ForbiddenAppException thrown without explicit PROJECT_NOT_FOUND code.",
               "source": "semantic-review"
             },
             {
@@ -168,7 +168,7 @@
               "severity": "error",
               "file": "apps/api/src",
               "line": 0,
-              "message": "AC-8 partially not met: assertActorHasEventRole() is wired for writeTicketEvent and writeAgentAction. However, 'GET /admin/outbox requires admin' — no such endpoint exists in the codebase. The integration test (line 1024) tests ActorResolver in isolation, not an actual HTTP endpoint.",
+              "message": "AC-8 partially not met: assertActorHasEventRole() is wired for writeTicketEvent and writeAgentAction. However, 'GET /admin/outbox requires admin' \u2014 no such endpoint exists in the codebase. The integration test (line 1024) tests ActorResolver in isolation, not an actual HTTP endpoint.",
               "source": "semantic-review"
             }
           ],
@@ -194,7 +194,7 @@
               "severity": "error",
               "file": "apps/api/src/events/actor-resolver.service.ts",
               "line": 41,
-              "message": "AC-7: ActorResolver queries agentRoleEntry by agentId, but for user actors (actorType === 'user'), it never populates projectRoles from any user-role source. The fallback on line 47 uses userRole from the request, but for ADMIN/MEMBER roles this does not reflect project membership. Additionally, the allowed roles in assertActorHasEventRole (line 60) are ADMIN/DEVELOPER/AGENT but AgentRoleEntry stores VERIFIER/DEVELOPER/REVIEWER — these sets are incompatible, so projectRoles will never match allowedRoles for agent-sourced roles.",
+              "message": "AC-7: ActorResolver queries agentRoleEntry by agentId, but for user actors (actorType === 'user'), it never populates projectRoles from any user-role source. The fallback on line 47 uses userRole from the request, but for ADMIN/MEMBER roles this does not reflect project membership. Additionally, the allowed roles in assertActorHasEventRole (line 60) are ADMIN/DEVELOPER/AGENT but AgentRoleEntry stores VERIFIER/DEVELOPER/REVIEWER \u2014 these sets are incompatible, so projectRoles will never match allowedRoles for agent-sourced roles.",
               "source": "semantic-review"
             },
             {
@@ -218,7 +218,7 @@
               "severity": "error",
               "file": "apps/api/src/koda-domain-writer/koda-domain-writer.service.ts",
               "line": 73,
-              "message": "AC-5: indexDocument calls ticketEventService.create (line 144) but the returned WriteResult (line 180-185) does not include any event record reference in provenance. The provenance object is built from buildProvenance which only carries actorId/projectId/action/timestamp/source — no event ID.",
+              "message": "AC-5: indexDocument calls ticketEventService.create (line 144) but the returned WriteResult (line 180-185) does not include any event record reference in provenance. The provenance object is built from buildProvenance which only carries actorId/projectId/action/timestamp/source \u2014 no event ID.",
               "source": "semantic-review"
             }
           ],
