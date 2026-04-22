@@ -166,7 +166,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private get db() {
+  private get prismaDb() {
     return this.prisma?.client;
   }
 
@@ -218,7 +218,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
 
     // Only perform format and existence validation when Prisma is available
     // This ensures that the RAG service can still be used in tests or contexts without the database
-    if (!this.db) {
+    if (!this.prismaDb) {
       return;
     }
 
@@ -231,7 +231,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     }
 
     // Verify project exists in the database
-    const project = await this.db.project.findUnique({
+    const project = await this.prismaDb.project.findUnique({
       where: { id: projectId },
       select: { id: true, deletedAt: true },
     });
