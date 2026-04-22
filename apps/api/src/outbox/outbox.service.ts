@@ -88,11 +88,7 @@ export class OutboxService {
       }
 
       try {
-        const parsedPayload = JSON.parse(String(event.payload));
-        await this.fanOutRegistry.dispatch({
-          eventType: String(event.eventType),
-          payload: parsedPayload,
-        });
+        await this.processEvent(event);
         await this.markCompleted(event.id);
 
         this.logger.log(`Outbox event ${event.id} processed successfully`);
@@ -102,6 +98,14 @@ export class OutboxService {
         await this.markFailed(event.id, errorMessage, Number(event.attempts ?? 0));
       }
     }
+  }
+
+  async processEvent(event: Record<string, unknown>): Promise<void> {
+    const parsedPayload = JSON.parse(String(event.payload));
+    await this.fanOutRegistry.dispatch({
+      eventType: String(event.eventType),
+      payload: parsedPayload,
+    });
   }
 
   async retry(event: OutboxEventData): Promise<OutboxEventData> {
