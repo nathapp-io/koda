@@ -59,7 +59,7 @@ export class KodaDomainWriter {
     if (actor.projectRoles.length === 0) {
       return;
     }
-    const allowedRoles = ['ADMIN', 'DEVELOPER', 'AGENT', 'VERIFIER', 'REVIEWER'];
+    const allowedRoles = ['ADMIN', 'DEVELOPER', 'AGENT'];
     const hasRole = actor.projectRoles.some((role) => allowedRoles.includes(role));
     if (!hasRole) {
       throw new ForbiddenAppException({}, 'koda-domain-writer');
