@@ -82,15 +82,16 @@ export class AgentsService {
 
   /**
    * Records an agent action event through the KodaDomainWriter write gateway.
-   * No-op when KodaDomainWriter is not available (e.g., in isolated unit tests).
+   * No-op when KodaDomainWriter is not available (e.g., in isolated unit tests)
+   * or when projectId is absent (agent-management operations have no project scope).
    */
   async recordAgentAction(
-    projectId: string,
     agentId: string,
     action: string,
     data: Record<string, unknown> = {},
+    projectId?: string,
   ): Promise<void> {
-    if (!this.kodaDomainWriter) return;
+    if (!this.kodaDomainWriter || !projectId) return;
     await this.kodaDomainWriter.writeAgentAction({
       agentId,
       projectId,
@@ -130,6 +131,7 @@ export class AgentsService {
         where: { id: agent.id },
         include: { roles: true, capabilities: true },
       });
+      await this.recordAgentAction(agent.id, 'API_KEY_ROTATED', { agentId: agent.id });
       return {
         apiKey: rawKey,
         agent: AgentResponseDto.from(agentWithRelations),
@@ -169,6 +171,7 @@ export class AgentsService {
         roles: createdRoles,
         capabilities: createdCapabilities,
       };
+      await this.recordAgentAction(agent.id, 'AGENT_CREATED', { name: agent.name, slug: agent.slug });
       // Return raw key ONCE to client (never return the hash)
       return {
         apiKey: rawKey,
@@ -349,6 +352,13 @@ export class AgentsService {
       const rankB = AgentsService.PRIORITY_RANK[b.ticket.priority] ?? 0;
       return rankB - rankA;
     });
+
+    await this.recordAgentAction(
+      agent.id,
+      'TICKET_SUGGESTED',
+      { ticketId: scored[0].ticket.id, ticketNumber: scored[0].ticket.number },
+      project.id,
+    );
 
     return scored[0];
   }
