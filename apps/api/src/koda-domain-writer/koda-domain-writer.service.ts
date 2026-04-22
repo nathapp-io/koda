@@ -5,6 +5,9 @@ import type { PrismaClient } from '@prisma/client';
 import { RagService } from '../rag/rag.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { ActorResolver, ActorRequest } from '../events/actor-resolver.service';
+import { TicketEventService } from '../events/ticket-event.service';
+import { AgentEventService } from '../events/agent-event.service';
+import { DecisionEventService } from '../events/decision-event.service';
 import type {
   WriteResult,
   WriteTicketEventInput,
@@ -23,6 +26,9 @@ export class KodaDomainWriter {
     private readonly ragService: RagService,
     private readonly outboxService: OutboxService,
     private readonly actorResolver: ActorResolver,
+    private readonly ticketEventService: TicketEventService,
+    private readonly agentEventService: AgentEventService,
+    private readonly decisionEventService: DecisionEventService,
   ) {}
 
   private assertNonEmpty(value: string, field: string): void {
@@ -64,8 +70,6 @@ export class KodaDomainWriter {
     this.assertNonEmpty(data.action, 'action');
     this.assertNonEmpty(data.actorId, 'actorId');
 
-    await this.assertProjectExists(data.projectId);
-
     const mockRequest: ActorRequest = {
       user: data.actorType === 'user' ? { id: data.actorId, sub: data.actorId } : null,
       agent: data.actorType === 'agent' ? { id: data.actorId, sub: data.actorId } : null,
@@ -73,20 +77,8 @@ export class KodaDomainWriter {
     const actor = await this.actorResolver.resolve(mockRequest);
     this.assertActorHasEventRole(actor);
 
-    const event = await this.prisma.client.ticketEvent.create({
-      data: {
-        ticketId: data.ticketId,
-        projectId: data.projectId,
-        action: data.action,
-        actorId: data.actorId,
-        actorType: data.actorType,
-        source: data.source,
-        data: JSON.stringify(data.data),
-        timestamp: new Date(),
-      },
-    });
+    const event = await this.ticketEventService.create(data);
 
-    // Fire-and-forget: enqueue outbox event for follow-up work
     this.outboxService.enqueue({
       projectId: data.projectId,
       eventType: 'ticket_event',
@@ -98,7 +90,6 @@ export class KodaDomainWriter {
         data: data.data,
       },
     }).catch(err => {
-      // Log but don't block the canonical write
       this.logger.error(`Failed to enqueue outbox event for ticket ${event.id}: ${String(err)}`);
     });
 
@@ -112,8 +103,6 @@ export class KodaDomainWriter {
     this.assertNonEmpty(data.projectId, 'projectId');
     this.assertNonEmpty(data.agentId, 'agentId');
 
-    await this.assertProjectExists(data.projectId);
-
     const mockRequest: ActorRequest = {
       user: null,
       agent: { id: data.agentId, sub: data.agentId },
@@ -121,19 +110,8 @@ export class KodaDomainWriter {
     const actor = await this.actorResolver.resolve(mockRequest);
     this.assertActorHasEventRole(actor);
 
-    const event = await this.prisma.client.agentEvent.create({
-      data: {
-        agentId: data.agentId,
-        projectId: data.projectId,
-        action: data.action,
-        actorId: data.actorId,
-        source: data.source,
-        data: JSON.stringify(data.data),
-        timestamp: new Date(),
-      },
-    });
+    const event = await this.agentEventService.create(data);
 
-    // Fire-and-forget: enqueue outbox event for follow-up work
     this.outboxService.enqueue({
       projectId: data.projectId,
       eventType: 'agent_event',
@@ -145,7 +123,6 @@ export class KodaDomainWriter {
         data: data.data,
       },
     }).catch(err => {
-      // Log but don't block the canonical write
       this.logger.error(`Failed to enqueue outbox event for agent ${event.id}: ${String(err)}`);
     });
 
@@ -164,22 +141,16 @@ export class KodaDomainWriter {
       throw new ValidationAppException({ source: 'source must be ticket for canonical indexing events' });
     }
 
-    await this.assertProjectExists(data.projectId);
-
-    const event = await this.prisma.client.ticketEvent.create({
-      data: {
-        ticketId: data.sourceId,
-        projectId: data.projectId,
-        action: 'INDEX_DOCUMENT',
-        actorId: data.actorId,
-        actorType: 'agent',
-        source: 'api',
-        data: JSON.stringify({ source: data.source, metadata: data.metadata }),
-        timestamp: data.timestamp ?? new Date(),
-      },
+    const event = await this.ticketEventService.create({
+      ticketId: data.sourceId,
+      projectId: data.projectId,
+      action: 'INDEX_DOCUMENT',
+      actorId: data.actorId,
+      actorType: 'agent',
+      source: 'api',
+      data: { source: data.source, metadata: data.metadata },
     });
 
-    // Fire-and-forget: canonical write succeeded, queue derived indexing follow-up
     this.outboxService.enqueue({
       projectId: data.projectId,
       eventType: 'document_indexed',

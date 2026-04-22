@@ -14,7 +14,7 @@ export class AgentEventService {
     });
 
     if (!project) {
-      throw new ForbiddenAppException({}, 'koda-domain-writer');
+      throw new ForbiddenAppException({ code: 'PROJECT_NOT_FOUND' }, 'koda-domain-writer');
     }
 
     const event = await this.prisma.client.agentEvent.create({

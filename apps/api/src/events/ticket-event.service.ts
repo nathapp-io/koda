@@ -14,8 +14,10 @@ export class TicketEventService {
     });
 
     if (!project) {
-      throw new ForbiddenAppException({}, 'koda-domain-writer');
+      throw new ForbiddenAppException({ code: 'PROJECT_NOT_FOUND' }, 'koda-domain-writer');
     }
+
+    const dataValue = typeof data.data === 'string' ? data.data : JSON.stringify(data.data);
 
     const event = await this.prisma.client.ticketEvent.create({
       data: {
@@ -25,7 +27,7 @@ export class TicketEventService {
         actorId: data.actorId,
         actorType: data.actorType,
         source: data.source,
-        data: JSON.stringify(data.data),
+        data: dataValue,
         timestamp: new Date(),
       },
     });
