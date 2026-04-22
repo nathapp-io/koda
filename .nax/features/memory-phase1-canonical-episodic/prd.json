@@ -3,7 +3,7 @@
   "feature": "memory-phase1-canonical-episodic",
   "branchName": "feat/memory-phase1-canonical-episodic",
   "createdAt": "2026-04-22T12:00:00.000Z",
-  "updatedAt": "2026-04-22T13:18:48.721Z",
+  "updatedAt": "2026-04-22T14:03:30.903Z",
   "userStories": [
     {
       "id": "US-001",
@@ -94,7 +94,7 @@
         "testStrategy": "three-session-tdd",
         "reasoning": "validated from LLM output",
         "initialComplexity": "medium",
-        "modelTier": "fast"
+        "modelTier": "balanced"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -104,8 +104,77 @@
         "apps/api/prisma/schema.prisma"
       ],
       "storyPoints": 1,
-      "priorErrors": [],
-      "priorFailures": [],
+      "priorErrors": [
+        "Attempt 1 failed with model tier: fast: Reviewer contradiction: AC-8 \"GET /admin/outbox requires admin\" cannot be satisfied because no such HTTP endpoint exists in the codebase - only ActorResolver in isolation is tested (line 1024). Creating a new HTTP endpoint/controller is beyond the scope of \"Event Write Operations and Actor Resolution\" story which focuses on event service implementation and wiring. All other AC-4, AC-6, and AC-8 issues (role-based access for event writes) are resolved."
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "fast",
+          "stage": "review",
+          "summary": "Failed with tier fast, escalating to next tier",
+          "reviewFindings": [
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src/koda-domain-writer/koda-domain-writer.service.ts",
+              "line": 76,
+              "message": "AC-4 not met: KodaDomainWriter writes ticket/agent events directly via `this.prisma.client.ticketEvent.create()` and `this.prisma.client.agentEvent.create()` instead of calling TicketEventService.create() and AgentEventService.create(). The three canonical event services exist but are not wired as callers. KodaDomainWriter is not even importing those services.",
+              "source": "semantic-review"
+            },
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src/koda-domain-writer/koda-domain-writer.module.ts",
+              "line": 1,
+              "message": "AC-4 not met: KodaDomainWriterModule does not import EventsModule, so the three event services are not available for injection into KodaDomainWriter. The module only imports RagModule and OutboxModule.",
+              "source": "semantic-review"
+            },
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src/koda-domain-writer/koda-domain-writer.service.ts",
+              "line": 169,
+              "message": "AC-4 not met: indexDocument() creates a ticketEvent directly via `this.prisma.client.ticketEvent.create()` instead of using TicketEventService.create(). This bypasses the canonical event service layer.",
+              "source": "semantic-review"
+            },
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src/events/ticket-event.service.ts",
+              "line": 17,
+              "message": "AC-6 cannot be verified: ForbiddenAppException is thrown with no code argument. The AC requires code 'PROJECT_NOT_FOUND' but `new ForbiddenAppException({}, 'koda-domain-writer')` does not pass a code.",
+              "source": "semantic-review"
+            },
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src/events/agent-event.service.ts",
+              "line": 17,
+              "message": "AC-6 cannot be verified: Same issue — ForbiddenAppException thrown without explicit PROJECT_NOT_FOUND code.",
+              "source": "semantic-review"
+            },
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src/events/decision-event.service.ts",
+              "line": 26,
+              "message": "AC-6 cannot be verified: Same issue — ForbiddenAppException thrown without explicit PROJECT_NOT_FOUND code.",
+              "source": "semantic-review"
+            },
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src",
+              "line": 0,
+              "message": "AC-8 partially not met: assertActorHasEventRole() is wired for writeTicketEvent and writeAgentAction. However, 'GET /admin/outbox requires admin' — no such endpoint exists in the codebase. The integration test (line 1024) tests ActorResolver in isolation, not an actual HTTP endpoint.",
+              "source": "semantic-review"
+            }
+          ],
+          "cost": 0.7292209199999999,
+          "timestamp": "2026-04-22T14:03:28.869Z"
+        }
+      ],
       "storyGitRef": "38611d0c90f1979ca69146b471727af215524548"
     },
     {
