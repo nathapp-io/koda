@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
+import { OutboxFanOutRegistry } from './outbox-fan-out-registry';
 
 export interface OutboxEventInput {
   projectId: string;
@@ -31,7 +32,10 @@ const BACKOFF_MS = (attempt: number) => Math.pow(2, attempt * 2) * 1000;
 export class OutboxService {
   private readonly logger = new Logger(OutboxService.name);
 
-  constructor(private readonly prisma: PrismaService<PrismaClient>) {}
+  constructor(
+    private readonly prisma: PrismaService<PrismaClient>,
+    private readonly fanOutRegistry: OutboxFanOutRegistry,
+  ) {}
 
   async enqueue(event: OutboxEventInput): Promise<OutboxEventData> {
     const createdEvent = await this.prisma.client.outboxEvent.create({
@@ -75,7 +79,6 @@ export class OutboxService {
     });
 
     for (const event of pendingEvents) {
-      // Claim event to reduce duplicate processing across concurrent workers.
       const claimResult = await this.prisma.client.outboxEvent.updateMany({
         where: { id: event.id, status: 'pending' },
         data: { status: 'processing' },
@@ -85,7 +88,11 @@ export class OutboxService {
       }
 
       try {
-        await this.processEvent(this.mapToOutboxEventData(event));
+        const parsedPayload = JSON.parse(String(event.payload));
+        await this.fanOutRegistry.dispatch({
+          eventType: String(event.eventType),
+          payload: parsedPayload,
+        });
         await this.markCompleted(event.id);
 
         this.logger.log(`Outbox event ${event.id} processed successfully`);
@@ -101,6 +108,8 @@ export class OutboxService {
     if (event.attempts >= MAX_RETRIES) {
       return this.markDeadLetter(event.id, `Failed after ${MAX_RETRIES} retries`);
     }
+
+    await this.delay(BACKOFF_MS(event.attempts));
 
     const updated = await this.prisma.client.outboxEvent.update({
       where: { id: event.id },
@@ -178,10 +187,8 @@ export class OutboxService {
     });
   }
 
-  private async processEvent(_event: OutboxEventData): Promise<void> {
-    // Placeholder for actual event processing logic
-    // This could dispatch to handlers based on event type
-    // For now, just resolve successfully
+  private async delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   private mapToOutboxEventData(event: OutboxEventData | Record<string, unknown>): OutboxEventData {
