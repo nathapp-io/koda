@@ -31,6 +31,10 @@
   },
   "context": {
     "fileInjection": "keyword",
+    "featureEngine": {
+      "enabled": true,
+      "budgetTokens": 2048
+    },    
     "v2": {
       "enabled": true,
       "minScore": 0.1,

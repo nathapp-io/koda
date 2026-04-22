@@ -1,0 +1,351 @@
+{
+  "project": "koda",
+  "feature": "memory-phase1-canonical-episodic",
+  "branchName": "feat/memory-phase1-canonical-episodic",
+  "createdAt": "2026-04-22T12:00:00.000Z",
+  "updatedAt": "2026-04-22T12:00:00.000Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Event Tables Schema and Prisma Migration",
+      "description": "Expand the current Phase 0 event storage into the Phase 1 canonical schema by adding durable `TicketEvent`, `AgentEvent`, and `DecisionEvent` tables with the required project-scoped indexes and Prisma migration support. Treat the existing Phase 0 event models as migration starting points, preserve `projectId` isolation, and make sure the resulting schema is the canonical source of truth for later timeline and semantic features.",
+      "acceptanceCriteria": [
+        "Prisma migration creates `TicketEvent`, `AgentEvent`, and `DecisionEvent` tables with the Phase 1 schema.",
+        "Migration is idempotent and can be applied multiple times without error.",
+        "Each event table has a non-null `projectId` foreign key to `Project`.",
+        "Each event table has `@@index([projectId, createdAt])` as a composite index.",
+        "`TicketEvent` has `@@index([projectId, ticketId])` for project-scoped ticket history queries.",
+        "`AgentEvent` has `@@index([projectId, actorId])` for project-scoped actor activity queries.",
+        "`prisma validate` passes after migration application."
+      ],
+      "suggestedCriteria": [
+        "Migration applies cleanly on an empty database and on a Phase 0 database with existing rows.",
+        "Existing Phase 0 event rows preserve `projectId` and `createdAt` values after migration.",
+        "`TicketEvent.ticketId = null` records remain queryable by `projectId` without migration/runtime errors.",
+        "If required foreign-key targets are missing during migration, migration fails with actionable error output instead of partial writes.",
+        "Running migration rollback and re-apply (dev workflow) produces the same final schema shape and indexes."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "memory",
+        "prisma",
+        "persistence"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/koda-domain-writer/koda-domain-writer.service.ts"
+      ],
+      "storyPoints": 1,
+      "priorErrors": [],
+      "priorFailures": []
+    },
+    {
+      "id": "US-002",
+      "title": "Event Write Operations and Actor Resolution",
+      "description": "Introduce canonical event services for ticket, agent, and decision writes, then wire them through `KodaDomainWriter` with a project-scoped actor resolution layer. This story should evolve the existing write-gate instead of replacing it, so agent-initiated writes gain canonical event recording, project-aware authorization, and provenance that later timeline and memory features can trust.",
+      "acceptanceCriteria": [
+        "`TicketEventService.create(data)` writes to `TicketEvent` and returns the created record.",
+        "`AgentEventService.create(data)` writes to `AgentEvent` and returns the created record.",
+        "`DecisionEventService.create(data)` writes to `DecisionEvent` and returns the created record.",
+        "All three services are called by `KodaDomainWriter` after relevant operations.",
+        "Event creation is included in the `WriteResult.provenance` output.",
+        "Creating an event with a non-existent `projectId` throws `ForbiddenError` with code `PROJECT_NOT_FOUND`.",
+        "`ActorResolver` maps current Koda auth and agent context into the Phase 1 actor model before permission checks run.",
+        "Only actors with role `admin`, `developer`, or `agent` on the target project can call event write operations, and `GET /admin/outbox` requires `admin`."
+      ],
+      "suggestedCriteria": [
+        "Actor resolution fails closed: missing/invalid actor context returns authorization error and does not write events.",
+        "Actors authorized in one project cannot create events for another project by overriding `projectId` in input.",
+        "When canonical domain write succeeds but event insert fails, operation is surfaced as failure and does not return success provenance.",
+        "Malformed event payloads (invalid JSON shape for action/intent) are rejected with validation error before persistence.",
+        "`GET /admin/outbox` returns 403 for non-admin users even when project membership is valid."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "memory",
+        "auth",
+        "persistence"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/koda-domain-writer/koda-domain-writer.service.ts",
+        "apps/api/src/agents/agents.service.ts",
+        "apps/api/src/auth/types.ts",
+        "apps/api/prisma/schema.prisma"
+      ],
+      "storyPoints": 1,
+      "priorErrors": [],
+      "priorFailures": []
+    },
+    {
+      "id": "US-003",
+      "title": "Outbox Service Enqueue and Processing",
+      "description": "Upgrade the existing persisted outbox from a Phase 0 skeleton into a real Phase 1 dispatcher with durable enqueueing, processing, retries, and dead-letter handling. Preserve the current canonical-first write flow, but make outbox processing reliable enough that later retrieval, semantic extraction, and graph handlers can safely depend on it.",
+      "acceptanceCriteria": [
+        "`OutboxService.enqueue(eventType, eventId, projectId, payload)` persists an `OutboxEvent` record with `status = 'pending'` and returns the created record.",
+        "`OutboxService.processPending(limit?)` picks up to `limit` pending events ordered by `createdAt ASC` (default limit: 50).",
+        "After successful fan-out, `OutboxService.markCompleted()` sets status to `completed` and populates `processedAt`.",
+        "If fan-out fails, `OutboxService.markFailed()` records failure details before retry/dead-letter evaluation.",
+        "After 3 failed attempts, `OutboxService.markDeadLetter()` sets status to `dead_letter` and records `lastError`.",
+        "Failed outbox events retry with exponential backoff (1s, 4s, 16s) before dead-lettering.",
+        "`OutboxService.retryEvent(eventId)` allows admin-only reset of a dead-letter event back to `pending`.",
+        "`KodaDomainWriter` calls `OutboxService.enqueue()` after every canonical write before returning.",
+        "The outbox processor job runs on a schedule and is idempotent for already completed or processing events.",
+        "If `OutboxFanOutRegistry.dispatch()` throws, the event is marked failed and retried instead of dead-lettered immediately.",
+        "Dead-lettered events are queryable via `GET /admin/outbox?status=dead_letter` with admin-only access."
+      ],
+      "suggestedCriteria": [
+        "`processPending(0)` and negative limits are handled safely (no processing or validation error), without crashing worker.",
+        "Concurrent processors do not complete the same pending event twice (single effective consumer per event).",
+        "Events with permanently failing handlers transition to `dead_letter` on the third failed attempt, not earlier or later.",
+        "`retryEvent(eventId)` on non-dead-letter events is rejected with clear error response.",
+        "A processor restart while events are `processing` does not orphan events indefinitely; stalled events become retryable.",
+        "Events are processed FIFO within each project even under multi-project concurrent processing."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "memory",
+        "outbox",
+        "reliability"
+      ],
+      "dependencies": [
+        "US-002",
+        "US-007"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/outbox/outbox.service.ts",
+        "apps/api/src/koda-domain-writer/koda-domain-writer.service.ts",
+        "apps/api/prisma/schema.prisma"
+      ],
+      "storyPoints": 2,
+      "priorErrors": [],
+      "priorFailures": []
+    },
+    {
+      "id": "US-004",
+      "title": "Timeline Query API",
+      "description": "Build a project-scoped timeline query service and API over the canonical event tables so agents and users can retrieve temporal history reliably. This story should turn the new event schema into a usable episodic memory surface with filtering, pagination, and ticket or actor history views, without weakening project isolation.",
+      "acceptanceCriteria": [
+        "`GET /projects/:slug/timeline` returns events filtered by `from`, `to`, `actorId`, and `eventTypes` query params.",
+        "`GET /projects/:slug/timeline?ticketId=X` returns all `TicketEvent` rows for that ticket, newest first.",
+        "`GET /projects/:slug/timeline?actorId=X` returns all events by that actor.",
+        "Results are paginated via `cursor` and include `nextCursor` when more rows exist.",
+        "`GET /projects/:slug/timeline` without filters returns the last 50 events.",
+        "Timeline results include all event fields plus a computed `eventType` field.",
+        "Requesting timeline for a non-existent or unauthorized project returns 403 after slug resolution."
+      ],
+      "suggestedCriteria": [
+        "Invalid date windows (`from > to`) return validation error and do not execute DB query.",
+        "Unknown `eventTypes` filter values are rejected explicitly or ignored consistently (documented behavior).",
+        "Invalid or expired cursor returns deterministic error response rather than partial/duplicated pagination.",
+        "When no matching events exist, API returns `events: []` with no `nextCursor` and success status.",
+        "Sorting is deterministic for equal timestamps (secondary sort key like id/cursor tie-breaker)."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "memory",
+        "timeline"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/projects/projects.service.ts",
+        "apps/api/src/koda-domain-writer/koda-domain-writer.service.ts"
+      ],
+      "storyPoints": 1,
+      "priorErrors": [],
+      "priorFailures": []
+    },
+    {
+      "id": "US-005",
+      "title": "Temporal Context in Agent Responses",
+      "description": "Expose recent event history through the agent context response path so answer and diagnose flows can use temporal memory directly. This story should consume the timeline service rather than duplicating event queries, and it must keep the temporal block excluded for planning flows to preserve prompt budget and latency.",
+      "acceptanceCriteria": [
+        "When `getProjectContext()` is called with `intent: 'diagnose'`, the response includes a `recentEvents` block with the last 10 relevant events.",
+        "When `getProjectContext()` is called with `intent: 'answer'` and the query references a ticket ID, the response includes that ticket's status change history.",
+        "The `recentEvents` block uses `TimelineService.getProjectTimeline()` internally.",
+        "`recentEvents` is ordered by `createdAt DESC` and includes `actorId`, `action`, and `createdAt` for each event.",
+        "The temporal block is excluded from context when `intent: 'plan'`."
+      ],
+      "suggestedCriteria": [
+        "If no timeline events exist, `recentEvents` is returned as an empty list instead of omitting the field unexpectedly.",
+        "If query references multiple ticket IDs, context selection behavior is deterministic and documented.",
+        "Malformed ticket reference in `intent: 'answer'` does not fail the entire context response.",
+        "Timeline read failure degrades gracefully (context still returned with explicit temporal-warning metadata).",
+        "Temporal block truncation is stable (top 10 by recency) and does not exceed configured prompt budget."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "memory",
+        "context"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/context/context-builder.service.ts",
+        "apps/api/src/memory/timeline.service.ts"
+      ],
+      "storyPoints": 1,
+      "priorErrors": [],
+      "priorFailures": []
+    },
+    {
+      "id": "US-006",
+      "title": "Outbox Fan-Out Registry and Handler Wiring",
+      "description": "Add an explicit outbox fan-out registry so future retrieval, semantic-memory, and graph handlers can register against canonical event types without changing the dispatcher each time. This story belongs in Phase 1 because later phases depend on handler registration existing before they can attach their own logic.",
+      "acceptanceCriteria": [
+        "`OutboxFanOutRegistry.register(eventType, handler)` adds a handler and it is called on subsequent `dispatch()` calls for that `eventType`.",
+        "Calling `register()` for the same `eventType` twice adds both handlers instead of replacing the first.",
+        "On app startup, all handlers from `DEFAULT_HANDLERS` are registered via `OutboxFanOutRegistry.register()`.",
+        "When `dispatch()` is called with `eventType='ticket_event'`, all handlers for `ticket_event` are executed sequentially in registration order.",
+        "If a handler throws, the error is caught and logged and the next handler still runs.",
+        "The `document_indexed` event payload includes `{ sourceId, content, metadata }`, sufficient for future `LexicalIndex.addDocument()` handling.",
+        "The `graphify_import` event payload includes `{ projectId, nodeCount, linkCount }`, sufficient for future graph handlers.",
+        "Handler registration is testable by registering a mock handler and asserting it is called when `dispatch()` fires."
+      ],
+      "suggestedCriteria": [
+        "Dispatching an event type with zero registered handlers is a safe no-op and does not throw.",
+        "Handler execution order remains stable across process restarts and repeated startup registration.",
+        "A slow handler does not block unrelated event types indefinitely (bounded execution or timeout strategy).",
+        "Duplicate handler registration behavior is explicit (allowed duplicates vs dedup by identity) and covered by tests.",
+        "Handler exceptions include enough context in logs (`eventType`, `eventId`, handler identity) for retries/debugging."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "memory",
+        "outbox",
+        "extensibility"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/outbox/outbox.service.ts",
+        "apps/api/src/koda-domain-writer/koda-domain-writer.service.ts",
+        "apps/api/src/app.module.ts"
+      ],
+      "storyPoints": 2,
+      "priorErrors": [],
+      "priorFailures": []
+    },
+    {
+      "id": "US-007",
+      "title": "OutboxEvent Table Migration",
+      "description": "Create the canonical `OutboxEvent` Prisma table for the Phase 1 contract with the required indexes and fields, treating the current Phase 0 outbox model as a migration baseline that must be aligned to the richer persisted queue schema without dropping the event tables.",
+      "acceptanceCriteria": [
+        "Prisma migration creates `OutboxEvent` table with all Phase 1 fields.",
+        "Migration uses `@@index([status, createdAt])` and `@@index([projectId, createdAt])`.",
+        "Migration is idempotent and can be applied twice without error.",
+        "Migration does not drop or alter existing `TicketEvent`, `AgentEvent`, or `DecisionEvent` tables.",
+        "`prisma validate` passes after migration application."
+      ],
+      "suggestedCriteria": [
+        "Applying migration to environments where `OutboxEvent` already exists with subset columns fails clearly or performs safe additive reconciliation.",
+        "Existing outbox rows (if any) preserve status/attempt counters and remain processable after migration.",
+        "New indexes are created exactly once and are used by pending-event selection query patterns.",
+        "Outbox migration does not introduce lock duration that blocks canonical writes beyond acceptable deployment window.",
+        "Migration rollback and re-apply in development keeps event tables unchanged and outbox schema deterministic."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "memory",
+        "prisma",
+        "outbox"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/outbox/outbox.service.ts"
+      ],
+      "storyPoints": 1,
+      "priorErrors": [],
+      "priorFailures": []
+    }
+  ],
+  "analysis": "Phase 1 should evolve the Phase 0 guardrail work instead of replacing it. The current repo already enforces `projectId` validation in the RAG boundary, already has a `KodaDomainWriter` seam for agent-initiated writes, already persists `OutboxEvent` rows, and already returns provenance on KB reads. Those are the right foundations. The next phase must turn them into a canonical operational memory substrate: richer event tables, actor-aware write services, real outbox dispatch, and a timeline API that later semantic and hybrid-retrieval phases can consume.\n\nThe biggest implementation trap is assuming Phase 0 rollout is complete. It is not. There are still direct write bypasses around the write gate, outbox fan-out is still stubbed, and current event/outbox payloads are simpler than the Phase 1 contract. Phase 1 should therefore proceed in this order: lock schema, align write services, align outbox persistence and processing, then expose temporal read APIs. Keep dependencies local to this PRD and treat later-phase handler consumers as downstream integrations, not blockers for the Phase 1 fan-out registry itself.\n\nAll work in this feature should target `apps/api`. Preserve project isolation, canonical-first writes, provenance, and derived-store failure tolerance throughout."
+}
