@@ -46,6 +46,15 @@ export class OutboxService {
     return this.mapToOutboxEventData(createdEvent);
   }
 
+  async getPendingEvents(limit = 100): Promise<OutboxEventData[]> {
+    const events = await this.prisma.client.outboxEvent.findMany({
+      where: { status: 'pending' },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
+    });
+    return events.map(this.mapToOutboxEventData);
+  }
+
   async processPending(limit = 50): Promise<void> {
     await this.requeueStaleProcessingEvents();
 
