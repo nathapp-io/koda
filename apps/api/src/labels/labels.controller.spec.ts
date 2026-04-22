@@ -1,7 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { LabelsController } from './labels.controller';
 import { LabelsService } from './labels.service';
-import { NotFoundException as _NotFoundException, ForbiddenException as _ForbiddenException, BadRequestException as _BadRequestException } from '@nestjs/common';
 import { CreateLabelDto } from './dto/create-label.dto';
 import { LabelResponseDto } from './dto/label-response.dto';
 

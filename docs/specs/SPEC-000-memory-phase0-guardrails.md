@@ -19,7 +19,7 @@ Current repo baseline to preserve while adding guardrails:
 All repository and service methods that accept `projectId` must validate it before any operation.
 
 **Changes:**
-- `rag.service.ts` — `getOrCreateTable(projectId)` already exists; add guard that throws `ForbiddenException` if `projectId` is falsy, malformed, or not a valid existing Koda project ID.
+- `rag.service.ts` — `getOrCreateTable(projectId)` already exists; add guard that throws `ForbiddenAppException` if `projectId` is falsy, malformed, or not a valid existing Koda project ID.
 - `rag.repository.ts` — all methods accept `projectId string`; add assertion at method entry.
 - `tickets.service.ts`, `docs.service.ts`, `rag.service.ts` — every public method that accepts `projectId` must validate it exists and belongs to the caller org.
 
@@ -112,11 +112,11 @@ class ItemProvenance {
 **Size:** Medium | **AC count:** 6 | **Files:** 3
 
 **ACs:**
-- `RagService.getOrCreateTable('')` throws `ForbiddenException` with message `Project ID is required`
-- `RagService.getOrCreateTable('not-a-project-id')` throws `ForbiddenException`
-- `RagService.getOrCreateTable('cm_invalid_but_well_shaped')` throws `ForbiddenException` when the project does not exist
+- `RagService.getOrCreateTable('')` throws `ForbiddenAppException` with message `Project ID is required`
+- `RagService.getOrCreateTable('not-a-project-id')` throws `ForbiddenAppException`
+- `RagService.getOrCreateTable('cm_invalid_but_well_shaped')` throws `ForbiddenAppException` when the project does not exist
 - `RagService.search()` rejects an invalid `projectId` before any table access occurs
-- Every service method that accepts `projectId` has a doc comment `@throws ForbiddenException if projectId is invalid`
+- Every service method that accepts `projectId` has a doc comment `@throws ForbiddenAppException if projectId is invalid`
 - Current slug-routed API endpoints resolve `slug -> projectId` before calling guarded services; any new endpoint that accepts raw `projectId` as a path/query param returns 400 when the value is missing or malformed
 
 ### US-002: KodaDomainWriter — Write Gate Service
@@ -128,7 +128,7 @@ class ItemProvenance {
 - `KodaDomainWriter.indexDocument(data)` calls `RagService.indexDocument()` and returns `WriteResult` with `derivedIds`
 - `KodaDomainWriter.importGraphify(data)` calls `RagService.importGraphify()` and returns `WriteResult`
 - Every `WriteResult` includes a fully populated `provenance` field (actorId, projectId, action, timestamp, source)
-- When `writeTicketEvent` is called with a non-existent `projectId`, it throws `ForbiddenException` (not a silent fail)
+- When `writeTicketEvent` is called with a non-existent `projectId`, it throws `ForbiddenAppException` (not a silent fail)
 - When `RagService.indexDocument()` fails during `indexDocument()`, `WriteResult.error` contains the error message but the canonical write (if any) is still committed
 - `KodaDomainWriter` is injected into `AgentService` (new or existing) replacing all direct repository calls for write operations
 
