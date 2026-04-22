@@ -1,0 +1,17 @@
+{
+  "id": "sess-a7f52b89-d674-48b3-832b-50d017a3e2e4",
+  "role": "verifier",
+  "state": "COMPLETED",
+  "agent": "claude",
+  "workdir": "apps/api",
+  "featureName": "memory-guardrails",
+  "storyId": "US-002",
+  "protocolIds": {
+    "recordId": "d4c48d60-1eff-4776-8e24-f1bf1bf241db",
+    "sessionId": "d4c48d60-1eff-4776-8e24-f1bf1bf241db"
+  },
+  "scratchDir": ".nax/features/memory-guardrails/sessions/sess-a7f52b89-d674-48b3-832b-50d017a3e2e4",
+  "completedStages": [],
+  "createdAt": "2026-04-22T07:33:32.120Z",
+  "lastActivityAt": "2026-04-22T07:37:08.303Z"
+}

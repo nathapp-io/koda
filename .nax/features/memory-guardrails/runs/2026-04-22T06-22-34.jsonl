@@ -1,0 +1,45 @@
+{"timestamp":"2026-04-22T06:22:34.191Z","level":"info","stage":"agents","message":"Agent protocol: acp","data":{"protocol":"acp","hasConfig":true}}
+{"timestamp":"2026-04-22T06:22:34.202Z","level":"debug","stage":"agents","message":"Created AcpAgentAdapter for claude","data":{"name":"claude"}}
+{"timestamp":"2026-04-22T06:22:34.203Z","level":"debug","stage":"pid-registry","message":"No stale PIDs to cleanup"}
+{"timestamp":"2026-04-22T06:22:34.203Z","level":"debug","stage":"crash-recovery","message":"Signal handlers installed"}
+{"timestamp":"2026-04-22T06:22:34.204Z","level":"info","stage":"interaction","message":"Initialized telegram interaction plugin","data":{"timeout":300000,"fallback":"escalate"}}
+{"timestamp":"2026-04-22T06:22:34.204Z","level":"info","stage":"precheck","message":"Skipping precheck validations (set NAX_PRECHECK=1 to enable)"}
+{"timestamp":"2026-04-22T06:22:34.206Z","level":"warn","stage":"execution","message":"Removing stale lock","data":{"pid":402446}}
+{"timestamp":"2026-04-22T06:22:34.207Z","level":"info","stage":"project","message":"Detected: typescript/monorepo (none, eslint)","data":{"explicit":{},"detected":{"language":"typescript","type":"monorepo","lintTool":"eslint"}}}
+{"timestamp":"2026-04-22T06:22:34.209Z","level":"info","stage":"plugin:semgrep-security","message":"Plugin loaded"}
+{"timestamp":"2026-04-22T06:22:34.210Z","level":"info","stage":"plugins","message":"Loaded 1 plugins","data":{"plugins":[{"name":"semgrep-security","version":"1.4.0","provides":["reviewer"]}]}}
+{"timestamp":"2026-04-22T06:22:34.210Z","level":"info","stage":"run.start","message":"Starting feature: memory-guardrails [nax v0.63.0-canary.11 (116726d3)]","data":{"runId":"run-2026-04-22T06-22-34-189Z","feature":"memory-guardrails","workdir":"/home/williamkhoo/Desktop/projects/nathapp/koda","dryRun":false,"routingMode":"hybrid","naxVersion":"0.63.0-canary.11","naxCommit":"116726d3"}}
+{"timestamp":"2026-04-22T06:22:34.210Z","level":"info","stage":"execution","message":"Story isolation mode","data":{"storyIsolation":"shared"}}
+{"timestamp":"2026-04-22T06:22:34.211Z","level":"info","stage":"execution","message":"Run initialization complete","data":{"totalStories":4,"doneStories":0,"pendingStories":4}}
+{"timestamp":"2026-04-22T06:22:34.213Z","level":"info","stage":"execution","message":"Starting memory-guardrails","data":{"totalStories":4,"doneStories":0,"pendingStories":4,"batchingEnabled":true}}
+{"timestamp":"2026-04-22T06:22:34.213Z","level":"debug","stage":"routing","message":"getAllReadyStories: completed set","data":{"completedIds":[],"totalStories":4}}
+{"timestamp":"2026-04-22T06:22:34.213Z","level":"debug","stage":"routing","message":"Ready stories for batch routing","data":{"readyCount":1,"readyIds":["US-001"],"allStories":[{"id":"US-001","status":"pending","passes":false,"deps":[]},{"id":"US-002","status":"pending","passes":false,"deps":["US-001"]},{"id":"US-003","status":"pending","passes":false,"deps":["US-001"]},{"id":"US-004","status":"pending","passes":false,"deps":["US-002"]}]}}
+{"timestamp":"2026-04-22T06:22:34.222Z","level":"debug","stage":"crash-recovery","message":"Heartbeat started (60s interval)"}
+{"timestamp":"2026-04-22T06:22:34.222Z","level":"info","stage":"execution","message":"Running pre-run pipeline (acceptance test setup)"}
+{"timestamp":"2026-04-22T06:22:34.226Z","level":"debug","stage":"acceptance-setup","message":"Fingerprint check","data":{"currentFingerprint":"sha256:4e2617631c58b4391c1fb6a3015546b3a251265379a3899211dab1af7dbef0b8","storedFingerprint":"none","match":false}}
+{"timestamp":"2026-04-22T06:22:34.226Z","level":"info","stage":"acceptance-setup","message":"No acceptance meta — generating acceptance tests"}
+{"timestamp":"2026-04-22T06:22:34.227Z","level":"warn","stage":"refinement","message":"No agentManager threaded — fresh manager created, unavailability state is lost","data":{"storyId":"US-001"}}
+{"timestamp":"2026-04-22T06:22:34.227Z","level":"info","stage":"agents","message":"Agent protocol: acp","data":{"protocol":"acp","hasConfig":true}}
+{"timestamp":"2026-04-22T06:22:34.228Z","level":"debug","stage":"agents","message":"Created AcpAgentAdapter for claude","data":{"name":"claude"}}
+{"timestamp":"2026-04-22T06:22:34.228Z","level":"warn","stage":"refinement","message":"No agentManager threaded — fresh manager created, unavailability state is lost","data":{"storyId":"US-002"}}
+{"timestamp":"2026-04-22T06:22:34.228Z","level":"info","stage":"agents","message":"Agent protocol: acp","data":{"protocol":"acp","hasConfig":true}}
+{"timestamp":"2026-04-22T06:22:34.228Z","level":"debug","stage":"agents","message":"Created AcpAgentAdapter for claude","data":{"name":"claude"}}
+{"timestamp":"2026-04-22T06:22:34.228Z","level":"warn","stage":"refinement","message":"No agentManager threaded — fresh manager created, unavailability state is lost","data":{"storyId":"US-003"}}
+{"timestamp":"2026-04-22T06:22:34.229Z","level":"info","stage":"agents","message":"Agent protocol: acp","data":{"protocol":"acp","hasConfig":true}}
+{"timestamp":"2026-04-22T06:22:34.229Z","level":"debug","stage":"agents","message":"Created AcpAgentAdapter for claude","data":{"name":"claude"}}
+{"timestamp":"2026-04-22T06:22:34.229Z","level":"debug","stage":"acp-adapter","message":"Ensuring session: nax-259387c8-memory-guardrails-us-001-refine"}
+{"timestamp":"2026-04-22T06:22:34.230Z","level":"debug","stage":"acp-adapter","message":"Ensuring session: nax-259387c8-memory-guardrails-us-002-refine"}
+{"timestamp":"2026-04-22T06:22:34.230Z","level":"debug","stage":"acp-adapter","message":"Ensuring session: nax-259387c8-memory-guardrails-us-003-refine"}
+{"timestamp":"2026-04-22T06:22:34.433Z","level":"info","stage":"acp-adapter","message":"Sending prompt","data":{"session":"nax-259387c8-memory-guardrails-us-003-refine","permission":"approve-all","cmd":"acpx --cwd /home/williamkhoo/Desktop/projects/nathapp/koda --format json --approve-all --model haiku --timeout 1800 claude prompt -s nax-259387c8-memory-guardrails-us-003-refine --file -"}}
+{"timestamp":"2026-04-22T06:22:34.433Z","level":"debug","stage":"acp-adapter","message":"Sending prompt to session: nax-259387c8-memory-guardrails-us-003-refine"}
+{"timestamp":"2026-04-22T06:22:48.152Z","level":"info","stage":"acp-adapter","message":"Sending prompt","data":{"session":"nax-259387c8-memory-guardrails-us-001-refine","permission":"approve-all","cmd":"acpx --cwd /home/williamkhoo/Desktop/projects/nathapp/koda --format json --approve-all --model haiku --timeout 1800 claude prompt -s nax-259387c8-memory-guardrails-us-001-refine --file -"}}
+{"timestamp":"2026-04-22T06:22:48.153Z","level":"debug","stage":"acp-adapter","message":"Sending prompt to session: nax-259387c8-memory-guardrails-us-001-refine"}
+{"timestamp":"2026-04-22T06:22:48.193Z","level":"info","stage":"acp-adapter","message":"Sending prompt","data":{"session":"nax-259387c8-memory-guardrails-us-002-refine","permission":"approve-all","cmd":"acpx --cwd /home/williamkhoo/Desktop/projects/nathapp/koda --format json --approve-all --model haiku --timeout 1800 claude prompt -s nax-259387c8-memory-guardrails-us-002-refine --file -"}}
+{"timestamp":"2026-04-22T06:22:48.193Z","level":"debug","stage":"acp-adapter","message":"Sending prompt to session: nax-259387c8-memory-guardrails-us-002-refine"}
+{"timestamp":"2026-04-22T06:22:53.954Z","level":"error","stage":"crash-recovery","message":"Received SIGINT, shutting down...","data":{"signal":"SIGINT"}}
+{"timestamp":"2026-04-22T06:22:53.955Z","level":"debug","stage":"pid-registry","message":"Registry frozen — new registrations blocked"}
+{"timestamp":"2026-04-22T06:22:53.956Z","level":"debug","stage":"pid-registry","message":"No PIDs to kill"}
+{"timestamp":"2026-04-22T06:22:53.960Z","level":"error","stage":"crash-recovery","message":"Process terminated by SIGINT","data":{"signal":"SIGINT"}}
+{"timestamp":"2026-04-22T06:22:53.960Z","level":"info","stage":"run.complete","message":"Feature execution terminated","data":{"runId":"run-2026-04-22T06-22-34-189Z","feature":"memory-guardrails","success":false,"exitReason":"sigint","totalCost":0,"iterations":0,"totalStories":4,"storiesCompleted":0,"durationMs":19771}}
+{"timestamp":"2026-04-22T06:22:53.960Z","level":"debug","stage":"crash-recovery","message":"run.complete event written","data":{"exitReason":"sigint"}}
+{"timestamp":"2026-04-22T06:22:53.961Z","level":"debug","stage":"status-file","message":"Feature status written","data":{"path":"/home/williamkhoo/Desktop/projects/nathapp/koda/.nax/features/memory-guardrails/status.json"}}
