@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { TimelineService } from './timeline.service';
 
 export type Intent = 'answer' | 'diagnose' | 'plan' | 'update' | 'search';
@@ -25,6 +25,8 @@ export interface GetProjectContextResponse {
 
 @Injectable()
 export class ContextBuilderService {
+  private readonly logger = new Logger(ContextBuilderService.name);
+
   constructor(private readonly timelineService: TimelineService) {}
 
   async getProjectContext(query: GetProjectContextQuery): Promise<GetProjectContextResponse> {
@@ -37,29 +39,62 @@ export class ContextBuilderService {
     }
 
     if (query.intent === 'diagnose') {
-      const timelineResult = await this.timelineService.getProjectTimeline({
-        projectId: query.projectId,
-        limit: 10,
-      });
+      try {
+        const timelineResult = await this.timelineService.getProjectTimeline({
+          projectId: query.projectId,
+          limit: 10,
+        });
 
-      response.recentEvents = timelineResult.events.map((e) => ({
-        actorId: e.actorId,
-        action: e.action,
-        createdAt: e.createdAt,
-      }));
-    }
-
-    if (query.intent === 'answer' && query.query) {
-      const ticketIdMatch = query.query.match(/ticket[-_]?(\d+)|(\d+)/i);
-      if (ticketIdMatch) {
-        const ticketId = ticketIdMatch[0];
-        const historyResult = await this.timelineService.getTicketHistory(ticketId);
-
-        response.statusChangeHistory = historyResult.events.map((e) => ({
+        response.recentEvents = timelineResult.events.map((e) => ({
           actorId: e.actorId,
           action: e.action,
           createdAt: e.createdAt,
         }));
+      } catch (error) {
+        this.logger.error(`Failed to get project timeline: ${error instanceof Error ? error.message : String(error)}`);
+        response.recentEvents = [];
+      }
+    }
+
+    if (query.intent === 'answer') {
+      const extractedTicketIds: string[] = [];
+
+      if (query.ticketIds && query.ticketIds.length > 0) {
+        extractedTicketIds.push(...query.ticketIds);
+      }
+
+      if (query.query) {
+        const ticketIdMatches = query.query.matchAll(/ticket[-_]?(\d+)|#(\d+)|([A-Z]+-\d+)/gi);
+        for (const match of ticketIdMatches) {
+          const ticketId = match[0];
+          if (!extractedTicketIds.includes(ticketId)) {
+            extractedTicketIds.push(ticketId);
+          }
+        }
+      }
+
+      if (extractedTicketIds.length > 0) {
+        const allHistory: RecentEvent[] = [];
+        for (const ticketId of extractedTicketIds) {
+          if (!ticketId || ticketId.trim().length === 0) {
+            continue;
+          }
+          try {
+            const historyResult = await this.timelineService.getTicketHistory(ticketId);
+            allHistory.push(
+              ...historyResult.events.map((e) => ({
+                actorId: e.actorId,
+                action: e.action,
+                createdAt: e.createdAt,
+              }))
+            );
+          } catch (error) {
+            this.logger.warn(`Failed to get ticket history for ${ticketId}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+        if (allHistory.length > 0) {
+          response.statusChangeHistory = allHistory;
+        }
       }
     }
 
