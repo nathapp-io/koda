@@ -20,15 +20,6 @@ DO NOT EDIT MANUALLY — run `nax generate` to regenerate.
 
 Koda is a Bun-managed Turborepo monorepo for tracking developer tickets and coordinating work between humans and AI agents.
 
-## Context Source Of Truth
-
-This file is the root source-of-truth for Codex/NAX repository guidance.
-
-Rules:
-- `AGENTS.md` at the repo root is generated from this file
-- app-specific context must live under `.nax/mono/apps/<app>/context.md`
-- in this monorepo, do not treat `apps/*/AGENTS.md` as the authoring source
-- when repo-level architecture or workflow changes, update this file first
 
 ## Monorepo Shape
 
@@ -140,7 +131,6 @@ Rules:
 - prefer updating tests alongside behavior changes
 - treat soft-delete, auth, and workflow constraints as API-owned invariants
 - never manually edit generated client files
-- never manually edit generated `AGENTS.md`; edit the matching `context.md` source instead
 - when changing app-specific guidance, update the file under `.nax/mono/apps/<app>/context.md`
 
 ## Tests
