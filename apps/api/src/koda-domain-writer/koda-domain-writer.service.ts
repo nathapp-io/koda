@@ -127,7 +127,7 @@ export class KodaDomainWriter {
         metadata: data.metadata,
       });
     } catch (err) {
-      ragError = (err as Error).message;
+      ragError = err instanceof Error ? err.message : String(err);
     }
 
     return {

@@ -6,11 +6,12 @@ import { ConfigService } from '@nestjs/config';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { createHmac } from 'crypto';
 import { randomBytes } from 'crypto';
+import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
 
 describe('AgentsService', () => {
   let service: AgentsService;
   let prismaService: PrismaService<PrismaClient>;
-  let _configService: ConfigService;
+  let kodaDomainWriter: { writeAgentAction: jest.Mock };
 
   const mockAgent = {
     id: 'agent-123',
@@ -83,18 +84,23 @@ describe('AgentsService', () => {
     get: jest.fn(),
   };
 
+  const mockKodaDomainWriter = {
+    writeAgentAction: jest.fn().mockResolvedValue({ canonicalId: 'evt-1' }),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AgentsService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: KodaDomainWriter, useValue: mockKodaDomainWriter },
       ],
     }).compile();
 
     service = module.get<AgentsService>(AgentsService);
     prismaService = module.get<PrismaService<PrismaClient>>(PrismaService);
-    _configService = module.get<ConfigService>(ConfigService);
+    kodaDomainWriter = module.get(KodaDomainWriter);
 
     mockConfigService.get.mockImplementation((key: string) => {
       if (key === 'auth') {
@@ -709,6 +715,9 @@ describe('AgentsService', () => {
       expect(safeResult.matchScore).toBe(2);
       expect(safeResult.matchedCapabilities).toContain('nestjs');
       expect(safeResult.matchedCapabilities).toContain('prisma');
+      expect(kodaDomainWriter.writeAgentAction).toHaveBeenCalledWith(
+        expect.objectContaining({ agentId: 'agent-123', projectId: 'project-1', action: 'TICKET_SUGGESTED' }),
+      );
     });
 
     it('should return null when no VERIFIED unassigned tickets exist in project', async () => {
