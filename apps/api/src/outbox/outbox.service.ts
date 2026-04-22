@@ -69,14 +69,16 @@ export class OutboxService {
         const errorMessage = error instanceof Error ? error.message : String(error);
         this.logger.error(`Error processing outbox event ${event.id}: ${errorMessage}`);
 
-        // Mark as failed
-        await this.prisma.client.outboxEvent.update({
+        // Update last error and invoke retry state machine
+        const eventWithError = await this.prisma.client.outboxEvent.update({
           where: { id: event.id },
           data: {
-            status: 'failed',
             lastError: errorMessage,
           },
         });
+
+        // Call retry to handle retry state machine (increment count or move to dead_letter)
+        await this.retry(this.mapToOutboxEventData(eventWithError));
       }
     }
   }
@@ -115,19 +117,19 @@ export class OutboxService {
     // For now, just resolve successfully
   }
 
-  private mapToOutboxEventData(event: any): OutboxEventData {
+  private mapToOutboxEventData(event: OutboxEventData | Record<string, unknown>): OutboxEventData {
     return {
-      id: event.id,
-      aggregateId: event.aggregateId,
-      aggregateType: event.aggregateType,
-      eventType: event.eventType,
-      payload: event.payload,
-      status: event.status,
-      retryCount: event.retryCount,
-      lastError: event.lastError,
-      processedAt: event.processedAt,
-      createdAt: event.createdAt,
-      updatedAt: event.updatedAt,
+      id: String(event.id),
+      aggregateId: String(event.aggregateId),
+      aggregateType: String(event.aggregateType),
+      eventType: String(event.eventType),
+      payload: String(event.payload),
+      status: String(event.status),
+      retryCount: Number(event.retryCount),
+      lastError: (event.lastError as string | null) ?? null,
+      processedAt: (event.processedAt as Date | null) ?? null,
+      createdAt: event.createdAt as Date,
+      updatedAt: event.updatedAt as Date,
     };
   }
 }
