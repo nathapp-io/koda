@@ -69,16 +69,17 @@ export class OutboxService {
         const errorMessage = error instanceof Error ? error.message : String(error);
         this.logger.error(`Error processing outbox event ${event.id}: ${errorMessage}`);
 
-        // Update last error and invoke retry state machine
-        const eventWithError = await this.prisma.client.outboxEvent.update({
+        // Mark as failed and update last error
+        const failedEvent = await this.prisma.client.outboxEvent.update({
           where: { id: event.id },
           data: {
+            status: 'failed',
             lastError: errorMessage,
           },
         });
 
-        // Call retry to handle retry state machine (increment count or move to dead_letter)
-        await this.retry(this.mapToOutboxEventData(eventWithError));
+        // Call retry state machine: resets to 'pending' for retry or moves to 'dead_letter'
+        await this.retry(this.mapToOutboxEventData(failedEvent));
       }
     }
   }
