@@ -802,6 +802,7 @@ describe('KodaDomainWriter Integration Tests', () => {
         timestamp: new Date(),
       };
 
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       const ragError = new Error('Embedding service unreachable');
       mockRagService.indexDocument.mockRejectedValue(ragError);
 
@@ -822,6 +823,7 @@ describe('KodaDomainWriter Integration Tests', () => {
         timestamp: new Date(),
       };
 
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       const ragError = new Error('Connection failed');
       mockRagService.indexDocument.mockRejectedValue(ragError);
 
@@ -857,6 +859,7 @@ describe('KodaDomainWriter Integration Tests', () => {
         timestamp: new Date(),
       };
 
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       const errorMsg = 'Vector database unavailable';
       mockRagService.indexDocument.mockRejectedValue(new Error(errorMsg));
 
@@ -899,6 +902,7 @@ describe('KodaDomainWriter Integration Tests', () => {
         data: { title: 'New ticket' },
       };
 
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.client.ticketEvent.create.mockResolvedValue({
         id: 'event-123',
         ticketId: ticketEventData.ticketId,
