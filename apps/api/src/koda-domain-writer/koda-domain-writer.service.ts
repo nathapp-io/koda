@@ -12,6 +12,7 @@ import type {
   WriteResult,
   WriteTicketEventInput,
   WriteAgentActionInput,
+  CreateDecisionEventInput,
   IndexDocumentInput,
   ImportGraphifyInput,
   Provenance,
@@ -130,6 +131,40 @@ export class KodaDomainWriter {
     return {
       canonicalId: event.id,
       provenance: this.buildProvenance(data.actorId, data.projectId, data.action, data.source, event.id),
+    };
+  }
+
+  async writeDecisionEvent(data: CreateDecisionEventInput): Promise<WriteResult> {
+    this.assertNonEmpty(data.projectId, 'projectId');
+    this.assertNonEmpty(data.agentId, 'agentId');
+    this.assertNonEmpty(data.action, 'action');
+
+    const mockRequest: ActorRequest = {
+      user: null,
+      agent: { id: data.agentId, sub: data.agentId },
+    };
+    const actor = await this.actorResolver.resolve(mockRequest);
+    this.assertActorHasEventRole(actor);
+
+    const event = await this.decisionEventService.create(data);
+
+    this.outboxService.enqueue({
+      projectId: data.projectId,
+      eventType: 'decision_event',
+      eventId: event.id,
+      payload: {
+        projectId: data.projectId,
+        agentId: data.agentId,
+        decision: data.decision,
+        data: data.data,
+      },
+    }).catch(err => {
+      this.logger.error(`Failed to enqueue outbox event for decision ${event.id}: ${String(err)}`);
+    });
+
+    return {
+      canonicalId: event.id,
+      provenance: this.buildProvenance(data.agentId, data.projectId, data.action, data.source, event.id),
     };
   }
 

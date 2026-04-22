@@ -1,5 +1,5 @@
 {
-  "requestId": "9d53b9fb-1f32-454a-bf28-228e4f0ef5da",
+  "requestId": "aa109904-7b48-441f-a47f-83479f586221",
   "stage": "tdd-implementer",
   "totalBudgetTokens": 8000,
   "usedTokens": 1969,
@@ -15,7 +15,7 @@
     "static-rules:project-conventions:6fb98908"
   ],
   "digestTokens": 18,
-  "buildMs": 202,
+  "buildMs": 204,
   "providerResults": [
     {
       "providerId": "static-rules",
@@ -28,7 +28,7 @@
       "providerId": "feature-context",
       "status": "empty",
       "chunkCount": 0,
-      "durationMs": 0,
+      "durationMs": 1,
       "tokensProduced": 0
     },
     {
@@ -49,14 +49,14 @@
       "providerId": "git-history",
       "status": "empty",
       "chunkCount": 0,
-      "durationMs": 201,
+      "durationMs": 203,
       "tokensProduced": 0
     },
     {
       "providerId": "code-neighbor",
       "status": "empty",
       "chunkCount": 0,
-      "durationMs": 30,
+      "durationMs": 26,
       "tokensProduced": 0
     }
   ],

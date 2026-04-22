@@ -3,7 +3,7 @@
   "feature": "memory-phase1-canonical-episodic",
   "branchName": "feat/memory-phase1-canonical-episodic",
   "createdAt": "2026-04-22T12:00:00.000Z",
-  "updatedAt": "2026-04-22T14:03:30.903Z",
+  "updatedAt": "2026-04-22T14:21:13.054Z",
   "userStories": [
     {
       "id": "US-001",
@@ -94,7 +94,7 @@
         "testStrategy": "three-session-tdd",
         "reasoning": "validated from LLM output",
         "initialComplexity": "medium",
-        "modelTier": "balanced"
+        "modelTier": "powerful"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -105,7 +105,8 @@
       ],
       "storyPoints": 1,
       "priorErrors": [
-        "Attempt 1 failed with model tier: fast: Reviewer contradiction: AC-8 \"GET /admin/outbox requires admin\" cannot be satisfied because no such HTTP endpoint exists in the codebase - only ActorResolver in isolation is tested (line 1024). Creating a new HTTP endpoint/controller is beyond the scope of \"Event Write Operations and Actor Resolution\" story which focuses on event service implementation and wiring. All other AC-4, AC-6, and AC-8 issues (role-based access for event writes) are resolved."
+        "Attempt 1 failed with model tier: fast: Reviewer contradiction: AC-8 \"GET /admin/outbox requires admin\" cannot be satisfied because no such HTTP endpoint exists in the codebase - only ActorResolver in isolation is tested (line 1024). Creating a new HTTP endpoint/controller is beyond the scope of \"Event Write Operations and Actor Resolution\" story which focuses on event service implementation and wiring. All other AC-4, AC-6, and AC-8 issues (role-based access for event writes) are resolved.",
+        "Attempt 1 failed with model tier: balanced: Reviewer contradiction: 1. **DecisionEventService not called by KodaDomainWriter** - No AC requires this. AC-3 requires DecisionEventService.create() to write to DecisionEvent (which it does), and AC-4 tests only writeTicketEvent/writeAgentAction. The DecisionEventService exists for future use but there is no \"decision write operation\" in KodaDomainWriter yet.\n\n2. **GET /admin/outbox endpoint** - The tests at lines 1024/1039 test ActorResolver in isolation (asserting actor.projectRoles), not an actual HTTP endpoint. Creating a new AdminController with HTTP routes is beyond the \"Event Write Operations and Actor Resolution\" story scope which focuses on service-layer implementation."
       ],
       "priorFailures": [
         {
@@ -173,6 +174,56 @@
           ],
           "cost": 0.7292209199999999,
           "timestamp": "2026-04-22T14:03:28.869Z"
+        },
+        {
+          "attempt": 1,
+          "modelTier": "balanced",
+          "stage": "review",
+          "summary": "Failed with tier balanced, escalating to next tier",
+          "reviewFindings": [
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src/koda-domain-writer/koda-domain-writer.service.ts",
+              "line": 31,
+              "message": "AC-3/AC-4: DecisionEventService is injected into KodaDomainWriter but never called. The diff shows no writeDecisionEvent method and no call to decisionEventService.create anywhere in the service. The DecisionEventService exists and is exported but is dead code in this context.",
+              "source": "semantic-review"
+            },
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src/events/actor-resolver.service.ts",
+              "line": 41,
+              "message": "AC-7: ActorResolver queries agentRoleEntry by agentId, but for user actors (actorType === 'user'), it never populates projectRoles from any user-role source. The fallback on line 47 uses userRole from the request, but for ADMIN/MEMBER roles this does not reflect project membership. Additionally, the allowed roles in assertActorHasEventRole (line 60) are ADMIN/DEVELOPER/AGENT but AgentRoleEntry stores VERIFIER/DEVELOPER/REVIEWER — these sets are incompatible, so projectRoles will never match allowedRoles for agent-sourced roles.",
+              "source": "semantic-review"
+            },
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src/koda-domain-writer/koda-domain-writer.service.ts",
+              "line": 67,
+              "message": "AC-5: The WriteResult returned from writeTicketEvent and writeAgentAction includes provenance (actorId, projectId, action, timestamp, source) but does not include the created event ID for provenance tracking. The event ID is only in canonicalId, but provenance itself has no event record reference.",
+              "source": "semantic-review"
+            },
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src/events/events.module.ts",
+              "line": 9,
+              "message": "AC-8: GET /admin/outbox requires admin role, but there is no controller or route handling this endpoint in the codebase. The diff adds no admin controller, and grep across src finds no OutboxController or /admin/outbox route. The outbox module only provides OutboxService.",
+              "source": "semantic-review"
+            },
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src/koda-domain-writer/koda-domain-writer.service.ts",
+              "line": 73,
+              "message": "AC-5: indexDocument calls ticketEventService.create (line 144) but the returned WriteResult (line 180-185) does not include any event record reference in provenance. The provenance object is built from buildProvenance which only carries actorId/projectId/action/timestamp/source — no event ID.",
+              "source": "semantic-review"
+            }
+          ],
+          "cost": 0.93790998,
+          "timestamp": "2026-04-22T14:21:11.022Z"
         }
       ],
       "storyGitRef": "38611d0c90f1979ca69146b471727af215524548"

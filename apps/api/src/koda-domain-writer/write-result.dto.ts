@@ -83,6 +83,26 @@ export interface WriteAgentActionInput {
 }
 
 /**
+ * Input data for writing a decision event.
+ */
+export interface CreateDecisionEventInput {
+  /** ID of the project */
+  projectId: string;
+  /** ID of the agent making the decision */
+  agentId: string;
+  /** Action performed */
+  action: string;
+  /** Decision outcome */
+  decision: 'approved' | 'rejected' | 'escalated';
+  /** Rationale for the decision */
+  rationale: string | null;
+  /** Source of the write operation */
+  source: 'api' | 'internal' | 'webhook';
+  /** Additional event data */
+  data: Record<string, unknown>;
+}
+
+/**
  * Input data for indexing a document in the knowledge base.
  */
 export interface IndexDocumentInput {
