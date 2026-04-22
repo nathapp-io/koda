@@ -439,6 +439,18 @@ describeIntegration('OutboxEvent Phase 1 Schema Validation', () => {
 
   describe('OutboxEvent model AC4: idempotency', () => {
     it('AC4: migration can be applied twice without error', async () => {
+      const { execSync } = await import('child_process');
+
+      execSync('bunx prisma db push --force-reset --skip-generate', {
+        stdio: 'pipe',
+        env: { ...process.env, DATABASE_URL: `file:${tmpDbPath}` },
+      });
+
+      execSync('bunx prisma db push --force-reset --skip-generate', {
+        stdio: 'pipe',
+        env: { ...process.env, DATABASE_URL: `file:${tmpDbPath}` },
+      });
+
       const project = await prisma.project.create({
         data: { name: 'IdempotencyTest', slug: 'idempotency-test', key: 'IDEM' },
       });
@@ -462,6 +474,21 @@ describeIntegration('OutboxEvent Phase 1 Schema Validation', () => {
 
       await prisma.outboxEvent.delete({ where: { id: outbox.id } });
       await prisma.project.delete({ where: { id: project.id } });
+    });
+  });
+
+  describe('OutboxEvent model AC5: prisma validate', () => {
+    it('AC5: prisma validate passes after migration application', async () => {
+      const { execSync } = await import('child_process');
+
+      try {
+        execSync('bunx prisma validate', {
+          stdio: 'pipe',
+          cwd: path.resolve(__dirname, '../../../..'),
+        });
+      } catch (error) {
+        throw new Error(`prisma validate failed: ${error}`);
+      }
     });
   });
 });
