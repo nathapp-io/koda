@@ -136,7 +136,7 @@ class InMemoryTable {
 @Injectable()
 export class RagService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RagService.name);
-  private lanceDb: LanceConnection = null;
+  private db: LanceConnection = null;
   private readonly tableCache = new Map<string, LanceTable>();
   private lanceAvailable = true;
   private readonly lancedbPath: string;
@@ -166,10 +166,6 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private get prismaDb() {
-    return this.prisma?.client;
-  }
-
   onModuleInit(): void {
     if (this.inMemoryOnly) {
       return;
@@ -190,9 +186,9 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
 
     this.tableCache.clear();
 
-    if (this.lanceDb && typeof this.lanceDb.close === 'function') {
+    if (this.db && typeof this.db.close === 'function') {
       try {
-        const closeResult = this.lanceDb.close();
+        const closeResult = this.db.close();
         if (closeResult && typeof closeResult.then === 'function') {
           await closeResult;
         }
@@ -201,7 +197,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    this.lanceDb = null;
+    this.db = null;
   }
 
   /**
@@ -218,7 +214,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
 
     // Only perform format and existence validation when Prisma is available
     // This ensures that the RAG service can still be used in tests or contexts without the database
-    if (!this.prismaDb) {
+    if (!this.prisma?.client) {
       return;
     }
 
@@ -231,7 +227,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     }
 
     // Verify project exists in the database
-    const project = await this.prismaDb.project.findUnique({
+    const project = await this.prisma.client.project.findUnique({
       where: { id: projectId },
       select: { id: true, deletedAt: true },
     });
@@ -248,19 +244,19 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       return null;
     }
 
-    if (!this.lanceDb) {
+    if (!this.db) {
       try {
         const lancedb = await import('@lancedb/lancedb');
         const connectFn = (lancedb as unknown as { connect: (path: string) => Promise<LanceConnection> }).connect
           ?? (lancedb.default as unknown as { connect: (path: string) => Promise<LanceConnection> })?.connect;
-        this.lanceDb = await connectFn(this.lancedbPath);
+        this.db = await connectFn(this.lancedbPath);
       } catch (err) {
         this.lanceAvailable = false;
         this.logger.warn(`LanceDB unavailable - ${(err as Error).message} - using in-memory fallback`);
         return null;
       }
     }
-    return this.lanceDb;
+    return this.db;
   }
 
   /**
