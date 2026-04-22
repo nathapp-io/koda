@@ -195,11 +195,19 @@ describe('OutboxService', () => {
         payload: '{}',
         status: 'failed',
         retryCount: 0,
+        lastError: null,
+        processedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
       };
 
       mockPrisma.client.outboxEvent.update.mockResolvedValue({
         ...event,
         retryCount: 1,
+        lastError: null,
+        processedAt: null,
+        createdAt: event.createdAt,
+        updatedAt: new Date(),
       });
 
       // First retry
@@ -210,6 +218,10 @@ describe('OutboxService', () => {
       mockPrisma.client.outboxEvent.update.mockResolvedValue({
         ...event,
         retryCount: 2,
+        lastError: null,
+        processedAt: null,
+        createdAt: event.createdAt,
+        updatedAt: new Date(),
       });
 
       // Second retry
@@ -220,6 +232,10 @@ describe('OutboxService', () => {
       mockPrisma.client.outboxEvent.update.mockResolvedValue({
         ...event,
         retryCount: 3,
+        lastError: null,
+        processedAt: null,
+        createdAt: event.createdAt,
+        updatedAt: new Date(),
       });
 
       // Third retry
@@ -236,11 +252,19 @@ describe('OutboxService', () => {
         payload: '{}',
         status: 'failed',
         retryCount: 3,
+        lastError: null,
+        processedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
       };
 
       mockPrisma.client.outboxEvent.update.mockResolvedValue({
         ...event,
         status: 'dead_letter',
+        lastError: `Failed after 3 retries`,
+        processedAt: null,
+        createdAt: event.createdAt,
+        updatedAt: new Date(),
       });
 
       const result = await service.retry(event);
