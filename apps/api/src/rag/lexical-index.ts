@@ -70,11 +70,23 @@ export class LexicalIndex {
     }
 
     if (!projectIndex.warmupCompleted && projectIndex.docs.size > 0) {
-      const docs = Array.from(projectIndex.docs.values()).map(d => ({
-        id: d.id,
-        content: d.content,
-      }));
-      this.buildIndex(projectId, docs);
+      while (projectIndex.rebuildLock) {
+        if (typeof setImmediate === 'function') {
+          break;
+        }
+      }
+      if (!projectIndex.rebuildLock) {
+        projectIndex.rebuildLock = true;
+        try {
+          const docs = Array.from(projectIndex.docs.values()).map(d => ({
+            id: d.id,
+            content: d.content,
+          }));
+          this.buildIndex(projectId, docs);
+        } finally {
+          projectIndex.rebuildLock = false;
+        }
+      }
     }
 
     const queryTerms = this.tokenize(query);

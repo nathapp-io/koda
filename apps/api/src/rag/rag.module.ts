@@ -1,6 +1,8 @@
-import { Injectable, Logger, Module, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, Module, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ScheduleModule, SchedulerRegistry } from '@nestjs/schedule';
+import { PrismaModule, PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaClient } from '@prisma/client';
 import { RagController } from './rag.controller';
 import { RagService } from './rag.service';
 import { EmbeddingService } from './embedding.service';
@@ -20,9 +22,10 @@ class LexicalIndexWarmup implements OnModuleInit {
   constructor(
     private readonly lexicalIndex: LexicalIndex,
     private readonly outboxFanOutRegistry: OutboxFanOutRegistry,
+    @Optional() private readonly prisma?: PrismaService<PrismaClient>,
   ) {}
 
-  onModuleInit(): void {
+  async onModuleInit(): Promise<void> {
     this.outboxFanOutRegistry.register('document_indexed', async (payload: unknown) => {
       const p = payload as { projectId?: string; sourceId?: string; content?: string; metadata?: Record<string, unknown> };
       if (p.projectId && p.sourceId && p.content !== undefined) {
@@ -35,11 +38,27 @@ class LexicalIndexWarmup implements OnModuleInit {
       }
     });
     this.logger.debug('LexicalIndex outbox handler registered');
+
+    if (this.prisma?.client) {
+      try {
+        const projects = await this.prisma.client.project.findMany({
+          where: { deletedAt: null },
+          select: { id: true },
+        });
+        const projectIds = projects.map(p => p.id);
+        if (projectIds.length > 0) {
+          await this.lexicalIndex.warmup(projectIds);
+          this.logger.log(`LexicalIndex warmup completed for ${projectIds.length} projects`);
+        }
+      } catch (err) {
+        this.logger.warn(`LexicalIndex warmup skipped: ${(err as Error).message}`);
+      }
+    }
   }
 }
 
 @Module({
-  imports: [ScheduleModule.forRoot(), OutboxModule],
+  imports: [ScheduleModule.forRoot(), OutboxModule, PrismaModule],
   controllers: [RagController],
   providers: [
     RagService,
