@@ -4,6 +4,7 @@ import { ScheduleModule, SchedulerRegistry } from '@nestjs/schedule';
 import { RagController } from './rag.controller';
 import { RagService } from './rag.service';
 import { EmbeddingService } from './embedding.service';
+import { HybridRetrieverService } from './hybrid-retriever.service';
 import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interface';
 import { CounterOptimizeStrategy } from './strategies/counter-optimize.strategy';
 import { CronOptimizeStrategy } from './strategies/cron-optimize.strategy';
@@ -15,6 +16,7 @@ import { ManualOptimizeStrategy } from './strategies/manual-optimize.strategy';
   providers: [
     RagService,
     EmbeddingService,
+    HybridRetrieverService,
     {
       provide: FTS_OPTIMIZE_STRATEGY,
       useFactory: (configService: ConfigService, schedulerRegistry: SchedulerRegistry): FtsOptimizeStrategy => {
@@ -33,6 +35,6 @@ import { ManualOptimizeStrategy } from './strategies/manual-optimize.strategy';
       inject: [ConfigService, SchedulerRegistry],
     },
   ],
-  exports: [RagService, FTS_OPTIMIZE_STRATEGY],
+  exports: [RagService, HybridRetrieverService, FTS_OPTIMIZE_STRATEGY],
 })
 export class RagModule {}

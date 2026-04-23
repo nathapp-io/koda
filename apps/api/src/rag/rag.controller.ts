@@ -14,6 +14,7 @@ import { ForbiddenAppException, JsonResponse, NotFoundAppException, ValidationAp
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
 import { RagService } from './rag.service';
+import { HybridRetrieverService } from './hybrid-retriever.service';
 import { AddDocumentDto } from './dto/add-document.dto';
 import { SearchKbDto } from './dto/search-kb.dto';
 import { ImportGraphifyDto } from './dto/import-graphify.dto';
@@ -25,6 +26,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 export class RagController {
   constructor(
     private readonly ragService: RagService,
+    private readonly hybridRetrieverService: HybridRetrieverService,
     private readonly prisma: PrismaService<PrismaClient>,
   ) {}
 
@@ -34,6 +36,26 @@ export class RagController {
     const project = await this.db.project.findUnique({ where: { slug } });
     if (!project || project.deletedAt) throw new NotFoundAppException({}, 'rag');
     return project;
+  }
+
+  private async checkProjectMembership(projectId: string, currentUser: { extra?: { role?: string; sub?: string } } | null): Promise<void> {
+    if (!currentUser?.extra?.sub) {
+      throw new ForbiddenAppException({}, 'rag');
+    }
+
+    const user = await this.db.user.findUnique({
+      where: { id: currentUser.extra.sub },
+      select: { role: true },
+    });
+
+    if (user?.role === 'ADMIN') return;
+
+    const agentRoleEntries = await this.db.agentRoleEntry.findMany({
+      where: { agentId: currentUser.extra.sub },
+    });
+    if (agentRoleEntries.length > 0) return;
+
+    throw new ForbiddenAppException({}, 'rag');
   }
 
   @Post('documents')
@@ -89,14 +111,34 @@ export class RagController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Hybrid search the project knowledge base' })
   @ApiResponse({ status: 200, description: 'Search results with RRF merge and similarity tiers' })
+  @ApiResponse({ status: 403, description: 'Forbidden - no project role' })
   @ApiResponse({ status: 404, description: 'Project not found' })
   async search(
     @Param('slug') slug: string,
     @Body() dto: SearchKbDto,
+    @CurrentUser() currentUser: { extra?: { role?: string; sub?: string } } | null,
   ) {
     const project = await this.resolveProject(slug);
-    const data = await this.ragService.search(project.id, dto.query, dto.limit ?? 5);
-    return JsonResponse.Ok(data);
+    await this.checkProjectMembership(project.id, currentUser);
+
+    const limit = Math.min(dto.limit ?? 20, 50);
+    const result = await this.hybridRetrieverService.search({
+      projectId: project.id,
+      query: dto.query,
+      limit,
+    });
+
+    return JsonResponse.Ok({
+      results: result.results,
+      scores: result.scores,
+      provenance: {
+        retrievedAt: result.retrievedAt,
+        sources: result.results.map((r) => ({
+          sourceType: r.source,
+          sourceId: r.sourceId,
+        })),
+      },
+    });
   }
 
   @Post('import/graphify')
