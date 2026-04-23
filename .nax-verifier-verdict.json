@@ -1,1 +1,61 @@
-{"version":1,"approved":true,"tests":{"allPassing":true,"passCount":34,"failCount":0},"testModifications":{"detected":false,"files":[],"legitimate":true,"reasoning":"Test file was created by test-writer; no modifications detected from implementer. Non-null assertion warnings are pre-existing in the test file, not introduced by implementation."},"acceptanceCriteria":{"allMet":true,"criteria":[{"criterion":"AC1: EntityStore.indexEntity(projectId, entity) stores the entity and its linked source + sourceId references, then makes it searchable by searchEntities()","met":true},{"criterion":"AC2: EntityStore.searchEntities(projectId, 'auth') returns entities with 'auth' in the label or tags","met":true},{"criterion":"AC3: EntityStore.getByTag(projectId, 'backend') returns all entities tagged 'backend'","met":true},{"criterion":"AC4: Entity score is computed as |query_terms ∩ entity.tags| / |entity.tags|, and is 0 when there is no overlap","met":true},{"criterion":"AC5: Entity score only boosts candidate documents linked to the matched entity, and unrelated candidate documents receive entityScore = 0","met":true},{"criterion":"AC6: Entities from graphify nodes with type code_module are indexed when the graphify_import outbox event fires","met":true},{"criterion":"AC7: Entities from tickets with type ticket are indexed when the ticket_event outbox event fires","met":true}]},"quality":{"rating":"good","issues":["5 non-null assertion warnings in test file (pre-existing from test-writer, not implementation issue)","type-check and lint on src/rag/entity-store.ts pass"]},"fixes":[],"reasoning":"All 34 EntityStore tests pass. Implementation meets all 7 acceptance criteria. Entity store uses Map<string, Map<string, Entity>> for project-scoped storage, implements indexEntity, searchEntities (with scoring), getByTag, getAllEntities, clear, and handleOutboxEvent for graphify_import and ticket_event event types. Score computation correctly implements |query_terms ∩ entity.tags| / |entity.tags|. Source file passes lint and type-check. Test file lint warnings are pre-existing from test-writer and do not affect implementation quality."}
+{
+  "version": 1,
+  "approved": true,
+  "tests": {
+    "allPassing": true,
+    "passCount": 58,
+    "failCount": 0
+  },
+  "testModifications": {
+    "detected": false,
+    "files": [],
+    "legitimate": true,
+    "reasoning": "No test modifications detected. EntityStore integration tests and HybridRetriever integration tests are original."
+  },
+  "acceptanceCriteria": {
+    "allMet": true,
+    "criteria": [
+      {
+        "criterion": "AC1: EntityStore.indexEntity(projectId, entity) stores the entity and its linked source + sourceId references, then makes it searchable by searchEntities()",
+        "met": true,
+        "evidence": "entity-store.ts:31-38 indexEntity stores entity with source/sourceId; searchEntities at :40-60 retrieves by label"
+      },
+      {
+        "criterion": "AC2: EntityStore.searchEntities(projectId, 'auth') returns entities with 'auth' in the label or tags",
+        "met": true,
+        "evidence": "entity-store.ts:44-56 checks labelMatch (labelLower.includes) and queryTerms match against tags"
+      },
+      {
+        "criterion": "AC3: EntityStore.getByTag(projectId, 'backend') returns all entities tagged 'backend'",
+        "met": true,
+        "evidence": "entity-store.ts:62-73 filters entities by tag (case-insensitive) and returns with score 1"
+      },
+      {
+        "criterion": "AC4: Entity score is computed as |query_terms ∩ entity.tags| / |entity.tags|, and is 0 when there is no overlap",
+        "met": true,
+        "evidence": "entity-store.ts:81-93 computeEntityScore implements intersectionSize / entityTags.length; returns 0 for empty query/tags"
+      },
+      {
+        "criterion": "AC5: Entity score only boosts candidate documents linked to the matched entity, and unrelated candidate documents receive entityScore = 0",
+        "met": true,
+        "evidence": "hybrid-retriever.service.ts:344-346 - docEntity is found by sourceId match; if not found (unrelated doc), entityScore = 0"
+      },
+      {
+        "criterion": "AC6: Entities from graphify nodes with type code_module are indexed when the graphify_import outbox event fires",
+        "met": true,
+        "evidence": "entity-store.ts:103-119 handleOutboxEvent filters node.type === 'code_module' and calls indexEntity"
+      },
+      {
+        "criterion": "AC7: Entities from tickets with type ticket are indexed when the ticket_event outbox event fires",
+        "met": true,
+        "evidence": "entity-store.ts:120-139 handleOutboxEvent extracts ticket from payload and indexes with source='ticket'"
+      }
+    ]
+  },
+  "quality": {
+    "rating": "good",
+    "issues": []
+  },
+  "fixes": [],
+  "reasoning": "All 58 tests pass (34 entity-store integration + 24 hybrid-retriever integration). Implementation is clean with proper TypeScript typing, error handling, and follows existing patterns. Entity scoring correctly boosts only linked documents via sourceId matching. Outbox event handlers properly index code_module and ticket entities. Lint and type-check pass."
+}

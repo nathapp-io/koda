@@ -3,7 +3,7 @@
   "feature": "memory-phase2-hybrid-retrieval",
   "branchName": "feat/memory-phase2-hybrid-retrieval",
   "createdAt": "2026-04-23T12:28:37.000Z",
-  "updatedAt": "2026-04-23T14:49:02.902Z",
+  "updatedAt": "2026-04-23T18:57:50.488Z",
   "userStories": [
     {
       "id": "US-001",
@@ -91,8 +91,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -145,14 +145,16 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
+      "status": "failed",
       "passes": false,
-      "attempts": 0,
+      "attempts": 1,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "modelTier": "powerful",
+        "initialComplexity": "complex"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -168,9 +170,39 @@
         "When a query term matches only entity label and not tags, entityScore remains 0.",
         "When a candidate document has no linked entities, entityScore is 0."
       ],
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1
+      "priorErrors": [
+        "Attempt 1 failed with model tier: balanced: Reviewer contradiction: Cannot satisfy both constraints simultaneously: lint warnings are in test files (entity-store.integration.spec.ts lines 232, 247, 262, 277, 503 — non-null assertions `!`), but I am prohibited from modifying test files. The other option (modifying .eslintrc.cjs to allow non-null assertions in tests) would violate the constitution rule against modifying CI/CD config files. These warnings are in test code where `!` assertions are idiomatic and appropriate."
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "balanced",
+          "stage": "review",
+          "summary": "Failed with tier balanced, escalating to next tier",
+          "reviewFindings": [
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src/rag/entity-store.ts",
+              "line": 130,
+              "message": "AC7: handleOutboxEvent for 'ticket_event' expects payload.ticket {id, ref, title, type}, but koda-domain-writer.service.ts:89 enqueues payload {ticketId, projectId, actorId, data}. The payload shapes are mismatched, so ticket entities are never indexed.",
+              "source": "semantic-review"
+            },
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src/rag/entity-store.ts",
+              "line": 108,
+              "message": "AC6: handleOutboxEvent for 'graphify_import' expects payload.nodes, but outbox-fan-out-registry.ts:19 shows the actual graphify_import payload is {projectId, nodeCount, linkCount}. Nodes array is never included in the payload, so code_module entities are never indexed from outbox events.",
+              "source": "semantic-review"
+            }
+          ],
+          "cost": 0.23997919499999998,
+          "timestamp": "2026-04-23T17:25:10.706Z"
+        }
+      ],
+      "storyPoints": 1,
+      "storyGitRef": "d340bd3c96118f6ffda34f317496f02ca3655067"
     },
     {
       "id": "US-004",
@@ -296,8 +328,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
