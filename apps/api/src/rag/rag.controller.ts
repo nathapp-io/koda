@@ -53,7 +53,12 @@ export class RagController {
     const agentRoleEntries = await this.db.agentRoleEntry.findMany({
       where: { agentId: currentUser.extra.sub },
     });
-    if (agentRoleEntries.length > 0) return;
+    if (agentRoleEntries.length > 0) {
+      const hasProjectRole = agentRoleEntries.some(
+        (entry) => entry.role === 'ADMIN' || entry.role === 'DEVELOPER' || entry.role === 'AGENT' || entry.role === 'VIEWER',
+      );
+      if (hasProjectRole) return;
+    }
 
     throw new ForbiddenAppException({}, 'rag');
   }

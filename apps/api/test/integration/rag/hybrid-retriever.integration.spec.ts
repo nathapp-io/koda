@@ -20,6 +20,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
+import { EmbeddingService } from '../../../src/rag/embedding.service';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -71,6 +72,13 @@ describe('HybridRetrieverService integration', () => {
     expect(HybridRetrieverService).toBeDefined();
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'koda-hybrid-test-'));
 
+    const fakeEmbeddingService = new FakeEmbeddingService();
+    const fakePrismaClient = {
+      $use: null,
+      user: { findUnique: async () => null },
+      agentRoleEntry: { findMany: async () => [] },
+    };
+
     module = await Test.createTestingModule({
       providers: [
         HybridRetrieverService,
@@ -90,12 +98,20 @@ describe('HybridRetrieverService integration', () => {
             },
           },
         },
+        {
+          provide: EmbeddingService,
+          useValue: fakeEmbeddingService,
+        },
+        {
+          provide: PrismaService,
+          useValue: { client: fakePrismaClient },
+        },
       ],
     }).compile();
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     hybridService = module.get<any>(HybridRetrieverService);
-    (hybridService as { embeddingService: FakeEmbeddingService }).embeddingService = new FakeEmbeddingService();
+    (hybridService as { embeddingService: FakeEmbeddingService }).embeddingService = fakeEmbeddingService;
   });
 
   afterAll(async () => {
