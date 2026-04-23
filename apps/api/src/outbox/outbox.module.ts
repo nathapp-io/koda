@@ -10,6 +10,6 @@ import { PrismaModule } from '@nathapp/nestjs-prisma';
   imports: [PrismaModule, ScheduleModule],
   controllers: [AdminController],
   providers: [OutboxService, OutboxFanOutRegistry, OutboxProcessor],
-  exports: [OutboxService],
+  exports: [OutboxService, OutboxFanOutRegistry],
 })
 export class OutboxModule {}

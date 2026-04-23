@@ -6,6 +6,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
 import { EmbeddingService } from './embedding.service';
 import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interface';
+import { LexicalIndex } from './lexical-index';
 import type { KbResultDto, SearchKbResponseDto } from './dto/kb-result.dto';
 
 export interface IndexDocumentInput {
@@ -152,6 +153,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     @Optional() private readonly embeddingService?: EmbeddingService,
     @Optional() @Inject(FTS_OPTIMIZE_STRATEGY) private readonly optimizeStrategy?: FtsOptimizeStrategy,
     @Optional() private readonly prisma?: PrismaService<PrismaClient>,
+    @Optional() private readonly lexicalIndex?: LexicalIndex,
   ) {
     this.lancedbPath = configService.get<string>('rag.lancedbPath') ?? './lancedb';
     this.similarityHigh = configService.get<number>('rag.similarityHigh') ?? 0.85;
@@ -359,6 +361,9 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       if (this.lanceAvailable && this.optimizeStrategy) {
         await this.optimizeStrategy.onInsert(projectId, table);
       }
+      if (this.lexicalIndex) {
+        this.lexicalIndex.addDocument(projectId, { id: doc.sourceId, content: doc.content });
+      }
     } catch (err) {
       // Embedding service unreachable — store content-only with zero vector for FTS
       this.logger.warn(`Embedding failed (${(err as Error).message}) — storing with zero vector`);
@@ -377,6 +382,9 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       await table.add([record]);
       if (this.lanceAvailable && this.optimizeStrategy) {
         await this.optimizeStrategy.onInsert(projectId, table);
+      }
+      if (this.lexicalIndex) {
+        this.lexicalIndex.addDocument(projectId, { id: doc.sourceId, content: doc.content });
       }
     }
   }
@@ -611,6 +619,9 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     }
     const table = await this.getOrCreateTable(projectId);
     await table.delete(`source_id = '${sourceId}'`);
+    if (this.lexicalIndex) {
+      this.lexicalIndex.removeDocument(projectId, sourceId);
+    }
   }
 
   /**
