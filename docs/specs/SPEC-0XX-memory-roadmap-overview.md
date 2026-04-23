@@ -3,7 +3,7 @@
 **Project:** Koda  
 **Parent:** `docs/specs/20260416-plan-koda-memory-gap-analysis-v2.md`  
 **Phases:** 6 (SPEC-000 → SPEC-005)  
-**Total stories:** 32 | **Total ACs:** ~185
+**Total stories:** 33 | **Total ACs:** ~200
 
 ---
 
@@ -45,10 +45,11 @@ SPEC-004 (Graph + Code Intelligence)
     ├── US-002 AST/symbol index pipeline         ← US-001
     ├── US-003 entity graph builder              ← SPEC-002/US-003
     ├── US-004 VCS webhook → code_commit         ← US-001, US-002
-    └── US-005 getChangeImpact API               ← US-001, US-002, US-003
+    ├── US-005 getChangeImpact API               ← US-001, US-002, US-003
+    └── US-006 CanonicalStateService snapshot    ← SPEC-001/US-004, SPEC-003/US-001
 
 SPEC-005 (Multi-Agent Consistency)
-    ├── US-001 ContextBuilderService + errors    ← SPEC-001/US-005, SPEC-002/US-001, SPEC-003/US-005, SPEC-004/US-001
+    ├── US-001 ContextBuilderService + errors    ← SPEC-001/US-005, SPEC-002/US-001, SPEC-003/US-005, SPEC-004/US-006
     ├── US-002 policy gates (incl. GraphifyGate) ← SPEC-000/US-002, SPEC-000/US-003, SPEC-002/US-006
     ├── US-003 agent adapter registry            ← US-001
     ├── US-004 SLO dashboard + token budgets     ← US-001
@@ -65,10 +66,10 @@ SPEC-005 (Multi-Agent Consistency)
 | SPEC-001 | Phase 1 — Canonical + Episodic | 7 | Simple → Complex | Medium |
 | SPEC-002 | Phase 2 — Hybrid Retrieval | 6 | Medium → Complex | High |
 | SPEC-003 | Phase 3 — Semantic Memory | 5 | Medium → Complex | Medium |
-| SPEC-004 | Phase 4 — Graph + Code Intel | 5 | Medium → Complex | High |
+| SPEC-004 | Phase 4 — Graph + Code Intel | 6 | Medium → Complex | High |
 | SPEC-005 | Phase 5 — Multi-Agent Hardening | 5 | Simple → Complex | Medium |
 
-**Total: 32 stories across 6 specs**
+**Total: 33 stories across 6 specs**
 
 ---
 
