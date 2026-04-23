@@ -65,6 +65,7 @@ class EntityStoreWarmup implements OnModuleInit {
   constructor(
     private readonly entityStore: EntityStore,
     private readonly outboxFanOutRegistry: OutboxFanOutRegistry,
+    @Optional() private readonly prisma?: PrismaService<PrismaClient>,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -85,6 +86,24 @@ class EntityStoreWarmup implements OnModuleInit {
     });
 
     this.logger.debug('EntityStore outbox handlers registered');
+
+    if (this.prisma?.client) {
+      try {
+        const projects = await this.prisma.client.project.findMany({
+          where: { deletedAt: null },
+          select: { id: true },
+        });
+        const projectIds = projects.map(p => p.id);
+        if (projectIds.length > 0) {
+          for (const projectId of projectIds) {
+            await this.entityStore.indexGraphifyEntitiesForProject(projectId);
+          }
+          this.logger.log(`EntityStore warmup completed for ${projectIds.length} projects`);
+        }
+      } catch (err) {
+        this.logger.warn(`EntityStore warmup skipped: ${(err as Error).message}`);
+      }
+    }
   }
 }
 

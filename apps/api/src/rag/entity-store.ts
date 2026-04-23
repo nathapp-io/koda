@@ -3,7 +3,9 @@
  *
  * Phase 2: in-memory store; must support rebuilds from outbox fan-out.
  */
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import type { PrismaClient } from '@prisma/client';
 
 export interface Entity {
   id: string;
@@ -20,6 +22,11 @@ export interface ScoredEntity extends Entity {
 @Injectable()
 export class EntityStore {
   private entities = new Map<string, Map<string, Entity>>();
+
+  constructor(
+    @Optional() private readonly prisma?: PrismaService<PrismaClient>,
+    @Optional() private readonly getProjectCodeDocuments?: (projectId: string) => Promise<Array<{ id: string; label: string; type: string; source_file?: string }>>,
+  ) {}
 
   indexEntity(projectId: string, entity: Entity): void {
     let projectEntities = this.entities.get(projectId);
@@ -94,45 +101,85 @@ export class EntityStore {
     payload: unknown;
   }): Promise<void> {
     if (event.eventType === 'graphify_import') {
-      const payload = event.payload as {
-        projectId: string;
-        nodes: Array<{
-          id: string;
-          label: string;
-          type: string;
-          source_file?: string;
-        }>;
-        links: unknown[];
-      };
-
-      for (const node of payload.nodes) {
-        if (node.type === 'code_module') {
-          this.indexEntity(payload.projectId, {
-            id: node.id,
-            label: node.label,
-            tags: this.extractTagsFromLabel(node.label),
-            source: 'code_module',
-            sourceId: node.id,
-          });
+      const payload = event.payload as { projectId: string; nodeCount?: number; linkCount?: number; nodes?: Array<{ id: string; label: string; type: string; source_file?: string }> };
+      if (payload.nodes && payload.nodes.length > 0) {
+        for (const node of payload.nodes) {
+          if (node.type === 'code_module') {
+            this.indexEntity(payload.projectId, {
+              id: node.id,
+              label: node.label,
+              tags: this.extractTagsFromLabel(node.label),
+              source: 'code_module',
+              sourceId: node.id,
+            });
+          }
         }
+      } else {
+        await this.indexGraphifyEntitiesForProject(payload.projectId);
       }
     } else if (event.eventType === 'ticket_event') {
       const payload = event.payload as {
-        projectId: string;
-        ticket: {
-          id: string;
-          ref: string;
-          title: string;
-          type: string;
-        };
+        ticketId?: string;
+        projectId?: string;
+        actorId?: string;
+        data?: Record<string, unknown>;
+        ticket?: { id: string; ref: string; title: string; type: string };
       };
+      if (payload.ticket) {
+        this.indexEntity(payload.projectId ?? '', {
+          id: payload.ticket.id,
+          label: payload.ticket.title,
+          tags: this.extractTagsFromLabel(payload.ticket.title),
+          source: 'ticket',
+          sourceId: payload.ticket.id,
+        });
+      } else if (payload.ticketId && payload.projectId) {
+        await this.indexTicketEntity(payload.ticketId, payload.projectId);
+      }
+    }
+  }
 
-      this.indexEntity(payload.projectId, {
-        id: payload.ticket.id,
-        label: payload.ticket.title,
-        tags: this.extractTagsFromLabel(payload.ticket.title),
+  async indexGraphifyEntitiesForProject(projectId: string): Promise<void> {
+    if (!this.prisma?.client) return;
+
+    let nodes: Array<{ id: string; label: string; type: string; source_file?: string }> = [];
+
+    if (this.getProjectCodeDocuments) {
+      nodes = await this.getProjectCodeDocuments(projectId);
+    } else {
+      const docs = await this.prisma.client.$queryRaw<Array<{ id: string; label: string; type: string; source_file?: string }>>`
+        SELECT id, label, type, source_file FROM code_document WHERE project_id = ${projectId}
+      `;
+      nodes = docs;
+    }
+
+    for (const node of nodes) {
+      if (node.type === 'code_module') {
+        this.indexEntity(projectId, {
+          id: node.id,
+          label: node.label,
+          tags: this.extractTagsFromLabel(node.label),
+          source: 'code_module',
+          sourceId: node.id,
+        });
+      }
+    }
+  }
+
+  private async indexTicketEntity(ticketId: string, projectId: string): Promise<void> {
+    if (!this.prisma?.client) return;
+
+    const ticket = await this.prisma.client.ticket.findUnique({
+      where: { id: ticketId },
+      select: { id: true, title: true },
+    });
+    if (ticket) {
+      this.indexEntity(projectId, {
+        id: ticket.id,
+        label: ticket.title,
+        tags: this.extractTagsFromLabel(ticket.title),
         source: 'ticket',
-        sourceId: payload.ticket.id,
+        sourceId: ticket.id,
       });
     }
   }
