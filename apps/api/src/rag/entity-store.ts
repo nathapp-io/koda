@@ -2,8 +2,6 @@
  * EntityStore — Retrieval-time entity index for entity-aware ranking
  *
  * Phase 2: in-memory store; must support rebuilds from outbox fan-out.
- *
- * STUB — real implementation to follow.
  */
 import { Injectable } from '@nestjs/common';
 

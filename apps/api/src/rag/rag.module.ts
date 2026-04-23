@@ -8,6 +8,7 @@ import { RagService } from './rag.service';
 import { EmbeddingService } from './embedding.service';
 import { HybridRetrieverService } from './hybrid-retriever.service';
 import { LexicalIndex } from './lexical-index';
+import { EntityStore } from './entity-store';
 import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interface';
 import { CounterOptimizeStrategy } from './strategies/counter-optimize.strategy';
 import { CronOptimizeStrategy } from './strategies/cron-optimize.strategy';
@@ -57,6 +58,36 @@ class LexicalIndexWarmup implements OnModuleInit {
   }
 }
 
+@Injectable()
+class EntityStoreWarmup implements OnModuleInit {
+  private readonly logger = new Logger(EntityStoreWarmup.name);
+
+  constructor(
+    private readonly entityStore: EntityStore,
+    private readonly outboxFanOutRegistry: OutboxFanOutRegistry,
+  ) {}
+
+  async onModuleInit(): Promise<void> {
+    this.outboxFanOutRegistry.register('graphify_import', async (payload: unknown) => {
+      await this.entityStore.handleOutboxEvent({
+        eventType: 'graphify_import',
+        payload,
+      });
+      this.logger.debug('EntityStore index updated from graphify_import event');
+    });
+
+    this.outboxFanOutRegistry.register('ticket_event', async (payload: unknown) => {
+      await this.entityStore.handleOutboxEvent({
+        eventType: 'ticket_event',
+        payload,
+      });
+      this.logger.debug('EntityStore index updated from ticket_event event');
+    });
+
+    this.logger.debug('EntityStore outbox handlers registered');
+  }
+}
+
 @Module({
   imports: [ScheduleModule.forRoot(), OutboxModule, PrismaModule],
   controllers: [RagController],
@@ -66,6 +97,8 @@ class LexicalIndexWarmup implements OnModuleInit {
     HybridRetrieverService,
     LexicalIndex,
     LexicalIndexWarmup,
+    EntityStore,
+    EntityStoreWarmup,
     {
       provide: FTS_OPTIMIZE_STRATEGY,
       useFactory: (configService: ConfigService, schedulerRegistry: SchedulerRegistry): FtsOptimizeStrategy => {
@@ -84,6 +117,6 @@ class LexicalIndexWarmup implements OnModuleInit {
       inject: [ConfigService, SchedulerRegistry],
     },
   ],
-  exports: [RagService, HybridRetrieverService, LexicalIndex, FTS_OPTIMIZE_STRATEGY],
+  exports: [RagService, HybridRetrieverService, LexicalIndex, EntityStore, FTS_OPTIMIZE_STRATEGY],
 })
 export class RagModule {}

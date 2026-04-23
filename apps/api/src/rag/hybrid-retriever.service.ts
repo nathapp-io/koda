@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
 import { EmbeddingService } from './embedding.service';
+import { EntityStore } from './entity-store';
 import {
   HybridSearchQuery,
   HybridSearchResult,
@@ -80,6 +81,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly configService: ConfigService,
     private readonly embeddingService: EmbeddingService,
+    private readonly entityStore: EntityStore,
     private readonly prisma: PrismaService<PrismaClient>,
   ) {
     this.lancedbPath = configService.get<string>('rag.lancedbPath') ?? './lancedb';
@@ -329,7 +331,11 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
 
       const vectorScore = simMap.has(id) ? Math.max(0, 1 - (vectorRows.find((r) => r.id === id)?._distance ?? 1)) : 0;
       const lexicalScore = ftsScoreMap.get(id) ?? 0;
-      const entityScore = 0;
+
+      const matchedEntities = this.entityStore.searchEntities(projectId, query.query);
+      const docEntity = matchedEntities.find((e) => e.sourceId === (record.source_id as string));
+      const entityScore = docEntity ? this.entityStore.computeEntityScore(query.query, docEntity.tags) : 0;
+
       const recencyScore = this.calcRecencyScore(record.created_at);
       const finalScore =
         vectorScore * weights.vectorScore +
