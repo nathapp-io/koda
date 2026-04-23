@@ -1,309 +1,309 @@
 import { describe, test, expect } from "bun:test";
 
 describe("memory-phase1-canonical-episodic - Acceptance Tests", () => {
-  test("AC-1: Migration file contains createTable statements for TicketEvent, AgentEvent, and DecisionEvent; Prisma client regenerates without error", async () => {
+  test("AC-1: Migration file contains createTable statements for TicketEvent, AgentEvent, and DecisionEvent with Phase 1 fields; `prisma migrate status` shows all three tables as applied", async () => {
     // TODO: Implement acceptance test for AC-1
-    // Migration file contains createTable statements for TicketEvent, AgentEvent, and DecisionEvent; Prisma client regenerates without error
+    // Migration file contains createTable statements for TicketEvent, AgentEvent, and DecisionEvent with Phase 1 fields; `prisma migrate status` shows all three tables as applied
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-2: Running `prisma migrate deploy` twice returns exit code 0 on second invocation with no 'database is already up to date' error", async () => {
+  test("AC-2: `prisma migrate deploy` exits with code 0 on first run; running it again exits with code 0 (no changes applied)", async () => {
     // TODO: Implement acceptance test for AC-2
-    // Running `prisma migrate deploy` twice returns exit code 0 on second invocation with no 'database is already up to date' error
+    // `prisma migrate deploy` exits with code 0 on first run; running it again exits with code 0 (no changes applied)
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-3: Each of TicketEvent, AgentEvent, DecisionEvent schemas contains field `projectId String @map("project_id") @relation(fields: [projectId], references: [id], onDelete: Cascade)`", async () => {
+  test("AC-3: Prisma schema defines projectId field on TicketEvent, AgentEvent, and DecisionEvent as String with @relation to Project, and migration generates NOT NULL constraint", async () => {
     // TODO: Implement acceptance test for AC-3
-    // Each of TicketEvent, AgentEvent, DecisionEvent schemas contains field `projectId String @map("project_id") @relation(fields: [projectId], references: [id], onDelete: Cascade)`
+    // Prisma schema defines projectId field on TicketEvent, AgentEvent, and DecisionEvent as String with @relation to Project, and migration generates NOT NULL constraint
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-4: Each of TicketEvent, AgentEvent, DecisionEvent schemas contains `@@index([projectId, createdAt])`", async () => {
+  test("AC-4: Prisma schema contains @@index([projectId, createdAt]) on TicketEvent, @@index([projectId, createdAt]) on AgentEvent, and @@index([projectId, createdAt]) on DecisionEvent", async () => {
     // TODO: Implement acceptance test for AC-4
-    // Each of TicketEvent, AgentEvent, DecisionEvent schemas contains `@@index([projectId, createdAt])`
+    // Prisma schema contains @@index([projectId, createdAt]) on TicketEvent, @@index([projectId, createdAt]) on AgentEvent, and @@index([projectId, createdAt]) on DecisionEvent
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-5: TicketEvent schema contains `@@index([projectId, ticketId])`", async () => {
+  test("AC-5: Prisma schema contains @@index([projectId, ticketId]) on TicketEvent model", async () => {
     // TODO: Implement acceptance test for AC-5
-    // TicketEvent schema contains `@@index([projectId, ticketId])`
+    // Prisma schema contains @@index([projectId, ticketId]) on TicketEvent model
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-6: AgentEvent schema contains `@@index([projectId, actorId])`", async () => {
+  test("AC-6: Prisma schema contains @@index([projectId, actorId]) on AgentEvent model", async () => {
     // TODO: Implement acceptance test for AC-6
-    // AgentEvent schema contains `@@index([projectId, actorId])`
+    // Prisma schema contains @@index([projectId, actorId]) on AgentEvent model
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-7: Command `prisma validate` exits with code 0", async () => {
+  test("AC-7: `prisma validate` CLI command exits with code 0; no schema or migration errors reported", async () => {
     // TODO: Implement acceptance test for AC-7
-    // Command `prisma validate` exits with code 0
+    // `prisma validate` CLI command exits with code 0; no schema or migration errors reported
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-8: TicketEventService.create({projectId, ticketId, type, actorId, metadata}) returns a TicketEvent record with generated id, matching projectId/ticketId/type, and createdAt timestamp; calling TicketEvent.findMany({where: {ticketId}}) returns the record within 100ms.", async () => {
+  test("AC-8: TicketEventService.create({ projectId, ticketId, type, payload }) returns an object where typeof id === 'number', ticketId === input.ticketId, projectId === input.projectId, type === input.type, payload === input.payload, and SELECT * FROM TicketEvent WHERE id = returned.id returns exactly one row matching these values.", async () => {
     // TODO: Implement acceptance test for AC-8
-    // TicketEventService.create({projectId, ticketId, type, actorId, metadata}) returns a TicketEvent record with generated id, matching projectId/ticketId/type, and createdAt timestamp; calling TicketEvent.findMany({where: {ticketId}}) returns the record within 100ms.
+    // TicketEventService.create({ projectId, ticketId, type, payload }) returns an object where typeof id === 'number', ticketId === input.ticketId, projectId === input.projectId, type === input.type, payload === input.payload, and SELECT * FROM TicketEvent WHERE id = returned.id returns exactly one row matching these values.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-9: AgentEventService.create({projectId, agentId, type, actorId, metadata}) returns an AgentEvent record with generated id, matching projectId/agentId/type, and createdAt timestamp; calling AgentEvent.findMany({where: {agentId}}) returns the record within 100ms.", async () => {
+  test("AC-9: AgentEventService.create({ projectId, agentId, type, payload }) returns an object where typeof id === 'number', agentId === input.agentId, projectId === input.projectId, type === input.type, payload === input.payload, and SELECT * FROM AgentEvent WHERE id = returned.id returns exactly one row matching these values.", async () => {
     // TODO: Implement acceptance test for AC-9
-    // AgentEventService.create({projectId, agentId, type, actorId, metadata}) returns an AgentEvent record with generated id, matching projectId/agentId/type, and createdAt timestamp; calling AgentEvent.findMany({where: {agentId}}) returns the record within 100ms.
+    // AgentEventService.create({ projectId, agentId, type, payload }) returns an object where typeof id === 'number', agentId === input.agentId, projectId === input.projectId, type === input.type, payload === input.payload, and SELECT * FROM AgentEvent WHERE id = returned.id returns exactly one row matching these values.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-10: DecisionEventService.create({projectId, decisionId, type, actorId, metadata}) returns a DecisionEvent record with generated id, matching projectId/decisionId/type, and createdAt timestamp; calling DecisionEvent.findMany({where: {decisionId}}) returns the record within 100ms.", async () => {
+  test("AC-10: DecisionEventService.create({ projectId, ticketId, type, payload }) returns an object where typeof id === 'number', ticketId === input.ticketId, projectId === input.projectId, type === input.type, payload === input.payload, and SELECT * FROM DecisionEvent WHERE id = returned.id returns exactly one row matching these values.", async () => {
     // TODO: Implement acceptance test for AC-10
-    // DecisionEventService.create({projectId, decisionId, type, actorId, metadata}) returns a DecisionEvent record with generated id, matching projectId/decisionId/type, and createdAt timestamp; calling DecisionEvent.findMany({where: {decisionId}}) returns the record within 100ms.
+    // DecisionEventService.create({ projectId, ticketId, type, payload }) returns an object where typeof id === 'number', ticketId === input.ticketId, projectId === input.projectId, type === input.type, payload === input.payload, and SELECT * FROM DecisionEvent WHERE id = returned.id returns exactly one row matching these values.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-11: KodaDomainWriter has injected TicketEventService, AgentEventService, DecisionEventService; calling ticketOperations.create/update/close invokes ticketEventService.create with operation context; same pattern for agentOperations and decisionOperations with their respective services.", async () => {
+  test("AC-11: After calling KodaDomainWriter.createTicket(), KodaDomainWriter.assignTicket(), or KodaDomainWriter.transitionTicket(), SELECT * FROM TicketEvent, AgentEvent, DecisionEvent WHERE createdAt > operationTimestamp returns at least one row for each respective event type.", async () => {
     // TODO: Implement acceptance test for AC-11
-    // KodaDomainWriter has injected TicketEventService, AgentEventService, DecisionEventService; calling ticketOperations.create/update/close invokes ticketEventService.create with operation context; same pattern for agentOperations and decisionOperations with their respective services.
+    // After calling KodaDomainWriter.createTicket(), KodaDomainWriter.assignTicket(), or KodaDomainWriter.transitionTicket(), SELECT * FROM TicketEvent, AgentEvent, DecisionEvent WHERE createdAt > operationTimestamp returns at least one row for each respective event type.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-12: WriteResult returned from KodaDomainWriter.write() contains provenance array with objects having {entityType: 'TicketEvent'|'AgentEvent'|'DecisionEvent', entityId: string, operation: 'create', timestamp: string} for each event created.", async () => {
+  test("AC-12: After KodaDomainWriter operation that creates events, WriteResult.provenance is an array containing entries with properties { id: number, type: 'TicketEvent' | 'AgentEvent' | 'DecisionEvent', entityId: number } for each created event.", async () => {
     // TODO: Implement acceptance test for AC-12
-    // WriteResult returned from KodaDomainWriter.write() contains provenance array with objects having {entityType: 'TicketEvent'|'AgentEvent'|'DecisionEvent', entityId: string, operation: 'create', timestamp: string} for each event created.
+    // After KodaDomainWriter operation that creates events, WriteResult.provenance is an array containing entries with properties { id: number, type: 'TicketEvent' | 'AgentEvent' | 'DecisionEvent', entityId: number } for each created event.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-13: Calling TicketEventService.create({projectId: 'non-existent-uuid'}) throws ForbiddenError with {code: 'PROJECT_NOT_FOUND', statusCode: 403}; same for AgentEventService.create and DecisionEventService.create.", async () => {
+  test("AC-13: When TicketEventService.create() or AgentEventService.create() or DecisionEventService.create() is called with a projectId value that has no matching row in the Project table, it throws an exception where exception.name === 'ForbiddenError' or exception.constructor.name === 'ForbiddenError' and exception.code === 'PROJECT_NOT_FOUND'.", async () => {
     // TODO: Implement acceptance test for AC-13
-    // Calling TicketEventService.create({projectId: 'non-existent-uuid'}) throws ForbiddenError with {code: 'PROJECT_NOT_FOUND', statusCode: 403}; same for AgentEventService.create and DecisionEventService.create.
+    // When TicketEventService.create() or AgentEventService.create() or DecisionEventService.create() is called with a projectId value that has no matching row in the Project table, it throws an exception where exception.name === 'ForbiddenError' or exception.constructor.name === 'ForbiddenError' and exception.code === 'PROJECT_NOT_FOUND'.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-14: ActorResolver.resolve(request) is called before any permission decorator executes; returns Actor object with {actorType: 'user'|'agent', actorId: string, projectRoles: string[], resourceRoles: string[]}; Permission guard receives this Actor as first argument.", async () => {
+  test("AC-14: When any protected event service method is called with valid auth context, ActorResolver.currentActor is an object containing properties { type: string, id: number | string, projectId: number, role: string } matching the current auth session, and this resolution occurs before the permission check throws.", async () => {
     // TODO: Implement acceptance test for AC-14
-    // ActorResolver.resolve(request) is called before any permission decorator executes; returns Actor object with {actorType: 'user'|'agent', actorId: string, projectRoles: string[], resourceRoles: string[]}; Permission guard receives this Actor as first argument.
+    // When any protected event service method is called with valid auth context, ActorResolver.currentActor is an object containing properties { type: string, id: number | string, projectId: number, role: string } matching the current auth session, and this resolution occurs before the permission check throws.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-15: POST /events/ticket with actor lacking admin/developer/agent role returns 403; same for POST /events/agent and POST /events/decision; GET /admin/outbox with non-admin role returns 403; GET /admin/outbox with admin role returns 200 with {items: Event[], total: number}.", async () => {
+  test("AC-15: When a request to POST /tickets/{id}/events or related event endpoints is made by a user whose ProjectMembership.role is not in ['admin', 'developer', 'agent'] on the target project, HTTP 403 is returned. When GET /admin/outbox is requested by a user without admin role on the project, HTTP 403 is returned.", async () => {
     // TODO: Implement acceptance test for AC-15
-    // POST /events/ticket with actor lacking admin/developer/agent role returns 403; same for POST /events/agent and POST /events/decision; GET /admin/outbox with non-admin role returns 403; GET /admin/outbox with admin role returns 200 with {items: Event[], total: number}.
+    // When a request to POST /tickets/{id}/events or related event endpoints is made by a user whose ProjectMembership.role is not in ['admin', 'developer', 'agent'] on the target project, HTTP 403 is returned. When GET /admin/outbox is requested by a user without admin role on the project, HTTP 403 is returned.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-16: When OutboxService.enqueue() is called with eventType, eventId, projectId, and payload: (1) an OutboxEvent record is persisted to the database, (2) the record's status field equals 'pending', (3) the record's eventType, eventId, projectId, and payload match the input arguments, and (4) the method returns an OutboxEvent object with all上述字段 populated including a non-null id and createdAt timestamp.", async () => {
+  test("AC-16: enqueue(eventType, eventId, projectId, payload) returns an object where: status === 'pending', eventType === passed eventType, eventId === passed eventId, projectId === passed projectId, payload === passed payload, createdAt is a valid timestamp, and the record exists in the database with these exact values.", async () => {
     // TODO: Implement acceptance test for AC-16
-    // When OutboxService.enqueue() is called with eventType, eventId, projectId, and payload: (1) an OutboxEvent record is persisted to the database, (2) the record's status field equals 'pending', (3) the record's eventType, eventId, projectId, and payload match the input arguments, and (4) the method returns an OutboxEvent object with all上述字段 populated including a non-null id and createdAt timestamp.
+    // enqueue(eventType, eventId, projectId, payload) returns an object where: status === 'pending', eventType === passed eventType, eventId === passed eventId, projectId === passed projectId, payload === passed payload, createdAt is a valid timestamp, and the record exists in the database with these exact values.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-17: When OutboxService.processPending(limit?) is called: (1) if limit is undefined, exactly 50 records are returned (or fewer if fewer pending exist), (2) if limit is provided, at most that many records are returned, (3) all returned records have status = 'pending', (4) records are sorted by createdAt in ascending order, and (5) the method returns an array of OutboxEvent objects.", async () => {
+  test("AC-17: processPending(10) returns an array where: length <= 10, every item has status === 'pending', items are sorted by createdAt ascending. processPending() with no argument returns array with length <= 50. processPending(0) returns empty array.", async () => {
     // TODO: Implement acceptance test for AC-17
-    // When OutboxService.processPending(limit?) is called: (1) if limit is undefined, exactly 50 records are returned (or fewer if fewer pending exist), (2) if limit is provided, at most that many records are returned, (3) all returned records have status = 'pending', (4) records are sorted by createdAt in ascending order, and (5) the method returns an array of OutboxEvent objects.
+    // processPending(10) returns an array where: length <= 10, every item has status === 'pending', items are sorted by createdAt ascending. processPending() with no argument returns array with length <= 50. processPending(0) returns empty array.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-18: When OutboxService.markCompleted(eventId) is called on a pending event: (1) the event's status is updated to 'completed', (2) the event's processedAt timestamp is set to a non-null datetime, and (3) the method returns the updated OutboxEvent record.", async () => {
+  test("AC-18: Calling markCompleted(eventId) on a pending event results in: status === 'completed', processedAt is a timestamp >= createdAt, and the updated record exists in the database.", async () => {
     // TODO: Implement acceptance test for AC-18
-    // When OutboxService.markCompleted(eventId) is called on a pending event: (1) the event's status is updated to 'completed', (2) the event's processedAt timestamp is set to a non-null datetime, and (3) the method returns the updated OutboxEvent record.
+    // Calling markCompleted(eventId) on a pending event results in: status === 'completed', processedAt is a timestamp >= createdAt, and the updated record exists in the database.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-19: When OutboxService.markFailed(eventId, error) is called: (1) the event's lastError field is set to the error message, (2) the event's attemptCount is incremented by 1, and (3) the method returns the updated OutboxEvent record without changing status to 'dead_letter'.", async () => {
+  test("AC-19: Calling markFailed(eventId, errorMessage) results in: lastError === errorMessage, attemptCount increments by 1, status remains 'pending' (not 'failed'), and the record is updated in the database.", async () => {
     // TODO: Implement acceptance test for AC-19
-    // When OutboxService.markFailed(eventId, error) is called: (1) the event's lastError field is set to the error message, (2) the event's attemptCount is incremented by 1, and (3) the method returns the updated OutboxEvent record without changing status to 'dead_letter'.
+    // Calling markFailed(eventId, errorMessage) results in: lastError === errorMessage, attemptCount increments by 1, status remains 'pending' (not 'failed'), and the record is updated in the database.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-20: When markFailed() is called on an event with attemptCount = 2 (bringing it to 3): (1) status is changed to 'dead_letter', (2) lastError is set to the error message from the third failure, (3) attemptCount becomes 3, and (4) processedAt remains null.", async () => {
+  test("AC-20: Calling markDeadLetter(eventId) results in: status === 'dead_letter', lastError contains the error from the 3rd failed attempt, attemptCount === 3, and the record is updated in the database.", async () => {
     // TODO: Implement acceptance test for AC-20
-    // When markFailed() is called on an event with attemptCount = 2 (bringing it to 3): (1) status is changed to 'dead_letter', (2) lastError is set to the error message from the third failure, (3) attemptCount becomes 3, and (4) processedAt remains null.
+    // Calling markDeadLetter(eventId) results in: status === 'dead_letter', lastError contains the error from the 3rd failed attempt, attemptCount === 3, and the record is updated in the database.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-21: For an event with attemptCount = 0, the calculated backoff delay is 1 second (2^0); with attemptCount = 1, the delay is 4 seconds (2^1); with attemptCount = 2, the delay is 16 seconds (2^2). No retry occurs before the calculated delay elapses, and dead-lettering occurs immediately after the third attempt fails.", async () => {
+  test("AC-21: For an event that fails 3 consecutive times: the time between 1st and 2nd attempt is >= 1000ms and < 5000ms, between 2nd and 3rd is >= 4000ms and < 20000ms, and after 3rd failure status becomes 'dead_letter'.", async () => {
     // TODO: Implement acceptance test for AC-21
-    // For an event with attemptCount = 0, the calculated backoff delay is 1 second (2^0); with attemptCount = 1, the delay is 4 seconds (2^1); with attemptCount = 2, the delay is 16 seconds (2^2). No retry occurs before the calculated delay elapses, and dead-lettering occurs immediately after the third attempt fails.
+    // For an event that fails 3 consecutive times: the time between 1st and 2nd attempt is >= 1000ms and < 5000ms, between 2nd and 3rd is >= 4000ms and < 20000ms, and after 3rd failure status becomes 'dead_letter'.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-22: When retryEvent(eventId) is called by an admin user on a dead-lettered event: (1) the event's status is changed to 'pending', (2) attemptCount is reset to 0, (3) lastError is cleared, and (4) processedAt is cleared. When called by a non-admin user, an AccessDeniedException is thrown.", async () => {
+  test("AC-22: Calling retryEvent(eventId) on a dead_letter event by an admin user results in: status === 'pending', attemptCount === 0, lastError === null. Non-admin calls throw UnauthorizedError. Calling retryEvent on a non-dead-letter event throws InvalidOperationError.", async () => {
     // TODO: Implement acceptance test for AC-22
-    // When retryEvent(eventId) is called by an admin user on a dead-lettered event: (1) the event's status is changed to 'pending', (2) attemptCount is reset to 0, (3) lastError is cleared, and (4) processedAt is cleared. When called by a non-admin user, an AccessDeniedException is thrown.
+    // Calling retryEvent(eventId) on a dead_letter event by an admin user results in: status === 'pending', attemptCount === 0, lastError === null. Non-admin calls throw UnauthorizedError. Calling retryEvent on a non-dead-letter event throws InvalidOperationError.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-23: After KodaDomainWriter.save() or KodaDomainWriter.update() completes successfully: (1) OutboxService.enqueue() has been called at least once with the correct eventType, eventId, and projectId matching the created/updated entity, and (2) the domain write method does not return until enqueue() completes.", async () => {
+  test("AC-23: After any create/update/delete operation via KodaDomainWriter, calling findMany({ where: { eventType, eventId } }) returns exactly one OutboxEvent with status === 'pending' that was created after the write operation.", async () => {
     // TODO: Implement acceptance test for AC-23
-    // After KodaDomainWriter.save() or KodaDomainWriter.update() completes successfully: (1) OutboxService.enqueue() has been called at least once with the correct eventType, eventId, and projectId matching the created/updated entity, and (2) the domain write method does not return until enqueue() completes.
+    // After any create/update/delete operation via KodaDomainWriter, calling findMany({ where: { eventType, eventId } }) returns exactly one OutboxEvent with status === 'pending' that was created after the write operation.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-24: When the outbox processor job executes: (1) events with status = 'completed' are skipped, (2) events with status = 'processing' are skipped, (3) re-running the job produces the same result without side effects for the same event set, and (4) events transition from 'pending' to 'processing' atomically to prevent double-processing.", async () => {
+  test("AC-24: Running processPending on an event already marked 'completed' leaves status unchanged. Running processPending on an event already marked 'processing' is skipped or returns early. Subsequent runs do not produce duplicate processing.", async () => {
     // TODO: Implement acceptance test for AC-24
-    // When the outbox processor job executes: (1) events with status = 'completed' are skipped, (2) events with status = 'processing' are skipped, (3) re-running the job produces the same result without side effects for the same event set, and (4) events transition from 'pending' to 'processing' atomically to prevent double-processing.
+    // Running processPending on an event already marked 'completed' leaves status unchanged. Running processPending on an event already marked 'processing' is skipped or returns early. Subsequent runs do not produce duplicate processing.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-25: When OutboxFanOutRegistry.dispatch() throws an exception for an event with attemptCount < 3: (1) markFailed() is called to record the error and increment attemptCount, (2) status remains 'pending' (not 'dead_letter'), and (3) the event is eligible for immediate retry based on backoff calculation.", async () => {
+  test("AC-25: When dispatch() throws an exception, the event is NOT marked 'dead_letter' and status remains 'pending'. The attemptCount increments and retryBackoffMs is set for the next scheduled retry.", async () => {
     // TODO: Implement acceptance test for AC-25
-    // When OutboxFanOutRegistry.dispatch() throws an exception for an event with attemptCount < 3: (1) markFailed() is called to record the error and increment attemptCount, (2) status remains 'pending' (not 'dead_letter'), and (3) the event is eligible for immediate retry based on backoff calculation.
+    // When dispatch() throws an exception, the event is NOT marked 'dead_letter' and status remains 'pending'. The attemptCount increments and retryBackoffMs is set for the next scheduled retry.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-26: When GET /admin/outbox?status=dead_letter is requested: (1) the response returns an array of OutboxEvent objects with status = 'dead_letter', (2) request without admin credentials returns HTTP 403 Forbidden, and (3) request with admin credentials returns HTTP 200 with a JSON array.", async () => {
+  test("AC-26: GET /admin/outbox?status=dead_letter returns HTTP 200 with array of dead-letter events. GET /admin/outbox?status=dead_letter without admin auth returns HTTP 401 or 403. Non-admin users cannot access dead-letter events.", async () => {
     // TODO: Implement acceptance test for AC-26
-    // When GET /admin/outbox?status=dead_letter is requested: (1) the response returns an array of OutboxEvent objects with status = 'dead_letter', (2) request without admin credentials returns HTTP 403 Forbidden, and (3) request with admin credentials returns HTTP 200 with a JSON array.
+    // GET /admin/outbox?status=dead_letter returns HTTP 200 with array of dead-letter events. GET /admin/outbox?status=dead_letter without admin auth returns HTTP 401 or 403. Non-admin users cannot access dead-letter events.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-27: When request includes `from=2024-01-01`, `to=2024-01-31`, `actorId=abc123`, and `eventTypes=TICKET_CREATED,TICKET_UPDATED` query params, response contains only events where event.createdAt >= '2024-01-01' AND event.createdAt <= '2024-01-31' AND event.actorId = 'abc123' AND event.type IN ('TICKET_CREATED','TICKET_UPDATED')", async () => {
+  test("AC-27: When calling GET /projects/:slug/timeline with query params {from, to, actorId, eventTypes}, the response contains only events where event.createdAt >= from AND event.createdAt <= to AND event.actorId IN actorId AND event.type IN eventTypes. HTTP status 200 returned.", async () => {
     // TODO: Implement acceptance test for AC-27
-    // When request includes `from=2024-01-01`, `to=2024-01-31`, `actorId=abc123`, and `eventTypes=TICKET_CREATED,TICKET_UPDATED` query params, response contains only events where event.createdAt >= '2024-01-01' AND event.createdAt <= '2024-01-31' AND event.actorId = 'abc123' AND event.type IN ('TICKET_CREATED','TICKET_UPDATED')
+    // When calling GET /projects/:slug/timeline with query params {from, to, actorId, eventTypes}, the response contains only events where event.createdAt >= from AND event.createdAt <= to AND event.actorId IN actorId AND event.type IN eventTypes. HTTP status 200 returned.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-28: When `ticketId=XYZ` query param is provided, response returns JSON array where all items have ticketId='XYZ' and items are sorted by createdAt descending (newest first). Array length equals total count of TicketEvent rows for that ticket.", async () => {
+  test("AC-28: When calling GET /projects/:slug/timeline?ticketId=X, response array contains only TicketEvent records with ticketId=X, sorted by createdAt DESC. HTTP status 200 returned.", async () => {
     // TODO: Implement acceptance test for AC-28
-    // When `ticketId=XYZ` query param is provided, response returns JSON array where all items have ticketId='XYZ' and items are sorted by createdAt descending (newest first). Array length equals total count of TicketEvent rows for that ticket.
+    // When calling GET /projects/:slug/timeline?ticketId=X, response array contains only TicketEvent records with ticketId=X, sorted by createdAt DESC. HTTP status 200 returned.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-29: When `actorId=USER_123` query param is provided, response JSON array contains only events where actorId='USER_123'; no events with different actorId appear in response.", async () => {
+  test("AC-29: When calling GET /projects/:slug/timeline?actorId=X, response array contains only events where actorId=X. HTTP status 200 returned.", async () => {
     // TODO: Implement acceptance test for AC-29
-    // When `actorId=USER_123` query param is provided, response JSON array contains only events where actorId='USER_123'; no events with different actorId appear in response.
+    // When calling GET /projects/:slug/timeline?actorId=X, response array contains only events where actorId=X. HTTP status 200 returned.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-30: When response has more pages, response body includes `nextCursor` string field. When `cursor=<previousNextCursor>` is sent in request, subsequent events are returned. When all events are returned, `nextCursor` is null or absent.", async () => {
+  test("AC-30: Response JSON contains {data: Array, nextCursor: string|null}. When total events > page size, nextCursor is non-null string. When total events <= page size, nextCursor is null.", async () => {
     // TODO: Implement acceptance test for AC-30
-    // When response has more pages, response body includes `nextCursor` string field. When `cursor=<previousNextCursor>` is sent in request, subsequent events are returned. When all events are returned, `nextCursor` is null or absent.
+    // Response JSON contains {data: Array, nextCursor: string|null}. When total events > page size, nextCursor is non-null string. When total events <= page size, nextCursor is null.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-31: When request has no query params, response JSON array contains exactly 50 items (or fewer if total events < 50), sorted by createdAt descending. Response does not include `nextCursor` when total count <= 50.", async () => {
+  test("AC-31: When calling GET /projects/:slug/timeline with no query params, response data array has length 50 (or total events if < 50), sorted by createdAt DESC.", async () => {
     // TODO: Implement acceptance test for AC-31
-    // When request has no query params, response JSON array contains exactly 50 items (or fewer if total events < 50), sorted by createdAt descending. Response does not include `nextCursor` when total count <= 50.
+    // When calling GET /projects/:slug/timeline with no query params, response data array has length 50 (or total events if < 50), sorted by createdAt DESC.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-32: Each item in response array includes: id, projectId, ticketId, actorId, type, metadata, createdAt, and computed `eventType` string field derived from type enum. The `eventType` field is present even when type is null.", async () => {
+  test("AC-32: Each item in response data array contains all Prisma event model fields plus a computed field 'eventType' equal to event.type. HTTP status 200 returned.", async () => {
     // TODO: Implement acceptance test for AC-32
-    // Each item in response array includes: id, projectId, ticketId, actorId, type, metadata, createdAt, and computed `eventType` string field derived from type enum. The `eventType` field is present even when type is null.
+    // Each item in response data array contains all Prisma event model fields plus a computed field 'eventType' equal to event.type. HTTP status 200 returned.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-33: When project slug does not exist OR requesting user lacks access to project, HTTP status code 403 is returned with JSON error body containing `statusCode:403` and `message` indicating forbidden access.", async () => {
+  test("AC-33: When calling GET /projects/:slug/timeline with slug pointing to non-existent or unauthorized project, HTTP status 403 returned with error body containing message.", async () => {
     // TODO: Implement acceptance test for AC-33
-    // When project slug does not exist OR requesting user lacks access to project, HTTP status code 403 is returned with JSON error body containing `statusCode:403` and `message` indicating forbidden access.
+    // When calling GET /projects/:slug/timeline with slug pointing to non-existent or unauthorized project, HTTP status 403 returned with error body containing message.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-34: Calling getProjectContext({intent: 'diagnose', projectId: string}) returns an object where typeof response.recentEvents === 'object' && Array.isArray(response.recentEvents) && response.recentEvents.length <= 10", async () => {
+  test("AC-34: When getProjectContext({ intent: 'diagnose' }) is invoked, the returned object contains a 'recentEvents' key with an Array value whose length is ≤ 10. Each array element is an object containing at minimum 'actorId' (string), 'action' (string), and 'createdAt' (ISO 8601 timestamp).", async () => {
     // TODO: Implement acceptance test for AC-34
-    // Calling getProjectContext({intent: 'diagnose', projectId: string}) returns an object where typeof response.recentEvents === 'object' && Array.isArray(response.recentEvents) && response.recentEvents.length <= 10
+    // When getProjectContext({ intent: 'diagnose' }) is invoked, the returned object contains a 'recentEvents' key with an Array value whose length is ≤ 10. Each array element is an object containing at minimum 'actorId' (string), 'action' (string), and 'createdAt' (ISO 8601 timestamp).
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-35: Calling getProjectContext({intent: 'answer', query: string containing ticket ID e.g. 'ticket-123'}, projectId) returns an object containing statusChangeHistory where statusChangeHistory[].ticketId === 'ticket-123'", async () => {
+  test("AC-35: When getProjectContext({ intent: 'answer', query: '...ticketId...' }) is invoked where query contains a ticket ID pattern (e.g., 'ticket-123' or '#123'), the returned object contains a 'statusChangeHistory' key with an Array value. Each array element contains 'ticketId', 'fromStatus', 'toStatus', and 'changedAt' fields.", async () => {
     // TODO: Implement acceptance test for AC-35
-    // Calling getProjectContext({intent: 'answer', query: string containing ticket ID e.g. 'ticket-123'}, projectId) returns an object containing statusChangeHistory where statusChangeHistory[].ticketId === 'ticket-123'
+    // When getProjectContext({ intent: 'answer', query: '...ticketId...' }) is invoked where query contains a ticket ID pattern (e.g., 'ticket-123' or '#123'), the returned object contains a 'statusChangeHistory' key with an Array value. Each array element contains 'ticketId', 'fromStatus', 'toStatus', and 'changedAt' fields.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-36: Mock/spy TimelineService.getProjectTimeline is called when getProjectContext({intent: 'diagnose'}) is invoked; verify call count >= 1 with correct projectId argument", async () => {
+  test("AC-36: When getProjectContext({ intent: 'diagnose' }) is called, TimelineService.getProjectTimeline is invoked with the projectId matching the input. The returned events from getProjectTimeline are mapped into the recentEvents response without additional filtering beyond the 10-item limit.", async () => {
     // TODO: Implement acceptance test for AC-36
-    // Mock/spy TimelineService.getProjectTimeline is called when getProjectContext({intent: 'diagnose'}) is invoked; verify call count >= 1 with correct projectId argument
+    // When getProjectContext({ intent: 'diagnose' }) is called, TimelineService.getProjectTimeline is invoked with the projectId matching the input. The returned events from getProjectTimeline are mapped into the recentEvents response without additional filtering beyond the 10-item limit.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-37: For response.recentEvents: (1) every item has non-null actorId, action, createdAt fields; (2) for all i < recentEvents.length - 1: new Date(recentEvents[i].createdAt) >= new Date(recentEvents[i+1].createdAt)", async () => {
+  test("AC-37: For getProjectContext({ intent: 'diagnose' }), the recentEvents array is sorted such that for all indices i < j, recentEvents[i].createdAt >= recentEvents[j].createdAt. Every event object has non-null values for 'actorId' (string), 'action' (string), and 'createdAt' (string in RFC 3339 format).", async () => {
     // TODO: Implement acceptance test for AC-37
-    // For response.recentEvents: (1) every item has non-null actorId, action, createdAt fields; (2) for all i < recentEvents.length - 1: new Date(recentEvents[i].createdAt) >= new Date(recentEvents[i+1].createdAt)
+    // For getProjectContext({ intent: 'diagnose' }), the recentEvents array is sorted such that for all indices i < j, recentEvents[i].createdAt >= recentEvents[j].createdAt. Every event object has non-null values for 'actorId' (string), 'action' (string), and 'createdAt' (string in RFC 3339 format).
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-38: Calling getProjectContext({intent: 'plan', ...}) returns an object where Object.keys(response).every(k => !['recentEvents','history','timeline','statusChangeHistory'].includes(k.toLowerCase()))", async () => {
+  test("AC-38: When getProjectContext({ intent: 'plan' }) is invoked, the returned object does not contain a 'recentEvents' key and does not contain a 'statusChangeHistory' key. The response may contain 'projectId', 'goals', and 'recommendations' but no temporal/timeline data.", async () => {
     // TODO: Implement acceptance test for AC-38
-    // Calling getProjectContext({intent: 'plan', ...}) returns an object where Object.keys(response).every(k => !['recentEvents','history','timeline','statusChangeHistory'].includes(k.toLowerCase()))
+    // When getProjectContext({ intent: 'plan' }) is invoked, the returned object does not contain a 'recentEvents' key and does not contain a 'statusChangeHistory' key. The response may contain 'projectId', 'goals', and 'recommendations' but no temporal/timeline data.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-39: After calling `OutboxFanOutRegistry.register('foo', handler)`, a subsequent call to `dispatch({ eventType: 'foo', payload: {...} })` invokes `handler` exactly once with the payload object. The handler is not called before registration.", async () => {
+  test("AC-39: After calling register('foo', handlerA), dispatch('foo', payload) invokes handlerA(payload) once. After subsequent register('foo', handlerB), dispatch('foo', payload) invokes handlerA(payload) then handlerB(payload) in order.", async () => {
     // TODO: Implement acceptance test for AC-39
-    // After calling `OutboxFanOutRegistry.register('foo', handler)`, a subsequent call to `dispatch({ eventType: 'foo', payload: {...} })` invokes `handler` exactly once with the payload object. The handler is not called before registration.
+    // After calling register('foo', handlerA), dispatch('foo', payload) invokes handlerA(payload) once. After subsequent register('foo', handlerB), dispatch('foo', payload) invokes handlerA(payload) then handlerB(payload) in order.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-40: Calling `register('foo', handler1)` then `register('foo', handler2)` and dispatching with `eventType: 'foo'` invokes both `handler1` and `handler2` in registration order (handler1 first, handler2 second). The returned array from a public `getHandlers(eventType)` method has length 2.", async () => {
+  test("AC-40: Calling register('foo', handlerA) then register('foo', handlerB) and then dispatch('foo', payload) results in handlerA being called first, then handlerB. The returned handlers array for 'foo' has length 2.", async () => {
     // TODO: Implement acceptance test for AC-40
-    // Calling `register('foo', handler1)` then `register('foo', handler2)` and dispatching with `eventType: 'foo'` invokes both `handler1` and `handler2` in registration order (handler1 first, handler2 second). The returned array from a public `getHandlers(eventType)` method has length 2.
+    // Calling register('foo', handlerA) then register('foo', handlerB) and then dispatch('foo', payload) results in handlerA being called first, then handlerB. The returned handlers array for 'foo' has length 2.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-41: Before the startup lifecycle completes, `OutboxFanOutRegistry.getHandlers()` returns an array whose length equals `DEFAULT_HANDLERS.length`, and each entry in `DEFAULT_HANDLERS` is present (by identity or eventType match) in the registry.", async () => {
+  test("AC-41: After app startup, for each eventType in DEFAULT_HANDLERS, OutboxFanOutRegistry.getHandlers(eventType) returns an array with length equal to the number of handlers defined for that eventType in DEFAULT_HANDLERS, and no handlers are missing.", async () => {
     // TODO: Implement acceptance test for AC-41
-    // Before the startup lifecycle completes, `OutboxFanOutRegistry.getHandlers()` returns an array whose length equals `DEFAULT_HANDLERS.length`, and each entry in `DEFAULT_HANDLERS` is present (by identity or eventType match) in the registry.
+    // After app startup, for each eventType in DEFAULT_HANDLERS, OutboxFanOutRegistry.getHandlers(eventType) returns an array with length equal to the number of handlers defined for that eventType in DEFAULT_HANDLERS, and no handlers are missing.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-42: Calling `dispatch({ eventType: 'ticket_event', payload: {...} })` calls all registered `ticket_event` handlers sequentially in the order they were registered. The final line of `dispatch()` is only reached after the last handler completes (no async parallelism, no early return on first handler).", async () => {
+  test("AC-42: Calling dispatch('ticket_event', payload) after registering handlerA, then handlerB, then handlerC for 'ticket_event' results in handlerA(payload) being called before handlerB(payload), and handlerB(payload) before handlerC(payload). No handlers are skipped.", async () => {
     // TODO: Implement acceptance test for AC-42
-    // Calling `dispatch({ eventType: 'ticket_event', payload: {...} })` calls all registered `ticket_event` handlers sequentially in the order they were registered. The final line of `dispatch()` is only reached after the last handler completes (no async parallelism, no early return on first handler).
+    // Calling dispatch('ticket_event', payload) after registering handlerA, then handlerB, then handlerC for 'ticket_event' results in handlerA(payload) being called before handlerB(payload), and handlerB(payload) before handlerC(payload). No handlers are skipped.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-43: When any handler in the chain throws an Error, `dispatch()` catches it, the error is passed to a logger (logger.error or similar called at least once with the Error), and subsequent handlers for the same eventType are still invoked. The Error propagates no further — `dispatch()` returns normally.", async () => {
+  test("AC-43: When dispatch('foo', payload) is called with handlers [handlerA, handlerB] where handlerA throws an Error, then handlerB(payload) is still invoked. An error is logged containing the Error message and stack trace.", async () => {
     // TODO: Implement acceptance test for AC-43
-    // When any handler in the chain throws an Error, `dispatch()` catches it, the error is passed to a logger (logger.error or similar called at least once with the Error), and subsequent handlers for the same eventType are still invoked. The Error propagates no further — `dispatch()` returns normally.
+    // When dispatch('foo', payload) is called with handlers [handlerA, handlerB] where handlerA throws an Error, then handlerB(payload) is still invoked. An error is logged containing the Error message and stack trace.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-44: When `dispatch({ eventType: 'document_indexed', payload: P })` is called, `P` has own enumerable properties `sourceId`, `content`, and `metadata`, all present (not undefined). `Object.keys(P).sort()` equals `['content','metadata','sourceId'].sort()`.", async () => {
+  test("AC-44: When dispatch('document_indexed', payload) is called, the payload object has own properties: 'sourceId' (non-empty string), 'content' (string), and 'metadata' (object). LexicalIndex.addDocument(payload) executes without throwing.", async () => {
     // TODO: Implement acceptance test for AC-44
-    // When `dispatch({ eventType: 'document_indexed', payload: P })` is called, `P` has own enumerable properties `sourceId`, `content`, and `metadata`, all present (not undefined). `Object.keys(P).sort()` equals `['content','metadata','sourceId'].sort()`.
+    // When dispatch('document_indexed', payload) is called, the payload object has own properties: 'sourceId' (non-empty string), 'content' (string), and 'metadata' (object). LexicalIndex.addDocument(payload) executes without throwing.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-45: When `dispatch({ eventType: 'graphify_import', payload: P })` is called, `P` has own enumerable properties `projectId`, `nodeCount`, and `linkCount`, all present (not undefined). `Object.keys(P).sort()` equals `['linkCount','nodeCount','projectId'].sort()`.", async () => {
+  test("AC-45: When dispatch('graphify_import', payload) is called, the payload object has own properties: 'projectId' (string), 'nodeCount' (number), and 'linkCount' (number). All three values are defined (not undefined).", async () => {
     // TODO: Implement acceptance test for AC-45
-    // When `dispatch({ eventType: 'graphify_import', payload: P })` is called, `P` has own enumerable properties `projectId`, `nodeCount`, and `linkCount`, all present (not undefined). `Object.keys(P).sort()` equals `['linkCount','nodeCount','projectId'].sort()`.
+    // When dispatch('graphify_import', payload) is called, the payload object has own properties: 'projectId' (string), 'nodeCount' (number), and 'linkCount' (number). All three values are defined (not undefined).
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-46: A test calling `register('test_event', mockFn)` followed by `dispatch({ eventType: 'test_event', payload: {} })` has `expect(mockFn).toHaveBeenCalledTimes(1)`. The registry and dispatch functions are exported or otherwise accessible in the test environment without requiring HTTP or database I/O.", async () => {
+  test("AC-46: After registering a mockHandler via register('test_event', mockHandler), calling dispatch('test_event', testPayload) causes mockHandler to have been called exactly once with testPayload as argument. getHandlers('test_event') includes mockHandler.", async () => {
     // TODO: Implement acceptance test for AC-46
-    // A test calling `register('test_event', mockFn)` followed by `dispatch({ eventType: 'test_event', payload: {} })` has `expect(mockFn).toHaveBeenCalledTimes(1)`. The registry and dispatch functions are exported or otherwise accessible in the test environment without requiring HTTP or database I/O.
+    // After registering a mockHandler via register('test_event', mockHandler), calling dispatch('test_event', testPayload) causes mockHandler to have been called exactly once with testPayload as argument. getHandlers('test_event') includes mockHandler.
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-47: Migration file contains `model OutboxEvent { id: String, status: String, eventType: String, payload: Json, createdAt: DateTime, processedAt: DateTime?, projectId: String }` definition", async () => {
+  test("AC-47: Migration file contains `model OutboxEvent { ... }` block with fields: id (UUID/默认), status (String), projectId (String?), agentId (String?), ticketId (String?), eventType (String), payload (Json), metadata (Json?), createdAt (DateTime), processedAt (DateTime?)", async () => {
     // TODO: Implement acceptance test for AC-47
-    // Migration file contains `model OutboxEvent { id: String, status: String, eventType: String, payload: Json, createdAt: DateTime, processedAt: DateTime?, projectId: String }` definition
+    // Migration file contains `model OutboxEvent { ... }` block with fields: id (UUID/默认), status (String), projectId (String?), agentId (String?), ticketId (String?), eventType (String), payload (Json), metadata (Json?), createdAt (DateTime), processedAt (DateTime?)
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-48: Migration SQL contains `CREATE INDEX ... ON "OutboxEvent" ("status", "createdAt")` and `CREATE INDEX ... ON "OutboxEvent" ("projectId", "createdAt")`", async () => {
+  test("AC-48: Migration file contains exactly two `@@index` declarations: `@@index([status, createdAt])` and `@@index([projectId, createdAt])` within OutboxEvent model", async () => {
     // TODO: Implement acceptance test for AC-48
-    // Migration SQL contains `CREATE INDEX ... ON "OutboxEvent" ("status", "createdAt")` and `CREATE INDEX ... ON "OutboxEvent" ("projectId", "createdAt")`
+    // Migration file contains exactly two `@@index` declarations: `@@index([status, createdAt])` and `@@index([projectId, createdAt])` within OutboxEvent model
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-49: Running `prisma migrate deploy` twice returns exit code 0 with no error messages on second run", async () => {
+  test("AC-49: `prisma migrate deploy` exits with code 0 when run consecutively twice on same database state", async () => {
     // TODO: Implement acceptance test for AC-49
-    // Running `prisma migrate deploy` twice returns exit code 0 with no error messages on second run
+    // `prisma migrate deploy` exits with code 0 when run consecutively twice on same database state
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-50: Migration file contains no `DROP TABLE` or `ALTER TABLE` statements referencing TicketEvent, AgentEvent, or DecisionEvent", async () => {
+  test("AC-50: Migration file contains zero occurrences of `dropTable("TicketEvent")`, `dropTable("AgentEvent")`, `dropTable("DecisionEvent")` and no `ALTER TABLE` statements targeting those tables", async () => {
     // TODO: Implement acceptance test for AC-50
-    // Migration file contains no `DROP TABLE` or `ALTER TABLE` statements referencing TicketEvent, AgentEvent, or DecisionEvent
+    // Migration file contains zero occurrences of `dropTable("TicketEvent")`, `dropTable("AgentEvent")`, `dropTable("DecisionEvent")` and no `ALTER TABLE` statements targeting those tables
     expect(true).toBe(false); // Replace with actual test
   });
 
-  test("AC-51: Running `prisma validate` command returns exit code 0", async () => {
+  test("AC-51: `prisma validate` command exits with code 0 after migration is applied", async () => {
     // TODO: Implement acceptance test for AC-51
-    // Running `prisma validate` command returns exit code 0
+    // `prisma validate` command exits with code 0 after migration is applied
     expect(true).toBe(false); // Replace with actual test
   });
 });
