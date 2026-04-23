@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import type { PrismaClient } from '@prisma/client';
@@ -20,8 +20,6 @@ import type {
 
 @Injectable()
 export class KodaDomainWriter {
-  private readonly logger = new Logger(KodaDomainWriter.name);
-
   constructor(
     private readonly prisma: PrismaService<PrismaClient>,
     private readonly ragService: RagService,
@@ -55,9 +53,14 @@ export class KodaDomainWriter {
     return { actorId, projectId, action, timestamp: new Date(), source, eventId };
   }
 
-  private assertActorHasEventRole(actor: { projectRoles: string[] }): void {
-    if (actor.projectRoles.length === 0) return;
-    const allowedRoles = ['AGENT', 'VERIFIER', 'DEVELOPER', 'REVIEWER'];
+  private assertActorHasEventRole(actor: { actorType: 'user' | 'agent'; projectRoles: string[] }): void {
+    if (actor.projectRoles.length === 0) {
+      if (actor.actorType === 'agent') {
+        return;
+      }
+      throw new ForbiddenAppException({}, 'koda-domain-writer');
+    }
+    const allowedRoles = ['ADMIN', 'DEVELOPER', 'REVIEWER', 'TRIAGER', 'AGENT'];
     const hasRole = actor.projectRoles.some((role) => allowedRoles.includes(role));
     if (!hasRole) {
       throw new ForbiddenAppException({}, 'koda-domain-writer');
@@ -79,21 +82,17 @@ export class KodaDomainWriter {
 
     const event = await this.ticketEventService.create(data);
 
-    try {
-      await this.outboxService.enqueue({
+    await this.outboxService.enqueue({
+      projectId: data.projectId,
+      eventType: 'ticket_event',
+      eventId: event.id,
+      payload: {
+        ticketId: data.ticketId,
         projectId: data.projectId,
-        eventType: 'ticket_event',
-        eventId: event.id,
-        payload: {
-          ticketId: data.ticketId,
-          projectId: data.projectId,
-          actorId: data.actorId,
-          data: data.data,
-        },
-      });
-    } catch (err) {
-      this.logger.error(`Failed to enqueue outbox event for ticket ${event.id}: ${String(err)}`);
-    }
+        actorId: data.actorId,
+        data: data.data,
+      },
+    });
 
     return {
       canonicalId: event.id,
@@ -114,21 +113,17 @@ export class KodaDomainWriter {
 
     const event = await this.agentEventService.create(data);
 
-    try {
-      await this.outboxService.enqueue({
+    await this.outboxService.enqueue({
+      projectId: data.projectId,
+      eventType: 'agent_event',
+      eventId: event.id,
+      payload: {
+        agentId: data.agentId,
         projectId: data.projectId,
-        eventType: 'agent_event',
-        eventId: event.id,
-        payload: {
-          agentId: data.agentId,
-          projectId: data.projectId,
-          actorId: data.actorId,
-          data: data.data,
-        },
-      });
-    } catch (err) {
-      this.logger.error(`Failed to enqueue outbox event for agent ${event.id}: ${String(err)}`);
-    }
+        actorId: data.actorId,
+        data: data.data,
+      },
+    });
 
     return {
       canonicalId: event.id,
@@ -150,21 +145,17 @@ export class KodaDomainWriter {
 
     const event = await this.decisionEventService.create(data);
 
-    try {
-      await this.outboxService.enqueue({
+    await this.outboxService.enqueue({
+      projectId: data.projectId,
+      eventType: 'decision_event',
+      eventId: event.id,
+      payload: {
         projectId: data.projectId,
-        eventType: 'decision_event',
-        eventId: event.id,
-        payload: {
-          projectId: data.projectId,
-          agentId: data.agentId,
-          decision: data.decision,
-          data: data.data,
-        },
-      });
-    } catch (err) {
-      this.logger.error(`Failed to enqueue outbox event for decision ${event.id}: ${String(err)}`);
-    }
+        agentId: data.agentId,
+        decision: data.decision,
+        data: data.data,
+      },
+    });
 
     return {
       canonicalId: event.id,
@@ -191,21 +182,18 @@ export class KodaDomainWriter {
       data: { source: data.source, metadata: data.metadata },
     });
 
-    try {
-      await this.outboxService.enqueue({
-        projectId: data.projectId,
-        eventType: 'document_indexed',
-        eventId: event.id,
-        payload: {
-          source: data.source,
-          sourceId: data.sourceId,
-          actorId: data.actorId,
-          metadata: data.metadata,
-        },
-      });
-    } catch (err) {
-      this.logger.error(`Failed to enqueue document_indexed outbox event ${event.id}: ${String(err)}`);
-    }
+    await this.outboxService.enqueue({
+      projectId: data.projectId,
+      eventType: 'document_indexed',
+      eventId: event.id,
+      payload: {
+        source: data.source,
+        sourceId: data.sourceId,
+        content: data.content,
+        actorId: data.actorId,
+        metadata: data.metadata,
+      },
+    });
 
     let ragError: string | undefined;
     try {
@@ -233,6 +221,17 @@ export class KodaDomainWriter {
     await this.assertProjectExists(data.projectId);
 
     const result = await this.ragService.importGraphify(data.projectId, data.nodes, data.links);
+
+    await this.outboxService.enqueue({
+      projectId: data.projectId,
+      eventType: 'graphify_import',
+      eventId: `${data.projectId}:${Date.now()}`,
+      payload: {
+        projectId: data.projectId,
+        nodeCount: data.nodes.length,
+        linkCount: data.links.length,
+      },
+    });
 
     return {
       metadata: { imported: result.imported, cleared: result.cleared },

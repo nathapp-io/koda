@@ -262,7 +262,7 @@ model VcsSyncLog {
 
 model TicketEvent {
   id        String   @id @default(cuid())
-  ticketId  String
+  ticketId  String?
   projectId String
   action    String
   actorId   String

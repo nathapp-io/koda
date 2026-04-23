@@ -5,7 +5,7 @@
 -- CreateTable: TicketEvent
 CREATE TABLE IF NOT EXISTS "TicketEvent" (
     "id" TEXT NOT NULL PRIMARY KEY,
-    "ticketId" TEXT NOT NULL,
+    "ticketId" TEXT,
     "projectId" TEXT NOT NULL,
     "action" TEXT NOT NULL,
     "actorId" TEXT NOT NULL,
@@ -18,10 +18,10 @@ CREATE TABLE IF NOT EXISTS "TicketEvent" (
 );
 
 -- CreateIndex: TicketEvent projectId+createdAt
-CREATE INDEX "TicketEvent_projectId_createdAt_idx" ON "TicketEvent"("projectId", "createdAt");
+CREATE INDEX IF NOT EXISTS "TicketEvent_projectId_createdAt_idx" ON "TicketEvent"("projectId", "createdAt");
 
 -- CreateIndex: TicketEvent projectId+ticketId
-CREATE INDEX "TicketEvent_projectId_ticketId_idx" ON "TicketEvent"("projectId", "ticketId");
+CREATE INDEX IF NOT EXISTS "TicketEvent_projectId_ticketId_idx" ON "TicketEvent"("projectId", "ticketId");
 
 -- CreateTable: AgentEvent
 CREATE TABLE IF NOT EXISTS "AgentEvent" (
@@ -38,10 +38,10 @@ CREATE TABLE IF NOT EXISTS "AgentEvent" (
 );
 
 -- CreateIndex: AgentEvent projectId+createdAt
-CREATE INDEX "AgentEvent_projectId_createdAt_idx" ON "AgentEvent"("projectId", "createdAt");
+CREATE INDEX IF NOT EXISTS "AgentEvent_projectId_createdAt_idx" ON "AgentEvent"("projectId", "createdAt");
 
 -- CreateIndex: AgentEvent projectId+actorId
-CREATE INDEX "AgentEvent_projectId_actorId_idx" ON "AgentEvent"("projectId", "actorId");
+CREATE INDEX IF NOT EXISTS "AgentEvent_projectId_actorId_idx" ON "AgentEvent"("projectId", "actorId");
 
 -- CreateTable: DecisionEvent
 CREATE TABLE IF NOT EXISTS "DecisionEvent" (
@@ -59,4 +59,4 @@ CREATE TABLE IF NOT EXISTS "DecisionEvent" (
 );
 
 -- CreateIndex: DecisionEvent projectId+createdAt
-CREATE INDEX "DecisionEvent_projectId_createdAt_idx" ON "DecisionEvent"("projectId", "createdAt");
+CREATE INDEX IF NOT EXISTS "DecisionEvent_projectId_createdAt_idx" ON "DecisionEvent"("projectId", "createdAt");

@@ -52,30 +52,36 @@ export class OutboxService {
   }
 
   async getPendingEvents(limit = 100): Promise<OutboxEventData[]> {
+    const take = Math.max(Math.floor(limit), 0);
     const events = await this.prisma.client.outboxEvent.findMany({
       where: { status: 'pending' },
       orderBy: { createdAt: 'asc' },
-      take: limit,
+      take,
     });
     return events.map(this.mapToOutboxEventData);
   }
 
   async getEventsByStatus(status: string, limit = 100): Promise<OutboxEventData[]> {
+    const take = Math.max(Math.floor(limit), 0);
     const events = await this.prisma.client.outboxEvent.findMany({
       where: { status },
       orderBy: { createdAt: 'asc' },
-      take: limit,
+      take,
     });
     return events.map(this.mapToOutboxEventData);
   }
 
   async processPending(limit = 50): Promise<void> {
+    const take = Math.max(Math.floor(limit), 0);
+    if (take === 0) {
+      return;
+    }
     await this.requeueStaleProcessingEvents();
 
     const pendingEvents = await this.prisma.client.outboxEvent.findMany({
       where: { status: 'pending' },
       orderBy: { createdAt: 'asc' },
-      take: limit,
+      take,
     });
 
     for (const event of pendingEvents) {
@@ -101,11 +107,17 @@ export class OutboxService {
   }
 
   async processEvent(event: Record<string, unknown>): Promise<void> {
-    const parsedPayload = JSON.parse(String(event.payload));
+    const parsedPayload = JSON.parse(String(event.payload ?? '{}'));
     await this.fanOutRegistry.dispatch({
       eventType: String(event.eventType),
       payload: parsedPayload,
     });
+    const failureCount = typeof this.fanOutRegistry.consumeLastDispatchFailureCount === 'function'
+      ? this.fanOutRegistry.consumeLastDispatchFailureCount()
+      : 0;
+    if (failureCount > 0) {
+      throw new Error(`One or more fan-out handlers failed for ${String(event.eventType)}`);
+    }
   }
 
   async retry(event: OutboxEventData): Promise<OutboxEventData> {

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ValidationAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
 
@@ -42,63 +43,111 @@ export class TimelineService {
   }
 
   async getProjectTimeline(query: TimelineQuery): Promise<TimelineResponse> {
-    const limit = Math.min(query.limit ?? 50, 200);
+    const limit = Math.min(Math.max(Math.floor(query.limit ?? 50), 1), 200);
+    const eventTypes = query.eventTypes?.length
+      ? query.eventTypes
+      : ['ticket_event', 'agent_event', 'decision_event'];
 
-    const where: {
-      projectId: string;
-      actorId?: string;
-      ticketId?: string;
-      createdAt?: { gte?: Date; lte?: Date };
-    } = {
+    const allowedTypes = new Set(['ticket_event', 'agent_event', 'decision_event']);
+    const unknownTypes = eventTypes.filter((eventType) => !allowedTypes.has(eventType));
+    if (unknownTypes.length > 0) {
+      throw new ValidationAppException({ eventTypes: `Unknown event types: ${unknownTypes.join(', ')}` });
+    }
+
+    const baseWhere = {
       projectId: query.projectId,
+      ...(query.from || query.to
+        ? {
+            createdAt: {
+              ...(query.from ? { gte: query.from } : {}),
+              ...(query.to ? { lte: query.to } : {}),
+            },
+          }
+        : {}),
     };
 
-    if (query.actorId) {
-      where.actorId = query.actorId;
-    }
+    const actorWhere = query.actorId ? { ...baseWhere, actorId: query.actorId } : baseWhere;
+    const ticketWhere = query.ticketId ? { ...actorWhere, ticketId: query.ticketId } : actorWhere;
+    const decisionWhere = query.actorId
+      ? { ...baseWhere, agentId: query.actorId }
+      : baseWhere;
 
-    if (query.ticketId) {
-      where.ticketId = query.ticketId;
-    }
+    const results: TimelineEvent[] = [];
 
-    if (query.from || query.to) {
-      where.createdAt = {};
-      if (query.from) {
-        where.createdAt.gte = query.from;
-      }
-      if (query.to) {
-        where.createdAt.lte = query.to;
-      }
-    }
-
-    const events = await this.db.ticketEvent.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: limit + 1,
-    });
-
-    const hasMore = events.length > limit;
-    const resultEvents = hasMore ? events.slice(0, limit) : events;
-
-    return {
-      events: resultEvents.map((e) => ({
+    if (eventTypes.includes('ticket_event')) {
+      const ticketEvents = (await this.db.ticketEvent.findMany({
+        where: ticketWhere,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      })) ?? [];
+      results.push(...ticketEvents.map((e) => ({
         id: e.id,
         eventType: 'ticket_event',
         actorId: e.actorId,
         action: e.action,
         ticketId: e.ticketId,
         createdAt: e.createdAt,
-      })),
-      nextCursor: hasMore ? resultEvents[resultEvents.length - 1]?.id : undefined,
-      total: hasMore ? events.length : resultEvents.length,
+      })));
+    }
+
+    if (!query.ticketId && eventTypes.includes('agent_event')) {
+      const agentEvents = (await this.db.agentEvent.findMany({
+        where: actorWhere,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      })) ?? [];
+      results.push(...agentEvents.map((e) => ({
+        id: e.id,
+        eventType: 'agent_event',
+        actorId: e.actorId,
+        action: e.action,
+        createdAt: e.createdAt,
+      })));
+    }
+
+    if (!query.ticketId && eventTypes.includes('decision_event')) {
+      const decisionEvents = (await this.db.decisionEvent.findMany({
+        where: decisionWhere,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      })) ?? [];
+      results.push(...decisionEvents.map((e) => ({
+        id: e.id,
+        eventType: 'decision_event',
+        actorId: e.agentId,
+        action: e.action,
+        createdAt: e.createdAt,
+      })));
+    }
+
+    results.sort((left, right) => {
+      const timeDelta = right.createdAt.getTime() - left.createdAt.getTime();
+      if (timeDelta !== 0) return timeDelta;
+      return right.id.localeCompare(left.id);
+    });
+
+    const total = results.length;
+
+    if (query.cursor) {
+      const cursorIndex = results.findIndex((event) => event.id === query.cursor);
+      if (cursorIndex < 0) {
+        throw new ValidationAppException({ cursor: 'Unknown cursor' });
+      }
+      results.splice(0, cursorIndex + 1);
+    }
+
+    const slicedEvents = results.slice(0, limit);
+    const hasMore = results.length > limit;
+
+    return {
+      events: slicedEvents,
+      nextCursor: hasMore ? slicedEvents[slicedEvents.length - 1]?.id : undefined,
+      total,
     };
   }
 
   async getTicketHistory(ticketId: string): Promise<TicketHistoryResponse> {
-    const events = await this.db.ticketEvent.findMany({
+    const events = (await this.db.ticketEvent.findMany({
       where: { ticketId },
-      orderBy: { createdAt: 'desc' },
-    });
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    })) ?? [];
 
     return {
       events: events.map((e) => ({

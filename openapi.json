@@ -751,10 +751,19 @@
     "/api/admin/outbox": {
       "get": {
         "operationId": "AdminController_getOutbox",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "status",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Returns pending outbox events"
+            "description": "Returns outbox events"
           },
           "403": {
             "description": "Forbidden - requires admin role"
@@ -765,7 +774,42 @@
             "bearer": []
           }
         ],
-        "summary": "Get pending outbox events",
+        "summary": "Get outbox events by status",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/outbox/{eventId}/retry": {
+      "post": {
+        "operationId": "AdminController_retryOutboxEvent",
+        "parameters": [
+          {
+            "name": "eventId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event reset to pending"
+          },
+          "403": {
+            "description": "Forbidden - requires admin role"
+          },
+          "404": {
+            "description": "Event not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Retry a dead-letter outbox event",
         "tags": [
           "admin"
         ]
@@ -2749,6 +2793,86 @@
         "summary": "Receive CI pipeline failure webhook and auto-create ticket",
         "tags": [
           "ci-webhooks"
+        ]
+      }
+    },
+    "/api/projects/{slug}/timeline": {
+      "get": {
+        "operationId": "TimelineController_getTimeline",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actorId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ticketId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project timeline"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a project timeline",
+        "tags": [
+          "memory"
         ]
       }
     }

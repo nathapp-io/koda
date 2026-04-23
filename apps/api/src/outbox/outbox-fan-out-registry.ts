@@ -26,6 +26,7 @@ export const DEFAULT_HANDLERS: OutboxHandler[] = [
 export class OutboxFanOutRegistry implements OnModuleInit {
   private readonly logger = new Logger(OutboxFanOutRegistry.name);
   private handlers: Map<string, Array<(payload: unknown) => void | Promise<void>>> = new Map();
+  private lastDispatchFailureCount = 0;
 
   onModuleInit(): void {
     for (const { eventType, handler } of DEFAULT_HANDLERS) {
@@ -41,6 +42,7 @@ export class OutboxFanOutRegistry implements OnModuleInit {
   }
 
   async dispatch(input: { eventType: string; payload: unknown }): Promise<void> {
+    this.lastDispatchFailureCount = 0;
     const handlers = this.handlers.get(input.eventType) || [];
     for (const handler of handlers) {
       try {
@@ -48,11 +50,18 @@ export class OutboxFanOutRegistry implements OnModuleInit {
       } catch (error) {
         this.logger.error(`Handler for ${input.eventType} failed`, error);
         console.error(`Handler for ${input.eventType} failed:`, error);
+        this.lastDispatchFailureCount += 1;
       }
     }
   }
 
   getHandlers(eventType: string): Array<(payload: unknown) => void | Promise<void>> {
     return this.handlers.get(eventType) || [];
+  }
+
+  consumeLastDispatchFailureCount(): number {
+    const failures = this.lastDispatchFailureCount;
+    this.lastDispatchFailureCount = 0;
+    return failures;
   }
 }

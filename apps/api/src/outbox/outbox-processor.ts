@@ -12,7 +12,7 @@ export class OutboxProcessor implements OnModuleInit {
     this.logger.log('OutboxProcessor initialized');
   }
 
-  @Cron(CronExpression.EVERY_10_SECONDS)
+  @Cron(CronExpression.EVERY_5_SECONDS)
   async processOutboxQueue(): Promise<void> {
     await this.outboxService.processPending();
   }
