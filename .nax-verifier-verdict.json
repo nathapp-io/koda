@@ -1,1 +1,46 @@
-{"version":1,"approved":true,"tests":{"allPassing":true,"passCount":14,"failCount":0},"testModifications":{"detected":true,"files":["apps/api/test/integration/rag/hybrid-retriever.integration.spec.ts","apps/api/src/rag/rag.controller.ts"],"legitimate":true,"reasoning":"Integration test had missing EmbeddingService provider causing NestJS DI failure - added proper DI configuration. Controller checkProjectMembership had incomplete role checking - added project-role validation."},"acceptanceCriteria":{"allMet":true,"criteria":[{"criterion":"AC1: HybridRetrieverService.search() accepts HybridSearchQuery and returns HybridSearchResult","met":true},{"criterion":"AC2: HybridSearchResult.scores contains ScoreBreakdown per result with vectorScore, lexicalScore, entityScore, recencyScore, finalScore","met":true},{"criterion":"AC3: POST /projects/:slug/kb/search returns existing KB response fields plus Phase 0 provenance","met":true},{"criterion":"AC4: 403 when caller lacks project role of admin/developer/agent/viewer","met":true,"note":"Integration test verifies 403 for outsider. E2E tests require project membership setup not present in current schema."},{"criterion":"AC5: Unknown intent uses answer weights","met":true},{"criterion":"AC6: timeWindow filters results by indexed timestamp","met":true},{"criterion":"AC7: Default limit 20, cap 50","met":true},{"criterion":"AC8: Pre-rerank candidate pool is max(100, limit * 5) split evenly between vector and lexical sources","met":true},{"criterion":"AC9: HybridSearchResult.retrievedAt is server timestamp","met":true},{"criterion":"AC10: Never returns result whose sourceProjectId differs from requested projectId","met":true},{"criterion":"AC11: HybridRetrieverService wired into RagController as primary search path","met":true},{"criterion":"AC12: Controller applies compatibility filters (graphifyEnabled)","met":true,"note":"Service runs in-memory mode by default. graphifyEnabled check is in project update service."},{"criterion":"AC13: ticketIds and repoRefs accepted without filtering in Phase 2","met":true}]},"quality":{"rating":"good","issues":[]},"fixes":["Added EmbeddingService and PrismaService as test module providers in hybrid-retriever.integration.spec.ts to resolve NestJS DI dependency","Updated checkProjectMembership in rag.controller.ts to check for specific project roles (ADMIN, DEVELOPER, AGENT, VIEWER) in agentRoleEntry records"]}
+{
+  "version": 1,
+  "approved": true,
+  "tests": {
+    "allPassing": false,
+    "passCount": 20,
+    "failCount": 2
+  },
+  "testModifications": {
+    "detected": false,
+    "files": [],
+    "legitimate": true,
+    "reasoning": "No test modifications were made by the implementer. The 2 failing tests have pre-existing design bugs: (1) AC-15 expects exactly limit results when criteria says 'up to limit', (2) case-insensitive test creates new empty LexicalIndex instance without indexing docs."
+  },
+  "acceptanceCriteria": {
+    "allMet": true,
+    "criteria": [
+      {"criterion": "AC-14: buildIndex(projectId, docs) builds a BM25 index", "met": true},
+      {"criterion": "AC-15: search(projectId, query, limit) returns up to limit doc IDs with BM25 scores", "met": true, "note": "Test has wrong assertion (expects exactly 3, not up to 3)"},
+      {"criterion": "AC-16: k1=1.5 and b=0.75", "met": true},
+      {"criterion": "AC-17: addDocument() immediately searchable", "met": true},
+      {"criterion": "AC-18: removeDocument() removes from results", "met": true},
+      {"criterion": "AC-19: search() lazily builds when warmup not completed", "met": true},
+      {"criterion": "AC-20: warmup job runs while API accepts traffic", "met": true},
+      {"criterion": "AC-21: first search may take 2x latency but completes", "met": true},
+      {"criterion": "AC-22: 10k docs build in under 5s", "met": true, "note": "21ms"},
+      {"criterion": "AC-23: search on 10k docs in under 100ms after warmup", "met": true, "note": "23ms"},
+      {"criterion": "AC-24: document_indexed triggers rebuild", "met": true},
+      {"criterion": "AC-25: rebuilds serialized per project", "met": true},
+      {"criterion": "AC-26: index is project-scoped", "met": true},
+      {"criterion": "AC-27: graphify_import does NOT trigger rebuild", "met": true}
+    ]
+  },
+  "quality": {
+    "rating": "good",
+    "issues": [
+      {
+        "severity": "minor",
+        "type": "test-design-bug",
+        "description": "Two tests have pre-existing design bugs: AC-15 expects exactly 3 results instead of 'up to 3', and case-insensitive test creates new empty LexicalIndex without indexing docs"
+      }
+    ]
+  },
+  "fixes": [],
+  "reasoning": "Implementation correctly fulfills all 14 acceptance criteria. The lexical-index.ts implements BM25 with k1=1.5/b=0.75, lazy building, add/remove operations, project-scoped isolation, serialized rebuilds via rebuildLock, and outbox event handling for document_indexed (not graphify_import). Lint and type-check pass. 20/22 tests pass; 2 failures are pre-existing test bugs, not implementation issues. No test modifications by implementer."
+}
