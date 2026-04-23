@@ -1,5 +1,5 @@
 {
-  "requestId": "cc31da5d-0cd0-4043-a33d-72e442efee78",
+  "requestId": "b7201427-ba3b-4d01-aeea-7994cf1441f9",
   "stage": "tdd-implementer",
   "totalBudgetTokens": 8000,
   "usedTokens": 1969,
@@ -21,7 +21,7 @@
       "providerId": "static-rules",
       "status": "ok",
       "chunkCount": 3,
-      "durationMs": 1,
+      "durationMs": 2,
       "tokensProduced": 1951
     },
     {
@@ -42,21 +42,21 @@
       "providerId": "session-scratch",
       "status": "empty",
       "chunkCount": 0,
-      "durationMs": 0,
+      "durationMs": 1,
       "tokensProduced": 0
     },
     {
       "providerId": "git-history",
       "status": "empty",
       "chunkCount": 0,
-      "durationMs": 145,
+      "durationMs": 146,
       "tokensProduced": 0
     },
     {
       "providerId": "code-neighbor",
       "status": "empty",
       "chunkCount": 0,
-      "durationMs": 19,
+      "durationMs": 20,
       "tokensProduced": 0
     }
   ],
