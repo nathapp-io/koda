@@ -43,14 +43,23 @@ export class RagController {
       throw new ForbiddenAppException({}, 'rag');
     }
 
-    const user = await this.db.user.findUnique({
-      where: { id: currentUser.extra.sub },
-      select: { role: true },
+    const membership = await this.db.projectMember.findUnique({
+      where: {
+        projectId_userId: {
+          projectId,
+          userId: currentUser.extra.sub,
+        },
+      },
     });
 
-    if (user?.role === 'ADMIN' || user?.role === 'MEMBER') return;
+    if (!membership) {
+      throw new ForbiddenAppException({}, 'rag');
+    }
 
-    throw new ForbiddenAppException({}, 'rag');
+    const allowedRoles = ['ADMIN', 'DEVELOPER', 'AGENT', 'VIEWER'];
+    if (!allowedRoles.includes(membership.role)) {
+      throw new ForbiddenAppException({}, 'rag');
+    }
   }
 
   @Post('documents')

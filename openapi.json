@@ -650,6 +650,9 @@
           "200": {
             "description": "Search results with RRF merge and similarity tiers"
           },
+          "403": {
+            "description": "Forbidden - no project role"
+          },
           "404": {
             "description": "Project not found"
           }
@@ -3135,14 +3138,11 @@
           },
           "limit": {
             "type": "number",
-            "default": 5,
+            "default": 20,
             "minimum": 1,
-            "maximum": 50
+            "description": "Result limit (capped at 50)"
           }
-        },
-        "required": [
-          "query"
-        ]
+        }
       },
       "GraphifyNodeDto": {
         "type": "object",

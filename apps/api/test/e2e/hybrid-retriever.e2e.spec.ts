@@ -20,7 +20,7 @@ import { execSync } from 'child_process';
 import { AppModule } from '../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient, ProjectMember } from '@prisma/client';
 import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
 
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -113,6 +113,28 @@ describeIntegration('Hybrid Retriever — KB Search E2E', () => {
       .send({ name: 'Hybrid E2E Project', slug: 'hybrid-e2e-project', key: 'HYE' })
       .expect(201);
     projectSlug = body<{ slug: string }>(projectRes).slug;
+
+    const prisma = app.get(PrismaService<PrismaClient>);
+    const project = await prisma.client.project.findUnique({ where: { slug: projectSlug } });
+    const adminUser = await prisma.client.user.findUnique({ where: { email: 'hybrid-admin@koda.test' } });
+    const developerUser = await prisma.client.user.findUnique({ where: { email: 'hybrid-developer@koda.test' } });
+    const viewerUser = await prisma.client.user.findUnique({ where: { email: 'hybrid-viewer@koda.test' } });
+
+    if (project && adminUser) {
+      await prisma.client.projectMember.create({
+        data: { projectId: project.id, userId: adminUser.id, role: 'ADMIN' },
+      });
+    }
+    if (project && developerUser) {
+      await prisma.client.projectMember.create({
+        data: { projectId: project.id, userId: developerUser.id, role: 'DEVELOPER' },
+      });
+    }
+    if (project && viewerUser) {
+      await prisma.client.projectMember.create({
+        data: { projectId: project.id, userId: viewerUser.id, role: 'VIEWER' },
+      });
+    }
 
     await request(httpServer)
       .post(`/api/projects/${projectSlug}/kb/documents`)
