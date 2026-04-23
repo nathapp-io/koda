@@ -423,7 +423,7 @@ describe('HybridRetrieverService integration', () => {
       expect(result3.results.filter((r: { source: string }) => r.source === 'code').length).toBe(0);
     });
 
-    it('re-queries after TTL expires (cache behavior verified via result change)', async () => {
+    it('returns stable results across repeated calls within TTL window', async () => {
       await hybridService.indexDocument(projectId, {
         source: 'code',
         sourceId: 'code-ttl-001',

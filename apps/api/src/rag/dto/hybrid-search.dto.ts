@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsArray, IsBoolean, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class HybridSearchQuery {
@@ -43,6 +43,7 @@ export class HybridSearchQuery {
 
   @ApiPropertyOptional({ description: 'Whether graphify code sources are enabled for this project', required: false })
   @IsOptional()
+  @IsBoolean()
   graphifyEnabled?: boolean;
 }
 
