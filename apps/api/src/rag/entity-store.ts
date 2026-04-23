@@ -1,7 +1,8 @@
 /**
  * EntityStore — Retrieval-time entity index for entity-aware ranking
  *
- * Phase 2: in-memory store; must support rebuilds from outbox fan-out.
+ * Phase 2: in-memory store; supports rebuilds from outbox fan-out.
+ * Handles graphify_import events (code_module nodes) and ticket_event events (ticket entities).
  */
 import { Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
