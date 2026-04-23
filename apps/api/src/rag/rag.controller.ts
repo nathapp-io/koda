@@ -131,6 +131,7 @@ export class RagController {
       projectId: project.id,
       query: dto.query,
       limit,
+      graphifyEnabled: project.graphifyEnabled,
     });
 
     return JsonResponse.Ok({
