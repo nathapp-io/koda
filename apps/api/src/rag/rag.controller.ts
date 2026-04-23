@@ -48,17 +48,7 @@ export class RagController {
       select: { role: true },
     });
 
-    if (user?.role === 'ADMIN') return;
-
-    const agentRoleEntries = await this.db.agentRoleEntry.findMany({
-      where: { agentId: currentUser.extra.sub },
-    });
-    if (agentRoleEntries.length > 0) {
-      const hasProjectRole = agentRoleEntries.some(
-        (entry) => entry.role === 'ADMIN' || entry.role === 'DEVELOPER' || entry.role === 'AGENT' || entry.role === 'VIEWER',
-      );
-      if (hasProjectRole) return;
-    }
+    if (user?.role === 'ADMIN' || user?.role === 'MEMBER') return;
 
     throw new ForbiddenAppException({}, 'rag');
   }
@@ -72,12 +62,20 @@ export class RagController {
     @Body() dto: AddDocumentDto,
   ) {
     const project = await this.resolveProject(slug);
-    await this.ragService.indexDocument(project.id, {
-      source: dto.source,
-      sourceId: dto.sourceId,
-      content: dto.content,
-      metadata: dto.metadata ?? {},
-    });
+    await Promise.all([
+      this.ragService.indexDocument(project.id, {
+        source: dto.source,
+        sourceId: dto.sourceId,
+        content: dto.content,
+        metadata: dto.metadata ?? {},
+      }),
+      this.hybridRetrieverService.indexDocument(project.id, {
+        source: dto.source,
+        sourceId: dto.sourceId,
+        content: dto.content,
+        metadata: dto.metadata ?? {},
+      }),
+    ]);
     return JsonResponse.Ok({ indexed: true });
   }
 
