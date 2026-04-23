@@ -1,0 +1,91 @@
+{
+    "review": {
+        "dialogue": {
+            "enabled": true
+        }
+    },
+    "debate": {
+        "enabled": true,
+        "agents": 3,
+        "stages": {
+            "plan": {
+                "enabled": true,
+                "rounds": 2,
+                "sessionMode": "stateful",
+                "mode": "hybrid",
+                "autoPersona": true,
+                "resolver": {
+                    "type": "synthesis",
+                    "agent": "codex",
+                    "model": "balanced"
+                },
+                "debaters": [
+                    {
+                        "agent": "claude",
+                        "model": "fast"
+                    },
+                    {
+                        "agent": "codex",
+                        "model": "fast"
+                    },
+                    {
+                        "agent": "opencode",
+                        "model": "fast"
+                    }
+                ]
+            },
+            "review": {
+                "enabled": true,
+                "rounds": 2,
+                "sessionMode": "stateful",
+                "autoPersona": true,
+                "resolver": {
+                    "type": "majority-fail-closed",
+                    "agent": "claude",
+                    "model": "fast"
+                },
+                "debaters": [
+                    {
+                        "agent": "claude",
+                        "model": "fast"
+                    },
+                    {
+                        "agent": "codex",
+                        "model": "fast"
+                    },
+                    {
+                        "agent": "opencode",
+                        "model": "fast"
+                    }
+                ]
+            },
+            "acceptance": {
+                "enabled": false,
+                "rounds": 1,
+                "sessionMode": "one-shot",
+                "resolver": {
+                    "type": "majority-fail-closed"
+                }
+            },
+            "rectification": {
+                "enabled": false,
+                "rounds": 1,
+                "sessionMode": "one-shot",
+                "resolver": {
+                    "type": "majority-fail-closed"
+                }
+            },
+            "escalation": {
+                "enabled": false,
+                "rounds": 1,
+                "sessionMode": "one-shot",
+                "resolver": {
+                    "type": "majority-fail-closed"
+                }
+            }
+        }
+    },
+    "agent": {
+        "default": "claude"
+    }      
+}

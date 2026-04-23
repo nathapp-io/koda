@@ -1,0 +1,261 @@
+{
+  "project": "koda",
+  "feature": "Memory Phase 2 — Hybrid Retrieval Upgrade",
+  "analysis": "The spec defines a 6-story hybrid retrieval upgrade that extends the existing vector-based search (RagService.search()) with BM25 lexical ranking, entity-aware scoring, and recency decay. The phase boundary is clear: Phase 2 owns retrieval ranking and filtering only; new canonical tables, semantic extraction, AST indexing, and entity graph traversal belong to other phases.\n\nKey architectural decisions: (1) In-memory indices for both BM25 and EntityStore, rebuilt from canonical sources (RAG table, ticket events, graphify events) rather than persisted. This keeps Phase 2 orthogonal to Phase 4's durable entity graph. (2) Warmup and lazy building: API startup begins background warmup for active projects; first search for unwarm project triggers lazy build (up to 2× latency penalty). API accepts traffic immediately. (3) Outbox-driven updates: BM25 and EntityStore updated via Phase 1's document_indexed, ticket_event, graphify_import events. Full project rebuilds used until per-document events exist. (4) Intent-weighted fusion: Five intents (answer, diagnose, plan, update, search) each have fixed weight table. Four score sources (vector, BM25, entity, recency) normalized to [0,1] and linearly combined. (5) Stable document identity: Results merged by source+sourceId; duplicates collapsed. (6) graphifyEnabled enforcement: Code results filtered post-scoring via Project flag (60s cache TTL).\n\nExisting dependencies and integration points: RagService (vector search via LanceDB), RagRepository (document content access), RagController.search() (/projects/:slug/kb/search endpoint), OutboxService (event fan-out from Phase 1), Project entity (graphifyEnabled field likely exists). The controller must apply graphifyEnabled filtering on both current and future hybrid paths for compatibility. No breaking changes required; hybrid retriever can be feature-flagged during rollout.\n\nRisk areas: (1) BM25 performance targets (10k docs <5s, single search <100ms) require optimized custom implementation; no external dependency. (2) Warmup coordination: API must not fail startup if warmup is slow; background job must not corrupt in-memory indices if multiple events fire concurrently (AC2-12 requires serialization per project). (3) Entity extraction: Entities from tickets and graphify nodes; outbox wiring must not drop events; entities not linked to documents do not boost unrelated candidates (AC3-5). (4) Cache invalidation: graphifyEnabled flag cached 60s; direct service-level invalidation sufficient per spec. (5) Evaluation harness: Seed dataset (eval-queries.json) must reflect real patterns; if precision@5 <0.70, CI fails arbitrarily.\n\nImpact map: New files: apps/api/src/retrieval/{hybrid-retriever,lexical-index,entity-store,evaluation}.service.ts, apps/api/src/retrieval/fixtures/eval-queries.json. Modified: apps/api/src/rag/{controller,module}.ts, apps/api/src/memory/outbox.service.ts, apps/api/src/app.module.ts (warmup job).\n\nTest strategy rationale: US-001 includes RBAC role checks, triggering three-session-tdd per security override. US-002 is complex (state management, warmup coordination, perf constraints), uses three-session-tdd-lite. US-003, US-004, US-005 are medium with standard patterns, use tdd-simple. US-006 applies feature flag guard (not RBAC), uses tdd-simple.",
+  "branchName": "feat/memory-phase2-hybrid-retrieval",
+  "createdAt": "2026-04-23T00:00:00Z",
+  "updatedAt": "2026-04-23T00:00:00Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "HybridRetrieverService — Pipeline Skeleton + Live Search Compatibility",
+      "description": "Implement the core HybridRetrieverService that accepts HybridSearchQuery and returns HybridSearchResult with four score components (vector, lexical, entity, recency) for each result. Integrate into the RAG controller as the primary search path. Ensure compatibility with the existing /projects/:slug/kb/search endpoint, including graphifyEnabled filtering and RBAC checks.",
+      "acceptanceCriteria": [
+        "HybridRetrieverService.search() accepts a HybridSearchQuery and returns a HybridSearchResult",
+        "HybridSearchResult.scores contains one ScoreBreakdown per result with vectorScore, lexicalScore, entityScore, and recencyScore populated",
+        "HybridRetrieverService is injected into the RAG controller as the primary search service",
+        "When graphifyEnabled=false on the project, results with source='code' are excluded from the KB search response",
+        "When intent is not recognized, search() defaults to 'answer' intent weights",
+        "When timeWindow is provided to search(), only documents indexed within that window are included in results",
+        "search() caps limit at 50 and uses a candidate pool of max(100, limit*5)",
+        "HybridSearchResult.retrievedAt is set to the server timestamp when the query executes",
+        "search() allows only actors with role admin, developer, agent, or viewer on the project to call it",
+        "search() never returns results from a projectId different than the request's projectId"
+      ],
+      "suggestedCriteria": [
+        "When search() is called with projectId=null or undefined, it throws an error",
+        "When no documents match the query, search() returns HybridSearchResult with empty results array and empty scores array",
+        "HybridSearchResult fields (results, scores, query, intent, retrievedAt) are all present in every response"
+      ],
+      "contextFiles": [
+        "apps/api/src/rag/rag.service.ts",
+        "apps/api/src/rag/rag.controller.ts",
+        "apps/api/src/entities/project.entity.ts"
+      ],
+      "tags": [
+        "feature",
+        "retrieval",
+        "api"
+      ],
+      "dependencies": [],
+      "workdir": "apps/api",
+      "status": "pending",
+      "passes": false,
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Medium complexity (multiple components, controller integration) with role-based access control checks. Security override applies due to RBAC enforcement, requiring strict test-implementation isolation."
+      },
+      "escalations": [],
+      "attempts": 0
+    },
+    {
+      "id": "US-002",
+      "title": "BM25 Lexical Index + Warmup",
+      "description": "Implement LexicalIndex service with in-memory BM25 index for full-text search. Include background warmup job that builds indices for active projects on API startup, lazy building for unwarm projects on first search, and serialized rebuild handling for concurrent outbox events. Ensure performance targets: 10k documents in <5s, single search in <100ms.",
+      "acceptanceCriteria": [
+        "LexicalIndex.buildIndex(projectId, docs) builds a BM25 index for the given documents",
+        "LexicalIndex.search(projectId, query, limit) returns up to limit document IDs with BM25 scores",
+        "The BM25 formula uses k1=1.5 and b=0.75",
+        "When addDocument(projectId, doc) is called, the document is immediately searchable in subsequent search() calls",
+        "When removeDocument(projectId, docId) is called, the document no longer appears in search() results",
+        "When search() is called for a project before warmup completes, the index is lazily built synchronously for that project",
+        "On API startup, a background warmup job begins for all active projects with ≥1 document",
+        "The API accepts traffic and processes requests while the warmup job is running",
+        "The first search() call for a project after a cold start may take up to 2× normal latency due to lazy building",
+        "Building a BM25 index for 10,000 documents completes in under 5 seconds",
+        "A single search() call with a 5-word query returns results in under 100ms for 10,000 documents after warmup",
+        "When a document_indexed outbox event is received, LexicalIndex.buildIndex() is triggered for that project, and concurrent rebuilds for the same project are serialized"
+      ],
+      "suggestedCriteria": [
+        "LexicalIndex.search() returns an empty array when no documents match the query",
+        "When a project has 0 documents, buildIndex(projectId, []) completes without error",
+        "When removeDocument() is called for a non-existent docId, search() results are unchanged"
+      ],
+      "contextFiles": [
+        "apps/api/src/rag/rag.repository.ts",
+        "apps/api/src/memory/outbox.service.ts"
+      ],
+      "tags": [
+        "feature",
+        "retrieval",
+        "performance"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "workdir": "apps/api",
+      "status": "pending",
+      "passes": false,
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Complex scope: custom BM25 implementation, background warmup coordination, lazy building, concurrent rebuild serialization, and strict performance constraints. Requires careful state management across startup and query paths."
+      },
+      "escalations": [],
+      "attempts": 0
+    },
+    {
+      "id": "US-003",
+      "title": "Entity Store + Entity Score",
+      "description": "Implement EntityStore service to index entities extracted from tickets and code graph (graphify nodes). Support entity search by label/tags and tag-based filtering. Compute entity-aware relevance scores that boost documents linked to matched entities. Wire entity indexing to ticket_event and graphify_import outbox events.",
+      "acceptanceCriteria": [
+        "EntityStore.indexEntity(projectId, entity) stores the entity and makes it searchable by searchEntities()",
+        "EntityStore.searchEntities(projectId, 'auth') returns entities with 'auth' in label or tags",
+        "EntityStore.getByTag(projectId, 'backend') returns all entities tagged 'backend'",
+        "Entity score is computed as |query_terms ∩ entity.tags| / |entity.tags|, or 0 if no overlap",
+        "Entity score only boosts documents linked to the matched entity; unrelated documents receive entityScore=0",
+        "Entities from graphify nodes (type: code_module) are indexed when a graphify_import outbox event fires",
+        "Entities from tickets (type: ticket) are indexed when a ticket_event outbox event fires"
+      ],
+      "suggestedCriteria": [
+        "EntityStore.searchEntities() returns an empty array when no entities match the query",
+        "When an entity has no tags, getByTag(projectId, 'any-tag') does not return that entity",
+        "removeEntity(projectId, entityId) removes the entity from all subsequent searches"
+      ],
+      "contextFiles": [
+        "apps/api/src/entities/ticket.entity.ts",
+        "apps/api/src/memory/outbox.service.ts"
+      ],
+      "tags": [
+        "feature",
+        "retrieval"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "workdir": "apps/api",
+      "status": "pending",
+      "passes": false,
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Medium complexity with standard patterns (in-memory store, outbox subscription). No security-critical paths or novel state management."
+      },
+      "escalations": [],
+      "attempts": 0
+    },
+    {
+      "id": "US-004",
+      "title": "Intent-Weighted Fusion + Reranking",
+      "description": "Implement score fusion algorithm in HybridRetrieverService that combines vector, lexical, entity, and recency scores using intent-specific weights. Normalize scores from each source to [0,1], apply linear fusion, sort results by final score, and assign sequential ranks. Support all five retrieval intents with correct weight tables.",
+      "acceptanceCriteria": [
+        "Each intent uses the weight table defined in the spec (answer, diagnose, plan, update, search)",
+        "For answer intent, finalScore = 0.4*vector + 0.3*lexical + 0.2*entity + 0.1*recency",
+        "Results are sorted by finalScore DESC and assigned sequential rank values",
+        "Candidates before reranking are drawn from a pool of max(100, limit*5) split evenly between vector and lexical sources",
+        "When a document has no entity tags, its entityScore is 0 and finalScore reflects the other three scores",
+        "When limit is not specified in HybridSearchQuery, limit=20 is used as default"
+      ],
+      "suggestedCriteria": [
+        "When all candidates have identical raw scores from a source, that source normalizes matching candidates to 1.0 and non-matching to 0.0",
+        "Results are never reordered after fusion (sorted by finalScore remains stable across queries)",
+        "Recency score correctly decays: score = 0.5^(days_since_indexed / 30), normalized within result set"
+      ],
+      "contextFiles": [
+        "apps/api/src/retrieval/hybrid-retriever.service.ts"
+      ],
+      "tags": [
+        "feature",
+        "retrieval",
+        "algorithm"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002",
+        "US-003"
+      ],
+      "workdir": "apps/api",
+      "status": "pending",
+      "passes": false,
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Medium complexity with clear fusion algorithm and weight tables. Standard mathematical operations with no novel patterns or state management."
+      },
+      "escalations": [],
+      "attempts": 0
+    },
+    {
+      "id": "US-005",
+      "title": "Evaluation Harness",
+      "description": "Implement EvaluationService to benchmark hybrid retriever quality. Create a seed dataset of 50 realistic evaluation queries with expected relevant document IDs. Provide batch query runner that computes precision@5 per query. Add CLI script and CI integration that fails if average precision@5 drops below 0.70.",
+      "acceptanceCriteria": [
+        "EvaluationService.runQueries(queries) runs a batch of queries and returns precision@5 per query",
+        "runQueries() returns a summary object with precision@5_avg, precision@5_p50, precision@5_p95, and totalQueries",
+        "A seed dataset of 50 evaluation queries is stored in apps/api/src/retrieval/fixtures/eval-queries.json",
+        "Running the evaluation harness prints a table to stdout for CI capture",
+        "The evaluation service is callable via bun run evaluate:retrieval CLI script",
+        "The evaluation harness is integrated into the CI pipeline and fails if precision@5_avg drops below 0.70"
+      ],
+      "suggestedCriteria": [
+        "runQueries() handles empty query batch and returns summary with totalQueries=0",
+        "Precision@5 is computed correctly when a query returns fewer than 5 results",
+        "Results table output includes columns: query, precision@5, rank positions of expected docs"
+      ],
+      "contextFiles": [
+        "apps/api/src/retrieval/hybrid-retriever.service.ts"
+      ],
+      "tags": [
+        "feature",
+        "retrieval",
+        "testing"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "workdir": "apps/api",
+      "status": "pending",
+      "passes": false,
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Medium complexity with standard evaluation metrics and CLI integration. Seed dataset creation is straightforward, no novel patterns."
+      },
+      "escalations": [],
+      "attempts": 0
+    },
+    {
+      "id": "US-006",
+      "title": "graphifyEnabled Retrieval Guard",
+      "description": "Implement graphifyEnabled feature flag guard in HybridRetrieverService and live KB endpoint. Filter out code results post-scoring for projects with graphifyEnabled=false. Add caching (60s TTL) for flag lookups and cache invalidation on Project updates. Add CI policy gate to assert code results are never returned for non-graphify projects.",
+      "acceptanceCriteria": [
+        "When HybridRetrieverService.search() is called for a project where Project.graphifyEnabled=false, results with source='code' are silently excluded",
+        "The same graphifyEnabled guard is enforced on the current live /projects/:slug/kb/search path",
+        "When Project.graphifyEnabled=true, results with source='code' are included as normal",
+        "The graphifyEnabled guard is applied after scoring and before the HybridSearchResult is returned",
+        "A project with graphifyEnabled=false that has never run importGraphify returns 0 code results",
+        "The graphifyEnabled flag lookup is cached in HybridRetrieverService with a 60-second TTL",
+        "The graphifyEnabled cache is invalidated when UpdateProjectDto sets graphifyEnabled",
+        "A policy gate GraphifyEnabledGate runs in CI and asserts that searching a non-graphify project never returns source='code' results"
+      ],
+      "suggestedCriteria": [
+        "When graphifyEnabled flag changes from false to true at runtime, subsequent searches start returning code results after cache invalidation",
+        "Guard does not affect filtering for source types other than 'code' (ticket, document results pass through)"
+      ],
+      "contextFiles": [
+        "apps/api/src/retrieval/hybrid-retriever.service.ts",
+        "apps/api/src/entities/project.entity.ts",
+        "apps/api/src/rag/rag.controller.ts"
+      ],
+      "tags": [
+        "feature",
+        "retrieval",
+        "access-control"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "workdir": "apps/api",
+      "status": "pending",
+      "passes": false,
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Medium complexity with feature flag guard logic and caching. Access control element is simple flag-based filtering (not RBAC auth), so does not trigger three-session-tdd security override."
+      },
+      "escalations": [],
+      "attempts": 0
+    }
+  ]
+}
