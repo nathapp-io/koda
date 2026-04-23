@@ -96,6 +96,9 @@ model Project {
   ciWebhookToken String?
   vcsConnection VcsConnection?
   outboxEvents OutboxEvent[]
+  ticketEvents TicketEvent[]
+  agentEvents AgentEvent[]
+  decisionEvents DecisionEvent[]
 }
 
 model Ticket {
@@ -259,7 +262,7 @@ model VcsSyncLog {
 
 model TicketEvent {
   id        String   @id @default(cuid())
-  ticketId  String
+  ticketId  String?
   projectId String
   action    String
   actorId   String
@@ -268,6 +271,11 @@ model TicketEvent {
   data      String   @default("{}") // JSON stored as string
   timestamp DateTime @default(now())
   createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([projectId, createdAt])
+  @@index([projectId, ticketId])
 }
 
 model AgentEvent {
@@ -280,6 +288,28 @@ model AgentEvent {
   data      String   @default("{}") // JSON stored as string
   timestamp DateTime @default(now())
   createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([projectId, createdAt])
+  @@index([projectId, actorId])
+}
+
+model DecisionEvent {
+  id        String   @id @default(cuid())
+  projectId String
+  agentId   String
+  action    String
+  decision  String   // decided | rejected | escalated
+  rationale String?
+  source    String   // api | internal | webhook
+  data      String   @default("{}") // JSON stored as string
+  timestamp DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([projectId, createdAt])
 }
 
 // ---------------------------------------------------------------------------

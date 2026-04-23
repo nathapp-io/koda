@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
+import { OutboxFanOutRegistry } from './outbox-fan-out-registry';
 
 export interface OutboxEventInput {
   projectId: string;
@@ -25,12 +26,16 @@ export interface OutboxEventData {
 
 const MAX_RETRIES = 3;
 const PROCESSING_STALE_MS = 60_000;
+const BACKOFF_MS = (attempt: number) => Math.pow(2, attempt * 2) * 1000;
 
 @Injectable()
 export class OutboxService {
   private readonly logger = new Logger(OutboxService.name);
 
-  constructor(private readonly prisma: PrismaService<PrismaClient>) {}
+  constructor(
+    private readonly prisma: PrismaService<PrismaClient>,
+    private readonly fanOutRegistry: OutboxFanOutRegistry,
+  ) {}
 
   async enqueue(event: OutboxEventInput): Promise<OutboxEventData> {
     const createdEvent = await this.prisma.client.outboxEvent.create({
@@ -46,17 +51,40 @@ export class OutboxService {
     return this.mapToOutboxEventData(createdEvent);
   }
 
+  async getPendingEvents(limit = 100): Promise<OutboxEventData[]> {
+    const take = Math.max(Math.floor(limit), 0);
+    const events = await this.prisma.client.outboxEvent.findMany({
+      where: { status: 'pending' },
+      orderBy: { createdAt: 'asc' },
+      take,
+    });
+    return events.map(this.mapToOutboxEventData);
+  }
+
+  async getEventsByStatus(status: string, limit = 100): Promise<OutboxEventData[]> {
+    const take = Math.max(Math.floor(limit), 0);
+    const events = await this.prisma.client.outboxEvent.findMany({
+      where: { status },
+      orderBy: { createdAt: 'asc' },
+      take,
+    });
+    return events.map(this.mapToOutboxEventData);
+  }
+
   async processPending(limit = 50): Promise<void> {
+    const take = Math.max(Math.floor(limit), 0);
+    if (take === 0) {
+      return;
+    }
     await this.requeueStaleProcessingEvents();
 
     const pendingEvents = await this.prisma.client.outboxEvent.findMany({
       where: { status: 'pending' },
       orderBy: { createdAt: 'asc' },
-      take: limit,
+      take,
     });
 
     for (const event of pendingEvents) {
-      // Claim event to reduce duplicate processing across concurrent workers.
       const claimResult = await this.prisma.client.outboxEvent.updateMany({
         where: { id: event.id, status: 'pending' },
         data: { status: 'processing' },
@@ -66,7 +94,7 @@ export class OutboxService {
       }
 
       try {
-        await this.processEvent(this.mapToOutboxEventData(event));
+        await this.processEvent(event);
         await this.markCompleted(event.id);
 
         this.logger.log(`Outbox event ${event.id} processed successfully`);
@@ -78,10 +106,26 @@ export class OutboxService {
     }
   }
 
+  async processEvent(event: Record<string, unknown>): Promise<void> {
+    const parsedPayload = JSON.parse(String(event.payload ?? '{}'));
+    await this.fanOutRegistry.dispatch({
+      eventType: String(event.eventType),
+      payload: parsedPayload,
+    });
+    const failureCount = typeof this.fanOutRegistry.consumeLastDispatchFailureCount === 'function'
+      ? this.fanOutRegistry.consumeLastDispatchFailureCount()
+      : 0;
+    if (failureCount > 0) {
+      throw new Error(`One or more fan-out handlers failed for ${String(event.eventType)}`);
+    }
+  }
+
   async retry(event: OutboxEventData): Promise<OutboxEventData> {
     if (event.attempts >= MAX_RETRIES) {
       return this.markDeadLetter(event.id, `Failed after ${MAX_RETRIES} retries`);
     }
+
+    await this.delay(BACKOFF_MS(event.attempts));
 
     const updated = await this.prisma.client.outboxEvent.update({
       where: { id: event.id },
@@ -159,10 +203,8 @@ export class OutboxService {
     });
   }
 
-  private async processEvent(_event: OutboxEventData): Promise<void> {
-    // Placeholder for actual event processing logic
-    // This could dispatch to handlers based on event type
-    // For now, just resolve successfully
+  private async delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   private mapToOutboxEventData(event: OutboxEventData | Record<string, unknown>): OutboxEventData {

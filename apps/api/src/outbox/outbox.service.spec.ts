@@ -1,7 +1,16 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { OutboxService } from './outbox.service';
+import { OutboxFanOutRegistry } from './outbox-fan-out-registry';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
+
+function createMockFanOutRegistry() {
+  return {
+    dispatch: jest.fn().mockResolvedValue(undefined),
+    register: jest.fn(),
+    getHandlers: jest.fn().mockReturnValue([]),
+  };
+}
 
 describe('OutboxService', () => {
   let service: OutboxService;
@@ -25,6 +34,10 @@ describe('OutboxService', () => {
         {
           provide: PrismaService,
           useValue: mockPrisma,
+        },
+        {
+          provide: OutboxFanOutRegistry,
+          useValue: createMockFanOutRegistry(),
         },
       ],
     }).compile();
@@ -233,6 +246,11 @@ describe('OutboxService', () => {
   });
 
   describe('retry logic', () => {
+    beforeEach(async () => {
+      // Mock the private delay method to be instant (avoids 1s+4s+16s wait)
+      jest.spyOn(service as any, 'delay').mockResolvedValue(undefined);
+    });
+
     it('should retry failed events up to 3 times', async () => {
       const event = {
         id: 'outbox-1',

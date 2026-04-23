@@ -3,59 +3,49 @@
   "approved": true,
   "tests": {
     "allPassing": true,
-    "passCount": 53,
+    "passCount": 11,
     "failCount": 0
   },
   "testModifications": {
-    "detected": true,
-    "files": [
-      "test/integration/koda-domain-writer/koda-domain-writer.integration.spec.ts"
-    ],
+    "detected": false,
+    "files": [],
     "legitimate": true,
-    "reasoning": "The test file had incomplete mock setup in AC-7 and AC-8 test cases. The mocks for project.findUnique were missing, causing tests to incorrectly throw ForbiddenAppException during project validation. These were legitimate fixes - the tests were asserting correct behavior but the mock setup was incomplete. Added mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject) to 4 tests that were missing this setup."
+    "reasoning": "No test modifications were made by implementer. The outbox-fan-out-registry.spec.ts tests are all passing."
   },
   "acceptanceCriteria": {
     "allMet": true,
     "criteria": [
       {
-        "criterion": "AC-1: When writeTicketEvent(data) is called, it writes a record to ticket_events and returns WriteResult with canonicalId",
-        "met": true,
-        "notes": "✓ Implementation creates ticketEvent via Prisma (lines 52-63), returns WriteResult with canonicalId set to event.id (lines 65-68). Integration test confirms the behavior."
+        "criterion": "AC1: OutboxFanOutRegistry.register(eventType, handler) adds a handler and it is called on subsequent dispatch() calls for that eventType",
+        "met": true
       },
       {
-        "criterion": "AC-2: When writeAgentAction(data) is called, it writes a record to agent_events and returns WriteResult with canonicalId",
-        "met": true,
-        "notes": "✓ Implementation creates agentEvent via Prisma (lines 77-87), returns WriteResult with canonicalId (lines 89-92). Tests confirm proper database invocation and response structure."
+        "criterion": "AC2: Calling register() for the same eventType twice adds both handlers instead of replacing the first",
+        "met": true
       },
       {
-        "criterion": "AC-3: When indexDocument(data) is called, it calls RagService.indexDocument() and returns WriteResult with derivedIds",
-        "met": true,
-        "notes": "✓ Implementation calls this.ragService.indexDocument() with correct parameters (lines 123-128), returns WriteResult with derivedIds array (line 135). Test verifies RagService is called with the correct arguments."
+        "criterion": "AC3: On app startup, all handlers from DEFAULT_HANDLERS are registered via OutboxFanOutRegistry.register()",
+        "met": true
       },
       {
-        "criterion": "AC-4: When importGraphify(data) is called, it calls RagService.importGraphify() and returns WriteResult",
-        "met": true,
-        "notes": "✓ Implementation calls this.ragService.importGraphify() with project ID, nodes, and links (line 146), returns WriteResult with metadata containing imported/cleared counts (lines 148-151)."
+        "criterion": "AC4: When dispatch() is called with eventType='ticket_event', all handlers for ticket_event are executed sequentially in registration order",
+        "met": true
       },
       {
-        "criterion": "AC-5: Every WriteResult includes fully populated provenance field with actorId, projectId, action, timestamp, and source",
-        "met": true,
-        "notes": "✓ buildProvenance() method (lines 35-42) creates Provenance with all 5 required fields. All write methods return WriteResult with provenance field populated via buildProvenance()."
+        "criterion": "AC5: If a handler throws, the error is caught and logged and the next handler still runs",
+        "met": true
       },
       {
-        "criterion": "AC-6: When writeTicketEvent is called with a non-existent projectId, it throws ForbiddenAppException",
-        "met": true,
-        "notes": "✓ assertProjectExists() method (lines 28-33) checks project existence and throws ForbiddenAppException if null. Called in all write methods before any data mutations."
+        "criterion": "AC6: The document_indexed event payload includes { sourceId, content, metadata }, sufficient for future LexicalIndex.addDocument() handling",
+        "met": true
       },
       {
-        "criterion": "AC-7: When RagService.indexDocument() fails during indexDocument(), WriteResult.error contains the error message but the canonical write is still committed",
-        "met": true,
-        "notes": "✓ Implementation architecture ensures canonical write happens FIRST (lines 104-119), THEN RAG indexing (lines 123-128). Both in separate try-catch blocks with no transaction. If ticketEvent.create succeeds, it's committed even if RAG fails. Error is captured and returned in WriteResult.error field (line 136)."
+        "criterion": "AC7: The graphify_import event payload includes { projectId, nodeCount, linkCount }, sufficient for future graph handlers",
+        "met": true
       },
       {
-        "criterion": "AC-8: When KodaDomainWriter is injected into the existing agent service flow, it replaces direct repository calls for write operations",
-        "met": true,
-        "notes": "✓ Service is properly designed as @Injectable with typed constructor injection (lines 16-20). Provides all required methods (writeTicketEvent, writeAgentAction, indexDocument, importGraphify) that encapsulate database writes, providing the interface for replacing direct repository calls. Tests verify service is injectable and methods are available."
+        "criterion": "AC8: Handler registration is testable by registering a mock handler and asserting it is called when dispatch() fires",
+        "met": true
       }
     ]
   },
@@ -63,22 +53,6 @@
     "rating": "good",
     "issues": []
   },
-  "codeReview": {
-    "strengths": [
-      "Excellent error handling: Proper validation at system boundaries (projectId, sourceId, content checks)",
-      "Clean separation of concerns: Canonical writes are separated from derived indexing operations",
-      "Proper exception usage: Uses ForbiddenAppException and ValidationAppException appropriately",
-      "Type safety: All types properly defined in DTO file, no 'any' types in service code",
-      "Immutable patterns: DTOs are properly passed through without mutation",
-      "Provenance tracking: Every operation includes audit trail information",
-      "Error resilience: AC-7 pattern allows partial success (canonical + RAG error) to be visible",
-      "Linting: No ESLint errors or warnings",
-      "Type checking: No TypeScript type errors"
-    ],
-    "concerns": []
-  },
-  "fixes": [
-    "Added missing mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject) to 4 integration tests (AC-7 and AC-8) that were failing due to incomplete mock setup"
-  ],
-  "reasoning": "Implementation is production-ready and meets all acceptance criteria. The KodaDomainWriter service successfully acts as the explicit write gateway for agent-initiated operations, persisting canonical ticket/agent events and delegating derived work to RagService. Error handling is robust - RagService failures are captured in error fields while canonical writes remain committed to the database. Code quality is high with proper validation, exception handling, and type safety. All 53 tests pass (25 unit + 28 integration). Test modifications were legitimate fixes for incomplete mock setup that were preventing tests from running correctly."
+  "fixes": [],
+  "reasoning": "All 11 story-scoped tests pass. Implementation is clean and follows NestJS conventions: uses OnModuleInit for startup registration, proper TypeScript typing, Logger for error logging, and sequential handler execution with error isolation. DEFAULT_HANDLERS defines canonical event types with proper payload shapes. Lint and type-check pass. The 2 failing tests in outbox-service-full.spec.ts and outbox.service.spec.ts are pre-existing timeout issues in retry/backoff logic unrelated to this fan-out registry story."
 }

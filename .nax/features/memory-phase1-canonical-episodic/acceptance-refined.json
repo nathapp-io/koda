@@ -1,0 +1,359 @@
+[
+  {
+    "acId": "AC-1",
+    "original": "Prisma migration creates `TicketEvent`, `AgentEvent`, and `DecisionEvent` tables with the Phase 1 schema.",
+    "refined": "Migration file contains three model definitions: TicketEvent, AgentEvent, and DecisionEvent with fields matching Phase 1 schema. Verified by checking prisma/migrate directory for migration SQL containing CREATE TABLE statements for all three models.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-2",
+    "original": "Migration is idempotent and can be applied multiple times without error.",
+    "refined": "Running `prisma migrate deploy` twice returns exit code 0 on both executions without errors about duplicate tables or constraints.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-3",
+    "original": "Each event table has a non-null `projectId` foreign key to `Project`.",
+    "refined": "Prisma schema contains projectId field on TicketEvent, AgentEvent, and DecisionEvent with @relation(fields: [projectId], references: [id]) annotation and no optional (?) modifier. SQL migration shows FOREIGN KEY (projectId) REFERENCES Project(id) NOT NULL.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-4",
+    "original": "Each event table has `@@index([projectId, createdAt])` as a composite index.",
+    "refined": "Prisma schema on each of TicketEvent, AgentEvent, DecisionEvent models contains @@index([projectId, createdAt]). SQL migration contains CREATE INDEX statements with (projectId, createdAt) for each table.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-5",
+    "original": "`TicketEvent` has `@@index([projectId, ticketId])` for project-scoped ticket history queries.",
+    "refined": "Prisma schema on TicketEvent model contains @@index([projectId, ticketId]). SQL migration contains CREATE INDEX with (projectId, ticketId) on ticket_events table.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-6",
+    "original": "`AgentEvent` has `@@index([projectId, actorId])` for project-scoped actor activity queries.",
+    "refined": "Prisma schema on AgentEvent model contains @@index([projectId, actorId]). SQL migration contains CREATE INDEX with (projectId, actorId) on agent_events table.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-7",
+    "original": "`prisma validate` passes after migration application.",
+    "refined": "Running `prisma validate` command returns exit code 0 and outputs 'The schema is valid.'",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-8",
+    "original": "TicketEventService.create(data) writes to TicketEvent and returns the created record.",
+    "refined": "Calling TicketEventService.create with valid data persists a TicketEvent record to the database and returns an object with id, type, projectId, ticketId, actorId, createdAt, and metadata fields matching the input data.",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-9",
+    "original": "AgentEventService.create(data) writes to AgentEvent and returns the created record.",
+    "refined": "Calling AgentEventService.create with valid data persists an AgentEvent record to the database and returns an object with id, type, projectId, agentId, actorId, createdAt, and metadata fields matching the input data.",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-10",
+    "original": "DecisionEventService.create(data) writes to DecisionEvent and returns the created record.",
+    "refined": "Calling DecisionEventService.create with valid data persists a DecisionEvent record to the database and returns an object with id, type, projectId, decisionId, actorId, createdAt, and metadata fields matching the input data.",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-11",
+    "original": "All three services are called by KodaDomainWriter after relevant operations.",
+    "refined": "KodaDomainWriter.execute invokes TicketEventService.create, AgentEventService.create, and DecisionEventService.create in sequence after processing write operations, verified by spy/mock calls in test with callOrder sequence 1, 2, 3.",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-12",
+    "original": "Event creation is included in the WriteResult.provenance output.",
+    "refined": "WriteResult returned from KodaDomainWriter.execute contains provenance array that includes objects with eventType and eventId for each TicketEvent, AgentEvent, and DecisionEvent created during the write operation.",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-13",
+    "original": "Creating an event with a non-existent projectId throws ForbiddenError with code PROJECT_NOT_FOUND.",
+    "refined": "Calling TicketEventService.create, AgentEventService.create, or DecisionEventService.create with projectId not in projects table throws ForbiddenError with code property equal to 'PROJECT_NOT_FOUND' and statusCode 403.",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-14",
+    "original": "ActorResolver maps current Koda auth and agent context into the Phase 1 actor model before permission checks run.",
+    "refined": "ActorResolver.resolve is called and returns an Actor object with type, actorId, projectId, and roles before any permission-check guards execute on event write endpoints, verified by call order in integration test.",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-15",
+    "original": "Only actors with role admin, developer, or agent on the target project can call event write operations, and GET /admin/outbox requires admin.",
+    "refined": "Event write endpoints return 403 when requesting actor lacks admin/developer/agent role on project; GET /admin/outbox returns 403 when requesting actor role is not admin; endpoints return 200 when requesting actor has valid role.",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-16",
+    "original": "OutboxService.enqueue(eventType, eventId, projectId, payload) persists an OutboxEvent record with status = 'pending' and returns the created record.",
+    "refined": "Calling enqueue(eventType, eventId, projectId, payload) must create an OutboxEvent in the database with status='pending' and return an object where eventType equals the input eventType, eventId equals the input eventId, projectId equals the input projectId, payload equals the input payload, status='pending', createdAt is a valid timestamp, and processedAt is null.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-17",
+    "original": "OutboxService.processPending(limit?) picks up to limit pending events ordered by createdAt ASC (default limit: 50).",
+    "refined": "Calling processPending() with no argument returns an array of OutboxEvent records with status='pending' limited to 50 items ordered by createdAt ASC. Calling processPending(10) returns at most 10 items with the same ordering constraint. All returned events must have status='pending'.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-18",
+    "original": "After successful fan-out, OutboxService.markCompleted() sets status to 'completed' and populates processedAt.",
+    "refined": "Calling markCompleted(outboxEventId) must update the OutboxEvent record identified by outboxEventId to have status='completed' and processedAt set to a valid timestamp that is not null. Subsequent calls to processPending must not include this event.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-19",
+    "original": "If fan-out fails, OutboxService.markFailed() records failure details before retry/dead-letter evaluation.",
+    "refined": "Calling markFailed(outboxEventId, error) must update the OutboxEvent record to have lastError set to the error message string, attemptCount incremented by 1, and status remain 'pending'. The lastError field must contain a non-empty string describing the failure.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-20",
+    "original": "After 3 failed attempts, OutboxService.markDeadLetter() sets status to 'dead_letter' and records lastError.",
+    "refined": "Calling markDeadLetter(outboxEventId, error) on an event with attemptCount >= 3 must update the OutboxEvent record to have status='dead_letter', lastError set to the error message, and the event must no longer appear in processPending() results.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-21",
+    "original": "Failed outbox events retry with exponential backoff (1s, 4s, 16s) before dead-lettering.",
+    "refined": "When an event fails and is retried: the first retry occurs at createdAt + 1 second, the second retry at createdAt + 4 seconds, the third retry at createdAt + 16 seconds. After the third retry fails, markDeadLetter is invoked.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-22",
+    "original": "OutboxService.retryEvent(eventId) allows admin-only reset of a dead-letter event back to pending.",
+    "refined": "Calling retryEvent(outboxEventId) on a record with status='dead_letter' must reset status to 'pending', reset attemptCount to 0, and clear lastError. The operation must return 403 Forbidden when called by a non-admin user and return 404 when the event does not exist.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-23",
+    "original": "KodaDomainWriter calls OutboxService.enqueue() after every canonical write before returning.",
+    "refined": "After any domain write operation (create, update, delete) in KodaDomainWriter completes successfully, a call to OutboxService.enqueue must have been made with the eventType, eventId, and projectId matching the written entity. The enqueue call must occur before the domain write method returns.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-24",
+    "original": "The outbox processor job runs on a schedule and is idempotent for already completed or processing events.",
+    "refined": "The outbox processor job must execute on a defined schedule (e.g., cron). When processPending is called multiple times concurrently or in rapid succession, events with status='completed' or 'processing' must not be reprocessed. Events already marked 'processing' during a prior call must be excluded from subsequent calls.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-25",
+    "original": "If OutboxFanOutRegistry.dispatch() throws, the event is marked failed and retried instead of dead-lettered immediately.",
+    "refined": "When OutboxFanOutRegistry.dispatch() throws an exception, the event must be marked as failed via markFailed (not markDeadLetter). The event must remain eligible for retry and must appear in subsequent processPending calls until 3 failures have occurred.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-26",
+    "original": "Dead-lettered events are queryable via GET /admin/outbox?status=dead_letter with admin-only access.",
+    "refined": "GET /admin/outbox?status=dead_letter must return HTTP 200 with a JSON array of outbox events where status='dead_letter'. GET /admin/outbox?status=dead_letter must return HTTP 403 when the requester is not an admin. The response must include eventType, eventId, projectId, lastError, and attemptCount for each dead-letter event.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-27",
+    "original": "GET /projects/:slug/timeline returns events filtered by `from`, `to`, `actorId`, and `eventTypes` query params.",
+    "refined": "When request includes `from` param, all returned events have `createdAt >= from` timestamp. When `to` param is provided, all events have `createdAt <= to`. When `actorId` is provided, all events have `actorId` matching that value. When `eventTypes` is provided as array, all events have `eventType` IN that array.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-28",
+    "original": "GET /projects/:slug/timeline?ticketId=X returns all TicketEvent rows for that ticket, newest first.",
+    "refined": "When `ticketId=X` param is provided, response array contains only events where `ticketId === X`, ordered by `createdAt` DESC (newest first).",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-29",
+    "original": "GET /projects/:slug/timeline?actorId=X returns all events by that actor.",
+    "refined": "When `actorId=X` param is provided, every event in response array has `actorId === X`.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-30",
+    "original": "Results are paginated via `cursor` and include `nextCursor` when more rows exist.",
+    "refined": "Response is JSON object with `data` array and optional `nextCursor` string. When `nextCursor` is present, requesting same query with `cursor=nextCursor` returns additional rows. When all rows returned, `nextCursor` is null or absent.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-31",
+    "original": "GET /projects/:slug/timeline without filters returns the last 50 events.",
+    "refined": "When no query params provided, response contains at most 50 events, ordered by `createdAt` DESC. If fewer than 50 events exist, all events are returned.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-32",
+    "original": "Timeline results include all event fields plus a computed `eventType` field.",
+    "refined": "Each object in response `data` array contains all Prisma event fields AND a string field `eventType` (computed, not stored directly in DB).",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-33",
+    "original": "Requesting timeline for a non-existent or unauthorized project returns 403 after slug resolution.",
+    "refined": "When project slug does not exist OR authenticated principal lacks permission to view project timeline, HTTP status 403 is returned with error body.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-34",
+    "original": "When `getProjectContext()` is called with `intent: 'diagnose'`, the response includes a `recentEvents` block with the last 10 relevant events.",
+    "refined": "getProjectContext({ intent: 'diagnose', projectId: string }) returns an object where response.recentEvents is an Array of length 10.",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-35",
+    "original": "When `getProjectContext()` is called with `intent: 'answer'` and the query references a ticket ID, the response includes that ticket's status change history.",
+    "refined": "getProjectContext({ intent: 'answer', query: string containing ticket ID, projectId: string }) returns an object where response.ticketHistory is defined and contains statusChangeHistory for the referenced ticket.",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-36",
+    "original": "The `recentEvents` block uses `TimelineService.getProjectTimeline()` internally.",
+    "refined": "When getProjectContext is called with intent 'diagnose', TimelineService.getProjectTimeline must be invoked at least once with the projectId.",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-37",
+    "original": "`recentEvents` is ordered by `createdAt DESC` and includes `actorId`, `action`, and `createdAt` for each event.",
+    "refined": "For each event in response.recentEvents: event.actorId exists (string), event.action exists (string), event.createdAt exists (ISO8601 string), and for all i from 0 to length-2: new Date(event[i].createdAt) >= new Date(event[i+1].createdAt).",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-38",
+    "original": "The temporal block is excluded from context when `intent: 'plan'`.",
+    "refined": "getProjectContext({ intent: 'plan', projectId: string }) returns an object where response.recentEvents is undefined and response.timeline is undefined.",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-39",
+    "original": "OutboxFanOutRegistry.register(eventType, handler) adds a handler and it is called on subsequent dispatch() calls for that eventType.",
+    "refined": "After calling OutboxFanOutRegistry.register('ticket_event', handler), a subsequent dispatch('ticket_event', payload) invokes the registered handler exactly once with the payload.",
+    "testable": true,
+    "storyId": "US-006"
+  },
+  {
+    "acId": "AC-40",
+    "original": "Calling register() for the same eventType twice adds both handlers instead of replacing the first.",
+    "refined": "Calling register('event_a', handler1) then register('event_a', handler2) results in both handlers being stored. dispatch('event_a', payload) invokes handler1 then handler2 in registration order.",
+    "testable": true,
+    "storyId": "US-006"
+  },
+  {
+    "acId": "AC-41",
+    "original": "On app startup, all handlers from DEFAULT_HANDLERS are registered via OutboxFanOutRegistry.register().",
+    "refined": "After app initialization, OutboxFanOutRegistry has entries for all eventTypes defined in DEFAULT_HANDLERS, each containing the corresponding handler function.",
+    "testable": true,
+    "storyId": "US-006"
+  },
+  {
+    "acId": "AC-42",
+    "original": "When dispatch() is called with eventType='ticket_event', all handlers for ticket_event are executed sequentially in registration order.",
+    "refined": "dispatch('ticket_event', payload) calls registered handlers in the order they were added. The call order is traceable via side effects or execution sequence verification.",
+    "testable": true,
+    "storyId": "US-006"
+  },
+  {
+    "acId": "AC-43",
+    "original": "If a handler throws, the error is caught and logged and the next handler still runs.",
+    "refined": "When handler1 throws, dispatch() continues to call handler2 and handler2 receives its expected payload. A console.error or logger.error call is made with the error and handler context.",
+    "testable": true,
+    "storyId": "US-006"
+  },
+  {
+    "acId": "AC-44",
+    "original": "The document_indexed event payload includes { sourceId, content, metadata }, sufficient for future LexicalIndex.addDocument() handling.",
+    "refined": "When dispatch('document_indexed', payload) is called, payload contains keys: sourceId (non-empty string), content (string or object), and metadata (object). All three keys are present and non-null.",
+    "testable": true,
+    "storyId": "US-006"
+  },
+  {
+    "acId": "AC-45",
+    "original": "The graphify_import event payload includes { projectId, nodeCount, linkCount }, sufficient for future graph handlers.",
+    "refined": "When dispatch('graphify_import', payload) is called, payload contains keys: projectId (string), nodeCount (number >= 0), linkCount (number >= 0). All three keys are present and of correct types.",
+    "testable": true,
+    "storyId": "US-006"
+  },
+  {
+    "acId": "AC-46",
+    "original": "Handler registration is testable by registering a mock handler and asserting it is called when dispatch() fires.",
+    "refined": "A test can call OutboxFanOutRegistry.register('test_event', mockHandler) followed by dispatch('test_event', testPayload) and assert mockHandler was called with testPayload as argument.",
+    "testable": true,
+    "storyId": "US-006"
+  },
+  {
+    "acId": "AC-47",
+    "original": "Prisma migration creates `OutboxEvent` table with all Phase 1 fields.",
+    "refined": "Prisma schema contains model OutboxEvent with fields: id (String, cuid), status (String), eventType (String), payload (Json), projectId (String?), createdAt (DateTime), processedAt (DateTime?), Phase 1 fieldset verified.",
+    "testable": true,
+    "storyId": "US-007"
+  },
+  {
+    "acId": "AC-48",
+    "original": "Migration uses `@@index([status, createdAt])` and `@@index([projectId, createdAt])`.",
+    "refined": "Prisma schema OutboxEvent model contains @@index([status, createdAt]) and @@index([projectId, createdAt]) declarations.",
+    "testable": true,
+    "storyId": "US-007"
+  },
+  {
+    "acId": "AC-49",
+    "original": "Migration is idempotent and can be applied twice without error.",
+    "refined": "Script executes `prisma migrate deploy` twice sequentially and exits with code 0 on second run.",
+    "testable": true,
+    "storyId": "US-007"
+  },
+  {
+    "acId": "AC-50",
+    "original": "Migration does not drop or alter existing `TicketEvent`, `AgentEvent`, or `DecisionEvent` tables.",
+    "refined": "After migration, database schema contains TicketEvent, AgentEvent, and DecisionEvent models with identical field definitions to baseline.",
+    "testable": true,
+    "storyId": "US-007"
+  },
+  {
+    "acId": "AC-51",
+    "original": "`prisma validate` passes after migration application.",
+    "refined": "Bash command `prisma validate` exits with code 0 after migration is applied.",
+    "testable": true,
+    "storyId": "US-007"
+  }
+]
