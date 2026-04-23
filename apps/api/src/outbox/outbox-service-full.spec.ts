@@ -370,6 +370,8 @@ describe('OutboxService - AC6: Exponential backoff 1s, 4s, 16s before dead-lette
     }).compile();
 
     service = module.get<OutboxService>(OutboxService);
+    // Mock the private delay method to be instant (avoids 16s wait on attempt=2)
+    jest.spyOn(service as any, 'delay').mockResolvedValue(undefined);
   });
 
   it('AC6: exponential backoff delay is 2^(attempt*2) seconds: 1s, 4s, 16s', () => {

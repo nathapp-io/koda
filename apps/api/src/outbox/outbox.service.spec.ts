@@ -246,6 +246,11 @@ describe('OutboxService', () => {
   });
 
   describe('retry logic', () => {
+    beforeEach(async () => {
+      // Mock the private delay method to be instant (avoids 1s+4s+16s wait)
+      jest.spyOn(service as any, 'delay').mockResolvedValue(undefined);
+    });
+
     it('should retry failed events up to 3 times', async () => {
       const event = {
         id: 'outbox-1',
