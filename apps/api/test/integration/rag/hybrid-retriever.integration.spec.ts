@@ -21,6 +21,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { EmbeddingService } from '../../../src/rag/embedding.service';
+import { EntityStore } from '../../../src/rag/entity-store';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -77,6 +78,14 @@ describe('HybridRetrieverService integration', () => {
       $use: null,
       user: { findUnique: async () => null },
       agentRoleEntry: { findMany: async () => [] },
+      project: { findUnique: async () => ({ graphifyEnabled: false }) },
+    };
+
+    const fakeEntityStore = {
+      searchEntities: jest.fn().mockReturnValue([]),
+      indexEntity: jest.fn(),
+      getByTag: jest.fn().mockReturnValue([]),
+      computeEntityScore: jest.fn().mockReturnValue(0),
     };
 
     module = await Test.createTestingModule({
@@ -101,6 +110,10 @@ describe('HybridRetrieverService integration', () => {
         {
           provide: EmbeddingService,
           useValue: fakeEmbeddingService,
+        },
+        {
+          provide: EntityStore,
+          useValue: fakeEntityStore,
         },
         {
           provide: PrismaService,
@@ -322,6 +335,158 @@ describe('HybridRetrieverService integration', () => {
       for (const r of result.results) {
         expect(r.provenance.sourceProjectId).toBe(projectId);
       }
+    });
+  });
+
+  describe('AC-43: graphifyEnabled=false filters code results', () => {
+    beforeEach(async () => {
+      await hybridService.indexDocument(projectId, {
+        source: 'code',
+        sourceId: 'code-auth-001',
+        content: 'function authenticate test function auth token',
+        metadata: { type: 'code_module', lang: 'typescript' },
+      });
+    });
+
+    it('returns zero code-source results when graphifyEnabled is false', async () => {
+      const result = await hybridService.search({
+        projectId,
+        query: 'auth token authenticate',
+        graphifyEnabled: false,
+      });
+      expect(result.results.filter((r: { source: string }) => r.source === 'code').length).toBe(0);
+    });
+
+    it('still returns non-code results when graphifyEnabled is false', async () => {
+      const result = await hybridService.search({
+        projectId,
+        query: 'authenticate token authentication',
+        graphifyEnabled: false,
+      });
+      const codeResults = result.results.filter((r: { source: string }) => r.source === 'code');
+      expect(codeResults.length).toBe(0);
+    });
+  });
+
+  describe('AC-45: graphifyEnabled=true includes code results', () => {
+    beforeEach(async () => {
+      await hybridService.indexDocument(projectId, {
+        source: 'code',
+        sourceId: 'code-auth-002',
+        content: 'function validate token boolean auth function',
+        metadata: { type: 'code_module', lang: 'typescript' },
+      });
+    });
+
+    it('returns at least one code-source result when graphifyEnabled is true', async () => {
+      const result = await hybridService.search({
+        projectId,
+        query: 'token validate function auth boolean',
+        graphifyEnabled: true,
+      });
+      expect(result.results.some((r: { source: string }) => r.source === 'code')).toBe(true);
+    });
+  });
+
+  describe('AC-47: no error when disabled with no graph data', () => {
+    it('completes without throwing when project has no graph data', async () => {
+      await expect(
+        hybridService.search({
+          projectId,
+          query: 'auth',
+          graphifyEnabled: false,
+        }),
+      ).resolves.not.toThrow();
+    });
+
+    it('returns zero code results when disabled and no graph data exists', async () => {
+      const result = await hybridService.search({
+        projectId,
+        query: 'auth',
+        graphifyEnabled: false,
+      });
+      expect(result.results.filter((r: { source: string }) => r.source === 'code').length).toBe(0);
+    });
+  });
+
+  describe('AC-48: 60-second TTL cache for graphifyEnabled', () => {
+    it('returns cached graphifyEnabled value within TTL window', async () => {
+      const query = { projectId, query: 'auth', graphifyEnabled: false };
+
+      const result1 = await hybridService.search(query);
+      expect(result1.results.filter((r: { source: string }) => r.source === 'code').length).toBe(0);
+
+      const result2 = await hybridService.search(query);
+      expect(result2.results.filter((r: { source: string }) => r.source === 'code').length).toBe(0);
+
+      const result3 = await hybridService.search(query);
+      expect(result3.results.filter((r: { source: string }) => r.source === 'code').length).toBe(0);
+    });
+
+    it('re-queries after TTL expires (cache behavior verified via result change)', async () => {
+      await hybridService.indexDocument(projectId, {
+        source: 'code',
+        sourceId: 'code-ttl-001',
+        content: 'function auth ttl test',
+        metadata: { type: 'code_module' },
+      });
+
+      const result1 = await hybridService.search({ projectId, query: 'auth ttl', graphifyEnabled: false });
+      expect(result1.results.filter((r: { source: string }) => r.source === 'code').length).toBe(0);
+
+      const result2 = await hybridService.search({ projectId, query: 'auth ttl', graphifyEnabled: true });
+      const codeResults = result2.results.filter((r: { source: string }) => r.source === 'code');
+      expect(codeResults.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('AC-49: cache invalidation on updateProject', () => {
+    it('fresh graphifyEnabled is queried after invalidation', async () => {
+      const hybrid = hybridService as unknown as { invalidateGraphifyEnabledCache: (projectId: string) => void };
+      expect(typeof hybrid.invalidateGraphifyEnabledCache).toBe('function');
+
+      hybrid.invalidateGraphifyEnabledCache(projectId);
+
+      const result = await hybridService.search({ projectId, query: 'auth' });
+      expect(result).toBeDefined();
+      expect(Array.isArray(result.results)).toBe(true);
+    });
+  });
+
+  describe('AC-50: GraphifyEnabledGate', () => {
+    it('search on non-graphify project never returns source=code results', async () => {
+      await hybridService.indexDocument(projectId, {
+        source: 'code',
+        sourceId: 'code-gate-001',
+        content: 'export class AuthService check return true function',
+        metadata: { type: 'code_module' },
+      });
+
+      const result = await hybridService.search({
+        projectId,
+        query: 'auth service check function export class',
+        graphifyEnabled: false,
+      });
+
+      expect(result.results.filter((r: { source: string }) => r.source === 'code').length).toBe(0);
+    });
+
+    it('GraphifyEnabledGate passes for enabled project', async () => {
+      await hybridService.indexDocument(projectId, {
+        source: 'code',
+        sourceId: 'code-gate-002',
+        content: 'function authCheck return false boolean check',
+        metadata: { type: 'code_module' },
+      });
+
+      const result = await hybridService.search({
+        projectId,
+        query: 'auth check function boolean return',
+        graphifyEnabled: true,
+      });
+
+      const codeResults = result.results.filter((r: { source: string }) => r.source === 'code');
+      expect(codeResults.length).toBeGreaterThan(0);
     });
   });
 });

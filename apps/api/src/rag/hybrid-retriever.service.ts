@@ -71,12 +71,14 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(HybridRetrieverService.name);
   private db: LanceConnection = null;
   private readonly tableCache = new Map<string, LanceTable>();
+  private readonly graphifyEnabledCache = new Map<string, { value: boolean; expiresAt: number }>();
   private lanceAvailable = true;
   private readonly lancedbPath: string;
   private readonly similarityHigh: number;
   private readonly similarityMedium: number;
   private readonly similarityLow: number;
   private readonly inMemoryOnly: boolean;
+  private readonly graphifyEnabledCacheTtlMs: number;
 
   constructor(
     private readonly configService: ConfigService,
@@ -89,6 +91,8 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     this.similarityMedium = configService.get<number>('rag.similarityMedium') ?? 0.7;
     this.similarityLow = configService.get<number>('rag.similarityLow') ?? 0.5;
     this.inMemoryOnly = configService.get<boolean>('rag.inMemoryOnly') ?? false;
+    this.graphifyEnabledCacheTtlMs = configService.get<number>('rag.graphifyEnabledCacheTtlSec') ?? 60;
+    this.graphifyEnabledCacheTtlMs = this.graphifyEnabledCacheTtlMs * 1000;
 
     if (this.inMemoryOnly) {
       this.lanceAvailable = false;
@@ -107,6 +111,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleDestroy(): Promise<void> {
     this.tableCache.clear();
+    this.graphifyEnabledCache.clear();
     if (this.db && typeof this.db.close === 'function') {
       try {
         const result = this.db.close();
@@ -228,6 +233,8 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
 
     const weights = INTENT_WEIGHTS[query.intent ?? 'answer'] ?? ANSWER_WEIGHTS;
 
+    const effectiveGraphifyEnabled = await this.resolveGraphifyEnabled(projectId, query.graphifyEnabled);
+
     const table = await this.getOrCreateTable(projectId);
     const rowCount: number = await table.countRows();
     if (rowCount === 0) {
@@ -308,6 +315,8 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
 
       if (record.source !== 'ticket' && record.source !== 'doc' && record.source !== 'manual' && record.source !== 'code') continue;
 
+      if (!effectiveGraphifyEnabled && record.source === 'code') continue;
+
       if (query.timeWindow?.start) {
         const startTime = new Date(query.timeWindow.start).getTime();
         const docTime = new Date(record.created_at).getTime();
@@ -375,6 +384,38 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
       scores: limitedScores,
       retrievedAt,
     };
+  }
+
+  private async resolveGraphifyEnabled(projectId: string, explicitValue?: boolean): Promise<boolean> {
+    if (typeof explicitValue === 'boolean') {
+      return explicitValue;
+    }
+
+    const cacheKey = `graphifyEnabled:${projectId}`;
+    const cached = this.graphifyEnabledCache.get(cacheKey);
+
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
+
+    const project = await this.prisma.client.project.findUnique({
+      where: { id: projectId },
+      select: { graphifyEnabled: true },
+    });
+
+    const enabled = project?.graphifyEnabled ?? false;
+
+    this.graphifyEnabledCache.set(cacheKey, {
+      value: enabled,
+      expiresAt: Date.now() + this.graphifyEnabledCacheTtlMs,
+    });
+
+    return enabled;
+  }
+
+  invalidateGraphifyEnabledCache(projectId: string): void {
+    const cacheKey = `graphifyEnabled:${projectId}`;
+    this.graphifyEnabledCache.delete(cacheKey);
   }
 
   private calcRecencyScore(createdAt: string): number {

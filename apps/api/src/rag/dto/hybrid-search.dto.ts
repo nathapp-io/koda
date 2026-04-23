@@ -40,6 +40,10 @@ export class HybridSearchQuery {
   @IsArray()
   @IsString({ each: true })
   repoRefs?: string[];
+
+  @ApiPropertyOptional({ description: 'Whether graphify code sources are enabled for this project', required: false })
+  @IsOptional()
+  graphifyEnabled?: boolean;
 }
 
 export class ScoreBreakdown {
