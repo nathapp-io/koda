@@ -20,7 +20,6 @@
  * AC-26: index is project-scoped
  * AC-27: graphify_import does NOT trigger LexicalIndex.buildIndex()
  */
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 
 interface Bm25Document {
   id: string;
