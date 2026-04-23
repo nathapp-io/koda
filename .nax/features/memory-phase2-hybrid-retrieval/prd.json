@@ -3,7 +3,7 @@
   "feature": "memory-phase2-hybrid-retrieval",
   "branchName": "feat/memory-phase2-hybrid-retrieval",
   "createdAt": "2026-04-23T12:28:37.000Z",
-  "updatedAt": "2026-04-23T13:15:00.000Z",
+  "updatedAt": "2026-04-23T14:49:02.902Z",
   "userStories": [
     {
       "id": "US-001",
@@ -31,14 +31,16 @@
         "security"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -53,7 +55,11 @@
         "When timeWindow excludes every candidate, search returns an empty results array instead of widening filters.",
         "When the caller is authenticated but not a project member, the retriever service is not invoked.",
         "When no documents match the query, HybridSearchResult returns empty results and scores arrays with query, intent, and retrievedAt still populated."
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b4fa62a023d0c313e73b613bf7000a34df42c496"
     },
     {
       "id": "US-002",
@@ -92,7 +98,9 @@
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -108,7 +116,11 @@
         "If warmup fails for one project, API startup remains healthy and warmup continues for other projects.",
         "If warmup previously failed for a project, a subsequent search lazily rebuilds and returns results.",
         "When a project has zero documents, buildIndex(projectId, []) completes and search returns an empty array."
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "7e80049a346bc87c6bc8fe4964b3449ad183d929"
     },
     {
       "id": "US-003",
@@ -155,7 +167,10 @@
         "When multiple matched linked entities exist for one candidate document, entityScore is the maximum of those per-entity scores.",
         "When a query term matches only entity label and not tags, entityScore remains 0.",
         "When a candidate document has no linked entities, entityScore is 0."
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -204,7 +219,10 @@
         "When all raw scores from a source are identical, normalization yields 1 for matching candidates and 0 for candidates missing that source score.",
         "When one source returns fewer than its candidate-pool half, the other source can fill remaining pool slots up to available candidates.",
         "When finalScore ties occur, deterministic ordering is preserved across repeated searches via a stable tie-break key."
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -249,7 +267,10 @@
         "When one query execution fails, the harness continues remaining queries and still emits a summary for completed rows.",
         "On threshold failure, output includes failing queries and missed expected document IDs so CI failures are actionable.",
         "The evaluation command supports report-only mode (no CI failure) and gate mode (fails below threshold) with explicit exit codes."
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -297,7 +318,10 @@
         "Concurrent graphifyEnabled updates invalidate cache entries per project without affecting other projects.",
         "If filtering removes every candidate (all were code results), the response is an empty result set and not an error.",
         "When filtering occurs, a structured debug-level log entry is emitted with projectId and filteredCount."
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "Synthesis baseline uses the Proposal 2 migration shape (controller-compatible cutover on existing /projects/:slug/kb/search, then lexical/entity/warmup, then fusion, then evaluation), with Proposal 1/3 spec fidelity. Ambiguities are resolved as follows for implementation clarity: (1) entity-to-document linkage is by stable candidate identity (source + sourceId), many-to-many; (2) per-document entityScore aggregates matched linked entities by max score; (3) duplicates are collapsed by source + sourceId before fusion while retaining both raw source signals, with missing sources contributing 0; (4) timeWindow and recency both use canonical RAG indexed timestamp (createdAt/created_at), never rebuild time; (5) warmup is non-blocking, bounded, and fault-tolerant, and shares per-project serialization with lazy-build and outbox rebuild paths; (6) evaluation is implemented in this phase but should support report-only and gate modes so CI strictness can be staged until seed labels are validated."
