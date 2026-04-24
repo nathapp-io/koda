@@ -307,14 +307,20 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    const merged = (vectorRows.length > 0 && this.lanceAvailable)
-      ? reciprocalRankFusion(
-          vectorRows.map((r) => ({ id: r.id as string })),
-          ftsRanked.map((r) => ({ id: r.id })),
-        )
-      : vectorRows.length > 0
-        ? vectorRows.map((r) => ({ id: r.id as string }))
-        : ftsRanked.slice(0, limit).map((r) => ({ id: r.id }));
+    const halfPool = Math.floor(candidatePoolSize / 2);
+
+    const vectorTopIds = new Set<string>();
+    for (let i = 0; i < Math.min(vectorRows.length, halfPool); i++) {
+      vectorTopIds.add(vectorRows[i].id as string);
+    }
+
+    const lexicalTopIds = new Set<string>();
+    for (let i = 0; i < Math.min(ftsRanked.length, halfPool); i++) {
+      lexicalTopIds.add(ftsRanked[i].id);
+    }
+
+    const splitCandidates = [...new Set([...vectorTopIds, ...lexicalTopIds])];
+    const candidates = splitCandidates.slice(0, candidatePoolSize);
 
     const recordMap = new Map<string, LanceRecord>();
     allRows.forEach((r) => recordMap.set(r.id as string, r));
@@ -326,12 +332,11 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
       simMap.set(r.id as string, Math.max(0, 1 - dist));
     });
 
-    const candidateLimit = Math.max(100, limit * 5);
-    const candidates = merged.slice(0, candidateLimit);
-
     const rawScoreMap: Map<string, { vector: number; lexical: number; entity: number; recency: number; hasVector: boolean; hasLexical: boolean }> = new Map();
 
-    for (const { id } of candidates) {
+    const matchedEntities = this.entityStore.searchEntities(projectId, query.query);
+
+    for (const id of candidates) {
       const record = recordMap.get(id);
       if (!record) continue;
 
