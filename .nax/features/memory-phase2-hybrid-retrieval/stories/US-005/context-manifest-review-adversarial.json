@@ -1,5 +1,5 @@
 {
-  "requestId": "1e2e582d-a493-4d2f-927b-6816fe88bd16",
+  "requestId": "a397af49-36fc-4b52-a8a1-8ca594c4f2dd",
   "stage": "review-adversarial",
   "totalBudgetTokens": 6000,
   "usedTokens": 3077,
@@ -19,7 +19,7 @@
     "static-rules:web:3afa6c95"
   ],
   "digestTokens": 26,
-  "buildMs": 2,
+  "buildMs": 3,
   "providerResults": [
     {
       "providerId": "static-rules",
