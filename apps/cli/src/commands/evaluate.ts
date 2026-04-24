@@ -5,18 +5,6 @@ import { OpenAPI } from '../generated';
 
 const CI_THRESHOLD = 0.70;
 
-// ragControllerEvaluateRetrieval will be generated after API contract change
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let ragControllerEvaluateRetrieval: any;
-(async () => {
-  try {
-    const generated = await import('../generated');
-    ragControllerEvaluateRetrieval = generated.ragControllerEvaluateRetrieval;
-  } catch {
-    ragControllerEvaluateRetrieval = undefined;
-  }
-})();
-
 export function evaluateCommand(program: Command): void {
   const evaluate = new Command('evaluate');
   evaluate
@@ -44,10 +32,19 @@ export function evaluateCommand(program: Command): void {
         process.exit(2);
       }
 
+      let ragControllerEvaluateRetrieval: (arg: { slug: string }) => Promise<unknown>;
+      try {
+        const generated = await import('../generated');
+        ragControllerEvaluateRetrieval = generated.ragControllerEvaluateRetrieval;
+      } catch {
+        console.error('Error: generated client not available');
+        process.exit(2);
+      }
+
       try {
         const result = await ragControllerEvaluateRetrieval({
           slug: ctx.projectSlug,
-        });
+        }) as unknown as { data: { precisionAt5_avg: number; precisionAt5_p50: number; precisionAt5_p95: number; totalQueries: number; results: Array<{ query: string; intent: string; precisionAt5: number }> } };
 
         const summary = result.data;
 

@@ -205,11 +205,12 @@ export class RagController {
   @Public()
   @ApiOperation({ summary: 'Run the retrieval evaluation harness with seeded queries' })
   @ApiResponse({ status: 200, description: 'Evaluation results with precision@5 metrics' })
+  @ApiBearerAuth()
   async evaluateRetrieval(@Param('slug') slug: string) {
     const project = await this.resolveProject(slug);
     const { loadEvalQueries } = await import('../retrieval/load-queries');
     const queries = loadEvalQueries();
-    const projectQueries = queries;
+    const projectQueries = queries.filter((q) => q.projectId === project.id);
     const summary = await this.evaluationService.runQueries(projectQueries);
     return JsonResponse.Ok(summary);
   }
