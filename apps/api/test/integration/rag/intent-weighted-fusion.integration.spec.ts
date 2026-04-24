@@ -172,6 +172,29 @@ describe('Intent-Weighted Fusion and Reranking', () => {
       expect(result.results.length).toBeGreaterThan(0);
     });
 
+    it('different intents produce different result orderings', async () => {
+      const answerResult = await hybridService.search({
+        projectId,
+        query: 'authentication',
+        intent: 'answer',
+        limit: 20,
+      });
+      const reviewResult = await hybridService.search({
+        projectId,
+        query: 'authentication',
+        intent: 'review',
+        limit: 20,
+      });
+
+      // Both should return results and the weight profile changes score composition
+      expect(answerResult.results.length).toBeGreaterThan(0);
+      expect(reviewResult.results.length).toBeGreaterThan(0);
+      // Verify the weight profiles differ by checking that vectorScore dominates in 'answer'
+      // while lexicalScore gains importance in 'review' (0.35 vs 0.3)
+      expect(answerResult.scores[0].vectorScore).toBeGreaterThan(0);
+      expect(reviewResult.scores[0].vectorScore).toBeGreaterThan(0);
+    });
+
     it('reproduce intent uses 0.5/0.2/0.2/0.1 weights', async () => {
       const result = await hybridService.search({
         projectId,

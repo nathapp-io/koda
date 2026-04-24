@@ -96,7 +96,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
 
     if (this.inMemoryOnly) {
       this.lanceAvailable = false;
-      this.logger.log('HybridRetriever is running in in-memory mode');
+      this.logger.log({ storyId: 'US-004', msg: 'HybridRetriever is running in in-memory mode' });
     }
   }
 
@@ -117,7 +117,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
         const result = this.db.close();
         if (result && typeof result.then === 'function') await result;
       } catch (err) {
-        this.logger.warn(`Failed to close LanceDB: ${(err as Error).message}`);
+        this.logger.warn({ storyId: 'US-004', msg: `Failed to close LanceDB: ${(err as Error).message}` });
       }
     }
     this.db = null;
@@ -134,7 +134,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
         this.db = await connectFn(this.lancedbPath);
       } catch (err) {
         this.lanceAvailable = false;
-        this.logger.warn(`LanceDB unavailable: ${(err as Error).message}`);
+        this.logger.warn({ storyId: 'US-004', msg: `LanceDB unavailable: ${(err as Error).message}` });
         return null;
       }
     }
@@ -161,7 +161,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
       };
       await table.add([record]);
     } catch (err) {
-      this.logger.warn(`Embedding failed: ${(err as Error).message}`);
+      this.logger.warn({ storyId: 'US-004', msg: `Embedding failed: ${(err as Error).message}` });
       const dims = this.embeddingService.dimensions ?? 768;
       const record: LanceRecord = {
         id: generateId(),
@@ -219,7 +219,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
       const IndexModule = (await import('@lancedb/lancedb')).Index;
       await table.createIndex('content', { config: IndexModule.fts(), replace: false });
     } catch (err) {
-      this.logger.warn(`FTS index creation failed: ${(err as Error).message}`);
+      this.logger.warn({ storyId: 'US-004', msg: `FTS index creation failed: ${(err as Error).message}` });
     }
 
     this.tableCache.set(tableName, table);
@@ -229,7 +229,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
   async search(query: HybridSearchQuery): Promise<HybridSearchResult> {
     const retrievedAt = new Date().toISOString();
     const projectId = query.projectId;
-    const limit = query.limit ?? 20;
+    const limit = Math.min(query.limit ?? 20, 50);
 
     const weights = INTENT_WEIGHTS[query.intent ?? 'answer'] ?? ANSWER_WEIGHTS;
 
@@ -282,7 +282,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
           .limit(candidatePoolSize)
           .toArray();
       } catch (err) {
-        this.logger.warn(`Vector search failed: ${(err as Error).message}`);
+        this.logger.warn({ storyId: 'US-004', msg: `Vector search failed: ${(err as Error).message}` });
       }
     }
 
@@ -303,7 +303,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
           .sort((a, b) => (a._distance as number) - (b._distance as number))
           .slice(0, candidatePoolSize);
       } catch (err) {
-        this.logger.warn(`Embedding failed during fallback search: ${(err as Error).message}`);
+        this.logger.warn({ storyId: 'US-004', msg: `Embedding failed during fallback search: ${(err as Error).message}` });
       }
     }
 
