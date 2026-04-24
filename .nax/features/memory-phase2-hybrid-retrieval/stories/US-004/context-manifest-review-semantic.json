@@ -1,5 +1,5 @@
 {
-  "requestId": "de78b32c-422a-42dd-83cd-9e9474545716",
+  "requestId": "82d8f173-031a-47ea-ac47-d12f4babf487",
   "stage": "review-semantic",
   "totalBudgetTokens": 6000,
   "usedTokens": 1969,
@@ -28,7 +28,7 @@
       "providerId": "feature-context",
       "status": "empty",
       "chunkCount": 0,
-      "durationMs": 1,
+      "durationMs": 0,
       "tokensProduced": 0
     }
   ],

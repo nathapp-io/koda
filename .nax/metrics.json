@@ -3291,5 +3291,17 @@
       "cache_read_input_tokens": 322396,
       "cache_creation_input_tokens": 242
     }
+  },
+  {
+    "runId": "run-2026-04-24T03-06-00-874Z",
+    "feature": "memory-phase2-hybrid-retrieval",
+    "startedAt": "2026-04-24T03:06:00.874Z",
+    "completedAt": "2026-04-24T06:16:16.332Z",
+    "totalCost": 3.416302814999999,
+    "totalStories": 0,
+    "storiesCompleted": 0,
+    "storiesFailed": 0,
+    "totalDurationMs": 11415458,
+    "stories": []
   }
 ]

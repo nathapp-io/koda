@@ -3,7 +3,7 @@
   "feature": "memory-phase2-hybrid-retrieval",
   "branchName": "feat/memory-phase2-hybrid-retrieval",
   "createdAt": "2026-04-23T12:28:37.000Z",
-  "updatedAt": "2026-04-24T03:06:00.957Z",
+  "updatedAt": "2026-04-24T06:08:36.830Z",
   "userStories": [
     {
       "id": "US-001",
@@ -229,16 +229,16 @@
         "US-002",
         "US-003"
       ],
-      "status": "pending",
+      "status": "paused",
       "passes": false,
-      "attempts": 0,
+      "attempts": 1,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
         "reasoning": "validated from LLM output",
         "initialComplexity": "complex",
-        "modelTier": "balanced"
+        "modelTier": "powerful"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -254,8 +254,19 @@
         "When one source returns fewer than its candidate-pool half, the other source can fill remaining pool slots up to available candidates.",
         "When finalScore ties occur, deterministic ordering is preserved across repeated searches via a stable tie-break key."
       ],
-      "priorErrors": [],
-      "priorFailures": [],
+      "priorErrors": [
+        "Attempt 1 failed with model tier: balanced: Autofix exhausted: review still failing after fix attempts"
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "balanced",
+          "stage": "escalation",
+          "summary": "Failed with tier balanced, escalating to next tier",
+          "cost": 0.7233633599999999,
+          "timestamp": "2026-04-24T05:05:28.536Z"
+        }
+      ],
       "storyPoints": 1,
       "storyGitRef": "1f9cda99dfc72de73adfc1f8846586b26f26794a"
     },

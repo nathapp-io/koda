@@ -1,13 +1,13 @@
 {
-  "requestId": "851f3a5f-05ee-498e-9162-0d31d0d3539a",
+  "requestId": "08849407-fd18-4ada-bd3f-acc26d9bba44",
   "stage": "tdd-implementer",
   "totalBudgetTokens": 8000,
-  "usedTokens": 2164,
+  "usedTokens": 2128,
   "includedChunks": [
     "static-rules:api:44f0d226",
     "static-rules:common:3fa0b420",
     "static-rules:project-conventions:6fb98908",
-    "session-scratch:670f5997"
+    "session-scratch:5a9c96b3"
   ],
   "excludedChunks": [],
   "floorItems": [
@@ -15,21 +15,21 @@
     "static-rules:common:3fa0b420",
     "static-rules:project-conventions:6fb98908"
   ],
-  "digestTokens": 50,
-  "buildMs": 284,
+  "digestTokens": 35,
+  "buildMs": 276,
   "providerResults": [
     {
       "providerId": "static-rules",
       "status": "ok",
       "chunkCount": 3,
-      "durationMs": 2,
+      "durationMs": 3,
       "tokensProduced": 1951
     },
     {
       "providerId": "feature-context",
       "status": "empty",
       "chunkCount": 0,
-      "durationMs": 0,
+      "durationMs": 1,
       "tokensProduced": 0
     },
     {
@@ -43,14 +43,14 @@
       "providerId": "session-scratch",
       "status": "ok",
       "chunkCount": 1,
-      "durationMs": 1,
-      "tokensProduced": 163
+      "durationMs": 0,
+      "tokensProduced": 142
     },
     {
       "providerId": "git-history",
       "status": "empty",
       "chunkCount": 0,
-      "durationMs": 282,
+      "durationMs": 274,
       "tokensProduced": 0
     },
     {
@@ -67,6 +67,6 @@
     "static-rules:api:44f0d226": "### api.md\n\n# API Rules — apps/api\n\n## Read-First\n- Follow `nathapp-nestjs-patterns` before implementing NestJS changes\n- Prefer Nathapp patterns over generic alternatives when both exist\n\n## Auth\n- Use `@nathapp/nestjs-auth` v3; do not use `nestjs-iam`\n- API key hashing: deterministic HMAC-SHA256 f",
     "static-rules:common:3fa0b420": "### common.md\n\n# Common Rules — All Apps\n\n## Tooling\n- Use Bun workspace commands (`bun install`, `bun run`), not `npm`/`yarn`\n- Exception: `npx jest` is allowed for targeted Jest runs\n- Prefer repository scripts over ad-hoc one-off command variants\n\n## Git\n- Never push to remote; human reviews and ",
     "static-rules:project-conventions:6fb98908": "### project-conventions.md\n\n# Project Conventions\n\nThis rules file is intentionally brief.\n\nPrimary architecture/context source is [`/home/williamkhoo/Desktop/projects/nathapp/koda/.nax/context.md`](/home/williamkhoo/Desktop/projects/nathapp/koda/.nax/context.md). Keep detailed stack, folder map, an",
-    "session-scratch:670f5997": "**TDD test-writer** at 2026-04-24T03:13:37.640Z: succeeded — changed: apps/api/test/integration/rag/intent-weighted-fusion.integration.spec.ts\n```\nntent finalScore formula verification\n- **AC3**: Descending sort by finalScore with sequential rank\n- **AC4**: Candidate pool max(100, limit*5), split ev"
+    "session-scratch:5a9c96b3": "**TDD test-writer** at 2026-04-24T05:08:32.450Z: succeeded\n```\nzation issue |\n\n**Issues in Implementation:**\n1. `normalizeMinMax()` (line 373-380) doesn't force `hasPresence[i]=false` candidates to 0 when `min !== max`\n2. Recency calculation uses actual document `createdAt` timestamps rather than co"
   }
 }
