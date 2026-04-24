@@ -371,12 +371,17 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     }
 
     const normalizeMinMax = (scores: number[], hasPresence: boolean[]): number[] => {
+      if (scores.length === 0) return [];
       const min = Math.min(...scores);
       const max = Math.max(...scores);
       if (min === max) {
         return scores.map((s, i) => (s > 0 && hasPresence[i] ? 1 : 0));
       }
-      return scores.map((s) => (s - min) / (max - min));
+      const result: number[] = new Array(scores.length);
+      for (let i = 0; i < scores.length; i++) {
+        result[i] = hasPresence[i] ? (scores[i] - min) / (max - min) : 0;
+      }
+      return result;
     };
 
     const hasVectorArr = rawScores.map((s) => s.hasVector);
@@ -387,9 +392,10 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     const normEntity = normalizeMinMax(entityScores, entityScores.map(() => true));
     const normRecency = normalizeMinMax(recencyScores, recencyScores.map(() => true));
 
+    const entries = Array.from(rawScoreMap.entries());
+
     const scoredCandidates: { id: string; finalScore: number; normVector: number; normLexical: number; normEntity: number; normRecency: number; record: LanceRecord }[] = [];
 
-    const entries = Array.from(rawScoreMap.entries());
     for (let i = 0; i < entries.length; i++) {
       const [id] = entries[i];
       const record = recordMap.get(id);
