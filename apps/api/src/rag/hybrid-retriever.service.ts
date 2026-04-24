@@ -400,20 +400,22 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     const entries = Array.from(rawScoreMap.entries());
     const scoredCandidates: { id: string; finalScore: number; normVector: number; normLexical: number; normEntity: number; normRecency: number; record: LanceRecord }[] = [];
 
+    let resultIdx = 0;
     for (let i = 0; i < entries.length; i++) {
       const [id] = entries[i];
       const record = recordMap.get(id);
       if (!record) continue;
-      const normVectorScore = normVector[i];
-      const normLexicalScore = normLexical[i];
-      const normEntityScore = normEntity[i];
-      const normRecencyScore = normRecency[i];
+      const normVectorScore = normVector[resultIdx];
+      const normLexicalScore = normLexical[resultIdx];
+      const normEntityScore = normEntity[resultIdx];
+      const normRecencyScore = normRecency[resultIdx];
       const finalScore =
         normVectorScore * weights.vectorScore +
         normLexicalScore * weights.lexicalScore +
         normEntityScore * weights.entityScore +
         normRecencyScore * weights.recencyScore;
       scoredCandidates.push({ id, finalScore, normVector: normVectorScore, normLexical: normLexicalScore, normEntity: normEntityScore, normRecency: normRecencyScore, record });
+      resultIdx++;
     }
 
     scoredCandidates.sort((a, b) => b.finalScore - a.finalScore);
@@ -504,10 +506,6 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     const now = Date.now();
     const ageDays = (now - docDate) / (1000 * 60 * 60 * 24);
     return Math.pow(0.5, ageDays / 30);
-  }
-
-  private calcRecencyScore(rawScore: number): number {
-    return rawScore;
   }
 
   private getSimilarityTier(score: number): 'high' | 'medium' | 'low' | 'none' {
