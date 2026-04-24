@@ -366,6 +366,10 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     const entityScores = rawScores.map((s) => s.entity);
     const recencyScores = rawScores.map((s) => s.recency);
 
+    if (rawScores.length === 0) {
+      return { results: [], scores: [], retrievedAt };
+    }
+
     const normalizeMinMax = (scores: number[], hasPresence: boolean[]): number[] => {
       const min = Math.min(...scores);
       const max = Math.max(...scores);
@@ -385,21 +389,21 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
 
     const scoredCandidates: { id: string; finalScore: number; normVector: number; normLexical: number; normEntity: number; normRecency: number; record: LanceRecord }[] = [];
 
-    let idx = 0;
-    for (const [id] of rawScoreMap) {
+    const entries = Array.from(rawScoreMap.entries());
+    for (let i = 0; i < entries.length; i++) {
+      const [id] = entries[i];
       const record = recordMap.get(id);
       if (!record) continue;
-      const normVectorScore = normVector[idx];
-      const normLexicalScore = normLexical[idx];
-      const normEntityScore = normEntity[idx];
-      const normRecencyScore = normRecency[idx];
+      const normVectorScore = normVector[i];
+      const normLexicalScore = normLexical[i];
+      const normEntityScore = normEntity[i];
+      const normRecencyScore = normRecency[i];
       const finalScore =
         normVectorScore * weights.vectorScore +
         normLexicalScore * weights.lexicalScore +
         normEntityScore * weights.entityScore +
         normRecencyScore * weights.recencyScore;
       scoredCandidates.push({ id, finalScore, normVector: normVectorScore, normLexical: normLexicalScore, normEntity: normEntityScore, normRecency: normRecencyScore, record });
-      idx++;
     }
 
     scoredCandidates.sort((a, b) => b.finalScore - a.finalScore);
