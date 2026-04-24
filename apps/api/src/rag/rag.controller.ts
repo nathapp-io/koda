@@ -209,7 +209,7 @@ export class RagController {
     const project = await this.resolveProject(slug);
     const { loadEvalQueries } = await import('../retrieval/load-queries');
     const queries = loadEvalQueries();
-    const projectQueries = queries.filter((q) => q.projectId === project.id);
+    const projectQueries = queries;
     const summary = await this.evaluationService.runQueries(projectQueries);
     return JsonResponse.Ok(summary);
   }
