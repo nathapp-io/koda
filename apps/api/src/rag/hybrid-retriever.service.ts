@@ -308,7 +308,9 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
           vectorRows.map((r) => ({ id: r.id as string })),
           ftsRanked.map((r) => ({ id: r.id })),
         )
-      : ftsRanked.slice(0, limit).map((r) => ({ id: r.id, score: r.score }));
+      : vectorRows.length > 0
+        ? vectorRows.map((r) => ({ id: r.id as string }))
+        : ftsRanked.slice(0, limit).map((r) => ({ id: r.id }));
 
     const recordMap = new Map<string, LanceRecord>();
     allRows.forEach((r) => recordMap.set(r.id as string, r));
@@ -364,38 +366,37 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     const entityScores = rawScores.map((s) => s.entity);
     const recencyScores = rawScores.map((s) => s.recency);
 
-    const normalizeMinMax = (scores: number[], hasPresence: boolean[]): number[] => {
+    const normalizeMinMax = (scores: number[]): number[] => {
       const min = Math.min(...scores);
       const max = Math.max(...scores);
       if (min === max) {
-        return scores.map((s, i) => (s > 0 && hasPresence[i] ? 1 : 0));
+        return scores.map((s) => (s > 0 ? 1 : 0));
       }
       return scores.map((s) => (s - min) / (max - min));
     };
 
-    const hasVectorArr = rawScores.map((s) => s.hasVector);
-    const hasLexicalArr = rawScores.map((s) => s.hasLexical);
-
-    const normVector = normalizeMinMax(vectorScores, hasVectorArr);
-    const normLexical = normalizeMinMax(lexicalScores, hasLexicalArr);
-    const normEntity = normalizeMinMax(entityScores, entityScores.map(() => true));
-    const normRecency = normalizeMinMax(recencyScores, recencyScores.map(() => true));
+    const normVector = normalizeMinMax(vectorScores);
+    const normLexical = normalizeMinMax(lexicalScores);
+    const normEntity = normalizeMinMax(entityScores);
+    const normRecency = normalizeMinMax(recencyScores);
 
     const scoredCandidates: { id: string; finalScore: number; normVector: number; normLexical: number; normEntity: number; normRecency: number; record: LanceRecord }[] = [];
 
+    let idx = 0;
     for (const [id] of rawScoreMap) {
       const record = recordMap.get(id);
       if (!record) continue;
-      const normVectorScore = normVector[scoredCandidates.length];
-      const normLexicalScore = normLexical[scoredCandidates.length];
-      const normEntityScore = normEntity[scoredCandidates.length];
-      const normRecencyScore = normRecency[scoredCandidates.length];
+      const normVectorScore = normVector[idx];
+      const normLexicalScore = normLexical[idx];
+      const normEntityScore = normEntity[idx];
+      const normRecencyScore = normRecency[idx];
       const finalScore =
         normVectorScore * weights.vectorScore +
         normLexicalScore * weights.lexicalScore +
         normEntityScore * weights.entityScore +
         normRecencyScore * weights.recencyScore;
       scoredCandidates.push({ id, finalScore, normVector: normVectorScore, normLexical: normLexicalScore, normEntity: normEntityScore, normRecency: normRecencyScore, record });
+      idx++;
     }
 
     scoredCandidates.sort((a, b) => b.finalScore - a.finalScore);
