@@ -1,5 +1,5 @@
 {
-  "requestId": "10ecc19b-6a8c-45f7-ac8a-0b69ec8a8ae4",
+  "requestId": "2cea0841-ff46-43e0-b1b1-306cfda87f27",
   "stage": "context",
   "totalBudgetTokens": 2048,
   "usedTokens": 1969,
@@ -15,27 +15,27 @@
     "static-rules:project-conventions:6fb98908"
   ],
   "digestTokens": 18,
-  "buildMs": 287,
+  "buildMs": 334,
   "providerResults": [
     {
       "providerId": "static-rules",
       "status": "ok",
       "chunkCount": 3,
-      "durationMs": 5,
+      "durationMs": 6,
       "tokensProduced": 1951
     },
     {
       "providerId": "feature-context",
       "status": "empty",
       "chunkCount": 0,
-      "durationMs": 2,
+      "durationMs": 3,
       "tokensProduced": 0
     },
     {
       "providerId": "test-coverage",
       "status": "empty",
       "chunkCount": 0,
-      "durationMs": 6,
+      "durationMs": 5,
       "tokensProduced": 0
     },
     {
@@ -49,14 +49,14 @@
       "providerId": "git-history",
       "status": "empty",
       "chunkCount": 0,
-      "durationMs": 285,
+      "durationMs": 332,
       "tokensProduced": 0
     },
     {
       "providerId": "code-neighbor",
       "status": "empty",
       "chunkCount": 0,
-      "durationMs": 41,
+      "durationMs": 40,
       "tokensProduced": 0
     }
   ],
