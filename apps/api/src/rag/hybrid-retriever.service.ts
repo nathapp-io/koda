@@ -286,7 +286,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    if (vectorRows.length === 0 && this.lanceAvailable === false) {
+    if (vectorRows.length === 0) {
       const queryVector = await this.embeddingService.embed(query.query);
       const dims = this.embeddingService.dimensions ?? 8;
       const allWithVectors = allRows.map((r) => {
@@ -366,19 +366,22 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     const entityScores = rawScores.map((s) => s.entity);
     const recencyScores = rawScores.map((s) => s.recency);
 
-    const normalizeMinMax = (scores: number[]): number[] => {
+    const normalizeMinMax = (scores: number[], hasPresence: boolean[]): number[] => {
       const min = Math.min(...scores);
       const max = Math.max(...scores);
       if (min === max) {
-        return scores.map((s) => (s > 0 ? 1 : 0));
+        return scores.map((s, i) => (s > 0 && hasPresence[i] ? 1 : 0));
       }
       return scores.map((s) => (s - min) / (max - min));
     };
 
-    const normVector = normalizeMinMax(vectorScores);
-    const normLexical = normalizeMinMax(lexicalScores);
-    const normEntity = normalizeMinMax(entityScores);
-    const normRecency = normalizeMinMax(recencyScores);
+    const hasVectorArr = rawScores.map((s) => s.hasVector);
+    const hasLexicalArr = rawScores.map((s) => s.hasLexical);
+
+    const normVector = normalizeMinMax(vectorScores, hasVectorArr);
+    const normLexical = normalizeMinMax(lexicalScores, hasLexicalArr);
+    const normEntity = normalizeMinMax(entityScores, entityScores.map(() => true));
+    const normRecency = normalizeMinMax(recencyScores, recencyScores.map(() => true));
 
     const scoredCandidates: { id: string; finalScore: number; normVector: number; normLexical: number; normEntity: number; normRecency: number; record: LanceRecord }[] = [];
 
