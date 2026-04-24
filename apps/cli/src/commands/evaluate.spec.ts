@@ -115,14 +115,21 @@ describe('evaluateCommand', () => {
       const evaluateCmd = program.commands.find((cmd) => cmd.name() === 'evaluate');
       expect(evaluateCmd).toBeDefined();
 
+      let captured = '';
+      const origWrite = process.stdout.write;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (process.stdout as any).write = (str: string) => {
+        captured += str;
+        return true;
+      };
       try {
         await evaluateCmd?.parseAsync(['node', 'test', '--help']);
       } catch {
         // Commander exits with 0 on --help, so we expect exitOverride to throw
       }
 
-      const allLogs = logSpy.mock.calls.map((call) => call.join(' ')).join('\n');
-      expect(allLogs).toMatch(/evaluate/i);
+      expect(captured).toMatch(/evaluate/i);
+      process.stdout.write = origWrite;
     });
   });
 
