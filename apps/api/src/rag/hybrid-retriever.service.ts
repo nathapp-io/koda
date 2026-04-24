@@ -11,7 +11,7 @@ import {
   HybridSearchResultItem,
   ScoreBreakdown,
 } from './dto/hybrid-search.dto';
-import { simpleFtsScore, reciprocalRankFusion } from './rag.service';
+import { simpleFtsScore } from './rag.service';
 
 const ANSWER_WEIGHTS = {
   vectorScore: 0.4,
