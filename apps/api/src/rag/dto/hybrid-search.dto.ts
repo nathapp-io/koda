@@ -94,6 +94,9 @@ export class HybridSearchResultItem {
     indexedAt: string;
     sourceProjectId: string;
   };
+
+  @ApiProperty({ description: 'Sequential rank starting from 1', required: false })
+  rank?: number;
 }
 
 export class HybridSearchResult {

@@ -16,8 +16,8 @@ import { simpleFtsScore, reciprocalRankFusion } from './rag.service';
 const ANSWER_WEIGHTS = {
   vectorScore: 0.4,
   lexicalScore: 0.3,
-  entityScore: 0.1,
-  recencyScore: 0.2,
+  entityScore: 0.2,
+  recencyScore: 0.1,
 };
 
 const INTENT_WEIGHTS: Record<string, Partial<typeof ANSWER_WEIGHTS>> = {
@@ -229,7 +229,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
   async search(query: HybridSearchQuery): Promise<HybridSearchResult> {
     const retrievedAt = new Date().toISOString();
     const projectId = query.projectId;
-    const limit = Math.min(query.limit ?? 20, 50);
+    const limit = query.limit ?? 20;
 
     const weights = INTENT_WEIGHTS[query.intent ?? 'answer'] ?? ANSWER_WEIGHTS;
 
@@ -286,7 +286,24 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    const merged = vectorRows.length > 0
+    if (vectorRows.length === 0 && this.lanceAvailable === false) {
+      const queryVector = await this.embeddingService.embed(query.query);
+      const dims = this.embeddingService.dimensions ?? 8;
+      const allWithVectors = allRows.map((r) => {
+        const docVec = (r.vector as number[]) ?? Array(dims).fill(0);
+        const dot = queryVector.reduce((sum, qv, i) => sum + qv * docVec[i], 0);
+        const qMag = Math.sqrt(queryVector.reduce((s, v) => s + v * v, 0));
+        const dMag = Math.sqrt(docVec.reduce((s, v) => s + v * v, 0));
+        const cosineSim = qMag > 0 && dMag > 0 ? dot / (qMag * dMag) : 0;
+        return { ...r, _distance: 1 - cosineSim };
+      });
+      vectorRows = allWithVectors
+        .filter((r) => (r._distance as number) < 1)
+        .sort((a, b) => (a._distance as number) - (b._distance as number))
+        .slice(0, candidatePoolSize);
+    }
+
+    const merged = (vectorRows.length > 0 && this.lanceAvailable)
       ? reciprocalRankFusion(
           vectorRows.map((r) => ({ id: r.id as string })),
           ftsRanked.map((r) => ({ id: r.id })),
@@ -306,8 +323,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     const candidateLimit = Math.max(100, limit * 5);
     const candidates = merged.slice(0, candidateLimit);
 
-    const results: HybridSearchResultItem[] = [];
-    const scores: ScoreBreakdown[] = [];
+    const rawScoreMap: Map<string, { vector: number; lexical: number; entity: number; recency: number; hasVector: boolean; hasLexical: boolean }> = new Map();
 
     for (const { id } of candidates) {
       const record = recordMap.get(id);
@@ -328,6 +344,72 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
         if (docTime > endTime) continue;
       }
 
+      const hasVector = simMap.has(id);
+      const vectorScore = hasVector ? Math.max(0, 1 - (vectorRows.find((r) => r.id === id)?._distance ?? 1)) : 0;
+      const hasLexical = ftsScoreMap.has(id);
+      const lexicalScore = hasLexical ? ftsScoreMap.get(id) ?? 0 : 0;
+
+      const matchedEntities = this.entityStore.searchEntities(projectId, query.query);
+      const docEntity = matchedEntities.find((e) => e.sourceId === (record.source_id as string));
+      const entityScore = docEntity ? this.entityStore.computeEntityScore(query.query, docEntity.tags) : 0;
+
+      const rawRecencyScore = this.calcRawRecencyScore(record.created_at);
+
+      rawScoreMap.set(id, { vector: vectorScore, lexical: lexicalScore, entity: entityScore, recency: rawRecencyScore, hasVector, hasLexical });
+    }
+
+    const rawScores = Array.from(rawScoreMap.values());
+    const vectorScores = rawScores.map((s) => s.vector);
+    const lexicalScores = rawScores.map((s) => s.lexical);
+    const entityScores = rawScores.map((s) => s.entity);
+    const recencyScores = rawScores.map((s) => s.recency);
+
+    const normalizeMinMax = (scores: number[], hasPresence: boolean[]): number[] => {
+      const min = Math.min(...scores);
+      const max = Math.max(...scores);
+      if (min === max) {
+        return scores.map((s, i) => (s > 0 && hasPresence[i] ? 1 : 0));
+      }
+      return scores.map((s) => (s - min) / (max - min));
+    };
+
+    const hasVectorArr = rawScores.map((s) => s.hasVector);
+    const hasLexicalArr = rawScores.map((s) => s.hasLexical);
+
+    const normVector = normalizeMinMax(vectorScores, hasVectorArr);
+    const normLexical = normalizeMinMax(lexicalScores, hasLexicalArr);
+    const normEntity = normalizeMinMax(entityScores, entityScores.map(() => true));
+    const normRecency = normalizeMinMax(recencyScores, recencyScores.map(() => true));
+
+    const scoredCandidates: { id: string; finalScore: number; normVector: number; normLexical: number; normEntity: number; normRecency: number; record: LanceRecord }[] = [];
+
+    let idx = 0;
+    for (const [id] of rawScoreMap) {
+      const record = recordMap.get(id);
+      if (!record) { idx++; continue; }
+      const normVectorScore = normVector[idx];
+      const normLexicalScore = normLexical[idx];
+      const normEntityScore = normEntity[idx];
+      const normRecencyScore = normRecency[idx];
+      const finalScore =
+        normVectorScore * weights.vectorScore +
+        normLexicalScore * weights.lexicalScore +
+        normEntityScore * weights.entityScore +
+        normRecencyScore * weights.recencyScore;
+      scoredCandidates.push({ id, finalScore, normVector: normVectorScore, normLexical: normLexicalScore, normEntity: normEntityScore, normRecency: normRecencyScore, record });
+      idx++;
+    }
+
+    const validScoredCandidates = scoredCandidates.filter((c) => c.record !== null);
+
+    scoredCandidates.sort((a, b) => b.finalScore - a.finalScore);
+
+    const results: HybridSearchResultItem[] = [];
+    const scores: ScoreBreakdown[] = [];
+
+    for (let rank = 0; rank < scoredCandidates.length; rank++) {
+      const { id, finalScore, normVector: vectorScore, normLexical: lexicalScore, normEntity: entityScore, normRecency: recencyScore, record } = scoredCandidates[rank];
+
       const meta = (() => {
         try {
           return JSON.parse(record.metadata as string) as Record<string, unknown>;
@@ -336,24 +418,8 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
         }
       })();
 
-      const rawScore = simMap.get(id) ?? ftsScoreMap.get(id) ?? 0;
-
-      const vectorScore = simMap.has(id) ? Math.max(0, 1 - (vectorRows.find((r) => r.id === id)?._distance ?? 1)) : 0;
-      const lexicalScore = ftsScoreMap.get(id) ?? 0;
-
-      const matchedEntities = this.entityStore.searchEntities(projectId, query.query);
-      const docEntity = matchedEntities.find((e) => e.sourceId === (record.source_id as string));
-      const entityScore = docEntity ? this.entityStore.computeEntityScore(query.query, docEntity.tags) : 0;
-
-      const recencyScore = this.calcRecencyScore(record.created_at);
-      const finalScore =
-        vectorScore * weights.vectorScore +
-        lexicalScore * weights.lexicalScore +
-        entityScore * weights.entityScore +
-        recencyScore * weights.recencyScore;
-
       results.push({
-        id: record.id as string,
+        id,
         source: record.source as 'ticket' | 'doc' | 'manual' | 'code',
         sourceId: record.source_id as string,
         content: record.content as string,
@@ -365,6 +431,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
           indexedAt: record.created_at as string,
           sourceProjectId: projectId,
         },
+        rank: rank + 1,
       });
 
       scores.push({
@@ -418,11 +485,15 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     this.graphifyEnabledCache.delete(cacheKey);
   }
 
-  private calcRecencyScore(createdAt: string): number {
+  private calcRawRecencyScore(createdAt: string): number {
     const docDate = new Date(createdAt).getTime();
     const now = Date.now();
     const ageDays = (now - docDate) / (1000 * 60 * 60 * 24);
-    return Math.max(0, 1 - ageDays / 365);
+    return Math.pow(0.5, ageDays / 30);
+  }
+
+  private calcRecencyScore(rawScore: number): number {
+    return rawScore;
   }
 
   private getSimilarityTier(score: number): 'high' | 'medium' | 'low' | 'none' {
