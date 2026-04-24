@@ -360,7 +360,6 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
       const hasLexical = ftsScoreMap.has(id);
       const lexicalScore = hasLexical ? ftsScoreMap.get(id) ?? 0 : 0;
 
-      const matchedEntities = this.entityStore.searchEntities(projectId, query.query);
       const docEntity = matchedEntities.find((e) => e.sourceId === (record.source_id as string));
       const entityScore = docEntity ? this.entityStore.computeEntityScore(query.query, docEntity.tags) : 0;
 
@@ -423,11 +422,13 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
 
     scoredCandidates.sort((a, b) => b.finalScore - a.finalScore);
 
+    const finalCandidates = scoredCandidates.slice(0, limit);
+
     const results: HybridSearchResultItem[] = [];
     const scores: ScoreBreakdown[] = [];
 
-    for (let rank = 0; rank < scoredCandidates.length; rank++) {
-      const { id, finalScore, normVector: vectorScore, normLexical: lexicalScore, normEntity: entityScore, normRecency: recencyScore, record } = scoredCandidates[rank];
+    for (let rank = 0; rank < finalCandidates.length; rank++) {
+      const { id, finalScore, normVector: vectorScore, normLexical: lexicalScore, normEntity: entityScore, normRecency: recencyScore, record } = finalCandidates[rank];
 
       const meta = (() => {
         try {
