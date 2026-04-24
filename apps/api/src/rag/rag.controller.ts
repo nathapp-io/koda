@@ -202,6 +202,7 @@ export class RagController {
 
   @Post('evaluate/retrieval')
   @HttpCode(HttpStatus.OK)
+  @Public()
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Run the retrieval evaluation harness with seeded queries' })
   @ApiResponse({ status: 200, description: 'Evaluation results with precision@5 metrics' })
