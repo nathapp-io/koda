@@ -3,7 +3,7 @@
   "feature": "memory-phase2-hybrid-retrieval",
   "branchName": "feat/memory-phase2-hybrid-retrieval",
   "createdAt": "2026-04-23T12:28:37.000Z",
-  "updatedAt": "2026-04-24T10:13:54.689Z",
+  "updatedAt": "2026-04-24T11:02:53.104Z",
   "userStories": [
     {
       "id": "US-001",
@@ -292,9 +292,9 @@
       "dependencies": [
         "US-004"
       ],
-      "status": "pending",
+      "status": "failed",
       "passes": false,
-      "attempts": 0,
+      "attempts": 1,
       "escalations": [],
       "routing": {
         "complexity": "complex",

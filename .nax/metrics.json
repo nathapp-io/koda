@@ -3315,5 +3315,17 @@
     "storiesFailed": 1,
     "totalDurationMs": 3986797,
     "stories": []
+  },
+  {
+    "runId": "run-2026-04-24T07-48-36-543Z",
+    "feature": "memory-phase2-hybrid-retrieval",
+    "startedAt": "2026-04-24T07:48:36.543Z",
+    "completedAt": "2026-04-24T11:02:54.165Z",
+    "totalCost": 5.5699623150000015,
+    "totalStories": 0,
+    "storiesCompleted": 0,
+    "storiesFailed": 1,
+    "totalDurationMs": 11657622,
+    "stories": []
   }
 ]
