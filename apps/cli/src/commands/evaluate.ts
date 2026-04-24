@@ -8,13 +8,14 @@ const CI_THRESHOLD = 0.70;
 // ragControllerEvaluateRetrieval will be generated after API contract change
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let ragControllerEvaluateRetrieval: any;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const generated = require('../generated');
-  ragControllerEvaluateRetrieval = generated.ragControllerEvaluateRetrieval;
-} catch {
-  ragControllerEvaluateRetrieval = undefined;
-}
+(async () => {
+  try {
+    const generated = await import('../generated');
+    ragControllerEvaluateRetrieval = generated.ragControllerEvaluateRetrieval;
+  } catch {
+    ragControllerEvaluateRetrieval = undefined;
+  }
+})();
 
 export function evaluateCommand(program: Command): void {
   const evaluate = new Command('evaluate');
@@ -38,9 +39,14 @@ export function evaluateCommand(program: Command): void {
       OpenAPI.BASE = ctx.apiUrl;
       OpenAPI.TOKEN = ctx.apiKey;
 
+      if (!ctx.projectSlug) {
+        console.error('Error: project slug is required');
+        process.exit(2);
+      }
+
       try {
         const result = await ragControllerEvaluateRetrieval({
-          slug: ctx.projectSlug!,
+          slug: ctx.projectSlug,
         });
 
         const summary = result.data;
