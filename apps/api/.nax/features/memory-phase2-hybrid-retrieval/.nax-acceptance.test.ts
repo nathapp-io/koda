@@ -1,3 +1,5 @@
+import 'reflect-metadata';
+
 import { HybridRetrieverService } from '../../../src/rag/hybrid-retriever.service';
 import { HybridSearchQuery, HybridSearchResult, ScoreBreakdown } from '../../../src/rag/dto/hybrid-search.dto';
 import { EntityStore, Entity, ScoredEntity } from '../../../src/rag/entity-store';
