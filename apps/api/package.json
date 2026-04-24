@@ -24,6 +24,7 @@
     "db:reset": "prisma migrate reset",
     "seed:e2e": "bun prisma/seed-e2e.ts",
     "seed:prod": "bun prisma/seed.ts",
+    "seed:eval:documents": "bun scripts/seed-eval-documents.ts",
     "evaluate:retrieval": "bun scripts/evaluate-retrieval.ts"
   },
   "dependencies": {
