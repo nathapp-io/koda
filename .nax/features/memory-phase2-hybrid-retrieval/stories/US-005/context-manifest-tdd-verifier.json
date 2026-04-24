@@ -1,5 +1,5 @@
 {
-  "requestId": "3562b46c-9674-4f60-98f8-5d27061b259e",
+  "requestId": "738f4213-7161-4b68-ad77-383b16e6ee92",
   "stage": "tdd-verifier",
   "totalBudgetTokens": 6000,
   "usedTokens": 3077,
@@ -32,7 +32,7 @@
       "providerId": "feature-context",
       "status": "empty",
       "chunkCount": 0,
-      "durationMs": 0,
+      "durationMs": 1,
       "tokensProduced": 0
     }
   ],
