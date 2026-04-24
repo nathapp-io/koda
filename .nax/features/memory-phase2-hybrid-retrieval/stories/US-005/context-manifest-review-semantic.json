@@ -1,5 +1,5 @@
 {
-  "requestId": "cb925278-19a8-4906-8a37-f055d85a3f64",
+  "requestId": "31580566-ec02-48c2-9b05-b5c74872b0f8",
   "stage": "review-semantic",
   "totalBudgetTokens": 6000,
   "usedTokens": 3077,
@@ -19,20 +19,20 @@
     "static-rules:web:3afa6c95"
   ],
   "digestTokens": 26,
-  "buildMs": 2,
+  "buildMs": 3,
   "providerResults": [
     {
       "providerId": "static-rules",
       "status": "ok",
       "chunkCount": 5,
-      "durationMs": 1,
+      "durationMs": 2,
       "tokensProduced": 3051
     },
     {
       "providerId": "feature-context",
       "status": "empty",
       "chunkCount": 0,
-      "durationMs": 1,
+      "durationMs": 0,
       "tokensProduced": 0
     }
   ],
