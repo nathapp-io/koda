@@ -365,6 +365,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     }
 
     const rawScores = Array.from(rawScoreMap.values());
+    const rawScoreIds = Array.from(rawScoreMap.keys());
     const vectorScores = rawScores.map((s) => s.vector);
     const lexicalScores = rawScores.map((s) => s.lexical);
     const entityScores = rawScores.map((s) => s.entity);
@@ -397,25 +398,22 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     const normEntity = normalizeMinMax(entityScores, entityScores.map(() => true));
     const normRecency = normalizeMinMax(recencyScores, recencyScores.map(() => true));
 
-    const entries = Array.from(rawScoreMap.entries());
     const scoredCandidates: { id: string; finalScore: number; normVector: number; normLexical: number; normEntity: number; normRecency: number; record: LanceRecord }[] = [];
 
-    let resultIdx = 0;
-    for (let i = 0; i < entries.length; i++) {
-      const [id] = entries[i];
+    for (let i = 0; i < rawScoreIds.length; i++) {
+      const id = rawScoreIds[i];
       const record = recordMap.get(id);
       if (!record) continue;
-      const normVectorScore = normVector[resultIdx];
-      const normLexicalScore = normLexical[resultIdx];
-      const normEntityScore = normEntity[resultIdx];
-      const normRecencyScore = normRecency[resultIdx];
+      const normVectorScore = normVector[i];
+      const normLexicalScore = normLexical[i];
+      const normEntityScore = normEntity[i];
+      const normRecencyScore = normRecency[i];
       const finalScore =
         normVectorScore * weights.vectorScore +
         normLexicalScore * weights.lexicalScore +
         normEntityScore * weights.entityScore +
         normRecencyScore * weights.recencyScore;
       scoredCandidates.push({ id, finalScore, normVector: normVectorScore, normLexical: normLexicalScore, normEntity: normEntityScore, normRecency: normRecencyScore, record });
-      resultIdx++;
     }
 
     scoredCandidates.sort((a, b) => b.finalScore - a.finalScore);
