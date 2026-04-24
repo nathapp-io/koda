@@ -409,6 +409,23 @@ describe('evaluateCommand', () => {
       expect(exitSpy).toHaveBeenCalledWith(1);
     });
 
+    it('exits 1 on 5xx server error', async () => {
+      const { ragControllerEvaluateRetrieval } = require('../generated');
+      const serverError = new Error('Service Unavailable');
+      (serverError as any).response = { status: 503, data: { message: 'Service Unavailable' } };
+      (ragControllerEvaluateRetrieval as jest.Mock).mockRejectedValue(serverError);
+
+      const evaluateCmd = program.commands.find((cmd) => cmd.name() === 'evaluate');
+
+      try {
+        await evaluateCmd?.parseAsync(['node', 'test']);
+      } catch {
+        // Expected
+      }
+
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    });
+
     it('exits 2 on 401 auth error', async () => {
       const { ragControllerEvaluateRetrieval } = require('../generated');
       const apiError = new Error('Unauthorized');

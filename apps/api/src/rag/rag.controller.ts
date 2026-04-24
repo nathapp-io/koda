@@ -202,10 +202,10 @@ export class RagController {
 
   @Post('evaluate/retrieval')
   @HttpCode(HttpStatus.OK)
-  @Public()
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Run the retrieval evaluation harness with seeded queries' })
   @ApiResponse({ status: 200, description: 'Evaluation results with precision@5 metrics' })
-  @ApiBearerAuth()
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async evaluateRetrieval(@Param('slug') slug: string) {
     const project = await this.resolveProject(slug);
     const { loadEvalQueries } = await import('../retrieval/load-queries');
