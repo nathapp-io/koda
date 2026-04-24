@@ -27,6 +27,7 @@
     "evaluate:retrieval": "bun scripts/evaluate-retrieval.ts"
   },
   "dependencies": {
+    "@casl/ability": "^6.8.1",
     "@fastify/static": "^9.0.0",
     "@lancedb/lancedb": "0.17.0",
     "@nathapp/nestjs-app": "^3.0.0",

@@ -3,7 +3,7 @@
   "feature": "memory-phase2-hybrid-retrieval",
   "branchName": "feat/memory-phase2-hybrid-retrieval",
   "createdAt": "2026-04-23T12:28:37.000Z",
-  "updatedAt": "2026-04-24T07:48:36.623Z",
+  "updatedAt": "2026-04-24T10:13:54.689Z",
   "userStories": [
     {
       "id": "US-001",
@@ -301,7 +301,7 @@
         "testStrategy": "three-session-tdd-lite",
         "reasoning": "validated from LLM output",
         "initialComplexity": "complex",
-        "modelTier": "balanced"
+        "modelTier": "powerful"
       },
       "contextFiles": [
         "package.json",
@@ -316,8 +316,29 @@
         "On threshold failure, output includes failing queries and missed expected document IDs so CI failures are actionable.",
         "The evaluation command supports report-only mode (no CI failure) and gate mode (fails below threshold) with explicit exit codes."
       ],
-      "priorErrors": [],
-      "priorFailures": [],
+      "priorErrors": [
+        "Attempt 1 failed with model tier: balanced: Autofix exhausted: review still failing after fix attempts"
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "balanced",
+          "stage": "review",
+          "summary": "Failed with tier balanced, escalating to next tier",
+          "reviewFindings": [
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src/rag/rag.controller.ts",
+              "line": 212,
+              "message": "Redundant OR condition: `q.projectId === project.id || q.projectId === project.id` - same expression appears on both sides of OR, making the second check dead code. This appears to be a typo where the second operand was intended to be a different filter condition (e.g., `q.projectId === project.id` should have been something like `expectedDocIds` check or the line was copy-pasted).",
+              "source": "semantic-review"
+            }
+          ],
+          "cost": 2.5945486200000007,
+          "timestamp": "2026-04-24T10:13:52.651Z"
+        }
+      ],
       "storyPoints": 1,
       "storyGitRef": "64d94c175cc703509d1b9fd0acac0c86a7e6f6c7"
     },
