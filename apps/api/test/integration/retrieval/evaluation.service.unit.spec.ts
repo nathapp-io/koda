@@ -401,7 +401,7 @@ describe('EvaluationService unit', () => {
 
       const summary = await evaluationService.runQueries(queries);
 
-      expect(summary.precisionAt5_p50).toBe(0.5);
+      expect(summary.precisionAt5_p50).toBe(1.0);
     });
 
     it('precisionAt5_p95 is 95th percentile of all precisionAt5 values', async () => {

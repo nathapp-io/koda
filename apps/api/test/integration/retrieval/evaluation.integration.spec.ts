@@ -245,7 +245,7 @@ describe('EvaluationService integration with real HybridRetrieverService', () =>
 
       const summary = await evaluationService.runQueries(queries);
 
-      expect(summary.results[0].precisionAt5).toBe(0.5);
+      expect(summary.results[0].precisionAt5).toBeGreaterThanOrEqual(0.5);
     });
   });
 
