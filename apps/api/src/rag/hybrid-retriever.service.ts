@@ -383,24 +383,20 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
 
     const scoredCandidates: { id: string; finalScore: number; normVector: number; normLexical: number; normEntity: number; normRecency: number; record: LanceRecord }[] = [];
 
-    let idx = 0;
     for (const [id] of rawScoreMap) {
       const record = recordMap.get(id);
-      if (!record) { idx++; continue; }
-      const normVectorScore = normVector[idx];
-      const normLexicalScore = normLexical[idx];
-      const normEntityScore = normEntity[idx];
-      const normRecencyScore = normRecency[idx];
+      if (!record) continue;
+      const normVectorScore = normVector[scoredCandidates.length];
+      const normLexicalScore = normLexical[scoredCandidates.length];
+      const normEntityScore = normEntity[scoredCandidates.length];
+      const normRecencyScore = normRecency[scoredCandidates.length];
       const finalScore =
         normVectorScore * weights.vectorScore +
         normLexicalScore * weights.lexicalScore +
         normEntityScore * weights.entityScore +
         normRecencyScore * weights.recencyScore;
       scoredCandidates.push({ id, finalScore, normVector: normVectorScore, normLexical: normLexicalScore, normEntity: normEntityScore, normRecency: normRecencyScore, record });
-      idx++;
     }
-
-    const validScoredCandidates = scoredCandidates.filter((c) => c.record !== null);
 
     scoredCandidates.sort((a, b) => b.finalScore - a.finalScore);
 
