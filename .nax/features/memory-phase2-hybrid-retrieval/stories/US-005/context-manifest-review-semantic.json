@@ -1,5 +1,5 @@
 {
-  "requestId": "31580566-ec02-48c2-9b05-b5c74872b0f8",
+  "requestId": "341eacbb-40e0-420c-836f-d4ef84d40601",
   "stage": "review-semantic",
   "totalBudgetTokens": 6000,
   "usedTokens": 3077,
@@ -19,13 +19,13 @@
     "static-rules:web:3afa6c95"
   ],
   "digestTokens": 26,
-  "buildMs": 3,
+  "buildMs": 2,
   "providerResults": [
     {
       "providerId": "static-rules",
       "status": "ok",
       "chunkCount": 5,
-      "durationMs": 2,
+      "durationMs": 1,
       "tokensProduced": 3051
     },
     {
