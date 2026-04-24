@@ -10,11 +10,13 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { Public } from '@nathapp/nestjs-auth';
 import { ForbiddenAppException, JsonResponse, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
 import { RagService } from './rag.service';
 import { HybridRetrieverService } from './hybrid-retriever.service';
+import { EvaluationService } from '../retrieval/evaluation.service';
 import { AddDocumentDto } from './dto/add-document.dto';
 import { SearchKbDto } from './dto/search-kb.dto';
 import { ImportGraphifyDto } from './dto/import-graphify.dto';
@@ -28,6 +30,7 @@ export class RagController {
     private readonly ragService: RagService,
     private readonly hybridRetrieverService: HybridRetrieverService,
     private readonly prisma: PrismaService<PrismaClient>,
+    private readonly evaluationService: EvaluationService,
   ) {}
 
   private get db() { return this.prisma.client; }
@@ -195,5 +198,19 @@ export class RagController {
     const project = await this.resolveProject(slug);
     await this.ragService.optimizeTable(project.id);
     return JsonResponse.Ok({ optimized: true });
+  }
+
+  @Post('evaluate/retrieval')
+  @HttpCode(HttpStatus.OK)
+  @Public()
+  @ApiOperation({ summary: 'Run the retrieval evaluation harness with seeded queries' })
+  @ApiResponse({ status: 200, description: 'Evaluation results with precision@5 metrics' })
+  async evaluateRetrieval(@Param('slug') slug: string) {
+    const project = await this.resolveProject(slug);
+    const { loadEvalQueries } = await import('../retrieval/load-queries');
+    const queries = loadEvalQueries();
+    const projectQueries = queries.filter((q) => q.projectId === project.id || q.projectId === project.id);
+    const summary = await this.evaluationService.runQueries(projectQueries);
+    return JsonResponse.Ok(summary);
   }
 }

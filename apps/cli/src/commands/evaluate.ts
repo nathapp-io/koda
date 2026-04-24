@@ -40,7 +40,7 @@ export function evaluateCommand(program: Command): void {
 
       try {
         const result = await ragControllerEvaluateRetrieval({
-          projectSlug: ctx.projectSlug!,
+          slug: ctx.projectSlug!,
         });
 
         const summary = result.data;

@@ -1,4 +1,4 @@
-import { Injectable, Logger, Module, OnModuleInit, Optional } from '@nestjs/common';
+import { Injectable, Logger, Module, OnModuleInit, Optional, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ScheduleModule, SchedulerRegistry } from '@nestjs/schedule';
 import { PrismaModule, PrismaService } from '@nathapp/nestjs-prisma';
@@ -15,6 +15,7 @@ import { CronOptimizeStrategy } from './strategies/cron-optimize.strategy';
 import { ManualOptimizeStrategy } from './strategies/manual-optimize.strategy';
 import { OutboxModule } from '../outbox/outbox.module';
 import { OutboxFanOutRegistry } from '../outbox/outbox-fan-out-registry';
+import { RetrievalModule } from '../retrieval/retrieval.module';
 
 @Injectable()
 class LexicalIndexWarmup implements OnModuleInit {
@@ -108,7 +109,7 @@ class EntityStoreWarmup implements OnModuleInit {
 }
 
 @Module({
-  imports: [ScheduleModule.forRoot(), OutboxModule, PrismaModule],
+  imports: [ScheduleModule.forRoot(), OutboxModule, PrismaModule, forwardRef(() => RetrievalModule)],
   controllers: [RagController],
   providers: [
     RagService,

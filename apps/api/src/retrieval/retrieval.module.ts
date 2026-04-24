@@ -1,9 +1,9 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { EvaluationService } from './evaluation.service';
 import { RagModule } from '../rag/rag.module';
 
 @Module({
-  imports: [RagModule],
+  imports: [forwardRef(() => RagModule)],
   providers: [EvaluationService],
   exports: [EvaluationService],
 })

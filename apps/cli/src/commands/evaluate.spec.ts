@@ -35,6 +35,7 @@ jest.mock('../generated', () => ({
   ragControllerDeleteDocument: jest.fn(),
   ragControllerOptimizeTable: jest.fn(),
   ragControllerImportGraphify: jest.fn(),
+  ragControllerEvaluateRetrieval: jest.fn(),
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 

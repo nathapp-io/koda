@@ -751,6 +751,35 @@
         ]
       }
     },
+    "/api/projects/{slug}/kb/evaluate/retrieval": {
+      "post": {
+        "operationId": "RagController_evaluateRetrieval",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Evaluation results with precision@5 metrics"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Run the retrieval evaluation harness with seeded queries",
+        "tags": [
+          "knowledge-base"
+        ]
+      }
+    },
     "/api/admin/outbox": {
       "get": {
         "operationId": "AdminController_getOutbox",
