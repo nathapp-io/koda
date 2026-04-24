@@ -130,7 +130,7 @@ jobs:
         run: bun run generate:cli
 
       - name: Evaluate retrieval
-        run: bun run seed:prod && bun run evaluate:retrieval
+        run: bun run evaluate:retrieval
         env:
           DATABASE_URL: ${{ vars.EVAL_DATABASE_URL || 'file:./prisma/koda.db' }}
           RAG_EVAL_PROJECT_ID: proj_eval_001
