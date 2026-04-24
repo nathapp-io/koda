@@ -3,7 +3,7 @@
   "feature": "memory-phase2-hybrid-retrieval",
   "branchName": "feat/memory-phase2-hybrid-retrieval",
   "createdAt": "2026-04-23T12:28:37.000Z",
-  "updatedAt": "2026-04-23T18:57:50.488Z",
+  "updatedAt": "2026-04-24T03:06:00.957Z",
   "userStories": [
     {
       "id": "US-001",
@@ -130,7 +130,7 @@
         "EntityStore.indexEntity(projectId, entity) stores the entity and its linked source + sourceId references, then makes it searchable by searchEntities().",
         "EntityStore.searchEntities(projectId, 'auth') returns entities with 'auth' in the label or tags.",
         "EntityStore.getByTag(projectId, 'backend') returns all entities tagged 'backend'.",
-        "Entity score is computed as |query_terms \u2229 entity.tags| / |entity.tags|, and is 0 when there is no overlap.",
+        "Entity score is computed as |query_terms ∩ entity.tags| / |entity.tags|, and is 0 when there is no overlap.",
         "Entity score only boosts candidate documents linked to the matched entity, and unrelated candidate documents receive entityScore = 0.",
         "Entities from graphify nodes with type code_module are indexed when the graphify_import outbox event fires.",
         "Entities from tickets with type ticket are indexed when the ticket_event outbox event fires."
@@ -171,7 +171,7 @@
         "When a candidate document has no linked entities, entityScore is 0."
       ],
       "priorErrors": [
-        "Attempt 1 failed with model tier: balanced: Reviewer contradiction: Cannot satisfy both constraints simultaneously: lint warnings are in test files (entity-store.integration.spec.ts lines 232, 247, 262, 277, 503 \u2014 non-null assertions `!`), but I am prohibited from modifying test files. The other option (modifying .eslintrc.cjs to allow non-null assertions in tests) would violate the constitution rule against modifying CI/CD config files. These warnings are in test code where `!` assertions are idiomatic and appropriate."
+        "Attempt 1 failed with model tier: balanced: Reviewer contradiction: Cannot satisfy both constraints simultaneously: lint warnings are in test files (entity-store.integration.spec.ts lines 232, 247, 262, 277, 503 — non-null assertions `!`), but I am prohibited from modifying test files. The other option (modifying .eslintrc.cjs to allow non-null assertions in tests) would violate the constitution rule against modifying CI/CD config files. These warnings are in test code where `!` assertions are idiomatic and appropriate."
       ],
       "priorFailures": [
         {
@@ -236,7 +236,9 @@
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -254,7 +256,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "1f9cda99dfc72de73adfc1f8846586b26f26794a"
     },
     {
       "id": "US-005",
