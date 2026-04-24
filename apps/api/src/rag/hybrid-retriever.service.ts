@@ -287,20 +287,24 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (vectorRows.length === 0) {
-      const queryVector = await this.embeddingService.embed(query.query);
-      const dims = this.embeddingService.dimensions ?? 8;
-      const allWithVectors = allRows.map((r) => {
-        const docVec = (r.vector as number[]) ?? Array(dims).fill(0);
-        const dot = queryVector.reduce((sum, qv, i) => sum + qv * docVec[i], 0);
-        const qMag = Math.sqrt(queryVector.reduce((s, v) => s + v * v, 0));
-        const dMag = Math.sqrt(docVec.reduce((s, v) => s + v * v, 0));
-        const cosineSim = qMag > 0 && dMag > 0 ? dot / (qMag * dMag) : 0;
-        return { ...r, _distance: 1 - cosineSim };
-      });
-      vectorRows = allWithVectors
-        .filter((r) => (r._distance as number) < 1)
-        .sort((a, b) => (a._distance as number) - (b._distance as number))
-        .slice(0, candidatePoolSize);
+      try {
+        const queryVector = await this.embeddingService.embed(query.query);
+        const dims = this.embeddingService.dimensions ?? 8;
+        const allWithVectors = allRows.map((r) => {
+          const docVec = (r.vector as number[]) ?? Array(dims).fill(0);
+          const dot = queryVector.reduce((sum, qv, i) => sum + qv * docVec[i], 0);
+          const qMag = Math.sqrt(queryVector.reduce((s, v) => s + v * v, 0));
+          const dMag = Math.sqrt(docVec.reduce((s, v) => s + v * v, 0));
+          const cosineSim = qMag > 0 && dMag > 0 ? dot / (qMag * dMag) : 0;
+          return { ...r, _distance: 1 - cosineSim };
+        });
+        vectorRows = allWithVectors
+          .filter((r) => (r._distance as number) < 1)
+          .sort((a, b) => (a._distance as number) - (b._distance as number))
+          .slice(0, candidatePoolSize);
+      } catch (err) {
+        this.logger.warn(`Embedding failed during fallback search: ${(err as Error).message}`);
+      }
     }
 
     const merged = (vectorRows.length > 0 && this.lanceAvailable)
@@ -374,12 +378,13 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
       if (scores.length === 0) return [];
       const min = Math.min(...scores);
       const max = Math.max(...scores);
-      if (min === max) {
+      const range = max - min;
+      if (range < 1e-9) {
         return scores.map((s, i) => (s > 0 && hasPresence[i] ? 1 : 0));
       }
       const result: number[] = new Array(scores.length);
       for (let i = 0; i < scores.length; i++) {
-        result[i] = hasPresence[i] ? (scores[i] - min) / (max - min) : 0;
+        result[i] = hasPresence[i] ? (scores[i] - min) / range : 0;
       }
       return result;
     };
@@ -393,7 +398,6 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     const normRecency = normalizeMinMax(recencyScores, recencyScores.map(() => true));
 
     const entries = Array.from(rawScoreMap.entries());
-
     const scoredCandidates: { id: string; finalScore: number; normVector: number; normLexical: number; normEntity: number; normRecency: number; record: LanceRecord }[] = [];
 
     for (let i = 0; i < entries.length; i++) {
