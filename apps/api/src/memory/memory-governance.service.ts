@@ -14,12 +14,10 @@ export class MemoryGovernanceService {
   constructor(private readonly repository: MemoryItemRepository) {}
 
   async runCleanup(projectId: string): Promise<GovernanceResult> {
-    const [expiredResult, downrankedResult, deduplicatedResult, supersessionResult] = await Promise.all([
-      this.expireMemories(projectId),
-      this.downrankStaleLowConfidence(projectId),
-      this.deduplicate(projectId),
-      this.applySupersession(projectId),
-    ]);
+    const expiredResult = await this.expireMemories(projectId);
+    const downrankedResult = await this.downrankStaleLowConfidence(projectId);
+    const deduplicatedResult = await this.deduplicate(projectId);
+    const supersessionResult = await this.applySupersession(projectId);
 
     return {
       expiredCount: expiredResult.count,
