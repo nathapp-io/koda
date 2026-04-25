@@ -127,6 +127,66 @@ describe('ContextBuilderService', () => {
       });
     });
 
+    describe('AC-25: findByProjectMemory is called and results appear in semanticMemory', () => {
+      test('calls findByProjectMemory with correct projectId for any intent', async () => {
+        const mockMemories = [
+          {
+            id: 'mem-1',
+            projectId: 'project-123',
+            kind: 'FACT',
+            subject: 'ticket:123',
+            predicate: 'status',
+            object: 'IN_PROGRESS',
+            status: 'active',
+            confidence: 0.9,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ];
+
+        mockMemoryItemRepository.findByProjectMemory.mockResolvedValue({
+          items: mockMemories,
+          total: 1,
+        });
+        mockTimelineService.getProjectTimeline.mockResolvedValue({
+          events: [],
+          total: 0,
+        });
+
+        const result = await service.getProjectContext({
+          projectId: 'project-123',
+          actorId: 'actor-1',
+          intent: 'diagnose' as Intent,
+        });
+
+        expect(mockMemoryItemRepository.findByProjectMemory).toHaveBeenCalledWith(
+          expect.objectContaining({
+            projectId: 'project-123',
+          })
+        );
+        expect(result.semanticMemory).toBeDefined();
+        expect(Array.isArray(result.semanticMemory)).toBe(true);
+        expect(result.semanticMemory).toHaveLength(1);
+        expect(result.semanticMemory[0].subject).toBe('ticket:123');
+      });
+
+      test('semanticMemory is empty array when findByProjectMemory throws', async () => {
+        mockMemoryItemRepository.findByProjectMemory.mockRejectedValue(new Error('DB error'));
+        mockTimelineService.getProjectTimeline.mockResolvedValue({
+          events: [],
+          total: 0,
+        });
+
+        const result = await service.getProjectContext({
+          projectId: 'project-123',
+          actorId: 'actor-1',
+          intent: 'diagnose' as Intent,
+        });
+
+        expect(result.semanticMemory).toEqual([]);
+      });
+    });
+
     describe('AC-37: recentEvents structure and ordering', () => {
       test('every item has non-null actorId, action, createdAt fields', async () => {
         const mockEvents = [
