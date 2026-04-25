@@ -50,9 +50,9 @@ export class RagController {
     }
 
     // Agent API key auth: agents are cross-project (their API key is their credential).
-    // actorType is set to 'agent' by CombinedAuthGuard when an API key is used, only
-    // for ACTIVE agents. We rely on actorType, not the absence of extra.sub, to keep
-    // this explicit and resilient to future actor model changes.
+    // actorType is set to 'agent' by CombinedAuthGuard when an API key is used.
+    // We rely on actorType, not the absence of extra.sub, to keep this explicit
+    // and resilient to future actor model changes.
     if (actorType === 'agent') {
       return;
     }

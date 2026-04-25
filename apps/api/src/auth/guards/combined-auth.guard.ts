@@ -83,7 +83,9 @@ export class CombinedAuthGuard extends JwtAuthGuard {
     });
 
     if (!agent) return false;
-    if (agent.status !== 'ACTIVE') return false;
+    // OFFLINE means decommissioned — no longer allowed to authenticate.
+    // PAUSED agents may still authenticate (they are operationally paused, not decommissioned).
+    if (agent.status === 'OFFLINE') return false;
 
     request['agent'] = agent;
     request['actorType'] = 'agent';
