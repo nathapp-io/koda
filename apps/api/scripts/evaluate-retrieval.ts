@@ -8,7 +8,7 @@ const CI_THRESHOLD = 0.70;
 
 const appRoot = resolve(__dirname, '..');
 const { AppFactory } = await import('@nathapp/nestjs-app');
-const { AppModule } = await import(resolve(appRoot, 'dist/main.js'));
+const { AppModule } = await import(resolve(appRoot, 'dist/app.module.js'));
 const { EvaluationService } = await import(resolve(appRoot, 'dist/retrieval/evaluation.service.js'));
 const { HybridRetrieverService } = await import(resolve(appRoot, 'dist/rag/hybrid-retriever.service.js'));
 const { loadEvalQueries } = await import(resolve(appRoot, 'dist/retrieval/load-queries.js'));
