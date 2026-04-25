@@ -3,7 +3,7 @@
   "feature": "memory-phase3-semantic-memory",
   "branchName": "feat/memory-phase3-semantic-memory",
   "createdAt": "2026-04-25T14:59:35.000Z",
-  "updatedAt": "2026-04-25T16:09:26.218Z",
+  "updatedAt": "2026-04-25T16:57:15.290Z",
   "userStories": [
     {
       "id": "US-001",
@@ -37,7 +37,7 @@
         "testStrategy": "three-session-tdd",
         "reasoning": "validated from LLM output",
         "initialComplexity": "complex",
-        "modelTier": "balanced"
+        "modelTier": "powerful"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -55,8 +55,45 @@
         "`MemoryKind` is implemented as a TypeScript string union/constant and validated at DTO/service boundaries instead of using a Prisma enum.",
         "`MemoryItem.object` stores only atomic facts, decisions, preferences, constraints, or incident patterns and never full agent transcripts."
       ],
-      "priorErrors": [],
-      "priorFailures": [],
+      "priorErrors": [
+        "Attempt 1 failed with model tier: balanced: Autofix exhausted: review still failing after fix attempts"
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "balanced",
+          "stage": "review",
+          "summary": "Failed with tier balanced, escalating to next tier",
+          "reviewFindings": [
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/prisma/schema.prisma",
+              "line": 0,
+              "message": "AC-1: Prisma migration adding MemoryItem table is not present in diff. The schema.prisma file was not modified.",
+              "source": "semantic-review"
+            },
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src/memory/memory-item-repository.ts",
+              "line": 0,
+              "message": "AC-2, AC-4, AC-5: MemoryItemRepository implementation not present. No findActive, upsert, or transaction logic for activeKey uniqueness.",
+              "source": "semantic-review"
+            },
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src/memory/memory-governance.service.ts",
+              "line": 0,
+              "message": "AC-9: Active rows (activeKey != null) and superseded/rejected rows (activeKey = null) logic not present.",
+              "source": "semantic-review"
+            }
+          ],
+          "cost": 0.6384225150000002,
+          "timestamp": "2026-04-25T16:57:13.252Z"
+        }
+      ],
       "storyPoints": 1,
       "storyGitRef": "6a74afbce79321b2768e878b1ee18ea3a5edc98b"
     },
