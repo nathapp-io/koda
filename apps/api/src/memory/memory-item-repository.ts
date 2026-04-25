@@ -10,6 +10,7 @@ export interface MemoryQuery {
   activeKey?: string;
   sourceType?: string;
   sourceId?: string;
+  status?: string;
   page?: number;
   limit?: number;
 }
@@ -87,6 +88,7 @@ export class MemoryItemRepository {
     if (query.activeKey !== undefined) where.activeKey = query.activeKey;
     if (query.sourceType) where.sourceType = query.sourceType;
     if (query.sourceId) where.sourceId = query.sourceId;
+    if (query.status) where.status = query.status;
 
     const [data, total] = await Promise.all([
       this.db.memoryItem.findMany({ where, skip, take: limit, orderBy: { createdAt: 'desc' } }),
@@ -97,11 +99,7 @@ export class MemoryItemRepository {
   }
 
   async upsert(item: MemoryItemInput): Promise<MemoryItem> {
-    if (item.id) {
-      return this.db.memoryItem.update({ where: { id: item.id }, data: item });
-    }
-
-    const memoryId = `mem-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const memoryId = item.id ?? `mem-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
     return this.db.$transaction(
       async (client) => {
@@ -113,22 +111,29 @@ export class MemoryItemRepository {
           };
         };
 
-        const existingActive = await db.memoryItem.findFirst({
-          where: {
-            projectId: item.projectId,
-            kind: item.kind,
-            subject: item.subject,
-            predicate: item.predicate,
-            activeKey: { not: null },
-            deletedAt: null,
-          },
-        });
-
-        if (existingActive) {
-          await db.memoryItem.update({
-            where: { id: existingActive.id },
-            data: { activeKey: null, status: 'superseded', supersededBy: memoryId },
+        if (item.activeKey) {
+          const existingActive = await db.memoryItem.findFirst({
+            where: {
+              projectId: item.projectId,
+              kind: item.kind,
+              subject: item.subject,
+              predicate: item.predicate,
+              activeKey: { not: null },
+              deletedAt: null,
+              id: { not: item.id ?? undefined },
+            },
           });
+
+          if (existingActive) {
+            await db.memoryItem.update({
+              where: { id: existingActive.id },
+              data: { activeKey: null, status: 'superseded', supersededBy: memoryId },
+            });
+          }
+        }
+
+        if (item.id) {
+          return db.memoryItem.update({ where: { id: item.id }, data: { ...item, id: memoryId } });
         }
 
         return db.memoryItem.create({ data: { ...item, id: memoryId } });
