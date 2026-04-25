@@ -36,6 +36,7 @@ export class MemoryGovernanceService {
     do {
       const result = await this.repository.findByProject({
         projectId,
+        status: 'active',
         page,
         limit: 100,
       });
@@ -73,6 +74,7 @@ export class MemoryGovernanceService {
     do {
       const result = await this.repository.findByProject({
         projectId,
+        status: 'active',
         page,
         limit: 100,
       });
@@ -111,6 +113,7 @@ export class MemoryGovernanceService {
     do {
       const result = await this.repository.findByProject({
         projectId,
+        status: 'active',
         page,
         limit: 100,
       });
@@ -134,17 +137,22 @@ export class MemoryGovernanceService {
       for (const [, items] of groups) {
         if (items.length > 1) {
           const sorted = [...items].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
-          const highest = sorted[0];
+          const activeCandidate = sorted.find((item) => item.status === 'active' && item.activeKey);
+          if (!activeCandidate) {
+            continue;
+          }
           for (let i = 1; i < sorted.length; i++) {
-            await this.repository.upsert({
-              ...sorted[i],
-              id: sorted[i].id,
-              kind: sorted[i].kind as MemoryKind,
-              status: 'superseded',
-              supersededBy: highest.id,
-              activeKey: null,
-            });
-            supersededCount++;
+            if (sorted[i].status === 'active' && sorted[i].activeKey) {
+              await this.repository.upsert({
+                ...sorted[i],
+                id: sorted[i].id,
+                kind: sorted[i].kind as MemoryKind,
+                status: 'superseded',
+                supersededBy: activeCandidate.id,
+                activeKey: null,
+              });
+              supersededCount++;
+            }
           }
         }
       }
