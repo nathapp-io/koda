@@ -48,31 +48,48 @@ export class ProjectsController {
       throw new ForbiddenAppException({}, 'projects');
     }
 
-    if (actorType === 'agent') {
-      return;
-    }
+    if (actorType !== 'agent') {
+      if (!currentUser.extra?.sub) {
+        throw new ForbiddenAppException({}, 'projects');
+      }
 
-    if (!currentUser.extra?.sub) {
-      throw new ForbiddenAppException({}, 'projects');
-    }
-
-    const membership = await this.db.projectMember.findUnique({
-      where: {
-        projectId_userId: {
-          projectId,
-          userId: currentUser.extra.sub,
+      const membership = await this.db.projectMember.findUnique({
+        where: {
+          projectId_userId: {
+            projectId,
+            userId: currentUser.extra.sub,
+          },
         },
-      },
-    });
+      });
 
-    if (!membership) {
-      throw new ForbiddenAppException({}, 'projects');
-    }
+      if (!membership) {
+        throw new ForbiddenAppException({}, 'projects');
+      }
 
-    const allowedRoles = [ActorRole.ADMIN, ActorRole.DEVELOPER, ActorRole.AGENT, ActorRole.VIEWER] as const;
-    const membershipRole = (membership as { role?: string }).role;
-    if (!membershipRole || !allowedRoles.includes(membershipRole as typeof allowedRoles[number])) {
-      throw new ForbiddenAppException({}, 'projects');
+      const allowedRoles = [ActorRole.ADMIN, ActorRole.DEVELOPER, ActorRole.AGENT, ActorRole.VIEWER] as const;
+      const membershipRole = (membership as { role?: string }).role;
+      if (!membershipRole || !allowedRoles.includes(membershipRole as typeof allowedRoles[number])) {
+        throw new ForbiddenAppException({}, 'projects');
+      }
+    } else {
+      const membership = await this.db.projectMember.findUnique({
+        where: {
+          projectId_userId: {
+            projectId,
+            userId: currentUser.extra?.sub ?? '',
+          },
+        },
+      });
+
+      if (!membership) {
+        throw new ForbiddenAppException({}, 'projects');
+      }
+
+      const allowedRoles = [ActorRole.ADMIN, ActorRole.DEVELOPER, ActorRole.AGENT, ActorRole.VIEWER] as const;
+      const membershipRole = (membership as { role?: string }).role;
+      if (!membershipRole || !allowedRoles.includes(membershipRole as typeof allowedRoles[number])) {
+        throw new ForbiddenAppException({}, 'projects');
+      }
     }
   }
 
