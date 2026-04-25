@@ -3,7 +3,7 @@
   "feature": "memory-phase3-semantic-memory",
   "branchName": "feat/memory-phase3-semantic-memory",
   "createdAt": "2026-04-25T14:59:35.000Z",
-  "updatedAt": "2026-04-25T16:57:15.290Z",
+  "updatedAt": "2026-04-25T19:40:49.113Z",
   "userStories": [
     {
       "id": "US-001",
@@ -28,8 +28,8 @@
         "security"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -123,14 +123,16 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "complex",
+        "modelTier": "powerful"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -150,9 +152,31 @@
         "A `FACT` derived from a canonical event overrides a conflicting `FACT` inferred from agent conversation for the same semantic key.",
         "A `PREFERENCE` written through explicit `recordDecision` overrides an extracted preference on the same topic."
       ],
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1
+      "priorErrors": [
+        "Attempt 1 failed with model tier: balanced: Reviewer contradiction: The semantic review correctly identifies that `recordDecision` should create a canonical `DecisionEvent` first (using `event.id` as canonicalId) and then upsert a derived memory item. My implementation now does this correctly with 2 separate upserts. However, the existing tests in `extraction-service-behavior.spec.ts` (AC6 expects `upsert` called once, AC7 expects 2 calls) have incorrect expectations - they reflect the OLD behavior where only a single memory item was created with `canonicalId = memoryId`. The tests cannot be satisfied with the correct implementation."
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "balanced",
+          "stage": "review",
+          "summary": "Failed with tier balanced, escalating to next tier",
+          "reviewFindings": [
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src/memory/extraction.service.ts",
+              "line": 196,
+              "message": "AC6: recordDecision does not create a canonical DecisionEvent. It only upserts a memory item and returns { canonicalId: memoryId, memoryId }. The _event.id parameter is never used. A canonical DecisionEvent should be created first (e.g., via DecisionEventService.create()), with its ID returned as canonicalId.",
+              "source": "semantic-review"
+            }
+          ],
+          "cost": 0.47412065999999997,
+          "timestamp": "2026-04-25T18:15:49.762Z"
+        }
+      ],
+      "storyPoints": 1,
+      "storyGitRef": "25200e7dd10cca06ed05d3831d4d0ecebebc8c06"
     },
     {
       "id": "US-003",
@@ -183,7 +207,9 @@
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "powerful"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -201,9 +227,40 @@
         "When query returns no matches, API returns an empty result set (not 404).",
         "After endpoint contract changes, `openapi.json` and CLI generated client are regenerated and in sync."
       ],
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1
+      "priorErrors": [
+        "Attempt 1 failed with model tier: fast: Reviewer contradiction: Finding #2 (`where.confidence = { not: null }`) changes query semantics, which would affect test assertions on result size (e.g., `toHaveLength(3)` could become 2 if a fixture has null confidence). Since I cannot modify test files to compensate, and the adversarial review requires the fix, there is a genuine conflict between \"fix the null confidence bug\" and \"do not change test behavior.\"",
+        "Attempt 1 failed with model tier: balanced: Reviewer contradiction: The finding references `context-builder.service.spec.ts:15` claiming AC6 verification is missing. However, the AC6 test is in `project-memory.integration.spec.ts` (lines 280-320), NOT in `context-builder.service.spec.ts`. The unit spec file covers AC-34 through AC-38 (intent-based tests), while the integration test properly verifies `findByProjectMemory` is called and results appear in `semanticMemory`. The implementation at `context-builder.service.ts:118` correctly calls `findByProjectMemory`. All 16 tests pass and lint/type-check are clean."
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "fast",
+          "stage": "escalation",
+          "summary": "Failed with tier fast, escalating to next tier",
+          "cost": 0.6569092800000003,
+          "timestamp": "2026-04-25T19:26:00.240Z"
+        },
+        {
+          "attempt": 1,
+          "modelTier": "balanced",
+          "stage": "review",
+          "summary": "Failed with tier balanced, escalating to next tier",
+          "reviewFindings": [
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src/memory/context-builder.service.spec.ts",
+              "line": 15,
+              "message": "AC6 verification gap: `mockMemoryItemRepository.findByProjectMemory` is mocked but never asserted to have been called. No test verifies that `findByProjectMemory` is invoked when `getProjectContext` is called, which is the core of AC6.",
+              "source": "semantic-review"
+            }
+          ],
+          "cost": 0.24819335999999997,
+          "timestamp": "2026-04-25T19:40:47.075Z"
+        }
+      ],
+      "storyPoints": 1,
+      "storyGitRef": "04035374f0db5ec42516094e599d7c9ba9aa8203"
     },
     {
       "id": "US-004",
