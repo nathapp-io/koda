@@ -186,7 +186,7 @@ export class MemoryItemRepository {
     const where: Record<string, unknown> = { projectId: query.projectId, deletedAt: null };
 
     if (query.kind) where.kind = query.kind;
-    if (query.subject) where.subject = { startsWith: query.subject };
+    if (query.subject && query.subject.trim().length > 0) where.subject = { startsWith: query.subject };
     if (query.status) where.status = query.status;
     else where.status = 'active';
 
