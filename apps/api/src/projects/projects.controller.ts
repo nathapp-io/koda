@@ -108,7 +108,18 @@ export class ProjectsController {
 
     return JsonResponse.Ok({
       total: result.total,
-      items: result.items,
+      items: result.items.map((item) => ({
+        id: item.id,
+        projectId: item.projectId,
+        kind: item.kind,
+        subject: item.subject,
+        predicate: item.predicate,
+        object: item.object,
+        confidence: item.confidence,
+        supersededBy: item.supersededBy,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+      })),
     });
   }
 }
