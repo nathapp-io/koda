@@ -101,6 +101,7 @@ model Project {
   agentEvents AgentEvent[]
   decisionEvents DecisionEvent[]
   members       ProjectMember[]
+  memoryItems   MemoryItem[]
 }
 
 model ProjectMember {
@@ -374,6 +375,7 @@ model MemoryItem {
 
   project      Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
+  @@unique([projectId, kind, subject, predicate, activeKey])
   @@index([projectId, kind, subject, predicate])
   @@index([projectId, activeKey])
   @@index([projectId, deletedAt])

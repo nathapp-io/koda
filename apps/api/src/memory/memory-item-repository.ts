@@ -100,7 +100,36 @@ export class MemoryItemRepository {
     if (item.id) {
       return this.db.memoryItem.update({ where: { id: item.id }, data: item });
     }
-    return this.db.memoryItem.create({ data: item });
+
+    return this.db.$transaction(async (client) => {
+      const db = client as unknown as {
+        memoryItem: {
+          findFirst(options: unknown): Promise<MemoryItem | null>;
+          create(options: unknown): Promise<MemoryItem>;
+          update(options: unknown): Promise<MemoryItem>;
+        };
+      };
+
+      const existingActive = await db.memoryItem.findFirst({
+        where: {
+          projectId: item.projectId,
+          kind: item.kind,
+          subject: item.subject,
+          predicate: item.predicate,
+          activeKey: { not: null },
+          deletedAt: null,
+        },
+      });
+
+      if (existingActive) {
+        await db.memoryItem.update({
+          where: { id: existingActive.id },
+          data: { activeKey: null, status: 'superseded', supersededBy: null },
+        });
+      }
+
+      return db.memoryItem.create({ data: item });
+    });
   }
 
   async findActive(
