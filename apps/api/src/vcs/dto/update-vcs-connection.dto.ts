@@ -1,4 +1,5 @@
-import { IsArray, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsArray, IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { VcsSyncModeType } from './create-vcs-connection.dto';
 
 export class UpdateVcsConnectionDto {
   @IsOptional()
@@ -6,8 +7,8 @@ export class UpdateVcsConnectionDto {
   token?: string;
 
   @IsOptional()
-  @IsString()
-  syncMode?: string;
+  @IsEnum(VcsSyncModeType)
+  syncMode?: VcsSyncModeType;
 
   @IsOptional()
   @IsArray()

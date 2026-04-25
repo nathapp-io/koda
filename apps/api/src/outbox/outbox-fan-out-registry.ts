@@ -31,14 +31,16 @@ export class OutboxFanOutRegistry implements OnModuleInit {
   private lastDispatchFailureCount = 0;
 
   constructor(
-    private readonly extractionService: ExtractionService,
-    private readonly memoryRepository: MemoryItemRepository,
+    private readonly extractionService?: ExtractionService,
+    private readonly memoryRepository?: MemoryItemRepository,
   ) {
     for (const { eventType, handler } of DEFAULT_HANDLERS) {
       this.register(eventType, handler);
     }
-    this.register('ticket_event', this.handleTicketEvent.bind(this));
-    this.register('agent_event', this.handleAgentEvent.bind(this));
+    if (this.extractionService && this.memoryRepository) {
+      this.register('ticket_event', this.handleTicketEvent.bind(this));
+      this.register('agent_event', this.handleAgentEvent.bind(this));
+    }
   }
 
   onModuleInit(): void {
