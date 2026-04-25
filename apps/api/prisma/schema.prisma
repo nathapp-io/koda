@@ -349,3 +349,33 @@ model OutboxEvent {
   @@index([status, createdAt])
   @@index([projectId, createdAt])
 }
+
+// ---------------------------------------------------------------------------
+// Memory Models (Semantic Memory)
+// ---------------------------------------------------------------------------
+
+model MemoryItem {
+  id           String    @id @default(cuid())
+  projectId    String
+  kind         String    // FACT | INCIDENT_PATTERN | DECISION
+  subject      String    // e.g. 'ticket:123'
+  predicate    String    // e.g. 'status', 'assigned_to'
+  object       String?   // e.g. 'IN_PROGRESS', 'user:456'
+  activeKey    String?   // unique key for active items per (projectId, kind, subject, predicate); null when superseded/rejected
+  sourceType   String?   // TicketEvent | AgentEvent | DecisionEvent | null
+  sourceId     String?   // ID of the source event
+  status       String?   // active | rejected | superseded
+  confidence   Float?    // 0.0 - 1.0
+  ttlAt        DateTime? // when to expire/reject this memory
+  supersededBy String?   // ID of the MemoryItem that superseded this one
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime? // soft delete
+
+  project      Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, kind, subject, predicate])
+  @@index([projectId, activeKey])
+  @@index([projectId, deletedAt])
+  @@index([projectId, sourceType, sourceId])
+}

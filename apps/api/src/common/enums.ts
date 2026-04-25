@@ -58,3 +58,10 @@ export type AgentRole = (typeof AgentRole)[keyof typeof AgentRole];
 
 export const AutoAssignMode = { OFF: 'OFF', SUGGEST: 'SUGGEST', AUTO: 'AUTO' } as const;
 export type AutoAssignMode = typeof AutoAssignMode[keyof typeof AutoAssignMode];
+
+export const MemoryKind = {
+  FACT: 'FACT',
+  INCIDENT_PATTERN: 'INCIDENT_PATTERN',
+  DECISION: 'DECISION',
+} as const;
+export type MemoryKind = (typeof MemoryKind)[keyof typeof MemoryKind];
