@@ -162,11 +162,11 @@ describe('Intent-Weighted Fusion and Reranking', () => {
       expect(topScore).toHaveProperty('recencyScore');
     });
 
-    it('review intent uses 0.35/0.35/0.15/0.15 weights', async () => {
+    it('plan intent uses 0.3/0.3/0.2/0.2 weights', async () => {
       const result = await hybridService.search({
         projectId,
         query: 'authentication',
-        intent: 'review',
+        intent: 'plan',
       });
 
       expect(result.results.length).toBeGreaterThan(0);
@@ -179,27 +179,26 @@ describe('Intent-Weighted Fusion and Reranking', () => {
         intent: 'answer',
         limit: 20,
       });
-      const reviewResult = await hybridService.search({
+      const searchResult = await hybridService.search({
         projectId,
         query: 'authentication',
-        intent: 'review',
+        intent: 'search',
         limit: 20,
       });
 
       // Both should return results and the weight profile changes score composition
       expect(answerResult.results.length).toBeGreaterThan(0);
-      expect(reviewResult.results.length).toBeGreaterThan(0);
-      // Verify the weight profiles differ by checking that vectorScore dominates in 'answer'
-      // while lexicalScore gains importance in 'review' (0.35 vs 0.3)
+      expect(searchResult.results.length).toBeGreaterThan(0);
+      // Verify the weight profiles differ: 'answer' weights vector=0.4, 'search' weights lexical=0.4
       expect(answerResult.scores[0].vectorScore).toBeGreaterThan(0);
-      expect(reviewResult.scores[0].vectorScore).toBeGreaterThan(0);
+      expect(searchResult.scores[0].vectorScore).toBeGreaterThan(0);
     });
 
-    it('reproduce intent uses 0.5/0.2/0.2/0.1 weights', async () => {
+    it('diagnose intent uses 0.2/0.2/0.4/0.2 weights', async () => {
       const result = await hybridService.search({
         projectId,
         query: 'authentication',
-        intent: 'reproduce',
+        intent: 'diagnose',
       });
 
       expect(result.results.length).toBeGreaterThan(0);
@@ -627,34 +626,34 @@ describe('Intent-Weighted Fusion and Reranking', () => {
       }
     });
 
-    it('verify review intent weight profile: vector=0.35, lexical=0.35, entity=0.15, recency=0.15', async () => {
+    it('verify plan intent weight profile: vector=0.3, lexical=0.3, entity=0.2, recency=0.2', async () => {
       const result = await hybridService.search({
         projectId,
         query: 'authentication bug',
-        intent: 'review',
+        intent: 'plan',
       });
 
       expect(result.results.length).toBeGreaterThan(0);
 
       for (let i = 0; i < result.scores.length; i++) {
         const score = result.scores[i];
-        const computed = 0.35 * score.vectorScore + 0.35 * score.lexicalScore + 0.15 * score.entityScore + 0.15 * score.recencyScore;
+        const computed = 0.3 * score.vectorScore + 0.3 * score.lexicalScore + 0.2 * score.entityScore + 0.2 * score.recencyScore;
         expect(score.finalScore).toBeCloseTo(computed, 4);
       }
     });
 
-    it('verify reproduce intent weight profile: vector=0.5, lexical=0.2, entity=0.2, recency=0.1', async () => {
+    it('verify diagnose intent weight profile: vector=0.2, lexical=0.2, entity=0.4, recency=0.2', async () => {
       const result = await hybridService.search({
         projectId,
         query: 'authentication bug',
-        intent: 'reproduce',
+        intent: 'diagnose',
       });
 
       expect(result.results.length).toBeGreaterThan(0);
 
       for (let i = 0; i < result.scores.length; i++) {
         const score = result.scores[i];
-        const computed = 0.5 * score.vectorScore + 0.2 * score.lexicalScore + 0.2 * score.entityScore + 0.1 * score.recencyScore;
+        const computed = 0.2 * score.vectorScore + 0.2 * score.lexicalScore + 0.4 * score.entityScore + 0.2 * score.recencyScore;
         expect(score.finalScore).toBeCloseTo(computed, 4);
       }
     });

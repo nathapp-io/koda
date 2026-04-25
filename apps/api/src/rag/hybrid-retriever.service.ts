@@ -20,10 +20,12 @@ const ANSWER_WEIGHTS = {
   recencyScore: 0.1,
 };
 
-const INTENT_WEIGHTS: Record<string, Partial<typeof ANSWER_WEIGHTS>> = {
-  answer: ANSWER_WEIGHTS,
-  review: { vectorScore: 0.35, lexicalScore: 0.35, entityScore: 0.15, recencyScore: 0.15 },
-  reproduce: { vectorScore: 0.5, lexicalScore: 0.2, entityScore: 0.2, recencyScore: 0.1 },
+const INTENT_WEIGHTS: Record<string, typeof ANSWER_WEIGHTS> = {
+  answer:   { vectorScore: 0.4, lexicalScore: 0.3, entityScore: 0.2, recencyScore: 0.1 },
+  diagnose: { vectorScore: 0.2, lexicalScore: 0.2, entityScore: 0.4, recencyScore: 0.2 },
+  plan:     { vectorScore: 0.3, lexicalScore: 0.3, entityScore: 0.2, recencyScore: 0.2 },
+  update:   { vectorScore: 0.2, lexicalScore: 0.4, entityScore: 0.2, recencyScore: 0.2 },
+  search:   { vectorScore: 0.3, lexicalScore: 0.4, entityScore: 0.1, recencyScore: 0.2 },
 };
 
 interface LanceRecord {
@@ -344,13 +346,13 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
 
       if (!effectiveGraphifyEnabled && record.source === 'code') continue;
 
-      if (query.timeWindow?.start) {
-        const startTime = new Date(query.timeWindow.start).getTime();
+      if (query.timeWindow?.from) {
+        const startTime = new Date(query.timeWindow.from).getTime();
         const docTime = new Date(record.created_at).getTime();
         if (docTime < startTime) continue;
       }
-      if (query.timeWindow?.end) {
-        const endTime = new Date(query.timeWindow.end).getTime();
+      if (query.timeWindow?.to) {
+        const endTime = new Date(query.timeWindow.to).getTime();
         const docTime = new Date(record.created_at).getTime();
         if (docTime > endTime) continue;
       }

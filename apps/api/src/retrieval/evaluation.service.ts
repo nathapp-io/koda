@@ -44,8 +44,8 @@ export class EvaluationService {
       const actualDocIds = top5.map((r) => r.sourceId);
       const expectedSet = new Set(q.expectedDocIds);
       const matches = top5.filter((r) => expectedSet.has(r.sourceId)).length;
-      const effectiveExpected = Math.min(q.expectedDocIds.length, 5);
-      const precisionAt5 = effectiveExpected > 0 ? Math.min(matches / effectiveExpected, 1) : 0;
+      // Standard precision@5: hits in top-5 divided by 5
+      const precisionAt5 = top5.length > 0 ? matches / 5 : 0;
 
       results.push({
         query: q.query,

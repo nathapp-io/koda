@@ -39,7 +39,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Memory leak in background worker",
-    "intent": "reproduce",
+    "intent": "diagnose",
     "expectedDocIds": [
       "ticket-002",
       "ticket-044"
@@ -48,7 +48,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Slow query performance on dashboard",
-    "intent": "reproduce",
+    "intent": "diagnose",
     "expectedDocIds": [
       "ticket-003",
       "ticket-038"
@@ -57,7 +57,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Authentication fails with SSO provider",
-    "intent": "reproduce",
+    "intent": "diagnose",
     "expectedDocIds": [
       "ticket-004",
       "ticket-029"
@@ -75,7 +75,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "WebSocket disconnection issues",
-    "intent": "reproduce",
+    "intent": "diagnose",
     "expectedDocIds": [
       "ticket-006",
       "ticket-041"
@@ -84,7 +84,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Email notification not sent",
-    "intent": "reproduce",
+    "intent": "diagnose",
     "expectedDocIds": [
       "ticket-007",
       "ticket-035"
@@ -93,7 +93,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Search results ranking inconsistent",
-    "intent": "review",
+    "intent": "plan",
     "expectedDocIds": [
       "ticket-008",
       "ticket-040"
@@ -102,7 +102,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Admin panel access denied for new users",
-    "intent": "reproduce",
+    "intent": "diagnose",
     "expectedDocIds": [
       "ticket-009",
       "ticket-031"
@@ -120,7 +120,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Export CSV includes deleted records",
-    "intent": "reproduce",
+    "intent": "diagnose",
     "expectedDocIds": [
       "ticket-011",
       "ticket-036"
@@ -129,7 +129,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Payment webhook retry logic",
-    "intent": "review",
+    "intent": "plan",
     "expectedDocIds": [
       "ticket-012",
       "doc-015"
@@ -138,7 +138,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Dark mode toggle not persisting",
-    "intent": "reproduce",
+    "intent": "diagnose",
     "expectedDocIds": [
       "ticket-013",
       "ticket-027"
@@ -156,7 +156,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Audit log missing entries",
-    "intent": "reproduce",
+    "intent": "diagnose",
     "expectedDocIds": [
       "ticket-014",
       "ticket-039"
@@ -174,7 +174,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "GraphQL query depth limit",
-    "intent": "review",
+    "intent": "plan",
     "expectedDocIds": [
       "ticket-017",
       "doc-011"
@@ -183,7 +183,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Redis cache invalidation timing",
-    "intent": "review",
+    "intent": "plan",
     "expectedDocIds": [
       "ticket-018",
       "ticket-043"
@@ -201,7 +201,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "gRPC streaming backpressure",
-    "intent": "review",
+    "intent": "plan",
     "expectedDocIds": [
       "ticket-019",
       "doc-014"
@@ -210,7 +210,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Session fixation vulnerability",
-    "intent": "reproduce",
+    "intent": "diagnose",
     "expectedDocIds": [
       "ticket-020",
       "ticket-037"
@@ -228,7 +228,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Feature flag evaluation delay",
-    "intent": "reproduce",
+    "intent": "diagnose",
     "expectedDocIds": [
       "ticket-021",
       "ticket-032"
@@ -237,7 +237,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "User permissions cache stale",
-    "intent": "reproduce",
+    "intent": "diagnose",
     "expectedDocIds": [
       "ticket-022",
       "ticket-034"
@@ -255,7 +255,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Query parameter injection prevention",
-    "intent": "review",
+    "intent": "plan",
     "expectedDocIds": [
       "ticket-023",
       "doc-013"
@@ -273,7 +273,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "CI pipeline cache miss every build",
-    "intent": "reproduce",
+    "intent": "diagnose",
     "expectedDocIds": [
       "ticket-025",
       "ticket-028"
@@ -291,7 +291,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Password reset link expired",
-    "intent": "reproduce",
+    "intent": "diagnose",
     "expectedDocIds": [
       "ticket-027",
       "ticket-013"
@@ -309,7 +309,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Tracing span context propagation",
-    "intent": "review",
+    "intent": "plan",
     "expectedDocIds": [
       "ticket-030",
       "doc-019"
@@ -327,7 +327,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Elasticsearch index mapping update",
-    "intent": "review",
+    "intent": "plan",
     "expectedDocIds": [
       "ticket-031",
       "doc-021"
@@ -336,7 +336,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Kanban board drag drop lag",
-    "intent": "reproduce",
+    "intent": "diagnose",
     "expectedDocIds": [
       "ticket-032",
       "ticket-021"
@@ -363,7 +363,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Inbound webhook signature verification",
-    "intent": "review",
+    "intent": "plan",
     "expectedDocIds": [
       "ticket-034",
       "doc-024"
@@ -381,7 +381,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Message queue consumer group rebalance",
-    "intent": "review",
+    "intent": "plan",
     "expectedDocIds": [
       "ticket-036",
       "doc-025"
@@ -399,7 +399,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "CDN cache purge edge case",
-    "intent": "reproduce",
+    "intent": "diagnose",
     "expectedDocIds": [
       "ticket-037",
       "ticket-025"
@@ -408,7 +408,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "GraphQL subscription reconnect",
-    "intent": "reproduce",
+    "intent": "diagnose",
     "expectedDocIds": [
       "ticket-038",
       "ticket-006"
@@ -417,7 +417,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Access token refresh race condition",
-    "intent": "reproduce",
+    "intent": "diagnose",
     "expectedDocIds": [
       "ticket-039",
       "ticket-004"
@@ -426,7 +426,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Search index corruption after crash",
-    "intent": "reproduce",
+    "intent": "diagnose",
     "expectedDocIds": [
       "ticket-040",
       "ticket-008"
@@ -435,7 +435,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Batch job retry exponential backoff",
-    "intent": "review",
+    "intent": "plan",
     "expectedDocIds": [
       "ticket-041",
       "doc-027"
@@ -444,7 +444,7 @@
   {
     "projectId": "proj_eval_001",
     "query": "Idempotency key deduplication window",
-    "intent": "review",
+    "intent": "plan",
     "expectedDocIds": [
       "ticket-042",
       "doc-028"

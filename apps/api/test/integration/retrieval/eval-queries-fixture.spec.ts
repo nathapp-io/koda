@@ -6,7 +6,7 @@
  * - Each entry has required fields: projectId, query, intent, expectedDocIds
  * - expectedDocIds is a non-empty array
  * - projectId is a non-empty string
- * - intent is one of: 'answer', 'review', 'reproduce'
+ * - intent is one of the SPEC-defined RetrievalIntent values: 'answer', 'diagnose', 'plan', 'update', 'search'
  */
 import { resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -40,8 +40,8 @@ describe('eval-queries.json fixture', () => {
     }
   });
 
-  it('every entry has intent as one of answer/review/reproduce', () => {
-    const validIntents = ['answer', 'review', 'reproduce'];
+  it('every entry has intent as one of the SPEC-defined RetrievalIntent values', () => {
+    const validIntents = ['answer', 'diagnose', 'plan', 'update', 'search'];
     for (const q of queries) {
       expect(q).toHaveProperty('intent');
       expect(validIntents).toContain((q as { intent: string }).intent);

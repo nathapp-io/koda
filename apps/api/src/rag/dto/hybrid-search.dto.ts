@@ -27,7 +27,7 @@ export class HybridSearchQuery {
   @ApiPropertyOptional({ description: 'Time window filter start (ISO timestamp)', required: false })
   @IsOptional()
   @IsString()
-  timeWindow?: { start?: string; end?: string };
+  timeWindow?: { from?: string; to?: string };
 
   @ApiPropertyOptional({ description: 'Ticket IDs to filter by (Phase 2: accepted, not filtered)', required: false })
   @IsOptional()

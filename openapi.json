@@ -767,9 +767,18 @@
         "responses": {
           "200": {
             "description": "Evaluation results with precision@5 metrics"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - no project role"
           }
         },
         "security": [
+          {
+            "bearer": []
+          },
           {
             "bearer": []
           }
@@ -3169,6 +3178,7 @@
             "type": "number",
             "default": 20,
             "minimum": 1,
+            "maximum": 50,
             "description": "Result limit (capped at 50)"
           }
         }

@@ -23,6 +23,7 @@ class LexicalIndexWarmup implements OnModuleInit {
 
   constructor(
     private readonly lexicalIndex: LexicalIndex,
+    private readonly ragService: RagService,
     private readonly outboxFanOutRegistry: OutboxFanOutRegistry,
     @Optional() private readonly prisma?: PrismaService<PrismaClient>,
   ) {}
@@ -42,19 +43,32 @@ class LexicalIndexWarmup implements OnModuleInit {
     this.logger.debug('LexicalIndex outbox handler registered');
 
     if (this.prisma?.client) {
-      try {
-        const projects = await this.prisma.client.project.findMany({
-          where: { deletedAt: null },
-          select: { id: true },
-        });
-        const projectIds = projects.map(p => p.id);
-        if (projectIds.length > 0) {
-          await this.lexicalIndex.warmup(projectIds);
-          this.logger.log(`LexicalIndex warmup completed for ${projectIds.length} projects`);
+      const prisma = this.prisma;
+      // Begin warmup in background — does not block API startup
+      Promise.resolve().then(async () => {
+        try {
+          const projects = await prisma.client.project.findMany({
+            where: { deletedAt: null },
+            select: { id: true },
+          });
+          let warmedUp = 0;
+          for (const { id: projectId } of projects) {
+            try {
+              const docs = await this.ragService.listDocuments(projectId, 50_000);
+              if (docs.length > 0) {
+                this.lexicalIndex.buildIndex(projectId, docs.map(d => ({ id: d.sourceId, content: d.content })));
+                this.lexicalIndex.setWarmupCompleted(projectId, true);
+                warmedUp++;
+              }
+            } catch {
+              // non-fatal: lazy build will handle this project on first search
+            }
+          }
+          this.logger.log(`LexicalIndex warmup completed for ${warmedUp}/${projects.length} projects`);
+        } catch (err) {
+          this.logger.warn(`LexicalIndex warmup skipped: ${(err as Error).message}`);
         }
-      } catch (err) {
-        this.logger.warn(`LexicalIndex warmup skipped: ${(err as Error).message}`);
-      }
+      }).catch(() => {});
     }
   }
 }

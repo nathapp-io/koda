@@ -10,7 +10,6 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { Public } from '@nathapp/nestjs-auth';
 import { ForbiddenAppException, JsonResponse, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
@@ -20,7 +19,7 @@ import { EvaluationService } from '../retrieval/evaluation.service';
 import { AddDocumentDto } from './dto/add-document.dto';
 import { SearchKbDto } from './dto/search-kb.dto';
 import { ImportGraphifyDto } from './dto/import-graphify.dto';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { CurrentActor, CurrentUser } from '../auth/decorators/current-user.decorator';
 
 @ApiTags('knowledge-base')
 @ApiBearerAuth()
@@ -41,8 +40,24 @@ export class RagController {
     return project;
   }
 
-  private async checkProjectMembership(projectId: string, currentUser: { extra?: { role?: string; sub?: string } } | null): Promise<void> {
-    if (!currentUser?.extra?.sub) {
+  private async checkProjectMembership(
+    projectId: string,
+    currentUser: { id?: string; extra?: { role?: string; sub?: string } } | null,
+    actorType?: string,
+  ): Promise<void> {
+    if (!currentUser) {
+      throw new ForbiddenAppException({}, 'rag');
+    }
+
+    // Agent API key auth: agents are cross-project (their API key is their credential).
+    // actorType is set to 'agent' by CombinedAuthGuard when an API key is used, only
+    // for ACTIVE agents. We rely on actorType, not the absence of extra.sub, to keep
+    // this explicit and resilient to future actor model changes.
+    if (actorType === 'agent') {
+      return;
+    }
+
+    if (!currentUser.extra?.sub) {
       throw new ForbiddenAppException({}, 'rag');
     }
 
@@ -131,12 +146,12 @@ export class RagController {
   async search(
     @Param('slug') slug: string,
     @Body() dto: SearchKbDto,
-    @CurrentUser() currentUser: { extra?: { role?: string; sub?: string } } | null,
+    @CurrentActor() { currentUser, actorType }: { currentUser: { id?: string; extra?: { role?: string; sub?: string } } | null; actorType?: string },
   ) {
     const project = await this.resolveProject(slug);
-    await this.checkProjectMembership(project.id, currentUser);
+    await this.checkProjectMembership(project.id, currentUser, actorType);
 
-    const limit = Math.min(dto.limit ?? 20, 50);
+    const limit = dto.limit ?? 20;
     const result = await this.hybridRetrieverService.search({
       projectId: project.id,
       query: dto.query,
@@ -206,8 +221,13 @@ export class RagController {
   @ApiOperation({ summary: 'Run the retrieval evaluation harness with seeded queries' })
   @ApiResponse({ status: 200, description: 'Evaluation results with precision@5 metrics' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async evaluateRetrieval(@Param('slug') slug: string) {
+  @ApiResponse({ status: 403, description: 'Forbidden - no project role' })
+  async evaluateRetrieval(
+    @Param('slug') slug: string,
+    @CurrentActor() { currentUser, actorType }: { currentUser: { id?: string; extra?: { role?: string; sub?: string } } | null; actorType?: string },
+  ) {
     const project = await this.resolveProject(slug);
+    await this.checkProjectMembership(project.id, currentUser, actorType);
     const { loadEvalQueries } = await import('../retrieval/load-queries');
     const queries = loadEvalQueries();
     const projectQueries = queries.filter((q) => q.projectId === project.id);

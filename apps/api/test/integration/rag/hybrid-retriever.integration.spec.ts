@@ -240,7 +240,7 @@ describe('HybridRetrieverService integration', () => {
         projectId,
         query: 'auth',
         timeWindow: {
-          start: recentTime.toISOString(),
+          from: recentTime.toISOString(),
         },
       });
 
@@ -253,7 +253,7 @@ describe('HybridRetrieverService integration', () => {
         projectId,
         query: 'auth',
         timeWindow: {
-          start: farFuture.toISOString(),
+          from: farFuture.toISOString(),
         },
       });
 

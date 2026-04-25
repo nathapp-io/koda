@@ -191,7 +191,7 @@ describe('EvaluationService integration with real HybridRetrieverService', () =>
         {
           projectId,
           query: 'database connection',
-          intent: 'reproduce',
+          intent: 'diagnose',
           expectedDocIds: ['ticket-003'],
         },
       ];
@@ -253,7 +253,7 @@ describe('EvaluationService integration with real HybridRetrieverService', () =>
     it('totalQueries equals number of input queries', async () => {
       const queries: EvalQuery[] = [
         { projectId, query: 'auth token', intent: 'answer', expectedDocIds: ['ticket-001'] },
-        { projectId, query: 'database pool', intent: 'reproduce', expectedDocIds: ['ticket-003'] },
+        { projectId, query: 'database pool', intent: 'diagnose', expectedDocIds: ['ticket-003'] },
         { projectId, query: 'deployment guide', intent: 'answer', expectedDocIds: ['manual-001'] },
       ];
 
@@ -265,7 +265,7 @@ describe('EvaluationService integration with real HybridRetrieverService', () =>
     it('summary contains precisionAt5_avg, precisionAt5_p50, precisionAt5_p95', async () => {
       const queries: EvalQuery[] = [
         { projectId, query: 'auth token', intent: 'answer', expectedDocIds: ['ticket-001'] },
-        { projectId, query: 'database pool', intent: 'reproduce', expectedDocIds: ['ticket-003'] },
+        { projectId, query: 'database pool', intent: 'diagnose', expectedDocIds: ['ticket-003'] },
       ];
 
       const summary = await evaluationService.runQueries(queries);
@@ -307,7 +307,7 @@ describe('EvaluationService integration with real HybridRetrieverService', () =>
       const queries: EvalQuery[] = [
         { projectId, query: 'null pointer auth', intent: 'answer', expectedDocIds: ['ticket-001'] },
         { projectId, query: 'auth sso', intent: 'answer', expectedDocIds: ['ticket-002'] },
-        { projectId, query: 'database connection', intent: 'reproduce', expectedDocIds: ['ticket-003'] },
+        { projectId, query: 'database connection', intent: 'diagnose', expectedDocIds: ['ticket-003'] },
         { projectId, query: 'nonexistent xyz', intent: 'answer', expectedDocIds: ['ticket-999'] },
       ];
 
@@ -337,8 +337,8 @@ describe('EvaluationService integration with real HybridRetrieverService', () =>
     it('multiple intents work with same documents', async () => {
       const queries: EvalQuery[] = [
         { projectId, query: 'null pointer auth', intent: 'answer', expectedDocIds: ['ticket-001'] },
-        { projectId, query: 'null pointer auth', intent: 'reproduce', expectedDocIds: ['ticket-001'] },
-        { projectId, query: 'null pointer auth', intent: 'review', expectedDocIds: ['ticket-001'] },
+        { projectId, query: 'null pointer auth', intent: 'diagnose', expectedDocIds: ['ticket-001'] },
+        { projectId, query: 'null pointer auth', intent: 'plan', expectedDocIds: ['ticket-001'] },
       ];
 
       const summary = await evaluationService.runQueries(queries);
@@ -390,7 +390,7 @@ describe('EvaluationService integration with real HybridRetrieverService', () =>
       const queries: EvalQuery[] = [
         { projectId, query: 'null pointer auth token', intent: 'answer', expectedDocIds: ['ticket-001'] },
         { projectId, query: 'auth sso provider', intent: 'answer', expectedDocIds: ['ticket-002'] },
-        { projectId, query: 'database pool exhausted', intent: 'reproduce', expectedDocIds: ['ticket-003'] },
+        { projectId, query: 'database pool exhausted', intent: 'diagnose', expectedDocIds: ['ticket-003'] },
       ];
 
       const summary = await evaluationService.runQueries(queries);

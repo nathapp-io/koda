@@ -95,7 +95,7 @@ describe('EvaluationService unit', () => {
         {
           projectId: 'proj_eval_001',
           query: 'null pointer',
-          intent: 'reproduce',
+          intent: 'diagnose',
           expectedDocIds: ['ticket-001'],
         },
       ];
@@ -111,7 +111,7 @@ describe('EvaluationService unit', () => {
       expect(summary.results).toHaveLength(1);
       const result = summary.results[0];
       expect(result).toHaveProperty('query', 'null pointer');
-      expect(result).toHaveProperty('intent', 'reproduce');
+      expect(result).toHaveProperty('intent', 'diagnose');
       expect(result).toHaveProperty('expectedDocIds', ['ticket-001']);
       expect(result).toHaveProperty('actualDocIds');
       expect(result).toHaveProperty('precisionAt5');
@@ -282,8 +282,8 @@ describe('EvaluationService unit', () => {
     it('totalQueries equals number of input queries', async () => {
       const queries: EvalQuery[] = [
         { projectId: 'proj_eval_001', query: 'q1', intent: 'answer', expectedDocIds: ['a'] },
-        { projectId: 'proj_eval_001', query: 'q2', intent: 'reproduce', expectedDocIds: ['b'] },
-        { projectId: 'proj_eval_001', query: 'q3', intent: 'review', expectedDocIds: ['c'] },
+        { projectId: 'proj_eval_001', query: 'q2', intent: 'diagnose', expectedDocIds: ['b'] },
+        { projectId: 'proj_eval_001', query: 'q3', intent: 'plan', expectedDocIds: ['c'] },
       ];
 
       for (const q of queries) {

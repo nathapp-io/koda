@@ -39,7 +39,6 @@ export class LexicalIndex {
   readonly b = 0.75;
 
   private indexes = new Map<string, ProjectIndex>();
-  private eventHandlers = new Map<string, (payload: unknown) => Promise<void>>();
 
   buildIndex(projectId: string, docs: Bm25Document[]): void {
     const projectIndex = this.getOrCreateProjectIndex(projectId);
@@ -270,9 +269,5 @@ export class LexicalIndex {
       .replace(/[^\w\s]/g, ' ')
       .split(/\s+/)
       .filter((term) => term.length > 0);
-  }
-
-  private idf(termDocFreqSize: number, docCount: number): number {
-    return Math.log((docCount - termDocFreqSize + 0.5) / (termDocFreqSize + 0.5) + 1);
   }
 }

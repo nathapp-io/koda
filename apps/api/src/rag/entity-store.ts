@@ -50,8 +50,11 @@ export class EntityStore {
     for (const entity of projectEntities.values()) {
       const labelLower = entity.label.toLowerCase();
       const labelMatch = labelLower.includes(queryLower);
+      const tagMatch = queryTerms.length > 0 && entity.tags.some(t =>
+        queryTerms.some(term => t.toLowerCase().includes(term)),
+      );
 
-      if (labelMatch || queryTerms.length > 0) {
+      if (labelMatch || tagMatch) {
         const score = this.computeEntityScore(query, entity.tags);
         results.push({ ...entity, score });
       }

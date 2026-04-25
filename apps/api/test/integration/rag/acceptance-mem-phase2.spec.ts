@@ -148,13 +148,13 @@ describe('AC-2: EvaluationService.runQueries() returns summary with finite preci
       {
         projectId: 'proj_test',
         query: 'Memory leak in background worker',
-        intent: 'reproduce',
+        intent: 'diagnose',
         expectedDocIds: ['ticket-002', 'ticket-044'],
       },
       {
         projectId: 'proj_test',
         query: 'Slow query performance on dashboard',
-        intent: 'reproduce',
+        intent: 'diagnose',
         expectedDocIds: ['ticket-003', 'ticket-038'],
       },
     ];
@@ -175,8 +175,8 @@ describe('AC-2: EvaluationService.runQueries() returns summary with finite preci
   it('totalQueries equals the number of input queries', async () => {
     const queries: EvalQuery[] = [
       { projectId: 'proj_test', query: 'Q1', intent: 'answer', expectedDocIds: ['doc-1'] },
-      { projectId: 'proj_test', query: 'Q2', intent: 'reproduce', expectedDocIds: ['doc-2'] },
-      { projectId: 'proj_test', query: 'Q3', intent: 'review', expectedDocIds: ['doc-3'] },
+      { projectId: 'proj_test', query: 'Q2', intent: 'diagnose', expectedDocIds: ['doc-2'] },
+      { projectId: 'proj_test', query: 'Q3', intent: 'plan', expectedDocIds: ['doc-3'] },
     ];
 
     const result = await service.runQueries(queries);

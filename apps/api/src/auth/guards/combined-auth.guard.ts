@@ -83,6 +83,7 @@ export class CombinedAuthGuard extends JwtAuthGuard {
     });
 
     if (!agent) return false;
+    if (agent.status !== 'ACTIVE') return false;
 
     request['agent'] = agent;
     request['actorType'] = 'agent';
