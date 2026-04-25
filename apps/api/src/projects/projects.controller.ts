@@ -6,24 +6,31 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   HttpCode,
 } from '@nestjs/common';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
+import { GetProjectMemoryDto, ProjectMemoryResponseDto } from './dto/project-memory.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import {
   ApiTags,
   ApiBearerAuth,
   ApiOperation,
   ApiResponse,
+  ApiQuery,
 } from '@nestjs/swagger';
+import { MemoryItemRepository } from '../memory/memory-item-repository';
 
 @ApiTags('projects')
 @ApiBearerAuth()
 @Controller('projects')
 export class ProjectsController {
-  constructor(private projectsService: ProjectsService) {}
+  constructor(
+    private projectsService: ProjectsService,
+    private memoryItemRepository: MemoryItemRepository,
+  ) {}
 
   @Post()
   @HttpCode(201)
@@ -80,5 +87,28 @@ export class ProjectsController {
   async remove(@Param('slug') slug: string) {
     const data = await this.projectsService.softDelete(slug);
     return JsonResponse.Ok(data);
+  }
+
+  @Get(':slug/memory')
+  @ApiOperation({ summary: 'Get project semantic memories' })
+  @ApiResponse({ status: 200, description: 'Project memories retrieved', type: ProjectMemoryResponseDto })
+  @ApiResponse({ status: 404, description: 'Project not found' })
+  @ApiQuery({ name: 'kind', required: false, enum: ['FACT', 'INCIDENT_PATTERN', 'DECISION'] })
+  @ApiQuery({ name: 'subjects', required: false, description: 'Filter by subject prefix' })
+  @ApiQuery({ name: 'status', required: false, description: 'Filter by status (active, superseded, rejected)' })
+  async getProjectMemory(@Param('slug') slug: string, @Query() query: GetProjectMemoryDto) {
+    const project = await this.projectsService.findBySlug(slug);
+
+    const result = await this.memoryItemRepository.findByProjectMemory({
+      projectId: project.id,
+      kind: query.kind,
+      subject: query.subjects,
+      status: query.status,
+    });
+
+    return JsonResponse.Ok({
+      total: result.total,
+      items: result.items,
+    });
   }
 }

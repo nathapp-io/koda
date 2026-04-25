@@ -15,6 +15,16 @@ export interface MemoryQuery {
   limit?: number;
 }
 
+export interface ProjectMemoryQuery {
+  projectId: string;
+  kind?: MemoryKind;
+  subject?: string;
+  status?: string;
+  page?: number;
+  limit?: number;
+  orderBy?: 'confidence' | 'updatedAt' | 'createdAt';
+}
+
 export interface PaginatedResult<T> {
   data: T[];
   total: number;
@@ -165,5 +175,37 @@ export class MemoryItemRepository {
       where: { id },
       data: { deletedAt: new Date(), activeKey: null },
     });
+  }
+
+  async findByProjectMemory(query: ProjectMemoryQuery): Promise<{ items: MemoryItem[]; total: number }> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const skip = (page - 1) * limit;
+
+    const where: Record<string, unknown> = { projectId: query.projectId, deletedAt: null };
+
+    if (query.kind) where.kind = query.kind;
+    if (query.subject) where.subject = { startsWith: query.subject };
+    if (query.status) where.status = query.status;
+    else where.status = 'active';
+
+    where.ttlAt = { equals: null };
+
+    const orderByField = query.orderBy ?? 'confidence';
+    const orderByClause: Record<string, string>[] = [];
+    if (orderByField === 'confidence') {
+      orderByClause.push({ confidence: 'desc' }, { updatedAt: 'desc' }, { createdAt: 'desc' });
+    } else if (orderByField === 'updatedAt') {
+      orderByClause.push({ updatedAt: 'desc' }, { confidence: 'desc' }, { createdAt: 'desc' });
+    } else {
+      orderByClause.push({ createdAt: 'desc' }, { confidence: 'desc' }, { updatedAt: 'desc' });
+    }
+
+    const [items, total] = await Promise.all([
+      this.db.memoryItem.findMany({ where, skip, take: limit, orderBy: orderByClause }),
+      this.db.memoryItem.count({ where }),
+    ]);
+
+    return { items, total };
   }
 }

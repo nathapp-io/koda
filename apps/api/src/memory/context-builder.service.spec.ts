@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ContextBuilderService, GetProjectContextQuery, Intent } from './context-builder.service';
 import { TimelineService } from './timeline.service';
+import { MemoryItemRepository } from './memory-item-repository';
 
 describe('ContextBuilderService', () => {
   let service: ContextBuilderService;
@@ -11,15 +12,23 @@ describe('ContextBuilderService', () => {
     getTicketHistory: jest.fn(),
   };
 
+  const mockMemoryItemRepository = {
+    findByProject: jest.fn(),
+    findByProjectMemory: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        ContextBuilderService,
         { provide: TimelineService, useValue: mockTimelineService },
+        { provide: MemoryItemRepository, useValue: mockMemoryItemRepository },
       ],
     }).compile();
 
-    service = module.get<ContextBuilderService>(ContextBuilderService);
+    service = new ContextBuilderService(
+      mockTimelineService as unknown as TimelineService,
+      mockMemoryItemRepository as unknown as MemoryItemRepository,
+    );
     timelineService = module.get<TimelineService>(TimelineService);
 
     jest.clearAllMocks();
