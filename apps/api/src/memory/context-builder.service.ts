@@ -42,7 +42,7 @@ export class ContextBuilderService {
 
   constructor(
     private readonly timelineService: TimelineService,
-    private readonly memoryItemRepository?: MemoryItemRepository,
+    private readonly memoryItemRepository: MemoryItemRepository,
   ) {}
 
   async getProjectContext(query: GetProjectContextQuery): Promise<GetProjectContextResponse> {
@@ -114,24 +114,23 @@ export class ContextBuilderService {
       }
     }
 
-    if (this.memoryItemRepository) {
-      try {
-        const memoryResult = await this.memoryItemRepository.findByProjectMemory({
-          projectId: query.projectId,
-        });
-        response.semanticMemory = memoryResult.items.map((item: MemoryItem) => ({
-          id: item.id,
-          kind: item.kind,
-          subject: item.subject,
-          predicate: item.predicate,
-          object: item.object,
-          confidence: item.confidence,
-          createdAt: item.createdAt,
-          updatedAt: item.updatedAt,
-        }));
-      } catch (error) {
-        this.logger.warn(`Failed to get project memory: ${error instanceof Error ? error.message : String(error)}`);
-      }
+    try {
+      const memoryResult = await this.memoryItemRepository.findByProjectMemory({
+        projectId: query.projectId,
+      });
+      response.semanticMemory = memoryResult.items.map((item: MemoryItem) => ({
+        id: item.id,
+        kind: item.kind,
+        subject: item.subject,
+        predicate: item.predicate,
+        object: item.object,
+        confidence: item.confidence,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+      }));
+    } catch (error) {
+      this.logger.warn(`Failed to get project memory: ${error instanceof Error ? error.message : String(error)}`);
+      response.semanticMemory = [];
     }
 
     return response;

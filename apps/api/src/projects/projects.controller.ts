@@ -22,6 +22,10 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { MemoryItemRepository } from '../memory/memory-item-repository';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { ForbiddenAppException } from '@nathapp/nestjs-common';
+import { CurrentUser, CurrentActor } from '../auth/decorators/current-user.decorator';
+import { ActorRole } from '../common/enums';
 
 @ApiTags('projects')
 @ApiBearerAuth()
@@ -30,7 +34,47 @@ export class ProjectsController {
   constructor(
     private projectsService: ProjectsService,
     private memoryItemRepository: MemoryItemRepository,
+    private prisma: PrismaService,
   ) {}
+
+  private get db() { return this.prisma.client as unknown as { projectMember: { findUnique(options: unknown): Promise<unknown> } }; }
+
+  private async checkProjectMembership(
+    projectId: string,
+    currentUser: { extra?: { sub?: string; role?: string } } | null,
+    actorType?: string,
+  ): Promise<void> {
+    if (!currentUser) {
+      throw new ForbiddenAppException({}, 'projects');
+    }
+
+    if (actorType === 'agent') {
+      return;
+    }
+
+    if (!currentUser.extra?.sub) {
+      throw new ForbiddenAppException({}, 'projects');
+    }
+
+    const membership = await this.db.projectMember.findUnique({
+      where: {
+        projectId_userId: {
+          projectId,
+          userId: currentUser.extra.sub,
+        },
+      },
+    });
+
+    if (!membership) {
+      throw new ForbiddenAppException({}, 'projects');
+    }
+
+    const allowedRoles = [ActorRole.ADMIN, ActorRole.DEVELOPER, ActorRole.AGENT, ActorRole.VIEWER] as const;
+    const membershipRole = (membership as { role?: string }).role;
+    if (!membershipRole || !allowedRoles.includes(membershipRole as typeof allowedRoles[number])) {
+      throw new ForbiddenAppException({}, 'projects');
+    }
+  }
 
   @Post()
   @HttpCode(201)
@@ -92,12 +136,20 @@ export class ProjectsController {
   @Get(':slug/memory')
   @ApiOperation({ summary: 'Get project semantic memories' })
   @ApiResponse({ status: 200, description: 'Project memories retrieved', type: ProjectMemoryResponseDto })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - no project access' })
   @ApiResponse({ status: 404, description: 'Project not found' })
   @ApiQuery({ name: 'kind', required: false, enum: ['FACT', 'INCIDENT_PATTERN', 'DECISION'] })
   @ApiQuery({ name: 'subjects', required: false, description: 'Filter by subject prefix' })
   @ApiQuery({ name: 'status', required: false, description: 'Filter by status (active, superseded, rejected)' })
-  async getProjectMemory(@Param('slug') slug: string, @Query() query: GetProjectMemoryDto) {
+  async getProjectMemory(
+    @Param('slug') slug: string,
+    @Query() query: GetProjectMemoryDto,
+    @CurrentUser() currentUser?: { extra?: { sub?: string; role?: string } } | null,
+    @CurrentActor() actor?: { actorType?: string },
+  ) {
     const project = await this.projectsService.findBySlug(slug);
+    await this.checkProjectMembership(project.id, currentUser ?? null, actor?.actorType);
 
     const result = await this.memoryItemRepository.findByProjectMemory({
       projectId: project.id,

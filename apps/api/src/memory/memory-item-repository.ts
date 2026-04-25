@@ -192,7 +192,7 @@ export class MemoryItemRepository {
     where.ttlAt = { equals: null };
 
     const orderByField = query.orderBy ?? 'confidence';
-    const orderByClause: Record<string, string>[] = [];
+    const orderByClause: Record<string, 'asc' | 'desc'>[] = [];
     if (orderByField === 'confidence') {
       orderByClause.push({ confidence: 'desc' }, { updatedAt: 'desc' }, { createdAt: 'desc' });
     } else if (orderByField === 'updatedAt') {
