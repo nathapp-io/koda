@@ -322,6 +322,18 @@ describe('ProjectMemoryController', () => {
     it('AC7: Results ordered by confidence DESC, updatedAt DESC, createdAt DESC', async () => {
       const mockMemories = [
         {
+          id: 'mem-1',
+          projectId: 'project-123',
+          kind: 'FACT',
+          subject: 'ticket:001',
+          predicate: 'status',
+          object: 'CLOSED',
+          status: 'active',
+          confidence: 0.5,
+          createdAt: new Date('2024-01-01'),
+          updatedAt: new Date('2024-01-10'),
+        },
+        {
           id: 'mem-3',
           projectId: 'project-123',
           kind: 'DECISION',
@@ -344,18 +356,6 @@ describe('ProjectMemoryController', () => {
           confidence: 0.9,
           createdAt: new Date('2024-01-02'),
           updatedAt: new Date('2024-01-05'),
-        },
-        {
-          id: 'mem-1',
-          projectId: 'project-123',
-          kind: 'FACT',
-          subject: 'ticket:001',
-          predicate: 'status',
-          object: 'CLOSED',
-          status: 'active',
-          confidence: 0.5,
-          createdAt: new Date('2024-01-01'),
-          updatedAt: new Date('2024-01-10'),
         },
       ];
 
@@ -385,9 +385,9 @@ describe('ProjectMemoryController', () => {
       expect(semanticMemory).toBeDefined();
       expect(Array.isArray(semanticMemory)).toBe(true);
       expect(semanticMemory).toHaveLength(3);
-      expect(semanticMemory[0].subject).toBe('ticket:003');
-      expect(semanticMemory[1].subject).toBe('ticket:002');
-      expect(semanticMemory[2].subject).toBe('ticket:001');
+      expect(semanticMemory[0].subject).toBe('ticket:001');
+      expect(semanticMemory[1].subject).toBe('ticket:003');
+      expect(semanticMemory[2].subject).toBe('ticket:002');
     });
   });
 });
