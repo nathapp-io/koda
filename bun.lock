@@ -23,8 +23,9 @@
     },
     "apps/api": {
       "name": "@nathapp/koda-api",
-      "version": "0.3.0",
+      "version": "0.4.2",
       "dependencies": {
+        "@casl/ability": "^6.8.1",
         "@fastify/static": "^9.0.0",
         "@lancedb/lancedb": "0.17.0",
         "@nathapp/nestjs-app": "^3.0.0",
@@ -66,7 +67,7 @@
     },
     "apps/cli": {
       "name": "@nathapp/koda-cli",
-      "version": "0.3.0",
+      "version": "0.4.2",
       "bin": {
         "koda": "./dist/index.js",
       },
@@ -87,7 +88,7 @@
     },
     "apps/web": {
       "name": "@nathapp/koda-web",
-      "version": "0.3.0",
+      "version": "0.4.2",
       "dependencies": {
         "@nuxtjs/color-mode": "^3.5.2",
         "@nuxtjs/i18n": "^10.2.3",
@@ -240,7 +241,7 @@
 
     "@borewit/text-codec": ["@borewit/text-codec@0.2.2", "", {}, "sha512-DDaRehssg1aNrH4+2hnj1B7vnUGEjU6OIlyRdkMd0aUdIUvKXrJfXsy8LVtXAy7DRvYVluWbMspsRhz2lcW0mQ=="],
 
-    "@casl/ability": ["@casl/ability@6.8.0", "", { "dependencies": { "@ucast/mongo2js": "^1.3.0" } }, "sha512-Ipt4mzI4gSgnomFdaPjaLgY2MWuXqAEZLrU6qqWBB7khGiBBuuEp6ytYDnq09bRXqcjaeeHiaCvCGFbBA2SpvA=="],
+    "@casl/ability": ["@casl/ability@6.8.1", "", { "dependencies": { "@ucast/mongo2js": "^1.3.0" } }, "sha512-VX5DD1JbSP/DdewZnNwXXaCzve+0pLe14mcUj2l93CdOFAQUT/ylAptNqxf3Wc/jlsuSanAgXza4Z1Iq23dzpQ=="],
 
     "@clack/core": ["@clack/core@0.4.1", "", { "dependencies": { "picocolors": "^1.0.0", "sisteransi": "^1.0.5" } }, "sha512-Pxhij4UXg8KSr7rPek6Zowm+5M22rbd2g1nfojHJkxp5YkFqiZ2+YLEM/XGVIzvGOcM0nqjIFxrpDwWRZYWYjA=="],
 

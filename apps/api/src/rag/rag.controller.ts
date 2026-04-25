@@ -14,10 +14,12 @@ import { ForbiddenAppException, JsonResponse, NotFoundAppException, ValidationAp
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
 import { RagService } from './rag.service';
+import { HybridRetrieverService } from './hybrid-retriever.service';
+import { EvaluationService } from '../retrieval/evaluation.service';
 import { AddDocumentDto } from './dto/add-document.dto';
 import { SearchKbDto } from './dto/search-kb.dto';
 import { ImportGraphifyDto } from './dto/import-graphify.dto';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { CurrentActor, CurrentUser } from '../auth/decorators/current-user.decorator';
 
 @ApiTags('knowledge-base')
 @ApiBearerAuth()
@@ -25,7 +27,9 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 export class RagController {
   constructor(
     private readonly ragService: RagService,
+    private readonly hybridRetrieverService: HybridRetrieverService,
     private readonly prisma: PrismaService<PrismaClient>,
+    private readonly evaluationService: EvaluationService,
   ) {}
 
   private get db() { return this.prisma.client; }
@@ -34,6 +38,46 @@ export class RagController {
     const project = await this.db.project.findUnique({ where: { slug } });
     if (!project || project.deletedAt) throw new NotFoundAppException({}, 'rag');
     return project;
+  }
+
+  private async checkProjectMembership(
+    projectId: string,
+    currentUser: { id?: string; extra?: { role?: string; sub?: string } } | null,
+    actorType?: string,
+  ): Promise<void> {
+    if (!currentUser) {
+      throw new ForbiddenAppException({}, 'rag');
+    }
+
+    // Agent API key auth: agents are cross-project (their API key is their credential).
+    // actorType is set to 'agent' by CombinedAuthGuard when an API key is used.
+    // We rely on actorType, not the absence of extra.sub, to keep this explicit
+    // and resilient to future actor model changes.
+    if (actorType === 'agent') {
+      return;
+    }
+
+    if (!currentUser.extra?.sub) {
+      throw new ForbiddenAppException({}, 'rag');
+    }
+
+    const membership = await this.db.projectMember.findUnique({
+      where: {
+        projectId_userId: {
+          projectId,
+          userId: currentUser.extra.sub,
+        },
+      },
+    });
+
+    if (!membership) {
+      throw new ForbiddenAppException({}, 'rag');
+    }
+
+    const allowedRoles = ['ADMIN', 'DEVELOPER', 'AGENT', 'VIEWER'];
+    if (!allowedRoles.includes(membership.role)) {
+      throw new ForbiddenAppException({}, 'rag');
+    }
   }
 
   @Post('documents')
@@ -45,12 +89,20 @@ export class RagController {
     @Body() dto: AddDocumentDto,
   ) {
     const project = await this.resolveProject(slug);
-    await this.ragService.indexDocument(project.id, {
-      source: dto.source,
-      sourceId: dto.sourceId,
-      content: dto.content,
-      metadata: dto.metadata ?? {},
-    });
+    await Promise.all([
+      this.ragService.indexDocument(project.id, {
+        source: dto.source,
+        sourceId: dto.sourceId,
+        content: dto.content,
+        metadata: dto.metadata ?? {},
+      }),
+      this.hybridRetrieverService.indexDocument(project.id, {
+        source: dto.source,
+        sourceId: dto.sourceId,
+        content: dto.content,
+        metadata: dto.metadata ?? {},
+      }),
+    ]);
     return JsonResponse.Ok({ indexed: true });
   }
 
@@ -89,14 +141,35 @@ export class RagController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Hybrid search the project knowledge base' })
   @ApiResponse({ status: 200, description: 'Search results with RRF merge and similarity tiers' })
+  @ApiResponse({ status: 403, description: 'Forbidden - no project role' })
   @ApiResponse({ status: 404, description: 'Project not found' })
   async search(
     @Param('slug') slug: string,
     @Body() dto: SearchKbDto,
+    @CurrentActor() { currentUser, actorType }: { currentUser: { id?: string; extra?: { role?: string; sub?: string } } | null; actorType?: string },
   ) {
     const project = await this.resolveProject(slug);
-    const data = await this.ragService.search(project.id, dto.query, dto.limit ?? 5);
-    return JsonResponse.Ok(data);
+    await this.checkProjectMembership(project.id, currentUser, actorType);
+
+    const limit = dto.limit ?? 20;
+    const result = await this.hybridRetrieverService.search({
+      projectId: project.id,
+      query: dto.query,
+      limit,
+      graphifyEnabled: project.graphifyEnabled,
+    });
+
+    return JsonResponse.Ok({
+      results: result.results,
+      scores: result.scores,
+      provenance: {
+        retrievedAt: result.retrievedAt,
+        sources: result.results.map((r) => ({
+          sourceType: r.source,
+          sourceId: r.sourceId,
+        })),
+      },
+    });
   }
 
   @Post('import/graphify')
@@ -140,5 +213,25 @@ export class RagController {
     const project = await this.resolveProject(slug);
     await this.ragService.optimizeTable(project.id);
     return JsonResponse.Ok({ optimized: true });
+  }
+
+  @Post('evaluate/retrieval')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Run the retrieval evaluation harness with seeded queries' })
+  @ApiResponse({ status: 200, description: 'Evaluation results with precision@5 metrics' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - no project role' })
+  async evaluateRetrieval(
+    @Param('slug') slug: string,
+    @CurrentActor() { currentUser, actorType }: { currentUser: { id?: string; extra?: { role?: string; sub?: string } } | null; actorType?: string },
+  ) {
+    const project = await this.resolveProject(slug);
+    await this.checkProjectMembership(project.id, currentUser, actorType);
+    const { loadEvalQueries } = await import('../retrieval/load-queries');
+    const queries = loadEvalQueries();
+    const projectQueries = queries.filter((q) => q.projectId === project.id);
+    const summary = await this.evaluationService.runQueries(projectQueries);
+    return JsonResponse.Ok(summary);
   }
 }

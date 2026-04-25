@@ -8,14 +8,15 @@
  * Run this after any API changes before running `bun run generate`.
  */
 
-import { NestFactory } from '@nestjs/core';
+import 'reflect-metadata';
+import { AppFactory } from '@nathapp/nestjs-app';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { writeFileSync } from 'fs';
 import { resolve } from 'path';
 import { AppModule } from '../src/app.module';
 
 async function exportSpec() {
-  const app = await NestFactory.create(AppModule, { logger: false });
+  const app = await AppFactory.createFastifyApp(AppModule, { logger: false });
   app.setGlobalPrefix('api');
 
   const config = new DocumentBuilder()

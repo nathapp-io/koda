@@ -1,0 +1,197 @@
+/**
+ * EntityStore — Retrieval-time entity index for entity-aware ranking
+ *
+ * Phase 2: in-memory store; supports rebuilds from outbox fan-out.
+ * Handles graphify_import events (code_module nodes) and ticket_event events (ticket entities).
+ */
+import { Injectable, Optional } from '@nestjs/common';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import type { PrismaClient } from '@prisma/client';
+
+export interface Entity {
+  id: string;
+  label: string;
+  tags: string[];
+  source: string;
+  sourceId: string;
+}
+
+export interface ScoredEntity extends Entity {
+  score: number;
+}
+
+@Injectable()
+export class EntityStore {
+  private entities = new Map<string, Map<string, Entity>>();
+
+  constructor(
+    @Optional() private readonly prisma?: PrismaService<PrismaClient>,
+    @Optional() private readonly getProjectCodeDocuments?: (projectId: string) => Promise<Array<{ id: string; label: string; type: string; source_file?: string }>>,
+  ) {}
+
+  indexEntity(projectId: string, entity: Entity): void {
+    let projectEntities = this.entities.get(projectId);
+    if (!projectEntities) {
+      projectEntities = new Map();
+      this.entities.set(projectId, projectEntities);
+    }
+    projectEntities.set(entity.id, { ...entity });
+  }
+
+  searchEntities(projectId: string, query: string): ScoredEntity[] {
+    const projectEntities = this.entities.get(projectId);
+    if (!projectEntities) return [];
+
+    const queryLower = query.toLowerCase();
+    const queryTerms = queryLower.split(/\s+/).filter(Boolean);
+
+    const results: ScoredEntity[] = [];
+
+    for (const entity of projectEntities.values()) {
+      const labelLower = entity.label.toLowerCase();
+      const labelMatch = labelLower.includes(queryLower);
+      const tagMatch = queryTerms.length > 0 && entity.tags.some(t =>
+        queryTerms.some(term => t.toLowerCase().includes(term)),
+      );
+
+      if (labelMatch || tagMatch) {
+        const score = this.computeEntityScore(query, entity.tags);
+        results.push({ ...entity, score });
+      }
+    }
+
+    return results;
+  }
+
+  getByTag(projectId: string, tag: string): ScoredEntity[] {
+    const projectEntities = this.entities.get(projectId);
+    if (!projectEntities) return [];
+
+    const normalizedTag = tag.toLowerCase();
+
+    return Array.from(projectEntities.values())
+      .filter((entity) =>
+        entity.tags.some((t) => t.toLowerCase() === normalizedTag),
+      )
+      .map((entity) => ({ ...entity, score: 1 }));
+  }
+
+  getAllEntities(projectId: string): ScoredEntity[] {
+    const projectEntities = this.entities.get(projectId);
+    if (!projectEntities) return [];
+    return Array.from(projectEntities.values()).map((e) => ({ ...e, score: 0 }));
+  }
+
+  computeEntityScore(query: string, entityTags: string[]): number {
+    if (!query || entityTags.length === 0) return 0;
+
+    const queryTerms = query.toLowerCase().split(/\s+/).filter(Boolean);
+    if (queryTerms.length === 0) return 0;
+
+    const normalizedTags = entityTags.map((t) => t.toLowerCase());
+    const intersectionSize = queryTerms.filter((term) =>
+      normalizedTags.some((tag) => tag.includes(term)),
+    ).length;
+
+    return intersectionSize / entityTags.length;
+  }
+
+  clear(projectId: string): void {
+    this.entities.delete(projectId);
+  }
+
+  async handleOutboxEvent(event: {
+    eventType: string;
+    payload: unknown;
+  }): Promise<void> {
+    if (event.eventType === 'graphify_import') {
+      const payload = event.payload as { projectId: string; nodeCount?: number; linkCount?: number; nodes?: Array<{ id: string; label: string; type: string; source_file?: string }> };
+      if (payload.nodes && payload.nodes.length > 0) {
+        for (const node of payload.nodes) {
+          if (node.type === 'code_module') {
+            this.indexEntity(payload.projectId, {
+              id: node.id,
+              label: node.label,
+              tags: this.extractTagsFromLabel(node.label),
+              source: 'code_module',
+              sourceId: node.id,
+            });
+          }
+        }
+      } else {
+        await this.indexGraphifyEntitiesForProject(payload.projectId);
+      }
+    } else if (event.eventType === 'ticket_event') {
+      const payload = event.payload as {
+        ticketId?: string;
+        projectId?: string;
+        actorId?: string;
+        data?: Record<string, unknown>;
+        ticket?: { id: string; ref: string; title: string; type: string };
+      };
+      if (payload.ticket) {
+        this.indexEntity(payload.projectId ?? '', {
+          id: payload.ticket.id,
+          label: payload.ticket.title,
+          tags: this.extractTagsFromLabel(payload.ticket.title),
+          source: 'ticket',
+          sourceId: payload.ticket.id,
+        });
+      } else if (payload.ticketId && payload.projectId) {
+        await this.indexTicketEntity(payload.ticketId, payload.projectId);
+      }
+    }
+  }
+
+  async indexGraphifyEntitiesForProject(projectId: string): Promise<void> {
+    if (!this.prisma?.client) return;
+
+    let nodes: Array<{ id: string; label: string; type: string; source_file?: string }> = [];
+
+    if (this.getProjectCodeDocuments) {
+      nodes = await this.getProjectCodeDocuments(projectId);
+    } else {
+      const docs = await this.prisma.client.$queryRaw<Array<{ id: string; label: string; type: string; source_file?: string }>>`
+        SELECT id, label, type, source_file FROM code_document WHERE project_id = ${projectId}
+      `;
+      nodes = docs;
+    }
+
+    for (const node of nodes) {
+      if (node.type === 'code_module') {
+        this.indexEntity(projectId, {
+          id: node.id,
+          label: node.label,
+          tags: this.extractTagsFromLabel(node.label),
+          source: 'code_module',
+          sourceId: node.id,
+        });
+      }
+    }
+  }
+
+  private async indexTicketEntity(ticketId: string, projectId: string): Promise<void> {
+    if (!this.prisma?.client) return;
+
+    const ticket = await this.prisma.client.ticket.findUnique({
+      where: { id: ticketId },
+      select: { id: true, title: true },
+    });
+    if (ticket) {
+      this.indexEntity(projectId, {
+        id: ticket.id,
+        label: ticket.title,
+        tags: this.extractTagsFromLabel(ticket.title),
+        source: 'ticket',
+        sourceId: ticket.id,
+      });
+    }
+  }
+
+  private extractTagsFromLabel(label: string): string[] {
+    return label
+      .split(/[\s_]+|(?=[A-Z])/)
+      .map((part) => part.toLowerCase())
+      .filter((part) => part.length > 1);
+  }
+}

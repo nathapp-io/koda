@@ -1,0 +1,80 @@
+{
+  "requestId": "5ae70b4b-40ca-429e-a986-9fdf75cd31d5",
+  "stage": "tdd-implementer",
+  "totalBudgetTokens": 8000,
+  "usedTokens": 3500,
+  "includedChunks": [
+    "static-rules:api:44f0d226",
+    "static-rules:cli:44aa10ec",
+    "static-rules:common:3fa0b420",
+    "static-rules:project-conventions:6fb98908",
+    "static-rules:web:3afa6c95",
+    "git-history:c40d4750",
+    "code-neighbor:9d93624c"
+  ],
+  "excludedChunks": [],
+  "floorItems": [
+    "static-rules:api:44f0d226",
+    "static-rules:cli:44aa10ec",
+    "static-rules:common:3fa0b420",
+    "static-rules:project-conventions:6fb98908",
+    "static-rules:web:3afa6c95"
+  ],
+  "digestTokens": 39,
+  "buildMs": 219,
+  "providerResults": [
+    {
+      "providerId": "static-rules",
+      "status": "ok",
+      "chunkCount": 5,
+      "durationMs": 1,
+      "tokensProduced": 3051
+    },
+    {
+      "providerId": "feature-context",
+      "status": "empty",
+      "chunkCount": 0,
+      "durationMs": 1,
+      "tokensProduced": 0
+    },
+    {
+      "providerId": "test-coverage",
+      "status": "empty",
+      "chunkCount": 0,
+      "durationMs": 6,
+      "tokensProduced": 0
+    },
+    {
+      "providerId": "session-scratch",
+      "status": "empty",
+      "chunkCount": 0,
+      "durationMs": 0,
+      "tokensProduced": 0
+    },
+    {
+      "providerId": "git-history",
+      "status": "ok",
+      "chunkCount": 1,
+      "durationMs": 217,
+      "tokensProduced": 315
+    },
+    {
+      "providerId": "code-neighbor",
+      "status": "ok",
+      "chunkCount": 1,
+      "durationMs": 1,
+      "tokensProduced": 95
+    }
+  ],
+  "repoRoot": ".",
+  "packageDir": ".",
+  "chunkSummaries": {
+    "static-rules:api:44f0d226": "### api.md\n\n# API Rules — apps/api\n\n## Read-First\n- Follow `nathapp-nestjs-patterns` before implementing NestJS changes\n- Prefer Nathapp patterns over generic alternatives when both exist\n\n## Auth\n- Use `@nathapp/nestjs-auth` v3; do not use `nestjs-iam`\n- API key hashing: deterministic HMAC-SHA256 f",
+    "static-rules:cli:44aa10ec": "### cli.md\n\n# CLI Rules — apps/cli\n\n## API Client\n- Use generated client in `src/generated/`; do not hand-write HTTP calls\n- Configure before each call:\n  - `OpenAPI.BASE = ctx.apiUrl`\n  - `OpenAPI.TOKEN = ctx.apiKey`\n- Handle API failures with generated `ApiError`\n- Do not use raw `axios`, `AxiosIn",
+    "static-rules:common:3fa0b420": "### common.md\n\n# Common Rules — All Apps\n\n## Tooling\n- Use Bun workspace commands (`bun install`, `bun run`), not `npm`/`yarn`\n- Exception: `npx jest` is allowed for targeted Jest runs\n- Prefer repository scripts over ad-hoc one-off command variants\n\n## Git\n- Never push to remote; human reviews and ",
+    "static-rules:project-conventions:6fb98908": "### project-conventions.md\n\n# Project Conventions\n\nThis rules file is intentionally brief.\n\nPrimary architecture/context source is [`/home/williamkhoo/Desktop/projects/nathapp/koda/.nax/context.md`](/home/williamkhoo/Desktop/projects/nathapp/koda/.nax/context.md). Keep detailed stack, folder map, an",
+    "static-rules:web:3afa6c95": "### web.md\n\n# Web Rules — apps/web\n\n## Components & UI\n- Add Shadcn components via CLI (`bunx shadcn-vue@latest add <name>`)\n- Keep custom components in PascalCase\n- Prefer Shadcn primitives over raw native form controls\n- Keep `components/ui/` aligned with Shadcn structure (editable, but not manual",
+    "git-history:c40d4750": "## Recent Git History\n\nCommits touching story files:\n\n### package.json\n0ba5597 chore: release 0.4.2\n64641db chore: release 0.4.1\ndf6d8be chore: release 0.4.0\n12965da feat: add MarkdownEditor component with write/preview tabs\ne5c0bfb chore: release 0.3.0\n\n### apps/api/package.json\n2ee2bb1 chore(US-00",
+    "code-neighbor:9d93624c": "## Code Neighbors\n\nRelated files (imports, reverse-deps, tests):\n\n### apps/api/src/retrieval/evaluation.service.ts\n- apps/api/src/rag/hybrid-retriever.service.ts\n\n### apps/api/src/rag/rag.service.ts\n- apps/api/src/rag/embedding.service.ts\n- apps/api/src/rag/strategies/fts-optimize-strategy.interface"
+  }
+}

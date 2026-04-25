@@ -21,24 +21,38 @@ async function main() {
   const password = process.env.KODA_ADMIN_PASSWORD ?? 'Admin123!';
   const name = process.env.KODA_ADMIN_NAME ?? 'Admin';
 
-  const existing = await prisma.user.findUnique({ where: { email } });
+  const existingUser = await prisma.user.findUnique({ where: { email } });
 
-  if (existing) {
-    console.log(`ℹ️  User "${email}" already exists (role: ${existing.role}). Skipping.`);
-    return;
+  if (existingUser) {
+    console.log(`ℹ️  User "${email}" already exists (role: ${existingUser.role}). Skipping.`);
+  } else {
+    const passwordHash = await bcrypt.hash(password, 12);
+    const user = await prisma.user.create({
+      data: { email, name, passwordHash, role: 'ADMIN' },
+    });
+    console.log(`✅ Admin user created:`);
+    console.log(`   Email:    ${user.email}`);
+    console.log(`   Password: ${password}`);
+    console.log(`   Role:     ${user.role}`);
+    console.log(`   ID:       ${user.id}`);
   }
 
-  const passwordHash = await bcrypt.hash(password, 12);
-
-  const user = await prisma.user.create({
-    data: { email, name, passwordHash, role: 'ADMIN' },
-  });
-
-  console.log(`✅ Admin user created:`);
-  console.log(`   Email:    ${user.email}`);
-  console.log(`   Password: ${password}`);
-  console.log(`   Role:     ${user.role}`);
-  console.log(`   ID:       ${user.id}`);
+  const evalProjectId = process.env.RAG_EVAL_PROJECT_ID ?? 'proj_eval_001';
+  const existingProject = await prisma.project.findUnique({ where: { id: evalProjectId } });
+  if (existingProject) {
+    console.log(`ℹ️  Evaluation project "${evalProjectId}" already exists. Skipping.`);
+  } else {
+    await prisma.project.create({
+      data: {
+        id: evalProjectId,
+        name: 'Retrieval Evaluation',
+        slug: 'eval',
+        key: 'EVAL',
+        description: 'Project used by the retrieval evaluation harness (US-005)',
+      },
+    });
+    console.log(`✅ Evaluation project created: ${evalProjectId}`);
+  }
 }
 
 main()

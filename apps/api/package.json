@@ -23,9 +23,12 @@
     "db:studio": "prisma studio",
     "db:reset": "prisma migrate reset",
     "seed:e2e": "bun prisma/seed-e2e.ts",
-    "seed:prod": "bun prisma/seed.ts"
+    "seed:prod": "bun prisma/seed.ts",
+    "seed:eval:documents": "bun scripts/seed-eval-documents.ts",
+    "evaluate:retrieval": "bun scripts/evaluate-retrieval.ts"
   },
   "dependencies": {
+    "@casl/ability": "^6.8.1",
     "@fastify/static": "^9.0.0",
     "@lancedb/lancedb": "0.17.0",
     "@nathapp/nestjs-app": "^3.0.0",

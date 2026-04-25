@@ -12,6 +12,7 @@ import { commentCommand } from './commands/comment';
 import { agentCommand } from './commands/agent';
 import { labelCommand } from './commands/label';
 import { kbCommand } from './commands/kb';
+import { evaluateCommand } from './commands/evaluate';
 import { vcsCommand } from './commands/vcs';
 
 // Read package.json to get version
@@ -154,6 +155,9 @@ labelCommand(program);
 
 // KB command
 kbCommand(program);
+
+// Evaluate command
+evaluateCommand(program);
 
 // VCS command
 vcsCommand(program);

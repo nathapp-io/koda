@@ -128,24 +128,34 @@ describe('kbCommand', () => {
     const mockSearchResponse = {
       ret: 0,
       data: {
-        verdict: 'RELEVANT' as const,
-        confidence: 0.92,
         results: [
           {
+            id: 'doc_001',
+            source: 'ticket',
+            sourceId: 'KODA-42',
+            content: 'Fix auth error on login',
             score: 0.95,
-            ticketRef: 'KODA-42',
-            type: 'bug' as const,
-            status: 'in_progress',
-            labels: ['auth', 'critical'],
+            similarity: 'high',
+            rank: 1,
+            metadata: {},
+            createdAt: '2026-01-01T00:00:00.000Z',
+            provenance: { indexedAt: '2026-01-01T00:00:00.000Z', sourceProjectId: 'proj-1' },
           },
           {
+            id: 'doc_002',
+            source: 'ticket',
+            sourceId: 'KODA-17',
+            content: 'Enhancement for auth flow',
             score: 0.61,
-            ticketRef: 'KODA-17',
-            type: 'enhancement' as const,
-            status: 'verified',
-            labels: [],
+            similarity: 'medium',
+            rank: 2,
+            metadata: {},
+            createdAt: '2026-01-01T00:00:00.000Z',
+            provenance: { indexedAt: '2026-01-01T00:00:00.000Z', sourceProjectId: 'proj-1' },
           },
         ],
+        scores: [],
+        retrievedAt: '2026-01-01T00:00:00.000Z',
       },
     };
 
@@ -163,7 +173,7 @@ describe('kbCommand', () => {
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
-    it('prints the verdict line in human output', async () => {
+    it('prints result count line in human output', async () => {
       (ragControllerSearch as jest.Mock).mockResolvedValue(mockSearchResponse);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
@@ -172,7 +182,7 @@ describe('kbCommand', () => {
       await searchCmd?.parseAsync(['node', 'test', '--project', 'koda', '--query', 'auth error']);
 
       const allLogs = logSpy.mock.calls.map((call) => call.join(' ')).join('\n');
-      expect(allLogs).toMatch(/RELEVANT/);
+      expect(allLogs).toMatch(/Found 2 result/);
     });
 
     it('prints ranked results with ticket refs in human output', async () => {
@@ -202,7 +212,7 @@ describe('kbCommand', () => {
       expect(allLogs).toMatch(/MED/);
     });
 
-    it('prints confidence score in human output', async () => {
+    it('prints score values in human output', async () => {
       (ragControllerSearch as jest.Mock).mockResolvedValue(mockSearchResponse);
 
       const kbCmd = program.commands.find((cmd) => cmd.name() === 'kb');
@@ -211,7 +221,8 @@ describe('kbCommand', () => {
       await searchCmd?.parseAsync(['node', 'test', '--project', 'koda', '--query', 'auth error']);
 
       const allLogs = logSpy.mock.calls.map((call) => call.join(' ')).join('\n');
-      expect(allLogs).toContain('0.92');
+      expect(allLogs).toContain('score=0.950');
+      expect(allLogs).toContain('score=0.610');
     });
 
     it('outputs raw JSON matching API response shape with --json flag', async () => {
@@ -229,9 +240,9 @@ describe('kbCommand', () => {
 
       if (!jsonCall) throw new Error('Expected jsonCall to be defined');
       const parsed = JSON.parse(jsonCall[0]);
-      expect(parsed).toHaveProperty('verdict');
-      expect(parsed).toHaveProperty('confidence');
       expect(parsed).toHaveProperty('results');
+      expect(parsed).toHaveProperty('scores');
+      expect(parsed).toHaveProperty('retrievedAt');
       expect(Array.isArray(parsed.results)).toBe(true);
     });
 

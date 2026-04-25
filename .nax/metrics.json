@@ -3113,5 +3113,231 @@
       "output_tokens": 354,
       "cache_read_input_tokens": 136288
     }
+  },
+  {
+    "runId": "run-2026-04-23T14-51-54-022Z",
+    "feature": "memory-phase2-hybrid-retrieval",
+    "startedAt": "2026-04-23T14:51:54.022Z",
+    "completedAt": "2026-04-23T19:49:18.219Z",
+    "totalCost": 8.253458730000002,
+    "totalStories": 2,
+    "storiesCompleted": 2,
+    "storiesFailed": 1,
+    "totalDurationMs": 17844197,
+    "stories": [
+      {
+        "storyId": "US-002",
+        "complexity": "complex",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "modelUsed": "minimax/MiniMax-M2.7",
+        "agentUsed": "opencode",
+        "attempts": 1,
+        "finalTier": "balanced",
+        "success": true,
+        "cost": 0.4936879349999999,
+        "durationMs": 1722989,
+        "firstPassSuccess": true,
+        "startedAt": "2026-04-23T14:51:54.117Z",
+        "completedAt": "2026-04-23T16:20:54.212Z",
+        "fullSuiteGatePassed": true,
+        "runtimeCrashes": 0,
+        "tokens": {
+          "input_tokens": 1265,
+          "output_tokens": 1164,
+          "cache_read_input_tokens": 203868,
+          "cache_creation_input_tokens": 242
+        },
+        "context": {
+          "providers": {
+            "static-rules": {
+              "tokensProduced": 11706,
+              "chunksProduced": 18,
+              "chunksKept": 18,
+              "wallClockMs": 27,
+              "timedOut": false,
+              "failed": false
+            },
+            "feature-context": {
+              "tokensProduced": 0,
+              "chunksProduced": 0,
+              "chunksKept": 0,
+              "wallClockMs": 4,
+              "timedOut": false,
+              "failed": false
+            },
+            "test-coverage": {
+              "tokensProduced": 0,
+              "chunksProduced": 0,
+              "chunksKept": 0,
+              "wallClockMs": 9,
+              "timedOut": false,
+              "failed": false
+            },
+            "session-scratch": {
+              "tokensProduced": 161,
+              "chunksProduced": 1,
+              "chunksKept": 1,
+              "wallClockMs": 5,
+              "timedOut": false,
+              "failed": false
+            },
+            "git-history": {
+              "tokensProduced": 0,
+              "chunksProduced": 0,
+              "chunksKept": 0,
+              "wallClockMs": 550,
+              "timedOut": false,
+              "failed": false
+            },
+            "code-neighbor": {
+              "tokensProduced": 0,
+              "chunksProduced": 0,
+              "chunksKept": 0,
+              "wallClockMs": 109,
+              "timedOut": false,
+              "failed": false
+            }
+          }
+        }
+      },
+      {
+        "storyId": "US-006",
+        "complexity": "medium",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "modelUsed": "minimax/MiniMax-M2.7",
+        "agentUsed": "opencode",
+        "attempts": 1,
+        "finalTier": "fast",
+        "success": true,
+        "cost": 0.4789907400000001,
+        "durationMs": 1316362,
+        "firstPassSuccess": true,
+        "startedAt": "2026-04-23T17:25:12.740Z",
+        "completedAt": "2026-04-23T18:25:59.853Z",
+        "fullSuiteGatePassed": false,
+        "runtimeCrashes": 0,
+        "tokens": {
+          "input_tokens": 346,
+          "output_tokens": 388,
+          "cache_read_input_tokens": 118528
+        },
+        "context": {
+          "providers": {
+            "static-rules": {
+              "tokensProduced": 7804,
+              "chunksProduced": 12,
+              "chunksKept": 12,
+              "wallClockMs": 11,
+              "timedOut": false,
+              "failed": false
+            },
+            "feature-context": {
+              "tokensProduced": 0,
+              "chunksProduced": 0,
+              "chunksKept": 0,
+              "wallClockMs": 4,
+              "timedOut": false,
+              "failed": false
+            },
+            "test-coverage": {
+              "tokensProduced": 0,
+              "chunksProduced": 0,
+              "chunksKept": 0,
+              "wallClockMs": 11,
+              "timedOut": false,
+              "failed": false
+            },
+            "session-scratch": {
+              "tokensProduced": 0,
+              "chunksProduced": 0,
+              "chunksKept": 0,
+              "wallClockMs": 3,
+              "timedOut": false,
+              "failed": false
+            },
+            "git-history": {
+              "tokensProduced": 0,
+              "chunksProduced": 0,
+              "chunksKept": 0,
+              "wallClockMs": 534,
+              "timedOut": false,
+              "failed": false
+            },
+            "code-neighbor": {
+              "tokensProduced": 0,
+              "chunksProduced": 0,
+              "chunksKept": 0,
+              "wallClockMs": 77,
+              "timedOut": false,
+              "failed": false
+            },
+            "plan-digest": {
+              "tokensProduced": 66,
+              "chunksProduced": 3,
+              "chunksKept": 3,
+              "wallClockMs": 0,
+              "timedOut": false,
+              "failed": false
+            }
+          }
+        }
+      }
+    ],
+    "totalTokens": {
+      "input_tokens": 1611,
+      "output_tokens": 1552,
+      "cache_read_input_tokens": 322396,
+      "cache_creation_input_tokens": 242
+    }
+  },
+  {
+    "runId": "run-2026-04-24T03-06-00-874Z",
+    "feature": "memory-phase2-hybrid-retrieval",
+    "startedAt": "2026-04-24T03:06:00.874Z",
+    "completedAt": "2026-04-24T06:16:16.332Z",
+    "totalCost": 3.416302814999999,
+    "totalStories": 0,
+    "storiesCompleted": 0,
+    "storiesFailed": 0,
+    "totalDurationMs": 11415458,
+    "stories": []
+  },
+  {
+    "runId": "run-2026-04-24T06-32-12-854Z",
+    "feature": "memory-phase2-hybrid-retrieval",
+    "startedAt": "2026-04-24T06:32:12.854Z",
+    "completedAt": "2026-04-24T07:38:39.651Z",
+    "totalCost": 4.272438194999999,
+    "totalStories": 0,
+    "storiesCompleted": 0,
+    "storiesFailed": 1,
+    "totalDurationMs": 3986797,
+    "stories": []
+  },
+  {
+    "runId": "run-2026-04-24T07-48-36-543Z",
+    "feature": "memory-phase2-hybrid-retrieval",
+    "startedAt": "2026-04-24T07:48:36.543Z",
+    "completedAt": "2026-04-24T11:02:54.165Z",
+    "totalCost": 5.5699623150000015,
+    "totalStories": 0,
+    "storiesCompleted": 0,
+    "storiesFailed": 1,
+    "totalDurationMs": 11657622,
+    "stories": []
+  },
+  {
+    "runId": "run-2026-04-24T11-36-50-389Z",
+    "feature": "memory-phase2-hybrid-retrieval",
+    "startedAt": "2026-04-24T11:36:50.389Z",
+    "completedAt": "2026-04-24T11:48:18.654Z",
+    "totalCost": 0.06904674000000001,
+    "totalStories": 0,
+    "storiesCompleted": 0,
+    "storiesFailed": 0,
+    "totalDurationMs": 688265,
+    "stories": []
   }
 ]

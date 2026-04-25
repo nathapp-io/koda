@@ -18,7 +18,7 @@ import request from 'supertest';
 import { AppModule } from '../../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, ProjectMember } from '@prisma/client';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
 
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -263,6 +263,15 @@ describeIntegration('API Integration Tests', () => {
       expect(data.slug).toBe('koda-test');
       expect(data.key).toBe('KT');
       projectSlug = data.slug;
+
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      const project = await prisma.client.project.findUnique({ where: { slug: projectSlug } });
+      const adminUser = await prisma.client.user.findUnique({ where: { email: 'admin@koda.test' } });
+      if (project && adminUser) {
+        await prisma.client.projectMember.create({
+          data: { projectId: project.id, userId: adminUser.id, role: 'ADMIN' },
+        });
+      }
     });
 
     it('POST /api/projects — 400 for duplicate key', async () => {

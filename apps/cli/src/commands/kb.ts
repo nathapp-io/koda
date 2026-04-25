@@ -60,22 +60,32 @@ export function kbCommand(program: Command): void {
           requestBody: { query: options.query },
         });
         const data = unwrap<{
-          verdict: string;
-          confidence: number;
-          results: Array<{ score: number; ticketRef: string; type: string; status: string; labels?: string[] }>;
+          results: Array<{
+            id: string;
+            source: string;
+            sourceId: string;
+            content: string;
+            score: number;
+            similarity: string;
+            rank?: number;
+          }>;
+          scores: unknown[];
+          retrievedAt: string;
         }>(response);
 
         if (options.json) {
           console.log(JSON.stringify(data, null, 2));
         } else {
-          console.log(`Verdict: ${data.verdict}  Confidence: ${data.confidence}`);
-          console.log('');
-          for (const result of data.results) {
-            const label = scoreLabel(result.score);
-            const labels = result.labels?.length ? `  [${result.labels.join(', ')}]` : '';
-            console.log(
-              `${label}  score=${result.score}  ${result.ticketRef}  ${result.type}  ${result.status}${labels}`
-            );
+          if (!data.results || data.results.length === 0) {
+            console.log('No results found.');
+          } else {
+            console.log(`Found ${data.results.length} result(s):\n`);
+            for (const result of data.results) {
+              const label = scoreLabel(result.score);
+              const preview = result.content?.slice(0, 80) ?? '';
+              console.log(`${label}  score=${result.score.toFixed(3)}  [${result.source}:${result.sourceId}]  similarity: ${result.similarity}`);
+              if (preview) console.log(`  "${preview}"`);
+            }
           }
         }
 

@@ -650,6 +650,9 @@
           "200": {
             "description": "Search results with RRF merge and similarity tiers"
           },
+          "403": {
+            "description": "Forbidden - no project role"
+          },
           "404": {
             "description": "Project not found"
           }
@@ -743,6 +746,44 @@
           }
         ],
         "summary": "Optimize the LanceDB table for a project (admin only)",
+        "tags": [
+          "knowledge-base"
+        ]
+      }
+    },
+    "/api/projects/{slug}/kb/evaluate/retrieval": {
+      "post": {
+        "operationId": "RagController_evaluateRetrieval",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Evaluation results with precision@5 metrics"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - no project role"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Run the retrieval evaluation harness with seeded queries",
         "tags": [
           "knowledge-base"
         ]
@@ -3135,14 +3176,12 @@
           },
           "limit": {
             "type": "number",
-            "default": 5,
+            "default": 20,
             "minimum": 1,
-            "maximum": 50
+            "maximum": 50,
+            "description": "Result limit (capped at 50)"
           }
-        },
-        "required": [
-          "query"
-        ]
+        }
       },
       "GraphifyNodeDto": {
         "type": "object",

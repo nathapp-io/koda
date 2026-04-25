@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
 import { ValidationAppException, NotFoundAppException } from '@nathapp/nestjs-common';
@@ -6,6 +6,7 @@ import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { ProjectResponseDto } from './dto/project-response.dto';
 import { RagService } from '../rag/rag.service';
+import { HybridRetrieverService } from '../rag/hybrid-retriever.service';
 
 @Injectable()
 export class ProjectsService {
@@ -14,6 +15,8 @@ export class ProjectsService {
   constructor(
     private prisma: PrismaService<PrismaClient>,
     private ragService: RagService,
+    @Inject(forwardRef(() => HybridRetrieverService))
+    private hybridRetrieverService?: HybridRetrieverService,
   ) {}
 
   private get db() {
@@ -177,6 +180,11 @@ export class ProjectsService {
         );
         // Do not re-throw - the flag change persists regardless
       }
+    }
+
+    // Invalidate graphifyEnabled cache when the flag is updated
+    if (updateProjectDto.graphifyEnabled !== undefined && this.hybridRetrieverService) {
+      this.hybridRetrieverService.invalidateGraphifyEnabledCache(updatedProject.id);
     }
 
     return ProjectResponseDto.from(updatedProject);

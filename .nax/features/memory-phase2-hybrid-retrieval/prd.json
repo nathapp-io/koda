@@ -1,0 +1,398 @@
+{
+  "project": "koda",
+  "feature": "memory-phase2-hybrid-retrieval",
+  "branchName": "feat/memory-phase2-hybrid-retrieval",
+  "createdAt": "2026-04-23T12:28:37.000Z",
+  "updatedAt": "2026-04-24T11:02:53.104Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Hybrid Retriever Skeleton and Search Compatibility",
+      "description": "Introduce the hybrid retriever facade behind the existing KB search path so `/projects/:slug/kb/search` continues to serve the public read contract while ranking logic migrates from RagService to HybridRetrieverService. The controller should keep project scoping and response compatibility intact, normalize unknown intents to answer, enforce the project membership gate at the controller boundary, and pass through the existing KB fields plus Phase 0 provenance.",
+      "acceptanceCriteria": [
+        "HybridRetrieverService.search() accepts HybridSearchQuery and returns HybridSearchResult.",
+        "HybridSearchResult.scores contains one ScoreBreakdown per returned result, and each breakdown includes vectorScore, lexicalScore, entityScore, recencyScore, and finalScore.",
+        "POST /projects/:slug/kb/search continues to return the existing KB response fields plus the Phase 0 provenance fields while the controller reads through the hybrid retriever path.",
+        "When the caller does not have a project role of admin, developer, agent, or viewer, POST /projects/:slug/kb/search returns 403 before the retriever runs.",
+        "When intent is not recognized, HybridRetrieverService.search() uses answer weights.",
+        "When timeWindow is provided, search results are filtered by indexed timestamp before scoring.",
+        "When limit is omitted, search uses 20, and when limit exceeds 50, it is capped at 50.",
+        "When limit is provided, the pre-rerank candidate pool size is max(100, limit * 5) and is split evenly between vector and lexical sources before deduplication.",
+        "HybridSearchResult.retrievedAt is set to the server timestamp at query time.",
+        "HybridRetrieverService.search() never returns a result whose internal project scope differs from the requested projectId.",
+        "HybridRetrieverService is wired into RagController or a dedicated RetrievalController as the primary search path for POST /projects/:slug/kb/search.",
+        "Until the controller fully migrates to HybridRetrieverService, the existing /projects/:slug/kb/search path applies all required compatibility filters (including graphifyEnabled) so behavior matches the future hybrid contract.",
+        "When ticketIds or repoRefs are provided in HybridSearchQuery, they are accepted without error; no filtering by these fields occurs in Phase 2 (reserved for Phase 3)."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "retrieval",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/rag/rag.controller.ts",
+        "apps/api/src/rag/rag.service.ts",
+        "apps/api/src/rag/dto/search-kb.dto.ts",
+        "apps/api/src/rag/dto/kb-result.dto.ts",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When search() is called with projectId missing, it returns a validation error.",
+        "When timeWindow excludes every candidate, search returns an empty results array instead of widening filters.",
+        "When the caller is authenticated but not a project member, the retriever service is not invoked.",
+        "When no documents match the query, HybridSearchResult returns empty results and scores arrays with query, intent, and retrievedAt still populated."
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b4fa62a023d0c313e73b613bf7000a34df42c496"
+    },
+    {
+      "id": "US-002",
+      "title": "In-Memory BM25 Index and Warmup",
+      "description": "Build the project-scoped lexical index that powers the BM25 side of the hybrid retriever. The index must support lazy project builds, incremental add/remove behavior for tests, startup warmup for active projects, serialized rebuilds from outbox events, and the performance envelope described in the spec.",
+      "acceptanceCriteria": [
+        "LexicalIndex.buildIndex(projectId, docs) builds a BM25 index for all documents in the project.",
+        "LexicalIndex.search(projectId, query, limit) returns up to limit document IDs with BM25 scores.",
+        "The BM25 score calculation uses k1=1.5 and b=0.75.",
+        "When a document is added via addDocument(), it is immediately searchable in subsequent calls.",
+        "When a document is removed via removeDocument(), it no longer appears in search results.",
+        "LexicalIndex.search() lazily builds the project index on the first call when warmup has not completed for that project.",
+        "An API startup warmup job starts for active projects with at least one document, and the API continues accepting traffic while warmup runs.",
+        "After a cold start, the first search for a project may take up to 2x the normal latency because of lazy build cost, but the request still completes successfully.",
+        "Building an index for 10,000 documents completes in under 5 seconds.",
+        "A single LexicalIndex.search() call with a 5-word query returns results in under 100ms for 10,000 documents after warmup.",
+        "A document_indexed outbox event triggers a full LexicalIndex.buildIndex() rebuild for the associated project.",
+        "Rebuilds for the same project are serialized so concurrent outbox events cannot corrupt the in-memory index.",
+        "The lexical index remains project-scoped and does not affect other projects' indexes.",
+        "A graphify_import outbox event does not trigger LexicalIndex.buildIndex(); only document_indexed events trigger BM25 rebuilds (graphify_import triggers EntityStore rebuild in US-003)."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "retrieval",
+        "lexical",
+        "persistence"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/retrieval/lexical-index.service.ts",
+        "apps/api/src/rag/rag.service.ts",
+        "apps/api/src/outbox/outbox-fan-out-registry.ts",
+        "apps/api/src/outbox/outbox.service.ts",
+        "apps/api/src/config/rag.config.ts"
+      ],
+      "suggestedCriteria": [
+        "When removeDocument() is called for an unknown document, it does not throw and results are unchanged.",
+        "Concurrent lazy builds for the same project are serialized so only one build runs and all callers receive a valid result.",
+        "If warmup fails for one project, API startup remains healthy and warmup continues for other projects.",
+        "If warmup previously failed for a project, a subsequent search lazily rebuilds and returns results.",
+        "When a project has zero documents, buildIndex(projectId, []) completes and search returns an empty array."
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "7e80049a346bc87c6bc8fe4964b3449ad183d929"
+    },
+    {
+      "id": "US-003",
+      "title": "Entity Store and Event-Driven Entity Scoring",
+      "description": "Add the retrieval-time entity store that indexes project entities from canonical ticket events and graphify imports, then exposes the query helpers needed for entity-aware ranking. The store may be in-memory in Phase 2, but it must support rebuilds from outbox fan-out and only boost documents linked to the matching entities.",
+      "acceptanceCriteria": [
+        "EntityStore.indexEntity(projectId, entity) stores the entity and its linked source + sourceId references, then makes it searchable by searchEntities().",
+        "EntityStore.searchEntities(projectId, 'auth') returns entities with 'auth' in the label or tags.",
+        "EntityStore.getByTag(projectId, 'backend') returns all entities tagged 'backend'.",
+        "Entity score is computed as |query_terms \u2229 entity.tags| / |entity.tags|, and is 0 when there is no overlap.",
+        "Entity score only boosts candidate documents linked to the matched entity, and unrelated candidate documents receive entityScore = 0.",
+        "Entities from graphify nodes with type code_module are indexed when the graphify_import outbox event fires.",
+        "Entities from tickets with type ticket are indexed when the ticket_event outbox event fires."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "retrieval",
+        "entity",
+        "outbox"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 1,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output",
+        "modelTier": "powerful",
+        "initialComplexity": "complex"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/retrieval/entity-store.service.ts",
+        "apps/api/src/outbox/outbox-fan-out-registry.ts",
+        "apps/api/src/koda-domain-writer/koda-domain-writer.service.ts",
+        "apps/api/src/events/events.module.ts",
+        "apps/api/src/rag/rag.service.ts"
+      ],
+      "suggestedCriteria": [
+        "An entity can link to multiple documents and a document can link to multiple entities via source + sourceId without cross-project leakage.",
+        "When multiple matched linked entities exist for one candidate document, entityScore is the maximum of those per-entity scores.",
+        "When a query term matches only entity label and not tags, entityScore remains 0.",
+        "When a candidate document has no linked entities, entityScore is 0."
+      ],
+      "priorErrors": [
+        "Attempt 1 failed with model tier: balanced: Reviewer contradiction: Cannot satisfy both constraints simultaneously: lint warnings are in test files (entity-store.integration.spec.ts lines 232, 247, 262, 277, 503 \u2014 non-null assertions `!`), but I am prohibited from modifying test files. The other option (modifying .eslintrc.cjs to allow non-null assertions in tests) would violate the constitution rule against modifying CI/CD config files. These warnings are in test code where `!` assertions are idiomatic and appropriate."
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "balanced",
+          "stage": "review",
+          "summary": "Failed with tier balanced, escalating to next tier",
+          "reviewFindings": [
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src/rag/entity-store.ts",
+              "line": 130,
+              "message": "AC7: handleOutboxEvent for 'ticket_event' expects payload.ticket {id, ref, title, type}, but koda-domain-writer.service.ts:89 enqueues payload {ticketId, projectId, actorId, data}. The payload shapes are mismatched, so ticket entities are never indexed.",
+              "source": "semantic-review"
+            },
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src/rag/entity-store.ts",
+              "line": 108,
+              "message": "AC6: handleOutboxEvent for 'graphify_import' expects payload.nodes, but outbox-fan-out-registry.ts:19 shows the actual graphify_import payload is {projectId, nodeCount, linkCount}. Nodes array is never included in the payload, so code_module entities are never indexed from outbox events.",
+              "source": "semantic-review"
+            }
+          ],
+          "cost": 0.23997919499999998,
+          "timestamp": "2026-04-23T17:25:10.706Z"
+        }
+      ],
+      "storyPoints": 1,
+      "storyGitRef": "d340bd3c96118f6ffda34f317496f02ca3655067"
+    },
+    {
+      "id": "US-004",
+      "title": "Intent-Weighted Fusion and Reranking",
+      "description": "Combine vector, lexical, entity, and recency signals into the final hybrid ranker with intent-specific weights and deterministic reranking. This story owns the scoring math, candidate pool fusion, normalization, and the sequential rank assignment that turns the retrieval candidates into the final ordered result set.",
+      "acceptanceCriteria": [
+        "Each intent uses the weight table defined in the spec.",
+        "For answer intent, finalScore is computed as 0.4*vector + 0.3*lexical + 0.2*entity + 0.1*recency.",
+        "Results are sorted by finalScore descending and assigned sequential rank values.",
+        "Candidates before reranking are drawn from a pool of max(100, limit * 5) split evenly between vector and lexical sources.",
+        "When a document has no entity tags, entityScore is 0 and finalScore reflects the other three scores.",
+        "When limit is not specified, limit defaults to 20.",
+        "Recency score is computed as 0.5^(days_since_indexed / 30) using the document's indexed timestamp (createdAt), then min-max normalized to [0,1] across the candidate result set.",
+        "Before fusion, each score source (vector, lexical, entity, recency) is min-max normalized to [0,1] across all candidates; a candidate missing a source score contributes 0 for that source; when all candidates share the same raw score for a source, that source normalizes to 1 for present candidates and 0 for absent candidates."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "retrieval",
+        "ranking"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002",
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 1,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "complex",
+        "modelTier": "powerful"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/retrieval/hybrid-retriever.service.ts",
+        "apps/api/src/retrieval/lexical-index.service.ts",
+        "apps/api/src/retrieval/entity-store.service.ts",
+        "apps/api/src/rag/rag.service.ts",
+        "apps/api/src/rag/rag.controller.ts"
+      ],
+      "suggestedCriteria": [
+        "When a candidate appears in both vector and lexical sources, it collapses to one stable result keyed by source + sourceId and retains both raw source scores for fusion.",
+        "When all raw scores from a source are identical, normalization yields 1 for matching candidates and 0 for candidates missing that source score.",
+        "When one source returns fewer than its candidate-pool half, the other source can fill remaining pool slots up to available candidates.",
+        "When finalScore ties occur, deterministic ordering is preserved across repeated searches via a stable tie-break key."
+      ],
+      "priorErrors": [
+        "Attempt 1 failed with model tier: balanced: Autofix exhausted: review still failing after fix attempts"
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "balanced",
+          "stage": "escalation",
+          "summary": "Failed with tier balanced, escalating to next tier",
+          "cost": 0.7233633599999999,
+          "timestamp": "2026-04-24T05:05:28.536Z"
+        }
+      ],
+      "storyPoints": 1,
+      "storyGitRef": "1f9cda99dfc72de73adfc1f8846586b26f26794a"
+    },
+    {
+      "id": "US-005",
+      "title": "Retrieval Evaluation Harness",
+      "description": "Add the offline retrieval evaluation harness that measures precision@5 over seeded queries, prints a CI-friendly table, and exposes a scriptable entrypoint for regression checks. This story also wires the harness into the monorepo scripts and CI gating so retrieval regressions fail the pipeline instead of silently shipping.",
+      "acceptanceCriteria": [
+        "EvaluationService.runQueries(queries) runs a batch of { projectId, query, intent, expectedDocIds } and returns precision@5 per query.",
+        "EvaluationService.runQueries() returns a summary with precision@5_avg, precision@5_p50, precision@5_p95, and totalQueries.",
+        "The seed dataset of 50 evaluation queries is stored in apps/api/src/retrieval/fixtures/eval-queries.json.",
+        "Running the full evaluation harness prints a table to stdout.",
+        "EvaluationService is callable via bun run evaluate:retrieval.",
+        "The CI pipeline fails when precision@5_avg drops below 0.70."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "retrieval",
+        "evaluation",
+        "ci"
+      ],
+      "dependencies": [
+        "US-004"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 1,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "complex",
+        "modelTier": "powerful"
+      },
+      "contextFiles": [
+        "package.json",
+        "apps/api/package.json",
+        "apps/api/src/retrieval/evaluation.service.ts",
+        "apps/api/src/retrieval/fixtures/eval-queries.json",
+        "apps/api/src/rag/rag.service.ts"
+      ],
+      "suggestedCriteria": [
+        "When expectedDocIds is empty for a query, precision@5 is reported as 0.",
+        "When one query execution fails, the harness continues remaining queries and still emits a summary for completed rows.",
+        "On threshold failure, output includes failing queries and missed expected document IDs so CI failures are actionable.",
+        "The evaluation command supports report-only mode (no CI failure) and gate mode (fails below threshold) with explicit exit codes."
+      ],
+      "priorErrors": [
+        "Attempt 1 failed with model tier: balanced: Autofix exhausted: review still failing after fix attempts"
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "balanced",
+          "stage": "review",
+          "summary": "Failed with tier balanced, escalating to next tier",
+          "reviewFindings": [
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src/rag/rag.controller.ts",
+              "line": 212,
+              "message": "Redundant OR condition: `q.projectId === project.id || q.projectId === project.id` - same expression appears on both sides of OR, making the second check dead code. This appears to be a typo where the second operand was intended to be a different filter condition (e.g., `q.projectId === project.id` should have been something like `expectedDocIds` check or the line was copy-pasted).",
+              "source": "semantic-review"
+            }
+          ],
+          "cost": 2.5945486200000007,
+          "timestamp": "2026-04-24T10:13:52.651Z"
+        }
+      ],
+      "storyPoints": 1,
+      "storyGitRef": "64d94c175cc703509d1b9fd0acac0c86a7e6f6c7"
+    },
+    {
+      "id": "US-006",
+      "title": "Graphify Code Result Guard and Cache",
+      "description": "Enforce the graphifyEnabled policy on retrieval results so code-source documents are suppressed for disabled projects on both the current KB path and the hybrid path. The guard must run after scoring, use a cached graphifyEnabled lookup with explicit invalidation, and preserve the no-error behavior for disabled projects that have never imported graphify data.",
+      "acceptanceCriteria": [
+        "When HybridRetrieverService.search() is called for a project where Project.graphifyEnabled is false, results with source = 'code' are silently excluded from the response.",
+        "The same guard is enforced on the current live /projects/:slug/kb/search path until that endpoint fully migrates to HybridRetrieverService.",
+        "When Project.graphifyEnabled is true, results with source = 'code' are included as normal.",
+        "The guard is applied after scoring and before the HybridSearchResult is returned.",
+        "A project with graphifyEnabled = false that has never run importGraphify returns 0 code results without error.",
+        "HybridRetrieverService caches the graphifyEnabled lookup with a 60-second TTL.",
+        "The cache is invalidated when UpdateProjectDto sets graphifyEnabled, and direct service-level invalidation is sufficient.",
+        "GraphifyEnabledGate runs in CI and asserts that searching a non-graphify project never returns source = 'code' results."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "retrieval",
+        "policy",
+        "cache"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/retrieval/hybrid-retriever.service.ts",
+        "apps/api/src/projects/projects.service.ts",
+        "apps/api/src/projects/dto/update-project.dto.ts",
+        "apps/api/src/rag/rag.controller.ts",
+        "apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When the cache entry expires, the next search reloads graphifyEnabled from persistent project state before filtering.",
+        "Concurrent graphifyEnabled updates invalidate cache entries per project without affecting other projects.",
+        "If filtering removes every candidate (all were code results), the response is an empty result set and not an error.",
+        "When filtering occurs, a structured debug-level log entry is emitted with projectId and filteredCount."
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
+    }
+  ],
+  "analysis": "Synthesis baseline uses the Proposal 2 migration shape (controller-compatible cutover on existing /projects/:slug/kb/search, then lexical/entity/warmup, then fusion, then evaluation), with Proposal 1/3 spec fidelity. Ambiguities are resolved as follows for implementation clarity: (1) entity-to-document linkage is by stable candidate identity (source + sourceId), many-to-many; (2) per-document entityScore aggregates matched linked entities by max score; (3) duplicates are collapsed by source + sourceId before fusion while retaining both raw source signals, with missing sources contributing 0; (4) timeWindow and recency both use canonical RAG indexed timestamp (createdAt/created_at), never rebuild time; (5) warmup is non-blocking, bounded, and fault-tolerant, and shares per-project serialization with lazy-build and outbox rebuild paths; (6) evaluation is implemented in this phase but should support report-only and gate modes so CI strictness can be staged until seed labels are validated."
+}

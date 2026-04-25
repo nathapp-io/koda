@@ -1,0 +1,93 @@
+import { Command } from 'commander';
+import { resolveContext } from '../config';
+import { handleApiError } from '../utils/error';
+import { OpenAPI } from '../generated';
+
+const CI_THRESHOLD = 0.70;
+
+export function evaluateCommand(program: Command): void {
+  const evaluate = new Command('evaluate');
+  evaluate
+    .description('Run retrieval evaluation harness')
+    .option('--json', 'Output raw JSON summary')
+    .action(async () => {
+      const opts = evaluate.optsWithGlobals();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ctx = await resolveContext(opts as any);
+
+      if (!ctx.apiKey) {
+        console.error('Error: API key is required');
+        process.exit(2);
+      }
+      if (!ctx.apiUrl) {
+        console.error('Error: API URL is required');
+        process.exit(2);
+      }
+
+      OpenAPI.BASE = ctx.apiUrl;
+      OpenAPI.TOKEN = ctx.apiKey;
+
+      if (!ctx.projectSlug) {
+        console.error('Error: project slug is required');
+        process.exit(2);
+      }
+
+      let ragControllerEvaluateRetrieval: (arg: { slug: string }) => Promise<unknown>;
+      try {
+        const generated = await import('../generated');
+        ragControllerEvaluateRetrieval = generated.ragControllerEvaluateRetrieval;
+      } catch {
+        console.error('Error: generated client not available');
+        process.exit(2);
+      }
+
+      try {
+        const result = await ragControllerEvaluateRetrieval({
+          slug: ctx.projectSlug,
+        }) as unknown as { data: { precisionAt5_avg: number; precisionAt5_p50: number; precisionAt5_p95: number; totalQueries: number; results: Array<{ query: string; intent: string; precisionAt5: number }> } };
+
+        const summary = result.data;
+
+        if (opts.json) {
+          console.log(JSON.stringify(summary, null, 2));
+          process.exit(0);
+        }
+
+        console.log('\n=== Retrieval Evaluation Results ===\n');
+        console.log(
+          `  precision@5_avg : ${summary.precisionAt5_avg.toFixed(3)}`
+        );
+        console.log(
+          `  precision@5_p50 : ${summary.precisionAt5_p50.toFixed(3)}`
+        );
+        console.log(
+          `  precision@5_p95 : ${summary.precisionAt5_p95.toFixed(3)}`
+        );
+        console.log(`  total_queries  : ${summary.totalQueries}`);
+        console.log('');
+
+        if (summary.results.length > 0) {
+          console.log('Per-query results:');
+          for (const r of summary.results) {
+            console.log(
+              `  [${r.precisionAt5.toFixed(2)}] "${r.query}" (intent=${r.intent})`
+            );
+          }
+          console.log('');
+        }
+
+        if (summary.precisionAt5_avg < CI_THRESHOLD) {
+          console.error(
+            `ERROR: precision@5_avg=${summary.precisionAt5_avg.toFixed(3)} is below CI threshold ${CI_THRESHOLD}`
+          );
+          process.exit(1);
+        }
+
+        process.exit(0);
+      } catch (err) {
+        handleApiError(err);
+      }
+    });
+
+  program.addCommand(evaluate);
+}

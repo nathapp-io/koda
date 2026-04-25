@@ -1,0 +1,44 @@
+[
+  {
+    "acId": "AC-1",
+    "original": "EvaluationService.runQueries(queries) runs a batch of { projectId, query, intent, expectedDocIds } and returns precision@5 per query.",
+    "refined": "EvaluationService.runQueries([{projectId: string, query: string, intent: string, expectedDocIds: string[]}]) returns Array<{query: string, precisionAt5: number}>. Each returned object has precisionAt5 as a number between 0 and 1 inclusive.",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-2",
+    "original": "EvaluationService.runQueries() returns a summary with precision@5_avg, precision@5_p50, precision@5_p95, and totalQueries.",
+    "refined": "EvaluationService.runQueries() returns an object containing precisionAt5_avg: number, precisionAt5_p50: number, precisionAt5_p95: number, and totalQueries: number. All values are finite numbers.",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-3",
+    "original": "The seed dataset of 50 evaluation queries is stored in apps/api/src/retrieval/fixtures/eval-queries.json.",
+    "refined": "File apps/api/src/retrieval/fixtures/eval-queries.json exists and contains a JSON array of exactly 50 objects. Each object has non-empty string fields: projectId, query, intent, and expectedDocIds (array of strings).",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-4",
+    "original": "Running the full evaluation harness prints a table to stdout.",
+    "refined": "Command 'bun run evaluate:retrieval' exits with code 0 and stdout contains a pipe-delimited or aligned text table with column headers including 'query' and 'precision@5' or 'precisionAt5'.",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-5",
+    "original": "EvaluationService is callable via bun run evaluate:retrieval.",
+    "refined": "Package.json scripts includes 'evaluate:retrieval' which executes EvaluationService.runQueries() against the seed dataset and produces output.",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-6",
+    "original": "The CI pipeline fails when precision@5_avg drops below 0.70.",
+    "refined": "In CI environment, when EvaluationService.runQueries() returns precisionAt5_avg < 0.70, the process exits with a non-zero exit code and the CI job status is 'failed'.",
+    "testable": true,
+    "storyId": "US-005"
+  }
+]

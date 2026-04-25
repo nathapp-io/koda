@@ -1,0 +1,84 @@
+{
+  "requestId": "658f4e47-128f-4256-9cf4-8f69432a1c83",
+  "stage": "context",
+  "totalBudgetTokens": 2048,
+  "usedTokens": 1969,
+  "includedChunks": [
+    "static-rules:api:44f0d226",
+    "static-rules:common:3fa0b420",
+    "static-rules:project-conventions:6fb98908"
+  ],
+  "excludedChunks": [],
+  "floorItems": [
+    "static-rules:api:44f0d226",
+    "static-rules:common:3fa0b420",
+    "static-rules:project-conventions:6fb98908"
+  ],
+  "digestTokens": 18,
+  "buildMs": 293,
+  "providerResults": [
+    {
+      "providerId": "static-rules",
+      "status": "ok",
+      "chunkCount": 3,
+      "durationMs": 6,
+      "tokensProduced": 1951
+    },
+    {
+      "providerId": "feature-context",
+      "status": "empty",
+      "chunkCount": 0,
+      "durationMs": 2,
+      "tokensProduced": 0
+    },
+    {
+      "providerId": "test-coverage",
+      "status": "empty",
+      "chunkCount": 0,
+      "durationMs": 6,
+      "tokensProduced": 0
+    },
+    {
+      "providerId": "session-scratch",
+      "status": "empty",
+      "chunkCount": 0,
+      "durationMs": 3,
+      "tokensProduced": 0
+    },
+    {
+      "providerId": "git-history",
+      "status": "empty",
+      "chunkCount": 0,
+      "durationMs": 290,
+      "tokensProduced": 0
+    },
+    {
+      "providerId": "code-neighbor",
+      "status": "empty",
+      "chunkCount": 0,
+      "durationMs": 42,
+      "tokensProduced": 0
+    }
+  ],
+  "repoRoot": ".",
+  "packageDir": "apps/api",
+  "chunkSummaries": {
+    "static-rules:api:44f0d226": "### api.md\n\n# API Rules — apps/api\n\n## Read-First\n- Follow `nathapp-nestjs-patterns` before implementing NestJS changes\n- Prefer Nathapp patterns over generic alternatives when both exist\n\n## Auth\n- Use `@nathapp/nestjs-auth` v3; do not use `nestjs-iam`\n- API key hashing: deterministic HMAC-SHA256 f",
+    "static-rules:common:3fa0b420": "### common.md\n\n# Common Rules — All Apps\n\n## Tooling\n- Use Bun workspace commands (`bun install`, `bun run`), not `npm`/`yarn`\n- Exception: `npx jest` is allowed for targeted Jest runs\n- Prefer repository scripts over ad-hoc one-off command variants\n\n## Git\n- Never push to remote; human reviews and ",
+    "static-rules:project-conventions:6fb98908": "### project-conventions.md\n\n# Project Conventions\n\nThis rules file is intentionally brief.\n\nPrimary architecture/context source is [`/home/williamkhoo/Desktop/projects/nathapp/koda/.nax/context.md`](/home/williamkhoo/Desktop/projects/nathapp/koda/.nax/context.md). Keep detailed stack, folder map, an"
+  },
+  "chunkEffectiveness": {
+    "static-rules:api:44f0d226": {
+      "signal": "followed",
+      "evidence": "terms found in diff"
+    },
+    "static-rules:common:3fa0b420": {
+      "signal": "followed",
+      "evidence": "terms found in diff"
+    },
+    "static-rules:project-conventions:6fb98908": {
+      "signal": "followed",
+      "evidence": "terms found in diff"
+    }
+  }
+}
