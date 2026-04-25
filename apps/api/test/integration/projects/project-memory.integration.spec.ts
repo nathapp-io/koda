@@ -38,6 +38,9 @@ describe('ProjectMemoryController', () => {
       project: {
         findUnique: jest.fn(),
       },
+      projectMember: {
+        findUnique: jest.fn(),
+      },
     },
   };
 
@@ -59,8 +62,11 @@ describe('ProjectMemoryController', () => {
   });
 
   describe('getProjectMemory', () => {
+    const mockCurrentUser = { extra: { sub: 'user-123', role: 'ADMIN' } };
+
     beforeEach(() => {
       mockProjectsService.findBySlug.mockResolvedValue({ id: 'project-123', slug: 'koda-test', key: 'KT', name: 'Koda Test', deletedAt: null });
+      mockPrismaService.client.projectMember.findUnique.mockResolvedValue({ role: 'ADMIN' });
     });
 
     it('AC1: GET /projects/:slug/memory returns all non-expired status=active memories', async () => {
@@ -98,7 +104,7 @@ describe('ProjectMemoryController', () => {
         total: 2,
       });
 
-      const result = await controller.getProjectMemory('koda-test', {});
+      const result = await controller.getProjectMemory('koda-test', {}, mockCurrentUser, {});
 
       expect(mockMemoryItemRepository.findByProjectMemory).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -134,7 +140,7 @@ describe('ProjectMemoryController', () => {
         total: 1,
       });
 
-      const result = await controller.getProjectMemory('koda-test', { kind: MemoryKind.FACT });
+      const result = await controller.getProjectMemory('koda-test', { kind: MemoryKind.FACT }, mockCurrentUser, {});
 
       expect(mockMemoryItemRepository.findByProjectMemory).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -172,7 +178,7 @@ describe('ProjectMemoryController', () => {
         total: 1,
       });
 
-      const result = await controller.getProjectMemory('koda-test', { subjects: 'ticket:123' });
+      const result = await controller.getProjectMemory('koda-test', { subjects: 'ticket:123' }, mockCurrentUser, {});
 
       expect(mockMemoryItemRepository.findByProjectMemory).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -224,7 +230,7 @@ describe('ProjectMemoryController', () => {
         total: 2,
       });
 
-      const result = await controller.getProjectMemory('koda-test', { status: 'superseded' });
+      const result = await controller.getProjectMemory('koda-test', { status: 'superseded' }, mockCurrentUser, {});
 
       const data = result.data as { items: { supersededBy?: string }[] };
       expect(data).toHaveProperty('items');
@@ -239,7 +245,7 @@ describe('ProjectMemoryController', () => {
         total: 0,
       });
 
-      await controller.getProjectMemory('other-project', {});
+      await controller.getProjectMemory('other-project', {}, mockCurrentUser, {});
 
       expect(mockMemoryItemRepository.findByProjectMemory).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -256,7 +262,7 @@ describe('ProjectMemoryController', () => {
     it('returns 404 when project does not exist', async () => {
       mockProjectsService.findBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
 
-      await expect(controller.getProjectMemory('nonexistent', {})).rejects.toThrow(NotFoundAppException);
+      await expect(controller.getProjectMemory('nonexistent', {}, mockCurrentUser, {})).rejects.toThrow(NotFoundAppException);
     });
   });
 
@@ -375,12 +381,13 @@ describe('ProjectMemoryController', () => {
         query: 'What is the status?',
       });
 
-      expect(result.semanticMemory).toBeDefined();
-      expect(Array.isArray(result.semanticMemory)).toBe(true);
-      expect(result.semanticMemory).toHaveLength(3);
-      expect(result.semanticMemory![0].subject).toBe('ticket:003');
-      expect(result.semanticMemory![1].subject).toBe('ticket:002');
-      expect(result.semanticMemory![2].subject).toBe('ticket:001');
+      const semanticMemory = result.semanticMemory;
+      expect(semanticMemory).toBeDefined();
+      expect(Array.isArray(semanticMemory)).toBe(true);
+      expect(semanticMemory).toHaveLength(3);
+      expect(semanticMemory[0].subject).toBe('ticket:003');
+      expect(semanticMemory[1].subject).toBe('ticket:002');
+      expect(semanticMemory[2].subject).toBe('ticket:001');
     });
   });
 });

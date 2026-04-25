@@ -178,7 +178,8 @@ export class MemoryItemRepository {
   }
 
   async findByProjectMemory(query: ProjectMemoryQuery): Promise<{ items: MemoryItem[]; total: number }> {
-    const page = query.page ?? 1;
+    let page = query.page ?? 1;
+    if (page < 1) page = 1;
     const limit = query.limit ?? 20;
     const skip = (page - 1) * limit;
 
@@ -194,6 +195,7 @@ export class MemoryItemRepository {
     const orderByField = query.orderBy ?? 'confidence';
     const orderByClause: Record<string, 'asc' | 'desc'>[] = [];
     if (orderByField === 'confidence') {
+      where.confidence = { not: null };
       orderByClause.push({ confidence: 'desc' }, { updatedAt: 'desc' }, { createdAt: 'desc' });
     } else if (orderByField === 'updatedAt') {
       orderByClause.push({ updatedAt: 'desc' }, { confidence: 'desc' }, { createdAt: 'desc' });
