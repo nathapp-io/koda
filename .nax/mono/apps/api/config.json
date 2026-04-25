@@ -35,5 +35,9 @@
         "**/*.test.tsx"
       ]
     }
+  },
+  "acceptance": {
+    "testFramework": "jest",
+    "command": "npx jest --runTestsByPath {{FILE}}"
   }
 }
