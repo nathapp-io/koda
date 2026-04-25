@@ -101,6 +101,8 @@ export class MemoryItemRepository {
       return this.db.memoryItem.update({ where: { id: item.id }, data: item });
     }
 
+    const memoryId = `mem-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
     return this.db.$transaction(async (client) => {
       const db = client as unknown as {
         memoryItem: {
@@ -124,11 +126,11 @@ export class MemoryItemRepository {
       if (existingActive) {
         await db.memoryItem.update({
           where: { id: existingActive.id },
-          data: { activeKey: null, status: 'superseded', supersededBy: null },
+          data: { activeKey: null, status: 'superseded', supersededBy: memoryId },
         });
       }
 
-      return db.memoryItem.create({ data: item });
+      return db.memoryItem.create({ data: { ...item, id: memoryId } });
     });
   }
 

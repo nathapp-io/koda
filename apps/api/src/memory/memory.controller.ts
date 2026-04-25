@@ -81,14 +81,16 @@ export class MemoryController {
   @Post('extract')
   @ApiOperation({ summary: 'Extract memory items from an event' })
   @ApiResponse({ status: 201, description: 'Memory items extracted' })
-  @ApiResponse({ status: 403, description: 'Access denied' })
+  @ApiResponse({ status: 403, description: 'Access denied or missing projectId' })
   async extractFromEvent(@Body() event: unknown, @Req() req: { user?: CurrentUser }) {
     const currentUser = req.user ?? null;
     const eventWithProject = event as { projectId?: string };
 
-    if (eventWithProject.projectId) {
-      await this.validateProjectAccess(eventWithProject.projectId, currentUser as CurrentUser);
+    if (!eventWithProject.projectId) {
+      throw new ForbiddenAppException({ code: 'PROJECT_NOT_FOUND' }, 'memory');
     }
+
+    await this.validateProjectAccess(eventWithProject.projectId, currentUser as CurrentUser);
 
     const items = this.extractionService.extractFromEvent(event as Parameters<typeof this.extractionService.extractFromEvent>[0]);
 
@@ -106,17 +108,14 @@ export class MemoryController {
   @Post('decisions')
   @ApiOperation({ summary: 'Record a decision' })
   @ApiResponse({ status: 201, description: 'Decision recorded' })
-  @ApiResponse({ status: 403, description: 'Access denied' })
+  @ApiResponse({ status: 403, description: 'Access denied or invalid project' })
   async recordDecision(
     @Body() decision: { projectId: string; agentId: string; decision: string; rationale?: string },
     @Req() req: { user?: CurrentUser },
   ) {
     const currentUser = req.user ?? null;
-    const role = this.getActorRole(currentUser);
 
-    if (!role || !['ADMIN', 'DEVELOPER', 'AGENT'].includes(role)) {
-      throw new ForbiddenAppException({ code: 'ACCESS_DENIED' }, 'memory');
-    }
+    await this.validateProjectAccess(decision.projectId, currentUser as CurrentUser);
 
     return this.extractionService.recordDecision(
       decision,
