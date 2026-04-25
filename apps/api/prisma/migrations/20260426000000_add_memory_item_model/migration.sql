@@ -27,7 +27,9 @@ CREATE TABLE IF NOT EXISTS "MemoryItem" (
 );
 
 -- CreateIndex: @@unique([projectId, kind, subject, predicate, activeKey])
--- Note: SQLite allows multiple NULL values in unique indexes
+-- Note: SQLite allows multiple NULL values in unique indexes. AC-2 enforcement
+-- (one active row per composite key) is guaranteed application-level via
+-- $transaction with Serializable isolation in MemoryItemRepository.upsert().
 CREATE UNIQUE INDEX IF NOT EXISTS "MemoryItem_projectId_kind_subject_predicate_activeKey_idx"
     ON "MemoryItem"("projectId", "kind", "subject", "predicate", "activeKey");
 

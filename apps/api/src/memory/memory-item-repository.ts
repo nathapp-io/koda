@@ -71,7 +71,7 @@ export class MemoryItemRepository {
         update(options: unknown): Promise<MemoryItem>;
         count(options: unknown): Promise<number>;
       };
-      $transaction<T>(fn: (client: unknown) => Promise<T>): Promise<T>;
+      $transaction<T>(fn: (client: unknown) => Promise<T>, options?: { isolationLevel: 'Serializable' }): Promise<T>;
     };
   }
 
@@ -103,35 +103,38 @@ export class MemoryItemRepository {
 
     const memoryId = `mem-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
-    return this.db.$transaction(async (client) => {
-      const db = client as unknown as {
-        memoryItem: {
-          findFirst(options: unknown): Promise<MemoryItem | null>;
-          create(options: unknown): Promise<MemoryItem>;
-          update(options: unknown): Promise<MemoryItem>;
+    return this.db.$transaction(
+      async (client) => {
+        const db = client as unknown as {
+          memoryItem: {
+            findFirst(options: unknown): Promise<MemoryItem | null>;
+            create(options: unknown): Promise<MemoryItem>;
+            update(options: unknown): Promise<MemoryItem>;
+          };
         };
-      };
 
-      const existingActive = await db.memoryItem.findFirst({
-        where: {
-          projectId: item.projectId,
-          kind: item.kind,
-          subject: item.subject,
-          predicate: item.predicate,
-          activeKey: { not: null },
-          deletedAt: null,
-        },
-      });
-
-      if (existingActive) {
-        await db.memoryItem.update({
-          where: { id: existingActive.id },
-          data: { activeKey: null, status: 'superseded', supersededBy: memoryId },
+        const existingActive = await db.memoryItem.findFirst({
+          where: {
+            projectId: item.projectId,
+            kind: item.kind,
+            subject: item.subject,
+            predicate: item.predicate,
+            activeKey: { not: null },
+            deletedAt: null,
+          },
         });
-      }
 
-      return db.memoryItem.create({ data: { ...item, id: memoryId } });
-    });
+        if (existingActive) {
+          await db.memoryItem.update({
+            where: { id: existingActive.id },
+            data: { activeKey: null, status: 'superseded', supersededBy: memoryId },
+          });
+        }
+
+        return db.memoryItem.create({ data: { ...item, id: memoryId } });
+      },
+      { isolationLevel: 'Serializable' },
+    );
   }
 
   async findActive(

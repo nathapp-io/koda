@@ -80,42 +80,57 @@ export class ExtractionService {
     }
 
     if (event.action === 'status_changed') {
-      const data = typeof event.data === 'string' ? JSON.parse(event.data as string) : event.data;
+      let data: { newStatus?: string; status?: string } = {};
+      try {
+        data = typeof event.data === 'string' ? JSON.parse(event.data) : (event.data as typeof data);
+      } catch {
+        return [];
+      }
       return [
         {
           projectId: event.projectId,
           kind: MemoryKind.FACT,
           subject: `ticket:${event.ticketId}`,
           predicate: 'status',
-          object: (data as { newStatus?: string; status?: string }).newStatus || (data as { status?: string }).status,
+          object: data.newStatus || data.status,
           confidence: 0.9,
         },
       ];
     }
 
     if (event.action === 'assigned') {
-      const data = typeof event.data === 'string' ? JSON.parse(event.data as string) : event.data;
+      let data: { assignedTo?: string } = {};
+      try {
+        data = typeof event.data === 'string' ? JSON.parse(event.data) : (event.data as typeof data);
+      } catch {
+        return [];
+      }
       return [
         {
           projectId: event.projectId,
           kind: MemoryKind.FACT,
           subject: `ticket:${event.ticketId}`,
           predicate: 'assigned_to',
-          object: (data as { assignedTo?: string }).assignedTo,
+          object: data.assignedTo,
           confidence: 0.85,
         },
       ];
     }
 
     if (event.action === 'incident_linked') {
-      const data = typeof event.data === 'string' ? JSON.parse(event.data as string) : event.data;
+      let data: { incidentId?: string } = {};
+      try {
+        data = typeof event.data === 'string' ? JSON.parse(event.data) : (event.data as typeof data);
+      } catch {
+        return [];
+      }
       return [
         {
           projectId: event.projectId,
           kind: MemoryKind.INCIDENT_PATTERN,
           subject: `ticket:${event.ticketId}`,
           predicate: 'incident',
-          object: (data as { incidentId?: string }).incidentId,
+          object: data.incidentId,
           confidence: 0.75,
         },
       ];
@@ -130,15 +145,19 @@ export class ExtractionService {
     }
 
     if (event.action === 'decision_made') {
-      const data = typeof event.data === 'string' ? JSON.parse(event.data as string) : event.data;
-      const decisionData = data as { decision?: string; rationale?: string };
+      let data: { decision?: string; rationale?: string } = {};
+      try {
+        data = typeof event.data === 'string' ? JSON.parse(event.data) : (event.data as typeof data);
+      } catch {
+        return [];
+      }
       return [
         {
           projectId: event.projectId,
           kind: MemoryKind.DECISION,
           subject: `agent:${event.agentId}`,
           predicate: 'decision',
-          object: decisionData.decision,
+          object: data.decision,
           confidence: 0.95,
         },
       ];
