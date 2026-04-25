@@ -1,6 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { Cron } from '@nestjs/schedule';
-import { PrismaService } from '@nathapp/nestjs-prisma';
+import { Injectable } from '@nestjs/common';
 import { MemoryItemRepository, MemoryItem } from './memory-item-repository';
 import { MemoryKind } from '../common/enums';
 
@@ -13,25 +11,7 @@ export interface GovernanceResult {
 
 @Injectable()
 export class MemoryGovernanceService {
-  private readonly logger = new Logger(MemoryGovernanceService.name);
-
-  constructor(
-    private readonly repository: MemoryItemRepository,
-    private readonly prisma: PrismaService,
-  ) {}
-
-  @Cron('0 3 * * *')
-  async scheduledCleanup(): Promise<void> {
-    this.logger.log('Starting scheduled memory governance cleanup');
-    const client = this.prisma.client as unknown as {
-      project: { findMany(): Promise<{ id: string }[]> };
-    };
-    const projects = await client.project.findMany();
-    for (const project of projects) {
-      await this.runCleanup(project.id);
-    }
-    this.logger.log('Completed scheduled memory governance cleanup');
-  }
+  constructor(private readonly repository: MemoryItemRepository) {}
 
   async runCleanup(projectId: string): Promise<GovernanceResult> {
     const [expiredResult, downrankedResult, deduplicatedResult, supersessionResult] = await Promise.all([
