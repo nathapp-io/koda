@@ -3,7 +3,7 @@
   "feature": "memory-phase3-semantic-memory",
   "branchName": "feat/memory-phase3-semantic-memory",
   "createdAt": "2026-04-25T14:59:35.000Z",
-  "updatedAt": "2026-04-25T19:40:49.113Z",
+  "updatedAt": "2026-04-25T20:41:09.076Z",
   "userStories": [
     {
       "id": "US-001",
@@ -200,9 +200,9 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
+      "status": "failed",
       "passes": false,
-      "attempts": 0,
+      "attempts": 1,
       "escalations": [],
       "routing": {
         "complexity": "medium",
@@ -295,7 +295,9 @@
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "complex",
+        "modelTier": "powerful"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -312,9 +314,31 @@
         "Governance run logs include timestamp, per-sub-job counts, and `durationMs`.",
         "Performance verification includes a reproducible 1000-row benchmark and query-plan capture to detect regressions at larger datasets."
       ],
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1
+      "priorErrors": [
+        "Attempt 1 failed with model tier: balanced: Reviewer contradiction: The reviewer's findings are internally contradictory to the test requirements:\n\n1. **Reviewer wants**: `success` field (not `ok`), optional `repoOwner`/`repoName`\n2. **Tests require**: `ok` field, required `repoOwner`/`repoName`\n\nThese cannot both be satisfied because:\n- Tests create instances like `new TestConnectionResultDto()` and set `.ok = true` - if field is named `success`, this fails\n- Tests validate DTOs with required `repoOwner`/`repoName` and expect validation errors when missing - if optional, test assertions fail\n\nThe test file `vcs-connection.dto.spec.ts` is the authoritative contract. All 26 tests in that file pass with my changes. My changes restore the original API that existed before commit 2993601 introduced the breaking change (changing `ok` to `success` and making fields optional).\n\nThe reviewer's concern about \"breaking consumers expecting `success`\" refers to consumers of the BROKEN API (commit 2993601), not the original correct API. My fix restores the correct original API that existed before the break was introduced."
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "balanced",
+          "stage": "review",
+          "summary": "Failed with tier balanced, escalating to next tier",
+          "reviewFindings": [
+            {
+              "ruleId": "semantic",
+              "severity": "error",
+              "file": "apps/api/src/memory/memory-governance.service.ts",
+              "line": 1,
+              "message": "AC-1: Memory governance cleanup is not scheduled to run daily at 03:00 UTC. There is no @Cron('0 3 * * *') decorator on any method, no ScheduleModule import, and no scheduler service that invokes GovernanceService.runCleanup(). The project uses @nestjs/schedule (evidenced by outbox-processor.ts:15 @Cron and rag module SchedulerRegistry usage), but GovernanceService has no scheduling wiring.",
+              "source": "semantic-review"
+            }
+          ],
+          "cost": 0.7045217399999999,
+          "timestamp": "2026-04-25T20:41:07.039Z"
+        }
+      ],
+      "storyPoints": 1,
+      "storyGitRef": "7889032b1da40f4221d8f86802c4150b2d1324d2"
     },
     {
       "id": "US-005",
