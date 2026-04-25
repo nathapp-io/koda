@@ -1,10 +1,10 @@
-import { Controller, Post, Body, Req } from '@nestjs/common';
+import { Controller, Post, Get, Body, Req, Query, Param } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ExtractionService } from './extraction.service';
 import { MemoryItemRepository } from './memory-item-repository';
-import { MemoryKind } from '../common/enums';
+import { MemoryKind, ActorRole } from '../common/enums';
 
 interface MemoryWriteInput {
   projectId: string;
@@ -65,7 +65,8 @@ export class MemoryController {
     const role = this.getActorRole(currentUser);
     if (!role) throw new ForbiddenAppException({}, 'memory');
 
-    if (!['ADMIN', 'DEVELOPER', 'AGENT'].includes(role)) {
+    const allowedRoles = ['ADMIN', 'DEVELOPER', 'AGENT'] as const;
+    if (!allowedRoles.includes(role as typeof allowedRoles[number])) {
       throw new ForbiddenAppException({ code: 'ACCESS_DENIED' }, 'memory');
     }
 
@@ -122,5 +123,58 @@ export class MemoryController {
       { id: `event-${Date.now()}` },
       this.repository,
     );
+  }
+
+  @Post()
+  @ApiOperation({ summary: 'Create a memory item' })
+  @ApiResponse({ status: 201, description: 'Memory item created' })
+  @ApiResponse({ status: 403, description: 'Access denied or project not found' })
+  async createMemory(@Body() input: MemoryWriteInput, @Req() req: { user?: CurrentUser }) {
+    const currentUser = req.user ?? null;
+    await this.validateProjectAccess(input.projectId, currentUser as CurrentUser);
+
+    const memory = await this.repository.upsert({
+      projectId: input.projectId,
+      kind: input.kind,
+      subject: input.subject,
+      predicate: input.predicate,
+      object: input.object,
+      sourceType: input.sourceType,
+      sourceId: input.sourceId,
+      confidence: input.confidence,
+      activeKey: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      status: 'active',
+    });
+
+    return memory;
+  }
+
+  @Get('project/:projectId')
+  @ApiOperation({ summary: 'List memory items for a project' })
+  @ApiResponse({ status: 200, description: 'Memory items retrieved' })
+  async listMemories(
+    @Param('projectId') projectId: string,
+    @Query('kind') kind?: MemoryKind,
+    @Query('subject') subject?: string,
+    @Query('predicate') predicate?: string,
+    @Query('activeKey') activeKey?: string,
+    @Query('sourceType') sourceType?: string,
+    @Query('sourceId') sourceId?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const result = await this.repository.findByProject({
+      projectId,
+      kind,
+      subject,
+      predicate,
+      activeKey,
+      sourceType,
+      sourceId,
+      page: page ? Number.parseInt(page, 10) : undefined,
+      limit: limit ? Number.parseInt(limit, 10) : undefined,
+    });
+
+    return result;
   }
 }

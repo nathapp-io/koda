@@ -1,5 +1,5 @@
 {
-  "requestId": "fd54993e-01a8-440f-bc13-4170f709f359",
+  "requestId": "47e9874b-df7f-44e0-a277-4b46a4d2b223",
   "stage": "review-semantic",
   "totalBudgetTokens": 6000,
   "usedTokens": 1969,
@@ -15,7 +15,7 @@
     "static-rules:project-conventions:6fb98908"
   ],
   "digestTokens": 18,
-  "buildMs": 2,
+  "buildMs": 1,
   "providerResults": [
     {
       "providerId": "static-rules",
