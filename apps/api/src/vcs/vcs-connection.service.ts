@@ -8,6 +8,7 @@ import { encryptToken, decryptToken } from '../common/utils/encryption.util';
 import { CreateVcsConnectionDto } from './dto/create-vcs-connection.dto';
 import { UpdateVcsConnectionDto } from './dto/update-vcs-connection.dto';
 import { VcsConnectionResponseDto } from './dto/vcs-connection-response.dto';
+import { TestConnectionResultDto } from './dto/test-connection-result.dto';
 import { createVcsProvider } from './factory';
 import { VcsPollingService } from './vcs-polling.service';
 
@@ -66,6 +67,23 @@ export class VcsConnectionService {
       throw new ValidationAppException({}, 'vcs');
     }
 
+    // Resolve repoOwner and repoName - either from separate fields or parsed from repoUrl
+    let repoOwner = dto.repoOwner;
+    let repoName = dto.repoName;
+
+    if (dto.repoUrl) {
+      const parsed = this.parseRepoUrl(dto.repoUrl);
+      if (!parsed) {
+        throw new ValidationAppException({}, 'vcs');
+      }
+      repoOwner = parsed.repoOwner;
+      repoName = parsed.repoName;
+    }
+
+    if (!repoOwner || !repoName) {
+      throw new ValidationAppException({}, 'vcs');
+    }
+
     // Encrypt the token
     const encryptedToken = encryptToken(dto.token, encryptionKey);
 
@@ -80,8 +98,8 @@ export class VcsConnectionService {
       data: {
         projectId,
         provider: dto.provider.toLowerCase(),
-        repoOwner: dto.repoOwner,
-        repoName: dto.repoName,
+        repoOwner,
+        repoName,
         encryptedToken,
         syncMode,
         allowedAuthors: JSON.stringify(dto.allowedAuthors ?? []),
@@ -196,7 +214,7 @@ export class VcsConnectionService {
   async testConnection(
     projectId: string,
     encryptionKey: string,
-  ): Promise<{ ok: boolean; error?: string }> {
+  ): Promise<TestConnectionResultDto> {
     const connection = (await this.db.vcsConnection.findUnique({
       where: { projectId },
     })) as VcsConnection | null;
@@ -204,6 +222,8 @@ export class VcsConnectionService {
     if (!connection) {
       throw new NotFoundAppException({}, 'vcs');
     }
+
+    const startTime = Date.now();
 
     // Decrypt the token
     let decryptedToken: string;
@@ -222,11 +242,16 @@ export class VcsConnectionService {
       });
 
       const result = await provider.testConnection();
-      return result.ok ? { ok: true } : { ok: false, error: result.error };
+      const latencyMs = Date.now() - startTime;
+      return result.ok
+        ? { success: true, latencyMs }
+        : { success: false, latencyMs, error: result.error };
     } catch (error) {
+      const latencyMs = Date.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return {
-        ok: false,
+        success: false,
+        latencyMs,
         error: errorMessage,
       };
     }
@@ -253,12 +278,14 @@ export class VcsConnectionService {
   private mapToResponseDto(connection: VcsConnection): VcsConnectionResponseDto {
     return {
       id: connection.id,
+      projectId: connection.projectId,
       provider: connection.provider,
       repoOwner: connection.repoOwner,
       repoName: connection.repoName,
       syncMode: connection.syncMode,
       allowedAuthors: this.parseAllowedAuthors(connection.allowedAuthors),
       pollingIntervalMs: connection.pollingIntervalMs,
+      webhookSecret: connection.webhookSecret,
       lastSyncedAt: connection.lastSyncedAt?.toISOString() ?? null,
       isActive: connection.isActive,
       createdAt: connection.createdAt.toISOString(),
@@ -273,5 +300,13 @@ export class VcsConnectionService {
     } catch {
       return [];
     }
+  }
+
+  private parseRepoUrl(repoUrl: string): { repoOwner: string; repoName: string } | null {
+    const match = repoUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
+    if (!match) {
+      return null;
+    }
+    return { repoOwner: match[1], repoName: match[2].replace(/\.git$/, '') };
   }
 }

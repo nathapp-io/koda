@@ -1,4 +1,5 @@
 export class TestConnectionResultDto {
-  ok: boolean;
+  success: boolean;
+  latencyMs: number;
   error?: string;
 }

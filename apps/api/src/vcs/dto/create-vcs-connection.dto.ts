@@ -14,18 +14,24 @@ export class CreateVcsConnectionDto {
   @IsEnum(VcsProviderType)
   provider: VcsProviderType;
 
+  @IsOptional()
   @IsString()
-  repoOwner: string;
+  repoOwner?: string;
 
+  @IsOptional()
   @IsString()
-  repoName: string;
+  repoName?: string;
+
+  @IsOptional()
+  @IsString()
+  repoUrl?: string;
 
   @IsString()
   token: string;
 
   @IsOptional()
-  @IsEnum(VcsSyncModeType)
-  syncMode?: VcsSyncModeType;
+  @IsString()
+  syncMode?: string;
 
   @IsOptional()
   @IsArray()

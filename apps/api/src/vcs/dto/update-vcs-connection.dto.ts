@@ -1,5 +1,4 @@
-import { IsArray, IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
-import { VcsSyncModeType } from './create-vcs-connection.dto';
+import { IsArray, IsInt, IsOptional, IsString, Min } from 'class-validator';
 
 export class UpdateVcsConnectionDto {
   @IsOptional()
@@ -7,8 +6,8 @@ export class UpdateVcsConnectionDto {
   token?: string;
 
   @IsOptional()
-  @IsEnum(VcsSyncModeType)
-  syncMode?: VcsSyncModeType;
+  @IsString()
+  syncMode?: string;
 
   @IsOptional()
   @IsArray()
@@ -19,4 +18,8 @@ export class UpdateVcsConnectionDto {
   @IsInt()
   @Min(60000)
   pollingIntervalMs?: number;
+
+  @IsOptional()
+  @IsString()
+  webhookSecret?: string;
 }
