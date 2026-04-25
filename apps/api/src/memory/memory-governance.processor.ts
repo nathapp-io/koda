@@ -19,8 +19,17 @@ export class MemoryGovernanceProcessor {
       project: { findMany(): Promise<{ id: string }[]> };
     };
     const projects = await client.project.findMany();
+    const errors: Error[] = [];
     for (const project of projects) {
-      await this.governanceService.runCleanup(project.id);
+      try {
+        await this.governanceService.runCleanup(project.id);
+      } catch (error) {
+        errors.push(error as Error);
+        this.logger.error(`Failed cleanup for project ${project.id}: ${(error as Error).message}`);
+      }
+    }
+    if (errors.length > 0) {
+      throw new Error(`Governance cleanup failed for ${errors.length} project(s): ${errors.map(e => e.message).join('; ')}`);
     }
     this.logger.log('Completed scheduled memory governance cleanup');
   }
