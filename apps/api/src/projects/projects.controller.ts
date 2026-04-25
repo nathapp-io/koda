@@ -72,11 +72,14 @@ export class ProjectsController {
         throw new ForbiddenAppException({}, 'projects');
       }
     } else {
+      if (!currentUser.extra?.sub) {
+        throw new ForbiddenAppException({}, 'projects');
+      }
       const membership = await this.db.projectMember.findUnique({
         where: {
           projectId_userId: {
             projectId,
-            userId: currentUser.extra?.sub ?? '',
+            userId: currentUser.extra.sub,
           },
         },
       });
