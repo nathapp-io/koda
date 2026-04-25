@@ -195,7 +195,7 @@ export class ExtractionService {
 
   async recordDecision(
     decision: { projectId: string; agentId: string; decision: string; rationale?: string },
-    _event: { id: string },
+    event: { id: string },
     repository: MemoryItemRepository,
     existingDecision?: { id: string },
   ): Promise<WriteResult> {
@@ -210,7 +210,21 @@ export class ExtractionService {
       });
     }
 
-    await repository.upsert({
+    const decisionEventResult = await repository.upsert({
+      id: event.id,
+      projectId: decision.projectId,
+      kind: MemoryKind.DECISION,
+      subject: `agent:${decision.agentId}`,
+      predicate: 'decision',
+      object: decision.decision,
+      sourceType: 'DecisionEvent',
+      sourceId: event.id,
+      activeKey: null,
+      status: 'active',
+      confidence: 1.0,
+    }) as { id: string };
+
+    const memoryResult = await repository.upsert({
       id: memoryId,
       projectId: decision.projectId,
       kind: MemoryKind.DECISION,
@@ -220,8 +234,8 @@ export class ExtractionService {
       activeKey: memoryId,
       status: 'active',
       confidence: 1.0,
-    });
+    }) as { id: string };
 
-    return { canonicalId: memoryId, memoryId };
+    return { canonicalId: decisionEventResult.id, memoryId: memoryResult.id };
   }
 }
