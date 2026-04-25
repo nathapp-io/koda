@@ -284,7 +284,7 @@ describe('ExtractionService', () => {
       expect(result).toHaveProperty('memoryId');
       expect(result.canonicalId).toBeDefined();
       expect(result.memoryId).toBeDefined();
-      expect(mockRepository.upsert).toHaveBeenCalledTimes(1);
+      expect(mockRepository.upsert).toHaveBeenCalledTimes(2);
     });
 
     it('AC6: recordDecision upsert includes projectId, kind=DECISION, subject, predicate, object', async () => {
@@ -327,7 +327,7 @@ describe('ExtractionService', () => {
         existingDecision,
       );
 
-      expect(mockRepository.upsert).toHaveBeenCalledTimes(2);
+      expect(mockRepository.upsert).toHaveBeenCalledTimes(3);
       expect(mockRepository.upsert).toHaveBeenNthCalledWith(
         1,
         expect.objectContaining({
