@@ -316,16 +316,16 @@ describe('ProjectMemoryController', () => {
     it('AC7: Results ordered by confidence DESC, updatedAt DESC, createdAt DESC', async () => {
       const mockMemories = [
         {
-          id: 'mem-1',
+          id: 'mem-3',
           projectId: 'project-123',
-          kind: 'FACT',
-          subject: 'ticket:001',
-          predicate: 'status',
-          object: 'CLOSED',
+          kind: 'DECISION',
+          subject: 'ticket:003',
+          predicate: 'approved',
+          object: 'true',
           status: 'active',
-          confidence: 0.5,
-          createdAt: new Date('2024-01-01'),
-          updatedAt: new Date('2024-01-10'),
+          confidence: 0.9,
+          createdAt: new Date('2024-01-03'),
+          updatedAt: new Date('2024-01-08'),
         },
         {
           id: 'mem-2',
@@ -340,16 +340,16 @@ describe('ProjectMemoryController', () => {
           updatedAt: new Date('2024-01-05'),
         },
         {
-          id: 'mem-3',
+          id: 'mem-1',
           projectId: 'project-123',
-          kind: 'DECISION',
-          subject: 'ticket:003',
-          predicate: 'approved',
-          object: 'true',
+          kind: 'FACT',
+          subject: 'ticket:001',
+          predicate: 'status',
+          object: 'CLOSED',
           status: 'active',
-          confidence: 0.9,
-          createdAt: new Date('2024-01-03'),
-          updatedAt: new Date('2024-01-08'),
+          confidence: 0.5,
+          createdAt: new Date('2024-01-01'),
+          updatedAt: new Date('2024-01-10'),
         },
       ];
 
@@ -371,10 +371,16 @@ describe('ProjectMemoryController', () => {
       const result = await contextBuilderService.getProjectContext({
         projectId: 'project-123',
         actorId: 'actor-1',
-        intent: 'plan',
+        intent: 'answer',
+        query: 'What is the status?',
       });
 
-      expect(result.semanticMemory).toBeUndefined();
+      expect(result.semanticMemory).toBeDefined();
+      expect(Array.isArray(result.semanticMemory)).toBe(true);
+      expect(result.semanticMemory).toHaveLength(3);
+      expect(result.semanticMemory![0].subject).toBe('ticket:003');
+      expect(result.semanticMemory![1].subject).toBe('ticket:002');
+      expect(result.semanticMemory![2].subject).toBe('ticket:001');
     });
   });
 });
