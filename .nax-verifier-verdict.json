@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "approved": true,
+  "tests": {
+    "allPassing": true,
+    "passCount": 32,
+    "failCount": 0
+  },
+  "testModifications": {
+    "detected": false,
+    "files": [],
+    "legitimate": true,
+    "reasoning": "No test files were modified by the implementer"
+  },
+  "acceptanceCriteria": {
+    "allMet": true,
+    "criteria": [
+      {
+        "criterion": "AC1: extractFromEvent(ticket_event action=status_changed) returns MemoryItem with kind=FACT, subject=ticket:{id}, predicate=status",
+        "met": true
+      },
+      {
+        "criterion": "AC2: extractFromEvent(ticket_event action=assigned) returns MemoryItem with kind=FACT, subject=ticket:{id}, predicate=assigned_to",
+        "met": true
+      },
+      {
+        "criterion": "AC3: extractFromEvent(ticket_event action=incident_linked) returns MemoryItem with kind=INCIDENT_PATTERN linking ticket to affected service",
+        "met": true
+      },
+      {
+        "criterion": "AC4: extractFromEvent(agent_event) returns empty array when metadata contains no decision_made key",
+        "met": true
+      },
+      {
+        "criterion": "AC5: extractFromEvent(event) returns empty array and logs a warning when a supported event type has an incomplete payload",
+        "met": true
+      },
+      {
+        "criterion": "AC6: recordDecision(data) creates a canonical DecisionEvent, calls MemoryItemRepository.upsert(), and returns WriteResult with canonicalId and derived memory ID",
+        "met": true
+      },
+      {
+        "criterion": "AC7: recordDecision with a topic that already has an active decision marks the old decision as superseded (sets supersededBy + status='superseded')",
+        "met": true
+      },
+      {
+        "criterion": "AC8: extractFromEvent is called by OutboxFanOutRegistry.dispatch() when event type is ticket_event or agent_event",
+        "met": true
+      },
+      {
+        "criterion": "AC9: Extracted items have confidence >= 0.5 and ttlAt = null (never expires by default)",
+        "met": true
+      },
+      {
+        "criterion": "AC10: Items from explicit recordDecision have confidence = 1.0",
+        "met": true
+      }
+    ]
+  },
+  "quality": {
+    "rating": "good",
+    "issues": []
+  },
+  "fixes": [],
+  "reasoning": "All 32 story-scoped tests pass (15 behavior + 11 unit + 6 integration). Implementation is clean: ExtractionService handles ticket/agent/decision events with correct kinds, predicates, and confidence values; MemoryItemRepository handles upserts with activeKey deduplication and superseded transitions; OutboxFanOutRegistry wires ticket_event and agent_event to extraction. No test modifications detected. Lint and type-check are clean."
+}
