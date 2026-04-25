@@ -5,9 +5,10 @@ import { OutboxFanOutRegistry } from './outbox-fan-out-registry';
 import { OutboxProcessor } from './outbox-processor';
 import { AdminController } from './admin.controller';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
+import { MemoryModule } from '../memory/memory.module';
 
 @Module({
-  imports: [PrismaModule, ScheduleModule],
+  imports: [PrismaModule, ScheduleModule, MemoryModule],
   controllers: [AdminController],
   providers: [OutboxService, OutboxFanOutRegistry, OutboxProcessor],
   exports: [OutboxService, OutboxFanOutRegistry],

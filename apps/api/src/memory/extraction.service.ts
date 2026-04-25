@@ -75,7 +75,12 @@ export class ExtractionService {
   }
 
   private extractTicketEvent(event: TicketEvent): MemoryExtractedItem[] {
-    if (!event.ticketId || !event.projectId) {
+    if (!event.projectId) {
+      return [];
+    }
+
+    if (!event.ticketId) {
+      console.warn(`Incomplete ticket_event payload: missing ticketId, event id: ${event.id}`);
       return [];
     }
 
@@ -94,6 +99,7 @@ export class ExtractionService {
           predicate: 'status',
           object: data.newStatus || data.status,
           confidence: 0.9,
+          ttlAt: null,
         },
       ];
     }
@@ -113,6 +119,7 @@ export class ExtractionService {
           predicate: 'assigned_to',
           object: data.assignedTo,
           confidence: 0.85,
+          ttlAt: null,
         },
       ];
     }
@@ -132,6 +139,7 @@ export class ExtractionService {
           predicate: 'incident',
           object: data.incidentId,
           confidence: 0.75,
+          ttlAt: null,
         },
       ];
     }
