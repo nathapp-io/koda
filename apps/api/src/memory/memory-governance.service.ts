@@ -44,7 +44,7 @@ export class MemoryGovernanceService {
       hasMore = result.data.length === 100;
 
       const expiredItems = result.data.filter(
-        (item) => item.ttlAt && item.ttlAt < now && item.status === 'active',
+        (item) => item.ttlAt && item.ttlAt < now,
       );
 
       for (const item of expiredItems) {
@@ -85,8 +85,7 @@ export class MemoryGovernanceService {
         (item) =>
           item.createdAt < ninetyDaysAgo &&
           item.confidence !== undefined &&
-          item.confidence < 0.3 &&
-          item.status === 'active',
+          item.confidence < 0.3,
       );
 
       for (const item of staleItems) {
@@ -120,39 +119,48 @@ export class MemoryGovernanceService {
 
       hasMore = result.data.length === 100;
 
-      const activeItems = result.data.filter((item) => item.status === 'active' && item.activeKey);
-
-      const groups = new Map<string, MemoryItem[]>();
-      for (const item of activeItems) {
+      // Group by (kind, subject, predicate) — skip items already superseded in this run
+      const groups = new Map<string, { item: MemoryItem; supersededInRun: boolean }[]>();
+      for (const item of result.data) {
         const key = `${item.kind}:${item.subject}:${item.predicate}`;
         if (!groups.has(key)) {
           groups.set(key, []);
         }
         const group = groups.get(key);
         if (group) {
-          group.push(item);
+          group.push({ item, supersededInRun: false });
         }
       }
 
-      for (const [, items] of groups) {
-        if (items.length > 1) {
-          const sorted = [...items].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
-          const activeCandidate = sorted.find((item) => item.status === 'active' && item.activeKey);
-          if (!activeCandidate) {
-            continue;
-          }
-          for (let i = 1; i < sorted.length; i++) {
-            if (sorted[i].status === 'active' && sorted[i].activeKey) {
-              await this.repository.upsert({
-                ...sorted[i],
-                id: sorted[i].id,
-                kind: sorted[i].kind as MemoryKind,
-                status: 'superseded',
-                supersededBy: activeCandidate.id,
-                activeKey: null,
-              });
-              supersededCount++;
-            }
+      for (const [, group] of groups) {
+        if (group.length <= 1) {
+          continue;
+        }
+
+        const sorted = [...group].sort((a, b) => (b.item.confidence ?? 0) - (a.item.confidence ?? 0));
+
+        // Find the first item that is genuinely still active
+        const activeCandidate = sorted.find(
+          ({ item, supersededInRun }) => item.activeKey && !supersededInRun,
+        );
+        if (!activeCandidate) {
+          continue;
+        }
+
+        // Mark lower-confidence items as superseded (skip already superseded in this run)
+        for (let i = 1; i < sorted.length; i++) {
+          const entry = sorted[i];
+          if (entry.item.activeKey && !entry.supersededInRun) {
+            await this.repository.upsert({
+              ...entry.item,
+              id: entry.item.id,
+              kind: entry.item.kind as MemoryKind,
+              status: 'superseded',
+              supersededBy: activeCandidate.item.id,
+              activeKey: null,
+            });
+            entry.supersededInRun = true;
+            supersededCount++;
           }
         }
       }
@@ -179,21 +187,39 @@ export class MemoryGovernanceService {
 
       hasMore = result.data.length === 100;
 
-      const activeDecisions = result.data.filter((item) => item.status === 'active' && item.activeKey);
+      // Group by topic (subject + predicate) — only apply supersession within each topic group
+      const topicGroups = new Map<string, MemoryItem[]>();
+      for (const item of result.data) {
+        const topicKey = `${item.subject}:${item.predicate}`;
+        if (!topicGroups.has(topicKey)) {
+          topicGroups.set(topicKey, []);
+        }
+        const group = topicGroups.get(topicKey);
+        if (group) {
+          group.push(item);
+        }
+      }
 
-      if (activeDecisions.length > 1) {
-        const sorted = [...activeDecisions].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      for (const [, topicDecisions] of topicGroups) {
+        if (topicDecisions.length <= 1) {
+          continue;
+        }
+
+        const sorted = [...topicDecisions].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
         const newest = sorted[0];
 
+        // Only supersede items that are still active and not the newest
         for (let i = 1; i < sorted.length; i++) {
-          await this.repository.upsert({
-            ...sorted[i],
-            id: sorted[i].id,
-            kind: sorted[i].kind as MemoryKind,
-            status: 'superseded',
-            supersededBy: newest.id,
-          });
-          supersededCount++;
+          if (sorted[i].activeKey) {
+            await this.repository.upsert({
+              ...sorted[i],
+              id: sorted[i].id,
+              kind: sorted[i].kind as MemoryKind,
+              status: 'superseded',
+              supersededBy: newest.id,
+            });
+            supersededCount++;
+          }
         }
       }
 
