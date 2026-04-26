@@ -188,9 +188,10 @@ export class MemoryItemRepository {
     if (query.kind) where.kind = query.kind;
     if (query.subject && query.subject.trim().length > 0) where.subject = { startsWith: query.subject };
     if (query.status) where.status = query.status;
-    else where.status = 'active';
-
-    where.ttlAt = { equals: null };
+    else {
+      where.status = 'active';
+      where.ttlAt = { equals: null };
+    }
 
     const orderByField = query.orderBy ?? 'confidence';
     const orderByClause: Record<string, 'asc' | 'desc'>[] = [];
