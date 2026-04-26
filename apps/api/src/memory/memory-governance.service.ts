@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { MemoryItemRepository, MemoryItem } from './memory-item-repository';
 import { MemoryKind } from '../common/enums';
 
@@ -9,8 +9,16 @@ export interface GovernanceResult {
   supersessionCount: number;
 }
 
+const PAGE_SIZE = 100;
+// Safety bound — terminates pagination if a repository ever returns full pages
+// indefinitely (e.g. a misbehaving query or stale cache), so a single project's
+// cleanup cannot exhaust the heap.
+const MAX_PAGES = 10_000;
+
 @Injectable()
 export class MemoryGovernanceService {
+  private readonly logger = new Logger(MemoryGovernanceService.name);
+
   constructor(private readonly repository: MemoryItemRepository) {}
 
   async runCleanup(projectId: string): Promise<GovernanceResult> {
@@ -34,14 +42,18 @@ export class MemoryGovernanceService {
     let hasMore = true;
 
     do {
+      if (page > MAX_PAGES) {
+        this.logger.warn(`expireMemories: pagination exceeded ${MAX_PAGES} pages for project ${projectId}`);
+        break;
+      }
       const result = await this.repository.findByProject({
         projectId,
         status: 'active',
         page,
-        limit: 100,
+        limit: PAGE_SIZE,
       });
 
-      hasMore = result.data.length === 100;
+      hasMore = result.data.length >= PAGE_SIZE;
 
       const expiredItems = result.data.filter(
         (item) => item.ttlAt && item.ttlAt < now,
@@ -72,14 +84,18 @@ export class MemoryGovernanceService {
     let hasMore = true;
 
     do {
+      if (page > MAX_PAGES) {
+        this.logger.warn(`downrankStaleLowConfidence: pagination exceeded ${MAX_PAGES} pages for project ${projectId}`);
+        break;
+      }
       const result = await this.repository.findByProject({
         projectId,
         status: 'active',
         page,
-        limit: 100,
+        limit: PAGE_SIZE,
       });
 
-      hasMore = result.data.length === 100;
+      hasMore = result.data.length >= PAGE_SIZE;
 
       const staleItems = result.data.filter(
         (item) =>
@@ -110,14 +126,18 @@ export class MemoryGovernanceService {
     let hasMore = true;
 
     do {
+      if (page > MAX_PAGES) {
+        this.logger.warn(`deduplicate: pagination exceeded ${MAX_PAGES} pages for project ${projectId}`);
+        break;
+      }
       const result = await this.repository.findByProject({
         projectId,
         status: 'active',
         page,
-        limit: 100,
+        limit: PAGE_SIZE,
       });
 
-      hasMore = result.data.length === 100;
+      hasMore = result.data.length >= PAGE_SIZE;
 
       // Group by (kind, subject, predicate) — skip items already superseded in this run
       const groups = new Map<string, { item: MemoryItem; supersededInRun: boolean }[]>();
@@ -177,15 +197,19 @@ export class MemoryGovernanceService {
     let hasMore = true;
 
     do {
+      if (page > MAX_PAGES) {
+        this.logger.warn(`applySupersession: pagination exceeded ${MAX_PAGES} pages for project ${projectId}`);
+        break;
+      }
       const result = await this.repository.findByProject({
         projectId,
         kind: MemoryKind.DECISION,
         status: 'active',
         page,
-        limit: 100,
+        limit: PAGE_SIZE,
       });
 
-      hasMore = result.data.length === 100;
+      hasMore = result.data.length >= PAGE_SIZE;
 
       // Group by topic (subject + predicate) — only apply supersession within each topic group
       const topicGroups = new Map<string, MemoryItem[]>();

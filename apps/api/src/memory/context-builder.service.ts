@@ -127,16 +127,19 @@ export class ContextBuilderService {
       const memoryResult = await this.memoryItemRepository.findByProjectMemory({
         projectId,
       });
-      response.semanticMemory = memoryResult.items.map((item: MemoryItem) => ({
-        id: item.id,
-        kind: item.kind,
-        subject: item.subject,
-        predicate: item.predicate,
-        object: item.object,
-        confidence: item.confidence,
-        createdAt: item.createdAt,
-        updatedAt: item.updatedAt,
-      }));
+      response.semanticMemory = memoryResult.items
+        .map((item: MemoryItem) => ({
+          id: item.id,
+          kind: item.kind,
+          subject: item.subject,
+          predicate: item.predicate,
+          object: item.object,
+          confidence: item.confidence,
+          createdAt: item.createdAt,
+          updatedAt: item.updatedAt,
+        }))
+        .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
+        .slice(0, 10);
     } catch (error) {
       this.logger.warn(`Failed to get project memory: ${error instanceof Error ? error.message : String(error)}`);
       response.semanticMemory = [];

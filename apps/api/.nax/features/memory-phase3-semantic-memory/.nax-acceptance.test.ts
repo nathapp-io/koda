@@ -1,4 +1,5 @@
-import { Test, TestingModule } from '@nestjs/testing';
+// REFACTORED: bypasses NestJS TestingModule entirely. Services are instantiated directly
+// with mock dependencies, which avoids the per-test DI-container heap cost that was causing OOM.
 import { MemoryItemRepository } from '../../../src/memory/memory-item-repository';
 import { MemoryGovernanceService } from '../../../src/memory/memory-governance.service';
 import { MemoryGovernanceProcessor } from '../../../src/memory/memory-governance.processor';
@@ -6,7 +7,6 @@ import { ExtractionService } from '../../../src/memory/extraction.service';
 import { ContextBuilderService } from '../../../src/memory/context-builder.service';
 import { TimelineService } from '../../../src/memory/timeline.service';
 import { OutboxFanOutRegistry } from '../../../src/outbox/outbox-fan-out-registry';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { MemoryKind } from '../../../src/common/enums';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -127,24 +127,8 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         return fn(txClient);
       });
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      // Test 1: NestJS injection
-      const repo = module.get(MemoryItemRepository);
-      console.log('NESTJS repo.prisma:', (repo as any).prisma);
-      
-      // Test 2: Direct instantiation
-      const mockPrismaSvc = { client: mockClient };
-      const directRepo = new MemoryItemRepository(mockPrismaSvc as any);
-      console.log('DIRECT repo.prisma:', (directRepo as any).prisma);
-      console.log('DIRECT repo.prisma.client:', (directRepo as any).prisma?.client);
-      console.log('DIRECT repo.prisma.client.memoryItem:', (directRepo as any).prisma?.client?.memoryItem);
-      
+      const repo = new MemoryItemRepository({ client: mockClient } as any);
       const result = await repo.upsert({
         projectId: 'proj-1',
         kind: MemoryKindEnum.FACT as any,
@@ -186,14 +170,8 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         });
       });
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      const repo = module.get(MemoryItemRepository);
+      const repo = new MemoryItemRepository({ client: mockClient } as any);
       await repo.upsert({
         projectId: 'proj-1',
         kind: MemoryKindEnum.FACT as any,
@@ -219,14 +197,8 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       mockClient.memoryItem.findMany.mockResolvedValue(items);
       mockClient.memoryItem.count.mockResolvedValue(1);
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      const repo = module.get(MemoryItemRepository);
+      const repo = new MemoryItemRepository({ client: mockClient } as any);
       const result = await repo.findByProject({ projectId: 'proj-1', page: 1, limit: 20 });
 
       expect(result).toHaveProperty('data');
@@ -242,14 +214,8 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       mockClient.memoryItem.findMany.mockResolvedValue([]);
       mockClient.memoryItem.count.mockResolvedValue(0);
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      const repo = module.get(MemoryItemRepository);
+      const repo = new MemoryItemRepository({ client: mockClient } as any);
       await repo.findByProject({
         projectId: 'proj-1',
         kind: MemoryKindEnum.FACT as any,
@@ -296,14 +262,8 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         });
       });
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      const repo = module.get(MemoryItemRepository);
+      const repo = new MemoryItemRepository({ client: mockClient } as any);
       const result = await repo.upsert({
         projectId: 'proj-1',
         kind: MemoryKindEnum.FACT as any,
@@ -339,14 +299,8 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         });
       });
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      const repo = module.get(MemoryItemRepository);
+      const repo = new MemoryItemRepository({ client: mockClient } as any);
       await repo.upsert({
         id: 'existing-1',
         projectId: 'proj-1',
@@ -376,14 +330,8 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
 
       mockClient.memoryItem.findFirst.mockResolvedValue(activeItem);
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      const repo = module.get(MemoryItemRepository);
+      const repo = new MemoryItemRepository({ client: mockClient } as any);
       const result = await repo.findActive('proj-1', 'FACT', 'ticket:1', 'status');
 
       expect(result).toBeDefined();
@@ -397,14 +345,8 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       const mockClient = createMockPrismaClient();
       mockClient.memoryItem.findFirst.mockResolvedValue(null);
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      const repo = module.get(MemoryItemRepository);
+      const repo = new MemoryItemRepository({ client: mockClient } as any);
       const result = await repo.findActive('proj-1', 'FACT', 'ticket:1', 'status');
 
       expect(result).toBeNull();
@@ -449,14 +391,8 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
   describe('AC-8: MemoryItem source tracking from event handlers', () => {
     it('MemoryItemRepository has upsert method', async () => {
       const mockClient = createMockPrismaClient();
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      const repo = module.get(MemoryItemRepository);
+      const repo = new MemoryItemRepository({ client: mockClient } as any);
       expect(typeof repo.upsert).toBe('function');
     });
   });
@@ -466,14 +402,8 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       const mockClient = createMockPrismaClient();
       mockClient.memoryItem.update.mockResolvedValue({ id: 'mem-1', activeKey: null, status: 'rejected' });
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      const repo = module.get(MemoryItemRepository);
+      const repo = new MemoryItemRepository({ client: mockClient } as any);
       await repo.reject('mem-1');
 
       expect(mockClient.memoryItem.update).toHaveBeenCalledWith({
@@ -484,12 +414,12 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
   });
 
   describe('AC-10: extractFromEvent status_changed returns FACT memory', () => {
-    it('extracts memory item for ticket status_changed', async () => {
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [ExtractionService],
-      }).compile();
+    beforeAll(async () => {
 
-      const service = module.get(ExtractionService);
+    });
+
+    it('extracts memory item for ticket status_changed', async () => {
+      const service = new ExtractionService();
       const result = service.extractFromEvent({
         type: 'ticket_event',
         id: 'evt-1',
@@ -512,12 +442,12 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
   });
 
   describe('AC-11: extractFromEvent assigned returns FACT memory with object', () => {
-    it('extracts memory item for ticket assigned', async () => {
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [ExtractionService],
-      }).compile();
+    beforeAll(async () => {
 
-      const service = module.get(ExtractionService);
+    });
+
+    it('extracts memory item for ticket assigned', async () => {
+      const service = new ExtractionService();
       const result = service.extractFromEvent({
         type: 'ticket_event',
         id: 'evt-2',
@@ -538,12 +468,12 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
   });
 
   describe('AC-12: extractFromEvent incident_linked returns INCIDENT_PATTERN', () => {
-    it('extracts INCIDENT_PATTERN memory for incident_linked', async () => {
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [ExtractionService],
-      }).compile();
+    beforeAll(async () => {
 
-      const service = module.get(ExtractionService);
+    });
+
+    it('extracts INCIDENT_PATTERN memory for incident_linked', async () => {
+      const service = new ExtractionService();
       const result = service.extractFromEvent({
         type: 'ticket_event',
         id: 'evt-3',
@@ -564,12 +494,12 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
   });
 
   describe('AC-13: extractFromEvent agent_event returns empty array', () => {
-    it('returns empty array for agent_event without decision_made action', async () => {
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [ExtractionService],
-      }).compile();
+    beforeAll(async () => {
 
-      const service = module.get(ExtractionService);
+    });
+
+    it('returns empty array for agent_event without decision_made action', async () => {
+      const service = new ExtractionService();
       const result = service.extractFromEvent({
         type: 'agent_event',
         id: 'evt-4',
@@ -586,12 +516,12 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
   });
 
   describe('AC-14: extractFromEvent incomplete ticket_event returns empty with warning', () => {
-    it('returns empty array when ticketId is missing', async () => {
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [ExtractionService],
-      }).compile();
+    beforeAll(async () => {
 
-      const service = module.get(ExtractionService);
+    });
+
+    it('returns empty array when ticketId is missing', async () => {
+      const service = new ExtractionService();
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
       const result = service.extractFromEvent({
@@ -615,12 +545,12 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
   });
 
   describe('AC-15: recordDecision creates DECISION kind memory item', () => {
-    it('recordDecision calls upsert with kind=DECISION', async () => {
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [ExtractionService],
-      }).compile();
+    beforeAll(async () => {
 
-      const service = module.get(ExtractionService);
+    });
+
+    it('recordDecision calls upsert with kind=DECISION', async () => {
+      const service = new ExtractionService();
       const mockRepo = createMockMemoryItemRepository();
       mockRepo.upsert
         .mockResolvedValueOnce({ id: 'dec-canonical-1' })
@@ -645,12 +575,12 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
   });
 
   describe('AC-16: recordDecision supersedes existing decision when provided', () => {
-    it('supersedes existing decision when existingDecision is provided', async () => {
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [ExtractionService],
-      }).compile();
+    beforeAll(async () => {
 
-      const service = module.get(ExtractionService);
+    });
+
+    it('supersedes existing decision when existingDecision is provided', async () => {
+      const service = new ExtractionService();
       const mockRepo = createMockMemoryItemRepository();
       mockRepo.upsert
         .mockResolvedValueOnce({ id: 'existing-decision-id' })
@@ -703,12 +633,12 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
   });
 
   describe('AC-18: All extractFromEvent results have confidence >= 0.5 and ttlAt === null', () => {
-    it('all ticket_event extractions meet confidence >= 0.5 and ttlAt === null', async () => {
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [ExtractionService],
-      }).compile();
+    beforeAll(async () => {
 
-      const service = module.get(ExtractionService);
+    });
+
+    it('all ticket_event extractions meet confidence >= 0.5 and ttlAt === null', async () => {
+      const service = new ExtractionService();
 
       const statusResult = service.extractFromEvent({
         type: 'ticket_event',
@@ -753,12 +683,12 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
   });
 
   describe('AC-19: recordDecision sets confidence to 1.0', () => {
-    it('recordDecision upsert calls include confidence 1.0', async () => {
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [ExtractionService],
-      }).compile();
+    beforeAll(async () => {
 
-      const service = module.get(ExtractionService);
+    });
+
+    it('recordDecision upsert calls include confidence 1.0', async () => {
+      const service = new ExtractionService();
       const mockRepo = createMockMemoryItemRepository();
       mockRepo.upsert
         .mockResolvedValueOnce({ id: 'dec-canonical-1', confidence: 1.0 })
@@ -800,14 +730,8 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       mockClient.memoryItem.findMany.mockResolvedValue(activeItems);
       mockClient.memoryItem.count.mockResolvedValue(1);
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      const repo = module.get(MemoryItemRepository);
+      const repo = new MemoryItemRepository({ client: mockClient } as any);
       const result = await repo.findByProjectMemory({
         projectId: 'proj-1',
         limit: 20,
@@ -837,14 +761,8 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       mockClient.memoryItem.findMany.mockResolvedValue(factItems);
       mockClient.memoryItem.count.mockResolvedValue(1);
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      const repo = module.get(MemoryItemRepository);
+      const repo = new MemoryItemRepository({ client: mockClient } as any);
       await repo.findByProjectMemory({
         projectId: 'proj-1',
         kind: MemoryKindEnum.FACT as any,
@@ -880,14 +798,8 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       mockClient.memoryItem.findMany.mockResolvedValue(items);
       mockClient.memoryItem.count.mockResolvedValue(1);
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      const repo = module.get(MemoryItemRepository);
+      const repo = new MemoryItemRepository({ client: mockClient } as any);
       await repo.findByProjectMemory({
         projectId: 'proj-1',
         subject: 'ticket:123',
@@ -924,14 +836,8 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       mockClient.memoryItem.findMany.mockResolvedValue(supersededItems);
       mockClient.memoryItem.count.mockResolvedValue(1);
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      const repo = module.get(MemoryItemRepository);
+      const repo = new MemoryItemRepository({ client: mockClient } as any);
       const result = await repo.findByProjectMemory({
         projectId: 'proj-1',
         status: 'superseded',
@@ -948,14 +854,8 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       mockClient.memoryItem.findMany.mockResolvedValue([]);
       mockClient.memoryItem.count.mockResolvedValue(0);
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      const repo = module.get(MemoryItemRepository);
+      const repo = new MemoryItemRepository({ client: mockClient } as any);
       await repo.findByProjectMemory({
         projectId: 'proj-slug-a',
         limit: 20,
@@ -977,15 +877,8 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       const mockRepo = createMockMemoryItemRepository();
       mockRepo.findByProjectMemory.mockResolvedValue({ items: [], total: 0 });
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          ContextBuilderService,
-          { provide: TimelineService, useValue: mockTimelineSvc },
-          { provide: MemoryItemRepository, useValue: mockRepo },
-        ],
-      }).compile();
 
-      const service = module.get(ContextBuilderService);
+      const service = new ContextBuilderService(mockTimelineSvc as any, mockRepo as any);
       const result = await service.getProjectContext({
         projectId: 'proj-1',
         actorId: 'actor-1',
@@ -995,7 +888,9 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       expect(result).toHaveProperty('semanticMemory');
       expect(Array.isArray(result.semanticMemory)).toBe(true);
     });
+  });
 
+  describe('AC-25b: semanticMemory contains memory items when data exists', () => {
     it('semanticMemory contains memory items when data exists', async () => {
       const mockTimelineSvc = createMockTimelineService();
       const mockRepo = createMockMemoryItemRepository();
@@ -1013,15 +908,8 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       ];
       mockRepo.findByProjectMemory.mockResolvedValue({ items: memoryItems, total: 1 });
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          ContextBuilderService,
-          { provide: TimelineService, useValue: mockTimelineSvc },
-          { provide: MemoryItemRepository, useValue: mockRepo },
-        ],
-      }).compile();
 
-      const service = module.get(ContextBuilderService);
+      const service = new ContextBuilderService(mockTimelineSvc as any, mockRepo as any);
       const result = await service.getProjectContext({
         projectId: 'proj-1',
         actorId: 'actor-1',
@@ -1046,14 +934,8 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       mockClient.memoryItem.findMany.mockResolvedValue(items);
       mockClient.memoryItem.count.mockResolvedValue(3);
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      const repo = module.get(MemoryItemRepository);
+      const repo = new MemoryItemRepository({ client: mockClient } as any);
       const result = await repo.findByProjectMemory({
         projectId: 'proj-1',
         limit: 20,
@@ -1093,15 +975,9 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       mockClient.memoryItem.findMany.mockResolvedValue([]);
       mockClient.memoryItem.count.mockResolvedValue(0);
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          MemoryGovernanceService,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      const governance = module.get(MemoryGovernanceService);
+      const __repo = new MemoryItemRepository({ client: mockClient } as any);
+      const governance = new MemoryGovernanceService(__repo);
       const result = await governance.runCleanup('proj-1');
 
       expect(result).toHaveProperty('expiredCount');
@@ -1146,15 +1022,9 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         });
       });
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          MemoryGovernanceService,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      const governance = module.get(MemoryGovernanceService);
+      const __repo = new MemoryItemRepository({ client: mockClient } as any);
+      const governance = new MemoryGovernanceService(__repo);
       const result = await governance.expireMemories('proj-1');
 
       expect(result).toHaveProperty('count');
@@ -1193,15 +1063,9 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         });
       });
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          MemoryGovernanceService,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      const governance = module.get(MemoryGovernanceService);
+      const __repo = new MemoryItemRepository({ client: mockClient } as any);
+      const governance = new MemoryGovernanceService(__repo);
       const result = await governance.downrankStaleLowConfidence('proj-1');
 
       expect(result).toHaveProperty('count');
@@ -1237,15 +1101,9 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         });
       });
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          MemoryGovernanceService,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      const governance = module.get(MemoryGovernanceService);
+      const __repo = new MemoryItemRepository({ client: mockClient } as any);
+      const governance = new MemoryGovernanceService(__repo);
       const result = await governance.deduplicate('proj-1');
 
       expect(result).toHaveProperty('count');
@@ -1284,15 +1142,9 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         });
       });
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          MemoryGovernanceService,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      const governance = module.get(MemoryGovernanceService);
+      const __repo = new MemoryItemRepository({ client: mockClient } as any);
+      const governance = new MemoryGovernanceService(__repo);
       const result = await governance.applySupersession('proj-1');
 
       expect(result).toHaveProperty('count');
@@ -1306,15 +1158,9 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       mockClient.memoryItem.findMany.mockResolvedValue([]);
       mockClient.memoryItem.count.mockResolvedValue(0);
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          MemoryGovernanceService,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      const governance = module.get(MemoryGovernanceService);
+      const __repo = new MemoryItemRepository({ client: mockClient } as any);
+      const governance = new MemoryGovernanceService(__repo);
       const result1 = await governance.runCleanup('proj-1');
       const result2 = await governance.runCleanup('proj-1');
 
@@ -1341,7 +1187,12 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         updatedAt: new Date(),
       }));
 
-      mockClient.memoryItem.findMany.mockResolvedValue(items);
+      // Pagination-aware mock: return items on page 1 (skip=0), empty afterward.
+      // Without this, runCleanup's `hasMore = result.data.length === 100` would loop forever
+      // and the mock metadata would balloon the heap until OOM.
+      mockClient.memoryItem.findMany.mockImplementation((opts: any) => {
+        return Promise.resolve(opts?.skip === 0 ? items : []);
+      });
       mockClient.memoryItem.count.mockResolvedValue(100);
 
       mockClient.$transaction.mockImplementation(async (fn) => {
@@ -1354,15 +1205,9 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         });
       });
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          MemoryGovernanceService,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      const governance = module.get(MemoryGovernanceService);
+      const __repo = new MemoryItemRepository({ client: mockClient } as any);
+      const governance = new MemoryGovernanceService(__repo);
       const start = Date.now();
       await governance.runCleanup('proj-1');
       const elapsed = Date.now() - start;
@@ -1395,15 +1240,9 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         });
       });
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          MemoryItemRepository,
-          MemoryGovernanceService,
-          { provide: PrismaService, useValue: { client: mockClient } },
-        ],
-      }).compile();
 
-      const governance = module.get(MemoryGovernanceService);
+      const __repo = new MemoryItemRepository({ client: mockClient } as any);
+      const governance = new MemoryGovernanceService(__repo);
       await governance.runCleanup('proj-1');
 
       const updateOperations = updates.filter(u => u.operation === 'update');
@@ -1422,15 +1261,8 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       const mockRepo = createMockMemoryItemRepository();
       mockRepo.findByProjectMemory.mockResolvedValue({ items: [], total: 0 });
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          ContextBuilderService,
-          { provide: TimelineService, useValue: mockTimelineSvc },
-          { provide: MemoryItemRepository, useValue: mockRepo },
-        ],
-      }).compile();
 
-      const service = module.get(ContextBuilderService);
+      const service = new ContextBuilderService(mockTimelineSvc as any, mockRepo as any);
       const result = await service.getProjectContext({
         projectId: 'proj-1',
         actorId: 'actor-1',
@@ -1460,15 +1292,8 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
 
       mockRepo.findByProjectMemory.mockResolvedValue({ items: manyItems, total: 15 });
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          ContextBuilderService,
-          { provide: TimelineService, useValue: mockTimelineSvc },
-          { provide: MemoryItemRepository, useValue: mockRepo },
-        ],
-      }).compile();
 
-      const service = module.get(ContextBuilderService);
+      const service = new ContextBuilderService(mockTimelineSvc as any, mockRepo as any);
       const result = await service.getProjectContext({
         projectId: 'proj-1',
         actorId: 'actor-1',
@@ -1503,15 +1328,8 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       ];
       mockRepo.findByProjectMemory.mockResolvedValue({ items: memoryItems, total: 1 });
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          ContextBuilderService,
-          { provide: TimelineService, useValue: mockTimelineSvc },
-          { provide: MemoryItemRepository, useValue: mockRepo },
-        ],
-      }).compile();
 
-      const service = module.get(ContextBuilderService);
+      const service = new ContextBuilderService(mockTimelineSvc as any, mockRepo as any);
       const result = await service.getProjectContext({
         projectId: 'proj-1',
         actorId: 'actor-1',
@@ -1529,15 +1347,8 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       const mockRepo = createMockMemoryItemRepository();
       mockRepo.findByProjectMemory.mockResolvedValue({ items: [], total: 0 });
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          ContextBuilderService,
-          { provide: TimelineService, useValue: mockTimelineSvc },
-          { provide: MemoryItemRepository, useValue: mockRepo },
-        ],
-      }).compile();
 
-      const service = module.get(ContextBuilderService);
+      const service = new ContextBuilderService(mockTimelineSvc as any, mockRepo as any);
       const result = await service.getProjectContext({
         projectId: 'proj-1',
         actorId: 'actor-1',
