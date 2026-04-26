@@ -3,7 +3,7 @@
   "feature": "memory-phase3-semantic-memory",
   "branchName": "feat/memory-phase3-semantic-memory",
   "createdAt": "2026-04-25T14:59:35.000Z",
-  "updatedAt": "2026-04-26T03:35:01.582Z",
+  "updatedAt": "2026-04-26T04:07:54.193Z",
   "userStories": [
     {
       "id": "US-001",
@@ -200,9 +200,9 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
+      "status": "failed",
       "passes": false,
-      "attempts": 0,
+      "attempts": 1,
       "escalations": [],
       "routing": {
         "complexity": "medium",
@@ -258,9 +258,9 @@
         "US-001",
         "US-002"
       ],
-      "status": "pending",
+      "status": "failed",
       "passes": false,
-      "attempts": 0,
+      "attempts": 1,
       "escalations": [],
       "routing": {
         "complexity": "complex",

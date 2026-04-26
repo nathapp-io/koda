@@ -1,5 +1,5 @@
 {
-  "requestId": "7625d710-9e46-4a88-a780-152ea1644e75",
+  "requestId": "c2be6d5b-c193-4c32-8e14-bdec4e256327",
   "stage": "tdd-test-writer",
   "totalBudgetTokens": 8000,
   "usedTokens": 1969,
@@ -15,7 +15,7 @@
     "static-rules:project-conventions:6fb98908"
   ],
   "digestTokens": 18,
-  "buildMs": 31,
+  "buildMs": 32,
   "providerResults": [
     {
       "providerId": "static-rules",
@@ -42,7 +42,7 @@
       "providerId": "code-neighbor",
       "status": "empty",
       "chunkCount": 0,
-      "durationMs": 30,
+      "durationMs": 32,
       "tokensProduced": 0
     }
   ],

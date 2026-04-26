@@ -1,5 +1,5 @@
 {
-  "requestId": "60211ad7-9f4e-4312-a5bf-8f0da357e901",
+  "requestId": "287c0388-e425-486d-bccb-8ac87f161437",
   "stage": "context",
   "totalBudgetTokens": 2048,
   "usedTokens": 2008,
@@ -16,48 +16,48 @@
     "static-rules:project-conventions:6fb98908"
   ],
   "digestTokens": 23,
-  "buildMs": 332,
+  "buildMs": 400,
   "providerResults": [
     {
       "providerId": "static-rules",
       "status": "ok",
       "chunkCount": 3,
-      "durationMs": 6,
+      "durationMs": 3,
       "tokensProduced": 1951
     },
     {
       "providerId": "feature-context",
       "status": "empty",
       "chunkCount": 0,
-      "durationMs": 3,
+      "durationMs": 1,
       "tokensProduced": 0
     },
     {
       "providerId": "test-coverage",
       "status": "empty",
       "chunkCount": 0,
-      "durationMs": 7,
+      "durationMs": 4,
       "tokensProduced": 0
     },
     {
       "providerId": "session-scratch",
       "status": "empty",
       "chunkCount": 0,
-      "durationMs": 3,
+      "durationMs": 1,
       "tokensProduced": 0
     },
     {
       "providerId": "git-history",
       "status": "empty",
       "chunkCount": 0,
-      "durationMs": 331,
+      "durationMs": 399,
       "tokensProduced": 0
     },
     {
       "providerId": "code-neighbor",
       "status": "ok",
       "chunkCount": 1,
-      "durationMs": 43,
+      "durationMs": 47,
       "tokensProduced": 34
     }
   ],

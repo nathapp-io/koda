@@ -1,5 +1,5 @@
 {
-  "requestId": "e597bb3a-3bde-4a18-b93a-86e84a5ceb3e",
+  "requestId": "87165163-2b22-499e-a05e-cfd46e04b6b0",
   "stage": "tdd-verifier",
   "totalBudgetTokens": 6000,
   "usedTokens": 1969,
@@ -15,20 +15,20 @@
     "static-rules:project-conventions:6fb98908"
   ],
   "digestTokens": 18,
-  "buildMs": 1,
+  "buildMs": 2,
   "providerResults": [
     {
       "providerId": "static-rules",
       "status": "ok",
       "chunkCount": 3,
-      "durationMs": 0,
+      "durationMs": 1,
       "tokensProduced": 1951
     },
     {
       "providerId": "feature-context",
       "status": "empty",
       "chunkCount": 0,
-      "durationMs": 0,
+      "durationMs": 1,
       "tokensProduced": 0
     }
   ],
