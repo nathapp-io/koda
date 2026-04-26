@@ -385,9 +385,11 @@ describe('ProjectMemoryController', () => {
       expect(semanticMemory).toBeDefined();
       expect(Array.isArray(semanticMemory)).toBe(true);
       expect(semanticMemory).toHaveLength(3);
-      expect(semanticMemory[0].subject).toBe('ticket:001');
-      expect(semanticMemory[1].subject).toBe('ticket:003');
-      expect(semanticMemory[2].subject).toBe('ticket:002');
+      // Order: confidence DESC, then updatedAt DESC
+      // ticket:003 (0.9, Jan 8) > ticket:002 (0.9, Jan 5) > ticket:001 (0.5)
+      expect(semanticMemory[0].subject).toBe('ticket:003');
+      expect(semanticMemory[1].subject).toBe('ticket:002');
+      expect(semanticMemory[2].subject).toBe('ticket:001');
     });
   });
 });
