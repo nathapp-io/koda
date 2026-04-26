@@ -488,4 +488,40 @@ describe('AC-7: Idempotent cleanup', () => {
       expect(upsertCall).not.toHaveProperty('deletedAt');
     });
   });
+
+  describe('AC-8: Performance - 1000 memories in under 30 seconds', () => {
+    it('should process 1000 memories in under 30 seconds', async () => {
+      const projectId = 'project-123';
+      const now = new Date();
+      const pastDate = new Date(now.getTime() - 100 * 24 * 60 * 60 * 1000);
+
+      const items: MemoryItem[] = Array.from({ length: 1000 }, (_, i) => ({
+        id: `mem-${i}`,
+        projectId,
+        kind: 'FACT' as const,
+        subject: `ticket:${i}`,
+        predicate: 'status',
+        status: 'active',
+        ttlAt: pastDate,
+        confidence: i % 2 === 0 ? 0.2 : 0.9,
+        activeKey: `key-${i}`,
+        createdAt: pastDate,
+        updatedAt: pastDate,
+      }));
+
+      mockRepository.findByProject.mockResolvedValue({
+        data: items,
+        total: 1000,
+        page: 1,
+        limit: 100,
+      });
+      mockRepository.upsert.mockResolvedValue({} as MemoryItem);
+
+      const start = Date.now();
+      await service.runCleanup(projectId);
+      const elapsed = Date.now() - start;
+
+      expect(elapsed).toBeLessThan(30000);
+    });
+  });
 });

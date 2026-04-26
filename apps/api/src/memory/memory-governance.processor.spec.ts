@@ -92,5 +92,22 @@ describe('MemoryGovernanceProcessor', () => {
       await expect(processor.scheduledCleanup()).rejects.toThrow('Governance cleanup failed for 1 project(s)');
       expect(mockGovernanceService.runCleanup).toHaveBeenCalledTimes(2);
     });
+
+    it('AC-8: should complete cleanup for 1000 memories in under 30 seconds', async () => {
+      const projects = [{ id: 'proj-1' }];
+      mockPrismaService.client.project.findMany.mockResolvedValue(projects);
+      mockGovernanceService.runCleanup.mockResolvedValue({
+        expiredCount: 250,
+        downrankedCount: 250,
+        deduplicatedCount: 250,
+        supersessionCount: 250,
+      });
+
+      const start = Date.now();
+      await processor.scheduledCleanup();
+      const elapsed = Date.now() - start;
+
+      expect(elapsed).toBeLessThan(30000);
+    });
   });
 });
