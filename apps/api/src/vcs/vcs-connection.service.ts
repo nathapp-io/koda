@@ -244,13 +244,13 @@ export class VcsConnectionService {
       const result = await provider.testConnection();
       const latencyMs = Date.now() - startTime;
       return result.ok
-        ? { success: true, latencyMs }
-        : { success: false, latencyMs, error: result.error };
+        ? { ok: true, latencyMs }
+        : { ok: false, latencyMs, error: result.error };
     } catch (error) {
       const latencyMs = Date.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return {
-        success: false,
+        ok: false,
         latencyMs,
         error: errorMessage,
       };

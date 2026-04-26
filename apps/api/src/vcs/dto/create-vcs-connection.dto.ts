@@ -14,13 +14,11 @@ export class CreateVcsConnectionDto {
   @IsEnum(VcsProviderType)
   provider: VcsProviderType;
 
-  @IsOptional()
   @IsString()
-  repoOwner?: string;
+  repoOwner: string;
 
-  @IsOptional()
   @IsString()
-  repoName?: string;
+  repoName: string;
 
   @IsOptional()
   @IsString()
