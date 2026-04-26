@@ -190,8 +190,8 @@ export class MemoryItemRepository {
     if (query.status) where.status = query.status;
     else {
       where.status = 'active';
-      where.ttlAt = { equals: null };
     }
+    where.ttlAt = { equals: null };
 
     const orderByField = query.orderBy ?? 'confidence';
     const orderByClause: Record<string, 'asc' | 'desc'>[] = [];
