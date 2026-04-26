@@ -31,23 +31,6 @@ describe('MemoryGovernanceService', () => {
     jest.clearAllMocks();
   });
 
-  describe('AC-1: Scheduled cleanup runs daily at 03:00 UTC', () => {
-    it('should have cron expression 0 3 * * * for 03:00 UTC', () => {
-      const cronExpression = '0 3 * * *';
-      const parts = cronExpression.split(' ');
-      expect(parts[0]).toBe('0');
-      expect(parts[1]).toBe('3');
-    });
-
-    it('should have a scheduled cleanup method in the service', () => {
-      const servicePrototype = Object.getPrototypeOf(service);
-      const methods = Object.getOwnPropertyNames(servicePrototype).filter(
-        (n) => n !== 'constructor' && typeof (servicePrototype as Record<string, unknown>)[n] === 'function'
-      );
-      expect(methods.length).toBeGreaterThan(0);
-    });
-  });
-
   describe('AC-2: runCleanup() executes all four sub-jobs', () => {
     it('should call all four sub-job methods', async () => {
       const projectId = 'project-123';

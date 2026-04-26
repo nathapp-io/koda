@@ -1,4 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { Reflector } from '@nestjs/core';
+import { ScheduleModule, SchedulerRegistry } from '@nestjs/schedule';
 import { MemoryGovernanceProcessor } from './memory-governance.processor';
 import { MemoryGovernanceService } from './memory-governance.service';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -19,20 +21,25 @@ describe('MemoryGovernanceProcessor', () => {
   let processor: MemoryGovernanceProcessor;
   let mockGovernanceService: ReturnType<typeof createMockGovernanceService>;
   let mockPrismaService: ReturnType<typeof createMockPrismaService>;
+  let schedulerRegistry: SchedulerRegistry;
 
   beforeEach(async () => {
     mockGovernanceService = createMockGovernanceService();
     mockPrismaService = createMockPrismaService();
 
     const module: TestingModule = await Test.createTestingModule({
+      imports: [ScheduleModule.forRoot()],
       providers: [
         MemoryGovernanceProcessor,
         { provide: MemoryGovernanceService, useValue: mockGovernanceService },
         { provide: PrismaService, useValue: mockPrismaService },
+        SchedulerRegistry,
+        Reflector,
       ],
     }).compile();
 
     processor = module.get<MemoryGovernanceProcessor>(MemoryGovernanceProcessor);
+    schedulerRegistry = module.get<SchedulerRegistry>(SchedulerRegistry);
   });
 
   afterEach(() => {
@@ -47,6 +54,12 @@ describe('MemoryGovernanceProcessor', () => {
     it('should have async scheduledCleanup method', () => {
       const method = (processor as unknown as { scheduledCleanup: (...args: unknown[]) => Promise<void> }).scheduledCleanup;
       expect(method.constructor.name).toBe('AsyncFunction');
+    });
+
+    it('should have @Cron decorator with 0 3 * * * expression for 03:00 UTC', () => {
+      const reflector = new Reflector();
+      const cronOptions = reflector.get('SCHEDULE_CRON_OPTIONS', processor.scheduledCleanup);
+      expect(cronOptions).toMatchObject({ cronTime: '0 3 * * *' });
     });
   });
 
