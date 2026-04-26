@@ -69,6 +69,50 @@ paths:
 - Do not use `@Optional()` for required dependencies
 - Do not throw Nest built-in exceptions for domain auth failures when an App exception exists
 
+## Pagination Anti-Patterns
+- Do not write unbounded `do { ... } while (hasMore)` loops without a hard iteration cap. A misbehaving repository, broken cache, or non-pagination-aware mock can cause infinite loops that allocate until OOM
+- Do not hardcode the page-size literal in the termination predicate (`length === 100`); reference a `PAGE_SIZE` constant so the predicate cannot drift from the `limit` argument
+- Always pair pagination with a `MAX_PAGES` safety bound and a `logger.warn` on overflow — silent infinite loops are worse than a logged early exit
+- Prefer `data.length >= PAGE_SIZE` over `data.length === PAGE_SIZE` so a repository overshoot still terminates
+- Wrong:
+  ```ts
+  do {
+    const result = await this.repo.findByProject({ page, limit: 100 });
+    hasMore = result.data.length === 100;
+    page++;
+  } while (hasMore);
+  ```
+- Correct:
+  ```ts
+  const PAGE_SIZE = 100;
+  const MAX_PAGES = 10_000;
+  do {
+    if (page > MAX_PAGES) {
+      this.logger.warn(`pagination exceeded ${MAX_PAGES} pages for ${projectId}`);
+      break;
+    }
+    const result = await this.repo.findByProject({ page, limit: PAGE_SIZE });
+    hasMore = result.data.length >= PAGE_SIZE;
+    page++;
+  } while (hasMore);
+  ```
+
+## Testing Anti-Patterns
+- Do not create `Test.createTestingModule(...).compile()` inline inside `it(...)` bodies without `beforeEach`/`afterEach` cleanup. NestJS DI containers retain reflector metadata, module compiler caches, and injector graphs even after the test returns; ~30+ uncleaned modules per file is enough to OOM Jest
+- If a service has only constructor-injected dependencies and no Nest lifecycle (no `OnModuleInit`, no decorator metadata under test), prefer **direct instantiation** (`new ServiceClass(mockDep)`) over `Test.createTestingModule`. It is faster, allocates orders of magnitude less, and avoids the cleanup requirement entirely
+- If `Test.createTestingModule` is genuinely needed, store the module and close it: declare `let module: TestingModule` at `describe` scope, assign in `beforeEach`/`beforeAll`, and `await module.close()` in the matching `afterEach`/`afterAll`
+- Do not stub paginated repository methods with `mockResolvedValue(items)` when `items.length >= PAGE_SIZE`. The mock will return the same full page on every call regardless of `skip`, and the production loop will never terminate. Use a pagination-aware `mockImplementation` that honors `skip`:
+  ```ts
+  // Wrong — infinite loop in production code under test
+  mockClient.memoryItem.findMany.mockResolvedValue(items);   // items.length === 100
+  
+  // Correct — page 1 returns items, subsequent pages return []
+  mockClient.memoryItem.findMany.mockImplementation((opts: any) =>
+    Promise.resolve(opts?.skip === 0 ? items : []),
+  );
+  ```
+- Do not let acceptance/test files grow past ~1000 lines. Long files compound the cost of any per-test allocation pattern (DI containers, large mock arrays) until the suite hits OOM. Split by feature area when over the limit
+
 ## Quick Reference
 - Wrong: `@Inject('PrismaService') private prisma: PrismaService`
 - Correct: constructor injection with typed `PrismaService`

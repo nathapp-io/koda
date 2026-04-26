@@ -56,5 +56,23 @@ export const AgentRole = {
 } as const;
 export type AgentRole = (typeof AgentRole)[keyof typeof AgentRole];
 
+export const ActorRole = {
+  ADMIN: 'ADMIN',
+  DEVELOPER: 'DEVELOPER',
+  AGENT: 'AGENT',
+  MEMBER: 'MEMBER',
+  VIEWER: 'VIEWER',
+} as const;
+export type ActorRole = (typeof ActorRole)[keyof typeof ActorRole];
+
 export const AutoAssignMode = { OFF: 'OFF', SUGGEST: 'SUGGEST', AUTO: 'AUTO' } as const;
 export type AutoAssignMode = typeof AutoAssignMode[keyof typeof AutoAssignMode];
+
+export const MemoryKind = {
+  FACT: 'FACT',
+  DECISION: 'DECISION',
+  PREFERENCE: 'PREFERENCE',
+  CONSTRAINT: 'CONSTRAINT',
+  INCIDENT_PATTERN: 'INCIDENT_PATTERN',
+} as const;
+export type MemoryKind = (typeof MemoryKind)[keyof typeof MemoryKind];

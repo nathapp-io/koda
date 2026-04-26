@@ -38,6 +38,6 @@
   },
   "acceptance": {
     "testFramework": "jest",
-    "command": "npx jest --runTestsByPath {{FILE}}"
+    "command": "npx jest --config jest.nax.config.js {{FILE}}"
   }
 }

@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ContextBuilderService, GetProjectContextQuery, Intent } from './context-builder.service';
 import { TimelineService } from './timeline.service';
+import { MemoryItemRepository } from './memory-item-repository';
 
 describe('ContextBuilderService', () => {
   let service: ContextBuilderService;
@@ -11,15 +12,23 @@ describe('ContextBuilderService', () => {
     getTicketHistory: jest.fn(),
   };
 
+  const mockMemoryItemRepository = {
+    findByProject: jest.fn(),
+    findByProjectMemory: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        ContextBuilderService,
         { provide: TimelineService, useValue: mockTimelineService },
+        { provide: MemoryItemRepository, useValue: mockMemoryItemRepository },
       ],
     }).compile();
 
-    service = module.get<ContextBuilderService>(ContextBuilderService);
+    service = new ContextBuilderService(
+      mockTimelineService as unknown as TimelineService,
+      mockMemoryItemRepository as unknown as MemoryItemRepository,
+    );
     timelineService = module.get<TimelineService>(TimelineService);
 
     jest.clearAllMocks();
@@ -118,6 +127,66 @@ describe('ContextBuilderService', () => {
       });
     });
 
+    describe('AC-25: findByProjectMemory is called and results appear in semanticMemory', () => {
+      test('calls findByProjectMemory with correct projectId for any intent', async () => {
+        const mockMemories = [
+          {
+            id: 'mem-1',
+            projectId: 'project-123',
+            kind: 'FACT',
+            subject: 'ticket:123',
+            predicate: 'status',
+            object: 'IN_PROGRESS',
+            status: 'active',
+            confidence: 0.9,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ];
+
+        mockMemoryItemRepository.findByProjectMemory.mockResolvedValue({
+          items: mockMemories,
+          total: 1,
+        });
+        mockTimelineService.getProjectTimeline.mockResolvedValue({
+          events: [],
+          total: 0,
+        });
+
+        const result = await service.getProjectContext({
+          projectId: 'project-123',
+          actorId: 'actor-1',
+          intent: 'diagnose' as Intent,
+        });
+
+        expect(mockMemoryItemRepository.findByProjectMemory).toHaveBeenCalledWith(
+          expect.objectContaining({
+            projectId: 'project-123',
+          })
+        );
+        expect(result.semanticMemory).toBeDefined();
+        expect(Array.isArray(result.semanticMemory)).toBe(true);
+        expect(result.semanticMemory).toHaveLength(1);
+        expect(result.semanticMemory[0].subject).toBe('ticket:123');
+      });
+
+      test('semanticMemory is empty array when findByProjectMemory throws', async () => {
+        mockMemoryItemRepository.findByProjectMemory.mockRejectedValue(new Error('DB error'));
+        mockTimelineService.getProjectTimeline.mockResolvedValue({
+          events: [],
+          total: 0,
+        });
+
+        const result = await service.getProjectContext({
+          projectId: 'project-123',
+          actorId: 'actor-1',
+          intent: 'diagnose' as Intent,
+        });
+
+        expect(result.semanticMemory).toEqual([]);
+      });
+    });
+
     describe('AC-37: recentEvents structure and ordering', () => {
       test('every item has non-null actorId, action, createdAt fields', async () => {
         const mockEvents = [
@@ -175,6 +244,10 @@ describe('ContextBuilderService', () => {
 
     describe('AC-38: intent plan excludes temporal blocks', () => {
       test('response does not contain recentEvents, history, timeline, or statusChangeHistory keys', async () => {
+        mockMemoryItemRepository.findByProjectMemory.mockResolvedValue({
+          items: [],
+          total: 0,
+        });
         mockTimelineService.getProjectTimeline.mockResolvedValue({
           events: [{ id: '1', eventType: 'ticket_event', actorId: 'actor-1', action: 'TEST', createdAt: new Date() }],
           total: 1,
@@ -194,14 +267,20 @@ describe('ContextBuilderService', () => {
         }
       });
 
-      test('plan intent returns only projectId', async () => {
+      test('plan intent returns only projectId and semanticMemory', async () => {
+        mockMemoryItemRepository.findByProjectMemory.mockResolvedValue({
+          items: [],
+          total: 0,
+        });
+
         const result = await service.getProjectContext({
           projectId: 'project-123',
           actorId: 'actor-1',
           intent: 'plan' as Intent,
         });
 
-        expect(Object.keys(result)).toEqual(['projectId']);
+        expect(Object.keys(result)).toEqual(['projectId', 'semanticMemory']);
+        expect(result.semanticMemory).toEqual([]);
       });
     });
   });

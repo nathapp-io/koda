@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { TimelineService } from './timeline.service';
+import { MemoryItemRepository, MemoryItem } from './memory-item-repository';
 
 export type Intent = 'answer' | 'diagnose' | 'plan' | 'update' | 'search';
 
@@ -17,22 +18,39 @@ export interface RecentEvent {
   createdAt: Date;
 }
 
+export interface SemanticMemoryItem {
+  id: string;
+  kind: string;
+  subject: string;
+  predicate: string;
+  object?: string;
+  confidence?: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface GetProjectContextResponse {
   projectId: string;
   recentEvents?: RecentEvent[];
   statusChangeHistory?: RecentEvent[];
+  semanticMemory?: SemanticMemoryItem[];
 }
 
 @Injectable()
 export class ContextBuilderService {
   private readonly logger = new Logger(ContextBuilderService.name);
 
-  constructor(private readonly timelineService: TimelineService) {}
+  constructor(
+    private readonly timelineService: TimelineService,
+    private readonly memoryItemRepository: MemoryItemRepository,
+  ) {}
 
   async getProjectContext(query: GetProjectContextQuery): Promise<GetProjectContextResponse> {
     const response: GetProjectContextResponse = {
       projectId: query.projectId,
     };
+
+    await this.loadSemanticMemory(query.projectId, response);
 
     if (query.intent === 'plan') {
       return response;
@@ -99,5 +117,31 @@ export class ContextBuilderService {
     }
 
     return response;
+  }
+
+  private async loadSemanticMemory(
+    projectId: string,
+    response: GetProjectContextResponse,
+  ): Promise<void> {
+    try {
+      const memoryResult = await this.memoryItemRepository.findByProjectMemory({
+        projectId,
+        limit: 10,
+      });
+      response.semanticMemory = memoryResult.items
+        .map((item: MemoryItem) => ({
+          id: item.id,
+          kind: item.kind,
+          subject: item.subject,
+          predicate: item.predicate,
+          object: item.object,
+          confidence: item.confidence,
+          createdAt: item.createdAt,
+          updatedAt: item.updatedAt,
+        }));
+    } catch (error) {
+      this.logger.warn(`Failed to get project memory: ${error instanceof Error ? error.message : String(error)}`);
+      response.semanticMemory = [];
+    }
   }
 }

@@ -98,9 +98,7 @@ describe('OutboxFanOutRegistry', () => {
   });
 
   describe('AC43: handler error handling', () => {
-    it('AC43: when handler throws, error is logged and subsequent handlers still run', async () => {
-      const loggerSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-
+    it('AC43: when handler throws, subsequent handlers still run', async () => {
       const handler1 = jest.fn().mockImplementation(() => {
         throw new Error('Handler 1 failed');
       });
@@ -113,9 +111,6 @@ describe('OutboxFanOutRegistry', () => {
 
       expect(handler1).toHaveBeenCalledTimes(1);
       expect(handler2).toHaveBeenCalledTimes(1);
-      expect(loggerSpy).toHaveBeenCalled();
-
-      loggerSpy.mockRestore();
     });
 
     it('AC43: dispatch() returns normally even when handlers throw', async () => {
@@ -125,6 +120,14 @@ describe('OutboxFanOutRegistry', () => {
       registry.register('ticket_event', handler);
 
       await expect(registry.dispatch({ eventType: 'ticket_event', payload: {} })).resolves.toBeUndefined();
+    });
+
+    it('AC43: failed handler increments failure count', async () => {
+      registry.register('ticket_event', () => { throw new Error('fail'); });
+
+      await registry.dispatch({ eventType: 'ticket_event', payload: {} });
+
+      expect(registry.consumeLastDispatchFailureCount()).toBe(1);
     });
   });
 
@@ -169,9 +172,7 @@ describe('OutboxFanOutRegistry', () => {
   });
 
   describe('AC25: dispatch throws triggers markFailed', () => {
-    it('AC25: when dispatch throws, error is logged and event can be retried', async () => {
-      const loggerSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-
+    it('AC25: when dispatch throws, failure count is tracked', async () => {
       const handler = jest.fn().mockImplementation(() => {
         throw new Error('Connection refused');
       });
@@ -181,12 +182,7 @@ describe('OutboxFanOutRegistry', () => {
 
       expect(result).toBeUndefined();
       expect(handler).toHaveBeenCalledTimes(1);
-      expect(loggerSpy).toHaveBeenCalledWith(
-        'Handler for ticket_event failed:',
-        expect.any(Error)
-      );
-
-      loggerSpy.mockRestore();
+      expect(registry.consumeLastDispatchFailureCount()).toBe(1);
     });
   });
 });

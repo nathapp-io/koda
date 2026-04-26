@@ -1,0 +1,237 @@
+{
+  "project": "koda",
+  "feature": "memory-phase3-semantic-memory",
+  "branchName": "feat/memory-phase3-semantic-memory",
+  "createdAt": "2026-04-25T14:59:35.000Z",
+  "updatedAt": "2026-04-25T14:59:35.000Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Memory Item Schema and Active-Key Repository",
+      "description": "Add the durable `MemoryItem` schema, migration, and repository rules that keep one active row per `(projectId, kind, subject, predicate)` key while preserving provenance and project isolation. This story also anchors the controller-layer write gate so only `admin`, `developer`, and `agent` actors can create memory records through the extraction path.",
+      "acceptanceCriteria": [
+        "Prisma migration adds `MemoryItem` table with all fields defined in §1.",
+        "Repository-level transaction logic prevents more than one active memory for the same `(projectId, kind, subject, predicate)` key.",
+        "`MemoryItemRepository.findByProject(query)` returns paginated results matching the filter criteria.",
+        "`MemoryItemRepository.upsert(item)` inserts or updates (on conflict) a memory item.",
+        "`MemoryItemRepository.findActive(projectId, kind, subject, predicate)` returns the active memory for that composite key, or null.",
+        "Creating a `MemoryItem` with a non-existent `projectId` throws `ForbiddenError` (`code: 'PROJECT_NOT_FOUND'`).",
+        "Only actors with role `admin`, `developer`, or `agent` can write memories; role is checked at the controller layer before calling `ExtractionService`.",
+        "Memory rows include `sourceType` and `sourceId` when created from `TicketEvent`, `AgentEvent`, `DecisionEvent`, or explicit `recordDecision`.",
+        "Active rows have non-null `activeKey`; superseded/rejected rows have `activeKey = null`."
+      ],
+      "suggestedCriteria": [
+        "When a new active memory is stored for an existing composite key, the previous active row is superseded instead of remaining active.",
+        "When a `projectId` refers to a soft-deleted project, the write is rejected with `PROJECT_NOT_FOUND`.",
+        "When a superseded or rejected row is written, `activeKey` remains `null`."
+      ],
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/memory/memory.module.ts",
+        "apps/api/src/memory/timeline.controller.ts",
+        "apps/api/src/koda-domain-writer/koda-domain-writer.service.ts",
+        "apps/api/src/app.module.ts"
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "memory",
+        "persistence",
+        "security"
+      ],
+      "dependencies": [],
+      "workdir": "apps/api",
+      "status": "pending",
+      "passes": false,
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Adds a new durable entity plus repository logic and a controller-level access control gate across schema, persistence, and API boundaries."
+      },
+      "escalations": [],
+      "attempts": 0
+    },
+    {
+      "id": "US-002",
+      "title": "Rule-Based Extraction and Decision Memory Writes",
+      "description": "Implement the extraction service that derives atomic memories from canonical outbox events and explicit decisions, with canonical `DecisionEvent` writes preceding derived memory upserts. This story also wires the outbox fan-out seam so ticket and agent events trigger rule-based extraction without using an LLM.",
+      "acceptanceCriteria": [
+        "`ExtractionService.extractFromEvent(ticket_event with action='status_changed')` returns a `MemoryItem` with `kind=FACT`, `subject=ticket:{id}`, `predicate=status`.",
+        "`ExtractionService.extractFromEvent(ticket_event with action='assigned')` returns a `MemoryItem` with `kind=FACT`, `subject=ticket:{id}`, `predicate=assigned_to`.",
+        "`ExtractionService.extractFromEvent(agent_event)` returns empty array when metadata contains no `decision_made` key.",
+        "`ExtractionService.extractFromEvent(event)` returns empty array and logs a warning when a supported event type has an incomplete payload.",
+        "`ExtractionService.recordDecision(data)` creates a canonical `DecisionEvent`, calls `MemoryItemRepository.upsert()`, and returns `WriteResult` with `canonicalId` and derived memory ID.",
+        "`recordDecision` with a topic that already has an active decision marks the old decision as `superseded` (sets `supersededBy` + `status='superseded'`).",
+        "`extractFromEvent` is called by `OutboxFanOutRegistry.dispatch()` when event type is `ticket_event` or `agent_event`.",
+        "Extracted items have `confidence >= 0.5` and `ttlAt = null` (never expires by default).",
+        "Items from explicit `recordDecision` have `confidence = 1.0`."
+      ],
+      "suggestedCriteria": [
+        "When a supported event payload is missing the fields required for a rule, the extractor writes no memory rows.",
+        "When `recordDecision()` is called for a new topic, no existing memory item is superseded.",
+        "When `OutboxFanOutRegistry.dispatch()` sees both `ticket_event` and `agent_event` payloads in the same run, each supported event is extracted independently."
+      ],
+      "contextFiles": [
+        "apps/api/src/outbox/outbox-fan-out-registry.ts",
+        "apps/api/src/koda-domain-writer/koda-domain-writer.service.ts",
+        "apps/api/src/events/decision-event.service.ts",
+        "apps/api/src/events/ticket-event.service.ts",
+        "apps/api/src/events/agent-event.service.ts"
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "memory",
+        "outbox",
+        "persistence"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "workdir": "apps/api",
+      "status": "pending",
+      "passes": false,
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Crosses canonical decision writes, outbox fan-out, and deterministic extraction rules across multiple existing modules."
+      },
+      "escalations": [],
+      "attempts": 0
+    },
+    {
+      "id": "US-003",
+      "title": "Project Memory Retrieval API",
+      "description": "Add the project-scoped retrieval surface for semantic memories and expose it through `GET /projects/:slug/memory`. The API should support kind filtering, subject prefix filtering, status filtering, project isolation, and deterministic ordering without leaking other projects' data.",
+      "acceptanceCriteria": [
+        "`GET /projects/:slug/memory` returns all `status=active` memories for the project.",
+        "`GET /projects/:slug/memory?kind=FACT` returns only FACT memories.",
+        "`GET /projects/:slug/memory?subjects=ticket:123` returns memories with subject starting with `ticket:123`.",
+        "When `status=superseded` is requested, each superseded memory includes `supersededBy` when known.",
+        "Memory retrieval respects `projectId` isolation and cannot access another project's memories.",
+        "Results are ordered by `confidence DESC`, then `updatedAt DESC` unless the caller provides a stricter filter."
+      ],
+      "suggestedCriteria": [
+        "When `status` is omitted, retrieval defaults to `active`.",
+        "When no memories match the query, the endpoint returns an empty array instead of 404.",
+        "When `subjects` is supplied as a prefix filter, every returned subject starts with that prefix."
+      ],
+      "contextFiles": [
+        "apps/api/src/memory/memory.module.ts",
+        "apps/api/src/memory/context-builder.service.ts",
+        "apps/api/src/memory/timeline.controller.ts",
+        "apps/api/src/memory/timeline.service.ts",
+        "apps/api/prisma/schema.prisma"
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "memory",
+        "retrieval"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "workdir": "apps/api",
+      "status": "pending",
+      "passes": false,
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Adds a standard project-scoped read API and service wiring over the new memory repository."
+      },
+      "escalations": [],
+      "attempts": 0
+    },
+    {
+      "id": "US-004",
+      "title": "Memory Governance Cleanup Jobs",
+      "description": "Add scheduled governance jobs that expire TTL'd memories, downrank stale low-confidence rows, deduplicate active duplicates, and supersede older decisions while preserving audit history. The cleanup runner should compose all four maintenance routines into a single idempotent pass.",
+      "acceptanceCriteria": [
+        "`GovernanceService.runCleanup()` executes all four sub-jobs and returns a combined `GovernanceResult`.",
+        "`expireMemories()` sets `status='rejected'` for all memories where `ttlAt < now()` and returns the count.",
+        "`downrankStaleLowConfidence()` sets `confidence=0.1` for memories older than 90 days with `confidence < 0.3`.",
+        "`deduplicate()` finds all `(projectId, kind, subject, predicate)` combos with more than one active memory, keeps the highest confidence, and marks the others as `superseded`.",
+        "`applySupersession()` finds DECISION memories on the same topic ordered by `createdAt DESC`, keeps the newest as active, and marks older ones as `superseded`.",
+        "Governance jobs are idempotent, so running them twice in a row produces the same end state.",
+        "A governance run touching 1000 memories completes in under 30 seconds.",
+        "Governance jobs never delete `MemoryItem` rows; they update `status`, `confidence`, or `supersededBy` so audit history remains available."
+      ],
+      "suggestedCriteria": [
+        "When `runCleanup()` finds rows already in a terminal state, it leaves them unchanged.",
+        "When governance marks rows as superseded, it preserves each row's `sourceType` and `sourceId`.",
+        "When no rows qualify for a sub-job, that sub-job returns zero without throwing."
+      ],
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/memory/memory.module.ts",
+        "apps/api/src/memory/timeline.service.ts",
+        "apps/api/src/outbox/outbox-fan-out-registry.ts",
+        "apps/api/src/koda-domain-writer/koda-domain-writer.service.ts"
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "memory",
+        "governance",
+        "persistence"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002"
+      ],
+      "workdir": "apps/api",
+      "status": "pending",
+      "passes": false,
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Implements four coordinated maintenance routines over the same table with idempotency, supersession, and TTL cleanup rules."
+      },
+      "escalations": [],
+      "attempts": 0
+    },
+    {
+      "id": "US-005",
+      "title": "Semantic Memory in Project Context",
+      "description": "Extend the project context builder so semantic memory becomes part of context assembly without changing the existing timeline behavior. The new memory block should use the retrieval service, cap the returned items, and expose memory provenance in the response.",
+      "acceptanceCriteria": [
+        "`getProjectContext()` includes a `semanticMemory` field in its response.",
+        "`semanticMemory` contains up to 10 most-relevant active `MemoryItem`s, ordered by confidence DESC.",
+        "When `semanticMemory` items are returned, `provenance.sources` includes entries with `source_type='memory_item'`.",
+        "If no `MemoryItem`s exist for the project, `semanticMemory` is an empty array."
+      ],
+      "suggestedCriteria": [
+        "When more than 10 active memories match the context query, only the top 10 are returned.",
+        "When `semanticMemory` is empty, the response still includes the `semanticMemory` key with an empty array value."
+      ],
+      "contextFiles": [
+        "apps/api/src/memory/context-builder.service.ts",
+        "apps/api/src/memory/memory.module.ts",
+        "apps/api/src/memory/timeline.service.ts",
+        "apps/api/src/app.module.ts",
+        "apps/api/prisma/schema.prisma"
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "memory",
+        "context"
+      ],
+      "dependencies": [
+        "US-003"
+      ],
+      "workdir": "apps/api",
+      "status": "pending",
+      "passes": false,
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Adds one additive context block and one retrieval call path to the existing project context builder."
+      },
+      "escalations": [],
+      "attempts": 0
+    }
+  ],
+  "analysis": "apps/api already has a memory module, but today it only owns timeline reads and context assembly (`apps/api/src/memory/timeline.service.ts`, `timeline.controller.ts`, `context-builder.service.ts`); Phase 3 adds durable semantic memory on top of that surface, not a new subsystem. The main schema touchpoint is `apps/api/prisma/schema.prisma`, which already defines `Project`, `Ticket`, `TicketEvent`, `AgentEvent`, `DecisionEvent`, and `ProjectMember`; `MemoryItem` is additive and should use the SQLite-safe `activeKey` uniqueness pattern because the repo defaults to SQLite. The likely new API files are under `apps/api/src/memory/` for repository, extraction, governance, retrieval, and possibly a new memory controller, with `MemoryModule` and `AppModule` updated to wire them in. Existing integration points that must be extended are `apps/api/src/outbox/outbox-fan-out-registry.ts` for event fan-out, `apps/api/src/koda-domain-writer/koda-domain-writer.service.ts` plus `apps/api/src/events/decision-event.service.ts` for explicit decision writes, and `apps/api/src/memory/context-builder.service.ts` for `semanticMemory` inclusion. Current tests already cover the surrounding seams: `apps/api/src/memory/context-builder.service.spec.ts`, `apps/api/src/memory/timeline.service.spec.ts`, `apps/api/src/outbox/outbox-fan-out-registry.spec.ts`, `apps/api/src/outbox/outbox.service.spec.ts`, `apps/api/src/koda-domain-writer/koda-domain-writer.service.spec.ts`, `apps/api/test/integration/events/event-write-operations.integration.spec.ts`, `apps/api/test/integration/openapi-spec/spec-integrity.integration.spec.ts`, and `apps/api/test/integration/openapi-client/openapi-client.integration.spec.ts` are the main regression points. Risks are mostly contract and data-shape drift: the new endpoint and `semanticMemory` response require OpenAPI regeneration, the active-row uniqueness scheme depends on correctly nulling `activeKey` for history rows, and governance jobs can silently alter retrieval order if confidence or TTL rules are applied too aggressively. Migration path should be additive: first land the schema and repository with project isolation and provenance persistence, then wire extraction fan-out and explicit decision recording, then add retrieval and governance, and finally surface semantic memory in `getProjectContext()`; canonical event tables remain the source of truth and memory rows must stay rebuildable from `TicketEvent`, `AgentEvent`, and `DecisionEvent`."
+}

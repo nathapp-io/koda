@@ -19,4 +19,8 @@ export class UpdateVcsConnectionDto {
   @IsInt()
   @Min(60000)
   pollingIntervalMs?: number;
+
+  @IsOptional()
+  @IsString()
+  webhookSecret?: string;
 }

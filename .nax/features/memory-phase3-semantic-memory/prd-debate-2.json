@@ -1,0 +1,191 @@
+{
+  "project": "koda",
+  "feature": "memory-phase3-semantic-memory",
+  "analysis": "## Analysis\n\n### Codebase Context\n\nThe Koda monorepo uses NestJS 11 + Fastify + Prisma (SQLite default). The API app (`apps/api`) is the system of record.\n\n### Key Existing Files\n\n**Prisma Schema (`apps/api/prisma/schema.prisma`)**\n- Phase 1 models: User, Agent, Project, Ticket, Comment, Label, TicketLabel, TicketActivity, TicketLink, Webhook\n- Phase 2 models: VcsConnection, VcsSyncLog\n- Domain Event Models: TicketEvent, AgentEvent, DecisionEvent\n- Outbox Model: OutboxEvent\n- No `MemoryItem` model exists yet\n\n**Outbox System (`apps/api/src/outbox/outbox-fan-out-registry.ts`)**\n- `OutboxFanOutRegistry` has `register(eventType, handler)` and `dispatch(input)` methods\n- `dispatch()` iterates handlers for the given eventType and logs failures but continues\n- Hook point: extraction is called from `OutboxFanOutRegistry.dispatch()` for `ticket_event` and `agent_event` types\n\n**Domain Writer (`apps/api/src/koda-domain-writer/koda-domain-writer.service.ts`)**\n- `writeDecisionEvent()` creates canonical DecisionEvent via `DecisionEventService.create()` then enqueues outbox event\n- Returns `WriteResult` with `canonicalId` and `derivedIds[]`\n- `writeTicketEvent()` and `writeAgentAction()` also enqueue outbox events\n\n**Memory Module (`apps/api/src/memory/memory.module.ts`)**\n- Exports `TimelineService` and `ContextBuilderService`\n- `ContextBuilderService.getProjectContext()` needs `semanticMemory` block added\n\n**Enums (`apps/api/src/common/enums.ts`)**\n- Uses TypeScript string const objects (e.g., `TicketStatus`, `TicketType`)\n- Koda API guidance: do NOT use Prisma enums; use local constants/types from `src/common/enums.ts`\n- MemoryKind should follow same pattern: `const MemoryKind = { FACT: 'FACT', DECISION: 'DECISION', PREFERENCE: 'PREFERENCE', CONSTRAINT: 'CONSTRAINT', INCIDENT_PATTERN: 'INCIDENT_PATTERN' }`\n\n**Timeline Service (`apps/api/src/memory/timeline.service.ts`)**\n- Already exists with `getProjectTimeline()` and `getTicketHistory()` methods\n- Extraction service depends on this for context\n\n### Architecture Decisions\n\n1. **MemoryItem Schema**: Uses `activeKey` for uniqueness (SQLite limitation — no partial unique indexes). Active rows have `activeKey = \"{kind}:{subject}:{predicate}\"`; superseded/rejected rows have `activeKey = null`.\n\n2. **MemoryKind**: TypeScript string union constant in `src/memory/memory-kinds.ts`, not a Prisma enum.\n\n3. **Extraction Flow**: `OutboxFanOutRegistry.dispatch()` → `ExtractionService.extractFromEvent()` → `MemoryItemRepository.upsert()`\n\n4. **Explicit Decisions**: `recordDecision()` writes canonical `DecisionEvent` first (via `DecisionEventService` or `KodaDomainWriter`), then upserts derived `MemoryItem`.\n\n5. **Conflict Resolution**: Rules per spec — FACT confidence wins, canonical events override inferred, newer DECISION supersedes older, explicit recordDecision overrides extracted.\n\n6. **Governance**: Cron job (daily 03:00 UTC) via `@nestjs/schedule`. Jobs are idempotent and never delete rows.\n\n7. **Retrieval**: Ordered by `confidence DESC`, then `updatedAt DESC`, then `createdAt DESC`. Up to 10 items in `semanticMemory` block of getProjectContext.\n\n### Migration Notes\n\n- Prisma migration needed to add `MemoryItem` model\n- Migration uses `@@unique([projectId, activeKey])` — SQLite allows multiple NULLs in unique index, so superseded/rejected rows coexist\n- Governance job uses `@nestjs/schedule` — may need to ensure the CronModule is imported in app.module\n\n### Files That Need Modification\n\n1. `apps/api/prisma/schema.prisma` — add MemoryItem model\n2. `apps/api/src/memory/memory-kinds.ts` — new file for MemoryKind constants\n3. `apps/api/src/memory/memory-item.repository.ts` — new file for repository\n4. `apps/api/src/memory/extraction.service.ts` — new file for extraction logic\n5. `apps/api/src/memory/memory.service.ts` — new file for retrieval API\n6. `apps/api/src/memory/governance.service.ts` — new file for governance jobs\n7. `apps/api/src/memory/memory.module.ts` — update to include new services\n8. `apps/api/src/memory/context-builder.service.ts` — add semanticMemory to getProjectContext response\n9. `apps/api/src/outbox/outbox-fan-out-registry.ts` — register extraction handlers\n10. `apps/api/src/app.module.ts` — ensure CronModule is imported\n\n### Test Strategy\n\n- US-001 (Schema + Repository): medium complexity, tdd-simple\n- US-002 (Extraction Service): complex, three-session-tdd-lite (cross-module dependencies)\n- US-003 (Memory Retrieval API): medium, tdd-simple\n- US-004 (Governance Jobs): medium, tdd-simple\n- US-005 (getProjectContext integration): simple, tdd-simple\n",
+  "branchName": "feat/memory-phase3-semantic-memory",
+  "createdAt": "2026-04-25T00:00:00.000Z",
+  "updatedAt": "2026-04-25T00:00:00.000Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "MemoryItem Schema + Repository",
+      "description": "Add MemoryItem model to Prisma schema with all fields defined in SPEC §1, including kind constants, activeKey uniqueness strategy, and self-referential supersession relation. Implement MemoryItemRepository with findByProject, upsert, findActive, and transaction-guarded uniqueness enforcement.",
+      "acceptanceCriteria": [
+        "Prisma migration adds MemoryItem table with id, projectId, kind, subject, predicate, object, confidence, ttlAt, ownerId, sourceType, sourceId, status, supersededBy, activeKey, createdAt, updatedAt fields",
+        "MemoryItemRepository.findByProject(query) returns paginated results matching filter criteria (kinds, subjects, status, limit)",
+        "MemoryItemRepository.upsert(item) inserts or updates a memory item and returns the created/updated record",
+        "MemoryItemRepository.findActive(projectId, kind, subject, predicate) returns the active MemoryItem for that composite key or null",
+        "MemoryItemRepository.upsert() within a transaction prevents more than one active memory for the same (projectId, kind, subject, predicate) key, throwing ConflictError when violated",
+        "Creating a MemoryItem with a non-existent projectId throws ForbiddenError with code 'PROJECT_NOT_FOUND'",
+        "MemoryItem has self-referential relation 'MemorySupersession' for supersededBy/supersedes",
+        "Active rows have non-null activeKey set to '{kind}:{subject}:{predicate}'; superseded/rejected rows have activeKey = null",
+        "MemoryKind constants (FACT, DECISION, PREFERENCE, CONSTRAINT, INCIDENT_PATTERN) are defined as TypeScript string union in src/memory/memory-kinds.ts"
+      ],
+      "suggestedCriteria": [
+        "findByProject with empty query returns all active memories for the project",
+        "upsert with identical item returns existing record without creating duplicate"
+      ],
+      "contextFiles": [
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/common/enums.ts",
+        "apps/api/src/koda-domain-writer/write-result.dto.ts"
+      ],
+      "tags": ["feature", "persistence", "api"],
+      "dependencies": [],
+      "workdir": "apps/api",
+      "status": "pending",
+      "passes": false,
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "noTestJustification": null,
+        "reasoning": "2-5 files, standard Prisma patterns, clear requirements, no new abstractions beyond repository pattern already established in codebase"
+      },
+      "escalations": [],
+      "attempts": 0
+    },
+    {
+      "id": "US-002",
+      "title": "Extraction Service — Rule-Based Extractors",
+      "description": "Implement ExtractionService with rule-based extractors that derive MemoryItems from OutboxEvent payloads. Called via OutboxFanOutRegistry.dispatch() for ticket_event and agent_event types. Includes recordDecision() for explicit decisions that first write a canonical DecisionEvent.",
+      "acceptanceCriteria": [
+        "extractFromEvent(ticket_event with action='status_changed') returns a MemoryItem with kind=FACT, subject='ticket:{id}', predicate='status', and object containing the new status value",
+        "extractFromEvent(ticket_event with action='assigned') returns a MemoryItem with kind=FACT, subject='ticket:{id}', predicate='assigned_to', and object containing the new assignee",
+        "extractFromEvent(agent_event) returns empty array when metadata contains no 'decision_made' key",
+        "extractFromEvent(event) returns empty array and logs a structured warning when a supported event type has an incomplete payload (missing required fields)",
+        "recordDecision(data) creates a canonical DecisionEvent via DecisionEventService, calls MemoryItemRepository.upsert(), and returns WriteResult with canonicalId and derivedIds containing the memory ID",
+        "recordDecision with a topic that already has an active decision marks the old decision as superseded (sets supersededBy to new memory ID and status='superseded')",
+        "extractFromEvent is called by OutboxFanOutRegistry.dispatch() when event type is 'ticket_event' or 'agent_event' (registered on module init)",
+        "Extracted items have confidence >= 0.5 and ttlAt = null (never expires by default)",
+        "Items from explicit recordDecision have confidence = 1.0"
+      ],
+      "suggestedCriteria": [
+        "extractFromEvent with unknown event type returns empty array without error",
+        "extractFromEvent does not create low-confidence placeholder memories from incomplete payloads"
+      ],
+      "contextFiles": [
+        "apps/api/src/outbox/outbox-fan-out-registry.ts",
+        "apps/api/src/events/decision-event.service.ts",
+        "apps/api/src/koda-domain-writer/koda-domain-writer.service.ts",
+        "apps/api/src/memory/timeline.service.ts"
+      ],
+      "tags": ["feature", "extraction", "api"],
+      "dependencies": ["US-001"],
+      "workdir": "apps/api",
+      "status": "pending",
+      "passes": false,
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "noTestJustification": null,
+        "reasoning": "Multiple modules (extraction, outbox hook, domain writer), new extractor registry pattern, cross-module dependencies, and event-driven architecture"
+      },
+      "escalations": [],
+      "attempts": 0
+    },
+    {
+      "id": "US-003",
+      "title": "Memory Retrieval API",
+      "description": "Implement MemoryService with getProjectMemory() and getMemoryById() methods. Add GET /projects/:slug/memory endpoint. Memory retrieval respects projectId isolation and orders by confidence DESC, updatedAt DESC, createdAt DESC.",
+      "acceptanceCriteria": [
+        "GET /projects/:slug/memory returns all status=active memories for the project, ordered by confidence DESC, updatedAt DESC, createdAt DESC",
+        "GET /projects/:slug/memory?kind=FACT returns only FACT memories matching the filter",
+        "GET /projects/:slug/memory?subjects=ticket:123 returns memories with subject starting with 'ticket:123' (prefix match)",
+        "When status=superseded is requested, each superseded memory includes supersededBy field pointing to the superseding memory ID",
+        "Memory retrieval enforces projectId isolation — requesting memories for a project the actor cannot access throws ForbiddenError",
+        "getMemoryById(id) returns the MemoryItem with that ID or null if not found",
+        "getMemoryById on a memory from another project throws ForbiddenError"
+      ],
+      "suggestedCriteria": [
+        "getProjectMemory with no matching memories returns empty array (not null)",
+        "getProjectMemory with limit=5 returns at most 5 results"
+      ],
+      "contextFiles": [
+        "apps/api/src/memory/memory.module.ts",
+        "apps/api/src/projects/projects.controller.ts",
+        "apps/api/src/common/enums.ts"
+      ],
+      "tags": ["feature", "api", "retrieval"],
+      "dependencies": ["US-001"],
+      "workdir": "apps/api",
+      "status": "pending",
+      "passes": false,
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "noTestJustification": null,
+        "reasoning": "2-3 files, standard NestJS controller/service pattern, clear requirements with no new abstractions"
+      },
+      "escalations": [],
+      "attempts": 0
+    },
+    {
+      "id": "US-004",
+      "title": "Memory Governance Jobs",
+      "description": "Implement GovernanceService with daily cron job that runs cleanup, expiration, downrank, deduplication, and supersession. Jobs are idempotent and never delete rows — only update status, confidence, or supersededBy.",
+      "acceptanceCriteria": [
+        "runCleanup() executes all four sub-jobs (expireMemories, downrankStaleLowConfidence, deduplicate, applySupersession) and returns GovernanceResult with expired, downranked, deduplicated, superseded counts and durationMs",
+        "expireMemories() sets status='rejected' for all memories where ttlAt < now() and returns the count of expired memories",
+        "downrankStaleLowConfidence() sets confidence=0.1 for memories older than 90 days with confidence < 0.3 and returns the count of downranked memories",
+        "deduplicate() finds all (projectId, kind, subject, predicate) combos with >1 active memory, keeps the highest confidence, marks others as superseded and returns the count of deduplicated memories",
+        "applySupersession() finds DECISION memories on the same topic ordered by createdAt DESC, keeps the newest as active, marks older ones as superseded and returns the count of superseded memories",
+        "Governance jobs are idempotent — running twice in a row produces the same end state",
+        "A governance run touching 1000 memories completes in under 30 seconds",
+        "Governance jobs never delete MemoryItem rows; they only update status, confidence, or supersededBy to preserve audit history"
+      ],
+      "suggestedCriteria": [
+        "runCleanup on empty MemoryItem table completes quickly with zero counts",
+        "deduplicate when all memories have unique (kind, subject, predicate) makes no changes"
+      ],
+      "contextFiles": [
+        "apps/api/src/memory/memory.module.ts",
+        "apps/api/src/app.module.ts"
+      ],
+      "tags": ["feature", "governance", "api"],
+      "dependencies": ["US-001", "US-002"],
+      "workdir": "apps/api",
+      "status": "pending",
+      "passes": false,
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "noTestJustification": null,
+        "reasoning": "3 files, standard cron/job pattern, clear requirements with idempotency constraint"
+      },
+      "escalations": [],
+      "attempts": 0
+    },
+    {
+      "id": "US-005",
+      "title": "Semantic Memory in getProjectContext",
+      "description": "Add semanticMemory field to getProjectContext() response in ContextBuilderService. Include up to 10 most-relevant active MemoryItems ordered by confidence DESC. Track memory_item provenance in sources.",
+      "acceptanceCriteria": [
+        "getProjectContext() includes a semanticMemory field in its response with up to 10 most-relevant active MemoryItems, ordered by confidence DESC",
+        "semanticMemory items have provenance.sources entries with source_type='memory_item' when memory items are present",
+        "When no MemoryItems exist for the project, semanticMemory is an empty array (not null) in the response",
+        "semanticMemory is populated by calling MemoryService.getProjectMemory() internally with appropriate filters"
+      ],
+      "suggestedCriteria": [
+        "getProjectContext with fewer than 10 memories returns all available memories",
+        "getProjectContext semanticMemory respects projectId isolation"
+      ],
+      "contextFiles": [
+        "apps/api/src/memory/context-builder.service.ts",
+        "apps/api/src/memory/memory.service.ts"
+      ],
+      "tags": ["feature", "context", "api"],
+      "dependencies": ["US-003"],
+      "workdir": "apps/api",
+      "status": "pending",
+      "passes": false,
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "noTestJustification": null,
+        "reasoning": "Single file modification to ContextBuilderService.getProjectContext(), purely additive semanticMemory block with straightforward integration to existing MemoryService"
+      },
+      "escalations": [],
+      "attempts": 0
+    }
+  ]
+}

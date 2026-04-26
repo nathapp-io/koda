@@ -20,12 +20,16 @@ export class CreateVcsConnectionDto {
   @IsString()
   repoName: string;
 
+  @IsOptional()
+  @IsString()
+  repoUrl?: string;
+
   @IsString()
   token: string;
 
   @IsOptional()
-  @IsEnum(VcsSyncModeType)
-  syncMode?: VcsSyncModeType;
+  @IsString()
+  syncMode?: string;
 
   @IsOptional()
   @IsArray()
