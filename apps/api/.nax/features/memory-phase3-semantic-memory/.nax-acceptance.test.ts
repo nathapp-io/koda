@@ -35,21 +35,19 @@ interface MockPrismaClient {
 
 function createMockPrismaClient(): MockPrismaClient {
   return {
-    client: {
-      memoryItem: {
-        findMany: jest.fn(),
-        findUnique: jest.fn(),
-        findFirst: jest.fn(),
-        create: jest.fn(),
-        update: jest.fn(),
-        count: jest.fn(),
-      },
-      project: {
-        findMany: jest.fn(),
-        findUnique: jest.fn(),
-      },
-      $transaction: jest.fn(),
+    memoryItem: {
+      findMany: jest.fn(),
+      findUnique: jest.fn(),
+      findFirst: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+      count: jest.fn(),
     },
+    project: {
+      findMany: jest.fn(),
+      findUnique: jest.fn(),
+    },
+    $transaction: jest.fn(),
   };
 }
 
@@ -118,7 +116,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         updatedAt: new Date(),
       };
 
-      mockClient.client.$transaction.mockImplementation(async (fn) => {
+      mockClient.$transaction.mockImplementation(async (fn) => {
         const txClient = {
           memoryItem: {
             findFirst: jest.fn().mockResolvedValue(existingActiveItem),
@@ -132,7 +130,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           MemoryItemRepository,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
@@ -147,7 +145,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       });
 
       expect(result).toBeDefined();
-      expect(mockClient.client.$transaction).toHaveBeenCalled();
+      expect(mockClient.$transaction).toHaveBeenCalled();
     });
 
     it('at most one active row exists per composite key after upsert', async () => {
@@ -165,7 +163,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       };
 
       let updateCall: any;
-      mockClient.client.$transaction.mockImplementation(async (fn) => {
+      mockClient.$transaction.mockImplementation(async (fn) => {
         return fn({
           memoryItem: {
             findFirst: jest.fn().mockResolvedValue(existingActiveItem),
@@ -181,7 +179,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           MemoryItemRepository,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
@@ -208,13 +206,13 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       const items = [
         { id: 'mem-1', projectId: 'proj-1', kind: 'FACT', subject: 'ticket:1', predicate: 'status', createdAt: new Date(), updatedAt: new Date() },
       ];
-      mockClient.client.memoryItem.findMany.mockResolvedValue(items);
-      mockClient.client.memoryItem.count.mockResolvedValue(1);
+      mockClient.memoryItem.findMany.mockResolvedValue(items);
+      mockClient.memoryItem.count.mockResolvedValue(1);
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           MemoryItemRepository,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
@@ -231,13 +229,13 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
 
     it('filters by kind, subject, predicate when provided', async () => {
       const mockClient = createMockPrismaClient();
-      mockClient.client.memoryItem.findMany.mockResolvedValue([]);
-      mockClient.client.memoryItem.count.mockResolvedValue(0);
+      mockClient.memoryItem.findMany.mockResolvedValue([]);
+      mockClient.memoryItem.count.mockResolvedValue(0);
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           MemoryItemRepository,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
@@ -251,7 +249,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         limit: 20,
       });
 
-      expect(mockClient.client.memoryItem.findMany).toHaveBeenCalledWith(
+      expect(mockClient.memoryItem.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             projectId: 'proj-1',
@@ -278,7 +276,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         updatedAt: new Date(),
       };
 
-      mockClient.client.$transaction.mockImplementation(async (fn) => {
+      mockClient.$transaction.mockImplementation(async (fn) => {
         return fn({
           memoryItem: {
             findFirst: jest.fn().mockResolvedValue(null),
@@ -291,7 +289,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           MemoryItemRepository,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
@@ -321,7 +319,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         updatedAt: new Date(),
       };
 
-      mockClient.client.$transaction.mockImplementation(async (fn) => {
+      mockClient.$transaction.mockImplementation(async (fn) => {
         return fn({
           memoryItem: {
             findFirst: jest.fn().mockResolvedValue(null),
@@ -334,7 +332,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           MemoryItemRepository,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
@@ -348,7 +346,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         object: 'closed',
       });
 
-      expect(mockClient.client.$transaction).toHaveBeenCalled();
+      expect(mockClient.$transaction).toHaveBeenCalled();
     });
   });
 
@@ -366,12 +364,12 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         updatedAt: new Date(),
       };
 
-      mockClient.client.memoryItem.findFirst.mockResolvedValue(activeItem);
+      mockClient.memoryItem.findFirst.mockResolvedValue(activeItem);
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           MemoryItemRepository,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
@@ -380,19 +378,19 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
 
       expect(result).toBeDefined();
       expect(result?.activeKey).toBe('active-key-123');
-      expect(mockClient.client.memoryItem.findFirst).toHaveBeenCalledWith({
+      expect(mockClient.memoryItem.findFirst).toHaveBeenCalledWith({
         where: { projectId: 'proj-1', kind: 'FACT', subject: 'ticket:1', predicate: 'status', activeKey: { not: null }, deletedAt: null },
       });
     });
 
     it('findActive returns null when no active row exists', async () => {
       const mockClient = createMockPrismaClient();
-      mockClient.client.memoryItem.findFirst.mockResolvedValue(null);
+      mockClient.memoryItem.findFirst.mockResolvedValue(null);
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           MemoryItemRepository,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
@@ -444,7 +442,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           MemoryItemRepository,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
@@ -456,19 +454,19 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
   describe('AC-9: activeKey invariant - null means superseded/rejected', () => {
     it('reject sets activeKey to null and status to rejected', async () => {
       const mockClient = createMockPrismaClient();
-      mockClient.client.memoryItem.update.mockResolvedValue({ id: 'mem-1', activeKey: null, status: 'rejected' });
+      mockClient.memoryItem.update.mockResolvedValue({ id: 'mem-1', activeKey: null, status: 'rejected' });
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           MemoryItemRepository,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
       const repo = module.get(MemoryItemRepository);
       await repo.reject('mem-1');
 
-      expect(mockClient.client.memoryItem.update).toHaveBeenCalledWith({
+      expect(mockClient.memoryItem.update).toHaveBeenCalledWith({
         where: { id: 'mem-1' },
         data: { activeKey: null, status: 'rejected' },
       });
@@ -645,17 +643,20 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       const service = module.get(ExtractionService);
       const mockRepo = createMockMemoryItemRepository();
       mockRepo.upsert
+        .mockResolvedValueOnce({ id: 'existing-decision-id' })
         .mockResolvedValueOnce({ id: 'dec-canonical-1' })
         .mockResolvedValueOnce({ id: 'mem-dec-1' });
 
-      await service.recordDecision(
+      const result = await service.recordDecision(
         { projectId: 'proj-1', agentId: 'agent-1', decision: 'revise' },
         { id: 'event-dec-002' },
         mockRepo,
         { id: 'existing-decision-id' },
       );
 
-      expect(mockRepo.upsert).toHaveBeenCalledTimes(2);
+      expect(mockRepo.upsert).toHaveBeenCalledTimes(3);
+      expect(result).toHaveProperty('canonicalId');
+      expect(result).toHaveProperty('memoryId');
     });
   });
 
@@ -786,13 +787,13 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         },
       ];
 
-      mockClient.client.memoryItem.findMany.mockResolvedValue(activeItems);
-      mockClient.client.memoryItem.count.mockResolvedValue(1);
+      mockClient.memoryItem.findMany.mockResolvedValue(activeItems);
+      mockClient.memoryItem.count.mockResolvedValue(1);
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           MemoryItemRepository,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
@@ -823,13 +824,13 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         },
       ];
 
-      mockClient.client.memoryItem.findMany.mockResolvedValue(factItems);
-      mockClient.client.memoryItem.count.mockResolvedValue(1);
+      mockClient.memoryItem.findMany.mockResolvedValue(factItems);
+      mockClient.memoryItem.count.mockResolvedValue(1);
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           MemoryItemRepository,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
@@ -840,7 +841,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         limit: 20,
       });
 
-      expect(mockClient.client.memoryItem.findMany).toHaveBeenCalledWith(
+      expect(mockClient.memoryItem.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             kind: 'FACT',
@@ -866,13 +867,13 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         },
       ];
 
-      mockClient.client.memoryItem.findMany.mockResolvedValue(items);
-      mockClient.client.memoryItem.count.mockResolvedValue(1);
+      mockClient.memoryItem.findMany.mockResolvedValue(items);
+      mockClient.memoryItem.count.mockResolvedValue(1);
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           MemoryItemRepository,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
@@ -883,7 +884,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         limit: 20,
       });
 
-      expect(mockClient.client.memoryItem.findMany).toHaveBeenCalledWith(
+      expect(mockClient.memoryItem.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             subject: { startsWith: 'ticket:123' },
@@ -910,13 +911,13 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         },
       ];
 
-      mockClient.client.memoryItem.findMany.mockResolvedValue(supersededItems);
-      mockClient.client.memoryItem.count.mockResolvedValue(1);
+      mockClient.memoryItem.findMany.mockResolvedValue(supersededItems);
+      mockClient.memoryItem.count.mockResolvedValue(1);
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           MemoryItemRepository,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
@@ -934,13 +935,13 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
   describe('AC-24: Cross-project memory access denied', () => {
     it('findByProjectMemory only returns items for specified projectId', async () => {
       const mockClient = createMockPrismaClient();
-      mockClient.client.memoryItem.findMany.mockResolvedValue([]);
-      mockClient.client.memoryItem.count.mockResolvedValue(0);
+      mockClient.memoryItem.findMany.mockResolvedValue([]);
+      mockClient.memoryItem.count.mockResolvedValue(0);
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           MemoryItemRepository,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
@@ -950,7 +951,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         limit: 20,
       });
 
-      expect(mockClient.client.memoryItem.findMany).toHaveBeenCalledWith(
+      expect(mockClient.memoryItem.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             projectId: 'proj-slug-a',
@@ -1027,18 +1028,18 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       const mockClient = createMockPrismaClient();
       const now = new Date();
       const items = [
-        { id: 'mem-1', kind: 'FACT', subject: 'ticket:1', predicate: 'status', confidence: 0.8, updatedAt: new Date(now.getTime() - 1000), createdAt: now },
         { id: 'mem-2', kind: 'FACT', subject: 'ticket:2', predicate: 'status', confidence: 0.9, updatedAt: now, createdAt: now },
+        { id: 'mem-1', kind: 'FACT', subject: 'ticket:1', predicate: 'status', confidence: 0.8, updatedAt: new Date(now.getTime() - 1000), createdAt: now },
         { id: 'mem-3', kind: 'FACT', subject: 'ticket:3', predicate: 'status', confidence: 0.7, updatedAt: now, createdAt: now },
       ];
 
-      mockClient.client.memoryItem.findMany.mockResolvedValue(items);
-      mockClient.client.memoryItem.count.mockResolvedValue(3);
+      mockClient.memoryItem.findMany.mockResolvedValue(items);
+      mockClient.memoryItem.count.mockResolvedValue(3);
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           MemoryItemRepository,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
@@ -1079,14 +1080,14 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
   describe('AC-28: runCleanup calls all four governance methods', () => {
     it('runCleanup returns GovernanceResult with expiredCount, downrankedCount, deduplicatedCount, supersededCount', async () => {
       const mockClient = createMockPrismaClient();
-      mockClient.client.memoryItem.findMany.mockResolvedValue([]);
-      mockClient.client.memoryItem.count.mockResolvedValue(0);
+      mockClient.memoryItem.findMany.mockResolvedValue([]);
+      mockClient.memoryItem.count.mockResolvedValue(0);
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           MemoryItemRepository,
           MemoryGovernanceService,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
@@ -1116,16 +1117,16 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       ];
 
       let callCount = 0;
-      mockClient.client.memoryItem.findMany.mockImplementation(() => {
+      mockClient.memoryItem.findMany.mockImplementation(() => {
         if (callCount === 0) {
           callCount++;
           return Promise.resolve(items);
         }
         return Promise.resolve([]);
       });
-      mockClient.client.memoryItem.count.mockResolvedValue(2);
+      mockClient.memoryItem.count.mockResolvedValue(2);
 
-      mockClient.client.$transaction.mockImplementation(async (fn) => {
+      mockClient.$transaction.mockImplementation(async (fn) => {
         return fn({
           memoryItem: {
             findFirst: jest.fn(),
@@ -1139,7 +1140,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         providers: [
           MemoryItemRepository,
           MemoryGovernanceService,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
@@ -1163,16 +1164,16 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       ];
 
       let callCount = 0;
-      mockClient.client.memoryItem.findMany.mockImplementation(() => {
+      mockClient.memoryItem.findMany.mockImplementation(() => {
         if (callCount === 0) {
           callCount++;
           return Promise.resolve(items);
         }
         return Promise.resolve([]);
       });
-      mockClient.client.memoryItem.count.mockResolvedValue(2);
+      mockClient.memoryItem.count.mockResolvedValue(2);
 
-      mockClient.client.$transaction.mockImplementation(async (fn) => {
+      mockClient.$transaction.mockImplementation(async (fn) => {
         return fn({
           memoryItem: {
             findFirst: jest.fn(),
@@ -1186,7 +1187,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         providers: [
           MemoryItemRepository,
           MemoryGovernanceService,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
@@ -1207,16 +1208,16 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       ];
 
       let callCount = 0;
-      mockClient.client.memoryItem.findMany.mockImplementation(() => {
+      mockClient.memoryItem.findMany.mockImplementation(() => {
         if (callCount === 0) {
           callCount++;
           return Promise.resolve(items);
         }
         return Promise.resolve([]);
       });
-      mockClient.client.memoryItem.count.mockResolvedValue(2);
+      mockClient.memoryItem.count.mockResolvedValue(2);
 
-      mockClient.client.$transaction.mockImplementation(async (fn) => {
+      mockClient.$transaction.mockImplementation(async (fn) => {
         return fn({
           memoryItem: {
             findFirst: jest.fn(),
@@ -1230,7 +1231,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         providers: [
           MemoryItemRepository,
           MemoryGovernanceService,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
@@ -1254,16 +1255,16 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       ];
 
       let callCount = 0;
-      mockClient.client.memoryItem.findMany.mockImplementation(() => {
+      mockClient.memoryItem.findMany.mockImplementation(() => {
         if (callCount === 0) {
           callCount++;
           return Promise.resolve(items);
         }
         return Promise.resolve([]);
       });
-      mockClient.client.memoryItem.count.mockResolvedValue(2);
+      mockClient.memoryItem.count.mockResolvedValue(2);
 
-      mockClient.client.$transaction.mockImplementation(async (fn) => {
+      mockClient.$transaction.mockImplementation(async (fn) => {
         return fn({
           memoryItem: {
             findFirst: jest.fn(),
@@ -1277,7 +1278,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         providers: [
           MemoryItemRepository,
           MemoryGovernanceService,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
@@ -1292,14 +1293,14 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
   describe('AC-33: runCleanup is idempotent', () => {
     it('running cleanup twice produces same result on second run', async () => {
       const mockClient = createMockPrismaClient();
-      mockClient.client.memoryItem.findMany.mockResolvedValue([]);
-      mockClient.client.memoryItem.count.mockResolvedValue(0);
+      mockClient.memoryItem.findMany.mockResolvedValue([]);
+      mockClient.memoryItem.count.mockResolvedValue(0);
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           MemoryItemRepository,
           MemoryGovernanceService,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
@@ -1330,10 +1331,10 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         updatedAt: new Date(),
       }));
 
-      mockClient.client.memoryItem.findMany.mockResolvedValue(items);
-      mockClient.client.memoryItem.count.mockResolvedValue(100);
+      mockClient.memoryItem.findMany.mockResolvedValue(items);
+      mockClient.memoryItem.count.mockResolvedValue(100);
 
-      mockClient.client.$transaction.mockImplementation(async (fn) => {
+      mockClient.$transaction.mockImplementation(async (fn) => {
         return fn({
           memoryItem: {
             findFirst: jest.fn(),
@@ -1347,7 +1348,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         providers: [
           MemoryItemRepository,
           MemoryGovernanceService,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
@@ -1365,10 +1366,10 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       const mockClient = createMockPrismaClient();
       const updates: any[] = [];
 
-      mockClient.client.memoryItem.findMany.mockResolvedValue([]);
-      mockClient.client.memoryItem.count.mockResolvedValue(0);
+      mockClient.memoryItem.findMany.mockResolvedValue([]);
+      mockClient.memoryItem.count.mockResolvedValue(0);
 
-      mockClient.client.$transaction.mockImplementation(async (fn) => {
+      mockClient.$transaction.mockImplementation(async (fn) => {
         return fn({
           memoryItem: {
             findFirst: jest.fn(),
@@ -1388,7 +1389,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         providers: [
           MemoryItemRepository,
           MemoryGovernanceService,
-          { provide: PrismaService, useValue: mockClient },
+          { provide: PrismaService, useValue: { client: mockClient } },
         ],
       }).compile();
 
