@@ -7,12 +7,10 @@ export interface GovernanceResult {
   downrankedCount: number;
   deduplicatedCount: number;
   supersessionCount: number;
+  durationMs: number;
 }
 
 const PAGE_SIZE = 100;
-// Safety bound — terminates pagination if a repository ever returns full pages
-// indefinitely (e.g. a misbehaving query or stale cache), so a single project's
-// cleanup cannot exhaust the heap.
 const MAX_PAGES = 10_000;
 
 @Injectable()
@@ -22,6 +20,8 @@ export class MemoryGovernanceService {
   constructor(private readonly repository: MemoryItemRepository) {}
 
   async runCleanup(projectId: string): Promise<GovernanceResult> {
+    const start = Date.now();
+
     const expiredResult = await this.expireMemories(projectId);
     const downrankedResult = await this.downrankStaleLowConfidence(projectId);
     const deduplicatedResult = await this.deduplicate(projectId);
@@ -32,6 +32,7 @@ export class MemoryGovernanceService {
       downrankedCount: downrankedResult.count,
       deduplicatedCount: deduplicatedResult.count,
       supersessionCount: supersessionResult.count,
+      durationMs: Date.now() - start,
     };
   }
 
@@ -60,10 +61,7 @@ export class MemoryGovernanceService {
       );
 
       for (const item of expiredItems) {
-        await this.repository.upsert({
-          ...item,
-          id: item.id,
-          kind: item.kind as MemoryKind,
+        await this.repository.updateDirect(item.id, {
           status: 'rejected',
           activeKey: null,
         });
@@ -100,17 +98,11 @@ export class MemoryGovernanceService {
       const staleItems = result.data.filter(
         (item) =>
           item.createdAt < ninetyDaysAgo &&
-          item.confidence !== undefined &&
           item.confidence < 0.3,
       );
 
       for (const item of staleItems) {
-        await this.repository.upsert({
-          ...item,
-          id: item.id,
-          kind: item.kind as MemoryKind,
-          confidence: 0.1,
-        });
+        await this.repository.updateDirect(item.id, { confidence: 0.1 });
         downrankedCount++;
       }
 
@@ -125,7 +117,7 @@ export class MemoryGovernanceService {
     let supersededCount = 0;
     let hasMore = true;
 
-    do {
+    while (hasMore && page <= MAX_PAGES) {
       if (page > MAX_PAGES) {
         this.logger.warn(`deduplicate: pagination exceeded ${MAX_PAGES} pages for project ${projectId}`);
         break;
@@ -139,8 +131,7 @@ export class MemoryGovernanceService {
 
       hasMore = result.data.length >= PAGE_SIZE;
 
-      // Group by (kind, subject, predicate) — skip items already superseded in this run
-      const groups = new Map<string, { item: MemoryItem; supersededInRun: boolean }[]>();
+      const groups = new Map<string, MemoryItem[]>();
       for (const item of result.data) {
         const key = `${item.kind}:${item.subject}:${item.predicate}`;
         if (!groups.has(key)) {
@@ -148,7 +139,7 @@ export class MemoryGovernanceService {
         }
         const group = groups.get(key);
         if (group) {
-          group.push({ item, supersededInRun: false });
+          group.push(item);
         }
       }
 
@@ -157,36 +148,23 @@ export class MemoryGovernanceService {
           continue;
         }
 
-        const sorted = [...group].sort((a, b) => (b.item.confidence ?? 0) - (a.item.confidence ?? 0));
+        const sorted = [...group].sort((a, b) => b.confidence - a.confidence);
+        const winner = sorted[0];
 
-        // Find the first item that is genuinely still active
-        const activeCandidate = sorted.find(
-          ({ item, supersededInRun }) => item.activeKey && !supersededInRun,
-        );
-        if (!activeCandidate) {
-          continue;
-        }
-
-        // Mark lower-confidence items as superseded (skip already superseded in this run)
         for (let i = 1; i < sorted.length; i++) {
-          const entry = sorted[i];
-          if (entry.item.activeKey && !entry.supersededInRun) {
-            await this.repository.upsert({
-              ...entry.item,
-              id: entry.item.id,
-              kind: entry.item.kind as MemoryKind,
+          if (sorted[i].activeKey) {
+            await this.repository.updateDirect(sorted[i].id, {
               status: 'superseded',
-              supersededBy: activeCandidate.item.id,
+              supersededBy: winner.id,
               activeKey: null,
             });
-            entry.supersededInRun = true;
             supersededCount++;
           }
         }
       }
 
       page++;
-    } while (hasMore);
+    }
 
     return { count: supersededCount };
   }
@@ -196,7 +174,7 @@ export class MemoryGovernanceService {
     let supersededCount = 0;
     let hasMore = true;
 
-    do {
+    while (hasMore && page <= MAX_PAGES) {
       if (page > MAX_PAGES) {
         this.logger.warn(`applySupersession: pagination exceeded ${MAX_PAGES} pages for project ${projectId}`);
         break;
@@ -211,7 +189,6 @@ export class MemoryGovernanceService {
 
       hasMore = result.data.length >= PAGE_SIZE;
 
-      // Group by topic (subject + predicate) — only apply supersession within each topic group
       const topicGroups = new Map<string, MemoryItem[]>();
       for (const item of result.data) {
         const topicKey = `${item.subject}:${item.predicate}`;
@@ -232,15 +209,12 @@ export class MemoryGovernanceService {
         const sorted = [...topicDecisions].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
         const newest = sorted[0];
 
-        // Only supersede items that are still active and not the newest
         for (let i = 1; i < sorted.length; i++) {
           if (sorted[i].activeKey) {
-            await this.repository.upsert({
-              ...sorted[i],
-              id: sorted[i].id,
-              kind: sorted[i].kind as MemoryKind,
+            await this.repository.updateDirect(sorted[i].id, {
               status: 'superseded',
               supersededBy: newest.id,
+              activeKey: null,
             });
             supersededCount++;
           }
@@ -248,7 +222,7 @@ export class MemoryGovernanceService {
       }
 
       page++;
-    } while (hasMore);
+    }
 
     return { count: supersededCount };
   }

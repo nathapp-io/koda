@@ -50,11 +50,11 @@ export class ContextBuilderService {
       projectId: query.projectId,
     };
 
+    await this.loadSemanticMemory(query.projectId, response);
+
     if (query.intent === 'plan') {
       return response;
     }
-
-    await this.loadSemanticMemory(query.projectId, response);
 
     if (query.intent === 'diagnose') {
       try {
@@ -126,6 +126,7 @@ export class ContextBuilderService {
     try {
       const memoryResult = await this.memoryItemRepository.findByProjectMemory({
         projectId,
+        limit: 10,
       });
       response.semanticMemory = memoryResult.items
         .map((item: MemoryItem) => ({
@@ -137,9 +138,7 @@ export class ContextBuilderService {
           confidence: item.confidence,
           createdAt: item.createdAt,
           updatedAt: item.updatedAt,
-        }))
-        .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
-        .slice(0, 10);
+        }));
     } catch (error) {
       this.logger.warn(`Failed to get project memory: ${error instanceof Error ? error.message : String(error)}`);
       response.semanticMemory = [];

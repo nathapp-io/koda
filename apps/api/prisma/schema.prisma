@@ -358,26 +358,30 @@ model OutboxEvent {
 model MemoryItem {
   id           String    @id @default(cuid())
   projectId    String
-  kind         String    // FACT | INCIDENT_PATTERN | DECISION
+  kind         String    // FACT | DECISION | PREFERENCE | CONSTRAINT | INCIDENT_PATTERN
   subject      String    // e.g. 'ticket:123'
   predicate    String    // e.g. 'status', 'assigned_to'
   object       String?   // e.g. 'IN_PROGRESS', 'user:456'
-  activeKey    String?   // unique key for active items per (projectId, kind, subject, predicate); null when superseded/rejected
-  sourceType   String?   // TicketEvent | AgentEvent | DecisionEvent | null
-  sourceId     String?   // ID of the source event
-  status       String?   // active | rejected | superseded
-  confidence   Float?    // 0.0 - 1.0
-  ttlAt        DateTime? // when to expire/reject this memory
+  confidence   Float     @default(0.8) // 0.0 - 1.0
+  ttlAt        DateTime? // null = never expires
+  ownerId      String?   // agent or user who created it
+  sourceType   String?   // ticket_event | agent_event | decision_event | manual
+  sourceId     String?   // ID of canonical record/source
+  status       String    @default("active") // active | superseded | rejected
   supersededBy String?   // ID of the MemoryItem that superseded this one
+  activeKey    String?   // set only for active rows; null for superseded/rejected
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   deletedAt    DateTime? // soft delete
 
   project      Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  supersededByMemory MemoryItem?  @relation("MemorySupersession", fields: [supersededBy], references: [id])
+  supersedes          MemoryItem[] @relation("MemorySupersession")
 
-  @@unique([projectId, kind, subject, predicate, activeKey])
+  @@unique([projectId, activeKey])
+  @@index([projectId, kind])
+  @@index([projectId, status])
   @@index([projectId, kind, subject, predicate])
-  @@index([projectId, activeKey])
   @@index([projectId, deletedAt])
   @@index([projectId, sourceType, sourceId])
 }

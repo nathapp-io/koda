@@ -5,11 +5,11 @@ import { MemoryKind } from '../../common/enums';
 export class GetProjectMemoryDto {
   @ApiPropertyOptional({
     description: 'Filter by memory kind',
-    enum: ['FACT', 'INCIDENT_PATTERN', 'DECISION'],
+    enum: ['FACT', 'DECISION', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN'],
   })
   @IsOptional()
   @IsString()
-  @IsIn(['FACT', 'INCIDENT_PATTERN', 'DECISION'])
+  @IsIn(['FACT', 'DECISION', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN'])
   kind?: MemoryKind;
 
   @ApiPropertyOptional({
@@ -36,7 +36,7 @@ export class MemoryItemResponseDto {
   @ApiProperty({ description: 'Project ID' })
   projectId!: string;
 
-  @ApiProperty({ description: 'Memory kind', enum: ['FACT', 'INCIDENT_PATTERN', 'DECISION'] })
+  @ApiProperty({ description: 'Memory kind', enum: ['FACT', 'DECISION', 'PREFERENCE', 'CONSTRAINT', 'INCIDENT_PATTERN'] })
   kind!: string;
 
   @ApiProperty({ description: 'Memory subject', example: 'ticket:123' })

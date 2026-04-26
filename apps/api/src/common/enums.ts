@@ -70,7 +70,9 @@ export type AutoAssignMode = typeof AutoAssignMode[keyof typeof AutoAssignMode];
 
 export const MemoryKind = {
   FACT: 'FACT',
-  INCIDENT_PATTERN: 'INCIDENT_PATTERN',
   DECISION: 'DECISION',
+  PREFERENCE: 'PREFERENCE',
+  CONSTRAINT: 'CONSTRAINT',
+  INCIDENT_PATTERN: 'INCIDENT_PATTERN',
 } as const;
 export type MemoryKind = (typeof MemoryKind)[keyof typeof MemoryKind];

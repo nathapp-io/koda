@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { MemoryKind } from '../common/enums';
+import { MemoryItemRepository, MemoryItemInput } from './memory-item-repository';
 
 export interface MemoryExtractedItem {
   projectId: string;
@@ -10,7 +11,7 @@ export interface MemoryExtractedItem {
   sourceType?: string;
   sourceId?: string;
   confidence: number;
-  ttlAt?: Date;
+  ttlAt?: Date | null;
 }
 
 interface TicketEvent {
@@ -54,11 +55,6 @@ export interface WriteResult {
   memoryId: string;
 }
 
-interface MemoryItemRepository {
-  upsert(item: unknown): Promise<unknown>;
-  findActive(projectId: string, kind: string, subject: string, predicate: string): Promise<unknown | null>;
-}
-
 @Injectable()
 export class ExtractionService {
   extractFromEvent(event: CanonicalEvent): MemoryExtractedItem[] {
@@ -98,6 +94,8 @@ export class ExtractionService {
           subject: `ticket:${event.ticketId}`,
           predicate: 'status',
           object: data.newStatus || data.status,
+          sourceType: 'ticket_event',
+          sourceId: event.id,
           confidence: 0.9,
           ttlAt: null,
         },
@@ -118,6 +116,8 @@ export class ExtractionService {
           subject: `ticket:${event.ticketId}`,
           predicate: 'assigned_to',
           object: data.assignedTo,
+          sourceType: 'ticket_event',
+          sourceId: event.id,
           confidence: 0.85,
           ttlAt: null,
         },
@@ -138,6 +138,8 @@ export class ExtractionService {
           subject: `ticket:${event.ticketId}`,
           predicate: 'incident',
           object: data.incidentId,
+          sourceType: 'ticket_event',
+          sourceId: event.id,
           confidence: 0.75,
           ttlAt: null,
         },
@@ -166,6 +168,8 @@ export class ExtractionService {
           subject: `agent:${event.agentId}`,
           predicate: 'decision',
           object: data.decision,
+          sourceType: 'agent_event',
+          sourceId: event.id,
           confidence: 0.95,
         },
       ];
@@ -186,7 +190,7 @@ export class ExtractionService {
         subject: `agent:${event.agentId}`,
         predicate: 'decision',
         object: event.decision,
-        sourceType: 'DecisionEvent',
+        sourceType: 'decision_event',
         sourceId: event.id,
         confidence: 1.0,
       },
@@ -194,48 +198,38 @@ export class ExtractionService {
   }
 
   async recordDecision(
-    decision: { projectId: string; agentId: string; decision: string; rationale?: string },
-    event: { id: string },
+    input: { projectId: string; actorId: string; topic: string; decision: string; rationale?: string; sourceId?: string },
     repository: MemoryItemRepository,
-    existingDecision?: { id: string },
   ): Promise<WriteResult> {
-    const memoryId = `mem-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const existingActive = await repository.findActive(
+      input.projectId,
+      MemoryKind.DECISION,
+      `agent:${input.actorId}`,
+      input.topic,
+    );
 
-    if (existingDecision) {
-      await repository.upsert({
-        id: existingDecision.id,
+    if (existingActive) {
+      await repository.updateDirect(existingActive.id, {
         status: 'superseded',
         activeKey: null,
-        supersededBy: memoryId,
+        supersededBy: undefined,
       });
     }
 
-    const decisionEventResult = await repository.upsert({
-      id: event.id,
-      projectId: decision.projectId,
+    const memoryInput: MemoryItemInput = {
+      projectId: input.projectId,
       kind: MemoryKind.DECISION,
-      subject: `agent:${decision.agentId}`,
-      predicate: 'decision',
-      object: decision.decision,
-      sourceType: 'DecisionEvent',
-      sourceId: event.id,
-      activeKey: null,
-      status: 'active',
+      subject: `agent:${input.actorId}`,
+      predicate: input.topic,
+      object: input.decision,
+      sourceType: 'decision_event',
+      sourceId: input.sourceId,
       confidence: 1.0,
-    }) as { id: string };
+      ownerId: input.actorId,
+    };
 
-    const memoryResult = await repository.upsert({
-      id: memoryId,
-      projectId: decision.projectId,
-      kind: MemoryKind.DECISION,
-      subject: `agent:${decision.agentId}`,
-      predicate: 'decision',
-      object: decision.decision,
-      activeKey: memoryId,
-      status: 'active',
-      confidence: 1.0,
-    }) as { id: string };
+    const memory = await repository.upsert(memoryInput);
 
-    return { canonicalId: decisionEventResult.id, memoryId: memoryResult.id };
+    return { canonicalId: input.sourceId ?? memory.id, memoryId: memory.id };
   }
 }

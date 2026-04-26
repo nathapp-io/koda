@@ -2,13 +2,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { MemoryItemRepository } from './memory-item-repository';
 
-const MemoryKind = {
-  FACT: 'FACT',
-  INCIDENT_PATTERN: 'INCIDENT_PATTERN',
-  DECISION: 'DECISION',
-} as const;
-type MemoryKind = (typeof MemoryKind)[keyof typeof MemoryKind];
-
 describe('MemoryItemRepository.findByProjectMemory', () => {
   let repository: MemoryItemRepository;
   let prismaService: PrismaService<any>;
@@ -39,7 +32,7 @@ describe('MemoryItemRepository.findByProjectMemory', () => {
   });
 
   describe('default active filter', () => {
-    it('defaults to status=active and ttlAt=null when no status provided', async () => {
+    it('defaults to status=active and includes non-expired TTL items when no status provided', async () => {
       mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
       mockPrismaClient.memoryItem.count.mockResolvedValue(0);
 
@@ -51,7 +44,10 @@ describe('MemoryItemRepository.findByProjectMemory', () => {
             projectId: 'project-123',
             deletedAt: null,
             status: 'active',
-            ttlAt: { equals: null },
+            OR: [
+              { ttlAt: null },
+              { ttlAt: { gt: expect.any(Date) } },
+            ],
           }),
         }),
       );
@@ -63,7 +59,7 @@ describe('MemoryItemRepository.findByProjectMemory', () => {
       mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
       mockPrismaClient.memoryItem.count.mockResolvedValue(0);
 
-      await repository.findByProjectMemory({ projectId: 'project-123', kind: MemoryKind.FACT });
+      await repository.findByProjectMemory({ projectId: 'project-123', kind: 'FACT' });
 
       expect(mockPrismaClient.memoryItem.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -91,43 +87,16 @@ describe('MemoryItemRepository.findByProjectMemory', () => {
   });
 
   describe('status=superseded includes supersededBy', () => {
-    it('should not override status when explicitly provided', async () => {
+    it('should not add TTL filter when status is explicitly provided', async () => {
       mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
       mockPrismaClient.memoryItem.count.mockResolvedValue(0);
 
       await repository.findByProjectMemory({ projectId: 'project-123', status: 'superseded' });
 
-      expect(mockPrismaClient.memoryItem.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ status: 'superseded' }),
-        }),
-      );
-    });
-  });
-
-  describe('ttlAt null exclusion', () => {
-    it('filters out expired memories (ttlAt not null) when status defaults to active', async () => {
-      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
-      mockPrismaClient.memoryItem.count.mockResolvedValue(0);
-
-      await repository.findByProjectMemory({ projectId: 'project-123' });
-      expect(mockPrismaClient.memoryItem.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ ttlAt: { equals: null } }),
-        }),
-      );
-    });
-
-    it('does NOT add ttlAt filter when status is explicitly provided', async () => {
-      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
-      mockPrismaClient.memoryItem.count.mockResolvedValue(0);
-
-      await repository.findByProjectMemory({ projectId: 'project-123', status: 'superseded' });
-      expect(mockPrismaClient.memoryItem.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.not.objectContaining({ ttlAt: expect.anything() }),
-        }),
-      );
+      const callArgs = mockPrismaClient.memoryItem.findMany.mock.calls[0][0] as Record<string, unknown>;
+      const where = callArgs.where as Record<string, unknown>;
+      expect(where.status).toBe('superseded');
+      expect(where.OR).toBeUndefined();
     });
   });
 
@@ -185,7 +154,7 @@ describe('MemoryItemRepository.findByProjectMemory', () => {
   });
 
   describe('pagination', () => {
-    it('should use default page=1 limit=20', async () => {
+    it('should use limit cap of 10 by default', async () => {
       mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
       mockPrismaClient.memoryItem.count.mockResolvedValue(0);
 
@@ -194,30 +163,30 @@ describe('MemoryItemRepository.findByProjectMemory', () => {
       expect(mockPrismaClient.memoryItem.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           skip: 0,
-          take: 20,
+          take: 10,
         }),
       );
     });
 
-    it('should calculate skip correctly for page 3 with limit 10', async () => {
+    it('should calculate skip correctly for page 3 with limit 5', async () => {
       mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
       mockPrismaClient.memoryItem.count.mockResolvedValue(0);
 
-      await repository.findByProjectMemory({ projectId: 'project-123', page: 3, limit: 10 });
+      await repository.findByProjectMemory({ projectId: 'project-123', page: 3, limit: 5 });
 
       expect(mockPrismaClient.memoryItem.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          skip: 20,
-          take: 10,
+          skip: 10,
+          take: 5,
         }),
       );
     });
   });
 
   describe('return shape', () => {
-    it('should return { items, total } not paginated result', async () => {
+    it('should return { items, total }', async () => {
       const mockItems = [
-        { id: 'mem-1', projectId: 'project-123', kind: 'FACT', subject: 'ticket:1', predicate: 'status', createdAt: new Date(), updatedAt: new Date() },
+        { id: 'mem-1', projectId: 'project-123', kind: 'FACT', subject: 'ticket:1', predicate: 'status', confidence: 0.9, status: 'active', createdAt: new Date(), updatedAt: new Date() },
       ];
       mockPrismaClient.memoryItem.findMany.mockResolvedValue(mockItems);
       mockPrismaClient.memoryItem.count.mockResolvedValue(1);

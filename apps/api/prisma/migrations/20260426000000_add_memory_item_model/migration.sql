@@ -2,6 +2,7 @@
 -- Creates the MemoryItem table for semantic memory storage.
 -- Supports one active memory per (projectId, kind, subject, predicate) key.
 -- Active rows have non-null activeKey; superseded/rejected rows have activeKey = null.
+-- Conflicts are resolved via application-level serializable transactions.
 
 BEGIN TRANSACTION;
 
@@ -13,33 +14,37 @@ CREATE TABLE IF NOT EXISTS "MemoryItem" (
     "subject" TEXT NOT NULL,
     "predicate" TEXT NOT NULL,
     "object" TEXT,
-    "activeKey" TEXT,
+    "confidence" REAL NOT NULL DEFAULT 0.8,
+    "ttlAt" DATETIME,
+    "ownerId" TEXT,
     "sourceType" TEXT,
     "sourceId" TEXT,
-    "status" TEXT,
-    "confidence" REAL,
-    "ttlAt" DATETIME,
+    "status" TEXT NOT NULL DEFAULT 'active',
     "supersededBy" TEXT,
+    "activeKey" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     "deletedAt" DATETIME,
     CONSTRAINT "MemoryItem_projectId_fkey" FOREIGN KEY ("projectId") REFERENCES "Project" ("id") ON DELETE CASCADE
 );
 
--- CreateIndex: @@unique([projectId, kind, subject, predicate, activeKey])
--- Note: SQLite allows multiple NULL values in unique indexes. AC-2 enforcement
--- (one active row per composite key) is guaranteed application-level via
--- $transaction with Serializable isolation in MemoryItemRepository.upsert().
-CREATE UNIQUE INDEX IF NOT EXISTS "MemoryItem_projectId_kind_subject_predicate_activeKey_idx"
-    ON "MemoryItem"("projectId", "kind", "subject", "predicate", "activeKey");
+-- CreateIndex: @@unique([projectId, activeKey])
+-- SQLite allows multiple NULL values in unique indexes, so superseded/rejected
+-- rows (activeKey = null) coexist while active rows remain unique per project.
+CREATE UNIQUE INDEX IF NOT EXISTS "MemoryItem_projectId_activeKey_key"
+    ON "MemoryItem"("projectId", "activeKey");
+
+-- CreateIndex: @@index([projectId, kind])
+CREATE INDEX IF NOT EXISTS "MemoryItem_projectId_kind_idx"
+    ON "MemoryItem"("projectId", "kind");
+
+-- CreateIndex: @@index([projectId, status])
+CREATE INDEX IF NOT EXISTS "MemoryItem_projectId_status_idx"
+    ON "MemoryItem"("projectId", "status");
 
 -- CreateIndex: @@index([projectId, kind, subject, predicate])
 CREATE INDEX IF NOT EXISTS "MemoryItem_projectId_kind_subject_predicate_idx"
     ON "MemoryItem"("projectId", "kind", "subject", "predicate");
-
--- CreateIndex: @@index([projectId, activeKey])
-CREATE INDEX IF NOT EXISTS "MemoryItem_projectId_activeKey_idx"
-    ON "MemoryItem"("projectId", "activeKey");
 
 -- CreateIndex: @@index([projectId, deletedAt])
 CREATE INDEX IF NOT EXISTS "MemoryItem_projectId_deletedAt_idx"

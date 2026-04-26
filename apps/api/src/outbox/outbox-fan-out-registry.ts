@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { ExtractionService } from '../memory/extraction.service';
-import { MemoryItemRepository } from '../memory/memory-item-repository';
+import { ExtractionService, MemoryExtractedItem } from '../memory/extraction.service';
+import { MemoryItemRepository, MemoryItemInput } from '../memory/memory-item-repository';
+import { MemoryKind } from '../common/enums';
 
 export interface OutboxHandler {
   eventType: string;
@@ -29,11 +30,16 @@ export class OutboxFanOutRegistry implements OnModuleInit {
   private readonly logger = new Logger(OutboxFanOutRegistry.name);
   private handlers: Map<string, Array<(payload: unknown) => void | Promise<void>>> = new Map();
   private lastDispatchFailureCount = 0;
+  private extractionService: ExtractionService | null = null;
+  private memoryRepository: MemoryItemRepository | null = null;
 
   constructor(
-    private readonly extractionService?: ExtractionService,
-    private readonly memoryRepository?: MemoryItemRepository,
+    extractionService?: ExtractionService,
+    memoryRepository?: MemoryItemRepository,
   ) {
+    this.extractionService = extractionService ?? null;
+    this.memoryRepository = memoryRepository ?? null;
+
     for (const { eventType, handler } of DEFAULT_HANDLERS) {
       this.register(eventType, handler);
     }
@@ -44,29 +50,49 @@ export class OutboxFanOutRegistry implements OnModuleInit {
   }
 
   onModuleInit(): void {
-    this.logger.log(`Registered ${DEFAULT_HANDLERS.length + 2} handlers`);
+    this.logger.log(`Registered ${DEFAULT_HANDLERS.length + (this.extractionService ? 2 : 0)} handlers`);
+  }
+
+  private async persistExtractedItems(items: MemoryExtractedItem[]): Promise<void> {
+    if (!this.memoryRepository) return;
+    for (const item of items) {
+      const input: MemoryItemInput = {
+        projectId: item.projectId,
+        kind: item.kind as MemoryKind,
+        subject: item.subject,
+        predicate: item.predicate,
+        object: item.object,
+        sourceType: item.sourceType,
+        sourceId: item.sourceId,
+        confidence: item.confidence,
+        ttlAt: item.ttlAt ?? null,
+      };
+      await this.memoryRepository.upsert(input);
+    }
   }
 
   private async handleTicketEvent(payload: unknown): Promise<void> {
+    if (!this.extractionService) return;
     const event = payload as { type: string; id: string; ticketId?: string; projectId: string; actorId: string; action: string; data: unknown; timestamp: string };
     this.logger.debug(`handleTicketEvent called with payload: ${JSON.stringify(event)}`);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const items = this.extractionService.extractFromEvent(event as any);
+    const items = this.extractionService.extractFromEvent({
+      ...event,
+      type: 'ticket_event' as const,
+      timestamp: new Date(event.timestamp),
+    });
     this.logger.debug(`Extraction returned ${items.length} items`);
-    for (const item of items) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await this.memoryRepository.upsert(item as any);
-    }
+    await this.persistExtractedItems(items);
   }
 
   private async handleAgentEvent(payload: unknown): Promise<void> {
+    if (!this.extractionService) return;
     const event = payload as { type: string; id: string; agentId: string; projectId: string; actorId: string; action: string; data: unknown; timestamp: string };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const items = this.extractionService.extractFromEvent(event as any);
-    for (const item of items) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await this.memoryRepository.upsert(item as any);
-    }
+    const items = this.extractionService.extractFromEvent({
+      ...event,
+      type: 'agent_event' as const,
+      timestamp: new Date(event.timestamp),
+    });
+    await this.persistExtractedItems(items);
   }
 
   register(eventType: string, handler: (payload: unknown) => void | Promise<void>): void {
@@ -84,7 +110,6 @@ export class OutboxFanOutRegistry implements OnModuleInit {
         await Promise.resolve(handler(input.payload));
       } catch (error) {
         this.logger.error(`Handler for ${input.eventType} failed`, error);
-        console.error(`Handler for ${input.eventType} failed:`, error);
         this.lastDispatchFailureCount += 1;
       }
     }

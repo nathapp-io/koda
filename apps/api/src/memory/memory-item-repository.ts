@@ -33,13 +33,13 @@ export interface PaginatedResult<T> {
 }
 
 export interface MemoryItemInput {
-  id?: string;
   projectId: string;
   kind: MemoryKind;
   subject: string;
   predicate: string;
   object?: string;
   activeKey?: string | null;
+  ownerId?: string;
   sourceType?: string;
   sourceId?: string;
   status?: string;
@@ -57,10 +57,11 @@ export interface MemoryItem {
   predicate: string;
   object?: string;
   activeKey?: string;
+  ownerId?: string;
   sourceType?: string;
   sourceId?: string;
-  status?: string;
-  confidence?: number;
+  status: string;
+  confidence: number;
   ttlAt?: Date;
   supersededBy?: string;
   createdAt: Date;
@@ -86,19 +87,26 @@ export class MemoryItemRepository {
     };
   }
 
+  private buildActiveKey(projectId: string, kind: string, subject: string, predicate: string): string {
+    return `${kind}:${subject}:${predicate}`;
+  }
+
   async findByProject(query: MemoryQuery): Promise<PaginatedResult<MemoryItem>> {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const skip = (page - 1) * limit;
 
-    const where: Record<string, unknown> = { projectId: query.projectId, deletedAt: null };
+    const where: Record<string, unknown> = {
+      projectId: query.projectId,
+      deletedAt: null,
+      status: query.status ?? 'active',
+    };
     if (query.kind) where.kind = query.kind;
     if (query.subject) where.subject = query.subject;
     if (query.predicate) where.predicate = query.predicate;
     if (query.activeKey !== undefined) where.activeKey = query.activeKey;
     if (query.sourceType) where.sourceType = query.sourceType;
     if (query.sourceId) where.sourceId = query.sourceId;
-    if (query.status) where.status = query.status;
 
     const [data, total] = await Promise.all([
       this.db.memoryItem.findMany({ where, skip, take: limit, orderBy: { createdAt: 'desc' } }),
@@ -109,8 +117,6 @@ export class MemoryItemRepository {
   }
 
   async upsert(item: MemoryItemInput): Promise<MemoryItem> {
-    const memoryId = item.id ?? `mem-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-
     return this.db.$transaction(
       async (client) => {
         const db = client as unknown as {
@@ -121,32 +127,43 @@ export class MemoryItemRepository {
           };
         };
 
-        if (item.activeKey) {
-          const existingActive = await db.memoryItem.findFirst({
-            where: {
-              projectId: item.projectId,
-              kind: item.kind,
-              subject: item.subject,
-              predicate: item.predicate,
-              activeKey: { not: null },
-              deletedAt: null,
-              id: { not: item.id ?? undefined },
-            },
+        const activeKey = this.buildActiveKey(item.projectId, item.kind, item.subject, item.predicate);
+
+        const existingActive = await db.memoryItem.findFirst({
+          where: {
+            projectId: item.projectId,
+            kind: item.kind,
+            subject: item.subject,
+            predicate: item.predicate,
+            activeKey: { not: null },
+            deletedAt: null,
+          },
+        });
+
+        if (existingActive) {
+          await db.memoryItem.update({
+            where: { id: existingActive.id },
+            data: { activeKey: null, status: 'superseded', supersededBy: undefined },
           });
-
-          if (existingActive) {
-            await db.memoryItem.update({
-              where: { id: existingActive.id },
-              data: { activeKey: null, status: 'superseded', supersededBy: memoryId },
-            });
-          }
         }
 
-        if (item.id) {
-          return db.memoryItem.update({ where: { id: item.id }, data: { ...item, id: memoryId } });
-        }
-
-        return db.memoryItem.create({ data: { ...item, id: memoryId } });
+        return db.memoryItem.create({
+          data: {
+            projectId: item.projectId,
+            kind: item.kind,
+            subject: item.subject,
+            predicate: item.predicate,
+            object: item.object,
+            activeKey,
+            ownerId: item.ownerId,
+            sourceType: item.sourceType,
+            sourceId: item.sourceId,
+            status: item.status ?? 'active',
+            confidence: item.confidence ?? 0.8,
+            ttlAt: item.ttlAt ?? null,
+            supersededBy: item.supersededBy,
+          },
+        });
       },
       { isolationLevel: 'Serializable' },
     );
@@ -159,7 +176,7 @@ export class MemoryItemRepository {
     predicate: string,
   ): Promise<MemoryItem | null> {
     return this.db.memoryItem.findFirst({
-      where: { projectId, kind, subject, predicate, activeKey: { not: null }, deletedAt: null },
+      where: { projectId, kind, subject, predicate, activeKey: { not: null }, status: 'active', deletedAt: null },
     });
   }
 
@@ -177,26 +194,42 @@ export class MemoryItemRepository {
     });
   }
 
+  async updateDirect(id: string, data: Partial<MemoryItemInput>): Promise<void> {
+    const updateData: Record<string, unknown> = {};
+    if (data.status !== undefined) updateData.status = data.status;
+    if (data.confidence !== undefined) updateData.confidence = data.confidence;
+    if (data.activeKey !== undefined) updateData.activeKey = data.activeKey;
+    if (data.supersededBy !== undefined) updateData.supersededBy = data.supersededBy;
+    if (data.ttlAt !== undefined) updateData.ttlAt = data.ttlAt;
+
+    await this.db.memoryItem.update({ where: { id }, data: updateData });
+  }
+
   async findByProjectMemory(query: ProjectMemoryQuery): Promise<{ items: MemoryItem[]; total: number }> {
+    const limit = Math.min(query.limit ?? 10, 50);
     let page = query.page ?? 1;
     if (page < 1) page = 1;
-    const limit = query.limit ?? 20;
     const skip = (page - 1) * limit;
 
     const where: Record<string, unknown> = { projectId: query.projectId, deletedAt: null };
 
+    if (query.status) {
+      where.status = query.status;
+    } else {
+      where.status = 'active';
+      const now = new Date();
+      where.OR = [
+        { ttlAt: null },
+        { ttlAt: { gt: now } },
+      ];
+    }
+
     if (query.kind) where.kind = query.kind;
     if (query.subject && query.subject.trim().length > 0) where.subject = { startsWith: query.subject };
-    if (query.status) where.status = query.status;
-    else {
-      where.status = 'active';
-      where.ttlAt = { equals: null };
-    }
 
     const orderByField = query.orderBy ?? 'confidence';
     const orderByClause: Record<string, 'asc' | 'desc'>[] = [];
     if (orderByField === 'confidence') {
-      where.confidence = { not: null };
       orderByClause.push({ confidence: 'desc' }, { updatedAt: 'desc' }, { createdAt: 'desc' });
     } else if (orderByField === 'updatedAt') {
       orderByClause.push({ updatedAt: 'desc' }, { confidence: 'desc' }, { createdAt: 'desc' });

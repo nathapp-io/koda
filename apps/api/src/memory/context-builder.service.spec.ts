@@ -244,6 +244,10 @@ describe('ContextBuilderService', () => {
 
     describe('AC-38: intent plan excludes temporal blocks', () => {
       test('response does not contain recentEvents, history, timeline, or statusChangeHistory keys', async () => {
+        mockMemoryItemRepository.findByProjectMemory.mockResolvedValue({
+          items: [],
+          total: 0,
+        });
         mockTimelineService.getProjectTimeline.mockResolvedValue({
           events: [{ id: '1', eventType: 'ticket_event', actorId: 'actor-1', action: 'TEST', createdAt: new Date() }],
           total: 1,
@@ -263,14 +267,20 @@ describe('ContextBuilderService', () => {
         }
       });
 
-      test('plan intent returns only projectId', async () => {
+      test('plan intent returns only projectId and semanticMemory', async () => {
+        mockMemoryItemRepository.findByProjectMemory.mockResolvedValue({
+          items: [],
+          total: 0,
+        });
+
         const result = await service.getProjectContext({
           projectId: 'project-123',
           actorId: 'actor-1',
           intent: 'plan' as Intent,
         });
 
-        expect(Object.keys(result)).toEqual(['projectId']);
+        expect(Object.keys(result)).toEqual(['projectId', 'semanticMemory']);
+        expect(result.semanticMemory).toEqual([]);
       });
     });
   });
