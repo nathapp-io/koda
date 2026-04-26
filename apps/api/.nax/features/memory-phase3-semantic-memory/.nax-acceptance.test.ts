@@ -134,7 +134,17 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
         ],
       }).compile();
 
+      // Test 1: NestJS injection
       const repo = module.get(MemoryItemRepository);
+      console.log('NESTJS repo.prisma:', (repo as any).prisma);
+      
+      // Test 2: Direct instantiation
+      const mockPrismaSvc = { client: mockClient };
+      const directRepo = new MemoryItemRepository(mockPrismaSvc as any);
+      console.log('DIRECT repo.prisma:', (directRepo as any).prisma);
+      console.log('DIRECT repo.prisma.client:', (directRepo as any).prisma?.client);
+      console.log('DIRECT repo.prisma.client.memoryItem:', (directRepo as any).prisma?.client?.memoryItem);
+      
       const result = await repo.upsert({
         projectId: 'proj-1',
         kind: MemoryKindEnum.FACT as any,
