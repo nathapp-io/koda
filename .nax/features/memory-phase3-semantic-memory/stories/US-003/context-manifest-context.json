@@ -1,5 +1,5 @@
 {
-  "requestId": "19bce7cb-e11f-491a-bd24-fc1efc4652d7",
+  "requestId": "fa07d105-3fd7-4ecd-99d3-5b15b071b02c",
   "stage": "context",
   "totalBudgetTokens": 2048,
   "usedTokens": 2008,
@@ -16,13 +16,13 @@
     "static-rules:project-conventions:6fb98908"
   ],
   "digestTokens": 23,
-  "buildMs": 329,
+  "buildMs": 388,
   "providerResults": [
     {
       "providerId": "static-rules",
       "status": "ok",
       "chunkCount": 3,
-      "durationMs": 6,
+      "durationMs": 7,
       "tokensProduced": 1951
     },
     {
@@ -43,21 +43,21 @@
       "providerId": "session-scratch",
       "status": "empty",
       "chunkCount": 0,
-      "durationMs": 2,
+      "durationMs": 3,
       "tokensProduced": 0
     },
     {
       "providerId": "git-history",
       "status": "empty",
       "chunkCount": 0,
-      "durationMs": 327,
+      "durationMs": 386,
       "tokensProduced": 0
     },
     {
       "providerId": "code-neighbor",
       "status": "ok",
       "chunkCount": 1,
-      "durationMs": 47,
+      "durationMs": 52,
       "tokensProduced": 34
     }
   ],

@@ -3,14 +3,14 @@
   "feature": "memory-phase3-semantic-memory",
   "branchName": "feat/memory-phase3-semantic-memory",
   "createdAt": "2026-04-25T14:59:35.000Z",
-  "updatedAt": "2026-04-25T21:09:05.578Z",
+  "updatedAt": "2026-04-26T03:35:01.582Z",
   "userStories": [
     {
       "id": "US-001",
       "title": "Memory Item Schema and Active-Key Repository",
       "description": "Add the durable `MemoryItem` schema, migration, and repository rules that keep one active row per `(projectId, kind, subject, predicate)` key while preserving provenance and project isolation. This story also anchors the controller-layer write gate so only `admin`, `developer`, and `agent` actors can create memory records through the extraction path, and it preserves the spec constraint that `MemoryKind` stays an API-side TypeScript constant/union rather than a Prisma enum.",
       "acceptanceCriteria": [
-        "Prisma migration adds `MemoryItem` table with all fields defined in \u00a71.",
+        "Prisma migration adds `MemoryItem` table with all fields defined in §1.",
         "Repository-level transaction logic prevents more than one active memory for the same `(projectId, kind, subject, predicate)` key.",
         "`MemoryItemRepository.findByProject(query)` returns paginated results matching the filter criteria.",
         "`MemoryItemRepository.upsert(item)` inserts or updates (on conflict) a memory item.",
@@ -228,7 +228,9 @@
         "After endpoint contract changes, `openapi.json` and CLI generated client are regenerated and in sync."
       ],
       "storyPoints": 1,
-      "storyGitRef": "04035374f0db5ec42516094e599d7c9ba9aa8203"
+      "storyGitRef": "04035374f0db5ec42516094e599d7c9ba9aa8203",
+      "priorErrors": [],
+      "priorFailures": []
     },
     {
       "id": "US-004",
@@ -283,7 +285,9 @@
         "Performance verification includes a reproducible 1000-row benchmark and query-plan capture to detect regressions at larger datasets."
       ],
       "storyPoints": 1,
-      "storyGitRef": "7889032b1da40f4221d8f86802c4150b2d1324d2"
+      "storyGitRef": "7889032b1da40f4221d8f86802c4150b2d1324d2",
+      "priorErrors": [],
+      "priorFailures": []
     },
     {
       "id": "US-005",
@@ -328,7 +332,9 @@
         "Existing context fields remain backward compatible for current callers.",
         "After response schema changes, `openapi.json` and CLI generated client are regenerated and in sync."
       ],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "priorErrors": [],
+      "priorFailures": []
     }
   ],
   "analysis": "Synthesis uses Proposal 2 as the delivery baseline (pragmatic scope), Proposal 3 for concrete integration seams, and Proposal 1 for risk coverage. Phase 3 is additive to existing `apps/api/src/memory` and canonical event infrastructure, not a new subsystem. The core persistence decision is retained: SQLite-safe active uniqueness with `activeKey` on active rows and `activeKey=null` on superseded/rejected rows, while preserving `sourceType`/`sourceId` for rebuildability from canonical events and prohibiting full transcript storage in `MemoryItem.object`. The persistence contract also keeps `MemoryKind` as an API-side TypeScript string union/constant rather than a Prisma enum. Delivery sequence remains schema+repository first, then extraction/outbox wiring, then retrieval API, then governance jobs, then context integration. Extraction scope explicitly includes `status_changed`, `assigned`, agent decision extraction, and `incident_linked` incident-pattern extraction, all from canonical events whenever possible and without LLM-based extraction. Conflict resolution keeps the spec precedence rules intact: higher-confidence `FACT`s win, canonical-event `FACT`s override conversation-inferred `FACT`s, newer `DECISION`s supersede older ones on the same topic, explicit `recordDecision` preferences override extracted preferences, and expired memories are excluded from retrieval. Retrieval ordering remains `confidence DESC`, then `updatedAt DESC`, then `createdAt DESC`, and governance remains a daily 03:00 UTC cleanup pass. Cross-cutting hardening from critiques is incorporated as testable criteria: explicit status/value validation, concurrent upsert behavior, soft-deleted project semantics, structured extraction warning logs, sourceType/eventType alignment, retrieval pagination contract alignment, governance failure/idempotency behavior, performance baselining, and graceful context degradation if memory retrieval fails. API contract changes are additive and must regenerate `openapi.json` and CLI generated client."
