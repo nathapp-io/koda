@@ -10,7 +10,7 @@
       "title": "Memory Item Schema and Active-Key Repository",
       "description": "Add the durable `MemoryItem` schema, migration, and repository rules that keep one active row per `(projectId, kind, subject, predicate)` key while preserving provenance and project isolation. This story also anchors the controller-layer write gate so only `admin`, `developer`, and `agent` actors can create memory records through the extraction path, and it preserves the spec constraint that `MemoryKind` stays an API-side TypeScript constant/union rather than a Prisma enum.",
       "acceptanceCriteria": [
-        "Prisma migration adds `MemoryItem` table with all fields defined in §1.",
+        "Prisma migration adds `MemoryItem` table with all fields defined in \u00a71.",
         "Repository-level transaction logic prevents more than one active memory for the same `(projectId, kind, subject, predicate)` key.",
         "`MemoryItemRepository.findByProject(query)` returns paginated results matching the filter criteria.",
         "`MemoryItemRepository.upsert(item)` inserts or updates (on conflict) a memory item.",
@@ -200,9 +200,9 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "failed",
+      "status": "pending",
       "passes": false,
-      "attempts": 1,
+      "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "medium",
@@ -226,38 +226,6 @@
         "Invalid `status` filter values are rejected with validation errors.",
         "When query returns no matches, API returns an empty result set (not 404).",
         "After endpoint contract changes, `openapi.json` and CLI generated client are regenerated and in sync."
-      ],
-      "priorErrors": [
-        "Attempt 1 failed with model tier: fast: Reviewer contradiction: Finding #2 (`where.confidence = { not: null }`) changes query semantics, which would affect test assertions on result size (e.g., `toHaveLength(3)` could become 2 if a fixture has null confidence). Since I cannot modify test files to compensate, and the adversarial review requires the fix, there is a genuine conflict between \"fix the null confidence bug\" and \"do not change test behavior.\"",
-        "Attempt 1 failed with model tier: balanced: Reviewer contradiction: The finding references `context-builder.service.spec.ts:15` claiming AC6 verification is missing. However, the AC6 test is in `project-memory.integration.spec.ts` (lines 280-320), NOT in `context-builder.service.spec.ts`. The unit spec file covers AC-34 through AC-38 (intent-based tests), while the integration test properly verifies `findByProjectMemory` is called and results appear in `semanticMemory`. The implementation at `context-builder.service.ts:118` correctly calls `findByProjectMemory`. All 16 tests pass and lint/type-check are clean."
-      ],
-      "priorFailures": [
-        {
-          "attempt": 1,
-          "modelTier": "fast",
-          "stage": "escalation",
-          "summary": "Failed with tier fast, escalating to next tier",
-          "cost": 0.6569092800000003,
-          "timestamp": "2026-04-25T19:26:00.240Z"
-        },
-        {
-          "attempt": 1,
-          "modelTier": "balanced",
-          "stage": "review",
-          "summary": "Failed with tier balanced, escalating to next tier",
-          "reviewFindings": [
-            {
-              "ruleId": "semantic",
-              "severity": "error",
-              "file": "apps/api/src/memory/context-builder.service.spec.ts",
-              "line": 15,
-              "message": "AC6 verification gap: `mockMemoryItemRepository.findByProjectMemory` is mocked but never asserted to have been called. No test verifies that `findByProjectMemory` is invoked when `getProjectContext` is called, which is the core of AC6.",
-              "source": "semantic-review"
-            }
-          ],
-          "cost": 0.24819335999999997,
-          "timestamp": "2026-04-25T19:40:47.075Z"
-        }
       ],
       "storyPoints": 1,
       "storyGitRef": "04035374f0db5ec42516094e599d7c9ba9aa8203"
@@ -288,9 +256,9 @@
         "US-001",
         "US-002"
       ],
-      "status": "failed",
+      "status": "pending",
       "passes": false,
-      "attempts": 1,
+      "attempts": 0,
       "escalations": [],
       "routing": {
         "complexity": "complex",
@@ -313,29 +281,6 @@
         "If one sub-job fails, completed prior sub-jobs remain durable and rerun converges to the expected final state.",
         "Governance run logs include timestamp, per-sub-job counts, and `durationMs`.",
         "Performance verification includes a reproducible 1000-row benchmark and query-plan capture to detect regressions at larger datasets."
-      ],
-      "priorErrors": [
-        "Attempt 1 failed with model tier: balanced: Reviewer contradiction: The reviewer's findings are internally contradictory to the test requirements:\n\n1. **Reviewer wants**: `success` field (not `ok`), optional `repoOwner`/`repoName`\n2. **Tests require**: `ok` field, required `repoOwner`/`repoName`\n\nThese cannot both be satisfied because:\n- Tests create instances like `new TestConnectionResultDto()` and set `.ok = true` - if field is named `success`, this fails\n- Tests validate DTOs with required `repoOwner`/`repoName` and expect validation errors when missing - if optional, test assertions fail\n\nThe test file `vcs-connection.dto.spec.ts` is the authoritative contract. All 26 tests in that file pass with my changes. My changes restore the original API that existed before commit 2993601 introduced the breaking change (changing `ok` to `success` and making fields optional).\n\nThe reviewer's concern about \"breaking consumers expecting `success`\" refers to consumers of the BROKEN API (commit 2993601), not the original correct API. My fix restores the correct original API that existed before the break was introduced."
-      ],
-      "priorFailures": [
-        {
-          "attempt": 1,
-          "modelTier": "balanced",
-          "stage": "review",
-          "summary": "Failed with tier balanced, escalating to next tier",
-          "reviewFindings": [
-            {
-              "ruleId": "semantic",
-              "severity": "error",
-              "file": "apps/api/src/memory/memory-governance.service.ts",
-              "line": 1,
-              "message": "AC-1: Memory governance cleanup is not scheduled to run daily at 03:00 UTC. There is no @Cron('0 3 * * *') decorator on any method, no ScheduleModule import, and no scheduler service that invokes GovernanceService.runCleanup(). The project uses @nestjs/schedule (evidenced by outbox-processor.ts:15 @Cron and rag module SchedulerRegistry usage), but GovernanceService has no scheduling wiring.",
-              "source": "semantic-review"
-            }
-          ],
-          "cost": 0.7045217399999999,
-          "timestamp": "2026-04-25T20:41:07.039Z"
-        }
       ],
       "storyPoints": 1,
       "storyGitRef": "7889032b1da40f4221d8f86802c4150b2d1324d2"
@@ -383,8 +328,6 @@
         "Existing context fields remain backward compatible for current callers.",
         "After response schema changes, `openapi.json` and CLI generated client are regenerated and in sync."
       ],
-      "priorErrors": [],
-      "priorFailures": [],
       "storyPoints": 1
     }
   ],
