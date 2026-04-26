@@ -1,0 +1,275 @@
+[
+  {
+    "acId": "AC-1",
+    "original": "Prisma migration adds `MemoryItem` table with all fields defined in §1.",
+    "refined": "Prisma schema contains a MemoryItem model with fields: projectId (String, required), kind (String, required), subject (String, required), predicate (String, required), activeKey (String, nullable), content (Json, required), metadata (Json, nullable), sourceType (String, nullable), sourceId (String, nullable), createdAt (DateTime, required), updatedAt (DateTime, required), createdBy (String, required). Unique constraint on (projectId, kind, subject, predicate, activeKey) where activeKey IS NOT NULL.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-2",
+    "original": "Repository-level transaction logic prevents more than one active memory for the same `(projectId, kind, subject, predicate)` key.",
+    "refined": "When upsert sets activeKey on a row, any pre-existing row with matching (projectId, kind, subject, predicate) and non-null activeKey has activeKey set to null within the same transaction, ensuring at most one active row per composite key.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-3",
+    "original": "`MemoryItemRepository.findByProject(query)` returns paginated results matching the filter criteria.",
+    "refined": "findByProject({ projectId, kind?, subject?, predicate?, page?, pageSize? }) returns { items: MemoryItem[], total: number, page: number, pageSize: number } where all items match projectId and optional filters, ordered by createdAt descending, respecting pagination params.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-4",
+    "original": "`MemoryItemRepository.upsert(item)` inserts or updates (on conflict) a memory item.",
+    "refined": "upsert({ projectId, kind, subject, predicate, content, metadata?, sourceType?, sourceId?, createdBy }) returns MemoryItem with id populated. If a row with matching (projectId, kind, subject, predicate) already exists, updates that row's content, metadata, sourceType, sourceId, updatedAt, createdBy and sets activeKey to a generated value; otherwise inserts new row with generated id and activeKey.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-5",
+    "original": "`MemoryItemRepository.findActive(projectId, kind, subject, predicate)` returns the active memory for that composite key, or null.",
+    "refined": "findActive(projectId, kind, subject, predicate) executes: SELECT * FROM MemoryItem WHERE projectId=? AND kind=? AND subject=? AND predicate=? AND activeKey IS NOT NULL LIMIT 1, returning the row or null.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-6",
+    "original": "Creating a `MemoryItem` with a non-existent `projectId` throws `ForbiddenError` (`code: 'PROJECT_NOT_FOUND'`).",
+    "refined": "POST /memories with body { projectId, kind, subject, predicate, content } where projectId does not exist in Project table returns HTTP 403 with JSON body { statusCode: 403, error: 'Forbidden', message: 'Project not found', code: 'PROJECT_NOT_FOUND' }.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-7",
+    "original": "Only actors with role `admin`, `developer`, or `agent` can write memories; role is checked at the controller layer before calling `ExtractionService`.",
+    "refined": "When principal.role is not in {admin, developer, agent}, POST /memories, PATCH /memories/:id, DELETE /memories/:id return HTTP 403 with body { statusCode: 403, error: 'Forbidden', message: 'Insufficient role' }. Controller calls ExtractionService only after role check passes.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-8",
+    "original": "Memory rows include `sourceType` and `sourceId` when created from `TicketEvent`, `AgentEvent`, `DecisionEvent`, or explicit `recordDecision`.",
+    "refined": "After processing TicketEvent | AgentEvent | DecisionEvent | recordDecision command, the inserted MemoryItem row has non-null sourceType and sourceId fields populated with the event type and event.id respectively.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-9",
+    "original": "Active rows have non-null `activeKey`; superseded/rejected rows have `activeKey = null`.",
+    "refined": "All rows in MemoryItem table satisfy invariant: (activeKey IS NOT NULL) if and only if row is currently active; (activeKey IS NULL) if and only if row has been superseded by another upsert or explicitly rejected.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-10",
+    "original": "ExtractionService.extractFromEvent(ticket_event with action='status_changed') returns a MemoryItem with kind=FACT, subject=ticket:{id}, predicate=status.",
+    "refined": "extractFromEvent({type:'ticket_event', action:'status_changed', payload:{id:1, newStatus:'open'}}).toStrictEqual([{kind:'FACT', subject:'ticket:1', predicate:'status', object:'open', confidence:expect.any(Number), ttlAt:null, metadata:expect.any(Object)}])",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-11",
+    "original": "ExtractionService.extractFromEvent(ticket_event with action='assigned') returns a MemoryItem with kind=FACT, subject=ticket:{id}, predicate=assigned_to.",
+    "refined": "extractFromEvent({type:'ticket_event', action:'assigned', payload:{id:1, assigneeId:'user-123'}}).toStrictEqual([{kind:'FACT', subject:'ticket:1', predicate:'assigned_to', object:'user-123', confidence:expect.any(Number), ttlAt:null, metadata:expect.any(Object)}])",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-12",
+    "original": "ExtractionService.extractFromEvent(ticket_event with action='incident_linked') returns a MemoryItem with kind=INCIDENT_PATTERN linking the ticket to the affected service.",
+    "refined": "extractFromEvent({type:'ticket_event', action:'incident_linked', payload:{id:1, serviceId:'svc-456'}}).toStrictEqual([{kind:'INCIDENT_PATTERN', subject:'ticket:1', predicate:'impacts', object:'svc-456', confidence:expect.any(Number), ttlAt:null, metadata:expect.any(Object)}])",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-13",
+    "original": "ExtractionService.extractFromEvent(agent_event) returns empty array when metadata contains no decision_made key.",
+    "refined": "const result = extractFromEvent({type:'agent_event', metadata:{}}); expect(result).toEqual([]);",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-14",
+    "original": "ExtractionService.extractFromEvent(event) returns empty array and logs a warning when a supported event type has an incomplete payload.",
+    "refined": "const warnSpy = jest.spyOn(logger, 'warn'); const result = extractFromEvent({type:'ticket_event', action:'status_changed', payload:{id:1}}); expect(result).toEqual([]); expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('incomplete payload'));",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-15",
+    "original": "ExtractionService.recordDecision(data) creates a canonical DecisionEvent, calls MemoryItemRepository.upsert(), and returns WriteResult with canonicalId and derived memory ID.",
+    "refined": "memoryItemRepository.upsert = jest.fn().mockResolvedValue({canonicalId:'dec-1', memoryId:'mem-1'}); const result = await service.recordDecision({topicId:'topic-1', decision:'approve', madeBy:'agent-1'}); expect(memoryItemRepository.upsert).toHaveBeenCalledWith(expect.objectContaining({kind:'DECISION', subject:'topic:topic-1'})); expect(result).toEqual({canonicalId:'dec-1', memoryId:'mem-1'});",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-16",
+    "original": "recordDecision with a topic that already has an active decision marks the old decision as superseded (sets supersededBy + status='superseded').",
+    "refined": "memoryItemRepository.findActiveByTopic = jest.fn().mockResolvedValue({id:'mem-old', status:'active'}); memoryItemRepository.upsert = jest.fn().mockResolvedValue({canonicalId:'dec-new', memoryId:'mem-new'}); await service.recordDecision({topicId:'topic-1', decision:'revise', madeBy:'agent-1'}); expect(memoryItemRepository.upsert).toHaveBeenCalledWith(expect.objectContaining({id:'mem-old', supersededBy:'mem-new', status:'superseded'}));",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-17",
+    "original": "extractFromEvent is called by OutboxFanOutRegistry.dispatch() when event type is ticket_event or agent_event (registered per SPEC-001/US-006).",
+    "refined": "const extractSpy = jest.spyOn(service, 'extractFromEvent'); registry.dispatch({type:'ticket_event', action:'status_changed', payload:{id:1}}); expect(extractSpy).toHaveBeenCalledWith({type:'ticket_event', action:'status_changed', payload:{id:1}});",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-18",
+    "original": "Extracted items have confidence >= 0.5 and ttlAt = null (never expires by default).",
+    "refined": "const result = extractFromEvent({type:'ticket_event', action:'status_changed', payload:{id:1, newStatus:'open'}}); result.forEach(item => { expect(item.confidence).toBeGreaterThanOrEqual(0.5); expect(item.ttlAt).toBeNull(); });",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-19",
+    "original": "Items from explicit recordDecision have confidence = 1.0.",
+    "refined": "memoryItemRepository.upsert = jest.fn().mockResolvedValue({canonicalId:'dec-1', memoryId:'mem-1'}); await service.recordDecision({topicId:'topic-1', decision:'approve', madeBy:'agent-1'}); expect(memoryItemRepository.upsert).toHaveBeenCalledWith(expect.objectContaining({confidence:1.0}));",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-20",
+    "original": "GET /projects/:slug/memory returns all non-expired status=active memories for the project.",
+    "refined": "GET /projects/:slug/memory returns HTTP 200 with a JSON array body. Every item in the array has status equal to 'active'. Every item has expiresAt either null or a future timestamp (expiresAt > Date.now() or expiresAt is null). No item has status='superseded' or status='expired'.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-21",
+    "original": "GET /projects/:slug/memory?kind=FACT returns only FACT memories.",
+    "refined": "GET /projects/:slug/memory?kind=FACT returns HTTP 200 with a JSON array body. Every item in the array has kind equal to 'FACT'. No item has kind different from 'FACT'.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-22",
+    "original": "GET /projects/:slug/memory?subjects=ticket:123 returns memories with subject starting with ticket:123.",
+    "refined": "GET /projects/:slug/memory?subjects=ticket:123 returns HTTP 200 with a JSON array body. Every item in the array has a subject property that is a string starting with 'ticket:123'.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-23",
+    "original": "When status=superseded is requested, each superseded memory includes supersededBy when known.",
+    "refined": "GET /projects/:slug/memory?status=superseded returns HTTP 200 with a JSON array body. Every item has status='superseded'. For every item, the supersededBy field is either: (a) a non-null string reference ID, or (b) null only when the superseding memory is genuinely unknown.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-24",
+    "original": "Memory retrieval respects projectId isolation and cannot access another project's memories.",
+    "refined": "Calling GET /projects/:slug/memory with slug X returns only memories whose project.slug equals X. Calling GET /projects/:slug/memory with slug Y (where Y != X) returns HTTP 403 Forbidden or HTTP 404 Not Found. No memory from project X is returned when requesting project Y's memories.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-25",
+    "original": "getProjectMemory() is called internally by getProjectContext() and results appear in the semanticMemory block.",
+    "refined": "Calling getProjectContext(slug) returns an object containing a semanticMemory block. The semanticMemory block is a non-null array. The array contains items that originate from getProjectMemory(slug). When getProjectMemory returns an empty array, semanticMemory is an empty array (not null).",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-26",
+    "original": "Results are ordered by confidence DESC, then updatedAt DESC, then createdAt DESC unless the caller provides a stricter filter.",
+    "refined": "GET /projects/:slug/memory returns HTTP 200 with a JSON array body. For indices i < j in the returned array: confidence[i] >= confidence[j]; if confidence[i] === confidence[j] then updatedAt[i] >= updatedAt[j]; if confidence[i] === confidence[j] and updatedAt[i] === updatedAt[j] then createdAt[i] >= createdAt[j]. This ordering holds unless the query includes an explicit sort parameter that overrides the default order.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-27",
+    "original": "Memory governance cleanup is scheduled to run daily at `03:00 UTC`.",
+    "refined": "Scheduler configuration shows a cron expression evaluating to 03:00 UTC daily, OR a timer/schedule service is called at the equivalent interval.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-28",
+    "original": "`GovernanceService.runCleanup()` executes all four sub-jobs and returns a combined `GovernanceResult`.",
+    "refined": "After calling runCleanup(), verify: (1) expireMemories(), downrankStaleLowConfidence(), deduplicate(), and applySupersession() were each invoked exactly once; (2) returned object has properties: expiredCount, downrankedCount, deduplicatedCount, supersededCount, and all are non-negative integers.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-29",
+    "original": "`expireMemories()` sets `status='rejected'` for all memories where `ttlAt < now()` and returns the count.",
+    "refined": "Insert 3 memories with ttlAt in the past and 2 with ttlAt in the future; invoke expireMemories(); assert returned count === 3; assert all 3 expired memories have status === 'rejected'; assert 2 non-expired memories retain original status.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-30",
+    "original": "`downrankStaleLowConfidence()` sets `confidence=0.1` for memories older than 90 days with `confidence < 0.3`.",
+    "refined": "Insert 2 memories with createdAt 91 days ago and confidence 0.2, and 1 memory with createdAt 91 days ago and confidence 0.5, and 1 memory with createdAt 30 days ago and confidence 0.1; invoke downrankStaleLowConfidence(); assert first 2 memories have confidence === 0.1; assert other 2 memories retain original confidence values.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-31",
+    "original": "`deduplicate()` finds all `(projectId, kind, subject, predicate)` combos with more than one active memory, keeps the highest confidence, and marks the others as `superseded`.",
+    "refined": "Insert memories A (confidence 0.8), B (confidence 0.6), C (confidence 0.9) sharing same projectId/kind/subject/predicate; invoke deduplicate(); assert A.status === 'active', B.status === 'superseded', C.status === 'active' with supersededBy null for A and C, and B.supersededBy points to C or A; returned deduplicatedCount === 2.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-32",
+    "original": "`applySupersession()` finds DECISION memories on the same topic ordered by `createdAt DESC`, keeps the newest as active, and marks older ones as `superseded`.",
+    "refined": "Insert 3 DECISION memories for same projectId/topic with createdAt dates [oldest, middle, newest]; invoke applySupersession(); assert newest has status === 'active' and supersededBy === null; assert oldest and middle have status === 'superseded' and supersededBy points to newest; returned supersededCount === 2.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-33",
+    "original": "Governance jobs are idempotent, so running them twice in a row produces the same end state.",
+    "refined": "Insert test memories in mixed states; capture GovernanceResult and final memory states after first run; capture GovernanceResult and final memory states after second run; assert result1.expiredCount === result2.expiredCount, result1.downrankedCount === result2.downrankedCount, etc.; assert final memory status/confidence values are identical between run1 and run2.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-34",
+    "original": "A governance run touching 1000 memories completes in under 30 seconds.",
+    "refined": "Insert 1000 memories with mixed conditions (expired, stale, duplicates, superseding); invoke runCleanup(); assert elapsed time < 30000 milliseconds; assert all memories were processed.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-35",
+    "original": "Governance jobs never delete `MemoryItem` rows; they update `status`, `confidence`, or `supersededBy` so audit history remains available.",
+    "refined": "Insert 100 test memories; run full governance cleanup; query database for any MemoryItem with deletedAt !== null OR operation type DELETE; assert no rows returned; verify all modified memories only changed status, confidence, or supersededBy columns.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-36",
+    "original": "`getProjectContext()` includes a `semanticMemory` field in its response.",
+    "refined": "Response object from `getProjectContext()` contains a property named `semanticMemory`",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-37",
+    "original": "`semanticMemory` contains up to 10 most-relevant active `MemoryItem`s, ordered by confidence DESC.",
+    "refined": "`semanticMemory` is an array of length <= 10, and each item's confidence is <= the previous item's confidence",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-38",
+    "original": "When `semanticMemory` items are returned, `provenance.sources` includes entries with `source_type='memory_item'.",
+    "refined": "When `semanticMemory.length > 0`, `provenance.sources` contains at least one object where `source_type === 'memory_item'`",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-39",
+    "original": "If no `MemoryItem`s exist for the project, `semanticMemory` is an empty array.",
+    "refined": "When no MemoryItems exist for the project, `semanticMemory` equals `[]`",
+    "testable": true,
+    "storyId": "US-005"
+  }
+]
