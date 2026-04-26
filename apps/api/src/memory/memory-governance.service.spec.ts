@@ -491,13 +491,30 @@ describe('AC-7: Idempotent cleanup', () => {
         createdAt: pastDate,
         updatedAt: pastDate,
       }));
-
-      mockRepository.findByProject.mockResolvedValue({
-        data: items,
-        total: 1000,
-        page: 1,
-        limit: 100,
-      });
+      // Provide paginated mock data for ALL 4 sub-jobs (44 total pages)
+      const mockPage = (data) => ({ data, total: data.length, page: 1, limit: 100 });
+      const emptyPage = mockPage([]);
+      const pageOf100 = (offset, count = 100) => {
+        const slice = items.slice(offset, offset + count);
+        return mockPage(slice.length > 0 ? slice : []);
+      };
+      // Each sub-job has its own pagination loop: 10 pages of 100 + empty to stop
+      // Total 44 mockResolvedValueOnce calls (11 per sub-job x 4)
+      const allPages = [
+        // expireMemories (status=active, expired items have ttlAt in past)
+        pageOf100(0), pageOf100(100), pageOf100(200), pageOf100(300), pageOf100(400),
+        pageOf100(500), pageOf100(600), pageOf100(700), pageOf100(800), pageOf100(900), emptyPage,
+        // downrankStaleLowConfidence (active items with confidence<0.5)
+        pageOf100(0), pageOf100(100), pageOf100(200), pageOf100(300), pageOf100(400),
+        pageOf100(500), pageOf100(600), pageOf100(700), pageOf100(800), pageOf100(900), emptyPage,
+        // deduplicate (active items)
+        pageOf100(0), pageOf100(100), pageOf100(200), pageOf100(300), pageOf100(400),
+        pageOf100(500), pageOf100(600), pageOf100(700), pageOf100(800), pageOf100(900), emptyPage,
+        // applySupersession (active DECISION items)
+        mockPage([]), mockPage([]), mockPage([]), mockPage([]), mockPage([]),
+        mockPage([]), mockPage([]), mockPage([]), mockPage([]), mockPage([]), emptyPage,
+      ];
+      allPages.forEach((page) => mockRepository.findByProject.mockResolvedValueOnce(page));
       mockRepository.upsert.mockResolvedValue({} as MemoryItem);
 
       const start = Date.now();

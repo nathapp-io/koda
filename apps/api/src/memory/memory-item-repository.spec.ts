@@ -106,15 +106,26 @@ describe('MemoryItemRepository.findByProjectMemory', () => {
   });
 
   describe('ttlAt null exclusion', () => {
-    it('always filters out expired memories with ttlAt not null', async () => {
+    it('filters out expired memories (ttlAt not null) when status defaults to active', async () => {
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+      mockPrismaClient.memoryItem.count.mockResolvedValue(0);
+
+      await repository.findByProjectMemory({ projectId: 'project-123' });
+      expect(mockPrismaClient.memoryItem.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ ttlAt: { equals: null } }),
+        }),
+      );
+    });
+
+    it('does NOT add ttlAt filter when status is explicitly provided', async () => {
       mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
       mockPrismaClient.memoryItem.count.mockResolvedValue(0);
 
       await repository.findByProjectMemory({ projectId: 'project-123', status: 'superseded' });
-
       expect(mockPrismaClient.memoryItem.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ ttlAt: { equals: null } }),
+          where: expect.not.objectContaining({ ttlAt: expect.anything() }),
         }),
       );
     });
