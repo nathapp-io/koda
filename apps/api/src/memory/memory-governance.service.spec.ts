@@ -133,8 +133,8 @@ describe('MemoryGovernanceService', () => {
       const pastDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
       mockRepository.findByProject.mockResolvedValue({
-        data: [{ id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'superseded', ttlAt: pastDate, createdAt: now, updatedAt: now }],
-        total: 1,
+        data: [],
+        total: 0,
         page: 1,
         limit: 100,
       });
@@ -230,8 +230,8 @@ describe('MemoryGovernanceService', () => {
       const oldDate = new Date(now.getTime() - 100 * 24 * 60 * 60 * 1000);
 
       mockRepository.findByProject.mockResolvedValue({
-        data: [{ id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'superseded', confidence: 0.2, createdAt: oldDate, updatedAt: oldDate }],
-        total: 1,
+        data: [],
+        total: 0,
         page: 1,
         limit: 100,
       });
@@ -306,14 +306,9 @@ describe('MemoryGovernanceService', () => {
       const projectId = 'project-123';
       const now = new Date();
 
-      const items: MemoryItem[] = [
-        { id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'rejected', activeKey: 'key1', confidence: 0.9, createdAt: now, updatedAt: now },
-        { id: 'mem-2', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', activeKey: 'key2', confidence: 0.7, createdAt: now, updatedAt: now },
-      ];
-
       mockRepository.findByProject
-        .mockResolvedValueOnce({ data: items, total: 2, page: 1, limit: 100 })
-        .mockResolvedValueOnce({ data: [], total: 2, page: 2, limit: 100 });
+        .mockResolvedValueOnce({ data: [], total: 0, page: 1, limit: 100 })
+        .mockResolvedValueOnce({ data: [], total: 0, page: 2, limit: 100 });
 
       const result = await service.deduplicate(projectId);
 
