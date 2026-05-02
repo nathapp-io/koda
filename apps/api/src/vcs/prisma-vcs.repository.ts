@@ -6,6 +6,7 @@ import { Ticket } from '@prisma/client';
 import { Project } from '@prisma/client';
 import { VcsIssue } from './types';
 import { TicketStatus, CommentType, ActivityType } from '../common/enums';
+import { IVcsRepository } from './domain/vcs.repository';
 
 /**
  * Data needed for the merged-PR auto-transition
@@ -28,7 +29,7 @@ export interface CreateTicketFromIssueResult {
 }
 
 @Injectable()
-export class PrismaVcsRepository {
+export class PrismaVcsRepository implements IVcsRepository {
   constructor(
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly prisma: PrismaService<PrismaClient>,

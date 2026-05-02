@@ -1,7 +1,7 @@
 /**
  * VcsPrSyncService - Syncs PR status from VCS provider to TicketLink records
  */
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ConfigService } from '@nestjs/config';
 import { Project, Ticket, VcsConnection } from '@prisma/client';
@@ -11,26 +11,7 @@ import { VcsPrStatus } from './types';
 import { TicketStatus, CommentType } from '../common/enums';
 import { validateTransition } from '../tickets/state-machine/ticket-transitions';
 import { VcsLinkExtractorService } from './vcs-link-extractor.service';
-import { PrismaVcsRepository } from './prisma-vcs.repository';
-
-/**
- * TicketLink data returned from findMany
- */
-interface TicketLinkData {
-  id: string
-  ticketId: string
-  prNumber: number | null
-  prState: string | null
-  url: string
-  externalRef: string | null
-  ticket?: {
-    id: string
-    status: string
-    projectId: string
-    number: number
-    externalVcsId: string | null
-  }
-}
+import { IVcsRepository, TicketLinkData, VCS_REPOSITORY } from './domain/vcs.repository';
 
 export interface SyncPrStatusResult {
   updated: number;
@@ -42,7 +23,7 @@ export class VcsPrSyncService {
   private readonly logger = new Logger(VcsPrSyncService.name);
 
   constructor(
-    private readonly vcsRepo: PrismaVcsRepository,
+    @Inject(VCS_REPOSITORY) private readonly vcsRepo: IVcsRepository,
     @Optional() private readonly vcsLinkExtractorService?: VcsLinkExtractorService,
     @Optional() private readonly configService?: ConfigService,
   ) {}

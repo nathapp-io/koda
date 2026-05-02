@@ -1,9 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { Project, VcsConnection } from '@prisma/client';
 import { VcsIssue } from './types';
 import { createVcsProvider } from './factory';
 import { decryptToken } from '../common/utils/encryption.util';
-import { PrismaVcsRepository } from './prisma-vcs.repository';
+import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 
 /**
  * Result of syncing a single issue
@@ -18,7 +18,7 @@ export interface SyncIssueResult {
 
 @Injectable()
 export class VcsSyncService {
-  constructor(private readonly vcsRepo: PrismaVcsRepository) {}
+  constructor(@Inject(VCS_REPOSITORY) private readonly vcsRepo: IVcsRepository) {}
 
   /**
    * Sync a single issue into a ticket

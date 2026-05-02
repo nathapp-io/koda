@@ -11,12 +11,14 @@ import { VcsLinkExtractorService } from './vcs-link-extractor.service';
 import { PrismaVcsRepository } from './prisma-vcs.repository';
 import { ProjectsService } from '../projects/projects.service';
 import { RagModule } from '../rag/rag.module';
+import { VCS_REPOSITORY } from './domain/vcs.repository';
 
 @Module({
   imports: [ScheduleModule.forRoot(), RagModule],
   controllers: [VcsController, VcsWebhookController],
   providers: [
     PrismaVcsRepository,
+    { provide: VCS_REPOSITORY, useExisting: PrismaVcsRepository },
     VcsConnectionService,
     VcsSyncService,
     VcsWebhookService,
@@ -25,6 +27,6 @@ import { RagModule } from '../rag/rag.module';
     VcsLinkExtractorService,
     ProjectsService,
   ],
-  exports: [VcsConnectionService, VcsSyncService, VcsWebhookService, VcsPollingService, VcsPrSyncService, VcsLinkExtractorService],
+  exports: [VCS_REPOSITORY, VcsConnectionService, VcsSyncService, VcsWebhookService, VcsPollingService, VcsPrSyncService, VcsLinkExtractorService],
 })
 export class VcsModule {}
