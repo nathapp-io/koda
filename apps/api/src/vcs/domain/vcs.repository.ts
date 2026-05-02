@@ -1,9 +1,18 @@
-import type {
-  CreateTicketFromIssueResult,
-  MergedPrTransitionInput,
-} from '../prisma-vcs.repository';
-
 export const VCS_REPOSITORY = Symbol('VCS_REPOSITORY');
+
+export interface MergedPrTransitionInput {
+  ticketId: string;
+  externalRef: string | null;
+  prUrl: string;
+  mergedBy: string | null;
+  mergeSha: string | null;
+}
+
+export interface CreateTicketFromIssueResult {
+  id: string;
+  number: number;
+  title: string;
+}
 
 export interface TicketLinkData {
   id: string;

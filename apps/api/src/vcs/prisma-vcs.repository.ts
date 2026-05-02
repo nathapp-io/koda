@@ -6,27 +6,11 @@ import { Ticket } from '@prisma/client';
 import { Project } from '@prisma/client';
 import { VcsIssue } from './types';
 import { TicketStatus, CommentType, ActivityType } from '../common/enums';
-import { IVcsRepository } from './domain/vcs.repository';
-
-/**
- * Data needed for the merged-PR auto-transition
- */
-export interface MergedPrTransitionInput {
-  ticketId: string;
-  externalRef: string | null;
-  prUrl: string;
-  mergedBy: string | null;
-  mergeSha: string | null;
-}
-
-/**
- * Result of creating a ticket from a VCS issue
- */
-export interface CreateTicketFromIssueResult {
-  id: string;
-  number: number;
-  title: string;
-}
+import {
+  CreateTicketFromIssueResult,
+  IVcsRepository,
+  MergedPrTransitionInput,
+} from './domain/vcs.repository';
 
 @Injectable()
 export class PrismaVcsRepository implements IVcsRepository {
