@@ -4,6 +4,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
+import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 
 describe('TicketsService', () => {
   let service: TicketsService;
@@ -64,13 +65,19 @@ describe('TicketsService', () => {
       },
       ticket: {
         create: jest.fn(),
+        findFirst: jest.fn(),
         findUnique: jest.fn(),
         findMany: jest.fn(),
         update: jest.fn(),
         count: jest.fn(),
       },
-      $transaction: jest.fn(),
     },
+  };
+
+  const mockTxManager = {
+    run: jest.fn((fn: () => unknown) => fn()),
+    getClient: jest.fn(),
+    isInTransaction: jest.fn(() => false),
   };
 
   beforeEach(async () => {
@@ -78,6 +85,7 @@ describe('TicketsService', () => {
       providers: [
         TicketsService,
         { provide: PrismaService, useValue: mockPrismaService },
+        { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
       ],
     }).compile();
 
@@ -99,15 +107,15 @@ describe('TicketsService', () => {
       };
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      // Mock transaction to return ticket with number 1
-      mockPrismaService.client.$transaction.mockResolvedValue(mockTicket);
+      mockPrismaService.client.ticket.findFirst.mockResolvedValue(null);
+      mockPrismaService.client.ticket.create.mockResolvedValue(mockTicket);
 
       const result = await service.create('koda', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
 
       // service adds ref: `${project.key}-${ticket.number}` to the response
       expect(result).toEqual({ ...mockTicket, ref: 'KODA-1' });
       expect(result.number).toBe(1);
-      expect(prismaService.client.$transaction).toHaveBeenCalled();
+      expect(mockTxManager.run).toHaveBeenCalled();
     });
 
     it('should increment ticket number sequentially', async () => {
@@ -123,13 +131,15 @@ describe('TicketsService', () => {
       const ticket1 = { ...mockTicket, number: 1 };
       const ticket2 = { ...mockTicket, number: 2, title: 'Add dark mode', id: 'ticket-124' };
 
-      // First create
-      mockPrismaService.client.$transaction.mockResolvedValueOnce(ticket1);
+      // First create: no previous tickets
+      mockPrismaService.client.ticket.findFirst.mockResolvedValueOnce(null);
+      mockPrismaService.client.ticket.create.mockResolvedValueOnce(ticket1);
       const result1 = await service.create('koda', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
       expect(result1.number).toBe(1);
 
-      // Second create
-      mockPrismaService.client.$transaction.mockResolvedValueOnce(ticket2);
+      // Second create: last ticket has number 1
+      mockPrismaService.client.ticket.findFirst.mockResolvedValueOnce(ticket1);
+      mockPrismaService.client.ticket.create.mockResolvedValueOnce(ticket2);
       const result2 = await service.create('koda', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
       expect(result2.number).toBe(2);
     });
@@ -146,8 +156,11 @@ describe('TicketsService', () => {
       const ticket1 = { ...mockTicket, number: 1 };
       const ticket2 = { ...mockTicket, number: 2, id: 'ticket-124' };
 
-      // Simulate concurrent creates
-      mockPrismaService.client.$transaction
+      // Simulate concurrent creates: each sees no prior ticket, but txManager ensures isolation
+      mockPrismaService.client.ticket.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(ticket1);
+      mockPrismaService.client.ticket.create
         .mockResolvedValueOnce(ticket1)
         .mockResolvedValueOnce(ticket2);
 
@@ -181,7 +194,8 @@ describe('TicketsService', () => {
       };
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.$transaction.mockResolvedValue({
+      mockPrismaService.client.ticket.findFirst.mockResolvedValue(null);
+      mockPrismaService.client.ticket.create.mockResolvedValue({
         ...mockTicket,
         createdByUserId: 'user-123',
       });
@@ -199,7 +213,8 @@ describe('TicketsService', () => {
       };
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.$transaction.mockResolvedValue({
+      mockPrismaService.client.ticket.findFirst.mockResolvedValue(null);
+      mockPrismaService.client.ticket.create.mockResolvedValue({
         ...mockTicket,
         createdByAgentId: 'agent-123',
         createdByUserId: null,
@@ -233,11 +248,12 @@ describe('TicketsService', () => {
       };
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.ticket.findFirst.mockResolvedValue(null);
       const expectedTicket = {
         ...mockTicket,
         description: null,
       };
-      mockPrismaService.client.$transaction.mockResolvedValue(expectedTicket);
+      mockPrismaService.client.ticket.create.mockResolvedValue(expectedTicket);
 
       const result = await service.create('koda', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
 
@@ -251,12 +267,13 @@ describe('TicketsService', () => {
       };
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.ticket.findFirst.mockResolvedValue(null);
       const expectedTicket = {
         ...mockTicket,
         status: 'CREATED',
         priority: 'MEDIUM', // default
       };
-      mockPrismaService.client.$transaction.mockResolvedValue(expectedTicket);
+      mockPrismaService.client.ticket.create.mockResolvedValue(expectedTicket);
 
       const result = await service.create('koda', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
 
