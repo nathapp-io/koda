@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ContextBuilderService, GetProjectContextQuery, Intent } from './context-builder.service';
 import { TimelineService } from './timeline.service';
-import { MemoryItemRepository } from './memory-item-repository';
+import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
 
 describe('ContextBuilderService', () => {
   let service: ContextBuilderService;
@@ -21,13 +21,13 @@ describe('ContextBuilderService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         { provide: TimelineService, useValue: mockTimelineService },
-        { provide: MemoryItemRepository, useValue: mockMemoryItemRepository },
+        { provide: PrismaMemoryItemRepository, useValue: mockMemoryItemRepository },
       ],
     }).compile();
 
     service = new ContextBuilderService(
       mockTimelineService as unknown as TimelineService,
-      mockMemoryItemRepository as unknown as MemoryItemRepository,
+      mockMemoryItemRepository as unknown as PrismaMemoryItemRepository,
     );
     timelineService = module.get<TimelineService>(TimelineService);
 

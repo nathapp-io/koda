@@ -1,14 +1,14 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { OutboxFanOutRegistry } from '../../../src/outbox/outbox-fan-out-registry';
 import { ExtractionService } from '../../../src/memory/extraction.service';
-import { MemoryItemRepository } from '../../../src/memory/memory-item-repository';
+import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-item.repository';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { MemoryKind } from '../../../src/common/enums';
 
 describe('AC8: OutboxFanOutRegistry dispatches to ExtractionService', () => {
   let fanOutRegistry: OutboxFanOutRegistry;
   let extractionService: ExtractionService;
-  let memoryRepository: MemoryItemRepository;
+  let memoryRepository: PrismaMemoryItemRepository;
   let mockPrismaService: any;
 
   beforeEach(async () => {
@@ -32,14 +32,14 @@ describe('AC8: OutboxFanOutRegistry dispatches to ExtractionService', () => {
       providers: [
         OutboxFanOutRegistry,
         ExtractionService,
-        MemoryItemRepository,
+        PrismaMemoryItemRepository,
         { provide: PrismaService, useValue: mockPrismaService },
       ],
     }).compile();
 
     fanOutRegistry = module.get<OutboxFanOutRegistry>(OutboxFanOutRegistry);
     extractionService = module.get<ExtractionService>(ExtractionService);
-    memoryRepository = module.get<MemoryItemRepository>(MemoryItemRepository);
+    memoryRepository = module.get<PrismaMemoryItemRepository>(PrismaMemoryItemRepository);
   });
 
   describe('ticket_event dispatch triggers extraction', () => {

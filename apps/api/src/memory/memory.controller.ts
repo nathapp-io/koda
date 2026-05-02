@@ -2,7 +2,8 @@ import { Controller, Post, Get, Body, Query, Param, UseGuards } from '@nestjs/co
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, CurrentActor } from '../auth/decorators/current-user.decorator';
 import { ExtractionService, WriteResult } from './extraction.service';
-import { MemoryItemRepository } from './memory-item-repository';
+import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
+import { MemoryItemInput } from './memory-item-repository';
 import { MemoryKind, ActorRole } from '../common/enums';
 
 interface MemoryWriteInput {
@@ -35,7 +36,7 @@ interface CurrentUser {
 export class MemoryController {
   constructor(
     private readonly extractionService: ExtractionService,
-    private readonly repository: MemoryItemRepository,
+    private readonly repository: PrismaMemoryItemRepository,
   ) {}
 
   @Post('extract')
@@ -56,7 +57,7 @@ export class MemoryController {
     const items = this.extractionService.extractFromEvent(event as unknown as Parameters<typeof this.extractionService.extractFromEvent>[0]);
 
     for (const item of items) {
-      const input: Parameters<MemoryItemRepository['upsert']>[0] = {
+      const input: MemoryItemInput = {
         projectId: item.projectId,
         kind: item.kind,
         subject: item.subject,

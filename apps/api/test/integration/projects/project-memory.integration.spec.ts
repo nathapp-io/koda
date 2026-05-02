@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ProjectsController } from '../../../src/projects/projects.controller';
 import { ProjectsService } from '../../../src/projects/projects.service';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { MemoryItemRepository } from '../../../src/memory/memory-item-repository';
+import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-item.repository';
 import { ContextBuilderService } from '../../../src/memory/context-builder.service';
 import { TimelineService } from '../../../src/memory/timeline.service';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
@@ -17,7 +17,7 @@ type MemoryKind = (typeof MemoryKind)[keyof typeof MemoryKind];
 describe('ProjectMemoryController', () => {
   let controller: ProjectsController;
   let projectsService: ProjectsService;
-  let memoryItemRepository: MemoryItemRepository;
+  let memoryItemRepository: PrismaMemoryItemRepository;
 
   const mockProjectsService = {
     findBySlug: jest.fn(),
@@ -49,14 +49,14 @@ describe('ProjectMemoryController', () => {
       controllers: [ProjectsController],
       providers: [
         { provide: ProjectsService, useValue: mockProjectsService },
-        { provide: MemoryItemRepository, useValue: mockMemoryItemRepository },
+        { provide: PrismaMemoryItemRepository, useValue: mockMemoryItemRepository },
         { provide: PrismaService, useValue: mockPrismaService },
       ],
     }).compile();
 
     controller = module.get<ProjectsController>(ProjectsController);
     projectsService = module.get<ProjectsService>(ProjectsService);
-    memoryItemRepository = module.get<MemoryItemRepository>(MemoryItemRepository);
+    memoryItemRepository = module.get<PrismaMemoryItemRepository>(PrismaMemoryItemRepository);
 
     jest.clearAllMocks();
   });
@@ -305,7 +305,7 @@ describe('ProjectMemoryController', () => {
 
       const contextBuilderService = new ContextBuilderService(
         mockTimelineService as unknown as TimelineService,
-        mockMemoryItemRepository as unknown as MemoryItemRepository,
+        mockMemoryItemRepository as unknown as PrismaMemoryItemRepository,
       );
 
       const result = await contextBuilderService.getProjectContext({
@@ -371,7 +371,7 @@ describe('ProjectMemoryController', () => {
 
       const contextBuilderService = new ContextBuilderService(
         mockTimelineService as unknown as TimelineService,
-        mockMemoryItemRepository as unknown as MemoryItemRepository,
+        mockMemoryItemRepository as unknown as PrismaMemoryItemRepository,
       );
 
       const result = await contextBuilderService.getProjectContext({

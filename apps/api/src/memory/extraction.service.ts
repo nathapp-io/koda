@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { MemoryKind } from '../common/enums';
-import { MemoryItemRepository, MemoryItemInput } from './memory-item-repository';
+import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
+import { MemoryItemInput } from './memory-item-repository';
 
 export interface MemoryExtractedItem {
   projectId: string;
@@ -199,7 +200,7 @@ export class ExtractionService {
 
   async recordDecision(
     input: { projectId: string; actorId: string; topic: string; decision: string; rationale?: string; sourceId?: string },
-    repository: MemoryItemRepository,
+    repository: PrismaMemoryItemRepository,
   ): Promise<WriteResult> {
     const existingActive = await repository.findActive(
       input.projectId,

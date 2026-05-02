@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { MemoryItemRepository, MemoryItem } from './memory-item-repository';
+import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
+import { MemoryItem } from './memory-item-repository';
 import { MemoryKind } from '../common/enums';
 
 export interface GovernanceResult {
@@ -17,7 +18,7 @@ const MAX_PAGES = 10_000;
 export class MemoryGovernanceService {
   private readonly logger = new Logger(MemoryGovernanceService.name);
 
-  constructor(private readonly repository: MemoryItemRepository) {}
+  constructor(private readonly repository: PrismaMemoryItemRepository) {}
 
   async runCleanup(projectId: string): Promise<GovernanceResult> {
     const start = Date.now();

@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { MemoryGovernanceService, GovernanceResult } from './memory-governance.service';
-import { MemoryItemRepository, MemoryItem } from './memory-item-repository';
+import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
+import { MemoryItem } from './memory-item-repository';
 
 const createMockRepository = () => ({
   findByProject: jest.fn(),
@@ -22,7 +23,7 @@ describe('MemoryGovernanceService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MemoryGovernanceService,
-        { provide: MemoryItemRepository, useValue: mockRepository },
+        { provide: PrismaMemoryItemRepository, useValue: mockRepository },
       ],
     }).compile();
 

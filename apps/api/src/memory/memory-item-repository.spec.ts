@@ -1,9 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { MemoryItemRepository } from './memory-item-repository';
+import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
 
-describe('MemoryItemRepository.findByProjectMemory', () => {
-  let repository: MemoryItemRepository;
+describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
+  let repository: PrismaMemoryItemRepository;
   let prismaService: PrismaService<any>;
 
   const mockPrismaClient = {
@@ -20,12 +20,12 @@ describe('MemoryItemRepository.findByProjectMemory', () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        MemoryItemRepository,
+        PrismaMemoryItemRepository,
         { provide: PrismaService, useValue: mockPrismaService },
       ],
     }).compile();
 
-    repository = module.get<MemoryItemRepository>(MemoryItemRepository);
+    repository = module.get<PrismaMemoryItemRepository>(PrismaMemoryItemRepository);
     prismaService = module.get<PrismaService<any>>(PrismaService);
 
     jest.clearAllMocks();
