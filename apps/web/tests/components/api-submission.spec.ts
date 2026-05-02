@@ -109,7 +109,7 @@ describe('US-002-5 AC2: On API failure, error message is displayed and dialog re
     // Extract the catch block content
     const catchBlockMatch = source.match(/catch\s*\([^)]*\)\s*\{([\s\S]*?)\}/)
     expect(catchBlockMatch).not.toBeNull()
-    const catchBlock = catchBlockMatch![1]
+    const catchBlock = catchBlockMatch?.[1] ?? ''
     // The catch block should NOT set apiKey
     const setsApiKeyInCatch = catchBlock.includes('apiKey.value =')
     expect(setsApiKeyInCatch).toBe(false)
@@ -121,7 +121,7 @@ describe('US-002-5 AC2: On API failure, error message is displayed and dialog re
     // This is verified by ensuring catch block does NOT set apiKey
     const catchBlockMatch = source.match(/catch\s*\([^)]*\)\s*\{([\s\S]*?)\}/)
     expect(catchBlockMatch).not.toBeNull()
-    const catchBlock = catchBlockMatch![1]
+    const catchBlock = catchBlockMatch?.[1] ?? ''
     // apiKey should not be modified in catch block
     expect(catchBlock).not.toMatch(/apiKey\.value\s*=/)
   })
@@ -132,7 +132,7 @@ describe('US-002-5 AC2: On API failure, error message is displayed and dialog re
     // It should only show the error toast
     const catchBlockMatch = source.match(/catch\s*\([^)]*\)\s*\{([\s\S]*?)\}/)
     expect(catchBlockMatch).not.toBeNull()
-    const catchBlock = catchBlockMatch![1]
+    const catchBlock = catchBlockMatch?.[1] ?? ''
     // Should NOT close the dialog in catch block
     const closesDialogInCatch = catchBlock.includes("emit('update:open'")
     expect(closesDialogInCatch).toBe(false)
@@ -158,7 +158,7 @@ describe('US-002-5 AC3: On API success, dialog switches to key-reveal view with 
     // Extract the try block content
     const tryBlockMatch = source.match(/try\s*\{([\s\S]*?)catch/)
     expect(tryBlockMatch).not.toBeNull()
-    const tryBlock = tryBlockMatch![1]
+    const tryBlock = tryBlockMatch?.[1] ?? ''
     // Should set apiKey in try block
     expect(tryBlock).toMatch(/apiKey\.value\s*=/)
   })

@@ -200,7 +200,7 @@ describe('US-004-3: Full agents page integration for RotateKeyDialog and DeleteA
     // Count refresh() calls - should be at least 4 (created, updated, rotated, deleted)
     const refreshMatches = source.match(/refresh\s*\(\)/g)
     expect(refreshMatches).not.toBeNull()
-    expect(refreshMatches!.length).toBeGreaterThanOrEqual(4)
+    expect(refreshMatches?.length ?? 0).toBeGreaterThanOrEqual(4)
   })
 })
 

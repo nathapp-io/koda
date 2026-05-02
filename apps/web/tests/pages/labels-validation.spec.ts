@@ -26,14 +26,14 @@ describe('US-003 AC3: Given normalized value does not match ^#[0-9A-F]{6}$, when
     expect(source).toContain('normalizeHexColor')
     const onSubmitMatch = source.match(/const onSubmit = handleSubmit\(async \(values\) =>\s*\{[\s\S]*?\}\)/)
     expect(onSubmitMatch).not.toBeNull()
-    expect(onSubmitMatch![0]).toContain('normalizeHexColor')
+    expect(onSubmitMatch?.[0] ?? '').toContain('normalizeHexColor')
   })
 
   test('labels.vue onSubmit sends normalized color to POST /projects/:slug/labels', () => {
     const source = readFileSync(labelsPagePath, 'utf-8')
     const onSubmitMatch = source.match(/const onSubmit = handleSubmit\(async \(values\) =>\s*\{[\s\S]*?\}\)/)
     expect(onSubmitMatch).not.toBeNull()
-    const onSubmitBody = onSubmitMatch![0]
+    const onSubmitBody = onSubmitMatch?.[0] ?? ''
     expect(onSubmitBody).toMatch(/\$api\.post\(`\/projects\/\$\{slug\}\/labels`/)
     expect(onSubmitBody).toContain('color: normalizeHexColor')
   })
@@ -42,7 +42,7 @@ describe('US-003 AC3: Given normalized value does not match ^#[0-9A-F]{6}$, when
     const source = readFileSync(labelsPagePath, 'utf-8')
     const colorFieldMatch = source.match(/FormField\s+name="color"[\s\S]*?<\/FormField>/)
     expect(colorFieldMatch).not.toBeNull()
-    expect(colorFieldMatch![0]).toContain('FormMessage')
+    expect(colorFieldMatch?.[0] ?? '').toContain('FormMessage')
   })
 
   test('labels.vue form has handleSubmit to block invalid submissions', () => {
@@ -57,17 +57,17 @@ describe('US-003 AC4: Given valid color input, when submit occurs, then POST /pr
     const source = readFileSync(labelsPagePath, 'utf-8')
     const onSubmitMatch = source.match(/const onSubmit = handleSubmit\(async \(values\) =>\s*\{[\s\S]*?\}\)/)
     expect(onSubmitMatch).not.toBeNull()
-    const onSubmitBody = onSubmitMatch![0]
+    const onSubmitBody = onSubmitMatch?.[0] ?? ''
     const apiCallMatch = onSubmitBody.match(/\$api\.post\([^)]+\)/)
     expect(apiCallMatch).not.toBeNull()
-    expect(apiCallMatch![0]).toContain('normalizeHexColor')
+    expect(apiCallMatch?.[0] ?? '').toContain('normalizeHexColor')
   })
 
   test('labels.vue sends color as part of POST request body', () => {
     const source = readFileSync(labelsPagePath, 'utf-8')
     const onSubmitMatch = source.match(/const onSubmit = handleSubmit\(async \(values\) =>\s*\{[\s\S]*?\}\)/)
     expect(onSubmitMatch).not.toBeNull()
-    const onSubmitBody = onSubmitMatch![0]
+    const onSubmitBody = onSubmitMatch?.[0] ?? ''
     expect(onSubmitBody).toMatch(/color:\s*normalizeHexColor/)
   })
 })

@@ -59,7 +59,7 @@ describe('US-004 AC2: Given label row contains invalid persisted color value, wh
     const source = readFileSync(labelsPagePath, 'utf-8')
     const tableRowMatch = source.match(/<TableRow[\s\S]*?<\/TableRow>/)
     expect(tableRowMatch).not.toBeNull()
-    const tableRowSource = tableRowMatch![0]
+    const tableRowSource = tableRowMatch?.[0] ?? ''
     const usesFallback =
       tableRowSource.includes('fallbackColor') ||
       tableRowSource.includes('getSafeColor') ||
@@ -103,7 +103,7 @@ describe('US-004 AC5: When delete label succeeds, then refresh() is invoked', ()
     const source = readFileSync(labelsPagePath, 'utf-8')
     const deleteLabelMatch = source.match(/async function deleteLabel[\s\S]*?\{[\s\S]*?\}\s*\}/)
     expect(deleteLabelMatch).not.toBeNull()
-    const deleteLabelBody = deleteLabelMatch![0]
+    const deleteLabelBody = deleteLabelMatch?.[0] ?? ''
     expect(deleteLabelBody).toContain('refresh')
   })
 
@@ -111,10 +111,10 @@ describe('US-004 AC5: When delete label succeeds, then refresh() is invoked', ()
     const source = readFileSync(labelsPagePath, 'utf-8')
     const deleteLabelMatch = source.match(/async function deleteLabel[\s\S]*?\{[\s\S]*?\}\s*\}/)
     expect(deleteLabelMatch).not.toBeNull()
-    const deleteLabelBody = deleteLabelMatch![0]
+    const deleteLabelBody = deleteLabelMatch?.[0] ?? ''
     const toastSuccessMatch = deleteLabelBody.match(/toast\.success\([^)]+\)/)
     expect(toastSuccessMatch).not.toBeNull()
-    const afterToast = deleteLabelBody.substring(deleteLabelBody.indexOf(toastSuccessMatch![0]) + toastSuccessMatch![0].length)
+    const afterToast = deleteLabelBody.substring(deleteLabelBody.indexOf(toastSuccessMatch?.[0] ?? '') + (toastSuccessMatch?.[0] ?? '').length)
     expect(afterToast).toContain('refresh')
   })
 })
@@ -124,7 +124,7 @@ describe('US-004 AC6: When delete label succeeds, then a localized success toast
     const source = readFileSync(labelsPagePath, 'utf-8')
     const deleteLabelMatch = source.match(/async function deleteLabel[\s\S]*?\{[\s\S]*?\}\s*\}/)
     expect(deleteLabelMatch).not.toBeNull()
-    const deleteLabelBody = deleteLabelMatch![0]
+    const deleteLabelBody = deleteLabelMatch?.[0] ?? ''
     expect(deleteLabelBody).toContain("toast.success")
     expect(deleteLabelBody).toContain("labels.toast.deleted")
   })
@@ -133,9 +133,9 @@ describe('US-004 AC6: When delete label succeeds, then a localized success toast
     const source = readFileSync(labelsPagePath, 'utf-8')
     const deleteLabelMatch = source.match(/async function deleteLabel[\s\S]*?\{[\s\S]*?\}\s*\}/)
     expect(deleteLabelMatch).not.toBeNull()
-    const deleteLabelBody = deleteLabelMatch![0]
+    const deleteLabelBody = deleteLabelMatch?.[0] ?? ''
     const toastSuccessMatch = deleteLabelBody.match(/toast\.success\([^)]+\)/)
     expect(toastSuccessMatch).not.toBeNull()
-    expect(toastSuccessMatch![0]).toContain("t('labels.toast.deleted')")
+    expect(toastSuccessMatch?.[0] ?? '').toContain("t('labels.toast.deleted')")
   })
 })

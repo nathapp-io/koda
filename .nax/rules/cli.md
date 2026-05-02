@@ -11,7 +11,6 @@ paths:
   - `OpenAPI.BASE = ctx.apiUrl`
   - `OpenAPI.TOKEN = ctx.apiKey`
 - Handle API failures with generated `ApiError`
-- Do not use raw `axios`, `AxiosInstance`, or `configureClient()`
 - Generated functions return data directly (no axios envelope unwrap needed)
 
 ## Output

@@ -8,8 +8,8 @@
       },
       "opencode": {
           "fast": "opencode-go/minimax-m2.7",
-          "balanced": "opencode-go/qwen3.6-plus",
-          "powerful": "opencode-go/kimi-k2.6"
+          "balanced": "opencode-go/deepseek-v4-pro",
+          "powerful": "opencode-go/glm-5.1"
       },
       "codex": {
           "fast": "gpt-5.4-mini/medium",

@@ -137,7 +137,7 @@ describe('US-003-A AC6: CreateAgentDialog addCapability does not add empty trimm
     const source = getCreateDialogSource()
     const addCapabilityMatch = source.match(/function addCapability\([\s\S]*?^\}/m)
     expect(addCapabilityMatch).not.toBeNull()
-    expect(addCapabilityMatch![0]).toContain('.trim()')
+    expect(addCapabilityMatch?.[0] ?? '').toContain('.trim()')
   })
 
   test('source addCapability checks for empty string after trim', () => {
@@ -150,7 +150,7 @@ describe('US-003-A AC6: CreateAgentDialog addCapability does not add empty trimm
     const source = getCreateDialogSource()
     const addCapabilityMatch = source.match(/function addCapability\([\s\S]*?^\}/m)
     expect(addCapabilityMatch).not.toBeNull()
-    const funcBody = addCapabilityMatch![0]
+    const funcBody = addCapabilityMatch?.[0] ?? ''
     expect(funcBody).toContain('if (value')
     expect(funcBody).toContain('!capabilitiesTags.value.some(')
   })

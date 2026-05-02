@@ -185,7 +185,7 @@ describe("US-002-3 AC4: Copy button label changes to 'Copied!' for 2 seconds the
     expect(setTimeoutCallback).not.toBeNull()
 
     // The callback should contain logic to revert using i18n key for copy
-    const callbackText = setTimeoutCallback![0]
+    const callbackText = setTimeoutCallback?.[0] ?? ''
     const revertsToCopy = callbackText.includes("t('agents.rotateKey.apiKeyReveal.copy')") || callbackText.includes('t("agents.rotateKey.apiKeyReveal.copy")')
     expect(revertsToCopy).toBe(true)
   })
@@ -217,7 +217,7 @@ describe("US-002-3 AC5: Warning message uses i18n key for apiKeyReveal.message",
     // The warning should appear alongside the apiKey display using i18n
     const keyRevealSection = source.match(/v-if=["']apiKey["'][\s\S]*?<\/template>/)
     expect(keyRevealSection).not.toBeNull()
-    const hasWarningInSection = keyRevealSection![0].includes("t('agents.rotateKey.apiKeyReveal.message')") || keyRevealSection![0].includes('t("agents.rotateKey.apiKeyReveal.message")')
+    const hasWarningInSection = (keyRevealSection?.[0] ?? '').includes("t('agents.rotateKey.apiKeyReveal.message')") || (keyRevealSection?.[0] ?? '').includes('t("agents.rotateKey.apiKeyReveal.message")')
     expect(hasWarningInSection).toBe(true)
   })
 
@@ -260,7 +260,7 @@ describe("US-002-3 AC6: Done button emits 'created' event and closes the dialog"
     // Look for handleDone function that contains emit('created')
     const handleDoneFunction = source.match(/function\s+handleDone[\s\S]{0,500}/)
     expect(handleDoneFunction).not.toBeNull()
-    expect(handleDoneFunction![0]).toContain("emit('created')")
+    expect(handleDoneFunction?.[0] ?? '').toContain("emit('created')")
   })
 
   test('Done button closes the dialog by emitting update:open with false', () => {
@@ -268,7 +268,7 @@ describe("US-002-3 AC6: Done button emits 'created' event and closes the dialog"
     // When Done is clicked, should emit update:open(false) to close
     const handleDoneFunction = source.match(/function\s+handleDone[\s\S]{0,500}/)
     expect(handleDoneFunction).not.toBeNull()
-    const hasCloseDialog = handleDoneFunction![0].includes("emit('update:open'")
+    const hasCloseDialog = (handleDoneFunction?.[0] ?? '').includes("emit('update:open'")
     expect(hasCloseDialog).toBe(true)
   })
 
@@ -277,7 +277,7 @@ describe("US-002-3 AC6: Done button emits 'created' event and closes the dialog"
     // After closing, should reset apiKey.value = null for next use
     const handleDoneFunction = source.match(/function\s+handleDone[\s\S]{0,500}/)
     expect(handleDoneFunction).not.toBeNull()
-    const resetsApiKey = handleDoneFunction![0].includes('apiKey.value = null')
+    const resetsApiKey = (handleDoneFunction?.[0] ?? '').includes('apiKey.value = null')
     expect(resetsApiKey).toBe(true)
   })
 })
@@ -309,7 +309,7 @@ describe('US-002-3: Key-reveal view is a distinct section in the dialog', () => 
     // The key-reveal section should contain all required elements using i18n
     const keyRevealSection = source.match(/v-if=["']apiKey["'][\s\S]{0,1500}<\/div>/)
     expect(keyRevealSection).not.toBeNull()
-    const section = keyRevealSection![0]
+    const section = keyRevealSection?.[0] ?? ''
     // Check for all required elements with i18n keys
     expect(section).toContain('<Input')
     expect(section).toContain('readonly')

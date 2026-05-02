@@ -62,7 +62,7 @@ describe('US-002-1 AC2: name field is required', () => {
     // FormMessage should appear within the name FormField context
     const nameFieldMatch = source.match(/FormField\s+name="name"[\s\S]*?<\/FormField>/)
     expect(nameFieldMatch).not.toBeNull()
-    expect(nameFieldMatch![0]).toContain('FormMessage')
+    expect(nameFieldMatch?.[0] ?? '').toContain('FormMessage')
   })
 })
 
@@ -86,7 +86,7 @@ describe('US-002-1 AC3: slug field validates against pattern /^[a-z0-9-]+$/', ()
     const source = readFileSync(componentPath, 'utf-8')
     const slugFieldMatch = source.match(/FormField\s+name="slug"[\s\S]*?<\/FormField>/)
     expect(slugFieldMatch).not.toBeNull()
-    expect(slugFieldMatch![0]).toContain('FormMessage')
+    expect(slugFieldMatch?.[0] ?? '').toContain('FormMessage')
   })
 })
 
@@ -117,7 +117,7 @@ describe('US-002-1 AC4: roles field requires at least one checkbox selected (VER
     const source = readFileSync(componentPath, 'utf-8')
     const rolesFieldMatch = source.match(/FormField\s+name="roles"[\s\S]*?<\/FormField>/)
     expect(rolesFieldMatch).not.toBeNull()
-    expect(rolesFieldMatch![0]).toContain('FormMessage')
+    expect(rolesFieldMatch?.[0] ?? '').toContain('FormMessage')
   })
 })
 
@@ -142,7 +142,7 @@ describe('US-002-1 AC5: capabilities is an optional tag input field', () => {
     const source = readFileSync(componentPath, 'utf-8')
     const capabilitiesFieldMatch = source.match(/FormField\s+name="capabilities"[\s\S]*?<\/FormField>/)
     expect(capabilitiesFieldMatch).not.toBeNull()
-    expect(capabilitiesFieldMatch![0]).toContain('FormMessage')
+    expect(capabilitiesFieldMatch?.[0] ?? '').toContain('FormMessage')
   })
 })
 
@@ -174,7 +174,7 @@ describe('US-002-1 AC6: maxConcurrentTickets defaults to 3, validates integer â‰
     const source = readFileSync(componentPath, 'utf-8')
     const maxConcurrentFieldMatch = source.match(/FormField\s+name="maxConcurrentTickets"[\s\S]*?<\/FormField>/)
     expect(maxConcurrentFieldMatch).not.toBeNull()
-    expect(maxConcurrentFieldMatch![0]).toContain('FormMessage')
+    expect(maxConcurrentFieldMatch?.[0] ?? '').toContain('FormMessage')
   })
 })
 
@@ -190,7 +190,7 @@ describe('US-002-1 AC7: Validation errors are shown inline for each field on sub
     // We have 5 fields: name, slug, roles, capabilities, maxConcurrentTickets
     // Each should have a FormMessage
     expect(formMessageMatches).not.toBeNull()
-    expect(formMessageMatches!.length).toBeGreaterThanOrEqual(5)
+    expect(formMessageMatches?.length ?? 0).toBeGreaterThanOrEqual(5)
   })
 
   test('form uses handleSubmit for submission', () => {

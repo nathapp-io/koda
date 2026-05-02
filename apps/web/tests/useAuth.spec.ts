@@ -80,7 +80,7 @@ describe('AC-1: useCookie called with secure: true for koda_token', () => {
     mod.useAuth()
     const tokenCall = env.cookieCalls.find((c) => c.name === 'koda_token')
     expect(tokenCall).toBeDefined()
-    expect(tokenCall!.opts).toEqual(expect.objectContaining({ secure: true }))
+    expect(tokenCall?.opts).toEqual(expect.objectContaining({ secure: true }))
   })
 })
 
@@ -94,7 +94,7 @@ describe("AC-2: useCookie called with sameSite: 'strict' for koda_token", () => 
     mod.useAuth()
     const tokenCall = env.cookieCalls.find((c) => c.name === 'koda_token')
     expect(tokenCall).toBeDefined()
-    expect(tokenCall!.opts).toEqual(expect.objectContaining({ sameSite: 'strict' }))
+    expect(tokenCall?.opts).toEqual(expect.objectContaining({ sameSite: 'strict' }))
   })
 })
 
@@ -108,7 +108,7 @@ describe('AC-3: useCookie called with maxAge: 604800 for koda_token', () => {
     mod.useAuth()
     const tokenCall = env.cookieCalls.find((c) => c.name === 'koda_token')
     expect(tokenCall).toBeDefined()
-    expect(tokenCall!.opts).toEqual(expect.objectContaining({ maxAge: 604800 }))
+    expect(tokenCall?.opts).toEqual(expect.objectContaining({ maxAge: 604800 }))
   })
 })
 

@@ -58,7 +58,7 @@ describe('VCS-P1-005-C: Provider selector field', () => {
     const source = getSource()
     const providerFieldMatch = source.match(/<FormField[^>]*name="provider"[\s\S]{0,1000}<\/FormField>/)
     expect(providerFieldMatch).not.toBeNull()
-    const fieldContent = providerFieldMatch![0]
+    const fieldContent = providerFieldMatch?.[0] ?? ''
     expect(fieldContent).toContain('Select')
   })
 
@@ -71,7 +71,7 @@ describe('VCS-P1-005-C: Provider selector field', () => {
     const source = getSource()
     const providerFieldMatch = source.match(/<FormField[^>]*name="provider"[\s\S]{0,1000}<\/FormField>/)
     expect(providerFieldMatch).not.toBeNull()
-    expect(providerFieldMatch![0]).toContain('FormMessage')
+    expect(providerFieldMatch?.[0] ?? '').toContain('FormMessage')
   })
 })
 
@@ -89,7 +89,7 @@ describe('VCS-P1-005-C: Repo owner text field', () => {
     const source = getSource()
     const ownerFieldMatch = source.match(/FormField[^>]*name="owner"[\s\S]{0,500}<\/FormField>/)
     expect(ownerFieldMatch).not.toBeNull()
-    expect(ownerFieldMatch![0]).toContain('Input')
+    expect(ownerFieldMatch?.[0] ?? '').toContain('Input')
   })
 
   test('source includes z.string().min(1) validation for owner field', () => {
@@ -101,7 +101,7 @@ describe('VCS-P1-005-C: Repo owner text field', () => {
     const source = getSource()
     const ownerFieldMatch = source.match(/FormField[^>]*name="owner"[\s\S]{0,500}<\/FormField>/)
     expect(ownerFieldMatch).not.toBeNull()
-    expect(ownerFieldMatch![0]).toContain('FormMessage')
+    expect(ownerFieldMatch?.[0] ?? '').toContain('FormMessage')
   })
 })
 
@@ -119,7 +119,7 @@ describe('VCS-P1-005-C: Repo name text field', () => {
     const source = getSource()
     const repoFieldMatch = source.match(/FormField[^>]*name="repo"[\s\S]{0,500}<\/FormField>/)
     expect(repoFieldMatch).not.toBeNull()
-    expect(repoFieldMatch![0]).toContain('Input')
+    expect(repoFieldMatch?.[0] ?? '').toContain('Input')
   })
 
   test('source includes z.string().min(1) validation for repo field', () => {
@@ -131,7 +131,7 @@ describe('VCS-P1-005-C: Repo name text field', () => {
     const source = getSource()
     const repoFieldMatch = source.match(/FormField[^>]*name="repo"[\s\S]{0,500}<\/FormField>/)
     expect(repoFieldMatch).not.toBeNull()
-    expect(repoFieldMatch![0]).toContain('FormMessage')
+    expect(repoFieldMatch?.[0] ?? '').toContain('FormMessage')
   })
 })
 
@@ -149,7 +149,7 @@ describe('VCS-P1-005-C: Token masked input field', () => {
     const source = getSource()
     const tokenFieldMatch = source.match(/FormField[^>]*name="token"[\s\S]{0,500}<\/FormField>/)
     expect(tokenFieldMatch).not.toBeNull()
-    const fieldContent = tokenFieldMatch![0]
+    const fieldContent = tokenFieldMatch?.[0] ?? ''
     expect(fieldContent).toContain('Input')
     expect(fieldContent).toMatch(/type=["']password["']/)
   })
@@ -163,7 +163,7 @@ describe('VCS-P1-005-C: Token masked input field', () => {
     const source = getSource()
     const tokenFieldMatch = source.match(/FormField[^>]*name="token"[\s\S]{0,500}<\/FormField>/)
     expect(tokenFieldMatch).not.toBeNull()
-    expect(tokenFieldMatch![0]).toContain('FormMessage')
+    expect(tokenFieldMatch?.[0] ?? '').toContain('FormMessage')
   })
 })
 
@@ -181,14 +181,14 @@ describe('VCS-P1-005-C: Sync mode radio group field', () => {
     const source = getSource()
     const syncModeFieldMatch = source.match(/<FormField[^>]*name="syncMode"[\s\S]{0,1000}<\/FormField>/)
     expect(syncModeFieldMatch).not.toBeNull()
-    expect(syncModeFieldMatch![0]).toContain('RadioGroup')
+    expect(syncModeFieldMatch?.[0] ?? '').toContain('RadioGroup')
   })
 
   test('source includes off, polling, and webhook radio options', () => {
     const source = getSource()
     const syncModeFieldMatch = source.match(/<FormField[^>]*name="syncMode"[\s\S]{0,1000}<\/FormField>/)
     expect(syncModeFieldMatch).not.toBeNull()
-    const fieldContent = syncModeFieldMatch![0]
+    const fieldContent = syncModeFieldMatch?.[0] ?? ''
     expect(fieldContent).toContain('off')
     expect(fieldContent).toContain('polling')
     expect(fieldContent).toContain('webhook')
@@ -203,7 +203,7 @@ describe('VCS-P1-005-C: Sync mode radio group field', () => {
     const source = getSource()
     const syncModeFieldMatch = source.match(/<FormField[^>]*name="syncMode"[\s\S]{0,1000}<\/FormField>/)
     expect(syncModeFieldMatch).not.toBeNull()
-    expect(syncModeFieldMatch![0]).toContain('FormMessage')
+    expect(syncModeFieldMatch?.[0] ?? '').toContain('FormMessage')
   })
 })
 
@@ -221,7 +221,7 @@ describe('VCS-P1-005-C: Polling interval number input field', () => {
     const source = getSource()
     const pollingFieldMatch = source.match(/FormField[^>]*name="pollingInterval"[\s\S]{0,500}<\/FormField>/)
     expect(pollingFieldMatch).not.toBeNull()
-    const fieldContent = pollingFieldMatch![0]
+    const fieldContent = pollingFieldMatch?.[0] ?? ''
     expect(fieldContent).toContain('Input')
     expect(fieldContent).toMatch(/type=["']number["']/)
   })
@@ -235,7 +235,7 @@ describe('VCS-P1-005-C: Polling interval number input field', () => {
     const source = getSource()
     const pollingFieldMatch = source.match(/FormField[^>]*name="pollingInterval"[\s\S]{0,500}<\/FormField>/)
     expect(pollingFieldMatch).not.toBeNull()
-    expect(pollingFieldMatch![0]).toContain('FormMessage')
+    expect(pollingFieldMatch?.[0] ?? '').toContain('FormMessage')
   })
 })
 
@@ -253,7 +253,7 @@ describe('VCS-P1-005-C: Authors tag input field', () => {
     const source = getSource()
     const authorsFieldMatch = source.match(/FormField[^>]*name="authors"[\s\S]{0,500}<\/FormField>/)
     expect(authorsFieldMatch).not.toBeNull()
-    expect(authorsFieldMatch![0]).toContain('Input')
+    expect(authorsFieldMatch?.[0] ?? '').toContain('Input')
   })
 
   test('source includes z.string() validation for authors field', () => {
@@ -265,7 +265,7 @@ describe('VCS-P1-005-C: Authors tag input field', () => {
     const source = getSource()
     const authorsFieldMatch = source.match(/FormField[^>]*name="authors"[\s\S]{0,500}<\/FormField>/)
     expect(authorsFieldMatch).not.toBeNull()
-    expect(authorsFieldMatch![0]).toContain('FormMessage')
+    expect(authorsFieldMatch?.[0] ?? '').toContain('FormMessage')
   })
 })
 

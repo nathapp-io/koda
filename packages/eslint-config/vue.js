@@ -10,7 +10,12 @@ module.exports = {
   },
   ignorePatterns: ['.nuxt/', '.output/', 'generated/', 'node_modules/', 'dist/'],
   rules: {
-    '@typescript-eslint/no-explicit-any': 'warn',
     '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+    'no-restricted-imports': ['error', {
+      paths: [{
+        name: 'axios',
+        message: 'Use the useApi() composable for API calls instead of axios directly.',
+      }],
+    }],
   },
 };

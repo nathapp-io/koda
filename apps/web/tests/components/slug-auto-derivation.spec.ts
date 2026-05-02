@@ -79,7 +79,7 @@ describe('US-002-2 AC3: User can manually edit the slug after auto-derivation', 
     // The slug Input should NOT have readonly or disabled attribute
     const slugFieldMatch = source.match(/FormField\s+name="slug"[\s\S]*?<\/FormField>/)
     expect(slugFieldMatch).not.toBeNull()
-    const slugFieldContent = slugFieldMatch![0]
+    const slugFieldContent = slugFieldMatch?.[0] ?? ''
     // Should not have readonly or disabled on the slug input
     expect(slugFieldContent).not.toMatch(/readonly/)
     expect(slugFieldContent).not.toMatch(/disabled/)
@@ -90,7 +90,7 @@ describe('US-002-2 AC3: User can manually edit the slug after auto-derivation', 
     // Slug field should use Input component like other editable fields
     const slugFieldMatch = source.match(/FormField\s+name="slug"[\s\S]*?<\/FormField>/)
     expect(slugFieldMatch).not.toBeNull()
-    expect(slugFieldMatch![0]).toContain('<Input')
+    expect(slugFieldMatch?.[0] ?? '').toContain('<Input')
   })
 
   test('source does not set slug as read-only after initial derivation', () => {

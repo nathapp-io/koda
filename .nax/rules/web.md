@@ -17,7 +17,7 @@ paths:
 - Zod validation messages should use i18n keys (not hardcoded English)
 
 ## API Access
-- Use `useApi()` for API calls; do not use raw `$fetch`, `useFetch`, or axios in components
+- Use `useApi()` for API calls; do not use raw `$fetch` or `useFetch` in components
 - Use `$api.get/post/patch/delete` with paths relative to API base
 - Use `useAuth()` for auth/session handling
 - Use `useAppToast()` and `extractApiError()` for notifications/error presentation

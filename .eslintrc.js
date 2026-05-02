@@ -11,10 +11,17 @@ module.exports = {
     es2022: true,
   },
   rules: {
-    '@typescript-eslint/no-explicit-any': 'warn',
+    '@typescript-eslint/no-explicit-any': 'error',
+    '@typescript-eslint/no-non-null-assertion': 'error',
+    '@typescript-eslint/ban-ts-comment': 'error',
     '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
     '@typescript-eslint/explicit-module-boundary-types': 'off',
-    '@typescript-eslint/no-non-null-assertion': 'warn',
+    'no-restricted-imports': ['error', {
+      paths: [{
+        name: 'axios',
+        message: 'Use the generated API client from src/generated/ instead of axios directly.',
+      }],
+    }],
   },
   overrides: [
     {

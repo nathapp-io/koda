@@ -9,7 +9,6 @@ module.exports = {
   ignorePatterns: ['dist/', 'node_modules/', '.turbo/', 'coverage/'],
   rules: {
     '@typescript-eslint/explicit-module-boundary-types': 'off',
-    '@typescript-eslint/no-non-null-assertion': 'warn',
   },
   overrides: [
     {

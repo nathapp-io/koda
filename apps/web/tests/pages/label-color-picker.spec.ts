@@ -19,8 +19,8 @@ describe('US-002 AC1: Color FormField uses ColorPicker component', () => {
     const source = readFileSync(pagePath, 'utf-8')
     const colorFieldMatch = source.match(/FormField\s+name="color"[\s\S]*?<\/FormField>/)
     expect(colorFieldMatch).not.toBeNull()
-    expect(colorFieldMatch![0]).toContain('ColorPicker')
-    expect(colorFieldMatch![0]).not.toContain('<Input')
+    expect(colorFieldMatch?.[0] ?? '').toContain('ColorPicker')
+    expect(colorFieldMatch?.[0] ?? '').not.toContain('<Input')
   })
 
   test('ColorPicker is used with v-bind="componentField" for vee-validate binding', () => {
@@ -39,14 +39,14 @@ describe('US-002 AC2: ColorPicker emits normalized hex to form state', () => {
     const source = readFileSync(pagePath, 'utf-8')
     const colorFieldMatch = source.match(/FormField\s+name="color"[\s\S]*?<\/FormField>/)
     expect(colorFieldMatch).not.toBeNull()
-    expect(colorFieldMatch![0]).toContain('v-bind="componentField"')
+    expect(colorFieldMatch?.[0] ?? '').toContain('v-bind="componentField"')
   })
 
   test('ColorPicker emits update:modelValue for form binding via componentField', () => {
     const source = readFileSync(pagePath, 'utf-8')
     const colorFieldMatch = source.match(/FormField\s+name="color"[\s\S]*?<\/FormField>/)
     expect(colorFieldMatch).not.toBeNull()
-    expect(colorFieldMatch![0]).toContain('v-bind="componentField"')
+    expect(colorFieldMatch?.[0] ?? '').toContain('v-bind="componentField"')
   })
 
   test('ColorPicker defaultColor prop is set to #6366F1 for fallback', () => {
@@ -54,10 +54,10 @@ describe('US-002 AC2: ColorPicker emits normalized hex to form state', () => {
     const colorFieldMatch = source.match(/FormField\s+name="color"[\s\S]*?<\/FormField>/)
     expect(colorFieldMatch).not.toBeNull()
     const hasDefaultColor =
-      colorFieldMatch![0].includes("defaultColor='#6366F1'") ||
-      colorFieldMatch![0].includes('defaultColor="#6366F1"') ||
-      colorFieldMatch![0].includes('defaultColor={') &&
-      colorFieldMatch![0].includes('#6366F1')
+      (colorFieldMatch?.[0] ?? '').includes("defaultColor='#6366F1'") ||
+      (colorFieldMatch?.[0] ?? '').includes('defaultColor="#6366F1"') ||
+      (colorFieldMatch?.[0] ?? '').includes('defaultColor={') &&
+      (colorFieldMatch?.[0] ?? '').includes('#6366F1')
     expect(hasDefaultColor).toBe(true)
   })
 })

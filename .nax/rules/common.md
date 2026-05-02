@@ -33,17 +33,16 @@
 
 ## Type Safety
 - TypeScript strict mode applies across apps
-- No `any` in production code (`any` in tests is allowed)
-- Do not suppress typing with `eslint-disable`, `@ts-ignore`, or `@ts-expect-error`
-- Avoid non-null assertions (`!`); handle null/undefined explicitly
+- Do not suppress typing with `eslint-disable`
 
 ## Error Handling
 - Use structured error codes, not message-string matching
 - Never swallow errors; handle, rethrow, or log intentionally
 - Validate at system boundaries (user input, API responses, file content)
 
-## Quick Reference
-- Wrong: `if (err.message.includes('Unique constraint')) { ... }`
-- Correct: `if (err.code === 'P2002') { ... }`
-- Wrong: absolute test path `/Users/...` or `/home/...`
-- Correct: resolve paths from `__dirname`
+## Review Checklist
+- Is business logic added in API instead of CLI/Web?
+- Are generated artifacts regenerated instead of manually patched?
+- Are test naming/location conventions respected?
+- Are API and web i18n keys updated in their own systems?
+- Is `openapi.json` in sync with current API contract when relevant?

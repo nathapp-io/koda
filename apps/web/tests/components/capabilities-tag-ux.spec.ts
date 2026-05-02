@@ -34,7 +34,7 @@ describe('US-003-B AC1: CreateAgentDialog addCapability rejects case-insensitive
     const source = getCreateDialogSource()
     const addCapabilityMatch = source.match(/function addCapability\([\s\S]*?^\}/m)
     expect(addCapabilityMatch).not.toBeNull()
-    const addCapabilityBody = addCapabilityMatch![0]
+    const addCapabilityBody = addCapabilityMatch?.[0] ?? ''
     const usesNormalize = addCapabilityBody.includes('normalizeCapabilities')
     expect(usesNormalize).toBe(true)
   })
@@ -43,7 +43,7 @@ describe('US-003-B AC1: CreateAgentDialog addCapability rejects case-insensitive
     const source = getCreateDialogSource()
     const addCapabilityMatch = source.match(/function addCapability\([\s\S]*?^\}/m)
     expect(addCapabilityMatch).not.toBeNull()
-    const addCapabilityBody = addCapabilityMatch![0]
+    const addCapabilityBody = addCapabilityMatch?.[0] ?? ''
     const usesCaseSensitiveIncludes = addCapabilityBody.match(/capabilitiesTags\.value\.includes\s*\(\s*value\s*\)/)
     expect(usesCaseSensitiveIncludes).toBeNull()
   })
@@ -58,7 +58,7 @@ describe('US-003-B AC2: EditAgentCapabilitiesDialog addCapability rejects empty 
     const source = getEditDialogSource()
     const addCapabilityMatch = source.match(/function addCapability\([\s\S]*?^\}/m)
     expect(addCapabilityMatch).not.toBeNull()
-    const addCapabilityBody = addCapabilityMatch![0]
+    const addCapabilityBody = addCapabilityMatch?.[0] ?? ''
     expect(addCapabilityBody).toContain('.trim()')
   })
 
@@ -66,7 +66,7 @@ describe('US-003-B AC2: EditAgentCapabilitiesDialog addCapability rejects empty 
     const source = getEditDialogSource()
     const addCapabilityMatch = source.match(/function addCapability\([\s\S]*?^\}/m)
     expect(addCapabilityMatch).not.toBeNull()
-    const addCapabilityBody = addCapabilityMatch![0]
+    const addCapabilityBody = addCapabilityMatch?.[0] ?? ''
     const hasEmptyCheck = addCapabilityBody.match(/if\s*\(\s*value\s*&&/)
     expect(hasEmptyCheck).not.toBeNull()
   })
@@ -75,7 +75,7 @@ describe('US-003-B AC2: EditAgentCapabilitiesDialog addCapability rejects empty 
     const source = getEditDialogSource()
     const addCapabilityMatch = source.match(/function addCapability\([\s\S]*?^\}/m)
     expect(addCapabilityMatch).not.toBeNull()
-    const addCapabilityBody = addCapabilityMatch![0]
+    const addCapabilityBody = addCapabilityMatch?.[0] ?? ''
     expect(addCapabilityBody).toContain('if (value')
     expect(addCapabilityBody).toContain('capabilitiesTags.value')
   })
@@ -96,7 +96,7 @@ describe('US-003-B AC3: EditAgentCapabilitiesDialog addCapability rejects case-i
     const source = getEditDialogSource()
     const addCapabilityMatch = source.match(/function addCapability\([\s\S]*?^\}/m)
     expect(addCapabilityMatch).not.toBeNull()
-    const addCapabilityBody = addCapabilityMatch![0]
+    const addCapabilityBody = addCapabilityMatch?.[0] ?? ''
     const usesNormalize = addCapabilityBody.includes('normalizeCapabilities')
     expect(usesNormalize).toBe(true)
   })
@@ -105,7 +105,7 @@ describe('US-003-B AC3: EditAgentCapabilitiesDialog addCapability rejects case-i
     const source = getEditDialogSource()
     const addCapabilityMatch = source.match(/function addCapability\([\s\S]*?^\}/m)
     expect(addCapabilityMatch).not.toBeNull()
-    const addCapabilityBody = addCapabilityMatch![0]
+    const addCapabilityBody = addCapabilityMatch?.[0] ?? ''
     const usesCaseSensitiveIncludes = addCapabilityBody.match(/capabilitiesTags\.value\.includes\s*\(\s*value\s*\)/)
     expect(usesCaseSensitiveIncludes).toBeNull()
   })
@@ -120,7 +120,7 @@ describe('US-003-B AC4: CreateAgentDialog removeCapability updates tags and onSu
     const source = getCreateDialogSource()
     const removeCapabilityMatch = source.match(/function removeCapability\([\s\S]*?^\}/m)
     expect(removeCapabilityMatch).not.toBeNull()
-    const removeCapabilityBody = removeCapabilityMatch![0]
+    const removeCapabilityBody = removeCapabilityMatch?.[0] ?? ''
     const usesFilter = removeCapabilityBody.includes('filter')
     const passesIndex = removeCapabilityBody.includes('i !== index') || removeCapabilityBody.includes('i !== index')
     expect(usesFilter && passesIndex).toBe(true)
@@ -137,7 +137,7 @@ describe('US-003-B AC4: CreateAgentDialog removeCapability updates tags and onSu
     const source = getCreateDialogSource()
     const watchMatch = source.match(/watch\s*\(\s*capabilitiesTags[\s\S]*?\}\s*,\s*\{[^}]*\}\s*\)/m)
     expect(watchMatch).not.toBeNull()
-    const watchBody = watchMatch![0]
+    const watchBody = watchMatch?.[0] ?? ''
     const syncsToField = watchBody.includes('setFieldValue') && watchBody.includes('capabilities')
     expect(syncsToField).toBe(true)
   })
@@ -165,7 +165,7 @@ describe('US-003-B AC5: EditAgentCapabilitiesDialog handleRemove updates tags an
     const source = getEditDialogSource()
     const handleRemoveMatch = source.match(/function handleRemove\([\s\S]*?^\}/m)
     expect(handleRemoveMatch).not.toBeNull()
-    const handleRemoveBody = handleRemoveMatch![0]
+    const handleRemoveBody = handleRemoveMatch?.[0] ?? ''
     const usesFilter = handleRemoveBody.includes('filter')
     const passesIndex = handleRemoveBody.includes('i !== index')
     expect(usesFilter && passesIndex).toBe(true)
@@ -189,7 +189,7 @@ describe('US-003-B AC5: EditAgentCapabilitiesDialog handleRemove updates tags an
     const source = getEditDialogSource()
     const patchCallMatch = source.match(/\$api\.patch\s*\(\s*[^,]+,\s*\{([^}]+)\}\s*\)/m)
     expect(patchCallMatch).not.toBeNull()
-    const payload = patchCallMatch![1]
+    const payload = patchCallMatch?.[1] ?? ''
     expect(payload).toContain('capabilities')
     expect(payload).toContain('capabilitiesTags')
   })
@@ -209,7 +209,7 @@ describe('Utility: normalizeCapabilities is properly implemented', () => {
     const source = getUtilsSource()
     const normalizeMatch = source.match(/export function normalizeCapabilities[\s\S]*?^\}/m)
     expect(normalizeMatch).not.toBeNull()
-    const funcBody = normalizeMatch![0]
+    const funcBody = normalizeMatch?.[0] ?? ''
     const usesSet = funcBody.includes('Set')
     const usesToLowerCase = funcBody.includes('toLowerCase')
     expect(usesSet && usesToLowerCase).toBe(true)
@@ -219,7 +219,7 @@ describe('Utility: normalizeCapabilities is properly implemented', () => {
     const source = getUtilsSource()
     const normalizeMatch = source.match(/export function normalizeCapabilities[\s\S]*?^\}/m)
     expect(normalizeMatch).not.toBeNull()
-    const funcBody = normalizeMatch![0]
+    const funcBody = normalizeMatch?.[0] ?? ''
     const trims = funcBody.includes('.trim()')
     const skipsEmpty = funcBody.includes('if (!trimmed) continue') || funcBody.includes('if (trimmed)')
     expect(trims && skipsEmpty).toBe(true)
