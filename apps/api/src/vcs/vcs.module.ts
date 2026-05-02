@@ -8,6 +8,7 @@ import { VcsWebhookService } from './vcs-webhook.service';
 import { VcsPollingService } from './vcs-polling.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { VcsLinkExtractorService } from './vcs-link-extractor.service';
+import { PrismaVcsRepository } from './prisma-vcs.repository';
 import { ProjectsService } from '../projects/projects.service';
 import { RagModule } from '../rag/rag.module';
 
@@ -15,6 +16,7 @@ import { RagModule } from '../rag/rag.module';
   imports: [ScheduleModule.forRoot(), RagModule],
   controllers: [VcsController, VcsWebhookController],
   providers: [
+    PrismaVcsRepository,
     VcsConnectionService,
     VcsSyncService,
     VcsWebhookService,

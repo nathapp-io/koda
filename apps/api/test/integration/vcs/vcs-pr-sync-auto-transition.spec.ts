@@ -13,10 +13,9 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { VcsPrStatus } from '../../../src/vcs/types';
-import { TicketStatus, CommentType, ActivityType } from '../../../src/common/enums';
+import { TicketStatus, ActivityType } from '../../../src/common/enums';
 
 // Mock the decryptToken utility
 jest.mock('../../../src/common/utils/encryption.util', () => ({
@@ -33,9 +32,11 @@ jest.mock('../../../src/vcs/factory', () => ({
 
 // Import after mocks
 import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
+import { PrismaVcsRepository } from '../../../src/vcs/prisma-vcs.repository';
 
 describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
   let service: VcsPrSyncService;
+  let vcsRepo: jest.Mocked<PrismaVcsRepository>;
   let module: TestingModule;
 
   const projectId = 'project-123';
@@ -87,18 +88,8 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
       id: 'ticket-1',
       number: 1,
       projectId,
-      title: 'Test Ticket',
-      description: null,
-      type: 'BUG',
       status: TicketStatus.IN_PROGRESS,
-      priority: 'MEDIUM',
-      assigneeUserId: null,
-      assigneeAgentId: null,
-      reporterUserId: 'user-1',
-      reporterAgentId: null,
-      deletedAt: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      externalVcsId: null,
     },
   };
 
@@ -117,38 +108,9 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
       id: 'ticket-2',
       number: 2,
       projectId,
-      title: 'Test Ticket 2',
-      description: null,
-      type: 'BUG',
       status: TicketStatus.VERIFIED,
-      priority: 'MEDIUM',
-      assigneeUserId: null,
-      assigneeAgentId: null,
-      reporterUserId: 'user-1',
-      reporterAgentId: null,
-      deletedAt: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      externalVcsId: null,
     },
-  };
-
-  const mockTicketLinkDelegate = {
-    findMany: jest.fn(),
-    update: jest.fn(),
-    findUnique: jest.fn(),
-  };
-
-  const mockTicketDelegate = {
-    findUnique: jest.fn(),
-    update: jest.fn(),
-  };
-
-  const mockCommentDelegate = {
-    create: jest.fn(),
-  };
-
-  const mockTicketActivityDelegate = {
-    create: jest.fn(),
   };
 
   const mockVcsProvider = {
@@ -161,16 +123,6 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
     listPullRequests: jest.fn(),
   };
 
-  const mockClient = {
-    ticketLink: { ...mockTicketLinkDelegate },
-    ticket: { ...mockTicketDelegate },
-    comment: { ...mockCommentDelegate },
-    ticketActivity: { ...mockTicketActivityDelegate },
-    $transaction: jest.fn((fn) => fn(mockClient)),
-    $connect: jest.fn(),
-    $disconnect: jest.fn(),
-  } as any;
-
   beforeEach(async () => {
     jest.clearAllMocks();
     jest.restoreAllMocks();
@@ -182,15 +134,20 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
       providers: [
         VcsPrSyncService,
         {
-          provide: PrismaService,
+          provide: PrismaVcsRepository,
           useValue: {
-            client: mockClient,
+            findExistingTicketByExternalId: jest.fn(),
+            createTicketFromIssue: jest.fn(),
+            findActiveTicketLinksWithPrs: jest.fn(),
+            updateTicketLinkPrState: jest.fn(),
+            applyMergedPrTransition: jest.fn(),
           },
         },
       ],
     }).compile();
 
     service = module.get<VcsPrSyncService>(VcsPrSyncService);
+    vcsRepo = module.get(PrismaVcsRepository);
   });
 
   afterEach(async () => {
@@ -212,67 +169,46 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
 
   describe('AC1: When prState changes to merged and ticket.status === IN_PROGRESS, ticket transitions to VERIFY_FIX', () => {
     it('should transition ticket from IN_PROGRESS to VERIFY_FIX when PR is merged', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinkInProgress]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinkInProgress] as any);
 
       const mergedPrStatus = createMergedPrStatus(101, 'abc123', 'octocat');
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
 
-      // Mock $transaction to capture and execute the transition logic
-      mockClient.$transaction.mockImplementation(async (fn) => {
-        const result = await fn(mockClient);
-        return result;
-      });
-
-      mockTicketLinkDelegate.update.mockResolvedValueOnce({
-        ...mockTicketLinkInProgress,
-        prState: 'merged',
-      });
-
-      mockTicketDelegate.findUnique.mockResolvedValueOnce(mockTicketLinkInProgress.ticket);
-      mockTicketDelegate.update.mockResolvedValueOnce({
-        ...mockTicketLinkInProgress.ticket,
-        status: TicketStatus.VERIFY_FIX,
-      });
+      vcsRepo.applyMergedPrTransition.mockResolvedValueOnce(undefined);
+      vcsRepo.updateTicketLinkPrState.mockResolvedValueOnce(undefined);
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
-      // Should update the prState to merged
-      expect(mockTicketLinkDelegate.update).toHaveBeenCalledWith({
-        where: { id: 'link-1' },
-        data: {
-          prState: 'merged',
-          prUpdatedAt: expect.any(Date),
-        },
-      });
+      // Should call applyMergedPrTransition for IN_PROGRESS ticket
+      expect(vcsRepo.applyMergedPrTransition).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ticketId: 'ticket-1',
+          externalRef: 'owner/repo#101',
+          mergedBy: 'octocat',
+          mergeSha: 'abc123',
+        }),
+      );
 
-      // The result should indicate update occurred
+      // Should update prState to merged
+      expect(vcsRepo.updateTicketLinkPrState).toHaveBeenCalledWith('link-1', 'merged');
       expect(result.updated).toBe(1);
     });
 
     it('should NOT attempt transition when ticket status is VERIFIED (not IN_PROGRESS)', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinkVerified]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinkVerified] as any);
 
       const mergedPrStatus = createMergedPrStatus(102, 'def456', 'octocat');
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
 
-      mockTicketLinkDelegate.update.mockResolvedValueOnce({
-        ...mockTicketLinkVerified,
-        prState: 'merged',
-      });
+      vcsRepo.updateTicketLinkPrState.mockResolvedValueOnce(undefined);
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
-      // Should update prState but not attempt ticket transition
-      expect(mockTicketLinkDelegate.update).toHaveBeenCalledWith({
-        where: { id: 'link-2' },
-        data: {
-          prState: 'merged',
-          prUpdatedAt: expect.any(Date),
-        },
-      });
+      // Should update prState but NOT attempt ticket transition
+      expect(vcsRepo.updateTicketLinkPrState).toHaveBeenCalledWith('link-2', 'merged');
 
-      // Should NOT call ticket update for status transition
-      expect(mockTicketDelegate.update).not.toHaveBeenCalled();
+      // Should NOT call applyMergedPrTransition
+      expect(vcsRepo.applyMergedPrTransition).not.toHaveBeenCalled();
 
       expect(result.updated).toBe(1);
     });
@@ -286,181 +222,109 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
         },
       };
 
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([ticketInCreatedStatus]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([ticketInCreatedStatus] as any);
 
       const mergedPrStatus = createMergedPrStatus(101, 'abc123', 'octocat');
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
 
-      mockTicketLinkDelegate.update.mockResolvedValueOnce({
-        ...ticketInCreatedStatus,
-        prState: 'merged',
-      });
+      vcsRepo.updateTicketLinkPrState.mockResolvedValueOnce(undefined);
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
       // Should update prState but NOT transition ticket status
-      expect(mockTicketLinkDelegate.update).toHaveBeenCalled();
-      expect(mockTicketDelegate.update).not.toHaveBeenCalled();
+      expect(vcsRepo.updateTicketLinkPrState).toHaveBeenCalled();
+      expect(vcsRepo.applyMergedPrTransition).not.toHaveBeenCalled();
     });
   });
 
   describe('AC2: Auto-transition creates Comment with type FIX_REPORT containing PR URL, merge SHA, and merge author', () => {
-    it('should create FIX_REPORT comment with PR URL, merge SHA, and merge author when transitioning', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinkInProgress]);
+    it('should call applyMergedPrTransition with correct PR details', async () => {
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinkInProgress] as any);
 
       const mergedPrStatus = createMergedPrStatus(101, 'abc123def', 'merger-user');
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
 
-      mockClient.$transaction.mockImplementation(async (fn) => {
-        return fn(mockClient);
-      });
-
-      mockTicketLinkDelegate.update.mockResolvedValueOnce({
-        ...mockTicketLinkInProgress,
-        prState: 'merged',
-      });
-
-      mockTicketDelegate.findUnique.mockResolvedValueOnce(mockTicketLinkInProgress.ticket);
-      mockTicketDelegate.update.mockResolvedValueOnce({
-        ...mockTicketLinkInProgress.ticket,
-        status: TicketStatus.VERIFY_FIX,
-      });
-
-      mockCommentDelegate.create.mockResolvedValueOnce({
-        id: 'comment-1',
-        ticketId: 'ticket-1',
-        body: 'Merged PR: https://github.com/owner/repo/pull/101 by merger-user (abc123def)',
-        type: CommentType.FIX_REPORT,
-        authorUserId: null,
-        authorAgentId: 'system',
-        createdAt: new Date(),
-      });
+      vcsRepo.applyMergedPrTransition.mockResolvedValueOnce(undefined);
+      vcsRepo.updateTicketLinkPrState.mockResolvedValueOnce(undefined);
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
-      // Verify comment was created with FIX_REPORT type containing PR info
-      expect(mockCommentDelegate.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          type: CommentType.FIX_REPORT,
-        }),
+      expect(vcsRepo.applyMergedPrTransition).toHaveBeenCalledWith({
+        ticketId: 'ticket-1',
+        externalRef: 'owner/repo#101',
+        prUrl: 'https://github.com/owner/repo/pull/101',
+        mergedBy: 'merger-user',
+        mergeSha: 'abc123def',
       });
-      // Verify body contains required information
-      const createCall = mockCommentDelegate.create.mock.calls[0][0];
-      expect(createCall.data.body).toContain('https://github.com/owner/repo/pull/101');
-      expect(createCall.data.body).toContain('abc123def');
-      expect(createCall.data.body).toContain('merger-user');
     });
 
-    it('should NOT create comment when ticket is not IN_PROGRESS', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinkVerified]);
+    it('should NOT call applyMergedPrTransition when ticket is not IN_PROGRESS', async () => {
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinkVerified] as any);
 
       const mergedPrStatus = createMergedPrStatus(102, 'def456', 'octocat');
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
 
-      mockTicketLinkDelegate.update.mockResolvedValueOnce({
-        ...mockTicketLinkVerified,
-        prState: 'merged',
-      });
+      vcsRepo.updateTicketLinkPrState.mockResolvedValueOnce(undefined);
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
-      // Should NOT create any comment
-      expect(mockCommentDelegate.create).not.toHaveBeenCalled();
+      // Should NOT call applyMergedPrTransition (no comment, no activity)
+      expect(vcsRepo.applyMergedPrTransition).not.toHaveBeenCalled();
     });
   });
 
   describe('AC3: Auto-transition logs TicketActivity with action VCS_PR_MERGED', () => {
-    it('should create TicketActivity with VCS_PR_MERGED action when transitioning', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinkInProgress]);
+    it('should have VCS_PR_MERGED in ActivityType enum', async () => {
+      expect(ActivityType.VCS_PR_MERGED).toBe('VCS_PR_MERGED');
+    });
+
+    it('should call applyMergedPrTransition which handles VCS_PR_MERGED activity internally', async () => {
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinkInProgress] as any);
 
       const mergedPrStatus = createMergedPrStatus(101, 'sha123', 'merger');
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
 
-      mockClient.$transaction.mockImplementation(async (fn) => {
-        return fn(mockClient);
-      });
-
-      mockTicketLinkDelegate.update.mockResolvedValueOnce({
-        ...mockTicketLinkInProgress,
-        prState: 'merged',
-      });
-
-      mockTicketDelegate.findUnique.mockResolvedValueOnce(mockTicketLinkInProgress.ticket);
-      mockTicketDelegate.update.mockResolvedValueOnce({
-        ...mockTicketLinkInProgress.ticket,
-        status: TicketStatus.VERIFY_FIX,
-      });
-
-      mockTicketActivityDelegate.create.mockResolvedValueOnce({
-        id: 'activity-1',
-        ticketId: 'ticket-1',
-        action: ActivityType.VCS_PR_MERGED,
-        fromStatus: null,
-        toStatus: null,
-        actorUserId: null,
-        actorAgentId: null,
-        createdAt: new Date(),
-      });
+      vcsRepo.applyMergedPrTransition.mockResolvedValueOnce(undefined);
+      vcsRepo.updateTicketLinkPrState.mockResolvedValueOnce(undefined);
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
-      // Verify activity was created with VCS_PR_MERGED
-      expect(mockTicketActivityDelegate.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          action: ActivityType.VCS_PR_MERGED,
-        }),
-      });
+      // applyMergedPrTransition is the repository method that internally creates
+      // the VERIFY_FIX status update, FIX_REPORT comment, and VCS_PR_MERGED activity
+      expect(vcsRepo.applyMergedPrTransition).toHaveBeenCalledTimes(1);
     });
 
-    it('should NOT create VCS_PR_MERGED activity when ticket is not IN_PROGRESS', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinkVerified]);
+    it('should NOT call applyMergedPrTransition when ticket is not IN_PROGRESS', async () => {
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinkVerified] as any);
 
       const mergedPrStatus = createMergedPrStatus(102, 'sha456', 'octocat');
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
 
-      mockTicketLinkDelegate.update.mockResolvedValueOnce({
-        ...mockTicketLinkVerified,
-        prState: 'merged',
-      });
+      vcsRepo.updateTicketLinkPrState.mockResolvedValueOnce(undefined);
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
-      // Should NOT create any activity
-      expect(mockTicketActivityDelegate.create).not.toHaveBeenCalled();
+      // Should NOT call applyMergedPrTransition
+      expect(vcsRepo.applyMergedPrTransition).not.toHaveBeenCalled();
     });
   });
 
   describe('AC4: When prState changes to merged and ticket.status !== IN_PROGRESS, prState is updated but no transition', () => {
     it('should only update prState without transition for VERIFIED ticket', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinkVerified]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinkVerified] as any);
 
       const mergedPrStatus = createMergedPrStatus(102, 'xyz789', 'another-user');
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
 
-      mockTicketLinkDelegate.update.mockResolvedValueOnce({
-        ...mockTicketLinkVerified,
-        prState: 'merged',
-      });
+      vcsRepo.updateTicketLinkPrState.mockResolvedValueOnce(undefined);
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
       // Should update TicketLink prState to merged
-      expect(mockTicketLinkDelegate.update).toHaveBeenCalledWith({
-        where: { id: 'link-2' },
-        data: {
-          prState: 'merged',
-          prUpdatedAt: expect.any(Date),
-        },
-      });
+      expect(vcsRepo.updateTicketLinkPrState).toHaveBeenCalledWith('link-2', 'merged');
 
-      // Should NOT update ticket status
-      expect(mockTicketDelegate.update).not.toHaveBeenCalled();
-
-      // Should NOT create comment
-      expect(mockCommentDelegate.create).not.toHaveBeenCalled();
-
-      // Should NOT create activity
-      expect(mockTicketActivityDelegate.create).not.toHaveBeenCalled();
+      // Should NOT call applyMergedPrTransition
+      expect(vcsRepo.applyMergedPrTransition).not.toHaveBeenCalled();
     });
 
     it('should only update prState without transition for VERIFY_FIX ticket', async () => {
@@ -472,73 +336,54 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
         },
       };
 
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([ticketInVerifyFix]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([ticketInVerifyFix] as any);
 
       const mergedPrStatus = createMergedPrStatus(101, 'sha789', 'user');
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
 
-      mockTicketLinkDelegate.update.mockResolvedValueOnce({
-        ...ticketInVerifyFix,
-        prState: 'merged',
-      });
+      vcsRepo.updateTicketLinkPrState.mockResolvedValueOnce(undefined);
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
       // Should update prState
-      expect(mockTicketLinkDelegate.update).toHaveBeenCalled();
+      expect(vcsRepo.updateTicketLinkPrState).toHaveBeenCalled();
 
-      // Should NOT update ticket status (transition not allowed from VERIFY_FIX on merge)
-      expect(mockTicketDelegate.update).not.toHaveBeenCalled();
+      // Should NOT call applyMergedPrTransition
+      expect(vcsRepo.applyMergedPrTransition).not.toHaveBeenCalled();
     });
   });
 
   describe('AC5: Auto-transition respects the existing state machine constraints', () => {
-    it('should fail gracefully if state machine rejects IN_PROGRESS -> VERIFY_FIX transition', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinkInProgress]);
-
-      // Simulate state machine constraint - though IN_PROGRESS -> VERIFY_FIX is valid
-      // This test verifies that if validateTransition throws, the prState still gets updated
+    it('should fail gracefully if applyMergedPrTransition throws ValidationAppException', async () => {
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinkInProgress] as any);
 
       const mergedPrStatus = createMergedPrStatus(101, 'sha', 'user');
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
 
-      mockClient.$transaction.mockRejectedValueOnce(
+      vcsRepo.applyMergedPrTransition.mockRejectedValueOnce(
         new ValidationAppException({}, 'tickets'),
       );
 
-      mockTicketLinkDelegate.update.mockResolvedValueOnce({
-        ...mockTicketLinkInProgress,
-        prState: 'merged',
-      });
+      vcsRepo.updateTicketLinkPrState.mockResolvedValueOnce(undefined);
 
       // Should not throw - prState update should still happen
       await expect(
         service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key'),
       ).resolves.not.toThrow();
+
+      // prState should still be updated despite transition failure
+      expect(vcsRepo.updateTicketLinkPrState).toHaveBeenCalledWith('link-1', 'merged');
     });
 
     it('should handle ticket not found during transition gracefully', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinkInProgress]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinkInProgress] as any);
 
       const mergedPrStatus = createMergedPrStatus(101, 'sha', 'user');
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
 
-      // Simulate ticket not found during transition lookup
-      mockClient.$transaction.mockImplementation(async (fn) => {
-        const client = {
-          ...mockClient,
-          ticket: {
-            findUnique: jest.fn().mockResolvedValue(null),
-            update: jest.fn(),
-          },
-        };
-        return fn(client);
-      });
-
-      mockTicketLinkDelegate.update.mockResolvedValueOnce({
-        ...mockTicketLinkInProgress,
-        prState: 'merged',
-      });
+      // Simulate applyMergedPrTransition throwing because ticket not found
+      vcsRepo.applyMergedPrTransition.mockRejectedValueOnce(new Error('Ticket not found'));
+      vcsRepo.updateTicketLinkPrState.mockResolvedValueOnce(undefined);
 
       // Should not throw - should continue
       await expect(
@@ -548,36 +393,21 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
   });
 
   describe('AC6: A failure in the auto-transition does not prevent prState from being persisted', () => {
-    it('should persist prState=merged even if ticket transition fails', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinkInProgress]);
+    it('should persist prState=merged even if applyMergedPrTransition fails', async () => {
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinkInProgress] as any);
 
       const mergedPrStatus = createMergedPrStatus(101, 'abc123', 'merger');
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
 
-      // Simulate ticket transition failure but prState update succeeds
-      mockClient.$transaction
-        .mockRejectedValueOnce(new Error('Database error during transition'))
-        .mockResolvedValueOnce({
-          ...mockTicketLinkInProgress,
-          prState: 'merged',
-        });
-
-      mockTicketLinkDelegate.update.mockResolvedValueOnce({
-        ...mockTicketLinkInProgress,
-        prState: 'merged',
-      });
+      vcsRepo.applyMergedPrTransition.mockRejectedValueOnce(
+        new Error('Database error during transition'),
+      );
+      vcsRepo.updateTicketLinkPrState.mockResolvedValueOnce(undefined);
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
       // prState should still be updated
-      expect(mockTicketLinkDelegate.update).toHaveBeenCalledWith({
-        where: { id: 'link-1' },
-        data: {
-          prState: 'merged',
-          prUpdatedAt: expect.any(Date),
-        },
-      });
-
+      expect(vcsRepo.updateTicketLinkPrState).toHaveBeenCalledWith('link-1', 'merged');
       expect(result.updated).toBe(1);
     });
 
@@ -594,7 +424,7 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
         },
       };
 
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinkInProgress, ticketInProgress2]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinkInProgress, ticketInProgress2] as any);
 
       // First PR transition fails
       const mergedPr1 = createMergedPrStatus(101, 'sha1', 'user1');
@@ -602,23 +432,14 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
         .mockResolvedValueOnce(mergedPr1)
         .mockResolvedValueOnce(createMergedPrStatus(103, 'sha2', 'user2'));
 
-      // First $transaction fails for ticket transition but succeeds for prState
-      let transactionCallCount = 0;
-      mockClient.$transaction.mockImplementation(async (fn) => {
-        transactionCallCount++;
-        if (transactionCallCount === 1) {
-          // First PR: transition fails
-          throw new Error('Transition failed');
-        }
-        return fn(mockClient);
-      });
+      // First transition fails
+      vcsRepo.applyMergedPrTransition
+        .mockRejectedValueOnce(new Error('Transition failed'))
+        .mockResolvedValueOnce(undefined);
 
-      mockTicketLinkDelegate.update
-        .mockRejectedValueOnce(new Error('DB error'))
-        .mockResolvedValueOnce({
-          ...ticketInProgress2,
-          prState: 'merged',
-        });
+      vcsRepo.updateTicketLinkPrState
+        .mockResolvedValueOnce(undefined) // link-1: still updated despite transition failure
+        .mockResolvedValueOnce(undefined); // link-3
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
@@ -634,24 +455,24 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
         ticket: null,
       };
 
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([ticketLinkNoTicket]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([ticketLinkNoTicket] as any);
 
       const mergedPrStatus = createMergedPrStatus(101, 'sha', 'user');
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
 
-      mockTicketLinkDelegate.update.mockResolvedValueOnce({
-        ...ticketLinkNoTicket,
-        prState: 'merged',
-      });
+      vcsRepo.updateTicketLinkPrState.mockResolvedValueOnce(undefined);
 
-      // Should not throw - ticket lookup returns null
+      // Should not throw - ticket lookup returns null → no transition attempted
       await expect(
         service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key'),
       ).resolves.not.toThrow();
+
+      // Should NOT call applyMergedPrTransition when ticket is null
+      expect(vcsRepo.applyMergedPrTransition).not.toHaveBeenCalled();
     });
 
     it('should handle missing mergeSha and mergedBy in PR status', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinkInProgress]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinkInProgress] as any);
 
       const mergedPrStatus: VcsPrStatus = {
         number: 101,
@@ -666,35 +487,19 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
       };
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
 
-      mockClient.$transaction.mockImplementation(async (fn) => {
-        return fn(mockClient);
-      });
-
-      mockTicketLinkDelegate.update.mockResolvedValueOnce({
-        ...mockTicketLinkInProgress,
-        prState: 'merged',
-      });
-
-      mockTicketDelegate.findUnique.mockResolvedValueOnce(mockTicketLinkInProgress.ticket);
-      mockTicketDelegate.update.mockResolvedValueOnce({
-        ...mockTicketLinkInProgress.ticket,
-        status: TicketStatus.VERIFY_FIX,
-      });
-
-      mockCommentDelegate.create.mockResolvedValueOnce({
-        id: 'comment-1',
-        ticketId: 'ticket-1',
-        body: 'Merged PR without merge metadata',
-        type: CommentType.FIX_REPORT,
-        authorUserId: null,
-        authorAgentId: null,
-        createdAt: new Date(),
-      });
+      vcsRepo.applyMergedPrTransition.mockResolvedValueOnce(undefined);
+      vcsRepo.updateTicketLinkPrState.mockResolvedValueOnce(undefined);
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
-      // Comment should still be created with available info
-      expect(mockCommentDelegate.create).toHaveBeenCalled();
+      // Should still call applyMergedPrTransition with null values
+      expect(vcsRepo.applyMergedPrTransition).toHaveBeenCalledWith({
+        ticketId: 'ticket-1',
+        externalRef: 'owner/repo#101',
+        prUrl: 'https://github.com/owner/repo/pull/101',
+        mergedBy: null,
+        mergeSha: null,
+      });
     });
   });
 });

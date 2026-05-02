@@ -1,10 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import { Project, VcsConnection, Ticket } from '@prisma/client';
-import { ValidationAppException, NotFoundAppException } from '@nathapp/nestjs-common';
+import { Project, VcsConnection } from '@prisma/client';
 import { VcsIssue } from './types';
 import { createVcsProvider } from './factory';
 import { decryptToken } from '../common/utils/encryption.util';
+import { PrismaVcsRepository } from './prisma-vcs.repository';
 
 /**
  * Result of syncing a single issue
@@ -17,30 +16,9 @@ export interface SyncIssueResult {
   reason?: string;
 }
 
-// PrismaClientLike from @nathapp/nestjs-prisma doesn't expose VCS models,
-// but they exist at runtime. Define a delegate interface for proper typing.
-interface PrismaDelegate {
-  findUnique(options: { where: Record<string, unknown>; select?: unknown; include?: unknown }): Promise<unknown>
-  findMany(options?: unknown): Promise<unknown[]>
-  findFirst(options?: unknown): Promise<unknown>
-  create(options: { data: unknown; select?: unknown; include?: unknown }): Promise<unknown>
-  update(options: { where: Record<string, unknown>; data: unknown; select?: unknown; include?: unknown }): Promise<unknown>
-  delete(options: { where: Record<string, unknown>; select?: unknown; include?: unknown }): Promise<unknown>
-}
-
-interface ExtendedPrismaClient {
-  ticket: PrismaDelegate
-  $transaction<T>(callback: (tx: ExtendedPrismaClient) => Promise<T>): Promise<T>
-  [key: string]: unknown
-}
-
 @Injectable()
 export class VcsSyncService {
-  constructor(private readonly prisma: PrismaService) {}
-
-  private get db() {
-    return this.prisma.client as unknown as ExtendedPrismaClient;
-  }
+  constructor(private readonly vcsRepo: PrismaVcsRepository) {}
 
   /**
    * Sync a single issue into a ticket
@@ -51,13 +29,10 @@ export class VcsSyncService {
     syncMode: 'manual' | 'polling' | 'webhook',
   ): Promise<SyncIssueResult> {
     // Check if issue already exists (deduplication)
-    const existingTicket = await this.db.ticket.findFirst({
-      where: {
-        projectId: project.id,
-        externalVcsId: `${issue.number}`,
-        deletedAt: null,
-      },
-    });
+    const existingTicket = await this.vcsRepo.findExistingTicketByExternalId(
+      project.id,
+      `${issue.number}`,
+    );
 
     if (existingTicket) {
       return {
@@ -66,34 +41,8 @@ export class VcsSyncService {
       };
     }
 
-    // Allocate ticket number in transaction
-    const result = await this.db.$transaction<Ticket>(async (tx) => {
-      // Get the current max ticket number for this project
-      const lastTicket = await (tx.ticket.findFirst({
-        where: { projectId: project.id },
-        orderBy: { number: 'desc' },
-      }) as Promise<Ticket | null>);
-
-      const nextNumber = (lastTicket?.number ?? 0) + 1;
-
-      // Create the ticket
-      const ticket = await (tx.ticket.create({
-        data: {
-          projectId: project.id,
-          number: nextNumber,
-          type: 'TASK',
-          title: issue.title,
-          description: issue.body,
-          status: 'CREATED',
-          priority: 'MEDIUM',
-          externalVcsId: `${issue.number}`,
-          externalVcsUrl: issue.url,
-          vcsSyncedAt: new Date(),
-        },
-      }) as Promise<Ticket>);
-
-      return ticket;
-    });
+    // Allocate ticket number in transaction and create ticket
+    const result = await this.vcsRepo.createTicketFromIssue(project, issue);
 
     return {
       action: 'created',

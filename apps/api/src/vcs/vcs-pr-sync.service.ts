@@ -3,45 +3,15 @@
  */
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ConfigService } from '@nestjs/config';
 import { Project, Ticket, VcsConnection } from '@prisma/client';
 import { decryptToken } from '../common/utils/encryption.util';
 import { createVcsProvider } from './factory';
 import { VcsPrStatus } from './types';
-import { TicketStatus, CommentType, ActivityType } from '../common/enums';
+import { TicketStatus, CommentType } from '../common/enums';
 import { validateTransition } from '../tickets/state-machine/ticket-transitions';
 import { VcsLinkExtractorService } from './vcs-link-extractor.service';
-
-// PrismaClientLike from @nathapp/nestjs-prisma doesn't expose VCS models,
-// but they exist at runtime. Define a delegate interface for proper typing.
-interface TicketLinkDelegate {
-  findMany<T = unknown>(options: Record<string, unknown>): Promise<T[]>
-  update(options: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<unknown>
-  findUnique(options: { where: Record<string, unknown> }): Promise<unknown>
-}
-
-interface TicketDelegate {
-  findUnique(options: { where: Record<string, unknown> }): Promise<unknown>
-  update(options: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<unknown>
-}
-
-interface CommentDelegate {
-  create(options: { data: Record<string, unknown> }): Promise<unknown>
-}
-
-interface TicketActivityDelegate {
-  create(options: { data: Record<string, unknown> }): Promise<unknown>
-}
-
-interface ExtendedPrismaClient {
-  ticketLink: TicketLinkDelegate
-  ticket: TicketDelegate
-  comment: CommentDelegate
-  ticketActivity: TicketActivityDelegate
-  $transaction<T>(fn: (client: ExtendedPrismaClient) => Promise<T>): Promise<T>
-  [key: string]: unknown
-}
+import { PrismaVcsRepository } from './prisma-vcs.repository';
 
 /**
  * TicketLink data returned from findMany
@@ -72,14 +42,10 @@ export class VcsPrSyncService {
   private readonly logger = new Logger(VcsPrSyncService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly vcsRepo: PrismaVcsRepository,
     @Optional() private readonly vcsLinkExtractorService?: VcsLinkExtractorService,
     @Optional() private readonly configService?: ConfigService,
   ) {}
-
-  private get db() {
-    return this.prisma as unknown as ExtendedPrismaClient;
-  }
 
   /**
    * Sync PR status from VCS provider to TicketLink records
@@ -122,27 +88,7 @@ export class VcsPrSyncService {
     });
 
     // Query TicketLink entries with active PRs and their linked tickets
-    const ticketLinks = (await this.db.ticketLink.findMany({
-      include: {
-        ticket: {
-          select: {
-            id: true,
-            status: true,
-            projectId: true,
-            number: true,
-            externalVcsId: true,
-          },
-        },
-      },
-      where: {
-        prNumber: { not: null },
-        prState: { notIn: ['merged', 'closed'] },
-        ticket: {
-          projectId: project.id,
-          deletedAt: null,
-        },
-      },
-    })) as TicketLinkData[];
+    const ticketLinks = (await this.vcsRepo.findActiveTicketLinksWithPrs(project.id)) as TicketLinkData[];
 
     let updated = 0;
     let skipped = 0;
@@ -168,13 +114,7 @@ export class VcsPrSyncService {
           }
 
           // Always update prState regardless of transition outcome
-          await this.db.ticketLink.update({
-            where: { id: link.id },
-            data: {
-              prState: newPrState,
-              prUpdatedAt: new Date(),
-            },
-          });
+          await this.vcsRepo.updateTicketLinkPrState(link.id, newPrState);
           updated++;
 
           // AC6: After syncPrStatus() updates a TicketLink, extractLinksFromPr() is called
@@ -218,13 +158,7 @@ export class VcsPrSyncService {
       } catch (error) {
         if (error instanceof NotFoundAppException) {
           // 404: mark as closed
-          await this.db.ticketLink.update({
-            where: { id: link.id },
-            data: {
-              prState: 'closed',
-              prUpdatedAt: new Date(),
-            },
-          });
+          await this.vcsRepo.updateTicketLinkPrState(link.id, 'closed');
           updated++;
         } else {
           // General API error: skip this PR
@@ -257,49 +191,19 @@ export class VcsPrSyncService {
     }
 
     try {
-      await this.db.$transaction(async (tx) => {
-        // Validate the transition
-        validateTransition(
-          TicketStatus.IN_PROGRESS,
-          TicketStatus.VERIFY_FIX,
-          CommentType.FIX_REPORT,
-        );
+      // Validate the transition
+      validateTransition(
+        TicketStatus.IN_PROGRESS,
+        TicketStatus.VERIFY_FIX,
+        CommentType.FIX_REPORT,
+      );
 
-        // Update ticket status to VERIFY_FIX
-        await tx.ticket.update({
-          where: { id: link.ticketId },
-          data: { status: TicketStatus.VERIFY_FIX },
-        });
-
-        // Create FIX_REPORT comment with PR details
-        const mergeAuthor = prStatus.mergedBy ?? 'unknown';
-        const mergeSha = prStatus.mergeSha ?? 'unknown';
-        const commentBody = `Merged PR: ${prStatus.url} by ${mergeAuthor} (${mergeSha})`;
-
-        await tx.comment.create({
-          data: {
-            ticketId: link.ticketId,
-            body: commentBody,
-            type: CommentType.FIX_REPORT,
-            authorUserId: null,
-            authorAgentId: 'system',
-          },
-        });
-
-        // Log VCS_PR_MERGED activity
-        // Store PR info in newValue field for activity display: "owner/repo#number by @author"
-        const prInfo = `${link.externalRef || prStatus.url} by @${mergeAuthor}`;
-        await tx.ticketActivity.create({
-          data: {
-            ticketId: link.ticketId,
-            action: ActivityType.VCS_PR_MERGED,
-            fromStatus: TicketStatus.IN_PROGRESS,
-            toStatus: TicketStatus.VERIFY_FIX,
-            actorUserId: null,
-            actorAgentId: null,
-            newValue: prInfo,
-          },
-        });
+      await this.vcsRepo.applyMergedPrTransition({
+        ticketId: link.ticketId,
+        externalRef: link.externalRef,
+        prUrl: prStatus.url,
+        mergedBy: prStatus.mergedBy ?? null,
+        mergeSha: prStatus.mergeSha ?? null,
       });
     } catch (error) {
       // Log the error but don't rethrow - auto-transition failure should not

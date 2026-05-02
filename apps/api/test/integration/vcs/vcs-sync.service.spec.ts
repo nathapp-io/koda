@@ -13,13 +13,13 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { VcsSyncService, SyncIssueResult } from '../../../src/vcs/vcs-sync.service';
+import { PrismaVcsRepository } from '../../../src/vcs/prisma-vcs.repository';
 import { VcsIssue } from '../../../src/vcs/types';
 
 describe('VcsSyncService.syncIssue', () => {
   let service: VcsSyncService;
-  let prismaService: PrismaService;
+  let vcsRepo: jest.Mocked<PrismaVcsRepository>;
   let module: TestingModule;
 
   const projectId = 'project-123';
@@ -48,21 +48,6 @@ describe('VcsSyncService.syncIssue', () => {
     createdAt: new Date('2024-01-15'),
   };
 
-  const mockTicketDelegate = {
-    findFirst: jest.fn(),
-    findMany: jest.fn(),
-    findUnique: jest.fn(),
-    create: jest.fn(),
-    update: jest.fn(),
-    delete: jest.fn(),
-    count: jest.fn(),
-  };
-
-  const mockClient = {
-    ticket: { ...mockTicketDelegate },
-    $transaction: jest.fn(),
-  } as any;
-
   beforeEach(async () => {
     jest.clearAllMocks();
     jest.restoreAllMocks();
@@ -71,16 +56,20 @@ describe('VcsSyncService.syncIssue', () => {
       providers: [
         VcsSyncService,
         {
-          provide: PrismaService,
+          provide: PrismaVcsRepository,
           useValue: {
-            client: mockClient,
+            findExistingTicketByExternalId: jest.fn(),
+            createTicketFromIssue: jest.fn(),
+            findActiveTicketLinksWithPrs: jest.fn(),
+            updateTicketLinkPrState: jest.fn(),
+            applyMergedPrTransition: jest.fn(),
           },
         },
       ],
     }).compile();
 
     service = module.get<VcsSyncService>(VcsSyncService);
-    prismaService = module.get<PrismaService>(PrismaService);
+    vcsRepo = module.get(PrismaVcsRepository);
   });
 
   afterEach(async () => {
@@ -89,111 +78,34 @@ describe('VcsSyncService.syncIssue', () => {
 
   describe('AC1: Creates ticket with correct defaults', () => {
     it('should create a ticket with type=TASK, status=CREATED, priority=MEDIUM', async () => {
-      const createdTicket = {
+      vcsRepo.findExistingTicketByExternalId.mockResolvedValueOnce(null);
+      vcsRepo.createTicketFromIssue.mockResolvedValueOnce({
         id: 'ticket-123',
-        projectId,
         number: 1,
-        type: 'TASK',
         title: mockVcsIssue.title,
-        description: mockVcsIssue.body,
-        status: 'CREATED',
-        priority: 'MEDIUM',
-        assignedToUserId: null,
-        assignedToAgentId: null,
-        createdByUserId: null,
-        createdByAgentId: null,
-        gitRefVersion: null,
-        gitRefFile: null,
-        gitRefLine: null,
-        externalVcsId: '42',
-        externalVcsUrl: mockVcsIssue.url,
-        vcsSyncedAt: expect.any(Date),
-        deletedAt: null,
-        createdAt: expect.any(Date),
-        updatedAt: expect.any(Date),
-      };
+      });
 
-      // Mock: no existing ticket
-      mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
+      const result = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual');
 
-      // Mock transaction
-      ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: (client: any) => Promise<any>) => {
-          mockTicketDelegate.findFirst.mockResolvedValueOnce(null); // No existing tickets
-          return callback(prismaService.client);
-        },
-      );
-
-      // Mock create to return the expected ticket
-      mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
-
-      const result = await service.syncIssue(mockProject, mockVcsIssue, 'manual');
-
-      // Verify the create call was made with correct ticket data
-      expect(mockTicketDelegate.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            projectId,
-            number: expect.any(Number),
-            type: 'TASK',
-            title: mockVcsIssue.title,
-            description: mockVcsIssue.body,
-            status: 'CREATED',
-            priority: 'MEDIUM',
-            externalVcsId: '42',
-            externalVcsUrl: mockVcsIssue.url,
-            vcsSyncedAt: expect.any(Date),
-          }),
-        }),
-      );
+      expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(mockProject, mockVcsIssue);
+      expect(result.action).toBe('created');
     });
 
     it('should use type from source parameter (manual/polling/webhook all use TASK)', async () => {
-      const createdTicket = {
-        id: 'ticket-123',
-        projectId,
-        number: 1,
-        type: 'TASK',
-        title: mockVcsIssue.title,
-        description: mockVcsIssue.body,
-        status: 'CREATED',
-        priority: 'MEDIUM',
-        assignedToUserId: null,
-        assignedToAgentId: null,
-        createdByUserId: null,
-        createdByAgentId: null,
-        gitRefVersion: null,
-        gitRefFile: null,
-        gitRefLine: null,
-        externalVcsId: '42',
-        externalVcsUrl: mockVcsIssue.url,
-        vcsSyncedAt: expect.any(Date),
-        deletedAt: null,
-        createdAt: expect.any(Date),
-        updatedAt: expect.any(Date),
-      };
-
       for (const source of ['manual', 'polling', 'webhook'] as const) {
         jest.clearAllMocks();
 
-        mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
-        ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-          async (callback: (client: any) => Promise<any>) => {
-            mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
-            return callback(prismaService.client);
-          },
-        );
-        mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
+        vcsRepo.findExistingTicketByExternalId.mockResolvedValueOnce(null);
+        vcsRepo.createTicketFromIssue.mockResolvedValueOnce({
+          id: 'ticket-123',
+          number: 1,
+          title: mockVcsIssue.title,
+        });
 
-        await service.syncIssue(mockProject, mockVcsIssue, source);
+        const result = await service.syncIssue(mockProject as any, mockVcsIssue, source);
 
-        expect(mockTicketDelegate.create).toHaveBeenCalledWith(
-          expect.objectContaining({
-            data: expect.objectContaining({
-              type: 'TASK',
-            }),
-          }),
-        );
+        expect(result.action).toBe('created');
+        expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(mockProject, mockVcsIssue);
       }
     });
   });
@@ -203,47 +115,20 @@ describe('VcsSyncService.syncIssue', () => {
       const ticketId = 'ticket-xyz-789';
       const ticketNumber = 5;
 
-      const createdTicket = {
+      vcsRepo.findExistingTicketByExternalId.mockResolvedValueOnce(null);
+      vcsRepo.createTicketFromIssue.mockResolvedValueOnce({
         id: ticketId,
-        projectId,
         number: ticketNumber,
-        type: 'TASK',
         title: mockVcsIssue.title,
-        description: mockVcsIssue.body,
-        status: 'CREATED',
-        priority: 'MEDIUM',
-        assignedToUserId: null,
-        assignedToAgentId: null,
-        createdByUserId: null,
-        createdByAgentId: null,
-        gitRefVersion: null,
-        gitRefFile: null,
-        gitRefLine: null,
-        externalVcsId: '42',
-        externalVcsUrl: mockVcsIssue.url,
-        vcsSyncedAt: expect.any(Date),
-        deletedAt: null,
-        createdAt: expect.any(Date),
-        updatedAt: expect.any(Date),
-      };
+      });
 
-      mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
-
-      ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: (client: any) => Promise<any>) => {
-          mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
-          return callback(prismaService.client);
-        },
-      );
-
-      mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
-
-      const result: SyncIssueResult = await service.syncIssue(mockProject, mockVcsIssue, 'manual');
+      const result: SyncIssueResult = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual');
 
       expect(result).toEqual({
         action: 'created',
         ticketId,
         ticketNumber,
+        ticketTitle: mockVcsIssue.title,
       });
       expect(result.action).toBe('created');
       expect(result.ticketId).toBe(ticketId);
@@ -253,42 +138,14 @@ describe('VcsSyncService.syncIssue', () => {
       const ticketId = 'ticket-456';
       const ticketNumber = 10;
 
-      const createdTicket = {
+      vcsRepo.findExistingTicketByExternalId.mockResolvedValueOnce(null);
+      vcsRepo.createTicketFromIssue.mockResolvedValueOnce({
         id: ticketId,
-        projectId,
         number: ticketNumber,
-        type: 'TASK',
         title: mockVcsIssue.title,
-        description: mockVcsIssue.body,
-        status: 'CREATED',
-        priority: 'MEDIUM',
-        assignedToUserId: null,
-        assignedToAgentId: null,
-        createdByUserId: null,
-        createdByAgentId: null,
-        gitRefVersion: null,
-        gitRefFile: null,
-        gitRefLine: null,
-        externalVcsId: '42',
-        externalVcsUrl: mockVcsIssue.url,
-        vcsSyncedAt: expect.any(Date),
-        deletedAt: null,
-        createdAt: expect.any(Date),
-        updatedAt: expect.any(Date),
-      };
+      });
 
-      mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
-
-      ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: (client: any) => Promise<any>) => {
-          mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
-          return callback(prismaService.client);
-        },
-      );
-
-      mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
-
-      const result: SyncIssueResult = await service.syncIssue(mockProject, mockVcsIssue, 'manual');
+      const result: SyncIssueResult = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual');
 
       expect(result.ticketNumber).toBe(ticketNumber);
     });
@@ -305,18 +162,17 @@ describe('VcsSyncService.syncIssue', () => {
         description: null,
         status: 'CREATED',
         priority: 'MEDIUM',
-        externalVcsId: '42', // Same as the issue we're syncing
+        externalVcsId: '42',
         externalVcsUrl: mockVcsIssue.url,
         vcsSyncedAt: new Date('2024-01-01'),
         deletedAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
-      };
+      } as any;
 
-      // Mock: ticket already exists
-      mockTicketDelegate.findFirst.mockResolvedValueOnce(existingTicket);
+      vcsRepo.findExistingTicketByExternalId.mockResolvedValueOnce(existingTicket);
 
-      const result: SyncIssueResult = await service.syncIssue(mockProject, mockVcsIssue, 'manual');
+      const result: SyncIssueResult = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual');
 
       expect(result).toEqual({
         action: 'skipped',
@@ -327,104 +183,34 @@ describe('VcsSyncService.syncIssue', () => {
     });
 
     it('should check for existing ticket with matching externalVcsId in project scope', async () => {
-      mockTicketDelegate.findFirst.mockResolvedValueOnce(null); // No existing ticket
-
-      ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: (client: any) => Promise<any>) => {
-          mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
-          return callback(prismaService.client);
-        },
-      );
-
-      const createdTicket = {
+      vcsRepo.findExistingTicketByExternalId.mockResolvedValueOnce(null);
+      vcsRepo.createTicketFromIssue.mockResolvedValueOnce({
         id: 'ticket-123',
-        projectId,
         number: 1,
-        type: 'TASK',
         title: mockVcsIssue.title,
-        description: mockVcsIssue.body,
-        status: 'CREATED',
-        priority: 'MEDIUM',
-        externalVcsId: '42',
-        externalVcsUrl: mockVcsIssue.url,
-        vcsSyncedAt: expect.any(Date),
-        deletedAt: null,
-        createdAt: expect.any(Date),
-        updatedAt: expect.any(Date),
-      };
+      });
 
-      mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
+      await service.syncIssue(mockProject as any, mockVcsIssue, 'manual');
 
-      await service.syncIssue(mockProject, mockVcsIssue, 'manual');
-
-      // Verify deduplication check was done with correct filters
-      expect(mockTicketDelegate.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            projectId,
-            externalVcsId: '42',
-            deletedAt: null,
-          }),
-        }),
-      );
+      expect(vcsRepo.findExistingTicketByExternalId).toHaveBeenCalledWith(projectId, '42');
     });
 
     it('should not skip if externalVcsId exists in different project', async () => {
-      // This test verifies project-scope isolation
-      const otherProjectTicket = {
-        id: 'other-project-ticket',
-        projectId: 'other-project-456',
-        number: 1,
-        type: 'TASK',
-        title: 'Different project ticket',
-        description: null,
-        status: 'CREATED',
-        priority: 'MEDIUM',
-        externalVcsId: '42',
-        externalVcsUrl: mockVcsIssue.url,
-        vcsSyncedAt: new Date(),
-        deletedAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-
-      // First call checks for existing in projectId (finds none)
-      mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
-
-      ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: (client: any) => Promise<any>) => {
-          mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
-          return callback(prismaService.client);
-        },
-      );
-
-      const createdTicket = {
+      // Returns null because the query is scoped to the project
+      vcsRepo.findExistingTicketByExternalId.mockResolvedValueOnce(null);
+      vcsRepo.createTicketFromIssue.mockResolvedValueOnce({
         id: 'ticket-new-123',
-        projectId,
         number: 1,
-        type: 'TASK',
         title: mockVcsIssue.title,
-        description: mockVcsIssue.body,
-        status: 'CREATED',
-        priority: 'MEDIUM',
-        externalVcsId: '42',
-        externalVcsUrl: mockVcsIssue.url,
-        vcsSyncedAt: expect.any(Date),
-        deletedAt: null,
-        createdAt: expect.any(Date),
-        updatedAt: expect.any(Date),
-      };
+      });
 
-      mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
-
-      const result: SyncIssueResult = await service.syncIssue(mockProject, mockVcsIssue, 'manual');
+      const result: SyncIssueResult = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual');
 
       // Should create (not skip) because existing ticket is in different project
       expect(result.action).toBe('created');
     });
 
     it('should skip if soft-deleted ticket exists with same externalVcsId and projectId', async () => {
-      // This is important: soft-deleted tickets should still prevent duplication
       const softDeletedTicket = {
         id: 'deleted-ticket-123',
         projectId,
@@ -437,578 +223,88 @@ describe('VcsSyncService.syncIssue', () => {
         externalVcsId: '42',
         externalVcsUrl: mockVcsIssue.url,
         vcsSyncedAt: new Date('2024-01-01'),
-        deletedAt: new Date('2024-02-01'), // Soft deleted
+        deletedAt: new Date('2024-02-01'),
         createdAt: new Date(),
         updatedAt: new Date(),
-      };
+      } as any;
 
-      mockTicketDelegate.findFirst.mockResolvedValueOnce(softDeletedTicket);
+      vcsRepo.findExistingTicketByExternalId.mockResolvedValueOnce(softDeletedTicket);
 
-      const result: SyncIssueResult = await service.syncIssue(mockProject, mockVcsIssue, 'manual');
+      const result: SyncIssueResult = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual');
 
       expect(result.action).toBe('skipped');
     });
   });
 
   describe('AC4: VCS metadata fields populated from VcsIssue', () => {
-    it('should set externalVcsId from issue.number', async () => {
-      const createdTicket = {
+    it('should delegate to repository with the correct issue data', async () => {
+      vcsRepo.findExistingTicketByExternalId.mockResolvedValueOnce(null);
+      vcsRepo.createTicketFromIssue.mockResolvedValueOnce({
         id: 'ticket-123',
-        projectId,
         number: 1,
-        type: 'TASK',
         title: mockVcsIssue.title,
-        description: mockVcsIssue.body,
-        status: 'CREATED',
-        priority: 'MEDIUM',
-        assignedToUserId: null,
-        assignedToAgentId: null,
-        createdByUserId: null,
-        createdByAgentId: null,
-        gitRefVersion: null,
-        gitRefFile: null,
-        gitRefLine: null,
-        externalVcsId: '42',
-        externalVcsUrl: mockVcsIssue.url,
-        vcsSyncedAt: expect.any(Date),
-        deletedAt: null,
-        createdAt: expect.any(Date),
-        updatedAt: expect.any(Date),
-      };
+      });
 
-      mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
+      await service.syncIssue(mockProject as any, mockVcsIssue, 'manual');
 
-      ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: (client: any) => Promise<any>) => {
-          mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
-          return callback(prismaService.client);
-        },
-      );
-
-      mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
-
-      await service.syncIssue(mockProject, mockVcsIssue, 'manual');
-
-      expect(mockTicketDelegate.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            externalVcsId: String(mockVcsIssue.number), // Should be stringified
-          }),
-        }),
-      );
+      expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(mockProject, mockVcsIssue);
     });
 
-    it('should set externalVcsUrl from issue.url', async () => {
-      const createdTicket = {
-        id: 'ticket-123',
-        projectId,
-        number: 1,
-        type: 'TASK',
-        title: mockVcsIssue.title,
-        description: mockVcsIssue.body,
-        status: 'CREATED',
-        priority: 'MEDIUM',
-        assignedToUserId: null,
-        assignedToAgentId: null,
-        createdByUserId: null,
-        createdByAgentId: null,
-        gitRefVersion: null,
-        gitRefFile: null,
-        gitRefLine: null,
-        externalVcsId: '42',
-        externalVcsUrl: mockVcsIssue.url,
-        vcsSyncedAt: expect.any(Date),
-        deletedAt: null,
-        createdAt: expect.any(Date),
-        updatedAt: expect.any(Date),
-      };
-
-      mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
-
-      ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: (client: any) => Promise<any>) => {
-          mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
-          return callback(prismaService.client);
-        },
-      );
-
-      mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
-
-      await service.syncIssue(mockProject, mockVcsIssue, 'manual');
-
-      expect(mockTicketDelegate.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            externalVcsUrl: mockVcsIssue.url,
-          }),
-        }),
-      );
-    });
-
-    it('should set vcsSyncedAt to current timestamp', async () => {
-      const beforeCall = new Date();
-
-      const createdTicket = {
-        id: 'ticket-123',
-        projectId,
-        number: 1,
-        type: 'TASK',
-        title: mockVcsIssue.title,
-        description: mockVcsIssue.body,
-        status: 'CREATED',
-        priority: 'MEDIUM',
-        assignedToUserId: null,
-        assignedToAgentId: null,
-        createdByUserId: null,
-        createdByAgentId: null,
-        gitRefVersion: null,
-        gitRefFile: null,
-        gitRefLine: null,
-        externalVcsId: '42',
-        externalVcsUrl: mockVcsIssue.url,
-        vcsSyncedAt: new Date(),
-        deletedAt: null,
-        createdAt: expect.any(Date),
-        updatedAt: expect.any(Date),
-      };
-
-      mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
-
-      ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: (client: any) => Promise<any>) => {
-          mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
-          return callback(prismaService.client);
-        },
-      );
-
-      mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
-
-      await service.syncIssue(mockProject, mockVcsIssue, 'manual');
-
-      const afterCall = new Date();
-
-      expect(mockTicketDelegate.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            vcsSyncedAt: expect.any(Date),
-          }),
-        }),
-      );
-
-      const createCall = mockTicketDelegate.create.mock.calls[0][0];
-      const vcsSyncedAt = createCall.data.vcsSyncedAt;
-      expect(vcsSyncedAt.getTime()).toBeGreaterThanOrEqual(beforeCall.getTime());
-      expect(vcsSyncedAt.getTime()).toBeLessThanOrEqual(afterCall.getTime());
-    });
-
-    it('should use issue.body as ticket description', async () => {
-      const issueWithDescription: VcsIssue = {
-        ...mockVcsIssue,
-        body: 'Detailed description of the issue',
-      };
-
-      const createdTicket = {
-        id: 'ticket-123',
-        projectId,
-        number: 1,
-        type: 'TASK',
-        title: issueWithDescription.title,
-        description: issueWithDescription.body,
-        status: 'CREATED',
-        priority: 'MEDIUM',
-        assignedToUserId: null,
-        assignedToAgentId: null,
-        createdByUserId: null,
-        createdByAgentId: null,
-        gitRefVersion: null,
-        gitRefFile: null,
-        gitRefLine: null,
-        externalVcsId: '42',
-        externalVcsUrl: issueWithDescription.url,
-        vcsSyncedAt: expect.any(Date),
-        deletedAt: null,
-        createdAt: expect.any(Date),
-        updatedAt: expect.any(Date),
-      };
-
-      mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
-
-      ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: (client: any) => Promise<any>) => {
-          mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
-          return callback(prismaService.client);
-        },
-      );
-
-      mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
-
-      await service.syncIssue(mockProject, issueWithDescription, 'manual');
-
-      expect(mockTicketDelegate.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            description: issueWithDescription.body,
-          }),
-        }),
-      );
-    });
-
-    it('should handle null issue.body', async () => {
+    it('should handle null issue.body (passed through to repository)', async () => {
       const issueWithoutDescription: VcsIssue = {
         ...mockVcsIssue,
         body: null,
       };
 
-      const createdTicket = {
+      vcsRepo.findExistingTicketByExternalId.mockResolvedValueOnce(null);
+      vcsRepo.createTicketFromIssue.mockResolvedValueOnce({
         id: 'ticket-123',
-        projectId,
         number: 1,
-        type: 'TASK',
         title: issueWithoutDescription.title,
-        description: null,
-        status: 'CREATED',
-        priority: 'MEDIUM',
-        assignedToUserId: null,
-        assignedToAgentId: null,
-        createdByUserId: null,
-        createdByAgentId: null,
-        gitRefVersion: null,
-        gitRefFile: null,
-        gitRefLine: null,
-        externalVcsId: '42',
-        externalVcsUrl: issueWithoutDescription.url,
-        vcsSyncedAt: expect.any(Date),
-        deletedAt: null,
-        createdAt: expect.any(Date),
-        updatedAt: expect.any(Date),
-      };
+      });
 
-      mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
+      const result = await service.syncIssue(mockProject as any, issueWithoutDescription, 'manual');
 
-      ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: (client: any) => Promise<any>) => {
-          mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
-          return callback(prismaService.client);
-        },
-      );
-
-      mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
-
-      await service.syncIssue(mockProject, issueWithoutDescription, 'manual');
-
-      expect(mockTicketDelegate.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            description: null,
-          }),
-        }),
-      );
+      expect(result.action).toBe('created');
+      expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(mockProject, issueWithoutDescription);
     });
   });
 
-  describe('AC5: Atomic ticket number allocation in transaction', () => {
-    it('should allocate ticket.number as MAX(number)+1 scoped to project', async () => {
-      const lastTicketInProject = {
-        id: 'last-ticket-id',
-        projectId,
-        number: 5,
-        type: 'TASK',
-        title: 'Previous ticket',
-        description: null,
-        status: 'CREATED',
-        priority: 'MEDIUM',
-        assignedToUserId: null,
-        assignedToAgentId: null,
-        createdByUserId: null,
-        createdByAgentId: null,
-        gitRefVersion: null,
-        gitRefFile: null,
-        gitRefLine: null,
-        externalVcsId: '41',
-        externalVcsUrl: 'https://github.com/owner/repo/issues/41',
-        vcsSyncedAt: new Date(),
-        deletedAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-
-      const createdTicket = {
+  describe('AC5: Atomic ticket number allocation via repository', () => {
+    it('should delegate number allocation to the repository', async () => {
+      vcsRepo.findExistingTicketByExternalId.mockResolvedValueOnce(null);
+      vcsRepo.createTicketFromIssue.mockResolvedValueOnce({
         id: 'new-ticket-123',
-        projectId,
-        number: 6, // MAX(5) + 1
-        type: 'TASK',
+        number: 6,
         title: mockVcsIssue.title,
-        description: mockVcsIssue.body,
-        status: 'CREATED',
-        priority: 'MEDIUM',
-        assignedToUserId: null,
-        assignedToAgentId: null,
-        createdByUserId: null,
-        createdByAgentId: null,
-        gitRefVersion: null,
-        gitRefFile: null,
-        gitRefLine: null,
-        externalVcsId: '42',
-        externalVcsUrl: mockVcsIssue.url,
-        vcsSyncedAt: expect.any(Date),
-        deletedAt: null,
-        createdAt: expect.any(Date),
-        updatedAt: expect.any(Date),
-      };
+      });
 
-      mockTicketDelegate.findFirst.mockResolvedValueOnce(null); // Deduplication check
+      const result = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual');
 
-      let transactionCallbackArg: (client: any) => Promise<any>;
-      ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: (client: any) => Promise<any>) => {
-          transactionCallbackArg = callback;
-          mockTicketDelegate.findFirst.mockResolvedValueOnce(lastTicketInProject); // In transaction
-          mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
-          return callback(prismaService.client);
-        },
-      );
-
-      const result = await service.syncIssue(mockProject, mockVcsIssue, 'manual');
-
-      // Verify transaction was used
-      expect((prismaService.client as any).$transaction).toHaveBeenCalled();
-
-      // Verify correct number allocation
+      expect(vcsRepo.createTicketFromIssue).toHaveBeenCalledWith(mockProject, mockVcsIssue);
       expect(result.ticketNumber).toBe(6);
-
-      // Verify findFirst was called to get max number
-      expect(mockTicketDelegate.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            projectId,
-          }),
-          orderBy: { number: 'desc' },
-        }),
-      );
     });
 
     it('should start from 1 when no previous tickets exist in project', async () => {
-      const createdTicket = {
+      vcsRepo.findExistingTicketByExternalId.mockResolvedValueOnce(null);
+      vcsRepo.createTicketFromIssue.mockResolvedValueOnce({
         id: 'first-ticket-123',
-        projectId,
         number: 1,
-        type: 'TASK',
         title: mockVcsIssue.title,
-        description: mockVcsIssue.body,
-        status: 'CREATED',
-        priority: 'MEDIUM',
-        assignedToUserId: null,
-        assignedToAgentId: null,
-        createdByUserId: null,
-        createdByAgentId: null,
-        gitRefVersion: null,
-        gitRefFile: null,
-        gitRefLine: null,
-        externalVcsId: '42',
-        externalVcsUrl: mockVcsIssue.url,
-        vcsSyncedAt: expect.any(Date),
-        deletedAt: null,
-        createdAt: expect.any(Date),
-        updatedAt: expect.any(Date),
-      };
+      });
 
-      mockTicketDelegate.findFirst.mockResolvedValueOnce(null); // Deduplication check
+      const result = await service.syncIssue(mockProject as any, mockVcsIssue, 'manual');
 
-      ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: (client: any) => Promise<any>) => {
-          mockTicketDelegate.findFirst.mockResolvedValueOnce(null); // No existing tickets
-          mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
-          return callback(prismaService.client);
-        },
-      );
-
-      const result = await service.syncIssue(mockProject, mockVcsIssue, 'manual');
-
-      // First ticket should be number 1
       expect(result.ticketNumber).toBe(1);
     });
 
-    it('should use transaction to prevent concurrent duplicate numbers', async () => {
-      const createdTicket = {
-        id: 'ticket-123',
-        projectId,
-        number: 1,
-        type: 'TASK',
-        title: mockVcsIssue.title,
-        description: mockVcsIssue.body,
-        status: 'CREATED',
-        priority: 'MEDIUM',
-        assignedToUserId: null,
-        assignedToAgentId: null,
-        createdByUserId: null,
-        createdByAgentId: null,
-        gitRefVersion: null,
-        gitRefFile: null,
-        gitRefLine: null,
-        externalVcsId: '42',
-        externalVcsUrl: mockVcsIssue.url,
-        vcsSyncedAt: expect.any(Date),
-        deletedAt: null,
-        createdAt: expect.any(Date),
-        updatedAt: expect.any(Date),
-      };
+    it('should not create ticket if repository throws', async () => {
+      vcsRepo.findExistingTicketByExternalId.mockResolvedValueOnce(null);
+      vcsRepo.createTicketFromIssue.mockRejectedValueOnce(new Error('Transaction failed'));
 
-      mockTicketDelegate.findFirst.mockResolvedValueOnce(null); // Deduplication check
-
-      ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: (client: any) => Promise<any>) => {
-          // Verify callback receives the transactional client
-          mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
-          mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
-          return callback(prismaService.client);
-        },
+      await expect(service.syncIssue(mockProject as any, mockVcsIssue, 'manual')).rejects.toThrow(
+        'Transaction failed',
       );
-
-      await service.syncIssue(mockProject, mockVcsIssue, 'manual');
-
-      // Verify that $transaction was called, ensuring atomicity
-      expect((prismaService.client as any).$transaction).toHaveBeenCalledWith(expect.any(Function));
-    });
-
-    it('should scope ticket number allocation to project', async () => {
-      // Create tickets in different projects
-      const otherProjectLastTicket = {
-        id: 'other-project-ticket',
-        projectId: 'other-project-456',
-        number: 100,
-        type: 'TASK',
-        title: 'Other project ticket',
-        description: null,
-        status: 'CREATED',
-        priority: 'MEDIUM',
-        assignedToUserId: null,
-        assignedToAgentId: null,
-        createdByUserId: null,
-        createdByAgentId: null,
-        gitRefVersion: null,
-        gitRefFile: null,
-        gitRefLine: null,
-        externalVcsId: 'other-42',
-        externalVcsUrl: 'https://github.com/owner/repo/issues/42',
-        vcsSyncedAt: new Date(),
-        deletedAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-
-      const createdTicket = {
-        id: 'ticket-123',
-        projectId, // Current project, not the "other" project
-        number: 1, // Should be 1, not 101
-        type: 'TASK',
-        title: mockVcsIssue.title,
-        description: mockVcsIssue.body,
-        status: 'CREATED',
-        priority: 'MEDIUM',
-        assignedToUserId: null,
-        assignedToAgentId: null,
-        createdByUserId: null,
-        createdByAgentId: null,
-        gitRefVersion: null,
-        gitRefFile: null,
-        gitRefLine: null,
-        externalVcsId: '42',
-        externalVcsUrl: mockVcsIssue.url,
-        vcsSyncedAt: expect.any(Date),
-        deletedAt: null,
-        createdAt: expect.any(Date),
-        updatedAt: expect.any(Date),
-      };
-
-      mockTicketDelegate.findFirst.mockResolvedValueOnce(null); // Deduplication check
-
-      ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: (client: any) => Promise<any>) => {
-          mockTicketDelegate.findFirst.mockResolvedValueOnce(null); // No tickets in projectId
-          mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
-          return callback(prismaService.client);
-        },
-      );
-
-      const result = await service.syncIssue(mockProject, mockVcsIssue, 'manual');
-
-      // Should be 1, not 101 (other project's max + 1)
-      expect(result.ticketNumber).toBe(1);
-
-      // Verify findFirst was scoped to the project
-      expect(mockTicketDelegate.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            projectId, // Scoped to current project
-          }),
-        }),
-      );
-    });
-
-    it('should include soft-deleted tickets when calculating MAX(number)', async () => {
-      // This is important: soft-deleted tickets count toward number allocation
-      const lastTicket = {
-        id: 'deleted-ticket-999',
-        projectId,
-        number: 10,
-        type: 'TASK',
-        title: 'Previously synced and then deleted',
-        description: null,
-        status: 'CLOSED',
-        priority: 'MEDIUM',
-        assignedToUserId: null,
-        assignedToAgentId: null,
-        createdByUserId: null,
-        createdByAgentId: null,
-        gitRefVersion: null,
-        gitRefFile: null,
-        gitRefLine: null,
-        externalVcsId: 'old-issue',
-        externalVcsUrl: 'https://github.com/owner/repo/issues/999',
-        vcsSyncedAt: new Date(),
-        deletedAt: new Date(), // Soft deleted
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-
-      const createdTicket = {
-        id: 'new-ticket-123',
-        projectId,
-        number: 11, // Should be 10 + 1, even though previous is soft-deleted
-        type: 'TASK',
-        title: mockVcsIssue.title,
-        description: mockVcsIssue.body,
-        status: 'CREATED',
-        priority: 'MEDIUM',
-        assignedToUserId: null,
-        assignedToAgentId: null,
-        createdByUserId: null,
-        createdByAgentId: null,
-        gitRefVersion: null,
-        gitRefFile: null,
-        gitRefLine: null,
-        externalVcsId: '42',
-        externalVcsUrl: mockVcsIssue.url,
-        vcsSyncedAt: expect.any(Date),
-        deletedAt: null,
-        createdAt: expect.any(Date),
-        updatedAt: expect.any(Date),
-      };
-
-      mockTicketDelegate.findFirst.mockResolvedValueOnce(null); // Deduplication check
-
-      ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-        async (callback: (client: any) => Promise<any>) => {
-          mockTicketDelegate.findFirst.mockResolvedValueOnce(lastTicket); // Returns soft-deleted ticket
-          mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
-          return callback(prismaService.client);
-        },
-      );
-
-      const result = await service.syncIssue(mockProject, mockVcsIssue, 'manual');
-
-      // Should be 11 (considering soft-deleted ticket)
-      expect(result.ticketNumber).toBe(11);
     });
   });
 
@@ -1024,49 +320,18 @@ describe('VcsSyncService.syncIssue', () => {
           number: issueNumber,
         };
 
-        const createdTicket = {
+        vcsRepo.findExistingTicketByExternalId.mockResolvedValueOnce(null);
+        vcsRepo.createTicketFromIssue.mockResolvedValueOnce({
           id: 'ticket-123',
-          projectId,
           number: 1,
-          type: 'TASK',
           title: issue.title,
-          description: issue.body,
-          status: 'CREATED',
-          priority: 'MEDIUM',
-          assignedToUserId: null,
-          assignedToAgentId: null,
-          createdByUserId: null,
-          createdByAgentId: null,
-          gitRefVersion: null,
-          gitRefFile: null,
-          gitRefLine: null,
-          externalVcsId: String(issueNumber),
-          externalVcsUrl: issue.url,
-          vcsSyncedAt: expect.any(Date),
-          deletedAt: null,
-          createdAt: expect.any(Date),
-          updatedAt: expect.any(Date),
-        };
+        });
 
-        mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
+        await service.syncIssue(mockProject as any, issue, 'manual');
 
-        ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-          async (callback: (client: any) => Promise<any>) => {
-            mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
-            mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
-            return callback(prismaService.client);
-          },
-        );
-
-        await service.syncIssue(mockProject, issue, 'manual');
-
-        // Verify externalVcsId is set to stringified issue number
-        expect(mockTicketDelegate.create).toHaveBeenCalledWith(
-          expect.objectContaining({
-            data: expect.objectContaining({
-              externalVcsId: String(issueNumber),
-            }),
-          }),
+        expect(vcsRepo.findExistingTicketByExternalId).toHaveBeenCalledWith(
+          projectId,
+          String(issueNumber),
         );
       }
     });
@@ -1086,64 +351,17 @@ describe('VcsSyncService.syncIssue', () => {
           title,
         };
 
-        const createdTicket = {
+        vcsRepo.findExistingTicketByExternalId.mockResolvedValueOnce(null);
+        vcsRepo.createTicketFromIssue.mockResolvedValueOnce({
           id: 'ticket-123',
-          projectId,
           number: 1,
-          type: 'TASK',
           title,
-          description: issue.body,
-          status: 'CREATED',
-          priority: 'MEDIUM',
-          assignedToUserId: null,
-          assignedToAgentId: null,
-          createdByUserId: null,
-          createdByAgentId: null,
-          gitRefVersion: null,
-          gitRefFile: null,
-          gitRefLine: null,
-          externalVcsId: '42',
-          externalVcsUrl: issue.url,
-          vcsSyncedAt: expect.any(Date),
-          deletedAt: null,
-          createdAt: expect.any(Date),
-          updatedAt: expect.any(Date),
-        };
+        });
 
-        mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
+        const result = await service.syncIssue(mockProject as any, issue, 'manual');
 
-        ((prismaService.client as any).$transaction as jest.Mock).mockImplementation(
-          async (callback: (client: any) => Promise<any>) => {
-            mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
-            mockTicketDelegate.create.mockResolvedValueOnce(createdTicket);
-            return callback(prismaService.client);
-          },
-        );
-
-        await service.syncIssue(mockProject, issue, 'manual');
-
-        expect(mockTicketDelegate.create).toHaveBeenCalledWith(
-          expect.objectContaining({
-            data: expect.objectContaining({
-              title,
-            }),
-          }),
-        );
+        expect(result.ticketTitle).toBe(title);
       }
-    });
-
-    it('should not create ticket if transaction fails', async () => {
-      mockTicketDelegate.findFirst.mockResolvedValueOnce(null);
-
-      const transactionError = new Error('Transaction failed');
-      ((prismaService.client as any).$transaction as jest.Mock).mockRejectedValueOnce(transactionError);
-
-      await expect(service.syncIssue(mockProject, mockVcsIssue, 'manual')).rejects.toThrow(
-        transactionError,
-      );
-
-      // Ensure create was not called successfully
-      expect(mockTicketDelegate.create).not.toHaveBeenCalled();
     });
   });
 
