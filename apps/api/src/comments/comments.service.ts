@@ -80,13 +80,17 @@ export class CommentsService {
       throw new NotFoundAppException({}, 'comments');
     }
 
-    // Create the comment via repository
+    // Create the comment via repository.
+    // id/createdAt/updatedAt are DB-generated; toPersistenceCreate strips them.
     const comment = await this.commentRepo.create({
+      id: '',
       ticketId: ticket.id,
       body: createCommentDto.body,
       type: createCommentDto.type as CommentType,
       authorUserId: actorType === 'user' ? currentUser.id : null,
       authorAgentId: actorType === 'agent' ? currentUser.id : null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     });
 
     return CommentResponseDto.from(comment);

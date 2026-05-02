@@ -1,26 +1,23 @@
-import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { Injectable, Inject } from '@nestjs/common';
+import { AbstractPrismaRepository, PrismaClientLike, PrismaModelDelegate, PrismaService } from '@nathapp/nestjs-prisma';
+import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { Comment, PrismaClient } from '@prisma/client';
 import { CommentDomain } from './domain/comment.domain';
 
 @Injectable()
-export class PrismaCommentRepository {
-  constructor(private readonly prisma: PrismaService<PrismaClient>) {}
-
-  private get db() {
-    return this.prisma.client.comment;
+export class PrismaCommentRepository extends AbstractPrismaRepository<CommentDomain, Comment, string> {
+  constructor(
+    @Inject(TRANSACTION_MANAGER) tx: ITransactionManager,
+    private readonly prisma: PrismaService<PrismaClient>,
+  ) {
+    super(tx);
   }
 
-  private toDomain(m: {
-    id: string;
-    ticketId: string;
-    body: string;
-    type: string;
-    authorUserId: string | null;
-    authorAgentId: string | null;
-    createdAt: Date;
-    updatedAt: Date;
-  }): CommentDomain {
+  protected modelDelegate(client: PrismaClientLike): PrismaModelDelegate<Comment, string> {
+    return (client as unknown as PrismaClient).comment as unknown as PrismaModelDelegate<Comment, string>;
+  }
+
+  protected toDomain(m: Comment): CommentDomain {
     return {
       id: m.id,
       ticketId: m.ticketId,
@@ -33,47 +30,31 @@ export class PrismaCommentRepository {
     };
   }
 
-  async create(data: {
-    ticketId: string;
-    body: string;
-    type: string;
-    authorUserId: string | null;
-    authorAgentId: string | null;
-  }): Promise<CommentDomain> {
-    const model = await this.db.create({
-      data: {
-        ticketId: data.ticketId,
-        body: data.body,
-        type: data.type,
-        authorUserId: data.authorUserId ?? null,
-        authorAgentId: data.authorAgentId ?? null,
-      },
-    });
-    return this.toDomain(model);
+  protected toPersistenceCreate(d: CommentDomain): Omit<Comment, 'id' | 'createdAt' | 'updatedAt'> {
+    return {
+      ticketId: d.ticketId,
+      body: d.body,
+      type: d.type,
+      authorUserId: d.authorUserId ?? null,
+      authorAgentId: d.authorAgentId ?? null,
+    };
   }
 
-  async findById(id: string): Promise<CommentDomain | null> {
-    const model = await this.db.findUnique({ where: { id } });
-    return model ? this.toDomain(model) : null;
+  protected toPersistenceUpdate(patch: Partial<CommentDomain>): Partial<Omit<Comment, 'id' | 'createdAt' | 'updatedAt'>> {
+    const data: Partial<Omit<Comment, 'id' | 'createdAt' | 'updatedAt'>> = {};
+    if (patch.body !== undefined) data.body = patch.body;
+    if (patch.type !== undefined) data.type = patch.type;
+    if (patch.authorUserId !== undefined) data.authorUserId = patch.authorUserId;
+    if (patch.authorAgentId !== undefined) data.authorAgentId = patch.authorAgentId;
+    if (patch.ticketId !== undefined) data.ticketId = patch.ticketId;
+    return data;
   }
 
   async findByTicketId(ticketId: string): Promise<CommentDomain[]> {
-    const models = await this.db.findMany({
+    const models = await this.prisma.client.comment.findMany({
       where: { ticketId },
       orderBy: { createdAt: 'asc' },
     });
-    return models.map((m) => this.toDomain(m));
-  }
-
-  async update(id: string, data: { body: string }): Promise<CommentDomain> {
-    const model = await this.db.update({
-      where: { id },
-      data: { body: data.body },
-    });
-    return this.toDomain(model);
-  }
-
-  async delete(id: string): Promise<void> {
-    await this.db.delete({ where: { id } });
+    return models.map((m) => this.toDomain(m as Comment));
   }
 }
