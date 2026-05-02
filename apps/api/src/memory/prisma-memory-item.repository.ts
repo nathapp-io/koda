@@ -1,5 +1,7 @@
-import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
+import { Injectable, Inject } from '@nestjs/common';
+import { AbstractPrismaRepository, PrismaClientLike, PrismaModelDelegate, PrismaService } from '@nathapp/nestjs-prisma';
+import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { MemoryItem as MemoryItemModel, PrismaClient } from '@prisma/client';
 import {
   MemoryQuery,
   ProjectMemoryQuery,
@@ -13,21 +15,77 @@ export function buildActiveKey(_projectId: string, kind: string, subject: string
 }
 
 @Injectable()
-export class PrismaMemoryItemRepository {
-  constructor(private readonly prisma: PrismaService) {}
+export class PrismaMemoryItemRepository
+  extends AbstractPrismaRepository<MemoryItem, MemoryItemModel, string> {
+  constructor(
+    @Inject(TRANSACTION_MANAGER) tx: ITransactionManager,
+    private readonly prisma: PrismaService<PrismaClient>,
+  ) {
+    super(tx);
+  }
 
-  private get db() {
-    return this.prisma.client as unknown as {
-      memoryItem: {
-        findMany(options: unknown): Promise<MemoryItem[]>;
-        findUnique(options: unknown): Promise<MemoryItem | null>;
-        findFirst(options: unknown): Promise<MemoryItem | null>;
-        create(options: unknown): Promise<MemoryItem>;
-        update(options: unknown): Promise<MemoryItem>;
-        count(options: unknown): Promise<number>;
-      };
-      $transaction<T>(fn: (client: unknown) => Promise<T>, options?: { isolationLevel: 'Serializable' }): Promise<T>;
+  protected modelDelegate(client: PrismaClientLike): PrismaModelDelegate<MemoryItemModel, string> {
+    return (client as unknown as PrismaClient).memoryItem as unknown as PrismaModelDelegate<MemoryItemModel, string>;
+  }
+
+  protected toDomain(m: MemoryItemModel): MemoryItem {
+    return {
+      id: m.id,
+      projectId: m.projectId,
+      kind: m.kind,
+      subject: m.subject,
+      predicate: m.predicate,
+      object: m.object ?? undefined,
+      activeKey: m.activeKey ?? undefined,
+      ownerId: m.ownerId ?? undefined,
+      sourceType: m.sourceType ?? undefined,
+      sourceId: m.sourceId ?? undefined,
+      status: m.status,
+      confidence: m.confidence,
+      ttlAt: m.ttlAt ?? undefined,
+      supersededBy: m.supersededBy ?? undefined,
+      createdAt: m.createdAt,
+      updatedAt: m.updatedAt,
+      deletedAt: m.deletedAt ?? undefined,
     };
+  }
+
+  protected toPersistenceCreate(domain: MemoryItem): Omit<MemoryItemModel, 'id' | 'createdAt' | 'updatedAt'> {
+    return {
+      projectId: domain.projectId,
+      kind: domain.kind,
+      subject: domain.subject,
+      predicate: domain.predicate,
+      object: domain.object ?? null,
+      activeKey: domain.activeKey ?? null,
+      ownerId: domain.ownerId ?? null,
+      sourceType: domain.sourceType ?? null,
+      sourceId: domain.sourceId ?? null,
+      status: domain.status,
+      confidence: domain.confidence,
+      ttlAt: domain.ttlAt ?? null,
+      supersededBy: domain.supersededBy ?? null,
+      deletedAt: domain.deletedAt ?? null,
+    };
+  }
+
+  protected toPersistenceUpdate(patch: Partial<MemoryItem>): Partial<Omit<MemoryItemModel, 'id' | 'createdAt' | 'updatedAt'>> {
+    const data: Partial<Omit<MemoryItemModel, 'id' | 'createdAt' | 'updatedAt'>> = {};
+    if (patch.projectId !== undefined) data.projectId = patch.projectId;
+    if (patch.kind !== undefined) data.kind = patch.kind;
+    if (patch.subject !== undefined) data.subject = patch.subject;
+    if (patch.predicate !== undefined) data.predicate = patch.predicate;
+    if (patch.object !== undefined) data.object = patch.object ?? null;
+    if (patch.activeKey !== undefined) data.activeKey = patch.activeKey ?? null;
+    if (patch.ownerId !== undefined) data.ownerId = patch.ownerId ?? null;
+    if (patch.sourceType !== undefined) data.sourceType = patch.sourceType ?? null;
+    if (patch.sourceId !== undefined) data.sourceId = patch.sourceId ?? null;
+    if (patch.status !== undefined) data.status = patch.status;
+    if (patch.confidence !== undefined) data.confidence = patch.confidence;
+    if (patch.ttlAt !== undefined) data.ttlAt = patch.ttlAt ?? null;
+    if (patch.supersededBy !== undefined) data.supersededBy = patch.supersededBy ?? null;
+    if (patch.deletedAt !== undefined) data.deletedAt = patch.deletedAt ?? null;
+    return data;
   }
 
   async findByProject(query: MemoryQuery): Promise<PaginatedResult<MemoryItem>> {
@@ -47,24 +105,18 @@ export class PrismaMemoryItemRepository {
     if (query.sourceType) where.sourceType = query.sourceType;
     if (query.sourceId) where.sourceId = query.sourceId;
 
-    const [data, total] = await Promise.all([
-      this.db.memoryItem.findMany({ where, skip, take: limit, orderBy: { createdAt: 'desc' } }),
-      this.db.memoryItem.count({ where }),
+    const [models, total] = await Promise.all([
+      this.prisma.client.memoryItem.findMany({ where, skip, take: limit, orderBy: { createdAt: 'desc' } }),
+      this.prisma.client.memoryItem.count({ where }),
     ]);
 
-    return { data, total, page, limit };
+    return { data: models.map((m) => this.toDomain(m)), total, page, limit };
   }
 
   async upsert(item: MemoryItemInput): Promise<MemoryItem> {
-    return this.db.$transaction(
+    return this.prisma.client.$transaction(
       async (client) => {
-        const db = client as unknown as {
-          memoryItem: {
-            findFirst(options: unknown): Promise<MemoryItem | null>;
-            create(options: unknown): Promise<MemoryItem>;
-            update(options: unknown): Promise<MemoryItem>;
-          };
-        };
+        const db = client as unknown as PrismaClient;
 
         const activeKey = buildActiveKey(item.projectId, item.kind, item.subject, item.predicate);
 
@@ -86,7 +138,7 @@ export class PrismaMemoryItemRepository {
           });
         }
 
-        return db.memoryItem.create({
+        const created = await db.memoryItem.create({
           data: {
             projectId: item.projectId,
             kind: item.kind,
@@ -103,6 +155,8 @@ export class PrismaMemoryItemRepository {
             supersededBy: item.supersededBy,
           },
         });
+
+        return this.toDomain(created);
       },
       { isolationLevel: 'Serializable' },
     );
@@ -114,20 +168,21 @@ export class PrismaMemoryItemRepository {
     subject: string,
     predicate: string,
   ): Promise<MemoryItem | null> {
-    return this.db.memoryItem.findFirst({
+    const m = await this.prisma.client.memoryItem.findFirst({
       where: { projectId, kind, subject, predicate, activeKey: { not: null }, status: 'active', deletedAt: null },
     });
+    return m ? this.toDomain(m) : null;
   }
 
   async reject(id: string): Promise<void> {
-    await this.db.memoryItem.update({
+    await this.prisma.client.memoryItem.update({
       where: { id },
       data: { activeKey: null, status: 'rejected' },
     });
   }
 
   async softDelete(id: string): Promise<void> {
-    await this.db.memoryItem.update({
+    await this.prisma.client.memoryItem.update({
       where: { id },
       data: { deletedAt: new Date(), activeKey: null },
     });
@@ -141,7 +196,7 @@ export class PrismaMemoryItemRepository {
     if (data.supersededBy !== undefined) updateData.supersededBy = data.supersededBy;
     if (data.ttlAt !== undefined) updateData.ttlAt = data.ttlAt;
 
-    await this.db.memoryItem.update({ where: { id }, data: updateData });
+    await this.prisma.client.memoryItem.update({ where: { id }, data: updateData });
   }
 
   async findByProjectMemory(query: ProjectMemoryQuery): Promise<{ items: MemoryItem[]; total: number }> {
@@ -176,11 +231,11 @@ export class PrismaMemoryItemRepository {
       orderByClause.push({ createdAt: 'desc' }, { confidence: 'desc' }, { updatedAt: 'desc' });
     }
 
-    const [items, total] = await Promise.all([
-      this.db.memoryItem.findMany({ where, skip, take: limit, orderBy: orderByClause }),
-      this.db.memoryItem.count({ where }),
+    const [models, total] = await Promise.all([
+      this.prisma.client.memoryItem.findMany({ where, skip, take: limit, orderBy: orderByClause }),
+      this.prisma.client.memoryItem.count({ where }),
     ]);
 
-    return { items, total };
+    return { items: models.map((m) => this.toDomain(m)), total };
   }
 }

@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '@nathapp/nestjs-prisma';
+import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
 
 describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
@@ -17,11 +18,14 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
     client: mockPrismaClient,
   };
 
+  const mockTransactionManager = {};
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PrismaMemoryItemRepository,
         { provide: PrismaService, useValue: mockPrismaService },
+        { provide: TRANSACTION_MANAGER, useValue: mockTransactionManager },
       ],
     }).compile();
 
