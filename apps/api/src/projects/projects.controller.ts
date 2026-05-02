@@ -21,7 +21,7 @@ import {
   ApiResponse,
   ApiQuery,
 } from '@nestjs/swagger';
-import { MemoryItemRepository } from '../memory/memory-item-repository';
+import { PrismaMemoryItemRepository } from '../memory/prisma-memory-item.repository';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { CurrentUser, CurrentActor } from '../auth/decorators/current-user.decorator';
@@ -33,7 +33,7 @@ import { ActorRole } from '../common/enums';
 export class ProjectsController {
   constructor(
     private projectsService: ProjectsService,
-    private memoryItemRepository: MemoryItemRepository,
+    private memoryItemRepository: PrismaMemoryItemRepository,
     private prisma: PrismaService,
   ) {}
 

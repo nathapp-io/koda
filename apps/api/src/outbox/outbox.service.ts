@@ -1,28 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient } from '@prisma/client';
 import { OutboxFanOutRegistry } from './outbox-fan-out-registry';
+import { PrismaOutboxRepository } from './prisma-outbox.repository';
+import { OutboxEventDomain, OutboxEventInput } from './domain/outbox-event.domain';
 
-export interface OutboxEventInput {
-  projectId: string;
-  eventType: string;
-  eventId: string;
-  payload: unknown;
-}
+export type { OutboxEventInput };
 
-export interface OutboxEventData {
-  id: string;
-  projectId: string;
-  eventType: string;
-  eventId: string;
-  payload: string;
-  status: string;
-  attempts: number;
-  lastError: string | null;
-  processedAt: Date | null;
-  createdAt: Date;
-  updatedAt: Date;
-}
+export type OutboxEventData = OutboxEventDomain;
 
 const MAX_RETRIES = 3;
 const PROCESSING_STALE_MS = 60_000;
@@ -33,42 +16,22 @@ export class OutboxService {
   private readonly logger = new Logger(OutboxService.name);
 
   constructor(
-    private readonly prisma: PrismaService<PrismaClient>,
+    private readonly outboxRepo: PrismaOutboxRepository,
     private readonly fanOutRegistry: OutboxFanOutRegistry,
   ) {}
 
   async enqueue(event: OutboxEventInput): Promise<OutboxEventData> {
-    const createdEvent = await this.prisma.client.outboxEvent.create({
-      data: {
-        projectId: event.projectId,
-        eventType: event.eventType,
-        eventId: event.eventId,
-        payload: JSON.stringify(event.payload),
-        status: 'pending',
-      },
-    });
-
-    return this.mapToOutboxEventData(createdEvent);
+    return this.outboxRepo.enqueue(event);
   }
 
   async getPendingEvents(limit = 100): Promise<OutboxEventData[]> {
     const take = Math.max(Math.floor(limit), 0);
-    const events = await this.prisma.client.outboxEvent.findMany({
-      where: { status: 'pending' },
-      orderBy: { createdAt: 'asc' },
-      take,
-    });
-    return events.map(this.mapToOutboxEventData);
+    return this.outboxRepo.findPending(take);
   }
 
   async getEventsByStatus(status: string, limit = 100): Promise<OutboxEventData[]> {
     const take = Math.max(Math.floor(limit), 0);
-    const events = await this.prisma.client.outboxEvent.findMany({
-      where: { status },
-      orderBy: { createdAt: 'asc' },
-      take,
-    });
-    return events.map(this.mapToOutboxEventData);
+    return this.outboxRepo.findByStatus(status, take);
   }
 
   async processPending(limit = 50): Promise<void> {
@@ -78,23 +41,16 @@ export class OutboxService {
     }
     await this.requeueStaleProcessingEvents();
 
-    const pendingEvents = await this.prisma.client.outboxEvent.findMany({
-      where: { status: 'pending' },
-      orderBy: { createdAt: 'asc' },
-      take,
-    });
+    const pendingEvents = await this.outboxRepo.findPending(take);
 
     for (const event of pendingEvents) {
-      const claimResult = await this.prisma.client.outboxEvent.updateMany({
-        where: { id: event.id, status: 'pending' },
-        data: { status: 'processing' },
-      });
-      if (claimResult.count === 0) {
+      const claimedCount = await this.outboxRepo.claimForProcessing(event.id);
+      if (claimedCount === 0) {
         continue;
       }
 
       try {
-        await this.processEvent(event);
+        await this.processEvent(event as unknown as Record<string, unknown>);
         await this.markCompleted(event.id);
 
         this.logger.log(`Outbox event ${event.id} processed successfully`);
@@ -127,41 +83,21 @@ export class OutboxService {
 
     await this.delay(BACKOFF_MS(event.attempts));
 
-    const updated = await this.prisma.client.outboxEvent.update({
-      where: { id: event.id },
-      data: {
-        attempts: event.attempts + 1,
-        status: 'pending',
-      },
-    });
+    const updated = await this.outboxRepo.incrementAttemptsAndRequeue(event.id, event.attempts + 1);
 
     this.logger.log(`Outbox event ${event.id} retried (attempt ${updated.attempts})`);
-    return this.mapToOutboxEventData(updated);
+    return updated;
   }
 
   async markCompleted(eventId: string): Promise<void> {
-    await this.prisma.client.outboxEvent.update({
-      where: { id: eventId },
-      data: {
-        status: 'completed',
-        processedAt: new Date(),
-        lastError: null,
-      },
-    });
+    await this.outboxRepo.markCompleted(eventId);
   }
 
   async markFailed(eventId: string, error: string, currentAttempts: number): Promise<void> {
     const nextAttempts = currentAttempts + 1;
     const nextStatus = nextAttempts >= MAX_RETRIES ? 'dead_letter' : 'pending';
 
-    await this.prisma.client.outboxEvent.update({
-      where: { id: eventId },
-      data: {
-        attempts: nextAttempts,
-        lastError: error,
-        status: nextStatus,
-      },
-    });
+    await this.outboxRepo.markFailed(eventId, error, nextAttempts, nextStatus);
 
     if (nextStatus === 'dead_letter') {
       this.logger.error(`Outbox event ${eventId} moved to dead_letter: ${error}`);
@@ -169,61 +105,21 @@ export class OutboxService {
   }
 
   async markDeadLetter(eventId: string, reason: string): Promise<OutboxEventData> {
-    const updated = await this.prisma.client.outboxEvent.update({
-      where: { id: eventId },
-      data: {
-        status: 'dead_letter',
-        lastError: reason,
-      },
-    });
-
+    const updated = await this.outboxRepo.markDeadLetter(eventId, reason);
     this.logger.error(`Outbox event ${eventId} moved to dead_letter: ${reason}`);
-    return this.mapToOutboxEventData(updated);
+    return updated;
   }
 
   async retryEvent(eventId: string): Promise<void> {
-    await this.prisma.client.outboxEvent.update({
-      where: { id: eventId },
-      data: {
-        status: 'pending',
-        lastError: null,
-      },
-    });
+    await this.outboxRepo.retryEvent(eventId);
   }
 
   private async requeueStaleProcessingEvents(): Promise<void> {
     const staleThreshold = new Date(Date.now() - PROCESSING_STALE_MS);
-
-    await this.prisma.client.outboxEvent.updateMany({
-      where: {
-        status: 'processing',
-        updatedAt: { lt: staleThreshold },
-      },
-      data: { status: 'pending' },
-    });
+    await this.outboxRepo.requeueStaleProcessing(staleThreshold);
   }
 
   private async delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  private mapToOutboxEventData(event: OutboxEventData | Record<string, unknown>): OutboxEventData {
-    return {
-      id: String(event.id),
-      projectId: String(event.projectId),
-      eventType: String(event.eventType),
-      eventId: String(event.eventId),
-      payload: String(event.payload),
-      status: String(event.status),
-      attempts: Number(
-        (event.attempts as number | undefined)
-          ?? (event as { retryCount?: number }).retryCount
-          ?? 0,
-      ),
-      lastError: (event.lastError as string | null) ?? null,
-      processedAt: (event.processedAt as Date | null) ?? null,
-      createdAt: event.createdAt as Date,
-      updatedAt: event.updatedAt as Date,
-    };
   }
 }

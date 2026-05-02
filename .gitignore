@@ -1,4 +1,5 @@
 .vscode/
+.worktrees/
 node_modules/
 dist/
 .output/

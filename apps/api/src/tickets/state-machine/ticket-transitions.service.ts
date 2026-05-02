@@ -1,6 +1,7 @@
-import { Injectable, Optional, Logger } from '@nestjs/common';
+import { Injectable, Optional, Logger, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
+import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import {
   Ticket,
@@ -44,6 +45,7 @@ export class TicketTransitionsService {
 
   constructor(
     private readonly prisma: PrismaService<PrismaClient>,
+    @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Optional() private readonly ragService?: RagService,
     @Optional() private readonly webhookDispatcher?: WebhookDispatcherService,
     @Optional() private readonly vcsConnectionService?: VcsConnectionService,
@@ -348,18 +350,18 @@ export class TicketTransitionsService {
     }
 
     // Execute transition without comment requirement
-    const transaction = await this.db.$transaction(async (tx) => {
+    const transaction = await this.txManager.run(async () => {
       const actorUserId = actorType === 'user' ? currentUser.sub : null;
       const actorAgentId = actorType === 'agent' ? currentUser.sub : null;
 
       // Update ticket status
-      const updatedTicket = await tx.ticket.update({
+      const updatedTicket = await this.prisma.client.ticket.update({
         where: { id: ticket.id },
         data: { status: TicketStatus.CLOSED },
       });
 
       // Create activity record
-      const activity = await tx.ticketActivity.create({
+      const activity = await this.prisma.client.ticketActivity.create({
         data: {
           ticketId: ticket.id,
           action: ActivityType.STATUS_CHANGE,
@@ -433,14 +435,14 @@ export class TicketTransitionsService {
     validateTransition(ticket.status as TicketStatus, toStatus, commentType);
 
     // Execute transition in transaction
-    return this.db.$transaction(async (tx) => {
+    const result = await this.txManager.run(async () => {
       const actorUserId = actorType === 'user' ? currentUser.sub : null;
       const actorAgentId = actorType === 'agent' ? currentUser.sub : null;
 
       // Create comment if needed
       let comment = null;
       if (commentType && commentBody) {
-        comment = await tx.comment.create({
+        comment = await this.prisma.client.comment.create({
           data: {
             ticketId: ticket.id,
             body: commentBody,
@@ -452,13 +454,13 @@ export class TicketTransitionsService {
       }
 
       // Update ticket status
-      const updatedTicket = await tx.ticket.update({
+      const updatedTicket = await this.prisma.client.ticket.update({
         where: { id: ticket.id },
         data: { status: toStatus },
       });
 
       // Create activity record
-      const activity = await tx.ticketActivity.create({
+      const activity = await this.prisma.client.ticketActivity.create({
         data: {
           ticketId: ticket.id,
           action: ActivityType.STATUS_CHANGE,
@@ -483,19 +485,20 @@ export class TicketTransitionsService {
         ticket: updatedTicket,
         activity,
       } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-    }).then(async (result: TransitionResult) => {
-      // Auto-index when a ticket transitions to CLOSED via normal state machine
-      if (toStatus === TicketStatus.CLOSED) {
-        this.autoIndexTicket(project, result.ticket);
-      }
-      // Dispatch webhook for status change
-      this.dispatchStatusChangeWebhook(project.id, result.ticket, ticket.status, toStatus);
-      // Auto-create PR when ticket transitions to VERIFIED
-      if (toStatus === TicketStatus.VERIFIED) {
-        await this.createPrForTicket(project, result.ticket);
-      }
-      return result;
     });
+
+    // Post-transaction side effects (outside the transaction boundary)
+    // Auto-index when a ticket transitions to CLOSED via normal state machine
+    if (toStatus === TicketStatus.CLOSED) {
+      this.autoIndexTicket(project, result.ticket);
+    }
+    // Dispatch webhook for status change
+    this.dispatchStatusChangeWebhook(project.id, result.ticket, ticket.status, toStatus);
+    // Auto-create PR when ticket transitions to VERIFIED
+    if (toStatus === TicketStatus.VERIFIED) {
+      await this.createPrForTicket(project, result.ticket);
+    }
+    return result;
   }
 
   /**

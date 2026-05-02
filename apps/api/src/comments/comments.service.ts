@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { CommentType } from '../common/enums';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -6,6 +6,8 @@ import { ValidationAppException, NotFoundAppException, ForbiddenAppException } f
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { CommentResponseDto } from './dto/comment-response.dto';
+import { PrismaCommentRepository } from './prisma-comment.repository';
+import { COMMENT_REPOSITORY } from './domain/comment.domain';
 
 interface CurrentUser {
   id: string;
@@ -15,7 +17,11 @@ interface CurrentUser {
 
 @Injectable()
 export class CommentsService {
-  constructor(private prisma: PrismaService<PrismaClient>) {}
+  constructor(
+    private readonly prisma: PrismaService<PrismaClient>,
+    @Inject(COMMENT_REPOSITORY) private readonly commentRepo: PrismaCommentRepository,
+  ) {}
+
   private get db() { return this.prisma.client; }
 
 
@@ -74,15 +80,17 @@ export class CommentsService {
       throw new NotFoundAppException({}, 'comments');
     }
 
-    // Create the comment
-    const comment = await this.db.comment.create({
-      data: {
-        ticketId: ticket.id,
-        body: createCommentDto.body,
-        type: createCommentDto.type as CommentType,
-        authorUserId: actorType === 'user' ? currentUser.id : null,
-        authorAgentId: actorType === 'agent' ? currentUser.id : null,
-      },
+    // Create the comment via repository.
+    // id/createdAt/updatedAt are DB-generated; toPersistenceCreate strips them.
+    const comment = await this.commentRepo.create({
+      id: '',
+      ticketId: ticket.id,
+      body: createCommentDto.body,
+      type: createCommentDto.type as CommentType,
+      authorUserId: actorType === 'user' ? currentUser.id : null,
+      authorAgentId: actorType === 'agent' ? currentUser.id : null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     });
 
     return CommentResponseDto.from(comment);
@@ -126,19 +134,14 @@ export class CommentsService {
       throw new NotFoundAppException({}, 'comments');
     }
 
-    // Find all comments for this ticket, ordered by creation date
-    const comments = await this.db.comment.findMany({
-      where: { ticketId: ticket.id },
-      orderBy: { createdAt: 'asc' },
-    });
+    // Find all comments for this ticket via repository
+    const comments = await this.commentRepo.findByTicketId(ticket.id);
 
     return CommentResponseDto.fromMany(comments);
   }
 
   async findById(id: string) {
-    const comment = await this.db.comment.findUnique({
-      where: { id },
-    });
+    const comment = await this.commentRepo.findById(id);
 
     return comment ? CommentResponseDto.from(comment) : null;
   }
@@ -149,10 +152,8 @@ export class CommentsService {
     currentUser: CurrentUser,
     actorType: 'user' | 'agent',
   ) {
-    // Find the comment
-    const comment = await this.db.comment.findUnique({
-      where: { id: commentId },
-    });
+    // Find the comment via repository
+    const comment = await this.commentRepo.findById(commentId);
 
     if (!comment) {
       throw new NotFoundAppException({}, 'comments');
@@ -169,12 +170,9 @@ export class CommentsService {
       throw new ForbiddenAppException({}, 'comments');
     }
 
-    // Update the comment
-    const updatedComment = await this.db.comment.update({
-      where: { id: commentId },
-      data: {
-        body: updateCommentDto.body,
-      },
+    // Update the comment via repository
+    const updatedComment = await this.commentRepo.update(commentId, {
+      body: updateCommentDto.body,
     });
 
     return CommentResponseDto.from(updatedComment);
@@ -185,10 +183,8 @@ export class CommentsService {
     currentUser: CurrentUser,
     actorType: 'user' | 'agent',
   ) {
-    // Find the comment
-    const comment = await this.db.comment.findUnique({
-      where: { id: commentId },
-    });
+    // Find the comment via repository
+    const comment = await this.commentRepo.findById(commentId);
 
     if (!comment) {
       throw new NotFoundAppException({}, 'comments');
@@ -205,9 +201,7 @@ export class CommentsService {
       throw new ForbiddenAppException({}, 'comments');
     }
 
-    // Delete the comment
-    await this.db.comment.delete({
-      where: { id: commentId },
-    });
+    // Delete the comment via repository
+    await this.commentRepo.delete(commentId);
   }
 }

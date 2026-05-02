@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ExtractionService, MemoryExtractedItem } from '../memory/extraction.service';
-import { MemoryItemRepository, MemoryItemInput } from '../memory/memory-item-repository';
+import { PrismaMemoryItemRepository } from '../memory/prisma-memory-item.repository';
+import { MemoryItemInput } from '../memory/memory-item-repository';
 import { MemoryKind } from '../common/enums';
 
 export interface OutboxHandler {
@@ -31,11 +32,11 @@ export class OutboxFanOutRegistry implements OnModuleInit {
   private handlers: Map<string, Array<(payload: unknown) => void | Promise<void>>> = new Map();
   private lastDispatchFailureCount = 0;
   private extractionService: ExtractionService | null = null;
-  private memoryRepository: MemoryItemRepository | null = null;
+  private memoryRepository: PrismaMemoryItemRepository | null = null;
 
   constructor(
     extractionService?: ExtractionService,
-    memoryRepository?: MemoryItemRepository,
+    memoryRepository?: PrismaMemoryItemRepository,
   ) {
     this.extractionService = extractionService ?? null;
     this.memoryRepository = memoryRepository ?? null;

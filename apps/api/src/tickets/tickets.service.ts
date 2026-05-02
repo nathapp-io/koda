@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { NotFoundAppException, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TicketResponseDto } from './dto/ticket-response.dto';
@@ -32,7 +33,10 @@ interface CurrentUser {
 
 @Injectable()
 export class TicketsService {
-  constructor(private prisma: PrismaService<PrismaClient>) {}
+  constructor(
+    private prisma: PrismaService<PrismaClient>,
+    @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+  ) {}
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private get db() { return this.prisma.client; }
 
@@ -74,9 +78,9 @@ export class TicketsService {
     }
 
     // Use transaction to safely auto-increment ticket number
-    const ticket = await this.db.$transaction(async (tx) => {
+    const ticket = await this.txManager.run(async () => {
       // Find the highest number for this project (include soft-deleted to avoid number reuse)
-      const lastTicket = await tx.ticket.findFirst({
+      const lastTicket = await this.prisma.client.ticket.findFirst({
         where: { projectId: project.id },
         orderBy: { number: 'desc' },
       });
@@ -84,7 +88,7 @@ export class TicketsService {
       const nextNumber = (lastTicket?.number ?? 0) + 1;
 
       // Create the ticket with the next number
-      return tx.ticket.create({
+      return this.prisma.client.ticket.create({
         data: {
           projectId: project.id,
           number: nextNumber,

@@ -120,7 +120,7 @@ interface GateResult {
 | `IsolationGate` | No cross-project data access in test queries | Any result from wrong project |
 | `ProvenanceGate` | All search responses have `provenance.sources` populated | Any response missing provenance |
 | `TruthConsistencyGate` | Canonical state matches derived store for 10 random queries | Discrepancy > 0 |
-| `WriteGate` | All write paths go through `KodaDomainWriter` | Direct repository write detected |
+| `WriteGate` | All write paths go through approved write layers (`KodaDomainWriter` and repository abstractions) | Direct raw Prisma write (`PrismaService.client.*`) outside approved layers detected |
 | `GraphifyEnabledGate` | Code results are hidden when `Project.graphifyEnabled=false` | Any `source='code'` result leaks |
 | `TokenBudgetGate` | `getProjectContext` with `tokenBudget=1000` returns under 1000 tokens | Overshoot > 5% |
 
@@ -252,7 +252,7 @@ The exact model name can differ, but the persisted fields must be sufficient to 
 - `IsolationGate` runs 10 queries that should return 0 results for project-A, asserts all 10 return 0 results
 - `IsolationGate` seeds project-A and project-B, then queries project-B-specific terms while scoped to project-A and asserts no project-B data is returned
 - `ProvenanceGate` runs 20 fixture search queries with known matching results and asserts every non-empty response has `provenance.sources.length > 0`
-- `WriteGate` runs `KodaDomainWriter` writes and asserts they succeed; direct repository writes in CI test mode throw a `KodaError` with `code='WRITE_GATE_VIOLATION'`
+- `WriteGate` runs `KodaDomainWriter` writes and asserts they succeed; direct raw Prisma writes (`PrismaService.client.*`) outside approved layers in CI test mode throw a `KodaError` with `code='WRITE_GATE_VIOLATION'`
 - `TruthConsistencyGate` picks 10 random canonical ticket IDs, queries both canonical store and derived store, asserts content matches
 - `GraphifyEnabledGate` runs 10 queries on a project with `graphifyEnabled=false`, asserts zero results have `source='code'`
 - `TokenBudgetGate` calls `getProjectContext` with `tokenBudget=1000`, measures `meta.tokensUsed`, asserts `tokensUsed <= 1050` (5% tolerance)

@@ -31,8 +31,9 @@
         "@nathapp/nestjs-app": "^3.0.0",
         "@nathapp/nestjs-auth": "^3.0.0",
         "@nathapp/nestjs-common": "^3.0.0",
+        "@nathapp/nestjs-data": "^3.0.4",
         "@nathapp/nestjs-logging": "^3.0.0",
-        "@nathapp/nestjs-prisma": "^3.1.0",
+        "@nathapp/nestjs-prisma": "^3.1.3",
         "@nathapp/nestjs-throttler": "^3.0.0",
         "@nestjs/common": "^11.0.0",
         "@nestjs/config": "^4.0.0",
@@ -551,11 +552,11 @@
 
     "@nathapp/nestjs-common": ["@nathapp/nestjs-common@3.0.0", "https://npm.nathapp.io/@nathapp/nestjs-common/-/nestjs-common-3.0.0.tgz", { "dependencies": { "@nathapp/common": "^0.1.14", "ipaddr.js": "^2.3.0", "joi": "^17.6.0", "nestjs-i18n": "^10.5.1" }, "peerDependencies": { "@nestjs/common": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@nestjs/core": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@nestjs/throttler": "^5.0.0 || ^6.0.0", "class-transformer": "*", "class-validator": "*" }, "optionalPeers": ["@nestjs/throttler"] }, "sha512-DVR1+x3BBqiCIiOgG8LM8Ta7oS6AWQw1U80iR9rhlTsMeM1YtjxbG5+GQ3CYJZ5KigWNVfhfAHC3v7rx8sokmw=="],
 
-    "@nathapp/nestjs-data": ["@nathapp/nestjs-data@3.0.1", "https://npm.nathapp.io/@nathapp/nestjs-data/-/nestjs-data-3.0.1.tgz", { "peerDependencies": { "@nestjs/common": "^10.0.0 || ^11.0.0" } }, "sha512-xS0f60y7wyM1Lwkq+FQxyzaM5iz4biNmxZJE2GoeMHj9RHu06cYAD30YGvcatIlhQ/OXG0JpAglBg0vaKLJvVQ=="],
+    "@nathapp/nestjs-data": ["@nathapp/nestjs-data@3.0.4", "https://npm.nathapp.io/@nathapp/nestjs-data/-/nestjs-data-3.0.4.tgz", { "dependencies": { "@nathapp/nestjs-common": "^3.0.0" }, "peerDependencies": { "@nestjs/common": "^10.0.0 || ^11.0.0" } }, "sha512-0PRLOEerYqr2gEnFBCLrToA5O/Eg+JB1lpRihglbbjL7nG9YKP17HCF0acdl15HhjeVDLx6L4/Gz5jaqR+7XSA=="],
 
     "@nathapp/nestjs-logging": ["@nathapp/nestjs-logging@3.0.0", "https://npm.nathapp.io/@nathapp/nestjs-logging/-/nestjs-logging-3.0.0.tgz", { "dependencies": { "@nathapp/nestjs-common": "^3.0.0", "fast-redact": "^3.0.0" }, "peerDependencies": { "pino": "^7.5.0 || ^8.0.0 || ^9.0.0", "rotating-file-stream": "^3.0.0", "winston": "^3.0.0", "winston-loki": "*" }, "optionalPeers": ["pino", "rotating-file-stream", "winston", "winston-loki"] }, "sha512-J8e4ARhh7ObhRqSyemTSv7SBLUTJwZKIcQuS5mpuZGdG7IWHQ8oSEnq1pIxYbl9Px+DKx8U8LqBDHN/CWt0D4A=="],
 
-    "@nathapp/nestjs-prisma": ["@nathapp/nestjs-prisma@3.1.0", "https://npm.nathapp.io/@nathapp/nestjs-prisma/-/nestjs-prisma-3.1.0.tgz", { "dependencies": { "@nathapp/nestjs-common": "^3.0.0", "@nathapp/nestjs-data": "^3.0.1" }, "peerDependencies": { "@nestjs/common": "^10.0.0 || ^11.0.0", "@nestjs/core": "^10.0.0 || ^11.0.0", "@prisma/client": "^6.0.0" } }, "sha512-anNkB5qzz+JZ3208GyuO4f8hNxnuO4qw8LNa85GGLi82BIIB1cFWcEgkyN/gCaJ8BFrTeONLnzKykIXoPK83JQ=="],
+    "@nathapp/nestjs-prisma": ["@nathapp/nestjs-prisma@3.1.3", "https://npm.nathapp.io/@nathapp/nestjs-prisma/-/nestjs-prisma-3.1.3.tgz", { "dependencies": { "@nathapp/nestjs-common": "^3.0.0", "@nathapp/nestjs-data": "^3.0.4" }, "peerDependencies": { "@nestjs/common": "^10.0.0 || ^11.0.0", "@nestjs/core": "^10.0.0 || ^11.0.0", "@prisma/client": "^6.0.0" } }, "sha512-VyxIYOKKej0dUaTCjXeEkSesJSAI5E/vm+fVmKgNVEsmskhtuetjx7dl4Rc0Ktq64ZlfAdQ33n5I/p5pIqxxkQ=="],
 
     "@nathapp/nestjs-throttler": ["@nathapp/nestjs-throttler@3.0.0", "https://npm.nathapp.io/@nathapp/nestjs-throttler/-/nestjs-throttler-3.0.0.tgz", { "peerDependencies": { "@nathapp/nestjs-common": "^3.0.0", "@nestjs/common": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@nestjs/core": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@nestjs/throttler": "^6.0.0 || ^7.0.0" } }, "sha512-OqQrWAIB1T05pfMTtdTs9MUlw72LgRAWnx5AMeCLnRbKW6cETm4BQpTyMjltB8UQ5oue80ZmT4zDI/ygwtsXIA=="],
 

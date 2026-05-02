@@ -1,8 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { OutboxService } from './outbox.service';
 import { OutboxFanOutRegistry } from './outbox-fan-out-registry';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient } from '@prisma/client';
+import { PrismaOutboxRepository } from './prisma-outbox.repository';
 
 function createMockFanOutRegistry() {
   return {
@@ -12,28 +11,34 @@ function createMockFanOutRegistry() {
   };
 }
 
+function createMockOutboxRepo() {
+  return {
+    enqueue: jest.fn(),
+    findPending: jest.fn(),
+    findByStatus: jest.fn(),
+    claimForProcessing: jest.fn(),
+    markCompleted: jest.fn(),
+    markFailed: jest.fn(),
+    markDeadLetter: jest.fn(),
+    retryEvent: jest.fn(),
+    incrementAttemptsAndRequeue: jest.fn(),
+    requeueStaleProcessing: jest.fn(),
+  };
+}
+
 describe('OutboxService', () => {
   let service: OutboxService;
-  let mockPrisma: any;
+  let mockRepo: ReturnType<typeof createMockOutboxRepo>;
 
   beforeEach(async () => {
-    mockPrisma = {
-      client: {
-        outboxEvent: {
-          create: jest.fn(),
-          findMany: jest.fn(),
-          updateMany: jest.fn(),
-          update: jest.fn(),
-        },
-      },
-    };
+    mockRepo = createMockOutboxRepo();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OutboxService,
         {
-          provide: PrismaService,
-          useValue: mockPrisma,
+          provide: PrismaOutboxRepository,
+          useValue: mockRepo,
         },
         {
           provide: OutboxFanOutRegistry,
@@ -54,16 +59,21 @@ describe('OutboxService', () => {
         payload: { title: 'Test Ticket' },
       };
 
-      mockPrisma.client.outboxEvent.create.mockResolvedValue({
+      const created = {
         id: 'outbox-1',
-        ...event,
+        projectId: event.projectId,
+        eventType: event.eventType,
+        eventId: event.eventId,
+        payload: JSON.stringify(event.payload),
         status: 'pending',
         attempts: 0,
         lastError: null,
         processedAt: null,
         createdAt: new Date(),
         updatedAt: new Date(),
-      });
+      };
+
+      mockRepo.enqueue.mockResolvedValue(created);
 
       const result = await service.enqueue(event);
 
@@ -72,15 +82,7 @@ describe('OutboxService', () => {
         status: 'pending',
       }));
 
-      expect(mockPrisma.client.outboxEvent.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          projectId: event.projectId,
-          eventType: event.eventType,
-          eventId: event.eventId,
-          payload: JSON.stringify(event.payload),
-          status: 'pending',
-        }),
-      });
+      expect(mockRepo.enqueue).toHaveBeenCalledWith(event);
     });
 
     it('should return the created outbox event', async () => {
@@ -93,7 +95,9 @@ describe('OutboxService', () => {
 
       const createdEvent = {
         id: 'outbox-2',
-        ...event,
+        projectId: event.projectId,
+        eventType: event.eventType,
+        eventId: event.eventId,
         payload: JSON.stringify(event.payload),
         status: 'pending',
         attempts: 0,
@@ -103,7 +107,7 @@ describe('OutboxService', () => {
         updatedAt: new Date(),
       };
 
-      mockPrisma.client.outboxEvent.create.mockResolvedValue(createdEvent);
+      mockRepo.enqueue.mockResolvedValue(createdEvent);
 
       const result = await service.enqueue(event);
 
@@ -143,24 +147,15 @@ describe('OutboxService', () => {
         },
       ];
 
-      mockPrisma.client.outboxEvent.findMany.mockResolvedValue(pendingEvents);
-      mockPrisma.client.outboxEvent.updateMany.mockResolvedValue({ count: 1 });
-      mockPrisma.client.outboxEvent.update.mockResolvedValue({ status: 'completed' });
+      mockRepo.requeueStaleProcessing.mockResolvedValue(undefined);
+      mockRepo.findPending.mockResolvedValue(pendingEvents);
+      mockRepo.claimForProcessing.mockResolvedValue(1);
+      mockRepo.markCompleted.mockResolvedValue(undefined);
 
       await service.processPending();
 
-      expect(mockPrisma.client.outboxEvent.findMany).toHaveBeenCalledWith({
-        where: { status: 'pending' },
-        orderBy: { createdAt: 'asc' },
-        take: 50,
-      });
-      expect(mockPrisma.client.outboxEvent.updateMany).toHaveBeenNthCalledWith(1, {
-        where: {
-          status: 'processing',
-          updatedAt: { lt: expect.any(Date) },
-        },
-        data: { status: 'pending' },
-      });
+      expect(mockRepo.findPending).toHaveBeenCalledWith(50);
+      expect(mockRepo.requeueStaleProcessing).toHaveBeenCalledWith(expect.any(Date));
     });
 
     it('should claim and mark processed records as completed', async () => {
@@ -180,29 +175,15 @@ describe('OutboxService', () => {
         },
       ];
 
-      mockPrisma.client.outboxEvent.findMany.mockResolvedValue(pendingEvents);
-      mockPrisma.client.outboxEvent.updateMany.mockResolvedValue({ count: 1 });
-      mockPrisma.client.outboxEvent.update.mockResolvedValue({
-        id: 'outbox-1',
-        status: 'completed',
-        processedAt: expect.any(Date),
-      });
+      mockRepo.requeueStaleProcessing.mockResolvedValue(undefined);
+      mockRepo.findPending.mockResolvedValue(pendingEvents);
+      mockRepo.claimForProcessing.mockResolvedValue(1);
+      mockRepo.markCompleted.mockResolvedValue(undefined);
 
       await service.processPending();
 
-      expect(mockPrisma.client.outboxEvent.updateMany).toHaveBeenNthCalledWith(2, {
-        where: { id: 'outbox-1', status: 'pending' },
-        data: { status: 'processing' },
-      });
-
-      expect(mockPrisma.client.outboxEvent.update).toHaveBeenCalledWith({
-        where: { id: 'outbox-1' },
-        data: {
-          status: 'completed',
-          processedAt: expect.any(Date),
-          lastError: null,
-        },
-      });
+      expect(mockRepo.claimForProcessing).toHaveBeenCalledWith('outbox-1');
+      expect(mockRepo.markCompleted).toHaveBeenCalledWith('outbox-1');
     });
 
     it('should increment attempts and return failed records to pending', async () => {
@@ -222,9 +203,10 @@ describe('OutboxService', () => {
         },
       ];
 
-      mockPrisma.client.outboxEvent.findMany.mockResolvedValue(pendingEvents);
-      mockPrisma.client.outboxEvent.updateMany.mockResolvedValue({ count: 1 });
-      mockPrisma.client.outboxEvent.update.mockResolvedValue({ attempts: 1, status: 'pending' });
+      mockRepo.requeueStaleProcessing.mockResolvedValue(undefined);
+      mockRepo.findPending.mockResolvedValue(pendingEvents);
+      mockRepo.claimForProcessing.mockResolvedValue(1);
+      mockRepo.markFailed.mockResolvedValue(undefined);
 
       const processEventSpy = jest
         .spyOn(service as unknown as { processEvent: (event: unknown) => Promise<void> }, 'processEvent')
@@ -234,20 +216,17 @@ describe('OutboxService', () => {
 
       processEventSpy.mockRestore();
 
-      expect(mockPrisma.client.outboxEvent.update).toHaveBeenNthCalledWith(1, {
-        where: { id: 'outbox-1' },
-        data: {
-          attempts: 1,
-          lastError: 'boom',
-          status: 'pending',
-        },
-      });
+      expect(mockRepo.markFailed).toHaveBeenCalledWith(
+        'outbox-1',
+        'boom',
+        1,
+        'pending',
+      );
     });
   });
 
   describe('retry logic', () => {
     beforeEach(async () => {
-      // Mock the private delay method to be instant (avoids 1s+4s+16s wait)
       jest.spyOn(service as any, 'delay').mockResolvedValue(undefined);
     });
 
@@ -266,44 +245,30 @@ describe('OutboxService', () => {
         updatedAt: new Date(),
       };
 
-      mockPrisma.client.outboxEvent.update.mockResolvedValue({
+      mockRepo.incrementAttemptsAndRequeue.mockResolvedValue({
         ...event,
         attempts: 1,
-        lastError: null,
-        processedAt: null,
-        createdAt: event.createdAt,
-        updatedAt: new Date(),
+        status: 'pending',
       });
 
-      // First retry
       const retry1 = await service.retry(event);
       expect(retry1.attempts).toBe(1);
 
-      // Update mock for second retry
-      mockPrisma.client.outboxEvent.update.mockResolvedValue({
+      mockRepo.incrementAttemptsAndRequeue.mockResolvedValue({
         ...event,
         attempts: 2,
-        lastError: null,
-        processedAt: null,
-        createdAt: event.createdAt,
-        updatedAt: new Date(),
+        status: 'pending',
       });
 
-      // Second retry
       const retry2 = await service.retry({ ...event, attempts: 1 });
       expect(retry2.attempts).toBe(2);
 
-      // Update mock for third retry
-      mockPrisma.client.outboxEvent.update.mockResolvedValue({
+      mockRepo.incrementAttemptsAndRequeue.mockResolvedValue({
         ...event,
         attempts: 3,
-        lastError: null,
-        processedAt: null,
-        createdAt: event.createdAt,
-        updatedAt: new Date(),
+        status: 'pending',
       });
 
-      // Third retry
       const retry3 = await service.retry({ ...event, attempts: 2 });
       expect(retry3.attempts).toBe(3);
     });
@@ -323,25 +288,19 @@ describe('OutboxService', () => {
         updatedAt: new Date(),
       };
 
-      mockPrisma.client.outboxEvent.update.mockResolvedValue({
+      mockRepo.markDeadLetter.mockResolvedValue({
         ...event,
         status: 'dead_letter',
-        lastError: `Failed after 3 retries`,
-        processedAt: null,
-        createdAt: event.createdAt,
-        updatedAt: new Date(),
+        lastError: 'Failed after 3 retries',
       });
 
       const result = await service.retry(event);
 
       expect(result.status).toBe('dead_letter');
-      expect(mockPrisma.client.outboxEvent.update).toHaveBeenCalledWith({
-        where: { id: event.id },
-        data: {
-          status: 'dead_letter',
-          lastError: expect.any(String),
-        },
-      });
+      expect(mockRepo.markDeadLetter).toHaveBeenCalledWith(
+        event.id,
+        expect.any(String),
+      );
     });
   });
 });

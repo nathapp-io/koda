@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { TimelineService } from './timeline.service';
-import { MemoryItemRepository, MemoryItem } from './memory-item-repository';
+import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
+import { MemoryItem } from './memory-item-repository';
 
 export type Intent = 'answer' | 'diagnose' | 'plan' | 'update' | 'search';
 
@@ -42,7 +43,7 @@ export class ContextBuilderService {
 
   constructor(
     private readonly timelineService: TimelineService,
-    private readonly memoryItemRepository: MemoryItemRepository,
+    private readonly memoryItemRepository: PrismaMemoryItemRepository,
   ) {}
 
   async getProjectContext(query: GetProjectContextQuery): Promise<GetProjectContextResponse> {

@@ -1,6 +1,6 @@
 // REFACTORED: bypasses NestJS TestingModule entirely. Services are instantiated directly
 // with mock dependencies, which avoids the per-test DI-container heap cost that was causing OOM.
-import { MemoryItemRepository } from '../../../src/memory/memory-item-repository';
+import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-item.repository';
 import { MemoryGovernanceService } from '../../../src/memory/memory-governance.service';
 import { MemoryGovernanceProcessor } from '../../../src/memory/memory-governance.processor';
 import { ExtractionService } from '../../../src/memory/extraction.service';
@@ -128,7 +128,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       });
 
 
-      const repo = new MemoryItemRepository({ client: mockClient } as any);
+      const repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       const result = await repo.upsert({
         projectId: 'proj-1',
         kind: MemoryKindEnum.FACT as any,
@@ -171,7 +171,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       });
 
 
-      const repo = new MemoryItemRepository({ client: mockClient } as any);
+      const repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       await repo.upsert({
         projectId: 'proj-1',
         kind: MemoryKindEnum.FACT as any,
@@ -198,7 +198,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       mockClient.memoryItem.count.mockResolvedValue(1);
 
 
-      const repo = new MemoryItemRepository({ client: mockClient } as any);
+      const repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       const result = await repo.findByProject({ projectId: 'proj-1', page: 1, limit: 20 });
 
       expect(result).toHaveProperty('data');
@@ -215,7 +215,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       mockClient.memoryItem.count.mockResolvedValue(0);
 
 
-      const repo = new MemoryItemRepository({ client: mockClient } as any);
+      const repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       await repo.findByProject({
         projectId: 'proj-1',
         kind: MemoryKindEnum.FACT as any,
@@ -263,7 +263,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       });
 
 
-      const repo = new MemoryItemRepository({ client: mockClient } as any);
+      const repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       const result = await repo.upsert({
         projectId: 'proj-1',
         kind: MemoryKindEnum.FACT as any,
@@ -300,7 +300,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       });
 
 
-      const repo = new MemoryItemRepository({ client: mockClient } as any);
+      const repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       await repo.upsert({
         id: 'existing-1',
         projectId: 'proj-1',
@@ -331,7 +331,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       mockClient.memoryItem.findFirst.mockResolvedValue(activeItem);
 
 
-      const repo = new MemoryItemRepository({ client: mockClient } as any);
+      const repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       const result = await repo.findActive('proj-1', 'FACT', 'ticket:1', 'status');
 
       expect(result).toBeDefined();
@@ -346,7 +346,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       mockClient.memoryItem.findFirst.mockResolvedValue(null);
 
 
-      const repo = new MemoryItemRepository({ client: mockClient } as any);
+      const repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       const result = await repo.findActive('proj-1', 'FACT', 'ticket:1', 'status');
 
       expect(result).toBeNull();
@@ -392,7 +392,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
     it('MemoryItemRepository has upsert method', async () => {
       const mockClient = createMockPrismaClient();
 
-      const repo = new MemoryItemRepository({ client: mockClient } as any);
+      const repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       expect(typeof repo.upsert).toBe('function');
     });
   });
@@ -403,7 +403,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       mockClient.memoryItem.update.mockResolvedValue({ id: 'mem-1', activeKey: null, status: 'rejected' });
 
 
-      const repo = new MemoryItemRepository({ client: mockClient } as any);
+      const repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       await repo.reject('mem-1');
 
       expect(mockClient.memoryItem.update).toHaveBeenCalledWith({
@@ -731,7 +731,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       mockClient.memoryItem.count.mockResolvedValue(1);
 
 
-      const repo = new MemoryItemRepository({ client: mockClient } as any);
+      const repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       const result = await repo.findByProjectMemory({
         projectId: 'proj-1',
         limit: 20,
@@ -762,7 +762,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       mockClient.memoryItem.count.mockResolvedValue(1);
 
 
-      const repo = new MemoryItemRepository({ client: mockClient } as any);
+      const repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       await repo.findByProjectMemory({
         projectId: 'proj-1',
         kind: MemoryKindEnum.FACT as any,
@@ -799,7 +799,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       mockClient.memoryItem.count.mockResolvedValue(1);
 
 
-      const repo = new MemoryItemRepository({ client: mockClient } as any);
+      const repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       await repo.findByProjectMemory({
         projectId: 'proj-1',
         subject: 'ticket:123',
@@ -837,7 +837,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       mockClient.memoryItem.count.mockResolvedValue(1);
 
 
-      const repo = new MemoryItemRepository({ client: mockClient } as any);
+      const repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       const result = await repo.findByProjectMemory({
         projectId: 'proj-1',
         status: 'superseded',
@@ -855,7 +855,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       mockClient.memoryItem.count.mockResolvedValue(0);
 
 
-      const repo = new MemoryItemRepository({ client: mockClient } as any);
+      const repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       await repo.findByProjectMemory({
         projectId: 'proj-slug-a',
         limit: 20,
@@ -935,7 +935,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       mockClient.memoryItem.count.mockResolvedValue(3);
 
 
-      const repo = new MemoryItemRepository({ client: mockClient } as any);
+      const repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       const result = await repo.findByProjectMemory({
         projectId: 'proj-1',
         limit: 20,
@@ -976,7 +976,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       mockClient.memoryItem.count.mockResolvedValue(0);
 
 
-      const __repo = new MemoryItemRepository({ client: mockClient } as any);
+      const __repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       const governance = new MemoryGovernanceService(__repo);
       const result = await governance.runCleanup('proj-1');
 
@@ -1023,7 +1023,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       });
 
 
-      const __repo = new MemoryItemRepository({ client: mockClient } as any);
+      const __repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       const governance = new MemoryGovernanceService(__repo);
       const result = await governance.expireMemories('proj-1');
 
@@ -1064,7 +1064,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       });
 
 
-      const __repo = new MemoryItemRepository({ client: mockClient } as any);
+      const __repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       const governance = new MemoryGovernanceService(__repo);
       const result = await governance.downrankStaleLowConfidence('proj-1');
 
@@ -1102,7 +1102,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       });
 
 
-      const __repo = new MemoryItemRepository({ client: mockClient } as any);
+      const __repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       const governance = new MemoryGovernanceService(__repo);
       const result = await governance.deduplicate('proj-1');
 
@@ -1143,7 +1143,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       });
 
 
-      const __repo = new MemoryItemRepository({ client: mockClient } as any);
+      const __repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       const governance = new MemoryGovernanceService(__repo);
       const result = await governance.applySupersession('proj-1');
 
@@ -1159,7 +1159,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       mockClient.memoryItem.count.mockResolvedValue(0);
 
 
-      const __repo = new MemoryItemRepository({ client: mockClient } as any);
+      const __repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       const governance = new MemoryGovernanceService(__repo);
       const result1 = await governance.runCleanup('proj-1');
       const result2 = await governance.runCleanup('proj-1');
@@ -1206,7 +1206,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       });
 
 
-      const __repo = new MemoryItemRepository({ client: mockClient } as any);
+      const __repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       const governance = new MemoryGovernanceService(__repo);
       const start = Date.now();
       await governance.runCleanup('proj-1');
@@ -1241,7 +1241,7 @@ describe('Memory Phase 3 Semantic Memory Acceptance Tests', () => {
       });
 
 
-      const __repo = new MemoryItemRepository({ client: mockClient } as any);
+      const __repo = new PrismaMemoryItemRepository({ client: mockClient } as any);
       const governance = new MemoryGovernanceService(__repo);
       await governance.runCleanup('proj-1');
 

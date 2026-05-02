@@ -13,7 +13,6 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { VcsPrStatus } from '../../../src/vcs/types';
 
@@ -32,10 +31,11 @@ jest.mock('../../../src/vcs/factory', () => ({
 
 // Import the service - will fail to compile if service doesn't exist yet
 import { VcsPrSyncService, SyncPrStatusResult } from '../../../src/vcs/vcs-pr-sync.service';
+import { PrismaVcsRepository } from '../../../src/vcs/prisma-vcs.repository';
 
 describe('VcsPrSyncService.syncPrStatus', () => {
   let service: VcsPrSyncService;
-  let prismaService: PrismaService;
+  let vcsRepo: jest.Mocked<PrismaVcsRepository>;
   let module: TestingModule;
 
   const projectId = 'project-123';
@@ -99,7 +99,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
     {
       id: 'link-3',
       ticketId: 'ticket-3',
-      url: 'https://github.com/owner/repo/pull/103',
+      url: 'https://github.com/owner/repo/repo/pull/103',
       provider: 'github',
       externalRef: 'owner/repo#103',
       prState: 'open',
@@ -108,12 +108,6 @@ describe('VcsPrSyncService.syncPrStatus', () => {
       createdAt: new Date(),
     },
   ];
-
-  const mockTicketLinkDelegate = {
-    findMany: jest.fn(),
-    update: jest.fn(),
-    findUnique: jest.fn(),
-  };
 
   const mockVcsProvider = {
     getPullRequestStatus: jest.fn(),
@@ -124,21 +118,6 @@ describe('VcsPrSyncService.syncPrStatus', () => {
     createPullRequest: jest.fn(),
     listPullRequests: jest.fn(),
   };
-
-  const mockClient = {
-    ticketLink: { ...mockTicketLinkDelegate },
-    ticket: {
-      findUnique: jest.fn(),
-      update: jest.fn(),
-    },
-    comment: {
-      create: jest.fn(),
-    },
-    ticketActivity: {
-      create: jest.fn(),
-    },
-    $transaction: jest.fn((fn) => fn(mockClient)),
-  } as any;
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -152,16 +131,20 @@ describe('VcsPrSyncService.syncPrStatus', () => {
       providers: [
         VcsPrSyncService,
         {
-          provide: PrismaService,
+          provide: PrismaVcsRepository,
           useValue: {
-            client: mockClient,
+            findExistingTicketByExternalId: jest.fn(),
+            createTicketFromIssue: jest.fn(),
+            findActiveTicketLinksWithPrs: jest.fn(),
+            updateTicketLinkPrState: jest.fn(),
+            applyMergedPrTransition: jest.fn(),
           },
         },
       ],
     }).compile();
 
     service = module.get<VcsPrSyncService>(VcsPrSyncService);
-    prismaService = module.get<PrismaService>(PrismaService);
+    vcsRepo = module.get(PrismaVcsRepository);
   });
 
   afterEach(async () => {
@@ -181,41 +164,16 @@ describe('VcsPrSyncService.syncPrStatus', () => {
   });
 
   describe('AC2: Queries TicketLink entries with active PRs', () => {
-    it('should query TicketLink where prNumber IS NOT NULL and prState NOT IN ("merged", "closed")', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([]);
+    it('should query active ticket links via repository for the given project', async () => {
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([]);
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
-      expect(mockTicketLinkDelegate.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            prNumber: { not: null },
-            prState: { notIn: ['merged', 'closed'] },
-          }),
-        }),
-      );
-    });
-
-    it('should scope query to tickets in the given project via ticket relation', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([]);
-
-      await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
-
-      // Should filter by project through the ticket relation
-      expect(mockTicketLinkDelegate.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            ticket: {
-              projectId: projectId,
-              deletedAt: null,
-            },
-          }),
-        }),
-      );
+      expect(vcsRepo.findActiveTicketLinksWithPrs).toHaveBeenCalledWith(projectId);
     });
 
     it('should return empty array when no active PRs found', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([]);
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
@@ -226,7 +184,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
 
   describe('AC3: Calls VCS provider to fetch current PR status', () => {
     it('should call getPullRequestStatus for each matching TicketLink', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce(mockTicketLinks);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce(mockTicketLinks as any);
 
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce({
         number: 101,
@@ -248,7 +206,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
     });
 
     it('should decrypt the VCS connection token before creating provider', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([]);
       const decryptToken = jest.requireMock('../../../src/common/utils/encryption.util').decryptToken;
       decryptToken.mockReturnValueOnce('decrypted-token');
 
@@ -272,16 +230,16 @@ describe('VcsPrSyncService.syncPrStatus', () => {
         title: 'PR 102',
       };
 
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinks[1]]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinks[1]] as any);
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(draftPrStatus);
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
-      expect(mockTicketLinkDelegate.update).not.toHaveBeenCalled();
+      expect(vcsRepo.updateTicketLinkPrState).not.toHaveBeenCalled();
       expect(result.updated).toBe(0);
     });
 
-    it('should update prState and prUpdatedAt when fetched state differs from stored', async () => {
+    it('should update prState when fetched state differs from stored', async () => {
       // PR 101 changed from 'open' to 'merged'
       const mergedPrStatus: VcsPrStatus = {
         number: 101,
@@ -295,23 +253,13 @@ describe('VcsPrSyncService.syncPrStatus', () => {
         title: 'PR 101',
       };
 
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinks[0]]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinks[0]] as any);
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
-      mockTicketLinkDelegate.update.mockResolvedValueOnce({
-        ...mockTicketLinks[0],
-        prState: 'merged',
-        prUpdatedAt: expect.any(Date),
-      });
+      vcsRepo.updateTicketLinkPrState.mockResolvedValueOnce(undefined);
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
-      expect(mockTicketLinkDelegate.update).toHaveBeenCalledWith({
-        where: { id: 'link-1' },
-        data: {
-          prState: 'merged',
-          prUpdatedAt: expect.any(Date),
-        },
-      });
+      expect(vcsRepo.updateTicketLinkPrState).toHaveBeenCalledWith('link-1', 'merged');
       expect(result.updated).toBe(1);
     });
 
@@ -329,12 +277,12 @@ describe('VcsPrSyncService.syncPrStatus', () => {
         title: 'PR 101',
       };
 
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinks[0]]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinks[0]] as any);
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(openPrStatus);
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
-      expect(mockTicketLinkDelegate.update).not.toHaveBeenCalled();
+      expect(vcsRepo.updateTicketLinkPrState).not.toHaveBeenCalled();
       expect(result.updated).toBe(0);
     });
 
@@ -351,18 +299,13 @@ describe('VcsPrSyncService.syncPrStatus', () => {
         title: 'PR 101',
       };
 
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinks[0]]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinks[0]] as any);
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
-      mockTicketLinkDelegate.update.mockResolvedValueOnce({
-        ...mockTicketLinks[0],
-        prState: 'merged',
-        prUpdatedAt: new Date(),
-      });
+      vcsRepo.updateTicketLinkPrState.mockResolvedValueOnce(undefined);
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
-      const updateCall = mockTicketLinkDelegate.update.mock.calls[0][0];
-      expect(updateCall.data.prState).toBe('merged');
+      expect(vcsRepo.updateTicketLinkPrState).toHaveBeenCalledWith('link-1', 'merged');
     });
 
     it('should map VcsPrStatus.merged=true to prState="merged"', async () => {
@@ -378,28 +321,22 @@ describe('VcsPrSyncService.syncPrStatus', () => {
         title: 'Title',
       };
 
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinks[0]]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinks[0]] as any);
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
-      mockTicketLinkDelegate.update.mockResolvedValueOnce({
-        ...mockTicketLinks[0],
-        prState: 'merged',
-      });
+      vcsRepo.updateTicketLinkPrState.mockResolvedValueOnce(undefined);
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
-      expect(mockTicketLinkDelegate.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            prState: 'merged',
-          }),
-        }),
+      expect(vcsRepo.updateTicketLinkPrState).toHaveBeenCalledWith(
+        'link-1',
+        'merged',
       );
     });
   });
 
   describe('AC5: Skip on general API error', () => {
     it('should skip PR and continue with remaining PRs when getPullRequestStatus throws general API error', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce(mockTicketLinks);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce(mockTicketLinks as any);
 
       // PR 101 throws a general API error (not 404)
       mockVcsProvider.getPullRequestStatus
@@ -427,7 +364,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
           title: 'PR 103',
         });
 
-      mockTicketLinkDelegate.update.mockResolvedValue({});
+      vcsRepo.updateTicketLinkPrState.mockResolvedValue(undefined);
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
@@ -438,7 +375,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
     });
 
     it('should count skipped PRs in result summary', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinks[0]]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinks[0]] as any);
 
       mockVcsProvider.getPullRequestStatus.mockRejectedValueOnce(
         new Error('Server error'),
@@ -451,7 +388,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
     });
 
     it('should NOT throw when a PR errors - should continue processing remaining PRs', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce(mockTicketLinks);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce(mockTicketLinks as any);
 
       mockVcsProvider.getPullRequestStatus.mockRejectedValueOnce(new Error('API Error'));
 
@@ -464,39 +401,27 @@ describe('VcsPrSyncService.syncPrStatus', () => {
 
   describe('AC6: Mark as closed on 404', () => {
     it('should set prState to "closed" when getPullRequestStatus throws NotFoundAppException (404)', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinks[0]]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinks[0]] as any);
 
       mockVcsProvider.getPullRequestStatus.mockRejectedValueOnce(
         new NotFoundAppException('PR not found'),
       );
 
-      mockTicketLinkDelegate.update.mockResolvedValueOnce({
-        ...mockTicketLinks[0],
-        prState: 'closed',
-      });
+      vcsRepo.updateTicketLinkPrState.mockResolvedValueOnce(undefined);
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
-      expect(mockTicketLinkDelegate.update).toHaveBeenCalledWith({
-        where: { id: 'link-1' },
-        data: {
-          prState: 'closed',
-          prUpdatedAt: expect.any(Date),
-        },
-      });
+      expect(vcsRepo.updateTicketLinkPrState).toHaveBeenCalledWith('link-1', 'closed');
     });
 
     it('should count 404 PRs as updated (state changed to closed), not skipped', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinks[0]]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinks[0]] as any);
 
       mockVcsProvider.getPullRequestStatus.mockRejectedValueOnce(
         new NotFoundAppException('PR not found'),
       );
 
-      mockTicketLinkDelegate.update.mockResolvedValueOnce({
-        ...mockTicketLinks[0],
-        prState: 'closed',
-      });
+      vcsRepo.updateTicketLinkPrState.mockResolvedValueOnce(undefined);
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
@@ -508,7 +433,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
 
   describe('AC7: Returns summary of updated and skipped counts', () => {
     it('should return { updated: number, skipped: number }', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([]);
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
@@ -522,7 +447,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
       // PR 101: updated (state changed)
       // PR 102: skipped (API error)
       // PR 103: updated (state changed)
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce(mockTicketLinks);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce(mockTicketLinks as any);
 
       mockVcsProvider.getPullRequestStatus
         .mockResolvedValueOnce({
@@ -549,7 +474,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
           title: 'PR 103',
         });
 
-      mockTicketLinkDelegate.update.mockResolvedValue({});
+      vcsRepo.updateTicketLinkPrState.mockResolvedValue(undefined);
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
@@ -558,7 +483,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
     });
 
     it('should return zeros when no active PRs exist', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([]);
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
@@ -567,7 +492,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
     });
 
     it('should process all PRs even if some fail to update in DB', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinks[0], mockTicketLinks[1]]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinks[0], mockTicketLinks[1]] as any);
 
       // First PR - fetched state differs, needs update
       mockVcsProvider.getPullRequestStatus
@@ -594,10 +519,10 @@ describe('VcsPrSyncService.syncPrStatus', () => {
           title: 'PR 102',
         });
 
-      // First update succeeds, second update fails
-      mockTicketLinkDelegate.update
+      // First update fails DB
+      vcsRepo.updateTicketLinkPrState
         .mockRejectedValueOnce(new Error('DB error'))
-        .mockResolvedValueOnce({});
+        .mockResolvedValueOnce(undefined);
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
@@ -608,34 +533,24 @@ describe('VcsPrSyncService.syncPrStatus', () => {
 
   describe('Error handling edge cases', () => {
     it('should handle NotFoundAppException vs general errors differently', async () => {
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinks[0]]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinks[0]] as any);
 
       // NotFoundAppException should result in prState='closed', not skipped
       mockVcsProvider.getPullRequestStatus.mockRejectedValueOnce(
         new NotFoundAppException('PR not found'),
       );
 
-      mockTicketLinkDelegate.update.mockResolvedValueOnce({
-        ...mockTicketLinks[0],
-        prState: 'closed',
-      });
+      vcsRepo.updateTicketLinkPrState.mockResolvedValueOnce(undefined);
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
       expect(result.updated).toBe(1);
-      expect(mockTicketLinkDelegate.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            prState: 'closed',
-          }),
-        }),
-      );
+      expect(vcsRepo.updateTicketLinkPrState).toHaveBeenCalledWith('link-1', 'closed');
     });
 
     it('should map fetched state correctly regardless of VCS provider', async () => {
-      // When VcsPrStatus.merged is true, prState should be 'merged'
       // When VcsPrStatus.merged is false and state is 'closed', prState should be 'closed'
-      mockTicketLinkDelegate.findMany.mockResolvedValueOnce([mockTicketLinks[0]]);
+      vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinks[0]] as any);
 
       const closedPrStatus: VcsPrStatus = {
         number: 101,
@@ -650,16 +565,12 @@ describe('VcsPrSyncService.syncPrStatus', () => {
       };
 
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(closedPrStatus);
-      mockTicketLinkDelegate.update.mockResolvedValueOnce({
-        ...mockTicketLinks[0],
-        prState: 'closed',
-      });
+      vcsRepo.updateTicketLinkPrState.mockResolvedValueOnce(undefined);
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
-      const updateCall = mockTicketLinkDelegate.update.mock.calls[0][0];
       // When merged=false and state='closed', prState should be 'closed'
-      expect(updateCall.data.prState).toBe('closed');
+      expect(vcsRepo.updateTicketLinkPrState).toHaveBeenCalledWith('link-1', 'closed');
     });
   });
 });
