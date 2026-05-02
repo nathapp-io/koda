@@ -218,8 +218,10 @@ impactScore = 0.3 * (affectedSymbols / totalSymbols * 100)
 ### Context Files (optional)
 - `apps/api/src/rag/rag.service.ts` — existing `importGraphify` to modify
 - `apps/api/src/rag/dto/import-graphify.dto.ts` — DTOs to extend
-- `apps/api/src/memory/outbox.service.ts` — outbox event to hook AST indexing into
+- `apps/api/src/outbox/outbox.service.ts` — outbox event to hook AST indexing into
 - `apps/api/src/retrieval/entity-store.service.ts` — Phase 2 entity store to extend
+
+**Repository + transaction pattern:** New Phase 4 persistence should follow the repository abstraction introduced in the Prisma IRepository refactor. Prefer repository classes (IRepository/AbstractPrismaRepository style) for data access, and use `TRANSACTION_MANAGER` (`txManager.run`) for multi-write consistency instead of raw Prisma `$transaction` callbacks in services/controllers.
 
 ### 5. GraphNode + EntityNode + Symbol Prisma Schema
 
