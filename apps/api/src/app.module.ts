@@ -47,6 +47,7 @@ import { validate } from './config/env.validation';
     PrismaModule.forRoot({
       isGlobal: true,
       client: PrismaClient,
+      transaction: true,
     }),
     ThrottlerModule.forRootAsync({
       useFactory: () => ({
