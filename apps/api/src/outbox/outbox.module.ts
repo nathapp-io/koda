@@ -6,11 +6,19 @@ import { OutboxProcessor } from './outbox-processor';
 import { AdminController } from './admin.controller';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { MemoryModule } from '../memory/memory.module';
+import { PrismaOutboxRepository } from './prisma-outbox.repository';
+import { OUTBOX_REPOSITORY } from './domain/outbox-event.domain';
 
 @Module({
   imports: [PrismaModule, ScheduleModule, MemoryModule],
   controllers: [AdminController],
-  providers: [OutboxService, OutboxFanOutRegistry, OutboxProcessor],
+  providers: [
+    PrismaOutboxRepository,
+    { provide: OUTBOX_REPOSITORY, useExisting: PrismaOutboxRepository },
+    OutboxService,
+    OutboxFanOutRegistry,
+    OutboxProcessor,
+  ],
   exports: [OutboxService, OutboxFanOutRegistry],
 })
 export class OutboxModule {}
