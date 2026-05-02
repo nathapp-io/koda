@@ -1,47 +1,53 @@
 {
   "project": "koda",
-  "feature": "memory-phase4-graph-code-intelligence",
-  "analysis": "Phase 4 introduces three major new service areas (IncrementalGraphDiffService, AstIndexService, EntityGraphService) and extends existing RagService.importGraphify(). Key files to modify: apps/api/src/rag/rag.service.ts, apps/api/src/rag/dto/ import-graphify.dto.ts. New files needed: incremental-graph-diff.service.ts, ast-index.service.ts, entity-graph.service.ts, impact-analysis.service.ts, canonical-state.service.ts, plus corresponding DTOs and Prisma schema additions. Dependencies: US-001 (base) → US-002 → US-004; US-001 + US-002 + US-003 → US-005; US-006 is independent. Schema additions (GraphNode, GraphLink, EntityNode, EntityLink, Symbol) follow SQLite-compatible JSON-string pattern. Parser choice: ts-morph for TypeScript symbol extraction. Symbol ID convention: {repoId}:{filePath}::{SymbolName}. Impact score formula has denominator guards to prevent division by zero.",
+  "feature": "Memory Phase 4 \u2014 Graph + Code Intelligence",
+  "analysis": "The apps/api/src/graph/ directory is completely empty \u2014 all graph persistence and traversal services are greenfield. apps/api/src/codeintel/ does not exist \u2014 all AST/symbol and impact-analysis services are greenfield. The Prisma schema at apps/api/prisma/schema.prisma currently lacks GraphNode, GraphLink, EntityNode, EntityLink, and Symbol models; these must be added with a migration.\n\nRagService.importGraphify() in apps/api/src/rag/rag.service.ts currently performs a destructive full re-import: it calls deleteAllBySourceType(projectId, 'code') then re-indexes every node into LanceDB. This O(n) behavior must be replaced by IncrementalGraphDiffService, which loads the stored graph from durable GraphNode/GraphLink tables, computes added/updated/removed deltas, and re-indexes only changed nodes.\n\nRagController.importGraphify() in apps/api/src/rag/rag.controller.ts currently restricts access to ADMIN only. The spec expands this to admin, developer, or agent. KodaDomainWriter.importGraphify() in apps/api/src/koda-domain-writer/koda-domain-writer.service.ts consumes RagService.importGraphify() and expects the return shape { imported: number; cleared: number }. Changing this to DiffResult is a breaking interface change that will require updates in the writer service and its tests. Multiple test suites mock importGraphify returning { imported, cleared }: koda-domain-writer.service.spec.ts, koda-domain-writer.integration.spec.ts, graphify-kb-validation.integration.spec.ts, rag.service.spec.ts, and rag-project-id-validation.integration.spec.ts.\n\nThe Outbox system (OutboxService, OutboxFanOutRegistry, PrismaOutboxRepository) is already in place and extensible. New code_commit event handlers can be registered in the fan-out registry. VCS webhook handling (VcsWebhookController, VcsWebhookService) currently routes issues and pull_request events; push events are not handled and must be added. The GitHub provider does not implement fetchCommitFiles; the IVcsProvider interface must be extended.\n\nEntityStore at apps/api/src/rag/entity-store.ts is Phase 2's in-memory index. Phase 4 must not use it for graph traversal or impact analysis; instead it introduces durable EntityNode/EntityLink tables. Prisma uses SQLite; arrays/objects must be stored as JSON-encoded strings and validated in repositories/services, following the existing pattern in MemoryItem and OutboxEvent.\n\nThe repository abstraction (AbstractPrismaRepository, TRANSACTION_MANAGER from @nathapp/nestjs-data) is established and should be used for new persistence. AppModule will need new modules registered.\n\nRisks:\n1. Breaking change to importGraphify return type \u2014 affects controller, domain writer, and ~5 test suites.\n2. Circular dependency risk \u2014 VcsModule already imports RagModule. New graph/codeintel modules must not create cycles.\n3. Performance regression \u2014 diff-and-apply must complete in <2s for 500+ nodes; the implementation must use batch operations and avoid N+1 queries.\n4. Schema migration \u2014 adding 5 models with foreign keys to Project requires a Prisma migration and db:generate.\n5. ts-morph dependency \u2014 AST indexing requires adding ts-morph to apps/api; parser failures must not abort the entire commit.\n\nMigration path:\n1. Add Prisma models and run migration.\n2. Implement IncrementalGraphDiffService with GraphStoreService/repositories and update RagService.importGraphify() to delegate to it.\n3. Update RagController.importGraphify() role check and return type.\n4. Update KodaDomainWriter.importGraphify() and all affected tests to expect DiffResult.\n5. Add fetchCommitFiles to VCS provider interface and GitHub implementation.\n6. Implement AstIndexService, EntityGraphService, ImpactAnalysisService, CanonicalStateService.\n7. Register new outbox handlers and extend VCS webhook for push events.\n8. Add new controllers/modules to AppModule and regenerate openapi.json.",
   "branchName": "feat/memory-phase4-graph-code-intelligence",
-  "createdAt": "2026-04-28T12:00:00.000Z",
-  "updatedAt": "2026-04-28T12:00:00.000Z",
+  "createdAt": "2026-05-02T16:10:18.316522+00:00",
+  "updatedAt": "2026-05-02T16:10:18.316522+00:00",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Incremental Graph Diff — Replace Full Re-Import",
-      "description": "**Goal** — Replace O(n) full re-import with incremental diff-and-apply against durable graph tables.\n\n**Motivation** — importGraphify() deletes all nodes then re-indexes everything in memory, causing timeouts at 500+ nodes.\n\n**Interface**\n```typescript\nclass IncrementalGraphDiffService {\n  constructor(\n    private graphStore: GraphStoreService,\n    private rag: RagService,\n  ) {}\n\n  async diffAndApply(\n    projectId: string,\n    newNodes: GraphifyNodeDto[],\n    newLinks: GraphifyLinkDto[],\n  ): Promise<DiffResult>\n\n  async getStoredGraph(projectId: string): Promise<StoredGraph>\n}\n\ninterface StoredGraph {\n  nodeMap: Map<string, GraphifyNodeDto>;\n  linkMap: Map<string, GraphifyLinkDto[]>;\n}\n\ninterface DiffResult {\n  added: number;\n  updated: number;\n  removed: number;\n  indexed: number;\n  durationMs: number;\n}\n```\n\n**Approach** — 5-step diff: (1) load stored graph from GraphNode + GraphLink tables keyed by projectId+nodeId, (2) compute added/updated/removed sets by comparing newIds vs storedIds, (3) delete removed nodes from both GraphNode table and LanceDB (by graphify nodeId / RAG sourceId), (4) upsert changed nodes into GraphNode table and regenerate adjacency text, (5) upsert/reconcile links. Only changed nodes are re-indexed into LanceDB. Unchanged nodes are skipped entirely.",
+      "title": "Incremental Graph Diff \u2014 Replace Full Re-Import",
+      "description": "**Goal** \u2014 Replace O(n) full re-import with incremental diff-and-apply against durable graph tables.\n\n**Motivation** \u2014 importGraphify() deletes all nodes then re-indexes everything in memory, causing timeouts at 500+ nodes.\n\n**Approach** \u2014 Compute a diff between the incoming graph and the stored graph. Apply only the delta (added, modified, removed nodes/links).\n1. Load stored graph from GraphNode + GraphLink Prisma tables (keyed by projectId + nodeId).\n2. Compare: newIds - storedIds = added; storedIds - newIds = removed; intersection where content changed = updated.\n3. For removed nodes: delete from GraphNode table + delete from LanceDB vector store (by graphify nodeId / RAG sourceId).\n4. For added/updated nodes: upsert into GraphNode table + regenerate adjacency text + upsert into LanceDB.\n5. Links: upsert link records, delete stale links.\n\nContent regeneration for updated nodes: Only regenerate adjacency text for nodes whose label, type, source_file, or outgoing links changed. Skip unchanged nodes entirely.\n\n**Scope** \u2014 In: IncrementalGraphDiffService, GraphStoreService, GraphNode/GraphLink repositories, Prisma schema additions for GraphNode and GraphLink, RagService.importGraphify refactor, RagController role check update. Out: AST parsing, entity graph, impact analysis, VCS webhook changes.\n\n**Interface**\n```typescript\nclass IncrementalGraphDiffService {\n  constructor(\n    private graphStore: GraphStoreService,\n    private rag: RagService,\n  ) {}\n\n  async diffAndApply(\n    projectId: string,\n    newNodes: GraphifyNodeDto[],\n    newLinks: GraphifyLinkDto[],\n  ): Promise<DiffResult>\n\n  async getStoredGraph(projectId: string): Promise<StoredGraph>\n}\n\ninterface StoredGraph {\n  nodeMap: Map<string, GraphifyNodeDto>;\n  linkMap: Map<string, GraphifyLinkDto[]>;\n}\n\ninterface DiffResult {\n  added: number;\n  updated: number;\n  removed: number;\n  indexed: number;\n  durationMs: number;\n}\n```\n\n**Schema additions**\n```prisma\nmodel GraphNode {\n  id          String   @id @default(cuid())\n  projectId   String\n  nodeId      String\n  label       String\n  type        String?\n  sourceFile  String?\n  community   Int?\n  metadata    String   @default(\"{}\")\n  indexedAt   DateTime @default(now())\n  project     Project  @relation(fields: [projectId], references: [id])\n  outgoingLinks GraphLink[] @relation(\"GraphLinkSource\")\n  incomingLinks GraphLink[] @relation(\"GraphLinkTarget\")\n  @@unique([projectId, nodeId])\n  @@index([projectId])\n}\n\nmodel GraphLink {\n  id          String   @id @default(cuid())\n  projectId   String\n  sourceGraphNodeId String\n  targetGraphNodeId String\n  relation    String   @default(\"related\")\n  project     Project  @relation(fields: [projectId], references: [id])\n  sourceNode  GraphNode @relation(\"GraphLinkSource\", fields: [sourceGraphNodeId], references: [id], onDelete: Cascade)\n  targetNode  GraphNode @relation(\"GraphLinkTarget\", fields: [targetGraphNodeId], references: [id], onDelete: Cascade)\n  @@unique([projectId, sourceGraphNodeId, targetGraphNodeId, relation])\n  @@index([projectId, sourceGraphNodeId])\n  @@index([projectId, targetGraphNodeId])\n}\n```",
       "acceptanceCriteria": [
         "IncrementalGraphDiffService.diffAndApply() computes a diff and applies only the delta",
-        "Stored graph is loaded from GraphNode + GraphLink Prisma tables, not from LanceDB",
-        "When newNodes has 100 nodes and stored has 90, diffAndApply() returns added=10, removed=0",
-        "When a stored node is absent from newNodes, it is deleted from both GraphNode table and LanceDB (by graphify nodeId / RAG sourceId)",
-        "When a node exists in both with unchanged content, it is skipped (no re-index)",
-        "diffAndApply() is called by the existing importGraphify endpoint and replaces the current deleteAllBySourceType logic",
-        "DiffResult.indexed reflects only the number of nodes actually written to LanceDB (not the total node count)",
+        "Stored graph is loaded from GraphNode + GraphLink Prisma tables; not from LanceDB",
+        "When newNodes has 100 nodes and stored has 90, diffAndApply returns added=10 and removed=0",
+        "When a stored node is absent from newNodes, it is deleted from both GraphNode table and LanceDB by its graphify nodeId / RAG sourceId",
+        "When a node exists in both with unchanged content, it is skipped and no re-index occurs",
+        "diffAndApply is called by the existing importGraphify endpoint, replacing the current deleteAllBySourceType logic",
+        "DiffResult.indexed reflects only the number of nodes actually written to LanceDB",
         "A diff-and-apply of 500 unchanged nodes + 10 added + 5 removed completes in under 2 seconds",
         "DiffResult includes durationMs for performance monitoring",
         "Only actors with role admin, developer, or agent can call importGraphify (enforced at controller layer)"
       ],
       "suggestedCriteria": [
-        "When newNodes is empty and stored has 50 nodes, diffAndApply returns removed=50 and added=0",
-        "When stored is empty and newNodes has 20 nodes, diffAndApply returns added=20 and indexed=20",
-        "diffAndApply throws KodaError when projectId does not exist"
+        "diffAndApply returns durationMs greater than 0 even when no changes are detected",
+        "When newNodes is empty and stored graph has nodes, all stored nodes are marked removed and deleted from both tables and LanceDB",
+        "Concurrent calls to diffAndApply for the same projectId do not corrupt the stored graph or LanceDB state"
       ],
       "contextFiles": [
         "apps/api/src/rag/rag.service.ts",
+        "apps/api/src/rag/rag.controller.ts",
         "apps/api/src/rag/dto/import-graphify.dto.ts",
-        "apps/api/prisma/schema.prisma"
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/koda-domain-writer/koda-domain-writer.service.ts"
       ],
-      "tags": ["graph", "api", "performance"],
+      "tags": [
+        "feature",
+        "api",
+        "graph",
+        "performance"
+      ],
       "dependencies": [],
       "workdir": "apps/api",
       "status": "pending",
       "passes": false,
       "routing": {
         "complexity": "complex",
-        "testStrategy": "three-session-tdd-lite",
-        "noTestJustification": null,
-        "reasoning": "New service with cross-store dependencies (Prisma + LanceDB), algorithmic diff logic, and role-based access control enforcement"
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Multi-module service with new repositories, diff algorithm, LanceDB integration, and a security-critical role check expansion at the controller layer."
       },
       "escalations": [],
       "attempts": 0
@@ -49,40 +55,48 @@
     {
       "id": "US-002",
       "title": "AST/Symbol Index Pipeline",
-      "description": "**Goal** — Index TypeScript/JavaScript source files at symbol level using a deterministic parser, enabling symbol-level impact queries.\n\n**Motivation** — Adjacency text is not true symbol-level metadata; graphify lacks AST/symbol index.\n\n**Interface**\n```typescript\nclass AstIndexService {\n  constructor(\n    private codeGraph: CodeGraphService,\n    private symbolStore: SymbolStore,\n  ) {}\n\n  async indexCommit(repoId: string, commitHash: string, files: SourceFile[]): Promise<SymbolIndexResult>\n  async getSymbol(projectId: string, symbolId: string): Promise<Symbol | null>\n  async getCallers(projectId: string, symbolId: string): Promise<CallerInfo[]>\n  async getCallees(projectId: string, symbolId: string): Promise<CalleeInfo[]>\n}\n\ninterface SymbolIndexResult {\n  commitHash: string;\n  symbolsIndexed: number;\n  filesIndexed: number;\n  fileErrors: Array<{ path: string; error: string }>;\n  durationMs: number;\n}\n\ninterface Symbol {\n  id: string;\n  symbolId: string;\n  projectId: string;\n  repoId: string;\n  commitHash: string;\n  name: string;\n  kind: 'class' | 'method' | 'function' | 'interface' | 'enum';\n  file: string;\n  startLine: number;\n  endLine: number;\n  signature?: string;\n  callers: string[];\n  callees: string[];\n  docComment?: string;\n}\n```\n\n**Approach** — Use ts-morph parser for TypeScript projects. Parse only files changed in the commit (incremental). Symbol ID convention: {repoId}:{filePath}::{SymbolName}. Callers/callees are derived from parser output (not LLM). Parser failures for one file do not block other files.",
+      "description": "**Goal** \u2014 Parse TypeScript/JavaScript source files at the symbol level and store deterministic metadata in a durable Symbol table.\n\n**Motivation** \u2014 Graphify delivered adjacency text but no true AST/symbol-level metadata; Phase 4 must index classes, methods, functions, interfaces, and enums with signatures, callers, and callees.\n\n**Approach** \u2014 Parse TypeScript/JavaScript source files with a deterministic parser (ts-morph preferred for TypeScript projects). Index at the symbol level, not file level. Parser output is the source of truth; no LLM is used to identify symbol names, locations, signatures, callers, or callees. Process files changed in the commit only (not full repo). projectId comes from the repoId-to-projectId mapping.\n\nSymbol ID convention: {repoId}:{filePath}::{SymbolName} \u2014 unique within a project. If overloaded or nested symbols collide, append a stable parser-derived suffix such as #2.\n\nChanged file content: The code_commit outbox handler resolves file contents before calling AstIndexService.indexCommit(), either through a provider method added in this phase (fetchCommitFiles) or through a repo checkout/cache service. The webhook controller does not synchronously fetch file contents.\n\n**Scope** \u2014 In: AstIndexService, Symbol repository, Symbol Prisma model, ts-morph integration, outbox code_commit handler, VCS provider fetchCommitFiles extension. Out: Entity graph, impact analysis, webhook controller routing.\n\n**Interface**\n```typescript\nclass AstIndexService {\n  constructor(\n    private codeGraph: CodeGraphService,\n    private symbolStore: SymbolStore,\n  ) {}\n\n  async indexCommit(repoId: string, commitHash: string, files: SourceFile[]): Promise<SymbolIndexResult>\n  async getSymbol(projectId: string, symbolId: string): Promise<Symbol | null>\n  async getCallers(projectId: string, symbolId: string): Promise<CallerInfo[]>\n  async getCallees(projectId: string, symbolId: string): Promise<CalleeInfo[]>\n}\n\ninterface SymbolIndexResult {\n  commitHash: string;\n  symbolsIndexed: number;\n  filesIndexed: number;\n  fileErrors: Array<{ path: string; error: string }>;\n  durationMs: number;\n}\n\ninterface Symbol {\n  id: string;\n  symbolId: string;\n  projectId: string;\n  repoId: string;\n  commitHash: string;\n  name: string;\n  kind: 'class' | 'method' | 'function' | 'interface' | 'enum';\n  file: string;\n  startLine: number;\n  endLine: number;\n  signature?: string;\n  callers: string[];\n  callees: string[];\n  docComment?: string;\n}\n```\n\n**Schema additions**\n```prisma\nmodel Symbol {\n  id           String   @id @default(cuid())\n  projectId    String\n  symbolId     String\n  repoId       String\n  commitHash   String\n  name         String\n  kind         String\n  file         String\n  startLine    Int\n  endLine      Int\n  signature    String?\n  callers      String   @default(\"[]\")\n  callees      String   @default(\"[]\")\n  docComment   String?\n  indexedAt    DateTime @default(now())\n  project      Project  @relation(fields: [projectId], references: [id])\n  @@unique([projectId, symbolId])\n  @@index([projectId, repoId])\n  @@index([projectId, commitHash])\n}\n```",
       "acceptanceCriteria": [
         "AstIndexService.indexCommit() parses source files and stores symbol metadata in the Symbol Prisma table",
         "Symbol.symbolId uses the convention {repoId}:{filePath}::{SymbolName} and is globally unique within a project",
         "getCallers(symbolId) returns all symbols that include this symbol in their JSON callers list",
         "getCallees(symbolId) returns all symbols in this symbol's JSON callees list",
-        "When indexCommit is called with files=[{path: 'src/auth.ts', content: '...'}], only src/auth.ts is parsed (incremental — existing symbols for unchanged files are preserved)",
-        "Symbol.signature captures parameter types and return type (e.g. '(userId: string): Promise<User>')",
-        "Indexing is triggered by a code_commit outbox event (fired by the VCS webhook handler)",
+        "When indexCommit is called with files=[{path: 'src/auth.ts', content: '...'}], only src/auth.ts is parsed and existing symbols for unchanged files are preserved",
+        "Symbol.signature captures parameter types and return type (e.g. (userId: string): Promise<User>)",
+        "Indexing is triggered by a code_commit outbox event fired by the VCS webhook handler",
         "A commit with 20 files (avg 200 lines each) is indexed in under 30 seconds",
-        "Only actors with role admin or developer can call AstIndexService.indexCommit() directly (not agents); role checked at controller layer",
-        "Parser failures for one file are recorded in the result and do not prevent other files in the same commit from being indexed",
+        "Only actors with role admin or developer can call AstIndexService.indexCommit() directly; role is checked at controller layer",
+        "Parser failures for one file are recorded in SymbolIndexResult.fileErrors and do not prevent other files in the same commit from being indexed",
         "The code_commit handler resolves changed file contents before calling indexCommit(); the webhook controller only enqueues commit metadata"
       ],
       "suggestedCriteria": [
-        "indexCommit() with zero files returns symbolsIndexed=0 and filesIndexed=0",
-        "getSymbol() returns null when symbolId does not exist",
-        "getCallers() returns empty array when no symbols call the given symbol",
-        "When two symbols have the same name in different files, they have distinct symbolIds"
+        "indexCommit with an empty files array returns symbolsIndexed=0 without error",
+        "getSymbol returns null when symbolId does not exist in the project",
+        "getCallers returns an empty array when no symbols reference the given symbolId"
       ],
       "contextFiles": [
-        "apps/api/src/memory/outbox.service.ts",
-        "apps/api/prisma/schema.prisma"
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/outbox/outbox-fan-out-registry.ts",
+        "apps/api/src/outbox/outbox.service.ts",
+        "apps/api/src/vcs/vcs-provider.ts",
+        "apps/api/src/vcs/providers/github.provider.ts"
       ],
-      "tags": ["codeintel", "api", "parsing"],
-      "dependencies": ["US-001"],
+      "tags": [
+        "feature",
+        "api",
+        "code-intelligence",
+        "ast"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
       "workdir": "apps/api",
       "status": "pending",
       "passes": false,
       "routing": {
         "complexity": "complex",
-        "testStrategy": "three-session-tdd-lite",
-        "noTestJustification": null,
-        "reasoning": "New service with parser integration, incremental indexing logic, and Symbol table management with JSON array fields"
+        "testStrategy": "three-session-tdd",
+        "reasoning": "New ts-morph integration, symbol storage with JSON string arrays, outbox handler wiring, and security-critical direct-access role check."
       },
       "escalations": [],
       "attempts": 0
@@ -90,75 +104,94 @@
     {
       "id": "US-003",
       "title": "Ticket/Entity Graph Builder",
-      "description": "**Goal** — Build a durable entity graph linking tickets, services, owners, and incidents to enable graph traversal queries.\n\n**Motivation** — Code graph is isolated from operational context; no way to answer which tickets/services are affected by a change.\n\n**Interface**\n```typescript\nclass EntityGraphService {\n  constructor(private entityStore: EntityStore) {}\n\n  async rebuildGraph(projectId: string): Promise<void>\n  async onTicketEvent(event: TicketEvent): Promise<void>\n  async onGraphifyImport(projectId: string, nodes: GraphifyNodeDto[]): Promise<void>\n  async getRelatedEntities(projectId: string, entityId: string, depth?: number): Promise<EntityPath[]>\n  async getIncidentImpact(projectId: string, incidentTicketId: string): Promise<ImpactAnalysis>\n}\n\ninterface EntityPath {\n  path: EntityRecord[];\n  relation: string;\n  depth: number;\n}\n\ninterface ImpactAnalysis {\n  incidentTicketId: string;\n  affectedServices: EntityRecord[];\n  affectedTickets: EntityRecord[];\n  affectedCodeModules: EntityRecord[];\n  rootCause?: string;\n}\n```\n\n**Entity node types:** ticket (from TicketEvent), service (from graphify node type=code_module), owner (from assignedToUserId/assignedToAgentId), incident (from priority=critical/high tickets).\n\n**Persistence:** EntityNode and EntityLink Prisma tables. Do not depend on Phase 2's in-memory EntityStore for graph traversal.\n\n**Link creation:** ticket→service from gitRefFile/labels/graphify source_file; ticket→owner from assignedToUserId/assignedToAgentId; service→service from graphify links with relation=depends_on; incident→ticket from incident ticket linking events.",
+      "description": "**Goal** \u2014 Build and maintain a durable entity graph linking tickets, services, owners, and incidents using ticket events and graphify nodes.\n\n**Motivation** \u2014 The code graph is isolated from operational context; there is no ticket/entity graph connecting code changes to operational impact.\n\n**Approach** \u2014 Entity nodes and links are persisted in EntityNode and EntityLink Prisma tables. Do not depend on Phase 2's in-memory EntityStore for graph traversal or impact analysis.\n\nEntity node types:\n- ticket: extracted from TicketEvent\n- service: extracted from graphify node type=code_module (file path = service boundary)\n- owner: extracted from ticket assignedToUserId or assignedToAgentId\n- incident: extracted from tickets with priority=critical or priority=high\n\nLink creation:\n- ticket -> service: inferred from gitRefFile, linked code files, graphified source_file, labels, or a future explicit serviceId\n- ticket -> owner: from assignedToUserId or assignedToAgentId\n- service -> service: from graphify links with relation='depends_on'\n- incident -> ticket: from incident ticket linking events\n\n**Scope** \u2014 In: EntityGraphService, EntityNode/EntityLink repositories, Prisma schema additions, outbox fan-out handlers for ticket_event and graphify_import. Out: AST parsing, impact score computation, VCS webhook.\n\n**Interface**\n```typescript\nclass EntityGraphService {\n  constructor(private entityStore: EntityStore) {}\n\n  async rebuildGraph(projectId: string): Promise<void>\n  async onTicketEvent(event: TicketEvent): Promise<void>\n  async onGraphifyImport(projectId: string, nodes: GraphifyNodeDto[]): Promise<void>\n  async getRelatedEntities(projectId: string, entityId: string, depth?: number): Promise<EntityPath[]>\n  async getIncidentImpact(projectId: string, incidentTicketId: string): Promise<ImpactAnalysis>\n}\n\ninterface EntityPath {\n  path: EntityRecord[];\n  relation: string;\n  depth: number;\n}\n\ninterface ImpactAnalysis {\n  incidentTicketId: string;\n  affectedServices: EntityRecord[];\n  affectedTickets: EntityRecord[];\n  affectedCodeModules: EntityRecord[];\n  rootCause?: string;\n}\n```\n\n**Schema additions**\n```prisma\nmodel EntityNode {\n  id          String   @id @default(cuid())\n  projectId   String\n  entityId    String\n  type        String\n  label       String\n  tags        String   @default(\"[]\")\n  sourceType  String?\n  sourceId    String?\n  metadata    String   @default(\"{}\")\n  updatedAt   DateTime @updatedAt\n  createdAt   DateTime @default(now())\n  project       Project @relation(fields: [projectId], references: [id])\n  outgoingLinks EntityLink[] @relation(\"EntityLinkSource\")\n  incomingLinks EntityLink[] @relation(\"EntityLinkTarget\")\n  @@unique([projectId, entityId])\n  @@index([projectId, type])\n}\n\nmodel EntityLink {\n  id             String   @id @default(cuid())\n  projectId      String\n  sourceEntityNodeId String\n  targetEntityNodeId String\n  relation       String\n  confidence     Float    @default(0.8)\n  sourceType     String?\n  sourceId       String?\n  createdAt      DateTime @default(now())\n  project      Project @relation(fields: [projectId], references: [id])\n  sourceEntity EntityNode @relation(\"EntityLinkSource\", fields: [sourceEntityNodeId], references: [id], onDelete: Cascade)\n  targetEntity EntityNode @relation(\"EntityLinkTarget\", fields: [targetEntityNodeId], references: [id], onDelete: Cascade)\n  @@unique([projectId, sourceEntityNodeId, targetEntityNodeId, relation])\n  @@index([projectId, sourceEntityNodeId])\n  @@index([projectId, targetEntityNodeId])\n}\n```",
       "acceptanceCriteria": [
         "EntityGraphService.rebuildGraph(projectId) rebuilds all entity nodes and links for a project",
         "Entity graph data is persisted in EntityNode and EntityLink tables, not only in Phase 2's in-memory EntityStore",
-        "onTicketEvent(status_changed) updates the entity node for that ticket (if it exists)",
+        "onTicketEvent(status_changed) updates the entity node for that ticket if it exists",
         "onGraphifyImport() extracts service entities from graphify nodes with type=code_module",
-        "The initial implementation does not require a Ticket.serviceId column; service linkage works from current Koda fields (gitRefFile, labels, linked code/module references) until an explicit service relation exists",
+        "The initial implementation does not require a Ticket.serviceId column; service linkage works from current Koda fields (gitRefFile, labels, linked code/module references)",
         "getRelatedEntities(projectId, entityId, depth=2) returns all entities reachable within 2 hops",
         "getIncidentImpact(projectId, incidentTicketId) returns all entities linked to the incident",
         "Service entities extracted from graphify inherit tags from the graphify node (e.g. ['backend', 'auth'])",
-        "Entity graph is updated incrementally via outbox fan-out (no full rebuild on every event)",
+        "Entity graph is updated incrementally via outbox fan-out with no full rebuild on every event",
         "A graph with 500 nodes and 2000 edges returns getRelatedEntities in under 50ms"
       ],
       "suggestedCriteria": [
-        "When entityId does not exist, getRelatedEntities returns empty array",
-        "When incidentTicketId is not an incident type, getIncidentImpact returns empty affectedServices",
-        "onGraphifyImport with zero code_module nodes creates no service entities"
+        "onTicketEvent for a ticket that does not exist in the EntityNode table creates the entity node instead of failing",
+        "rebuildGraph deletes stale EntityLink records that no longer have corresponding source or target entities",
+        "getIncidentImpact returns empty arrays when the incident ticket has no linked entities"
       ],
       "contextFiles": [
-        "apps/api/src/retrieval/entity-store.service.ts",
-        "apps/api/prisma/schema.prisma"
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/rag/entity-store.ts",
+        "apps/api/src/memory/extraction.service.ts",
+        "apps/api/src/outbox/outbox-fan-out-registry.ts",
+        "apps/api/src/events/ticket-event.service.ts"
       ],
-      "tags": ["graph", "entity", "api"],
-      "dependencies": [],
+      "tags": [
+        "feature",
+        "api",
+        "graph",
+        "entity"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
       "workdir": "apps/api",
       "status": "pending",
       "passes": false,
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd-lite",
-        "noTestJustification": null,
-        "reasoning": "New service with EntityNode/EntityLink persistence, graph traversal algorithms, and event-driven incremental updates"
+        "reasoning": "Graph traversal algorithms, durable persistence with JSON string fields, outbox integration, and performance constraints \u2014 but no security-critical access control changes."
       },
       "escalations": [],
       "attempts": 0
     },
     {
       "id": "US-004",
-      "title": "VCS Webhook Handler to code_commit Outbox Event",
-      "description": "**Goal** — Extend VCS webhook controller to handle push events and enqueue code_commit outbox events for AST indexing.\n\n**Motivation** — Code changes from VCS pushes must trigger AST indexing and symbol extraction, but webhook handlers must not synchronously fetch file contents.\n\n**Approach** — VcsWebhookController extends existing project-scoped webhook surface at POST /projects/:slug/vcs-webhook. Webhook validates repository identifier, ref, commits[], and sender. For each commit, enqueue code_commit outbox event with {repoId, commitHash, ref, changedFiles}. AstIndexService.indexCommit() is called by the code_commit outbox handler asynchronously. Webhook handler is idempotent: dedup by commitHash within 5-minute window.\n\n**Security:** GitHub webhook signature verification reuses existing x-hub-signature-256 flow. Webhook secret from project VCS connection record (never hard-coded).",
+      "title": "VCS Webhook Handler \u2192 code_commit Outbox Event",
+      "description": "**Goal** \u2014 Extend the existing VCS webhook surface to handle push events and enqueue code_commit outbox events for asynchronous AST indexing.\n\n**Motivation** \u2014 Webhook controllers must not synchronously fetch file contents or perform heavy indexing; instead they should enqueue lightweight events for outbox processing.\n\n**Approach** \u2014 Extend the existing project-scoped webhook surface at POST /projects/:slug/vcs-webhook. Validate the push payload (repository identifier, ref, commits[], sender identifier). For each commit, enqueue a code_commit outbox event with { repoId, commitHash, ref, changedFiles }. AstIndexService.indexCommit() is called by the code_commit outbox handler, not synchronously by the webhook controller.\n\nGitHub webhook signature verification reuses the existing x-hub-signature-256 flow. The webhook secret comes from the project's VCS connection record. If event enqueue fails, the webhook logs the failure and returns a non-2xx response so the provider can retry.\n\nIdempotency: pushing the same commitHash twice does not create duplicate outbox events (dedup by commitHash within a 5-minute window).\n\n**Scope** \u2014 In: VcsWebhookController, VcsWebhookService, OutboxService, code_commit event type. Out: AST parsing, symbol storage, impact analysis.\n\n**Interface** \u2014 No new service class. The existing VcsWebhookController.handleWebhook signature is extended to route push events. The outbox event payload shape is:\n```typescript\ninterface CodeCommitOutboxPayload {\n  repoId: string;\n  commitHash: string;\n  ref: string;\n  changedFiles: string[];\n}\n```",
       "acceptanceCriteria": [
-        "VcsWebhookController extends existing project-scoped webhook surface at POST /projects/:slug/vcs-webhook to handle push/code-intel events",
+        "VcsWebhookController extends the existing project-scoped webhook surface at POST /projects/:slug/vcs-webhook to handle push/code-intel events",
         "Webhook payload is validated: presence of repository identifier, ref, commits[], and sender identifier (sender.id, sender.login, or provider equivalent)",
         "For each commit in the push, a code_commit outbox event is enqueued with { repoId, commitHash, ref, changedFiles }",
         "AstIndexService.indexCommit() is called by the code_commit outbox handler, not synchronously by the webhook controller",
         "If event enqueue fails, the webhook logs the failure and returns a non-2xx response so the provider can retry",
-        "GitHub webhook signature verification reuses existing x-hub-signature-256 flow; invalid signatures return 401",
-        "Webhook secret continues to come from the project's VCS connection record (never hard-coded)",
+        "GitHub webhook signature verification reuses the existing x-hub-signature-256 flow already used by Koda VCS webhooks; invalid signatures return 401",
+        "The webhook secret continues to come from the project's VCS connection record and is never hard-coded",
         "Webhook handler is idempotent: pushing the same commitHash twice does not create duplicate outbox events (dedup by commitHash within a 5-minute window)"
       ],
       "suggestedCriteria": [
-        "When webhook signature is missing, VcsWebhookController returns 401",
-        "When commits array is empty, no outbox event is created",
-        "When same commitHash is pushed twice within 5 minutes, only one outbox event is created"
+        "Webhook payload with commits array containing entries without id or timestamp is rejected with 400",
+        "Dedup window of 5 minutes is enforced using createdAt of existing outbox events, not wall-clock time of webhook arrival",
+        "Push event to a project without a VCS connection returns 404"
       ],
       "contextFiles": [
-        "apps/api/src/memory/outbox.service.ts",
-        "apps/api/src/rag/rag.service.ts"
+        "apps/api/src/vcs/vcs-webhook.controller.ts",
+        "apps/api/src/vcs/vcs-webhook.service.ts",
+        "apps/api/src/outbox/outbox.service.ts",
+        "apps/api/src/vcs/vcs-connection.service.ts",
+        "apps/api/src/vcs/vcs-provider.ts"
       ],
-      "tags": ["webhook", "api", "integration"],
-      "dependencies": ["US-001", "US-002"],
+      "tags": [
+        "feature",
+        "api",
+        "vcs",
+        "webhook"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002"
+      ],
       "workdir": "apps/api",
       "status": "pending",
       "passes": false,
       "routing": {
         "complexity": "medium",
-        "testStrategy": "three-session-tdd-lite",
-        "noTestJustification": null,
-        "reasoning": "Extends existing webhook controller, new outbox event type, idempotency logic, webhook signature verification"
+        "testStrategy": "tdd-simple",
+        "reasoning": "Standard webhook extension and outbox enqueue with existing signature verification; no new security-critical crypto code."
       },
       "escalations": [],
       "attempts": 0
@@ -166,36 +199,47 @@
     {
       "id": "US-005",
       "title": "getChangeImpact API",
-      "description": "**Goal** — Expose GET /projects/:slug/codeintel/impact endpoint that returns impacted symbols, services, and tickets for a given commit.\n\n**Motivation** — Phase 4 must expose a deterministic query API that answers which symbols, services, and tickets are likely affected by a code change.\n\n**Interface**\n```typescript\nclass ImpactAnalysisService {\n  constructor(\n    private symbolStore: SymbolStore,\n    private entityGraph: EntityGraphService,\n    private codeGraph: GraphStoreService,\n  ) {}\n\n  async getChangeImpact(query: ChangeImpactQuery): Promise<ChangeImpactResult>\n}\n\ninterface ChangeImpactQuery {\n  projectId: string;\n  repoId: string;\n  commitHash: string;\n  changedFiles: string[];\n  ticketId?: string;\n}\n\ninterface ChangeImpactResult {\n  commitHash: string;\n  changedFiles: string[];\n  impactedSymbols: Symbol[];\n  impactedServices: EntityRecord[];\n  impactedTickets: EntityRecord[];\n  impactScore: number;\n  provenance: Provenance;\n}\n```\n\n**Impact score formula:**\n```\nimpactScore = 0.3 * (affectedSymbols / totalSymbols * 100)\n            + 0.3 * (affectedServices / totalServices * 100)\n            + 0.2 * (affectedTickets / totalTickets * 100)\n            + 0.2 * (linkedIncidents > 0 ? 100 : 0)\n```\n\n**Denominator guard:** If any denominator is zero, that term contributes 0. impactScore clamped to [0,100].",
+      "description": "**Goal** \u2014 Expose a deterministic endpoint that answers which symbols, services, and tickets are likely affected by a code change.\n\n**Motivation** \u2014 Phase 4's minimum outcome is a foundation that can answer impact questions; this API is the primary consumer of the symbol index and entity graph.\n\n**Approach** \u2014 The endpoint queries the AST symbol index and the entity graph, then computes a composite impact score.\n\nImpact score formula:\nimpactScore = 0.3 * (affectedSymbols / totalSymbols * 100)\n            + 0.3 * (affectedServices / totalServices * 100)\n            + 0.2 * (affectedTickets / totalTickets * 100)\n            + 0.2 * (linkedIncidents > 0 ? 100 : 0)\n\nImpact score denominator guard: If any denominator is zero (totalSymbols, totalServices, or totalTickets), that term contributes 0 instead of dividing by zero. impactScore is clamped to [0,100].\n\n**Scope** \u2014 In: ImpactAnalysisService, codeintel controller, getChangeImpact endpoint. Out: AST parsing, entity graph building, VCS webhook.\n\n**Interface**\n```typescript\nclass ImpactAnalysisService {\n  constructor(\n    private symbolStore: SymbolStore,\n    private entityGraph: EntityGraphService,\n    private codeGraph: GraphStoreService,\n  ) {}\n\n  async getChangeImpact(query: ChangeImpactQuery): Promise<ChangeImpactResult>\n}\n\ninterface ChangeImpactQuery {\n  projectId: string;\n  repoId: string;\n  commitHash: string;\n  changedFiles: string[];\n  ticketId?: string;\n}\n\ninterface ChangeImpactResult {\n  commitHash: string;\n  changedFiles: string[];\n  impactedSymbols: Symbol[];\n  impactedServices: EntityRecord[];\n  impactedTickets: EntityRecord[];\n  impactScore: number;\n  provenance: Provenance;\n}\n```",
       "acceptanceCriteria": [
         "GET /projects/:slug/codeintel/impact?repoId=X&commitHash=Y&changedFiles=file1,file2 returns a ChangeImpactResult",
         "impactedSymbols contains symbols whose file matches any entry in changedFiles",
-        "impactedServices contains service entities linked to impacted symbols through matching Symbol.file → GraphNode.sourceFile or EntityNode.sourceId",
+        "impactedServices contains service entities linked to impacted symbols through matching Symbol.file to GraphNode.sourceFile or EntityNode.sourceId",
         "impactedTickets contains tickets linked to any impactedServices",
-        "impactScore is a number 0-100 computed by the formula above with denominator guards",
+        "impactScore is a number 0-100 computed by the formula in the design section",
         "When called with a ticketId, the result includes provenance source metadata pointing to that ticket",
         "The endpoint returns in under 5 seconds for a commit touching up to 50 files",
-        "Only actors with role admin, developer, or agent can call this endpoint (role checked at controller level)"
+        "Only actors with role admin, developer, or agent can call this endpoint (role checked at controller layer)"
       ],
       "suggestedCriteria": [
-        "When changedFiles is empty, impactScore is 0 and impactedSymbols/Services/Tickets are empty arrays",
-        "When no symbols match changedFiles, impactScore formula term for symbols contributes 0 (not division by zero)",
-        "When projectId does not exist, endpoint returns 404"
+        "impactScore returns 0 when no symbols, services, or tickets are affected",
+        "impactScore clamps to 100 when the computed raw score exceeds 100",
+        "Query with a changedFiles entry that matches no symbols returns empty impactedSymbols"
       ],
       "contextFiles": [
-        "apps/api/src/codeintel/impact-analysis.service.ts",
-        "apps/api/prisma/schema.prisma"
+        "apps/api/src/rag/rag.service.ts",
+        "apps/api/src/rag/entity-store.ts",
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/graph",
+        "apps/api/src/codeintel"
       ],
-      "tags": ["codeintel", "api", "impact-analysis"],
-      "dependencies": ["US-001", "US-002", "US-003"],
+      "tags": [
+        "feature",
+        "api",
+        "code-intelligence",
+        "impact-analysis"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-002",
+        "US-003"
+      ],
       "workdir": "apps/api",
       "status": "pending",
       "passes": false,
       "routing": {
         "complexity": "medium",
-        "testStrategy": "tdd-simple",
-        "noTestJustification": null,
-        "reasoning": "API endpoint composing existing services, clear formula, role-based access"
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Cross-module integration endpoint with security-critical role checks and a composite scoring formula that requires careful verification."
       },
       "escalations": [],
       "attempts": 0
@@ -203,24 +247,33 @@
     {
       "id": "US-006",
       "title": "CanonicalStateService Snapshot Read Layer",
-      "description": "**Goal** — Provide a thin read layer over existing Prisma models for authoritative state queries consumed by Phase 5.\n\n**Motivation** — Phase 5 needs a single canonical read path for tickets, events, decisions; must not query LanceDB, BM25, or derived stores.\n\n**Interface**\n```typescript\nclass CanonicalStateService {\n  constructor(private prisma: PrismaService) {}\n\n  async getSnapshot(query: CanonicalSnapshotQuery): Promise<CanonicalSnapshot>\n}\n\ninterface CanonicalSnapshotQuery {\n  projectId: string;\n  ticketIds?: string[];\n  actorId?: string;\n  timeWindow?: { from?: Date; to?: Date };\n}\n\ninterface CanonicalSnapshot {\n  tickets?: Array<{\n    id: string;\n    title: string;\n    status: string;\n    priority: string;\n    assignedToUserId: string | null;\n    assignedToAgentId: string | null;\n    createdAt: Date;\n    updatedAt: Date;\n  }>;\n  recentEvents?: Array<{\n    id: string;\n    eventType: string;\n    actorId: string;\n    action: string;\n    payload: Json;\n    createdAt: Date;\n  }>;\n  activeDecisions?: Array<{\n    id: string;\n    topic: string;\n    decision: string;\n    rationale: string | null;\n    createdAt: Date;\n  }>;\n  retrievedAt: Date;\n}\n```\n\n**Design note:** CanonicalStateService is a thin read layer. It does NOT introduce new tables — composes reads across Ticket, TicketEvent, AgentEvent, DecisionEvent, and MemoryItem (for active decisions).",
+      "description": "**Goal** \u2014 Provide a thin, canonical read layer over existing Prisma models for authoritative project state snapshots.\n\n**Motivation** \u2014 Phase 5 needs a single canonical read path for all authoritative data; CanonicalStateService composes reads across existing tables without introducing new ones.\n\n**Approach** \u2014 CanonicalStateService is a thin read layer over the existing Prisma models. It does NOT introduce new tables \u2014 it composes reads across Ticket, TicketEvent, AgentEvent, DecisionEvent and MemoryItem (for active decisions). It is the single canonical read path for all authoritative data and is consumed by Phase 5.\n\n**Scope** \u2014 In: CanonicalStateService, canonical-state controller or integration into memory module. Out: LanceDB, BM25, entity graph, or other derived stores.\n\n**Interface**\n```typescript\nclass CanonicalStateService {\n  constructor(private prisma: PrismaService) {}\n\n  async getSnapshot(query: CanonicalSnapshotQuery): Promise<CanonicalSnapshot>\n}\n\ninterface CanonicalSnapshotQuery {\n  projectId: string;\n  ticketIds?: string[];\n  actorId?: string;\n  timeWindow?: { from?: Date; to?: Date };\n}\n\ninterface CanonicalSnapshot {\n  tickets?: Array<{\n    id: string;\n    title: string;\n    status: string;\n    priority: string;\n    assignedToUserId: string | null;\n    assignedToAgentId: string | null;\n    createdAt: Date;\n    updatedAt: Date;\n  }>;\n  recentEvents?: Array<{\n    id: string;\n    eventType: string;\n    actorId: string;\n    action: string;\n    payload: Json;\n    createdAt: Date;\n  }>;\n  activeDecisions?: Array<{\n    id: string;\n    topic: string;\n    decision: string;\n    rationale: string | null;\n    createdAt: Date;\n  }>;\n  retrievedAt: Date;\n}\n```",
       "acceptanceCriteria": [
         "CanonicalStateService.getSnapshot(query) returns retrievedAt set to the server timestamp",
         "When ticketIds are provided, tickets contains only tickets in the requested projectId",
-        "When timeWindow is provided, recentEvents contains only events in the window, ordered by createdAt DESC",
+        "When timeWindow is provided, recentEvents contains only events in the window ordered by createdAt DESC",
         "activeDecisions is populated from active MemoryItem rows with kind='DECISION'",
         "A non-existent or unauthorized projectId throws the same KodaError/Nathapp exception style used by earlier memory endpoints",
         "The service performs canonical Prisma reads only; it does not query LanceDB, BM25, entity graph, or other derived stores"
       ],
       "suggestedCriteria": [
-        "When ticketIds is empty array, tickets is empty array (not all tickets)",
-        "When timeWindow.from and timeWindow.to are both set, recentEvents contains events where createdAt is between from and to",
-        "When no active decisions exist, activeDecisions is empty array (not undefined)"
+        "getSnapshot with an empty ticketIds array returns tickets as an empty array",
+        "getSnapshot called without timeWindow returns recentEvents as an empty array",
+        "activeDecisions excludes MemoryItem rows with status='superseded' or status='rejected'"
       ],
       "contextFiles": [
-        "apps/api/prisma/schema.prisma"
+        "apps/api/src/memory/memory.controller.ts",
+        "apps/api/prisma/schema.prisma",
+        "apps/api/src/memory/prisma-memory-item.repository.ts",
+        "apps/api/src/events/ticket-event.service.ts",
+        "apps/api/src/koda-domain-writer/koda-domain-writer.service.ts"
       ],
-      "tags": ["memory", "api", "read-layer"],
+      "tags": [
+        "feature",
+        "api",
+        "memory",
+        "canonical-state"
+      ],
       "dependencies": [],
       "workdir": "apps/api",
       "status": "pending",
@@ -228,8 +281,7 @@
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "noTestJustification": null,
-        "reasoning": "Composition of existing Prisma reads, no new tables or external store dependencies"
+        "reasoning": "Read-only service composing existing Prisma queries; no new persistence or security-critical changes."
       },
       "escalations": [],
       "attempts": 0
