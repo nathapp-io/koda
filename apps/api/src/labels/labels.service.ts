@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
+import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { ValidationAppException, NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
@@ -15,7 +16,10 @@ interface CurrentUser {
 
 @Injectable()
 export class LabelsService {
-  constructor(private prisma: PrismaService<PrismaClient>) {}
+  constructor(
+    private readonly prisma: PrismaService<PrismaClient>,
+    @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+  ) {}
   private get db() { return this.prisma.client; }
 
 
@@ -219,9 +223,9 @@ export class LabelsService {
 
     // Use transaction to assign label and create activity
     try {
-      const result = await this.db.$transaction(async (tx) => {
+      const result = await this.txManager.run(async () => {
         // Check if label already assigned
-        const existingAssignment = await tx.ticketLabel.findUnique({
+        const existingAssignment = await this.prisma.client.ticketLabel.findUnique({
           where: {
             ticketId_labelId: {
               ticketId: ticket.id,
@@ -235,7 +239,7 @@ export class LabelsService {
         }
 
         // Assign the label
-        await tx.ticketLabel.create({
+        await this.prisma.client.ticketLabel.create({
           data: {
             ticketId: ticket.id,
             labelId: assignLabelDto.labelId,
@@ -243,7 +247,7 @@ export class LabelsService {
         });
 
         // Create activity record
-        await tx.ticketActivity.create({
+        await this.prisma.client.ticketActivity.create({
           data: {
             ticketId: ticket.id,
             action: 'LABEL_CHANGE',
@@ -255,7 +259,7 @@ export class LabelsService {
         });
 
         // Return updated ticket with labels
-        const updated = await tx.ticket.findUnique({
+        const updated = await this.prisma.client.ticket.findUnique({
           where: { id: ticket.id },
           include: { labels: { include: { label: true } } },
         });
@@ -350,9 +354,9 @@ export class LabelsService {
     }
 
     // Use transaction to remove label and create activity
-    const result = await this.db.$transaction(async (tx) => {
+    const result = await this.txManager.run(async () => {
       // Remove the label
-      await tx.ticketLabel.delete({
+      await this.prisma.client.ticketLabel.delete({
         where: {
           ticketId_labelId: {
             ticketId: ticket.id,
@@ -362,7 +366,7 @@ export class LabelsService {
       });
 
       // Create activity record
-      await tx.ticketActivity.create({
+      await this.prisma.client.ticketActivity.create({
         data: {
           ticketId: ticket.id,
           action: 'LABEL_CHANGE',
@@ -374,7 +378,7 @@ export class LabelsService {
       });
 
       // Return updated ticket with labels
-      const updated = await tx.ticket.findUnique({
+      const updated = await this.prisma.client.ticket.findUnique({
         where: { id: ticket.id },
         include: { labels: { include: { label: true } } },
       });
