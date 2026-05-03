@@ -40,13 +40,13 @@ PrismaModule.forRoot({
 - **Never** pass a `tx` argument or use `$transaction(async tx => { tx.model... })` — this pattern is banned
 
 ```typescript
-// ✅ Correct
+// Correct
 await this.txManager.run(async () => {
   await this.prisma.client.ticket.update({ where: { id }, data: { status } });
   await this.prisma.client.ticketActivity.create({ data: { ... } });
 });
 
-// ❌ Banned — don't thread tx explicitly
+// Banned — don't thread tx explicitly
 await this.prisma.client.$transaction(async (tx) => {
   await tx.ticket.update({ ... });
   await tx.ticketActivity.create({ ... });
@@ -141,6 +141,11 @@ const mockTxManager = {
 // In beforeEach providers:
 { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
 ```
+
+## Schema Hygiene
+- Before writing any `prisma.client.<model>.*` call or repository, verify the model exists in `apps/api/prisma/schema.prisma`
+- If the model is missing, add it to the schema and run `bun run db:migrate` + `bun run db:generate` before implementing the service or repository layer
+- Never reference a Prisma model in code and defer schema work to a follow-up — missing models cause runtime errors that TypeScript cannot catch until after client regeneration
 
 ## Pagination Anti-Patterns
 - Do not write unbounded `do { ... } while (hasMore)` loops without a hard iteration cap
