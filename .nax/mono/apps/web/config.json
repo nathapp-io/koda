@@ -3,7 +3,7 @@
     "commands": {
       "build": "bun run build",
       "typecheck": "bun run type-check",
-      "lint": "bun run lint",
+      "lint": "bun run lint:json-error",
       "lintFix": "bun run lint:fix"
     }
   },

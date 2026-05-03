@@ -24,6 +24,7 @@
     "test": "jest --forceExit --passWithNoTests",
     "test:watch": "jest --watch",
     "lint": "eslint \"src/**/*.ts\" --ignore-pattern \"src/generated/**\" --max-warnings=0",
+    "lint:json-error": "eslint -f json \"src/**/*.ts\" --ignore-pattern \"src/generated/**\" --max-warnings=0 --quiet",
     "lint:fix": "eslint \"src/**/*.ts\" --ignore-pattern \"src/generated/**\" --fix",
     "type-check": "tsc --noEmit"
   },

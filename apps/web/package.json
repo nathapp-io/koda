@@ -8,6 +8,7 @@
     "generate": "nuxt generate",
     "preview": "nuxt preview",
     "lint": "eslint \"./**/*.ts\" --ignore-pattern \".nuxt/**\" --ignore-pattern \".output/**\" --max-warnings=0",
+    "lint:json-error": "eslint -f json \"./**/*.ts\" --ignore-pattern \".nuxt/**\" --ignore-pattern \".output/**\" --max-warnings=0 --quiet",
     "lint:fix": "eslint \"./**/*.ts\" --ignore-pattern \".nuxt/**\" --ignore-pattern \".output/**\" --fix",
     "type-check": "nuxt typecheck",
     "test": "jest",

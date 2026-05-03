@@ -5,7 +5,7 @@
       "test": "bun run test",
       "testScoped": "bunx jest {{files}} --forceExit --passWithNoTests",
       "typecheck": "bun run type-check",
-      "lint": "bun run lint",
+      "lint": "bun run lint:json-error",
       "lintFix": "bun run lint:fix",
       "formatFix": "bun run lint:fix"
     }

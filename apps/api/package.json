@@ -13,6 +13,7 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage --forceExit",
     "lint": "eslint \"{src,test}/**/*.ts\" --max-warnings=0",
+    "lint:json-error": "eslint -f json \"{src,test}/**/*.ts\" --max-warnings=0 --quiet",
     "lint:fix": "eslint \"{src,test}/**/*.ts\" --fix",
     "type-check": "tsc --noEmit",
     "test:unit": "jest --forceExit --passWithNoTests --testPathIgnorePatterns=integration",
