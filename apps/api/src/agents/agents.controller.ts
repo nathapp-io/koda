@@ -8,31 +8,15 @@ import { ForbiddenAppException, JsonResponse, ValidationAppException } from '@na
 import { Principal, RequiredPermission } from '@nathapp/nestjs-auth';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
-type LegacyPrincipal = {
-  id?: string;
-  sub?: string;
-  authorities?: unknown[];
-  extra?: { role?: string };
-} | null;
-
 @ApiTags('agents')
 @ApiBearerAuth()
 @Controller('agents')
 export class AgentsController {
   constructor(private agentsService: AgentsService) {}
 
-  private isAdmin(principal?: KodaPrincipal | LegacyPrincipal): boolean {
-    return Boolean(
-      principal?.authorities?.some((authority) => String(authority) === 'ADMIN') ||
-      principal?.extra?.role === 'ADMIN',
-    );
-  }
 
   // Public methods for testing (called directly in tests)
-  async createAgent(createAgentDto: CreateAgentDto, principal?: KodaPrincipal | LegacyPrincipal) {
-    if (!this.isAdmin(principal)) {
-      throw new ForbiddenAppException({}, 'agents');
-    }
+  async createAgent(createAgentDto: CreateAgentDto, _principal?: KodaPrincipal) {
     return this.agentsService.generateApiKey(createAgentDto);
   }
 
@@ -40,15 +24,11 @@ export class AgentsController {
     return this.agentsService.findAll();
   }
 
-  async getMe(principalOrId?: KodaPrincipal | string, actorType?: 'user' | 'agent' | undefined) {
-    const id = typeof principalOrId === 'string' ? principalOrId : principalOrId?.id;
-    const derivedActorType = typeof principalOrId === 'string'
-      ? actorType
-      : principalOrId?.actorType;
-    if (!id || (derivedActorType !== undefined && derivedActorType !== 'agent' && derivedActorType !== 'user')) {
+  async getMe(principal: KodaPrincipal) {
+    if (principal.actorType !== 'agent') {
       throw new ForbiddenAppException({}, 'agents');
     }
-    return this.agentsService.findMe(id);
+    return this.agentsService.findMe(principal.id);
   }
 
   async getBySlug(slug: string) {
@@ -62,40 +42,25 @@ export class AgentsController {
     return this.agentsService.suggestTicket(slug, project);
   }
 
-  async updateAgent(slug: string, updateDto: UpdateAgentDto, principal?: KodaPrincipal | LegacyPrincipal) {
-    if (!this.isAdmin(principal)) {
-      throw new ForbiddenAppException({}, 'agents');
-    }
+  async updateAgent(slug: string, updateDto: UpdateAgentDto, _principal?: KodaPrincipal) {
     return this.agentsService.update(slug, updateDto);
   }
 
-  async updateAgentRoles(slug: string, updateRolesDto: UpdateRolesDto, principal?: KodaPrincipal | LegacyPrincipal) {
-    if (!this.isAdmin(principal)) {
-      throw new ForbiddenAppException({}, 'agents');
-    }
+  async updateAgentRoles(slug: string, updateRolesDto: UpdateRolesDto, _principal?: KodaPrincipal) {
     const agent = await this.agentsService.findBySlug(slug);
     return this.agentsService.updateRoles(agent.id, updateRolesDto);
   }
 
-  async updateAgentCapabilities(slug: string, updateCapabilitiesDto: UpdateCapabilitiesDto, principal?: KodaPrincipal | LegacyPrincipal) {
-    if (!this.isAdmin(principal)) {
-      throw new ForbiddenAppException({}, 'agents');
-    }
+  async updateAgentCapabilities(slug: string, updateCapabilitiesDto: UpdateCapabilitiesDto, _principal?: KodaPrincipal) {
     const agent = await this.agentsService.findBySlug(slug);
     return this.agentsService.updateCapabilities(agent.id, updateCapabilitiesDto);
   }
 
-  async deleteAgent(slug: string, principal?: KodaPrincipal | LegacyPrincipal) {
-    if (!this.isAdmin(principal)) {
-      throw new ForbiddenAppException({}, 'agents');
-    }
+  async deleteAgent(slug: string, _principal?: KodaPrincipal) {
     return this.agentsService.remove(slug);
   }
 
-  async rotateKey(slug: string, principal?: KodaPrincipal | LegacyPrincipal) {
-    if (!this.isAdmin(principal)) {
-      throw new ForbiddenAppException({}, 'agents');
-    }
+  async rotateKey(slug: string, _principal?: KodaPrincipal) {
     return this.agentsService.rotateApiKey(slug);
   }
 

@@ -8,11 +8,32 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { AdminController } from './admin.controller';
 import { OutboxService, OutboxEventData } from './outbox.service';
 
-type AdminUser = { extra?: { role?: string } } | null;
+type AdminUser = {
+  actorType: 'user';
+  id: string;
+  name: string;
+  email: string;
+  role: 'ADMIN' | 'MEMBER';
+  blacklisted: boolean;
+  revoked: boolean;
+  authorities: string[];
+  extra: { sub: string };
+};
+
+const adminUser: AdminUser = {
+  actorType: 'user',
+  id: 'user-admin',
+  name: 'admin@example.com',
+  email: 'admin@example.com',
+  role: 'ADMIN',
+  blacklisted: false,
+  revoked: false,
+  authorities: ['ADMIN'],
+  extra: { sub: 'user-admin' },
+};
 
 function createMockOutboxService() {
   return {
@@ -72,7 +93,6 @@ describe('AdminController - AC11: Dead-letter query with admin-only access', () 
 
       mockOutboxService.getPendingEvents.mockResolvedValue(events);
 
-      const adminUser: AdminUser = { extra: { role: 'ADMIN' } };
       const result = await controller.getOutbox(adminUser);
 
       expect(result).toEqual({
@@ -81,22 +101,13 @@ describe('AdminController - AC11: Dead-letter query with admin-only access', () 
       });
     });
 
-    it('AC11: request without admin credentials returns HTTP 403 Forbidden', async () => {
-      const nonAdminUser: AdminUser = { extra: { role: 'MEMBER' } };
+    it('AC11: controller delegates to service (admin enforcement handled by guard)', async () => {
+      mockOutboxService.getPendingEvents.mockResolvedValue([]);
 
-      await expect(controller.getOutbox(nonAdminUser)).rejects.toThrow(ForbiddenAppException);
-    });
-
-    it('AC11: request with null user returns HTTP 403 Forbidden', async () => {
-      const nullUser: AdminUser = null;
-
-      await expect(controller.getOutbox(nullUser)).rejects.toThrow(ForbiddenAppException);
-    });
-
-    it('AC11: request with undefined extra returns HTTP 403 Forbidden', async () => {
-      const userWithNoExtra: AdminUser = {};
-
-      await expect(controller.getOutbox(userWithNoExtra)).rejects.toThrow(ForbiddenAppException);
+      await expect(controller.getOutbox(adminUser)).resolves.toEqual({
+        items: [],
+        total: 0,
+      });
     });
   });
 });
@@ -137,7 +148,6 @@ describe('AdminController - Additional admin outbox queries', () => {
 
     mockOutboxService.getPendingEvents.mockResolvedValue(pendingEvents);
 
-    const adminUser: AdminUser = { extra: { role: 'ADMIN' } };
     const result = await controller.getOutbox(adminUser);
 
     expect(mockOutboxService.getPendingEvents).toHaveBeenCalled();
@@ -164,7 +174,6 @@ describe('AdminController - Additional admin outbox queries', () => {
 
     mockOutboxService.getPendingEvents.mockResolvedValue(events);
 
-    const adminUser: AdminUser = { extra: { role: 'ADMIN' } };
     const result = await controller.getOutbox(adminUser);
 
     expect(result.total).toBe(1);

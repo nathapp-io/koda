@@ -22,7 +22,6 @@ import { TicketLinksService } from '../../ticket-links/ticket-links.service';
 import { IVcsProvider, VcsPullRequest } from '../../vcs';
 import { actorForeignKeys } from '../../auth/principal/actor-foreign-keys';
 import { KodaPrincipal } from '../../auth/principal/koda-principal.types';
-import { LegacyPrincipal, normalizeKodaPrincipal } from '../../auth/principal/normalize-koda-principal';
 
 export interface TransitionResultWithComment {
   ticket: Ticket;
@@ -220,10 +219,8 @@ export class TicketTransitionsService {
     projectSlug: string,
     ticketRef: string,
     commentBody: string,
-    principal: KodaPrincipal | LegacyPrincipal,
-    actorType?: 'user' | 'agent',
+    principal: KodaPrincipal,
   ): Promise<TransitionResultWithComment> {
-    const normalizedPrincipal = normalizeKodaPrincipal(principal, actorType);
     const ticket = await this.findTicketByRef(projectSlug, ticketRef);
     if (ticket?.status === TicketStatus.VERIFY_FIX) {
       return this.executeTransition(
@@ -232,7 +229,7 @@ export class TicketTransitionsService {
         TicketStatus.CLOSED,
         CommentType.REVIEW,
         commentBody ?? 'Verified',
-        normalizedPrincipal,
+        principal,
       ) as Promise<TransitionResultWithComment>;
     }
     return this.executeTransition(
@@ -241,7 +238,7 @@ export class TicketTransitionsService {
       TicketStatus.VERIFIED,
       CommentType.VERIFICATION,
       commentBody ?? 'Verified',
-      normalizedPrincipal,
+      principal,
     ) as Promise<TransitionResultWithComment>;
   }
 
@@ -251,17 +248,15 @@ export class TicketTransitionsService {
   async start(
     projectSlug: string,
     ticketRef: string,
-    principal: KodaPrincipal | LegacyPrincipal,
-    actorType?: 'user' | 'agent',
+    principal: KodaPrincipal,
   ): Promise<TransitionResultWithoutComment> {
-    const normalizedPrincipal = normalizeKodaPrincipal(principal, actorType);
     return this.executeTransition(
       projectSlug,
       ticketRef,
       TicketStatus.IN_PROGRESS,
       undefined,
       undefined,
-      normalizedPrincipal,
+      principal,
     ) as Promise<TransitionResultWithoutComment>;
   }
 
@@ -272,17 +267,15 @@ export class TicketTransitionsService {
     projectSlug: string,
     ticketRef: string,
     commentBody: string,
-    principal: KodaPrincipal | LegacyPrincipal,
-    actorType?: 'user' | 'agent',
+    principal: KodaPrincipal,
   ): Promise<TransitionResultWithComment> {
-    const normalizedPrincipal = normalizeKodaPrincipal(principal, actorType);
     return this.executeTransition(
       projectSlug,
       ticketRef,
       TicketStatus.VERIFY_FIX,
       CommentType.FIX_REPORT,
       commentBody ?? 'Fix submitted',
-      normalizedPrincipal,
+      principal,
     ) as Promise<TransitionResultWithComment>;
   }
 
@@ -294,10 +287,8 @@ export class TicketTransitionsService {
     ticketRef: string,
     commentBody: string,
     approve: boolean,
-    principal: KodaPrincipal | LegacyPrincipal,
-    actorType?: 'user' | 'agent',
+    principal: KodaPrincipal,
   ): Promise<TransitionResultWithComment> {
-    const normalizedPrincipal = normalizeKodaPrincipal(principal, actorType);
     // verify-fix is only valid when ticket is in VERIFY_FIX status
     const ticket = await this.findTicketByRef(projectSlug, ticketRef);
     if (!ticket) throw new NotFoundAppException();
@@ -311,7 +302,7 @@ export class TicketTransitionsService {
       toStatus,
       CommentType.REVIEW,
       commentBody,
-      normalizedPrincipal,
+      principal,
     ) as Promise<TransitionResultWithComment>;
   }
 
@@ -322,10 +313,8 @@ export class TicketTransitionsService {
   async close(
     projectSlug: string,
     ticketRef: string,
-    principal: KodaPrincipal | LegacyPrincipal,
-    actorType?: 'user' | 'agent',
+    principal: KodaPrincipal,
   ): Promise<TransitionResultWithoutComment> {
-    const normalizedPrincipal = normalizeKodaPrincipal(principal, actorType);
     const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
     });
@@ -349,7 +338,7 @@ export class TicketTransitionsService {
 
     // Execute transition without comment requirement
     const transaction = await this.txManager.run(async () => {
-      const actorFields = actorForeignKeys(normalizedPrincipal, 'actor');
+      const actorFields = actorForeignKeys(principal, 'actor');
 
       // Update ticket status
       const updatedTicket = await this.prisma.client.ticket.update({
@@ -387,17 +376,15 @@ export class TicketTransitionsService {
     projectSlug: string,
     ticketRef: string,
     commentBody: string,
-    principal: KodaPrincipal | LegacyPrincipal,
-    actorType?: 'user' | 'agent',
+    principal: KodaPrincipal,
   ): Promise<TransitionResultWithComment> {
-    const normalizedPrincipal = normalizeKodaPrincipal(principal, actorType);
     return this.executeTransition(
       projectSlug,
       ticketRef,
       TicketStatus.REJECTED,
       CommentType.GENERAL,
       commentBody,
-      normalizedPrincipal,
+      principal,
     ) as Promise<TransitionResultWithComment>;
   }
 

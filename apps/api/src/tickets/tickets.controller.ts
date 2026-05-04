@@ -41,9 +41,8 @@ export class TicketsController {
     slug: string,
     createTicketDto: CreateTicketDto,
     principal: KodaPrincipal,
-    actorType?: 'user' | 'agent',
   ) {
-    return this.ticketsService.create(slug, createTicketDto, principal, actorType);
+    return this.ticketsService.create(slug, createTicketDto, principal);
   }
 
   async listTickets(slug: string, filters: Record<string, unknown>) {
@@ -59,18 +58,16 @@ export class TicketsController {
     ref: string,
     updateTicketDto: UpdateTicketDto,
     principal: KodaPrincipal,
-    actorType?: 'user' | 'agent',
   ) {
-    return this.ticketsService.update(slug, ref, updateTicketDto, principal, actorType);
+    return this.ticketsService.update(slug, ref, updateTicketDto, principal);
   }
 
   async deleteTicket(
     slug: string,
     ref: string,
     principal: KodaPrincipal,
-    actorType?: 'user' | 'agent',
   ) {
-    return this.ticketsService.softDelete(slug, ref, principal, actorType);
+    return this.ticketsService.softDelete(slug, ref, principal);
   }
 
   async assignTicket(slug: string, ref: string, assignInput: Record<string, unknown>) {
@@ -82,18 +79,16 @@ export class TicketsController {
     ref: string,
     body: string,
     principal: KodaPrincipal,
-    actorType?: 'user' | 'agent',
   ) {
-    return this.transitionsService.verify(slug, ref, body, principal, actorType);
+    return this.transitionsService.verify(slug, ref, body, principal);
   }
 
   async startTicket(
     slug: string,
     ref: string,
     principal: KodaPrincipal,
-    actorType?: 'user' | 'agent',
   ) {
-    return this.transitionsService.start(slug, ref, principal, actorType);
+    return this.transitionsService.start(slug, ref, principal);
   }
 
   async fixTicket(
@@ -101,9 +96,8 @@ export class TicketsController {
     ref: string,
     body: string,
     principal: KodaPrincipal,
-    actorType?: 'user' | 'agent',
   ) {
-    return this.transitionsService.fix(slug, ref, body, principal, actorType);
+    return this.transitionsService.fix(slug, ref, body, principal);
   }
 
   async verifyFixTicket(
@@ -112,18 +106,16 @@ export class TicketsController {
     body: string,
     approve: boolean,
     principal: KodaPrincipal,
-    actorType?: 'user' | 'agent',
   ) {
-    return this.transitionsService.verifyFix(slug, ref, body, approve, principal, actorType);
+    return this.transitionsService.verifyFix(slug, ref, body, approve, principal);
   }
 
   async closeTicket(
     slug: string,
     ref: string,
     principal: KodaPrincipal,
-    actorType?: 'user' | 'agent',
   ) {
-    return this.transitionsService.close(slug, ref, principal, actorType);
+    return this.transitionsService.close(slug, ref, principal);
   }
 
   async rejectTicket(
@@ -131,9 +123,8 @@ export class TicketsController {
     ref: string,
     body: string,
     principal: KodaPrincipal,
-    actorType?: 'user' | 'agent',
   ) {
-    return this.transitionsService.reject(slug, ref, body, principal, actorType);
+    return this.transitionsService.reject(slug, ref, body, principal);
   }
 
   // HTTP route handlers

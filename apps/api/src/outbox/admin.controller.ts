@@ -2,10 +2,7 @@ import { Controller, Get, HttpCode, HttpStatus, Param, Post, Query, UseGuards } 
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { OutboxService, OutboxEventData } from './outbox.service';
 import { JwtAuthGuard, Principal, RequiredPermission } from '@nathapp/nestjs-auth';
-import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
-
-type LegacyPrincipal = { authorities?: unknown[]; extra?: { role?: string } } | null;
 
 @ApiTags('admin')
 @ApiBearerAuth()
@@ -14,16 +11,6 @@ type LegacyPrincipal = { authorities?: unknown[]; extra?: { role?: string } } | 
 export class AdminController {
   constructor(private readonly outboxService: OutboxService) {}
 
-  private ensureAdmin(principal: KodaPrincipal | LegacyPrincipal): void {
-    const isAdmin = Boolean(
-      principal?.authorities?.some((authority) => String(authority) === 'ADMIN') ||
-      principal?.extra?.role === 'ADMIN',
-    );
-    if (!isAdmin) {
-      throw new ForbiddenAppException({}, 'admin');
-    }
-  }
-
   @Get('outbox')
   @HttpCode(200)
   @ApiOperation({ summary: 'Get outbox events by status' })
@@ -31,10 +18,9 @@ export class AdminController {
   @ApiResponse({ status: 403, description: 'Forbidden - requires admin role' })
   @RequiredPermission('ADMIN')
   async getOutbox(
-    @Principal() principal: KodaPrincipal | LegacyPrincipal,
+    @Principal() _principal: KodaPrincipal,
     @Query('status') status?: string,
   ) {
-    this.ensureAdmin(principal);
     const events = status
       ? await this.outboxService.getEventsByStatus(status)
       : await this.outboxService.getPendingEvents();
@@ -52,10 +38,9 @@ export class AdminController {
   @ApiResponse({ status: 404, description: 'Event not found' })
   @RequiredPermission('ADMIN')
   async retryOutboxEvent(
-    @Principal() principal: KodaPrincipal | LegacyPrincipal,
+    @Principal() _principal: KodaPrincipal,
     @Param('eventId') eventId: string,
   ) {
-    this.ensureAdmin(principal);
     await this.outboxService.retryEvent(eventId);
   }
 }

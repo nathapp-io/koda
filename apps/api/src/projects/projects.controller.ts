@@ -25,7 +25,7 @@ import { PrismaMemoryItemRepository } from '../memory/prisma-memory-item.reposit
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { Principal } from '@nathapp/nestjs-auth';
-import { KodaPrincipal } from '../auth/principal/koda-principal.types';
+import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
 import { ActorRole } from '../common/enums';
 
 @ApiTags('projects')
@@ -46,6 +46,11 @@ export class ProjectsController {
   ): Promise<void> {
     if (!principal) {
       throw new ForbiddenAppException({}, 'projects');
+    }
+
+    // Agents are authorized by principal-level permissions, not projectMember rows.
+    if (!isUserPrincipal(principal)) {
+      return;
     }
 
     const membership = await this.db.projectMember.findUnique({

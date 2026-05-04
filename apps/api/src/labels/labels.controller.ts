@@ -32,10 +32,9 @@ export class LabelsController {
   async create(
     slug: string,
     createLabelDto: CreateLabelDto,
-    principal: KodaPrincipal | Record<string, unknown>,
-    actorType?: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    return this.labelsService.create(slug, createLabelDto, principal, actorType);
+    return this.labelsService.create(slug, createLabelDto, principal);
   }
 
   async findByProject(slug: string) {
@@ -46,39 +45,35 @@ export class LabelsController {
     slug: string,
     labelId: string,
     updateLabelDto: UpdateLabelDto,
-    principal: KodaPrincipal | Record<string, unknown>,
-    actorType?: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    return this.labelsService.update(slug, labelId, updateLabelDto, principal, actorType);
+    return this.labelsService.update(slug, labelId, updateLabelDto, principal);
   }
 
   async delete(
     slug: string,
     labelId: string,
-    principal: KodaPrincipal | Record<string, unknown>,
-    actorType?: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    return this.labelsService.delete(slug, labelId, principal, actorType);
+    return this.labelsService.delete(slug, labelId, principal);
   }
 
   async assignLabel(
     slug: string,
     ref: string,
     assignLabelDto: AssignLabelDto,
-    principal: KodaPrincipal | Record<string, unknown>,
-    actorType?: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    return this.labelsService.assignToTicket(slug, ref, assignLabelDto, principal, actorType);
+    return this.labelsService.assignToTicket(slug, ref, assignLabelDto, principal);
   }
 
   async removeLabel(
     slug: string,
     ref: string,
     labelId: string,
-    principal: KodaPrincipal | Record<string, unknown>,
-    actorType?: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    return this.labelsService.removeFromTicket(slug, ref, labelId, principal, actorType);
+    return this.labelsService.removeFromTicket(slug, ref, labelId, principal);
   }
 
   // HTTP route handlers

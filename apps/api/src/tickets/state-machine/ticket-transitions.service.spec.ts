@@ -35,6 +35,31 @@ describe('TicketTransitionsService', () => {
     updatedAt: new Date(),
   };
 
+  const mockUserPrincipal = {
+    actorType: 'user' as const,
+    id: 'user-123',
+    name: 'user@example.com',
+    email: 'user@example.com',
+    role: 'MEMBER' as const,
+    blacklisted: false,
+    revoked: false,
+    authorities: ['MEMBER'],
+    extra: { sub: 'user-123' },
+  };
+
+  const mockAgentPrincipal = {
+    actorType: 'agent' as const,
+    id: 'agent-123',
+    name: 'test-agent',
+    slug: 'test-agent',
+    status: 'ACTIVE' as const,
+    agentRoles: ['WORKER'],
+    capabilities: [],
+    blacklisted: false,
+    revoked: false,
+    authorities: ['WORKER'],
+  };
+
   const mockTicket = {
     id: 'ticket-123',
     projectId: 'proj-123',
@@ -147,8 +172,7 @@ describe('TicketTransitionsService', () => {
         'koda',
         'KODA-1',
         'This is verified',
-        { id: 'user-123', sub: 'user-123' },
-        'user'
+        mockUserPrincipal,
       );
 
       expect(result.ticket.status).toBe(TicketStatus.VERIFIED);
@@ -173,8 +197,7 @@ describe('TicketTransitionsService', () => {
         'koda',
         'KODA-1',
         'This is verified',
-        { id: 'user-123', sub: 'user-123' },
-        'user'
+        mockUserPrincipal,
       );
 
       // Verify txManager.run was called to handle atomic operations
@@ -201,8 +224,7 @@ describe('TicketTransitionsService', () => {
         'koda',
         'KODA-1',
         'This is verified',
-        { id: 'user-123', sub: 'user-123' },
-        'user'
+        mockUserPrincipal,
       );
 
       expect(result.activity.action).toBe(ActivityType.STATUS_CHANGE);
@@ -214,7 +236,7 @@ describe('TicketTransitionsService', () => {
       mockPrismaService.client.project.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.verify('nonexistent', 'KODA-1', 'Comment', { id: 'user-123', sub: 'user-123' }, 'user')
+        service.verify('nonexistent', 'KODA-1', 'Comment', mockUserPrincipal)
       ).rejects.toThrow(AppException);
     });
 
@@ -223,7 +245,7 @@ describe('TicketTransitionsService', () => {
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.verify('koda', 'KODA-999', 'Comment', { id: 'user-123', sub: 'user-123' }, 'user')
+        service.verify('koda', 'KODA-999', 'Comment', mockUserPrincipal)
       ).rejects.toThrow(AppException);
     });
 
@@ -235,7 +257,7 @@ describe('TicketTransitionsService', () => {
       });
 
       await expect(
-        service.verify('koda', 'KODA-1', 'Comment', { id: 'user-123', sub: 'user-123' }, 'user')
+        service.verify('koda', 'KODA-1', 'Comment', mockUserPrincipal)
       ).rejects.toThrow(AppException);
     });
   });
@@ -251,7 +273,7 @@ describe('TicketTransitionsService', () => {
       mockPrismaService.client.ticket.update.mockResolvedValue(updatedTicket);
       mockPrismaService.client.ticketActivity.create.mockResolvedValue(inProgressActivity);
 
-      const result = await service.start('koda', 'KODA-1', { id: 'user-123', sub: 'user-123' }, 'user');
+      const result = await service.start('koda', 'KODA-1', mockUserPrincipal);
 
       expect(result.ticket.status).toBe(TicketStatus.IN_PROGRESS);
       expect(result.activity.fromStatus).toBe(TicketStatus.VERIFIED);
@@ -268,7 +290,7 @@ describe('TicketTransitionsService', () => {
       mockPrismaService.client.ticket.update.mockResolvedValue(updatedTicket);
       mockPrismaService.client.ticketActivity.create.mockResolvedValue(inProgressActivity);
 
-      await service.start('koda', 'KODA-1', { id: 'user-123', sub: 'user-123' }, 'user');
+      await service.start('koda', 'KODA-1', mockUserPrincipal);
 
       expect(mockTxManager.run).toHaveBeenCalled();
     });
@@ -281,7 +303,7 @@ describe('TicketTransitionsService', () => {
       });
 
       await expect(
-        service.start('koda', 'KODA-1', { id: 'user-123', sub: 'user-123' }, 'user')
+        service.start('koda', 'KODA-1', mockUserPrincipal)
       ).rejects.toThrow(AppException);
     });
   });
@@ -303,8 +325,7 @@ describe('TicketTransitionsService', () => {
         'koda',
         'KODA-1',
         'Fixed the bug',
-        { id: 'user-123', sub: 'user-123' },
-        'user'
+        mockUserPrincipal,
       );
 
       expect(result.ticket.status).toBe(TicketStatus.VERIFY_FIX);
@@ -329,8 +350,7 @@ describe('TicketTransitionsService', () => {
         'koda',
         'KODA-1',
         'Fixed the bug',
-        { id: 'user-123', sub: 'user-123' },
-        'user'
+        mockUserPrincipal,
       );
 
       expect(mockTxManager.run).toHaveBeenCalled();
@@ -356,8 +376,7 @@ describe('TicketTransitionsService', () => {
         'KODA-1',
         'Approved',
         true, // approve=true → CLOSED
-        { id: 'user-123', sub: 'user-123' },
-        'user'
+        mockUserPrincipal,
       );
 
       expect(result.ticket.status).toBe(TicketStatus.CLOSED);
@@ -382,8 +401,7 @@ describe('TicketTransitionsService', () => {
         'KODA-1',
         'Fix is not working',
         false, // approve=false → IN_PROGRESS
-        { id: 'user-123', sub: 'user-123' },
-        'user'
+        mockUserPrincipal,
       );
 
       expect(result.ticket.status).toBe(TicketStatus.IN_PROGRESS);
@@ -408,8 +426,7 @@ describe('TicketTransitionsService', () => {
         'KODA-1',
         'Approved',
         true,
-        { id: 'user-123', sub: 'user-123' },
-        'user'
+        mockUserPrincipal,
       );
 
       expect(mockTxManager.run).toHaveBeenCalled();
@@ -427,7 +444,7 @@ describe('TicketTransitionsService', () => {
       mockPrismaService.client.ticket.update.mockResolvedValue(updatedTicket);
       mockPrismaService.client.ticketActivity.create.mockResolvedValue(closedActivity);
 
-      const result = await service.close('koda', 'KODA-1', { id: 'user-123', sub: 'user-123' }, 'user');
+      const result = await service.close('koda', 'KODA-1', mockUserPrincipal);
 
       expect(result.ticket.status).toBe(TicketStatus.CLOSED);
       expect(result.activity.toStatus).toBe(TicketStatus.CLOSED);
@@ -439,7 +456,7 @@ describe('TicketTransitionsService', () => {
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket); // CREATED status
 
       await expect(
-        service.close('koda', 'KODA-1', { id: 'user-123', sub: 'user-123' }, 'user')
+        service.close('koda', 'KODA-1', mockUserPrincipal)
       ).rejects.toThrow(AppException);
     });
   });
@@ -460,8 +477,7 @@ describe('TicketTransitionsService', () => {
         'koda',
         'KODA-1',
         'Not valid',
-        { id: 'user-123', sub: 'user-123' },
-        'user'
+        mockUserPrincipal,
       );
 
       expect(result.ticket.status).toBe(TicketStatus.REJECTED);
@@ -485,8 +501,7 @@ describe('TicketTransitionsService', () => {
         'koda',
         'KODA-1',
         'Not valid',
-        { id: 'user-123', sub: 'user-123' },
-        'user'
+        mockUserPrincipal,
       );
 
       expect(result.ticket.status).toBe(TicketStatus.REJECTED);
@@ -499,7 +514,7 @@ describe('TicketTransitionsService', () => {
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(inProgressTicket);
 
       await expect(
-        service.reject('koda', 'KODA-1', 'Not valid', { id: 'user-123', sub: 'user-123' }, 'user')
+        service.reject('koda', 'KODA-1', 'Not valid', mockUserPrincipal)
       ).rejects.toThrow(AppException);
     });
 
@@ -509,7 +524,7 @@ describe('TicketTransitionsService', () => {
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(closedTicket);
 
       await expect(
-        service.reject('koda', 'KODA-1', 'Not valid', { id: 'user-123', sub: 'user-123' }, 'user')
+        service.reject('koda', 'KODA-1', 'Not valid', mockUserPrincipal)
       ).rejects.toThrow(AppException);
     });
   });
@@ -530,8 +545,7 @@ describe('TicketTransitionsService', () => {
         'koda',
         'KODA-1',
         'Verified',
-        { id: 'user-123', sub: 'user-123' },
-        'user'
+        mockUserPrincipal,
       );
 
       expect(result.comment.authorUserId).toBe('user-123');
@@ -555,8 +569,7 @@ describe('TicketTransitionsService', () => {
         'koda',
         'KODA-1',
         'Verified',
-        { id: 'agent-123', sub: 'agent-123' },
-        'agent'
+        mockAgentPrincipal,
       );
 
       expect(result.comment.authorUserId).toBeNull();
@@ -582,8 +595,7 @@ describe('TicketTransitionsService', () => {
         'koda',
         'KODA-1',
         'Verified',
-        { id: 'user-123', sub: 'user-123' },
-        'user'
+        mockUserPrincipal,
       );
 
       expect(mockTxManager.run).toHaveBeenCalled();
@@ -604,8 +616,7 @@ describe('TicketTransitionsService', () => {
         'koda',
         'KODA-1',
         'Verified',
-        { id: 'user-123', sub: 'user-123' },
-        'user'
+        mockUserPrincipal,
       );
 
       // All three operations should return as part of transaction

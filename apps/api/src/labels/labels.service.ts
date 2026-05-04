@@ -9,7 +9,6 @@ import { AssignLabelDto } from './dto/assign-label.dto';
 import { LabelResponseDto } from './dto/label-response.dto';
 import { actorForeignKeys } from '../auth/principal/actor-foreign-keys';
 import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
-import { LegacyPrincipal, normalizeKodaPrincipal } from '../auth/principal/normalize-koda-principal';
 
 @Injectable()
 export class LabelsService {
@@ -23,11 +22,9 @@ export class LabelsService {
   async create(
     projectSlug: string,
     createLabelDto: CreateLabelDto,
-    principal: KodaPrincipal | LegacyPrincipal,
-    actorType?: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    const normalizedPrincipal = normalizeKodaPrincipal(principal, actorType);
-    if (isUserPrincipal(normalizedPrincipal) && normalizedPrincipal.role === 'MEMBER') {
+    if (isUserPrincipal(principal) && principal.role === 'MEMBER') {
       throw new ForbiddenAppException({}, 'labels');
     }
 
@@ -88,12 +85,10 @@ export class LabelsService {
   async delete(
     projectSlug: string,
     labelId: string,
-    principal: KodaPrincipal | LegacyPrincipal,
-    actorType?: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    const normalizedPrincipal = normalizeKodaPrincipal(principal, actorType);
     // ADMIN users and agents can delete labels; MEMBER users cannot
-    if (isUserPrincipal(normalizedPrincipal) && normalizedPrincipal.role === 'MEMBER') {
+    if (isUserPrincipal(principal) && principal.role === 'MEMBER') {
       throw new ForbiddenAppException({}, 'labels');
     }
 
@@ -130,12 +125,10 @@ export class LabelsService {
     projectSlug: string,
     labelId: string,
     updateLabelDto: UpdateLabelDto,
-    principal: KodaPrincipal | LegacyPrincipal,
-    actorType?: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    const normalizedPrincipal = normalizeKodaPrincipal(principal, actorType);
     // ADMIN users and agents can update labels; MEMBER users cannot
-    if (isUserPrincipal(normalizedPrincipal) && normalizedPrincipal.role === 'MEMBER') {
+    if (isUserPrincipal(principal) && principal.role === 'MEMBER') {
       throw new ForbiddenAppException({}, 'labels');
     }
 
@@ -165,10 +158,8 @@ export class LabelsService {
     projectSlug: string,
     ticketRef: string,
     assignLabelDto: AssignLabelDto,
-    principal: KodaPrincipal | LegacyPrincipal,
-    actorType?: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    const normalizedPrincipal = normalizeKodaPrincipal(principal, actorType);
     // Find project by slug
     const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
@@ -254,7 +245,7 @@ export class LabelsService {
             action: 'LABEL_CHANGE',
             field: 'labels',
             newValue: label.name,
-            ...actorForeignKeys(normalizedPrincipal, 'actor'),
+            ...actorForeignKeys(principal, 'actor'),
           },
         });
 
@@ -296,10 +287,8 @@ export class LabelsService {
     projectSlug: string,
     ticketRef: string,
     labelId: string,
-    principal: KodaPrincipal | LegacyPrincipal,
-    actorType?: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    const normalizedPrincipal = normalizeKodaPrincipal(principal, actorType);
     // Find project by slug
     const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
@@ -373,7 +362,7 @@ export class LabelsService {
           action: 'LABEL_CHANGE',
           field: 'labels',
           oldValue: ticketLabel.label.name,
-          ...actorForeignKeys(normalizedPrincipal, 'actor'),
+          ...actorForeignKeys(principal, 'actor'),
         },
       });
 

@@ -32,10 +32,9 @@ export class CommentsController {
     slug: string,
     ref: string,
     createCommentDto: CreateCommentDto,
-    principal: KodaPrincipal | Record<string, unknown>,
-    actorType?: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    return this.commentsService.create(slug, ref, createCommentDto, principal, actorType);
+    return this.commentsService.create(slug, ref, createCommentDto, principal);
   }
 
   async listByTicket(
@@ -48,18 +47,16 @@ export class CommentsController {
   async update(
     id: string,
     updateCommentDto: UpdateCommentDto,
-    principal: KodaPrincipal | Record<string, unknown>,
-    actorType?: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    return this.commentsService.update(id, updateCommentDto, principal, actorType);
+    return this.commentsService.update(id, updateCommentDto, principal);
   }
 
   async delete(
     id: string,
-    principal: KodaPrincipal | Record<string, unknown>,
-    actorType?: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    await this.commentsService.delete(id, principal, actorType);
+    await this.commentsService.delete(id, principal);
   }
 
   // HTTP route handlers

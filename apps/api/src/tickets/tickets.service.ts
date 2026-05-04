@@ -11,7 +11,6 @@ import { validateTransition } from './state-machine/ticket-transitions';
 import { buildGitUrl } from '../common/utils/git-url.util';
 import { actorForeignKeys } from '../auth/principal/actor-foreign-keys';
 import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
-import { LegacyPrincipal, normalizeKodaPrincipal } from '../auth/principal/normalize-koda-principal';
 
 interface FindAllFilters {
   status?: TicketStatus;
@@ -51,10 +50,8 @@ export class TicketsService {
   async create(
     projectSlug: string,
     createTicketDto: CreateTicketDto,
-    principal: KodaPrincipal | LegacyPrincipal,
-    actorType?: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    const normalizedPrincipal = normalizeKodaPrincipal(principal, actorType);
     // Find project by slug
     const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
@@ -95,7 +92,7 @@ export class TicketsService {
           description: createTicketDto.description || null,
           status: TicketStatus.CREATED,
           priority: createTicketDto.priority || Priority.MEDIUM,
-          ...actorForeignKeys(normalizedPrincipal, 'createdBy'),
+          ...actorForeignKeys(principal, 'createdBy'),
         },
       });
     });
@@ -244,8 +241,7 @@ export class TicketsService {
     projectSlug: string,
     ref: string,
     updateTicketDto: UpdateTicketDto,
-    _principal: KodaPrincipal | LegacyPrincipal,
-    _actorType?: 'user' | 'agent',
+    _principal: KodaPrincipal,
   ) {
     // Find ticket by ref (returns TicketResponseDto)
     const ticket = await this.findByRef(projectSlug, ref);
@@ -296,12 +292,10 @@ export class TicketsService {
   async softDelete(
     projectSlug: string,
     ref: string,
-    principal: KodaPrincipal | LegacyPrincipal,
-    actorType?: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    const normalizedPrincipal = normalizeKodaPrincipal(principal, actorType);
     // Check if user has ADMIN role (only applies to users)
-    if (isUserPrincipal(normalizedPrincipal) && normalizedPrincipal.role !== 'ADMIN') {
+    if (isUserPrincipal(principal) && principal.role !== 'ADMIN') {
       throw new ForbiddenAppException({}, 'tickets');
     }
 

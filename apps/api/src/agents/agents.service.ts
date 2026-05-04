@@ -128,7 +128,7 @@ export class AgentsService {
         where: { id: agentIdOrDto },
         data: { apiKeyHash },
       });
-      this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
+      await this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
       // Re-fetch with relations for DTO mapping
       const agentWithRelations = await this.db.agent.findUnique({
         where: { id: agent.id },
@@ -148,7 +148,7 @@ export class AgentsService {
           apiKeyHash,
         },
       });
-      this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
+      await this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
       // Create role entries (sequential create — createMany not reliable on SQLite for junction tables)
       const createdRoles = [];
       if (roles?.length) {
@@ -239,7 +239,7 @@ export class AgentsService {
       data,
       include: { roles: true, capabilities: true },
     });
-    this.agentAuthProvider?.invalidateByTag(`AGENT:${updated.id}`);
+    await this.agentAuthProvider?.invalidateByTag(`AGENT:${updated.id}`);
     return AgentResponseDto.from(updated);
   }
 
@@ -267,7 +267,7 @@ export class AgentsService {
         capabilities: true,
       },
     });
-    this.agentAuthProvider?.invalidateByTag(`AGENT:${agentId}`);
+    await this.agentAuthProvider?.invalidateByTag(`AGENT:${agentId}`);
     return AgentResponseDto.from(updated);
   }
 
@@ -297,7 +297,7 @@ export class AgentsService {
         capabilities: true,
       },
     });
-    this.agentAuthProvider?.invalidateByTag(`AGENT:${agentId}`);
+    await this.agentAuthProvider?.invalidateByTag(`AGENT:${agentId}`);
     return AgentResponseDto.from(updated);
   }
 
@@ -309,7 +309,7 @@ export class AgentsService {
     if (!agent) throw new NotFoundAppException({}, 'agents');
 
     await this.db.agent.delete({ where: { slug } });
-    this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
+    await this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
     return AgentResponseDto.from(agent);
   }
 
