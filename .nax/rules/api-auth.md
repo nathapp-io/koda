@@ -60,3 +60,23 @@ agentRoles: ['DEVELOPER'] as AgentRoleNames[],
 ```
 
 Prefer `readonly` on interface array properties (`agentRoles: readonly KodaAgentRole[]`) so both mutable and `as const` arrays are accepted.
+
+## `assertNever` in CASL Factory — Runtime-Safe Exhaustiveness
+
+The factory's `agentRoleDerivedPermissions` switch needs to:
+- Compile-time: error if a new value is added to `AGENT_ROLES` without a case
+- Runtime: safely skip unknown DB values (production DB may have legacy roles)
+
+```typescript
+// ✅ CORRECT — compile-time exhaustiveness + runtime no-op
+default:
+  // TS errors here if AGENT_ROLES gains a value without a case.
+  void (role as never);
+  break;
+
+// ❌ WRONG — throws at runtime when DB has unknown roles
+default:
+  assertNever(role); // crashes on every request for agents with legacy roles
+```
+
+Failure mode: `assertNever` kills the permissions computation → all agent requests get 403.

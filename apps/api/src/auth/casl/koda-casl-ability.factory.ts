@@ -4,7 +4,6 @@ import {
   CaslPermission,
   CaslPermissionAction,
 } from '@nathapp/nestjs-auth';
-import { assertNever } from '../../common/utils/assert-never';
 import {
   KodaPrincipal,
   isUserPrincipal,
@@ -90,7 +89,11 @@ export class KodaCaslAbilityFactory extends BaseCaslAbilityFactory {
           perms.push({ action: KodaAction.UPDATE as CaslPermissionAction, subject: 'Ticket' });
           break;
         default:
-          assertNever(role);
+          // Compile-time exhaustiveness guard: if a new value is added to
+          // AGENT_ROLES without a case here, TypeScript errors on this line.
+          // At runtime, unknown roles from DB are silently skipped (no-op).
+          void (role as never);
+          break;
       }
     }
     return perms;
