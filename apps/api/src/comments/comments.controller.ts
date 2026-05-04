@@ -18,9 +18,8 @@ import { CommentsService } from './comments.service';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
-import { CurrentActor } from '../auth/decorators/current-user.decorator';
-
-type CurrentUser = { id: string; sub: string; role?: string } | null;
+import { Principal } from '@nathapp/nestjs-auth';
+import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 @ApiTags('comments')
 @ApiBearerAuth()
@@ -33,10 +32,9 @@ export class CommentsController {
     slug: string,
     ref: string,
     createCommentDto: CreateCommentDto,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    return this.commentsService.create(slug, ref, createCommentDto, currentUser, actorType);
+    return this.commentsService.create(slug, ref, createCommentDto, principal);
   }
 
   async listByTicket(
@@ -49,18 +47,16 @@ export class CommentsController {
   async update(
     id: string,
     updateCommentDto: UpdateCommentDto,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    return this.commentsService.update(id, updateCommentDto, currentUser, actorType);
+    return this.commentsService.update(id, updateCommentDto, principal);
   }
 
   async delete(
     id: string,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    await this.commentsService.delete(id, currentUser, actorType);
+    await this.commentsService.delete(id, principal);
   }
 
   // HTTP route handlers
@@ -74,10 +70,9 @@ export class CommentsController {
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Body() createCommentDto: CreateCommentDto,
-    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
+    @Principal() principal: KodaPrincipal,
   ) {
-    const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    const data = await this.create(slug, ref, createCommentDto, currentUser, actor.actorType ?? 'user');
+    const data = await this.create(slug, ref, createCommentDto, principal);
     return JsonResponse.Ok(data);
   }
 
@@ -103,10 +98,9 @@ export class CommentsController {
   async updateFromHttp(
     @Param('id') id: string,
     @Body() updateCommentDto: UpdateCommentDto,
-    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
+    @Principal() principal: KodaPrincipal,
   ) {
-    const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    const data = await this.update(id, updateCommentDto, currentUser, actor.actorType ?? 'user');
+    const data = await this.update(id, updateCommentDto, principal);
     return JsonResponse.Ok(data);
   }
 
@@ -118,10 +112,9 @@ export class CommentsController {
   @ApiResponse({ status: 404, description: 'Comment not found' })
   async deleteFromHttp(
     @Param('id') id: string,
-    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
+    @Principal() principal: KodaPrincipal,
   ) {
-    const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    await this.delete(id, currentUser, actor.actorType ?? 'user');
+    await this.delete(id, principal);
     return JsonResponse.Ok(null);
   }
 }

@@ -14,6 +14,18 @@ Phase 4 owns durable graph/code intelligence and impact analysis. It builds on e
 
 The minimum Phase 4 outcome is not "perfect code intelligence"; it is a deterministic, incremental, project-isolated foundation that can answer which symbols, services, and tickets are likely affected by a code change.
 
+## Authorization
+
+Controller-level authorization in this spec must use the patterns established by:
+- [`20260504-consolidate-actor-auth-koda-principal.md`](./20260504-consolidate-actor-auth-koda-principal.md) — typed `KodaPrincipal` discriminated union (`UserPrincipal | AgentPrincipal`), `@Principal()` decorator from `@nathapp/nestjs-auth`, no custom `@CurrentUser()`/`@CurrentActor()`, `IPrincipal.authorities` populated for both actor types.
+- [`20260504-casl-migration-koda-principal.md`](./20260504-casl-migration-koda-principal.md) — `@RequiredPermission([action, subject])` on routes, ownership/conditional rules in `KodaCaslAbilityFactory`. Bare `@RequiredPermission('ADMIN')` only for pure ADMIN-user gates.
+
+Concretely for this spec:
+- Inject the actor with `@Principal() principal: KodaPrincipal`.
+- Translate every "role X can call Y" AC to either `@RequiredPermission([KodaAction.X, 'Subject'])` (decorator-only) or `ability.can(action, subject('Subject', instance))` after loading the resource.
+- Mixed gates (e.g. "ADMIN user OR DEVELOPER agent OR any agent") become CASL rules in the ability factory, not inline `if`-throws in controllers.
+- Add a `'CodeIntel'` subject to `KodaSubject` if not already present, with `KodaAction.IMPORT` / `KodaAction.READ` granted per role in the factory.
+
 ## Motivation
 
 Graphify (PR #81) delivered the *first* code graph via adjacency text and code-document indexing in LanceDB. Three critical gaps remain:
@@ -395,7 +407,7 @@ interface CanonicalSnapshot {
 - `DiffResult.indexed` reflects only the number of nodes actually written to LanceDB (not the total)
 - A diff-and-apply of 500 unchanged nodes + 10 added + 5 removed completes in under 2 seconds
 - `DiffResult` includes `durationMs` for performance monitoring
-- Only actors with role `admin`, `developer`, or `agent` can call `importGraphify` (enforced at controller layer)
+- The `importGraphify` route is gated with `@RequiredPermission([KodaAction.IMPORT, 'CodeIntel'])`. The `KodaCaslAbilityFactory` grants this to: ADMIN users, all agents, and users with `DEVELOPER` project role (when project membership is implemented). Non-permitted callers receive 403 from `PermissionAuthGuard` — no inline check in the controller. See Authorization section.
 
 ### US-002: AST/Symbol Index Pipeline
 **Size:** Complex | **AC count:** 11 | **Files:** 5 | **Depends on:** US-001
@@ -409,7 +421,7 @@ interface CanonicalSnapshot {
 - `Symbol.signature` captures parameter types and return type (e.g. `(userId: string): Promise<User>`)
 - Indexing is triggered by a `code_commit` outbox event (fired by the VCS webhook handler — see US-004)
 - A commit with 20 files (avg 200 lines each) is indexed in under 30 seconds
-- Only actors with role `admin` or `developer` can call `AstIndexService.indexCommit()` directly (not agents); role checked at controller layer
+- Direct calls to `AstIndexService.indexCommit()` (any controller route that exposes it directly) are gated with `@RequiredPermission([KodaAction.MANAGE, 'AstIndex'])`. The factory grants this to ADMIN users and to agents with `DEVELOPER` role only — not to all agents and not to MEMBER users. The webhook-driven outbox path bypasses this check (it is system-internal, not user-initiated). See Authorization section.
 - Parser failures for one file are recorded in the result and do not prevent other files in the same commit from being indexed
 - The `code_commit` handler resolves changed file contents before calling `indexCommit()`; the webhook controller only enqueues commit metadata
 
@@ -452,7 +464,7 @@ interface CanonicalSnapshot {
 - `impactScore` is a number 0-100 computed by the formula in §4
 - When called with a `ticketId`, the result includes provenance source metadata pointing to that ticket
 - The endpoint returns in under 5 seconds for a commit touching up to 50 files
-- Only actors with role `admin`, `developer`, or `agent` can call this endpoint (role checked at controller level)
+- The endpoint is gated with `@RequiredPermission([KodaAction.READ, 'CodeIntel'])`. The factory grants this to ADMIN users, all agents, and users with `DEVELOPER` project role (when project membership is implemented). Controller uses `@Principal() principal: KodaPrincipal`; no inline role check. See Authorization section.
 
 ### US-006: CanonicalStateService Snapshot Read Layer
 **Size:** Medium | **AC count:** 6 | **Files:** 2 | **Depends on:** SPEC-001/US-004, SPEC-003/US-001

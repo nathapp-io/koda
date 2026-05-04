@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AuthProvider } from '@nathapp/nestjs-auth';
-import type { IPrincipal } from './types';
+import { UserPrincipal, KodaUserRole } from './principal/koda-principal.types';
 
 /**
  * Custom AuthProvider that preserves JWT claims (role, email) in the principal.
@@ -13,17 +13,24 @@ import type { IPrincipal } from './types';
  */
 @Injectable()
 export class JwtAuthProvider implements AuthProvider {
-  async getPrincipal(jwtPayload: Record<string, unknown>): Promise<IPrincipal> {
+  async getPrincipal(jwtPayload: Record<string, unknown>): Promise<UserPrincipal> {
+    const role = ((jwtPayload['role'] as KodaUserRole | undefined) ?? 'MEMBER') as KodaUserRole;
+    const id = (jwtPayload['sub'] as string) ?? '';
+    const email = (jwtPayload['email'] as string) ?? id;
+
     return {
-      id: jwtPayload['sub'] as string,
-      name: (jwtPayload['email'] as string) ?? (jwtPayload['sub'] as string),
+      actorType: 'user',
+      id,
+      name: email,
+      email,
+      role,
       blacklisted: false,
       revoked: false,
-      authorities: (jwtPayload['authorities'] as string[]) ?? [],
+      authorities: [role],
       extra: {
-        sub: jwtPayload['sub'],
-        email: jwtPayload['email'],
-        role: jwtPayload['role'],
+        sub: id,
+        email,
+        role,
       },
     };
   }

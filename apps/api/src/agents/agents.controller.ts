@@ -5,10 +5,8 @@ import { UpdateRolesDto } from './dto/update-roles.dto';
 import { UpdateCapabilitiesDto } from './dto/update-capabilities.dto';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
 import { ForbiddenAppException, JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
-import { CurrentUser, CurrentActor } from '../auth/decorators/current-user.decorator';
-
-type AdminUser = { extra?: { role?: string } } | null;
-type AnyUser = { id?: string; extra?: { role?: string } } | null;
+import { Principal, RequiredPermission } from '@nathapp/nestjs-auth';
+import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 @ApiTags('agents')
 @ApiBearerAuth()
@@ -16,11 +14,9 @@ type AnyUser = { id?: string; extra?: { role?: string } } | null;
 export class AgentsController {
   constructor(private agentsService: AgentsService) {}
 
+
   // Public methods for testing (called directly in tests)
-  async createAgent(createAgentDto: CreateAgentDto, currentUser: AdminUser) {
-    if (currentUser?.extra?.role !== 'ADMIN') {
-      throw new ForbiddenAppException({}, 'agents');
-    }
+  async createAgent(createAgentDto: CreateAgentDto, _principal?: KodaPrincipal) {
     return this.agentsService.generateApiKey(createAgentDto);
   }
 
@@ -28,11 +24,11 @@ export class AgentsController {
     return this.agentsService.findAll();
   }
 
-  async getMe(id: string | undefined, actorType: 'user' | 'agent' | undefined) {
-    if (!id || (actorType !== 'agent' && actorType !== 'user')) {
+  async getMe(principal: KodaPrincipal) {
+    if (principal.actorType !== 'agent') {
       throw new ForbiddenAppException({}, 'agents');
     }
-    return this.agentsService.findMe(id);
+    return this.agentsService.findMe(principal.id);
   }
 
   async getBySlug(slug: string) {
@@ -46,40 +42,25 @@ export class AgentsController {
     return this.agentsService.suggestTicket(slug, project);
   }
 
-  async updateAgent(slug: string, updateDto: UpdateAgentDto, currentUser: AdminUser) {
-    if (currentUser?.extra?.role !== 'ADMIN') {
-      throw new ForbiddenAppException({}, 'agents');
-    }
+  async updateAgent(slug: string, updateDto: UpdateAgentDto, _principal?: KodaPrincipal) {
     return this.agentsService.update(slug, updateDto);
   }
 
-  async updateAgentRoles(slug: string, updateRolesDto: UpdateRolesDto, currentUser: AdminUser) {
-    if (currentUser?.extra?.role !== 'ADMIN') {
-      throw new ForbiddenAppException({}, 'agents');
-    }
+  async updateAgentRoles(slug: string, updateRolesDto: UpdateRolesDto, _principal?: KodaPrincipal) {
     const agent = await this.agentsService.findBySlug(slug);
     return this.agentsService.updateRoles(agent.id, updateRolesDto);
   }
 
-  async updateAgentCapabilities(slug: string, updateCapabilitiesDto: UpdateCapabilitiesDto, currentUser: AdminUser) {
-    if (currentUser?.extra?.role !== 'ADMIN') {
-      throw new ForbiddenAppException({}, 'agents');
-    }
+  async updateAgentCapabilities(slug: string, updateCapabilitiesDto: UpdateCapabilitiesDto, _principal?: KodaPrincipal) {
     const agent = await this.agentsService.findBySlug(slug);
     return this.agentsService.updateCapabilities(agent.id, updateCapabilitiesDto);
   }
 
-  async deleteAgent(slug: string, currentUser: AdminUser) {
-    if (currentUser?.extra?.role !== 'ADMIN') {
-      throw new ForbiddenAppException({}, 'agents');
-    }
+  async deleteAgent(slug: string, _principal?: KodaPrincipal) {
     return this.agentsService.remove(slug);
   }
 
-  async rotateKey(slug: string, currentUser: AdminUser) {
-    if (currentUser?.extra?.role !== 'ADMIN') {
-      throw new ForbiddenAppException({}, 'agents');
-    }
+  async rotateKey(slug: string, _principal?: KodaPrincipal) {
     return this.agentsService.rotateApiKey(slug);
   }
 
@@ -89,8 +70,9 @@ export class AgentsController {
   @ApiResponse({ status: 201, description: 'Agent created with API key' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
-  async generateApiKey(@Body() createAgentDto: CreateAgentDto, @CurrentUser() currentUser: AdminUser) {
-    const data = await this.createAgent(createAgentDto, currentUser);
+  @RequiredPermission('ADMIN')
+  async generateApiKey(@Body() createAgentDto: CreateAgentDto, @Principal() principal: KodaPrincipal) {
+    const data = await this.createAgent(createAgentDto, principal);
     return JsonResponse.Ok(data);
   }
 
@@ -106,8 +88,8 @@ export class AgentsController {
   @ApiOperation({ summary: 'Get current agent profile (API key auth)' })
   @ApiResponse({ status: 200, description: 'Agent profile retrieved' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async findMe(@CurrentActor() actor: { currentUser: AnyUser; actorType: 'user' | 'agent' | undefined }) {
-    const data = await this.getMe(actor.currentUser?.id, actor.actorType);
+  async findMe(@Principal() principal: KodaPrincipal) {
+    const data = await this.getMe(principal);
     return JsonResponse.Ok(data);
   }
 
@@ -137,8 +119,9 @@ export class AgentsController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
-  async update(@Param('slug') slug: string, @Body() updateDto: UpdateAgentDto, @CurrentUser() currentUser: AdminUser) {
-    const data = await this.updateAgent(slug, updateDto, currentUser);
+  @RequiredPermission('ADMIN')
+  async update(@Param('slug') slug: string, @Body() updateDto: UpdateAgentDto, @Principal() principal: KodaPrincipal) {
+    const data = await this.updateAgent(slug, updateDto, principal);
     return JsonResponse.Ok(data);
   }
 
@@ -148,8 +131,9 @@ export class AgentsController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
-  async updateRoles(@Param('slug') slug: string, @Body() updateRolesDto: UpdateRolesDto, @CurrentUser() currentUser: AdminUser) {
-    const data = await this.updateAgentRoles(slug, updateRolesDto, currentUser);
+  @RequiredPermission('ADMIN')
+  async updateRoles(@Param('slug') slug: string, @Body() updateRolesDto: UpdateRolesDto, @Principal() principal: KodaPrincipal) {
+    const data = await this.updateAgentRoles(slug, updateRolesDto, principal);
     return JsonResponse.Ok(data);
   }
 
@@ -159,8 +143,9 @@ export class AgentsController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
-  async updateCapabilities(@Param('slug') slug: string, @Body() updateCapabilitiesDto: UpdateCapabilitiesDto, @CurrentUser() currentUser: AdminUser) {
-    const data = await this.updateAgentCapabilities(slug, updateCapabilitiesDto, currentUser);
+  @RequiredPermission('ADMIN')
+  async updateCapabilities(@Param('slug') slug: string, @Body() updateCapabilitiesDto: UpdateCapabilitiesDto, @Principal() principal: KodaPrincipal) {
+    const data = await this.updateAgentCapabilities(slug, updateCapabilitiesDto, principal);
     return JsonResponse.Ok(data);
   }
 
@@ -171,8 +156,9 @@ export class AgentsController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
-  async remove(@Param('slug') slug: string, @CurrentUser() currentUser: AdminUser) {
-    const data = await this.deleteAgent(slug, currentUser);
+  @RequiredPermission('ADMIN')
+  async remove(@Param('slug') slug: string, @Principal() principal: KodaPrincipal) {
+    const data = await this.deleteAgent(slug, principal);
     return JsonResponse.Ok(data);
   }
 
@@ -183,8 +169,9 @@ export class AgentsController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Agent not found' })
-  async rotateApiKey(@Param('slug') slug: string, @CurrentUser() currentUser: AdminUser) {
-    const data = await this.rotateKey(slug, currentUser);
+  @RequiredPermission('ADMIN')
+  async rotateApiKey(@Param('slug') slug: string, @Principal() principal: KodaPrincipal) {
+    const data = await this.rotateKey(slug, principal);
     return JsonResponse.Ok(data);
   }
 }

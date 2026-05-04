@@ -1,10 +1,11 @@
 import { Controller, Post, Get, Body, Query, Param, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { CurrentUser, CurrentActor } from '../auth/decorators/current-user.decorator';
+import { Principal } from '@nathapp/nestjs-auth';
 import { ExtractionService, WriteResult } from './extraction.service';
 import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
 import { MemoryItemInput } from './memory-item-repository';
 import { MemoryKind, ActorRole } from '../common/enums';
+import { KodaPrincipal, isAgentPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
 
 interface MemoryWriteInput {
   projectId: string;
@@ -16,18 +17,6 @@ interface MemoryWriteInput {
   sourceId?: string;
   confidence?: number;
   ownerId?: string;
-}
-
-interface CurrentUser {
-  id?: string;
-  sub?: string;
-  extra?: {
-    sub?: string;
-    email?: string;
-    role?: string;
-    actorType?: string;
-  };
-  actorType?: string;
 }
 
 @ApiTags('memory')
@@ -42,13 +31,15 @@ export class MemoryController {
   @Post('extract')
   @ApiOperation({ summary: 'Extract memory items from a canonical event (internal)' })
   @ApiResponse({ status: 201, description: 'Memory items extracted' })
-  async extractFromEvent(@Body() event: Record<string, unknown>, @CurrentUser() currentUser?: CurrentUser | null, @CurrentActor() actor?: { actorType?: string } | null) {
+  async extractFromEvent(@Body() event: Record<string, unknown>, @Principal() principal: KodaPrincipal) {
     const projectId = event.projectId as string | undefined;
     if (!projectId) {
       return { items: [] };
     }
 
-    const role = currentUser?.extra?.role ?? (actor?.actorType === 'agent' ? 'AGENT' : null);
+    const role = isAgentPrincipal(principal)
+      ? 'AGENT'
+      : (isUserPrincipal(principal) ? principal.role : null);
     const allowedRoles: readonly string[] = [ActorRole.ADMIN, ActorRole.DEVELOPER, ActorRole.AGENT];
     if (!role || !allowedRoles.includes(role)) {
       return { items: [] };
@@ -66,7 +57,7 @@ export class MemoryController {
         sourceType: item.sourceType ?? (event.type as string),
         sourceId: item.sourceId ?? (event.id as string),
         confidence: item.confidence,
-        ownerId: (event.actorId as string) ?? currentUser?.extra?.sub,
+        ownerId: (event.actorId as string) ?? principal.id,
       };
       await this.repository.upsert(input);
     }
@@ -79,7 +70,7 @@ export class MemoryController {
   @ApiResponse({ status: 201, description: 'Decision recorded' })
   async recordDecision(
     @Body() decision: { projectId: string; actorId: string; topic: string; decision: string; rationale?: string; sourceId?: string },
-    @CurrentUser() currentUser?: CurrentUser | null,
+    @Principal() _principal: KodaPrincipal,
   ): Promise<WriteResult> {
     return this.extractionService.recordDecision(
       {
@@ -97,8 +88,10 @@ export class MemoryController {
   @Post()
   @ApiOperation({ summary: 'Create a memory item' })
   @ApiResponse({ status: 201, description: 'Memory item created' })
-  async createMemory(@Body() input: MemoryWriteInput, @CurrentUser() currentUser?: CurrentUser | null) {
-    const role = currentUser?.extra?.role ?? null;
+  async createMemory(@Body() input: MemoryWriteInput, @Principal() principal: KodaPrincipal) {
+    const role = isAgentPrincipal(principal)
+      ? 'AGENT'
+      : (isUserPrincipal(principal) ? principal.role : null);
     const allowedRoles: readonly string[] = [ActorRole.ADMIN, ActorRole.DEVELOPER, ActorRole.AGENT];
     if (!role || !allowedRoles.includes(role)) {
       return { error: 'ACCESS_DENIED' };
@@ -113,7 +106,7 @@ export class MemoryController {
       sourceType: input.sourceType ?? 'manual',
       sourceId: input.sourceId,
       confidence: input.confidence ?? 0.8,
-      ownerId: input.ownerId ?? currentUser?.extra?.sub,
+      ownerId: input.ownerId ?? principal.id,
     });
 
     return memory;

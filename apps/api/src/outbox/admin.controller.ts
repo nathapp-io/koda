@@ -1,11 +1,8 @@
 import { Controller, Get, HttpCode, HttpStatus, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { OutboxService, OutboxEventData } from './outbox.service';
-import { JwtAuthGuard } from '@nathapp/nestjs-auth';
-import { ForbiddenAppException } from '@nathapp/nestjs-common';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
-
-type AdminUser = { extra?: { role?: string } } | null;
+import { JwtAuthGuard, Principal, RequiredPermission } from '@nathapp/nestjs-auth';
+import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 @ApiTags('admin')
 @ApiBearerAuth()
@@ -19,13 +16,11 @@ export class AdminController {
   @ApiOperation({ summary: 'Get outbox events by status' })
   @ApiResponse({ status: 200, description: 'Returns outbox events' })
   @ApiResponse({ status: 403, description: 'Forbidden - requires admin role' })
+  @RequiredPermission('ADMIN')
   async getOutbox(
-    @CurrentUser() currentUser: AdminUser,
+    @Principal() _principal: KodaPrincipal,
     @Query('status') status?: string,
   ) {
-    if (currentUser?.extra?.role !== 'ADMIN') {
-      throw new ForbiddenAppException({}, 'admin');
-    }
     const events = status
       ? await this.outboxService.getEventsByStatus(status)
       : await this.outboxService.getPendingEvents();
@@ -41,13 +36,11 @@ export class AdminController {
   @ApiResponse({ status: 200, description: 'Event reset to pending' })
   @ApiResponse({ status: 403, description: 'Forbidden - requires admin role' })
   @ApiResponse({ status: 404, description: 'Event not found' })
+  @RequiredPermission('ADMIN')
   async retryOutboxEvent(
-    @CurrentUser() currentUser: AdminUser,
+    @Principal() _principal: KodaPrincipal,
     @Param('eventId') eventId: string,
   ) {
-    if (currentUser?.extra?.role !== 'ADMIN') {
-      throw new ForbiddenAppException({}, 'admin');
-    }
     await this.outboxService.retryEvent(eventId);
   }
 }

@@ -24,9 +24,8 @@ import { TicketResponseDto } from './dto/ticket-response.dto';
 import { TransitionWithCommentDto } from './dto/transition-with-comment.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { TicketType, TicketStatus, Priority } from '../common/enums';
-import { CurrentActor } from '../auth/decorators/current-user.decorator';
-
-type CurrentUser = { id: string; sub: string; role?: string } | null;
+import { Principal } from '@nathapp/nestjs-auth';
+import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 @ApiTags('tickets')
 @ApiBearerAuth()
@@ -41,10 +40,9 @@ export class TicketsController {
   async createTicket(
     slug: string,
     createTicketDto: CreateTicketDto,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    return this.ticketsService.create(slug, createTicketDto, currentUser, actorType);
+    return this.ticketsService.create(slug, createTicketDto, principal);
   }
 
   async listTickets(slug: string, filters: Record<string, unknown>) {
@@ -59,19 +57,17 @@ export class TicketsController {
     slug: string,
     ref: string,
     updateTicketDto: UpdateTicketDto,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    return this.ticketsService.update(slug, ref, updateTicketDto, currentUser, actorType);
+    return this.ticketsService.update(slug, ref, updateTicketDto, principal);
   }
 
   async deleteTicket(
     slug: string,
     ref: string,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    return this.ticketsService.softDelete(slug, ref, currentUser, actorType);
+    return this.ticketsService.softDelete(slug, ref, principal);
   }
 
   async assignTicket(slug: string, ref: string, assignInput: Record<string, unknown>) {
@@ -82,29 +78,26 @@ export class TicketsController {
     slug: string,
     ref: string,
     body: string,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    return this.transitionsService.verify(slug, ref, body, currentUser, actorType);
+    return this.transitionsService.verify(slug, ref, body, principal);
   }
 
   async startTicket(
     slug: string,
     ref: string,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    return this.transitionsService.start(slug, ref, currentUser, actorType);
+    return this.transitionsService.start(slug, ref, principal);
   }
 
   async fixTicket(
     slug: string,
     ref: string,
     body: string,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    return this.transitionsService.fix(slug, ref, body, currentUser, actorType);
+    return this.transitionsService.fix(slug, ref, body, principal);
   }
 
   async verifyFixTicket(
@@ -112,29 +105,26 @@ export class TicketsController {
     ref: string,
     body: string,
     approve: boolean,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    return this.transitionsService.verifyFix(slug, ref, body, approve, currentUser, actorType);
+    return this.transitionsService.verifyFix(slug, ref, body, approve, principal);
   }
 
   async closeTicket(
     slug: string,
     ref: string,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    return this.transitionsService.close(slug, ref, currentUser, actorType);
+    return this.transitionsService.close(slug, ref, principal);
   }
 
   async rejectTicket(
     slug: string,
     ref: string,
     body: string,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    return this.transitionsService.reject(slug, ref, body, currentUser, actorType);
+    return this.transitionsService.reject(slug, ref, body, principal);
   }
 
   // HTTP route handlers
@@ -147,10 +137,9 @@ export class TicketsController {
   async create(
     @Param('slug') slug: string,
     @Body() createTicketDto: CreateTicketDto,
-    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
+    @Principal() principal: KodaPrincipal,
   ) {
-    const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    const data = await this.createTicket(slug, createTicketDto, currentUser, actor.actorType ?? 'user');
+    const data = await this.createTicket(slug, createTicketDto, principal);
     return JsonResponse.Ok(data);
   }
 
@@ -210,10 +199,9 @@ export class TicketsController {
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Body() updateTicketDto: UpdateTicketDto,
-    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
+    @Principal() principal: KodaPrincipal,
   ) {
-    const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    const data = await this.updateTicket(slug, ref, updateTicketDto, currentUser, actor.actorType ?? 'user');
+    const data = await this.updateTicket(slug, ref, updateTicketDto, principal);
     return JsonResponse.Ok(data);
   }
 
@@ -225,10 +213,9 @@ export class TicketsController {
   async softDelete(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
-    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
+    @Principal() principal: KodaPrincipal,
   ) {
-    const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    const data = await this.deleteTicket(slug, ref, currentUser, actor.actorType ?? 'user');
+    const data = await this.deleteTicket(slug, ref, principal);
     return JsonResponse.Ok(data);
   }
 
@@ -260,10 +247,9 @@ export class TicketsController {
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Body() dto: TransitionWithCommentDto,
-    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
+    @Principal() principal: KodaPrincipal,
   ) {
-    const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    const data = await this.verifyTicket(slug, ref, dto.body ?? '', currentUser, actor.actorType ?? 'user');
+    const data = await this.verifyTicket(slug, ref, dto.body ?? '', principal);
     return JsonResponse.Ok(data);
   }
 
@@ -276,10 +262,9 @@ export class TicketsController {
   async start(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
-    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
+    @Principal() principal: KodaPrincipal,
   ) {
-    const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    const data = await this.startTicket(slug, ref, currentUser, actor.actorType ?? 'user');
+    const data = await this.startTicket(slug, ref, principal);
     return JsonResponse.Ok(data);
   }
 
@@ -293,10 +278,9 @@ export class TicketsController {
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Body() dto: TransitionWithCommentDto,
-    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
+    @Principal() principal: KodaPrincipal,
   ) {
-    const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    const data = await this.fixTicket(slug, ref, dto.body ?? '', currentUser, actor.actorType ?? 'user');
+    const data = await this.fixTicket(slug, ref, dto.body ?? '', principal);
     return JsonResponse.Ok(data);
   }
 
@@ -311,11 +295,10 @@ export class TicketsController {
     @Param('ref') ref: string,
     @Body() dto: TransitionWithCommentDto,
     @Query('approve') approve: boolean | string,
-    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
+    @Principal() principal: KodaPrincipal,
   ) {
-    const currentUser = actor.currentUser ?? { id: '', sub: '' };
     const isApproved = approve === 'true' || approve === true;
-    const data = await this.verifyFixTicket(slug, ref, dto.body ?? '', isApproved, currentUser, actor.actorType ?? 'user');
+    const data = await this.verifyFixTicket(slug, ref, dto.body ?? '', isApproved, principal);
     return JsonResponse.Ok(data);
   }
 
@@ -328,10 +311,9 @@ export class TicketsController {
   async close(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
-    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
+    @Principal() principal: KodaPrincipal,
   ) {
-    const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    const data = await this.closeTicket(slug, ref, currentUser, actor.actorType ?? 'user');
+    const data = await this.closeTicket(slug, ref, principal);
     return JsonResponse.Ok(data);
   }
 
@@ -345,10 +327,9 @@ export class TicketsController {
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Body() dto: TransitionWithCommentDto,
-    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
+    @Principal() principal: KodaPrincipal,
   ) {
-    const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    const data = await this.rejectTicket(slug, ref, dto.body ?? '', currentUser, actor.actorType ?? 'user');
+    const data = await this.rejectTicket(slug, ref, dto.body ?? '', principal);
     return JsonResponse.Ok(data);
   }
 }

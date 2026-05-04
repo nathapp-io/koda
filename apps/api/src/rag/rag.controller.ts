@@ -19,7 +19,8 @@ import { EvaluationService } from '../retrieval/evaluation.service';
 import { AddDocumentDto } from './dto/add-document.dto';
 import { SearchKbDto } from './dto/search-kb.dto';
 import { ImportGraphifyDto } from './dto/import-graphify.dto';
-import { CurrentActor, CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Principal, RequiredPermission } from '@nathapp/nestjs-auth';
+import { KodaPrincipal, isAgentPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
 
 @ApiTags('knowledge-base')
 @ApiBearerAuth()
@@ -42,22 +43,19 @@ export class RagController {
 
   private async checkProjectMembership(
     projectId: string,
-    currentUser: { id?: string; extra?: { role?: string; sub?: string } } | null,
-    actorType?: string,
+    principal: KodaPrincipal | null,
   ): Promise<void> {
-    if (!currentUser) {
+    if (!principal) {
       throw new ForbiddenAppException({}, 'rag');
     }
 
-    // Agent API key auth: agents are cross-project (their API key is their credential).
-    // actorType is set to 'agent' by CombinedAuthGuard when an API key is used.
-    // We rely on actorType, not the absence of extra.sub, to keep this explicit
-    // and resilient to future actor model changes.
-    if (actorType === 'agent') {
+    // Agent principals are cross-project (their API key is their credential).
+    // Actor shape is normalized in CombinedAuthGuard and read through principal type guards.
+    if (isAgentPrincipal(principal)) {
       return;
     }
 
-    if (!currentUser.extra?.sub) {
+    if (!isUserPrincipal(principal)) {
       throw new ForbiddenAppException({}, 'rag');
     }
 
@@ -65,7 +63,7 @@ export class RagController {
       where: {
         projectId_userId: {
           projectId,
-          userId: currentUser.extra.sub,
+          userId: principal.id,
         },
       },
     });
@@ -126,12 +124,12 @@ export class RagController {
   @ApiResponse({ status: 200, description: 'Delete documents by sourceId' })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Project not found' })
+  @RequiredPermission('ADMIN')
   async deleteDocument(
     @Param('slug') slug: string,
     @Param('sourceId') sourceId: string,
-    @CurrentUser() currentUser: { extra?: { role?: string } } | null,
+    @Principal() _principal: KodaPrincipal,
   ) {
-    if (currentUser?.extra?.role !== 'ADMIN') throw new ForbiddenAppException({}, 'rag');
     const project = await this.resolveProject(slug);
     await this.ragService.deleteBySource(project.id, sourceId);
     return JsonResponse.Ok({ deleted: true });
@@ -146,10 +144,10 @@ export class RagController {
   async search(
     @Param('slug') slug: string,
     @Body() dto: SearchKbDto,
-    @CurrentActor() { currentUser, actorType }: { currentUser: { id?: string; extra?: { role?: string; sub?: string } } | null; actorType?: string },
+    @Principal() principal: KodaPrincipal,
   ) {
     const project = await this.resolveProject(slug);
-    await this.checkProjectMembership(project.id, currentUser, actorType);
+    await this.checkProjectMembership(project.id, principal);
 
     const limit = dto.limit ?? 20;
     const result = await this.hybridRetrieverService.search({
@@ -179,12 +177,12 @@ export class RagController {
   @ApiResponse({ status: 400, description: 'Graphify not enabled for this project or validation error' })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Project not found' })
+  @RequiredPermission('ADMIN')
   async importGraphify(
     @Param('slug') slug: string,
     @Body() dto: ImportGraphifyDto,
-    @CurrentUser() currentUser: { extra?: { role?: string } } | null,
+    @Principal() _principal: KodaPrincipal,
   ) {
-    if (currentUser?.extra?.role !== 'ADMIN') throw new ForbiddenAppException({}, 'rag');
     const project = await this.resolveProject(slug);
     if (!project.graphifyEnabled) throw new ValidationAppException({}, 'rag.graphifyDisabled');
     if (dto.nodes.length === 0) return JsonResponse.Ok({ imported: 0, cleared: 0 });
@@ -205,11 +203,11 @@ export class RagController {
   @ApiResponse({ status: 200, description: 'Table optimized' })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Project not found' })
+  @RequiredPermission('ADMIN')
   async optimizeTable(
     @Param('slug') slug: string,
-    @CurrentUser() currentUser: { extra?: { role?: string } } | null,
+    @Principal() _principal: KodaPrincipal,
   ) {
-    if (currentUser?.extra?.role !== 'ADMIN') throw new ForbiddenAppException({}, 'rag');
     const project = await this.resolveProject(slug);
     await this.ragService.optimizeTable(project.id);
     return JsonResponse.Ok({ optimized: true });
@@ -224,10 +222,10 @@ export class RagController {
   @ApiResponse({ status: 403, description: 'Forbidden - no project role' })
   async evaluateRetrieval(
     @Param('slug') slug: string,
-    @CurrentActor() { currentUser, actorType }: { currentUser: { id?: string; extra?: { role?: string; sub?: string } } | null; actorType?: string },
+    @Principal() principal: KodaPrincipal,
   ) {
     const project = await this.resolveProject(slug);
-    await this.checkProjectMembership(project.id, currentUser, actorType);
+    await this.checkProjectMembership(project.id, principal);
     const { loadEvalQueries } = await import('../retrieval/load-queries');
     const queries = loadEvalQueries();
     const projectQueries = queries.filter((q) => q.projectId === project.id);

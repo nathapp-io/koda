@@ -24,7 +24,8 @@ import {
 import { PrismaMemoryItemRepository } from '../memory/prisma-memory-item.repository';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
-import { CurrentUser, CurrentActor } from '../auth/decorators/current-user.decorator';
+import { Principal } from '@nathapp/nestjs-auth';
+import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
 import { ActorRole } from '../common/enums';
 
 @ApiTags('projects')
@@ -41,58 +42,34 @@ export class ProjectsController {
 
   private async checkProjectMembership(
     projectId: string,
-    currentUser: { extra?: { sub?: string; role?: string } } | null,
-    actorType?: string,
+    principal: KodaPrincipal | null,
   ): Promise<void> {
-    if (!currentUser) {
+    if (!principal) {
       throw new ForbiddenAppException({}, 'projects');
     }
 
-    if (actorType !== 'agent') {
-      if (!currentUser.extra?.sub) {
-        throw new ForbiddenAppException({}, 'projects');
-      }
+    // Agents are authorized by principal-level permissions, not projectMember rows.
+    if (!isUserPrincipal(principal)) {
+      return;
+    }
 
-      const membership = await this.db.projectMember.findUnique({
-        where: {
-          projectId_userId: {
-            projectId,
-            userId: currentUser.extra.sub,
-          },
+    const membership = await this.db.projectMember.findUnique({
+      where: {
+        projectId_userId: {
+          projectId,
+          userId: principal.id,
         },
-      });
+      },
+    });
 
-      if (!membership) {
-        throw new ForbiddenAppException({}, 'projects');
-      }
+    if (!membership) {
+      throw new ForbiddenAppException({}, 'projects');
+    }
 
-      const allowedRoles = [ActorRole.ADMIN, ActorRole.DEVELOPER, ActorRole.AGENT, ActorRole.VIEWER] as const;
-      const membershipRole = (membership as { role?: string }).role;
-      if (!membershipRole || !allowedRoles.includes(membershipRole as typeof allowedRoles[number])) {
-        throw new ForbiddenAppException({}, 'projects');
-      }
-    } else {
-      if (!currentUser.extra?.sub) {
-        throw new ForbiddenAppException({}, 'projects');
-      }
-      const membership = await this.db.projectMember.findUnique({
-        where: {
-          projectId_userId: {
-            projectId,
-            userId: currentUser.extra.sub,
-          },
-        },
-      });
-
-      if (!membership) {
-        throw new ForbiddenAppException({}, 'projects');
-      }
-
-      const allowedRoles = [ActorRole.ADMIN, ActorRole.DEVELOPER, ActorRole.AGENT, ActorRole.VIEWER] as const;
-      const membershipRole = (membership as { role?: string }).role;
-      if (!membershipRole || !allowedRoles.includes(membershipRole as typeof allowedRoles[number])) {
-        throw new ForbiddenAppException({}, 'projects');
-      }
+    const allowedRoles = [ActorRole.ADMIN, ActorRole.DEVELOPER, ActorRole.AGENT, ActorRole.VIEWER] as const;
+    const membershipRole = (membership as { role?: string }).role;
+    if (!membershipRole || !allowedRoles.includes(membershipRole as typeof allowedRoles[number])) {
+      throw new ForbiddenAppException({}, 'projects');
     }
   }
 
@@ -165,11 +142,10 @@ export class ProjectsController {
   async getProjectMemory(
     @Param('slug') slug: string,
     @Query() query: GetProjectMemoryDto,
-    @CurrentUser() currentUser?: { extra?: { sub?: string; role?: string } } | null,
-    @CurrentActor() actor?: { actorType?: string },
+    @Principal() principal: KodaPrincipal,
   ) {
     const project = await this.projectsService.findBySlug(slug);
-    await this.checkProjectMembership(project.id, currentUser ?? null, actor?.actorType);
+    await this.checkProjectMembership(project.id, principal);
 
     const result = await this.memoryItemRepository.findByProjectMemory({
       projectId: project.id,

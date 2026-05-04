@@ -8,12 +8,7 @@ import { UpdateCommentDto } from './dto/update-comment.dto';
 import { CommentResponseDto } from './dto/comment-response.dto';
 import { PrismaCommentRepository } from './prisma-comment.repository';
 import { COMMENT_REPOSITORY } from './domain/comment.domain';
-
-interface CurrentUser {
-  id: string;
-  sub: string;
-  role?: string;
-}
+import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
 
 @Injectable()
 export class CommentsService {
@@ -29,8 +24,7 @@ export class CommentsService {
     projectSlug: string,
     ticketRef: string,
     createCommentDto: CreateCommentDto,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
     // Validate required fields
     if (!createCommentDto.body) {
@@ -87,8 +81,8 @@ export class CommentsService {
       ticketId: ticket.id,
       body: createCommentDto.body,
       type: createCommentDto.type as CommentType,
-      authorUserId: actorType === 'user' ? currentUser.id : null,
-      authorAgentId: actorType === 'agent' ? currentUser.id : null,
+      authorUserId: isUserPrincipal(principal) ? principal.id : null,
+      authorAgentId: isUserPrincipal(principal) ? null : principal.id,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -149,8 +143,7 @@ export class CommentsService {
   async update(
     commentId: string,
     updateCommentDto: UpdateCommentDto,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
     // Find the comment via repository
     const comment = await this.commentRepo.findById(commentId);
@@ -160,11 +153,11 @@ export class CommentsService {
     }
 
     // Check authorization: only author or admin can edit
-    const isAuthor =
-      (actorType === 'user' && comment.authorUserId === currentUser.id) ||
-      (actorType === 'agent' && comment.authorAgentId === currentUser.id);
+    const isAuthor = isUserPrincipal(principal)
+      ? comment.authorUserId === principal.id
+      : comment.authorAgentId === principal.id;
 
-    const isAdmin = actorType === 'user' && currentUser.role === 'ADMIN';
+    const isAdmin = isUserPrincipal(principal) && principal.role === 'ADMIN';
 
     if (!isAuthor && !isAdmin) {
       throw new ForbiddenAppException({}, 'comments');
@@ -180,8 +173,7 @@ export class CommentsService {
 
   async delete(
     commentId: string,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
     // Find the comment via repository
     const comment = await this.commentRepo.findById(commentId);
@@ -191,11 +183,11 @@ export class CommentsService {
     }
 
     // Check authorization: only author or admin can delete
-    const isAuthor =
-      (actorType === 'user' && comment.authorUserId === currentUser.id) ||
-      (actorType === 'agent' && comment.authorAgentId === currentUser.id);
+    const isAuthor = isUserPrincipal(principal)
+      ? comment.authorUserId === principal.id
+      : comment.authorAgentId === principal.id;
 
-    const isAdmin = actorType === 'user' && currentUser.role === 'ADMIN';
+    const isAdmin = isUserPrincipal(principal) && principal.role === 'ADMIN';
 
     if (!isAuthor && !isAdmin) {
       throw new ForbiddenAppException({}, 'comments');

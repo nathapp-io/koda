@@ -14,7 +14,9 @@ priority: 50
 - Use `@nathapp/nestjs-auth` v3; do not use `nestjs-iam`
 - API key hashing: deterministic HMAC-SHA256 for lookup
 - Password hashing: bcrypt (rounds 12)
-- Register `CombinedAuthGuard` globally (`APP_GUARD`); mark public routes with `@IsPublic()`
+- Register `CombinedAuthGuard` globally; mark public routes with `@Public()` from `@nathapp/nestjs-auth` (no custom `@IsPublic()`)
+- Inject the actor with `@Principal() principal: KodaPrincipal` (typed `UserPrincipal | AgentPrincipal` discriminated union); do not use `@CurrentUser()` / `@CurrentActor()` (removed) or `request.agent` / `request.user` directly
+- Authorize with `@RequiredPermission('ADMIN')` (or `[action, subject]` for CASL) on the route; do not duplicate the check inline
 
 ## Quality Gates
 - `bun run --cwd apps/api lint`
@@ -22,7 +24,7 @@ priority: 50
 - `cd apps/api && DATABASE_URL=file:./koda-test.db npx jest --forceExit test/e2e`
 
 ## Implementation Anti-Patterns
-- Do not use `@Req() req: any`; use typed request context helpers (for example `@CurrentUser()`)
+- Do not use `@Req() req: any`; use `@Principal() principal: KodaPrincipal`
 - Do not pass request-derived actor data through long method chains
 - Use constructor injection with typed dependencies (not string DI tokens)
 - Return DTO/enveloped responses instead of raw Prisma records

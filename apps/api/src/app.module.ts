@@ -2,6 +2,7 @@ import { join } from 'path';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { I18nCoreModule } from '@nathapp/nestjs-common';
+import { CacheModule, CacheStrategy } from './cache/cache.module';
 import { LoggingModule } from '@nathapp/nestjs-logging';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { ThrottlerModule } from '@nathapp/nestjs-throttler';
@@ -48,6 +49,14 @@ import { validate } from './config/env.validation';
       isGlobal: true,
       client: PrismaClient,
       transaction: true,
+    }),
+    CacheModule.register({
+      isGlobal: true,
+      strategy: CacheStrategy.MEMORY,
+      memory: {
+        lruSize: 1000,
+        ttl: '1m',
+      },
     }),
     ThrottlerModule.forRootAsync({
       useFactory: () => ({

@@ -4,7 +4,7 @@ import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-c
 import type { PrismaClient } from '@prisma/client';
 import { RagService } from '../rag/rag.service';
 import { OutboxService } from '../outbox/outbox.service';
-import { ActorResolver, ActorRequest } from '../events/actor-resolver.service';
+import { AgentAuthProvider } from '../auth/agent-auth.provider';
 import { TicketEventService } from '../events/ticket-event.service';
 import { AgentEventService } from '../events/agent-event.service';
 import { DecisionEventService } from '../events/decision-event.service';
@@ -24,7 +24,7 @@ export class KodaDomainWriter {
     private readonly prisma: PrismaService<PrismaClient>,
     private readonly ragService: RagService,
     private readonly outboxService: OutboxService,
-    private readonly actorResolver: ActorResolver,
+    private readonly agentAuthProvider: AgentAuthProvider,
     private readonly ticketEventService: TicketEventService,
     private readonly agentEventService: AgentEventService,
     private readonly decisionEventService: DecisionEventService,
@@ -67,17 +67,34 @@ export class KodaDomainWriter {
     }
   }
 
+  private roleFromEventPayload(data: Record<string, unknown>): string | undefined {
+    const actorRole = data['actorRole'];
+    if (typeof actorRole === 'string' && actorRole.length > 0) {
+      return actorRole;
+    }
+    const role = data['role'];
+    if (typeof role === 'string' && role.length > 0) {
+      return role;
+    }
+    return undefined;
+  }
+
   async writeTicketEvent(data: WriteTicketEventInput): Promise<WriteResult> {
     this.assertNonEmpty(data.projectId, 'projectId');
     this.assertNonEmpty(data.ticketId, 'ticketId');
     this.assertNonEmpty(data.action, 'action');
     this.assertNonEmpty(data.actorId, 'actorId');
 
-    const mockRequest: ActorRequest = {
-      user: data.actorType === 'user' ? { id: data.actorId, sub: data.actorId } : null,
-      agent: data.actorType === 'agent' ? { id: data.actorId, sub: data.actorId } : null,
+    const payloadRole = this.roleFromEventPayload(data.data ?? {});
+    const projectRoles = data.actorType === 'agent'
+      ? await this.agentAuthProvider.loadAgentRoles(data.actorId)
+      : (payloadRole ? [payloadRole] : []);
+    const actor = {
+      actorType: data.actorType,
+      actorId: data.actorId,
+      projectRoles,
+      resourceRoles: [],
     };
-    const actor = await this.actorResolver.resolve(mockRequest);
     this.assertActorHasEventRole(actor);
 
     const event = await this.ticketEventService.create(data);
@@ -104,11 +121,12 @@ export class KodaDomainWriter {
     this.assertNonEmpty(data.projectId, 'projectId');
     this.assertNonEmpty(data.agentId, 'agentId');
 
-    const mockRequest: ActorRequest = {
-      user: null,
-      agent: { id: data.agentId, sub: data.agentId },
+    const actor = {
+      actorType: 'agent' as const,
+      actorId: data.agentId,
+      projectRoles: await this.agentAuthProvider.loadAgentRoles(data.agentId),
+      resourceRoles: [],
     };
-    const actor = await this.actorResolver.resolve(mockRequest);
     this.assertActorHasEventRole(actor);
 
     const event = await this.agentEventService.create(data);
@@ -136,11 +154,12 @@ export class KodaDomainWriter {
     this.assertNonEmpty(data.agentId, 'agentId');
     this.assertNonEmpty(data.action, 'action');
 
-    const mockRequest: ActorRequest = {
-      user: null,
-      agent: { id: data.agentId, sub: data.agentId },
+    const actor = {
+      actorType: 'agent' as const,
+      actorId: data.agentId,
+      projectRoles: await this.agentAuthProvider.loadAgentRoles(data.agentId),
+      resourceRoles: [],
     };
-    const actor = await this.actorResolver.resolve(mockRequest);
     this.assertActorHasEventRole(actor);
 
     const event = await this.decisionEventService.create(data);

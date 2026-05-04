@@ -77,6 +77,70 @@ describe('CommentsService', () => {
     updatedAt: new Date(),
   };
 
+  const mockUserPrincipal = {
+    id: 'user-123',
+    sub: 'user-123',
+    actorType: 'user' as const,
+    role: 'MEMBER' as const,
+    email: 'user@example.com',
+    blacklisted: false,
+    revoked: false,
+    authorities: [] as string[],
+    name: 'Test User',
+  };
+
+  const mockAgentPrincipal = {
+    id: 'agent-123',
+    sub: 'agent-123',
+    actorType: 'agent' as const,
+    slug: 'test-agent',
+    status: 'ACTIVE' as const,
+    agentRoles: [] as string[],
+    capabilities: [] as string[],
+    blacklisted: false,
+    revoked: false,
+    authorities: [] as string[],
+    name: 'Test Agent',
+  };
+
+  const mockUser456Principal = {
+    id: 'user-456',
+    sub: 'user-456',
+    actorType: 'user' as const,
+    role: 'MEMBER' as const,
+    email: 'user456@example.com',
+    blacklisted: false,
+    revoked: false,
+    authorities: [] as string[],
+    name: 'Test User 456',
+  };
+
+  const mockAgent456Principal = {
+    id: 'agent-456',
+    sub: 'agent-456',
+    actorType: 'agent' as const,
+    slug: 'test-agent-456',
+    status: 'ACTIVE' as const,
+    agentRoles: [] as string[],
+    capabilities: [] as string[],
+    blacklisted: false,
+    revoked: false,
+    authorities: [] as string[],
+    name: 'Test Agent 456',
+  };
+
+  const mockAdminPrincipal = {
+    id: 'admin-user',
+    sub: 'admin-user',
+    actorType: 'user' as const,
+    role: 'ADMIN' as const,
+    email: 'admin@example.com',
+    blacklisted: false,
+    revoked: false,
+    authorities: [] as string[],
+    name: 'Admin User',
+  };
+
   // PrismaService mock is only needed for project/ticket lookups
   const mockPrismaService = {
     client: {
@@ -126,7 +190,7 @@ describe('CommentsService', () => {
       const createdComment = { ...mockComment, body: 'This is a test comment' };
       mockCommentRepo.create.mockResolvedValue(createdComment);
 
-      const result = await service.create('koda', 'KODA-1', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
+      const result = await service.create('koda', 'KODA-1', createDto, mockUserPrincipal);
 
       expect(result.body).toBe('This is a test comment');
       expect(mockCommentRepo.create).toHaveBeenCalledWith(
@@ -150,7 +214,7 @@ describe('CommentsService', () => {
       const commentWithType = { ...mockComment, type: 'VERIFICATION' };
       mockCommentRepo.create.mockResolvedValue(commentWithType);
 
-      const result = await service.create('koda', 'KODA-1', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
+      const result = await service.create('koda', 'KODA-1', createDto, mockUserPrincipal);
 
       expect(result.type).toBe('VERIFICATION');
     });
@@ -169,7 +233,7 @@ describe('CommentsService', () => {
           type: commentType as any,
         };
 
-        const result = await service.create('koda', 'KODA-1', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
+        const result = await service.create('koda', 'KODA-1', createDto, mockUserPrincipal);
 
         expect(result.type).toBe(commentType);
       }
@@ -188,7 +252,7 @@ describe('CommentsService', () => {
         authorUserId: 'user-456',
       });
 
-      const result = await service.create('koda', 'KODA-1', createDto, { id: 'user-456', sub: 'user-456' }, 'user');
+      const result = await service.create('koda', 'KODA-1', createDto, mockUser456Principal);
 
       expect(result.authorUserId).toBe('user-456');
       expect(result.authorAgentId).toBeNull();
@@ -208,7 +272,7 @@ describe('CommentsService', () => {
         authorAgentId: 'agent-456',
       });
 
-      const result = await service.create('koda', 'KODA-1', createDto, { id: 'agent-456', sub: 'agent-456' }, 'agent');
+      const result = await service.create('koda', 'KODA-1', createDto, mockAgent456Principal);
 
       expect(result.authorAgentId).toBe('agent-456');
       expect(result.authorUserId).toBeNull();
@@ -223,7 +287,7 @@ describe('CommentsService', () => {
       mockPrismaService.client.project.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.create('nonexistent', 'KODA-1', createDto, { id: 'user-123', sub: 'user-123' }, 'user')
+        service.create('nonexistent', 'KODA-1', createDto, mockUserPrincipal)
       ).rejects.toThrow();
     });
 
@@ -237,7 +301,7 @@ describe('CommentsService', () => {
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.create('koda', 'KODA-999', createDto, { id: 'user-123', sub: 'user-123' }, 'user')
+        service.create('koda', 'KODA-999', createDto, mockUserPrincipal)
       ).rejects.toThrow();
     });
 
@@ -253,7 +317,7 @@ describe('CommentsService', () => {
         mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
 
         await expect(
-          service.create('koda', 'KODA-1', invalidDto as CreateCommentDto, { id: 'user-123', sub: 'user-123' }, 'user')
+          service.create('koda', 'KODA-1', invalidDto as CreateCommentDto, mockUserPrincipal)
         ).rejects.toThrow();
       }
     });
@@ -313,7 +377,7 @@ describe('CommentsService', () => {
         body: 'Updated comment body',
       });
 
-      const result = await service.update('comment-123', updateDto, { id: 'user-123', sub: 'user-123' }, 'user');
+      const result = await service.update('comment-123', updateDto, mockUserPrincipal);
 
       expect(result.body).toBe('Updated comment body');
       expect(mockCommentRepo.update).toHaveBeenCalledWith('comment-123', { body: 'Updated comment body' });
@@ -331,7 +395,7 @@ describe('CommentsService', () => {
         body: 'Updated by agent',
       });
 
-      const result = await service.update('comment-123', updateDto, { id: 'agent-123', sub: 'agent-123' }, 'agent');
+      const result = await service.update('comment-123', updateDto, mockAgentPrincipal);
 
       expect(result.body).toBe('Updated by agent');
     });
@@ -344,7 +408,7 @@ describe('CommentsService', () => {
       mockCommentRepo.findById.mockResolvedValue(mockComment);
 
       await expect(
-        service.update('comment-123', updateDto, { id: 'user-456', sub: 'user-456' }, 'user')
+        service.update('comment-123', updateDto, mockUser456Principal)
       ).rejects.toThrow();
     });
 
@@ -356,7 +420,7 @@ describe('CommentsService', () => {
       mockCommentRepo.findById.mockResolvedValue(mockComment);
 
       await expect(
-        service.update('comment-123', updateDto, { id: 'agent-456', sub: 'agent-456' }, 'agent')
+        service.update('comment-123', updateDto, mockAgent456Principal)
       ).rejects.toThrow();
     });
 
@@ -374,8 +438,7 @@ describe('CommentsService', () => {
       const result = await service.update(
         'comment-123',
         updateDto,
-        { id: 'admin-user', sub: 'admin-user', role: 'ADMIN' },
-        'user'
+        mockAdminPrincipal
       );
 
       expect(result.body).toBe('Admin edited');
@@ -389,7 +452,7 @@ describe('CommentsService', () => {
       mockCommentRepo.findById.mockResolvedValue(null);
 
       await expect(
-        service.update('nonexistent-123', updateDto, { id: 'user-123', sub: 'user-123' }, 'user')
+        service.update('nonexistent-123', updateDto, mockUserPrincipal)
       ).rejects.toThrow();
     });
 
@@ -405,7 +468,7 @@ describe('CommentsService', () => {
         body: 'Updated body only',
       });
 
-      const result = await service.update('comment-123', updateDto, { id: 'user-123', sub: 'user-123' }, 'user');
+      const result = await service.update('comment-123', updateDto, mockUserPrincipal);
 
       expect(result.type).toBe('VERIFICATION');
       expect(result.body).toBe('Updated body only');
@@ -424,7 +487,7 @@ describe('CommentsService', () => {
         updatedAt: now,
       });
 
-      const result = await service.update('comment-123', updateDto, { id: 'user-123', sub: 'user-123' }, 'user');
+      const result = await service.update('comment-123', updateDto, mockUserPrincipal);
 
       expect(result.updatedAt).toEqual(now);
     });
@@ -435,7 +498,7 @@ describe('CommentsService', () => {
       mockCommentRepo.findById.mockResolvedValue(mockComment);
       mockCommentRepo.delete.mockResolvedValue(undefined);
 
-      await service.delete('comment-123', { id: 'user-123', sub: 'user-123' }, 'user');
+      await service.delete('comment-123', mockUserPrincipal);
 
       expect(mockCommentRepo.delete).toHaveBeenCalledWith('comment-123');
     });
@@ -445,7 +508,7 @@ describe('CommentsService', () => {
       mockCommentRepo.findById.mockResolvedValue(agentComment);
       mockCommentRepo.delete.mockResolvedValue(undefined);
 
-      await service.delete('comment-123', { id: 'agent-123', sub: 'agent-123' }, 'agent');
+      await service.delete('comment-123', mockAgentPrincipal);
 
       expect(mockCommentRepo.delete).toHaveBeenCalled();
     });
@@ -454,7 +517,7 @@ describe('CommentsService', () => {
       mockCommentRepo.findById.mockResolvedValue(mockComment);
 
       await expect(
-        service.delete('comment-123', { id: 'user-456', sub: 'user-456' }, 'user')
+        service.delete('comment-123', mockUser456Principal)
       ).rejects.toThrow();
     });
 
@@ -462,7 +525,7 @@ describe('CommentsService', () => {
       mockCommentRepo.findById.mockResolvedValue(mockComment);
 
       await expect(
-        service.delete('comment-123', { id: 'agent-456', sub: 'agent-456' }, 'agent')
+        service.delete('comment-123', mockAgent456Principal)
       ).rejects.toThrow();
     });
 
@@ -470,7 +533,7 @@ describe('CommentsService', () => {
       mockCommentRepo.findById.mockResolvedValue(mockComment);
       mockCommentRepo.delete.mockResolvedValue(undefined);
 
-      await service.delete('comment-123', { id: 'admin-user', sub: 'admin-user', role: 'ADMIN' }, 'user');
+      await service.delete('comment-123', mockAdminPrincipal);
 
       expect(mockCommentRepo.delete).toHaveBeenCalledWith('comment-123');
     });
@@ -479,7 +542,7 @@ describe('CommentsService', () => {
       mockCommentRepo.findById.mockResolvedValue(null);
 
       await expect(
-        service.delete('nonexistent-123', { id: 'user-123', sub: 'user-123' }, 'user')
+        service.delete('nonexistent-123', mockUserPrincipal)
       ).rejects.toThrow();
     });
 
@@ -487,7 +550,7 @@ describe('CommentsService', () => {
       mockCommentRepo.findById.mockResolvedValue(mockComment);
 
       await expect(
-        service.delete('comment-123', { id: 'user-456', sub: 'user-456', role: 'MEMBER' }, 'user')
+        service.delete('comment-123', mockUser456Principal)
       ).rejects.toThrow();
     });
   });

@@ -10,6 +10,7 @@ import { AgentRole } from '../common/enums';
 import { AgentResponseDto } from './dto/agent-response.dto';
 import { TicketResponseDto } from '../tickets/dto/ticket-response.dto';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
+import { AgentAuthProvider } from '../auth/agent-auth.provider';
 
 export class CreateAgentDto {
   @ApiProperty({ example: 'Subrina Coder' })
@@ -77,6 +78,7 @@ export class AgentsService {
     private prisma: PrismaService<PrismaClient>,
     private configService: ConfigService,
     @Optional() private readonly kodaDomainWriter?: KodaDomainWriter,
+    @Optional() private readonly agentAuthProvider?: AgentAuthProvider,
   ) {}
   private get db() { return this.prisma.client; }
 
@@ -126,6 +128,7 @@ export class AgentsService {
         where: { id: agentIdOrDto },
         data: { apiKeyHash },
       });
+      await this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
       // Re-fetch with relations for DTO mapping
       const agentWithRelations = await this.db.agent.findUnique({
         where: { id: agent.id },
@@ -145,6 +148,7 @@ export class AgentsService {
           apiKeyHash,
         },
       });
+      await this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
       // Create role entries (sequential create — createMany not reliable on SQLite for junction tables)
       const createdRoles = [];
       if (roles?.length) {
@@ -235,6 +239,7 @@ export class AgentsService {
       data,
       include: { roles: true, capabilities: true },
     });
+    await this.agentAuthProvider?.invalidateByTag(`AGENT:${updated.id}`);
     return AgentResponseDto.from(updated);
   }
 
@@ -255,13 +260,15 @@ export class AgentsService {
     }
 
     // Return updated agent with roles
-    return AgentResponseDto.from(await this.db.agent.findUnique({
+    const updated = await this.db.agent.findUnique({
       where: { id: agentId },
       include: {
         roles: true,
         capabilities: true,
       },
-    }));
+    });
+    await this.agentAuthProvider?.invalidateByTag(`AGENT:${agentId}`);
+    return AgentResponseDto.from(updated);
   }
 
   async updateCapabilities(agentId: string, updateData: UpdateCapabilitiesDto): Promise<AgentResponseDto> {
@@ -283,13 +290,15 @@ export class AgentsService {
     }
 
     // Return updated agent with capabilities
-    return AgentResponseDto.from(await this.db.agent.findUnique({
+    const updated = await this.db.agent.findUnique({
       where: { id: agentId },
       include: {
         roles: true,
         capabilities: true,
       },
-    }));
+    });
+    await this.agentAuthProvider?.invalidateByTag(`AGENT:${agentId}`);
+    return AgentResponseDto.from(updated);
   }
 
   async remove(slug: string): Promise<AgentResponseDto> {
@@ -300,6 +309,7 @@ export class AgentsService {
     if (!agent) throw new NotFoundAppException({}, 'agents');
 
     await this.db.agent.delete({ where: { slug } });
+    await this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
     return AgentResponseDto.from(agent);
   }
 

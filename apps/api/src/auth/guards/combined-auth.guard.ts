@@ -5,6 +5,7 @@ import { IS_PUBLIC_KEY, JwtAuthGuard } from '@nathapp/nestjs-auth';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
 import { createHmac } from 'crypto';
+import { AgentAuthProvider } from '../agent-auth.provider';
 
 @Injectable()
 export class CombinedAuthGuard extends JwtAuthGuard {
@@ -14,6 +15,7 @@ export class CombinedAuthGuard extends JwtAuthGuard {
     private readonly myReflector: Reflector,
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly agentAuthProvider: AgentAuthProvider,
   ) {
     super(myReflector);
   }
@@ -58,8 +60,9 @@ export class CombinedAuthGuard extends JwtAuthGuard {
 
   private async tryApiKey(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Record<string, unknown>>();
-    const headers = request['headers'] as Record<string, string>;
-    const authHeader = headers?.['authorization'] ?? '';
+    const headers = request['headers'] as Record<string, string | string[]>;
+    const authHeaderValue = headers?.['authorization'];
+    const authHeader = Array.isArray(authHeaderValue) ? authHeaderValue[0] : (authHeaderValue ?? '');
 
     if (!authHeader.startsWith('Bearer ')) return false;
 
@@ -87,11 +90,7 @@ export class CombinedAuthGuard extends JwtAuthGuard {
     // PAUSED agents may still authenticate (they are operationally paused, not decommissioned).
     if (agent.status === 'OFFLINE') return false;
 
-    request['agent'] = agent;
-    request['actorType'] = 'agent';
-    // Don't set req.user for API key auth — controller checks req.user to detect
-    // JWT auth. Setting it here would make actorType = 'user' even for agents.
-    delete request['user'];
+    request['user'] = await this.agentAuthProvider.buildPrincipal(agent);
 
     return true;
   }

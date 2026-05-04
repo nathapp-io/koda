@@ -29,23 +29,40 @@ describe('LabelsController', () => {
   };
 
   const mockAdminUser = {
+    actorType: 'user' as const,
     id: 'user-admin',
-    sub: 'user-admin',
+    name: 'admin@example.com',
     email: 'admin@example.com',
-    role: 'ADMIN',
+    role: 'ADMIN' as const,
+    blacklisted: false,
+    revoked: false,
+    authorities: ['ADMIN'],
+    extra: { sub: 'user-admin' },
   };
 
   const mockMemberUser = {
+    actorType: 'user' as const,
     id: 'user-member',
-    sub: 'user-member',
+    name: 'member@example.com',
     email: 'member@example.com',
-    role: 'MEMBER',
+    role: 'MEMBER' as const,
+    blacklisted: false,
+    revoked: false,
+    authorities: ['MEMBER'],
+    extra: { sub: 'user-member' },
   };
 
   const mockAgent = {
+    actorType: 'agent' as const,
     id: 'agent-123',
-    sub: 'agent-123',
+    name: 'test-agent',
     slug: 'test-agent',
+    status: 'ACTIVE' as const,
+    agentRoles: ['WORKER'],
+    capabilities: [],
+    blacklisted: false,
+    revoked: false,
+    authorities: ['WORKER'],
   };
 
   const mockLabelsService = {
@@ -79,10 +96,10 @@ describe('LabelsController', () => {
 
       mockLabelsService.create.mockResolvedValue(mockLabel);
 
-      const result = await controller.create('koda', createDto, mockAdminUser, 'user');
+      const result = await controller.create('koda', createDto, mockAdminUser);
 
       expect(result).toEqual(mockLabel);
-      expect(service.create).toHaveBeenCalledWith('koda', createDto, mockAdminUser, 'user');
+      expect(service.create).toHaveBeenCalledWith('koda', createDto, mockAdminUser);
     });
 
     it('should reject label creation from non-ADMIN user with 403', async () => {
@@ -94,7 +111,7 @@ describe('LabelsController', () => {
       mockLabelsService.create.mockRejectedValue(new Error('Forbidden'));
 
       await expect(
-        controller.create('koda', createDto, mockMemberUser, 'user')
+        controller.create('koda', createDto, mockMemberUser)
       ).rejects.toThrow();
     });
 
@@ -107,7 +124,7 @@ describe('LabelsController', () => {
       mockLabelsService.create.mockRejectedValue(new Error('Forbidden'));
 
       await expect(
-        controller.create('koda', createDto, mockAgent, 'agent')
+        controller.create('koda', createDto, mockAgent)
       ).rejects.toThrow();
     });
 
@@ -121,7 +138,7 @@ describe('LabelsController', () => {
 
       for (const invalidDto of invalidDtos) {
         await expect(
-          controller.create('koda', invalidDto as CreateLabelDto, mockAdminUser, 'user')
+          controller.create('koda', invalidDto as CreateLabelDto, mockAdminUser)
         ).rejects.toThrow();
       }
     });
@@ -134,7 +151,7 @@ describe('LabelsController', () => {
       const labelWithoutColor = { ...mockLabel, name: 'frontend', color: null };
       mockLabelsService.create.mockResolvedValue(labelWithoutColor);
 
-      const result = await controller.create('koda', createDto, mockAdminUser, 'user');
+      const result = await controller.create('koda', createDto, mockAdminUser);
 
       expect(result.name).toBe('frontend');
       expect(result.color).toBeNull();
@@ -149,7 +166,7 @@ describe('LabelsController', () => {
       mockLabelsService.create.mockRejectedValue(new Error('Label already exists'));
 
       await expect(
-        controller.create('koda', createDto, mockAdminUser, 'user')
+        controller.create('koda', createDto, mockAdminUser)
       ).rejects.toThrow();
     });
 
@@ -162,7 +179,7 @@ describe('LabelsController', () => {
       mockLabelsService.create.mockRejectedValue(new Error('Project not found'));
 
       await expect(
-        controller.create('nonexistent', createDto, mockAdminUser, 'user')
+        controller.create('nonexistent', createDto, mockAdminUser)
       ).rejects.toThrow();
     });
   });
@@ -229,16 +246,16 @@ describe('LabelsController', () => {
     it('should delete label for ADMIN user', async () => {
       mockLabelsService.delete.mockResolvedValue(undefined);
 
-      await controller.delete('koda', 'label-123', mockAdminUser, 'user');
+      await controller.delete('koda', 'label-123', mockAdminUser);
 
-      expect(service.delete).toHaveBeenCalledWith('koda', 'label-123', mockAdminUser, 'user');
+      expect(service.delete).toHaveBeenCalledWith('koda', 'label-123', mockAdminUser);
     });
 
     it('should reject delete from non-ADMIN user with 403', async () => {
       mockLabelsService.delete.mockRejectedValue(new Error('Forbidden'));
 
       await expect(
-        controller.delete('koda', 'label-123', mockMemberUser, 'user')
+        controller.delete('koda', 'label-123', mockMemberUser)
       ).rejects.toThrow();
     });
 
@@ -246,7 +263,7 @@ describe('LabelsController', () => {
       mockLabelsService.delete.mockRejectedValue(new Error('Forbidden'));
 
       await expect(
-        controller.delete('koda', 'label-123', mockAgent, 'agent')
+        controller.delete('koda', 'label-123', mockAgent)
       ).rejects.toThrow();
     });
 
@@ -254,7 +271,7 @@ describe('LabelsController', () => {
       mockLabelsService.delete.mockRejectedValue(new Error('Label not found'));
 
       await expect(
-        controller.delete('koda', 'nonexistent', mockAdminUser, 'user')
+        controller.delete('koda', 'nonexistent', mockAdminUser)
       ).rejects.toThrow();
     });
 
@@ -262,7 +279,7 @@ describe('LabelsController', () => {
       mockLabelsService.delete.mockRejectedValue(new Error('Project not found'));
 
       await expect(
-        controller.delete('nonexistent', 'label-123', mockAdminUser, 'user')
+        controller.delete('nonexistent', 'label-123', mockAdminUser)
       ).rejects.toThrow();
     });
   });
@@ -286,10 +303,10 @@ describe('LabelsController', () => {
 
       mockLabelsService.assignToTicket.mockResolvedValue(ticketWithLabel);
 
-      const result = await controller.assignLabel('koda', 'KODA-1', assignDto, mockMemberUser, 'user');
+      const result = await controller.assignLabel('koda', 'KODA-1', assignDto, mockMemberUser);
 
       expect(result.labels).toContainEqual(expect.objectContaining({ id: 'label-123' }));
-      expect(service.assignToTicket).toHaveBeenCalledWith('koda', 'KODA-1', assignDto, mockMemberUser, 'user');
+      expect(service.assignToTicket).toHaveBeenCalledWith('koda', 'KODA-1', assignDto, mockMemberUser);
     });
 
     it('should assign label to ticket for authenticated agent', async () => {
@@ -310,10 +327,10 @@ describe('LabelsController', () => {
 
       mockLabelsService.assignToTicket.mockResolvedValue(ticketWithLabel);
 
-      const result = await controller.assignLabel('koda', 'KODA-1', assignDto, mockAgent, 'agent');
+      const result = await controller.assignLabel('koda', 'KODA-1', assignDto, mockAgent);
 
       expect(result.labels).toBeDefined();
-      expect(service.assignToTicket).toHaveBeenCalledWith('koda', 'KODA-1', assignDto, mockAgent, 'agent');
+      expect(service.assignToTicket).toHaveBeenCalledWith('koda', 'KODA-1', assignDto, mockAgent);
     });
 
     it('should return 404 if ticket not found', async () => {
@@ -322,7 +339,7 @@ describe('LabelsController', () => {
       mockLabelsService.assignToTicket.mockRejectedValue(new Error('Ticket not found'));
 
       await expect(
-        controller.assignLabel('koda', 'KODA-999', assignDto, mockMemberUser, 'user')
+        controller.assignLabel('koda', 'KODA-999', assignDto, mockMemberUser)
       ).rejects.toThrow();
     });
 
@@ -332,7 +349,7 @@ describe('LabelsController', () => {
       mockLabelsService.assignToTicket.mockRejectedValue(new Error('Label not found'));
 
       await expect(
-        controller.assignLabel('koda', 'KODA-1', assignDto, mockMemberUser, 'user')
+        controller.assignLabel('koda', 'KODA-1', assignDto, mockMemberUser)
       ).rejects.toThrow();
     });
 
@@ -342,7 +359,7 @@ describe('LabelsController', () => {
       mockLabelsService.assignToTicket.mockRejectedValue(new Error('Label not in project'));
 
       await expect(
-        controller.assignLabel('koda', 'KODA-1', assignDto, mockMemberUser, 'user')
+        controller.assignLabel('koda', 'KODA-1', assignDto, mockMemberUser)
       ).rejects.toThrow();
     });
 
@@ -352,7 +369,7 @@ describe('LabelsController', () => {
       mockLabelsService.assignToTicket.mockRejectedValue(new Error('Label already assigned'));
 
       await expect(
-        controller.assignLabel('koda', 'KODA-1', assignDto, mockMemberUser, 'user')
+        controller.assignLabel('koda', 'KODA-1', assignDto, mockMemberUser)
       ).rejects.toThrow();
     });
   });
@@ -375,10 +392,10 @@ describe('LabelsController', () => {
 
       mockLabelsService.removeFromTicket.mockResolvedValue(ticketWithoutLabel);
 
-      const result = await controller.removeLabel('koda', 'KODA-1', 'label-123', mockMemberUser, 'user');
+      const result = await controller.removeLabel('koda', 'KODA-1', 'label-123', mockMemberUser);
 
       expect(result.labels).toEqual([]);
-      expect(service.removeFromTicket).toHaveBeenCalledWith('koda', 'KODA-1', 'label-123', mockMemberUser, 'user');
+      expect(service.removeFromTicket).toHaveBeenCalledWith('koda', 'KODA-1', 'label-123', mockMemberUser);
     });
 
     it('should remove label from ticket for authenticated agent', async () => {
@@ -398,7 +415,7 @@ describe('LabelsController', () => {
 
       mockLabelsService.removeFromTicket.mockResolvedValue(ticketWithoutLabel);
 
-      const result = await controller.removeLabel('koda', 'KODA-1', 'label-123', mockAgent, 'agent');
+      const result = await controller.removeLabel('koda', 'KODA-1', 'label-123', mockAgent);
 
       expect(result.labels).toEqual([]);
     });
@@ -407,7 +424,7 @@ describe('LabelsController', () => {
       mockLabelsService.removeFromTicket.mockRejectedValue(new Error('Ticket not found'));
 
       await expect(
-        controller.removeLabel('koda', 'KODA-999', 'label-123', mockMemberUser, 'user')
+        controller.removeLabel('koda', 'KODA-999', 'label-123', mockMemberUser)
       ).rejects.toThrow();
     });
 
@@ -415,7 +432,7 @@ describe('LabelsController', () => {
       mockLabelsService.removeFromTicket.mockRejectedValue(new Error('Label not assigned'));
 
       await expect(
-        controller.removeLabel('koda', 'KODA-1', 'label-123', mockMemberUser, 'user')
+        controller.removeLabel('koda', 'KODA-1', 'label-123', mockMemberUser)
       ).rejects.toThrow();
     });
   });

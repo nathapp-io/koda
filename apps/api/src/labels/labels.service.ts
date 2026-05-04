@@ -7,12 +7,8 @@ import { CreateLabelDto } from './dto/create-label.dto';
 import { UpdateLabelDto } from './dto/update-label.dto';
 import { AssignLabelDto } from './dto/assign-label.dto';
 import { LabelResponseDto } from './dto/label-response.dto';
-
-interface CurrentUser {
-  id: string;
-  sub: string;
-  role?: string;
-}
+import { actorForeignKeys } from '../auth/principal/actor-foreign-keys';
+import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
 
 @Injectable()
 export class LabelsService {
@@ -26,10 +22,9 @@ export class LabelsService {
   async create(
     projectSlug: string,
     createLabelDto: CreateLabelDto,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
-    if (actorType !== 'agent' && currentUser.role === 'MEMBER') {
+    if (isUserPrincipal(principal) && principal.role === 'MEMBER') {
       throw new ForbiddenAppException({}, 'labels');
     }
 
@@ -90,11 +85,10 @@ export class LabelsService {
   async delete(
     projectSlug: string,
     labelId: string,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
     // ADMIN users and agents can delete labels; MEMBER users cannot
-    if (actorType === 'user' && currentUser.role === 'MEMBER') {
+    if (isUserPrincipal(principal) && principal.role === 'MEMBER') {
       throw new ForbiddenAppException({}, 'labels');
     }
 
@@ -131,11 +125,10 @@ export class LabelsService {
     projectSlug: string,
     labelId: string,
     updateLabelDto: UpdateLabelDto,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
     // ADMIN users and agents can update labels; MEMBER users cannot
-    if (actorType === 'user' && currentUser.role === 'MEMBER') {
+    if (isUserPrincipal(principal) && principal.role === 'MEMBER') {
       throw new ForbiddenAppException({}, 'labels');
     }
 
@@ -165,8 +158,7 @@ export class LabelsService {
     projectSlug: string,
     ticketRef: string,
     assignLabelDto: AssignLabelDto,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
     // Find project by slug
     const project = await this.db.project.findUnique({
@@ -253,8 +245,7 @@ export class LabelsService {
             action: 'LABEL_CHANGE',
             field: 'labels',
             newValue: label.name,
-            actorUserId: actorType === 'user' ? currentUser.sub : null,
-            actorAgentId: actorType === 'agent' ? currentUser.sub : null,
+            ...actorForeignKeys(principal, 'actor'),
           },
         });
 
@@ -296,8 +287,7 @@ export class LabelsService {
     projectSlug: string,
     ticketRef: string,
     labelId: string,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal,
   ) {
     // Find project by slug
     const project = await this.db.project.findUnique({
@@ -372,8 +362,7 @@ export class LabelsService {
           action: 'LABEL_CHANGE',
           field: 'labels',
           oldValue: ticketLabel.label.name,
-          actorUserId: actorType === 'user' ? currentUser.sub : null,
-          actorAgentId: actorType === 'agent' ? currentUser.sub : null,
+          ...actorForeignKeys(principal, 'actor'),
         },
       });
 

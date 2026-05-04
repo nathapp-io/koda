@@ -902,11 +902,11 @@ describeIntegration('API Integration Tests', () => {
         .expect(403);
     });
 
-    it('GET /api/agents/me — 404 when using user token', async () => {
+    it('GET /api/agents/me — 403 when using user token', async () => {
       await request(httpServer)
         .get('/api/agents/me')
         .set('Authorization', `Bearer ${userAccessToken}`)
-        .expect(404);
+        .expect(403);
     });
   });
 
