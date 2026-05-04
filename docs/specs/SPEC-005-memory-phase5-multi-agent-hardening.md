@@ -16,6 +16,20 @@ Phase 5 deliverables are:
 
 Phase 5 does not require a full web UI dashboard. A JSON admin endpoint and CI artifacts are sufficient unless a later web spec adds UI work.
 
+## Authorization
+
+Controller-level authorization in this spec must use the patterns established by:
+- [`20260504-consolidate-actor-auth-koda-principal.md`](./20260504-consolidate-actor-auth-koda-principal.md) — typed `KodaPrincipal`, `@Principal()` decorator, `IPrincipal.authorities` populated for both actor types.
+- [`20260504-casl-migration-koda-principal.md`](./20260504-casl-migration-koda-principal.md) — `KodaCaslAbilityFactory` is the single source of truth for "who can do what".
+
+This spec introduces routes that mix three concerns: (1) **actor type** (user vs agent), (2) **role** (ADMIN/MEMBER for users; DEVELOPER/REVIEWER/etc. for agents), and (3) **project membership** ("on the target project"). The first two are fully expressible via CASL today. **Project membership is currently flagged out-of-scope in the CASL spec** because it requires loading per-project membership rows into the principal — that work is a prerequisite for full enforcement of `... on the target project` ACs in this spec.
+
+Until project-scoped CASL conditions land, project-membership ACs in this spec must:
+- Use `@RequiredPermission([action, subject])` for the action/role gate (decorator), AND
+- Call a `ProjectMembershipGuard` (or the existing `ProjectsController.checkProjectMembership` pattern from PR1) in the controller/service to enforce per-project access.
+
+This is a two-layer pattern, not a workaround: the decorator handles "can this principal ever do X?", the membership check handles "on this specific project?". Once project conditions land in CASL, the second layer can collapse into the first.
+
 ## Motivation
 
 Phase 1-4 delivered individual components. Phase 5 ensures they work together correctly regardless of which agent calls them. Without this, different agents get different answers to the same question. This is the integration and hardening phase.
@@ -242,7 +256,7 @@ The exact model name can differ, but the persisted fields must be sufficient to 
 - `meta.latencyMs` measures wall-clock time from entry to return (excluding network)
 - Calling `getProjectContext` with a non-existent `projectId` throws `ProjectNotFoundError` (`code: 'PROJECT_NOT_FOUND'`)
 - All errors thrown by `getProjectContext` are `KodaError` subclasses and serialize to the `ErrorEnvelope` format defined in SPEC-001 §5
-- `getProjectContext` is callable only by actors with role `admin`, `developer`, `agent`, or `viewer` on the target project
+- `getProjectContext` is gated with `@RequiredPermission([KodaAction.READ, 'ProjectContext'])`. The `KodaCaslAbilityFactory` grants this to: ADMIN users, agents (any role), and project members with role DEVELOPER/VIEWER. The route additionally enforces project membership via the `ProjectMembershipGuard` (or equivalent) until project-scoped CASL conditions land — see Authorization section. Controller uses `@Principal() principal: KodaPrincipal`; no inline `actorType`/role checks.
 - Repeated calls with identical input and unchanged data produce the same result ordering across all agent adapters
 
 ### US-002: Policy Gates — Isolation + Provenance + Write Safety + GraphifyEnabled
