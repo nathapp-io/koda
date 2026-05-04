@@ -27,6 +27,12 @@ This spec introduces routes that mix three concerns: (1) **actor type** (user vs
 Until project-scoped CASL conditions land, project-membership ACs in this spec must:
 - Use `@RequiredPermission([action, subject])` for the action/role gate (decorator), AND
 - Call a `ProjectMembershipGuard` (or the existing `ProjectsController.checkProjectMembership` pattern from PR1) in the controller/service to enforce per-project access.
+- Interim behavior must be explicit and consistent with PR1: user principals require a valid project membership row; agent principals are allowed by CASL principal permissions without requiring `projectMember` rows.
+
+CASL baseline alignment requirement for this phase:
+- The current CASL baseline (`apps/api/src/auth/casl/koda-action.enum.ts`) does not include a `'ProjectContext'` subject.
+- Phase 5 must add `'ProjectContext'` to `KodaSubject` and wire grants in `KodaCaslAbilityFactory` for `@RequiredPermission([KodaAction.READ, 'ProjectContext'])` routes.
+- `KodaAction.READ` already exists; no new action enum is required for Phase 5.
 
 This is a two-layer pattern, not a workaround: the decorator handles "can this principal ever do X?", the membership check handles "on this specific project?". Once project conditions land in CASL, the second layer can collapse into the first.
 
@@ -136,7 +142,7 @@ interface GateResult {
 | `TruthConsistencyGate` | Canonical state matches derived store for 10 random queries | Discrepancy > 0 |
 | `WriteGate` | All write paths go through approved write layers (`KodaDomainWriter` and repository abstractions) | Direct raw Prisma write (`PrismaService.client.*`) outside approved layers detected |
 | `GraphifyEnabledGate` | Code results are hidden when `Project.graphifyEnabled=false` | Any `source='code'` result leaks |
-| `TokenBudgetGate` | `getProjectContext` with `tokenBudget=1000` returns under 1000 tokens | Overshoot > 5% |
+| `TokenBudgetGate` | `getProjectContext` with `tokenBudget=1000` stays within a 5% tolerance (`tokensUsed <= 1050`) | `tokensUsed > 1050` |
 
 **Implementation:** Policy gates run against a test project in CI using a real (not mocked) database. Each gate produces a JSON report consumed by the CI pipeline.
 

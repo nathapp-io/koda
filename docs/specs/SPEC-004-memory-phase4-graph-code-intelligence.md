@@ -24,7 +24,10 @@ Concretely for this spec:
 - Inject the actor with `@Principal() principal: KodaPrincipal`.
 - Translate every "role X can call Y" AC to either `@RequiredPermission([KodaAction.X, 'Subject'])` (decorator-only) or `ability.can(action, subject('Subject', instance))` after loading the resource.
 - Mixed gates (e.g. "ADMIN user OR DEVELOPER agent OR any agent") become CASL rules in the ability factory, not inline `if`-throws in controllers.
-- Add a `'CodeIntel'` subject to `KodaSubject` if not already present, with `KodaAction.IMPORT` / `KodaAction.READ` granted per role in the factory.
+- The current CASL baseline (`apps/api/src/auth/casl/koda-action.enum.ts`) does not include `KodaAction.IMPORT` or Phase-4 subjects. Phase 4 must extend CASL with: (1) `KodaAction.IMPORT`, (2) `'CodeIntel'` subject, and (3) `'AstIndex'` subject.
+- Grant model for new Phase-4 subjects:
+  - `'CodeIntel'`: `IMPORT` + `READ` per ACs below.
+  - `'AstIndex'`: `MANAGE` only for direct/manual index triggers (webhook/outbox internal path is not caller-authorized).
 
 ## Motivation
 
@@ -407,7 +410,7 @@ interface CanonicalSnapshot {
 - `DiffResult.indexed` reflects only the number of nodes actually written to LanceDB (not the total)
 - A diff-and-apply of 500 unchanged nodes + 10 added + 5 removed completes in under 2 seconds
 - `DiffResult` includes `durationMs` for performance monitoring
-- The `importGraphify` route is gated with `@RequiredPermission([KodaAction.IMPORT, 'CodeIntel'])`. The `KodaCaslAbilityFactory` grants this to: ADMIN users, all agents, and users with `DEVELOPER` project role (when project membership is implemented). Non-permitted callers receive 403 from `PermissionAuthGuard` — no inline check in the controller. See Authorization section.
+- The `importGraphify` route is gated with `@RequiredPermission([KodaAction.IMPORT, 'CodeIntel'])`. Phase 4 adds `KodaAction.IMPORT` to CASL and grants this permission to: ADMIN users, all agents, and users with `DEVELOPER` project role (when project membership is implemented). Non-permitted callers receive 403 from `PermissionAuthGuard` — no inline check in the controller. See Authorization section.
 
 ### US-002: AST/Symbol Index Pipeline
 **Size:** Complex | **AC count:** 11 | **Files:** 5 | **Depends on:** US-001
