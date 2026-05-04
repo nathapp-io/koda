@@ -1,5 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
+import { subject } from '@casl/ability';
+import { CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { CommentType } from '../common/enums';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ValidationAppException, NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
@@ -9,12 +11,14 @@ import { CommentResponseDto } from './dto/comment-response.dto';
 import { PrismaCommentRepository } from './prisma-comment.repository';
 import { COMMENT_REPOSITORY } from './domain/comment.domain';
 import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
+import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
 
 @Injectable()
 export class CommentsService {
   constructor(
     private readonly prisma: PrismaService<PrismaClient>,
     @Inject(COMMENT_REPOSITORY) private readonly commentRepo: PrismaCommentRepository,
+    private readonly caslAbilityFactory: KodaCaslAbilityFactory,
   ) {}
 
   private get db() { return this.prisma.client; }
@@ -152,14 +156,8 @@ export class CommentsService {
       throw new NotFoundAppException({}, 'comments');
     }
 
-    // Check authorization: only author or admin can edit
-    const isAuthor = isUserPrincipal(principal)
-      ? comment.authorUserId === principal.id
-      : comment.authorAgentId === principal.id;
-
-    const isAdmin = isUserPrincipal(principal) && principal.role === 'ADMIN';
-
-    if (!isAuthor && !isAdmin) {
+    const ability = await this.caslAbilityFactory.createForUser(principal);
+    if (!ability.can(CaslPermissionAction.UPDATE, subject('Comment', comment))) {
       throw new ForbiddenAppException({}, 'comments');
     }
 
@@ -182,14 +180,8 @@ export class CommentsService {
       throw new NotFoundAppException({}, 'comments');
     }
 
-    // Check authorization: only author or admin can delete
-    const isAuthor = isUserPrincipal(principal)
-      ? comment.authorUserId === principal.id
-      : comment.authorAgentId === principal.id;
-
-    const isAdmin = isUserPrincipal(principal) && principal.role === 'ADMIN';
-
-    if (!isAuthor && !isAdmin) {
+    const ability = await this.caslAbilityFactory.createForUser(principal);
+    if (!ability.can(CaslPermissionAction.DELETE, subject('Comment', comment))) {
       throw new ForbiddenAppException({}, 'comments');
     }
 

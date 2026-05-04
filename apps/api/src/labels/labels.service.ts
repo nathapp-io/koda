@@ -2,13 +2,13 @@ import { Injectable, Inject } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient, Prisma } from '@prisma/client';
-import { ValidationAppException, NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { ValidationAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { CreateLabelDto } from './dto/create-label.dto';
 import { UpdateLabelDto } from './dto/update-label.dto';
 import { AssignLabelDto } from './dto/assign-label.dto';
 import { LabelResponseDto } from './dto/label-response.dto';
 import { actorForeignKeys } from '../auth/principal/actor-foreign-keys';
-import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
+import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 @Injectable()
 export class LabelsService {
@@ -24,10 +24,6 @@ export class LabelsService {
     createLabelDto: CreateLabelDto,
     principal: KodaPrincipal,
   ) {
-    if (isUserPrincipal(principal) && principal.role === 'MEMBER') {
-      throw new ForbiddenAppException({}, 'labels');
-    }
-
     // Validate required fields
     if (!createLabelDto.name) {
       throw new ValidationAppException({}, 'labels');
@@ -87,11 +83,6 @@ export class LabelsService {
     labelId: string,
     principal: KodaPrincipal,
   ) {
-    // ADMIN users and agents can delete labels; MEMBER users cannot
-    if (isUserPrincipal(principal) && principal.role === 'MEMBER') {
-      throw new ForbiddenAppException({}, 'labels');
-    }
-
     // Find project by slug
     const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
@@ -127,11 +118,6 @@ export class LabelsService {
     updateLabelDto: UpdateLabelDto,
     principal: KodaPrincipal,
   ) {
-    // ADMIN users and agents can update labels; MEMBER users cannot
-    if (isUserPrincipal(principal) && principal.role === 'MEMBER') {
-      throw new ForbiddenAppException({}, 'labels');
-    }
-
     const project = await this.db.project.findUnique({ where: { slug: projectSlug } });
     if (!project || project.deletedAt) throw new NotFoundAppException();
 

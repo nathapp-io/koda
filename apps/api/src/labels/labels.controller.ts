@@ -19,7 +19,7 @@ import { CreateLabelDto } from './dto/create-label.dto';
 import { UpdateLabelDto } from './dto/update-label.dto';
 import { AssignLabelDto } from './dto/assign-label.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
-import { Principal } from '@nathapp/nestjs-auth';
+import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 @ApiTags('labels')
@@ -82,8 +82,9 @@ export class LabelsController {
   @ApiOperation({ summary: 'Create a label for a project' })
   @ApiResponse({ status: 201, description: 'Label created' })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
-  @ApiResponse({ status: 403, description: 'Unauthorized - admin only' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Project not found' })
+  @RequiredPermission([CaslPermissionAction.MANAGE, 'Label'])
   async createFromHttp(
     @Param('slug') slug: string,
     @Body() createLabelDto: CreateLabelDto,
@@ -107,8 +108,9 @@ export class LabelsController {
   @ApiOperation({ summary: 'Update a label' })
   @ApiResponse({ status: 200, description: 'Label updated' })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
-  @ApiResponse({ status: 403, description: 'Unauthorized - admin only' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Label or project not found' })
+  @RequiredPermission([CaslPermissionAction.MANAGE, 'Label'])
   async updateFromHttp(
     @Param('slug') slug: string,
     @Param('id') id: string,
@@ -123,8 +125,9 @@ export class LabelsController {
   @HttpCode(204)
   @ApiOperation({ summary: 'Delete a label' })
   @ApiResponse({ status: 204, description: 'Label deleted' })
-  @ApiResponse({ status: 403, description: 'Unauthorized - admin only' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Label or project not found' })
+  @RequiredPermission([CaslPermissionAction.MANAGE, 'Label'])
   async deleteFromHttp(
     @Param('slug') slug: string,
     @Param('id') id: string,

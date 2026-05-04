@@ -1,8 +1,9 @@
 import type { IPrincipal } from '@nathapp/nestjs-auth';
+import type { AgentRoleNames } from '../../common/enums';
 
 export type KodaUserRole = 'MEMBER' | 'ADMIN';
 export type KodaAgentStatus = 'ACTIVE' | 'PAUSED' | 'OFFLINE';
-export type KodaAgentRole = string;
+export type KodaAgentRole = AgentRoleNames;
 
 export interface UserPrincipal extends IPrincipal {
   actorType: 'user';
@@ -16,8 +17,8 @@ export interface AgentPrincipal extends IPrincipal {
   id: string;
   slug: string;
   status: KodaAgentStatus;
-  agentRoles: KodaAgentRole[];
-  capabilities: string[];
+  agentRoles: readonly KodaAgentRole[];
+  capabilities: readonly string[];
 }
 
 export type KodaPrincipal = UserPrincipal | AgentPrincipal;

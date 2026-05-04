@@ -4,8 +4,8 @@ import { UpdateAgentDto } from './dto/update-agent.dto';
 import { UpdateRolesDto } from './dto/update-roles.dto';
 import { UpdateCapabilitiesDto } from './dto/update-capabilities.dto';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
-import { ForbiddenAppException, JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
-import { Principal, RequiredPermission } from '@nathapp/nestjs-auth';
+import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
+import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 @ApiTags('agents')
@@ -25,9 +25,6 @@ export class AgentsController {
   }
 
   async getMe(principal: KodaPrincipal) {
-    if (principal.actorType !== 'agent') {
-      throw new ForbiddenAppException({}, 'agents');
-    }
     return this.agentsService.findMe(principal.id);
   }
 
@@ -88,6 +85,7 @@ export class AgentsController {
   @ApiOperation({ summary: 'Get current agent profile (API key auth)' })
   @ApiResponse({ status: 200, description: 'Agent profile retrieved' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @RequiredPermission([CaslPermissionAction.READ, 'AgentScope'])
   async findMe(@Principal() principal: KodaPrincipal) {
     const data = await this.getMe(principal);
     return JsonResponse.Ok(data);

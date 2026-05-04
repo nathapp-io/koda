@@ -18,7 +18,7 @@ import { CommentsService } from './comments.service';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
-import { Principal } from '@nathapp/nestjs-auth';
+import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 @ApiTags('comments')
@@ -95,6 +95,7 @@ export class CommentsController {
   @ApiResponse({ status: 200, description: 'Comment updated' })
   @ApiResponse({ status: 403, description: 'Not authorized to edit this comment' })
   @ApiResponse({ status: 404, description: 'Comment not found' })
+  @RequiredPermission([CaslPermissionAction.UPDATE, 'Comment'])
   async updateFromHttp(
     @Param('id') id: string,
     @Body() updateCommentDto: UpdateCommentDto,
@@ -110,6 +111,7 @@ export class CommentsController {
   @ApiResponse({ status: 200, description: 'Comment deleted' })
   @ApiResponse({ status: 403, description: 'Not authorized to delete this comment' })
   @ApiResponse({ status: 404, description: 'Comment not found' })
+  @RequiredPermission([CaslPermissionAction.DELETE, 'Comment'])
   async deleteFromHttp(
     @Param('id') id: string,
     @Principal() principal: KodaPrincipal,

@@ -50,6 +50,7 @@
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
+import { AGENT_ROLES } from '~/lib/agent-roles'
 
 const props = defineProps<{
   open: boolean
@@ -67,7 +68,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const toast = useAppToast()
 
-const availableRoles = ['VERIFIER', 'DEVELOPER', 'REVIEWER'] as const
+const availableRoles = AGENT_ROLES
 
 const formSchema = toTypedSchema(
   z.object({

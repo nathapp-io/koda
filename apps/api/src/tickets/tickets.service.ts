@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { NotFoundAppException, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
@@ -10,7 +10,7 @@ import { TicketType, TicketStatus, Priority } from '../common/enums';
 import { validateTransition } from './state-machine/ticket-transitions';
 import { buildGitUrl } from '../common/utils/git-url.util';
 import { actorForeignKeys } from '../auth/principal/actor-foreign-keys';
-import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
+import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 interface FindAllFilters {
   status?: TicketStatus;
@@ -294,11 +294,6 @@ export class TicketsService {
     ref: string,
     principal: KodaPrincipal,
   ) {
-    // Check if user has ADMIN role (only applies to users)
-    if (isUserPrincipal(principal) && principal.role !== 'ADMIN') {
-      throw new ForbiddenAppException({}, 'tickets');
-    }
-
     // Find ticket by ref
     const ticket = await this.findByRef(projectSlug, ref);
     if (!ticket) {

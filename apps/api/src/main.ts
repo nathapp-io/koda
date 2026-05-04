@@ -36,6 +36,7 @@ async function bootstrap() {
   });
 
   const apiPort = parseInt(process.env.API_PORT || '3100', 10);
+  const apiHost = process.env.API_HOST || '0.0.0.0';
 
   // DI container is ready right after createFastifyApp() — get the guard before
   // setting up global handlers. Global guards MUST be registered before init()
@@ -54,7 +55,7 @@ async function bootstrap() {
       version: '1.0.0',
     });
 
-  await app.start(apiPort);
+  await app.start(apiPort, apiHost);
 }
 
 bootstrap();

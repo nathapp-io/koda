@@ -56,6 +56,9 @@ export const AgentRole = {
 } as const;
 export type AgentRole = (typeof AgentRole)[keyof typeof AgentRole];
 
+export const AGENT_ROLES = ['DEVELOPER', 'REVIEWER', 'VERIFIER', 'TRIAGER'] as const;
+export type AgentRoleNames = typeof AGENT_ROLES[number];
+
 export const ActorRole = {
   ADMIN: 'ADMIN',
   DEVELOPER: 'DEVELOPER',

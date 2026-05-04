@@ -31,12 +31,19 @@ describe('US-003-1 AC1: When EditAgentRolesDialog opens with an agent, the check
     expect(referencesAgentRoles).toBe(true)
   })
 
-  test('source has checkbox inputs for VERIFIER, DEVELOPER, and REVIEWER roles', () => {
+  test('dialog uses shared AGENT_ROLES constant from lib/agent-roles.ts', () => {
     const source = getSource()
-    // Should have checkboxes for the three roles
-    expect(source).toContain('VERIFIER')
-    expect(source).toContain('DEVELOPER')
-    expect(source).toContain('REVIEWER')
+    expect(source).toMatch(/import\s*\{\s*AGENT_ROLES\s*\}\s*from\s*['"]~\/lib\/agent-roles['"]/)
+    expect(source).toMatch(/availableRoles\s*=\s*AGENT_ROLES/)
+  })
+
+  test('shared AGENT_ROLES enumerates DEVELOPER, REVIEWER, VERIFIER, TRIAGER', () => {
+    const rolesPath = join(webDir, 'lib', 'agent-roles.ts')
+    const rolesSource = readFileSync(rolesPath, 'utf-8')
+    expect(rolesSource).toContain('DEVELOPER')
+    expect(rolesSource).toContain('REVIEWER')
+    expect(rolesSource).toContain('VERIFIER')
+    expect(rolesSource).toContain('TRIAGER')
   })
 
   test('source uses v-model or :checked binding for role checkboxes', () => {
@@ -50,11 +57,8 @@ describe('US-003-1 AC1: When EditAgentRolesDialog opens with an agent, the check
 
   test('source uses availableRoles array for role options', () => {
     const source = getSource()
-    // Should define availableRoles as array of role strings
-    const hasAvailableRoles =
-      source.includes('availableRoles') ||
-      source.match(/roles.*=.*\[[\s\S]*VERIFIER[\s\S]*DEVELOPER[\s\S]*REVIEWER/)
-    expect(hasAvailableRoles).toBe(true)
+    // Should reference availableRoles (now bound to shared AGENT_ROLES)
+    expect(source).toContain('availableRoles')
   })
 })
 

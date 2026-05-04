@@ -4,6 +4,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
 import { CreateLabelDto } from './dto/create-label.dto';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import type { KodaAgentRole } from '../auth/principal/koda-principal.types';
 
 describe('LabelsService', () => {
   let service: LabelsService;
@@ -135,7 +136,7 @@ describe('LabelsService', () => {
     actorType: 'agent' as const,
     slug: 'test-agent',
     status: 'ACTIVE' as const,
-    agentRoles: [] as string[],
+    agentRoles: [] as KodaAgentRole[],
     capabilities: [] as string[],
     blacklisted: false,
     revoked: false,
@@ -204,7 +205,7 @@ describe('LabelsService', () => {
       expect(prismaService.client.label.create).toHaveBeenCalled();
     });
 
-    it('should reject label creation for non-ADMIN user', async () => {
+    it('should allow label creation for non-ADMIN user (authorization at controller level)', async () => {
       const createDto: CreateLabelDto = {
         name: 'typescript',
         color: '#0066CC',
@@ -212,9 +213,11 @@ describe('LabelsService', () => {
 
       const memberUser = mockMemberPrincipal;
 
-      await expect(
-        service.create('koda', createDto, memberUser)
-      ).rejects.toThrow();
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.label.create.mockResolvedValue({ ...mockLabel, name: 'typescript', color: '#0066CC' });
+
+      const result = await service.create('koda', createDto, memberUser);
+      expect(result.name).toBe('typescript');
     });
 
     it('should allow label creation for agent', async () => {
@@ -339,10 +342,13 @@ describe('LabelsService', () => {
       });
     });
 
-    it('should reject delete from non-ADMIN user', async () => {
+    it('should allow delete from non-ADMIN user (authorization at controller level)', async () => {
+      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockPrismaService.client.label.findUnique.mockResolvedValue(mockLabel);
+
       await expect(
         service.delete('koda', 'label-123', mockMemberPrincipal)
-      ).rejects.toThrow();
+      ).resolves.toBeUndefined();
     });
 
     it('should allow delete from agent', async () => {

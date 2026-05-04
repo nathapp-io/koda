@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
-import { ForbiddenAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 
 describe('AgentsController', () => {
   let controller: AgentsController;
@@ -25,7 +25,7 @@ describe('AgentsController', () => {
     name: 'test-agent',
     slug: 'test-agent',
     status: 'ACTIVE' as const,
-    agentRoles: ['WORKER'],
+    agentRoles: ['DEVELOPER'] as const,
     capabilities: [],
     blacklisted: false,
     revoked: false,
@@ -92,6 +92,7 @@ describe('AgentsController', () => {
       const createAgentDto = {
         name: 'Test Agent',
         slug: 'test-agent',
+        roles: ['DEVELOPER'],
       };
 
       const generatedKey = {
@@ -117,6 +118,7 @@ describe('AgentsController', () => {
       const createAgentDto = {
         name: 'Test Agent',
         slug: 'test-agent',
+        roles: ['DEVELOPER'],
       };
 
       mockAgentsService.generateApiKey.mockResolvedValue({
@@ -131,6 +133,7 @@ describe('AgentsController', () => {
       const createAgentDto = {
         name: 'Test Agent',
         slug: 'test-agent',
+        roles: ['DEVELOPER'],
       };
 
       const rawKey = 'b'.repeat(64);
@@ -155,6 +158,7 @@ describe('AgentsController', () => {
       const createAgentDto = {
         name: 'Test Agent',
         slug: 'test-agent',
+        roles: ['DEVELOPER'],
       };
 
       mockAgentsService.generateApiKey.mockResolvedValue({
@@ -171,6 +175,7 @@ describe('AgentsController', () => {
       const createAgentDto = {
         name: 'Test Agent',
         slug: 'test-agent',
+        roles: ['DEVELOPER'],
       };
 
       const generatedKey = {
@@ -295,8 +300,9 @@ describe('AgentsController', () => {
       expect((result as any).apiKeyHash).not.toMatch(/^[a-f0-9]{64}$/);
     });
 
-    it('should return 403 when not authenticated', async () => {
-      await expect(controller.getMe(mockMemberUser)).rejects.toThrow(ForbiddenAppException);
+    it('should return 404 when non-agent user calls getMe (authorization at guard level)', async () => {
+      mockAgentsService.findMe.mockRejectedValue(new NotFoundAppException({}, 'agents'));
+      await expect(controller.getMe(mockMemberUser)).rejects.toThrow();
     });
   });
 
@@ -658,7 +664,7 @@ describe('AgentsController', () => {
 
   describe('Authorization & Auth Guards', () => {
     it('POST /agents requires JWT auth with ADMIN role', async () => {
-      const createDto = { name: 'Test', slug: 'test' };
+      const createDto = { name: 'Test', slug: 'test', roles: ['DEVELOPER'] };
 
       mockAgentsService.generateApiKey.mockResolvedValue({ apiKey: 'a'.repeat(64), agent: mockAgent });
       await expect(controller.createAgent(createDto, mockMemberUser)).resolves.toBeDefined();

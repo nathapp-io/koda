@@ -24,8 +24,9 @@ import { TicketResponseDto } from './dto/ticket-response.dto';
 import { TransitionWithCommentDto } from './dto/transition-with-comment.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { TicketType, TicketStatus, Priority } from '../common/enums';
-import { Principal } from '@nathapp/nestjs-auth';
+import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
+import { KodaAction } from '../auth/casl/koda-action.enum';
 
 @ApiTags('tickets')
 @ApiBearerAuth()
@@ -195,6 +196,7 @@ export class TicketsController {
   @ApiResponse({ status: 200, type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
+  @RequiredPermission([KodaAction.UPDATE as CaslPermissionAction, 'Ticket'])
   async update(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
@@ -210,6 +212,7 @@ export class TicketsController {
   @ApiResponse({ status: 200, type: TicketResponseDto })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
+  @RequiredPermission([CaslPermissionAction.DELETE, 'Ticket'])
   async softDelete(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
@@ -243,6 +246,7 @@ export class TicketsController {
   @ApiResponse({ status: 200, description: 'Ticket verified' })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
+  @RequiredPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
   async verify(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
@@ -259,6 +263,7 @@ export class TicketsController {
   @ApiResponse({ status: 200, description: 'Ticket started' })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
+  @RequiredPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
   async start(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
@@ -274,6 +279,7 @@ export class TicketsController {
   @ApiResponse({ status: 200, description: 'Fix submitted' })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
+  @RequiredPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
   async fix(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
@@ -290,6 +296,7 @@ export class TicketsController {
   @ApiResponse({ status: 200, description: 'Fix reviewed' })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
+  @RequiredPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
   async verifyFix(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
@@ -308,6 +315,7 @@ export class TicketsController {
   @ApiResponse({ status: 200, description: 'Ticket closed' })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
+  @RequiredPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
   async close(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
@@ -323,6 +331,7 @@ export class TicketsController {
   @ApiResponse({ status: 200, description: 'Ticket rejected' })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
+  @RequiredPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
   async reject(
     @Param('slug') slug: string,
     @Param('ref') ref: string,

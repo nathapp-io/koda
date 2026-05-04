@@ -1,12 +1,12 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { IsString, IsOptional, IsNumber, IsArray, MinLength } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsArray, IsIn, MinLength, ArrayMinSize } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { createHmac, randomBytes } from 'crypto';
 import type { PrismaClient } from '@prisma/client';
-import { AgentRole } from '../common/enums';
+import { AGENT_ROLES, type AgentRoleNames } from '../common/enums';
 import { AgentResponseDto } from './dto/agent-response.dto';
 import { TicketResponseDto } from '../tickets/dto/ticket-response.dto';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
@@ -28,11 +28,12 @@ export class CreateAgentDto {
   @IsNumber()
   maxConcurrentTickets?: number;
 
-  @ApiProperty({ required: false, example: ['DEVELOPER', 'REVIEWER'] })
-  @IsOptional()
+  @ApiProperty({ example: ['DEVELOPER', 'REVIEWER'] })
   @IsArray()
+  @ArrayMinSize(1)
   @IsString({ each: true })
-  roles?: string[];
+  @IsIn([...AGENT_ROLES], { each: true })
+  roles!: string[];
 
   @ApiProperty({ required: false, example: ['typescript', 'nestjs'] })
   @IsOptional()
@@ -62,6 +63,7 @@ export class UpdateRolesDto {
   @ApiProperty({ example: ['DEVELOPER', 'REVIEWER'] })
   @IsArray()
   @IsString({ each: true })
+  @IsIn([...AGENT_ROLES], { each: true })
   roles!: string[];
 }
 
@@ -81,6 +83,17 @@ export class AgentsService {
     @Optional() private readonly agentAuthProvider?: AgentAuthProvider,
   ) {}
   private get db() { return this.prisma.client; }
+
+  private static assertAgentRole(role: string): AgentRoleNames {
+    if (!(AGENT_ROLES as readonly string[]).includes(role)) {
+      throw new ValidationAppException({}, 'agents');
+    }
+    return role as AgentRoleNames;
+  }
+
+  private static validateAgentRoles(roles: readonly string[] | undefined): AgentRoleNames[] {
+    return roles?.map((role) => AgentsService.assertAgentRole(role)) ?? [];
+  }
 
   /**
    * Records an agent action event through the KodaDomainWriter write gateway.
@@ -142,6 +155,7 @@ export class AgentsService {
     } else {
       // Separate scalar fields from relational fields
       const { roles, capabilities, ...scalarFields } = agentIdOrDto;
+      const validatedRoles = AgentsService.validateAgentRoles(roles);
       agent = await this.db.agent.create({
         data: {
           ...scalarFields,
@@ -151,10 +165,10 @@ export class AgentsService {
       await this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
       // Create role entries (sequential create — createMany not reliable on SQLite for junction tables)
       const createdRoles = [];
-      if (roles?.length) {
-        for (const role of roles) {
+      if (validatedRoles.length) {
+        for (const role of validatedRoles) {
           const entry = await this.db.agentRoleEntry.create({
-            data: { agentId: agent.id, role: role as AgentRole },
+            data: { agentId: agent.id, role },
           });
           createdRoles.push(entry);
         }
@@ -244,17 +258,19 @@ export class AgentsService {
   }
 
   async updateRoles(agentId: string, updateData: UpdateRolesDto): Promise<AgentResponseDto> {
+    const validatedRoles = AgentsService.validateAgentRoles(updateData.roles);
+
     // Delete all existing roles
     await this.db.agentRoleEntry.deleteMany({
       where: { agentId },
     });
 
     // Create new roles if provided
-    if (updateData.roles && updateData.roles.length > 0) {
+    if (validatedRoles.length > 0) {
       await this.db.agentRoleEntry.createMany({
-        data: updateData.roles.map((role) => ({
+        data: validatedRoles.map((role) => ({
           agentId,
-          role: role as AgentRole,
+          role,
         })),
       });
     }

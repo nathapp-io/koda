@@ -902,7 +902,8 @@ describeIntegration('API Integration Tests', () => {
         .expect(403);
     });
 
-    it('GET /api/agents/me — 403 when using user token', async () => {
+    it('GET /api/agents/me — returns 403 when using user token', async () => {
+      // AgentScope is not granted to any user principal (not even ADMIN).
       await request(httpServer)
         .get('/api/agents/me')
         .set('Authorization', `Bearer ${userAccessToken}`)
@@ -921,7 +922,7 @@ describeIntegration('API Integration Tests', () => {
       const res = await request(httpServer)
         .post('/api/agents')
         .set('Authorization', `Bearer ${userAccessToken}`)
-        .send({ name: 'Temp Agent', slug: 'temp-agent' })
+        .send({ name: 'Temp Agent', slug: 'temp-agent', roles: ['DEVELOPER'] })
         .expect(201);
       deleteAgentSlug = body<{ agent: { slug: string } }>(res).agent.slug;
     });
@@ -1393,7 +1394,7 @@ describeIntegration('API Integration Tests', () => {
       const freshAgentRes = await request(httpServer)
         .post('/api/agents')
         .set('Authorization', `Bearer ${userAccessToken}`)
-        .send({ name: 'Pickup Empty Agent', slug: 'pickup-empty-agent' })
+        .send({ name: 'Pickup Empty Agent', slug: 'pickup-empty-agent', roles: ['DEVELOPER'] })
         .expect(201);
 
       const freshAgentSlug = body<{ agent: { slug: string } }>(freshAgentRes).agent.slug;
@@ -1450,7 +1451,8 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('AC-6: DELETE /api/projects/:slug/tickets/:ref — returns 200 with agent API key', async () => {
-      // Verifies that agents can soft-delete tickets (bug #19 fix: agent block removed from tickets.service.ts).
+      // Preserves pre-CASL behavior: agents can soft-delete tickets.
+      // Authorization is enforced by @RequiredPermission([DELETE, 'Ticket']) + KodaCaslAbilityFactory.
       const res = await request(httpServer)
         .delete(`/api/projects/${projectSlug}/tickets/${agentDeleteTicketRef}`)
         .set('Authorization', `Bearer ${agentApiKey}`)

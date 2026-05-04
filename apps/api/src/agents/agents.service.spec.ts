@@ -64,10 +64,12 @@ describe('AgentsService', () => {
         findMany: jest.fn(),
       },
       agentRoleEntry: {
+        create: jest.fn(),
         deleteMany: jest.fn(),
         createMany: jest.fn(),
       },
       agentCapabilityEntry: {
+        create: jest.fn(),
         deleteMany: jest.fn(),
         createMany: jest.fn(),
       },
@@ -108,6 +110,10 @@ describe('AgentsService', () => {
       }
       return null;
     });
+
+    mockPrismaService.client.agentRoleEntry.create.mockResolvedValue({
+      id: 'role-1', agentId: 'agent-123', role: 'DEVELOPER',
+    });
   });
 
   afterEach(() => {
@@ -123,6 +129,7 @@ describe('AgentsService', () => {
         const result = await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
+          roles: ['DEVELOPER'],
         });
 
         expect(result).toHaveProperty('apiKey');
@@ -138,6 +145,7 @@ describe('AgentsService', () => {
         const result = await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
+          roles: ['DEVELOPER'],
         });
 
         expect(prismaService.client.agent.create).toHaveBeenCalled();
@@ -154,6 +162,7 @@ describe('AgentsService', () => {
         const result = await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
+          roles: ['DEVELOPER'],
         });
 
         expect(result).toHaveProperty('apiKey');
@@ -168,6 +177,7 @@ describe('AgentsService', () => {
         const result = await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
+          roles: ['DEVELOPER'],
         });
 
         const createCall = (prismaService.client.agent.create as jest.Mock).mock.calls[0][0];
@@ -184,6 +194,7 @@ describe('AgentsService', () => {
         await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
+          roles: ['DEVELOPER'],
         });
 
         expect(prismaService.client.agent.create).toHaveBeenCalled();
@@ -200,6 +211,7 @@ describe('AgentsService', () => {
         const result = await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
+          roles: ['DEVELOPER'],
         });
 
         const expectedHash = createHmac('sha256', secret).update(result.apiKey).digest('hex');
@@ -214,7 +226,20 @@ describe('AgentsService', () => {
         await expect(service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
+          roles: ['DEVELOPER'],
         })).rejects.toThrow(ValidationAppException);
+      });
+
+      it('should reject invalid roles before creating the agent', async () => {
+        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
+
+        await expect(service.generateApiKey({
+          name: 'Test Agent',
+          slug: 'test-agent',
+          roles: ['DEVLOPER'],
+        })).rejects.toThrow(ValidationAppException);
+
+        expect(prismaService.client.agent.create).not.toHaveBeenCalled();
       });
 
       it('should return created agent in response', async () => {
@@ -224,6 +249,7 @@ describe('AgentsService', () => {
         const result = await service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
+          roles: ['DEVELOPER'],
         });
 
         // DTO strips apiKeyHash and formats roles/capabilities
@@ -543,6 +569,14 @@ describe('AgentsService', () => {
 
       expect(result.roles.length).toBe(0);
     });
+
+    it('should reject invalid roles before deleting existing roles', async () => {
+      await expect(service.updateRoles('agent-123', { roles: ['DEVLOPER'] }))
+        .rejects.toThrow(ValidationAppException);
+
+      expect(prismaService.client.agentRoleEntry.deleteMany).not.toHaveBeenCalled();
+      expect(prismaService.client.agentRoleEntry.createMany).not.toHaveBeenCalled();
+    });
   });
 
   describe('updateCapabilities', () => {
@@ -807,11 +841,13 @@ describe('AgentsService', () => {
       const result1 = await service.generateApiKey({
         name: 'Agent 1',
         slug: 'agent-1',
+        roles: ['DEVELOPER'],
       });
 
       const result2 = await service.generateApiKey({
         name: 'Agent 2',
         slug: 'agent-2',
+        roles: ['DEVELOPER'],
       });
 
       // Raw keys should be different
