@@ -11,13 +11,13 @@ priority: 45
 `caslAbilityFactory` takes a **bare class**, unlike `authProvider` which takes `{ useClass: ... }`:
 
 ```typescript
-// ✅ CORRECT
+// CORRECT
 AuthModule.forRootAsync({
   authProvider: { useClass: JwtAuthProvider },
   caslAbilityFactory: KodaCaslAbilityFactory,
 })
 
-// ❌ WRONG — library wraps with useClass internally → double-wrapped → silent failure
+// WRONG — library wraps with useClass internally → double-wrapped → silent failure
 AuthModule.forRootAsync({
   caslAbilityFactory: { useClass: KodaCaslAbilityFactory },
 })
@@ -32,12 +32,12 @@ The wildcard subject `all` covers **everything**, including virtual subjects lik
 **Always enumerate real subjects.** Virtual subjects are granted selectively:
 
 ```typescript
-// ✅ CORRECT — enumerated, excludes virtual subjects
+// CORRECT — enumerated, excludes virtual subjects
 { action: MANAGE, subject: 'Comment' },
 { action: MANAGE, subject: 'Label' },
 { action: MANAGE, subject: 'Ticket' },
 
-// ❌ WRONG — manages to leak into virtual subjects
+// WRONG — manages to leak into virtual subjects
 { action: MANAGE, subject: 'all' },
 ```
 
@@ -52,10 +52,10 @@ The wildcard subject `all` covers **everything**, including virtual subjects lik
 When tightening a type from `string` to a union (e.g. `KodaAgentRole`), test mocks break:
 
 ```typescript
-// ❌ WRONG — as const makes array readonly, incompatible with mutable AgentRoleNames[]
+// WRONG — as const makes array readonly, incompatible with mutable AgentRoleNames[]
 agentRoles: ['DEVELOPER'] as const,
 
-// ✅ CORRECT — either use readonly in the interface, or type-cast
+// CORRECT — either use readonly in the interface, or type-cast
 agentRoles: ['DEVELOPER'] as AgentRoleNames[],
 ```
 
@@ -68,13 +68,13 @@ The factory's `agentRoleDerivedPermissions` switch needs to:
 - Runtime: safely skip unknown DB values (production DB may have legacy roles)
 
 ```typescript
-// ✅ CORRECT — compile-time exhaustiveness + runtime no-op
+// CORRECT — compile-time exhaustiveness + runtime no-op
 default:
   // TS errors here if AGENT_ROLES gains a value without a case.
   void (role as never);
   break;
 
-// ❌ WRONG — throws at runtime when DB has unknown roles
+// WRONG — throws at runtime when DB has unknown roles
 default:
   assertNever(role); // crashes on every request for agents with legacy roles
 ```
