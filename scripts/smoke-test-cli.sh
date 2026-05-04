@@ -191,7 +191,7 @@ fi
 AGENT=$(curl -s -X POST "$API_URL/api/agents" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $JWT" \
-  -d '{"name":"Smoke Agent","slug":"smoke-agent"}' 2>&1)
+  -d '{"name":"Smoke Agent","slug":"smoke-agent","roles":["DEVELOPER","REVIEWER","VERIFIER","TRIAGER"]}' 2>&1)
 RAW_KEY=$(echo "$AGENT" | python3 -c "import json,sys; d=json.load(sys.stdin); inner=d.get('data',d); print(inner.get('apiKey',inner.get('rawApiKey','')))" 2>/dev/null)
 if [[ -n "$RAW_KEY" ]]; then
   ok "Create agent (API key captured)"

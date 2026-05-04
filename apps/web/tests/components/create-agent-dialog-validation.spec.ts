@@ -91,10 +91,11 @@ describe('US-002-1 AC3: slug field validates against pattern /^[a-z0-9-]+$/', ()
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC4 — roles field requires at least one checkbox selected (VERIFIER, DEVELOPER, REVIEWER)
+// AC4 — roles field requires at least one checkbox selected
+//        (DEVELOPER, REVIEWER, VERIFIER, TRIAGER — sourced from lib/agent-roles.ts)
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('US-002-1 AC4: roles field requires at least one checkbox selected (VERIFIER, DEVELOPER, REVIEWER)', () => {
+describe('US-002-1 AC4: roles field requires at least one checkbox selected (sourced from AGENT_ROLES)', () => {
   test('source contains FormField with name="roles"', () => {
     const source = readFileSync(componentPath, 'utf-8')
     expect(source).toMatch(/FormField\s+name="roles"/)
@@ -106,11 +107,19 @@ describe('US-002-1 AC4: roles field requires at least one checkbox selected (VER
     expect(source).toContain('z.array(z.string()).min(1')
   })
 
-  test('source contains checkboxes or inputs for VERIFIER, DEVELOPER, REVIEWER roles', () => {
+  test('dialog uses shared AGENT_ROLES constant from lib/agent-roles.ts', () => {
     const source = readFileSync(componentPath, 'utf-8')
-    expect(source).toContain('VERIFIER')
-    expect(source).toContain('DEVELOPER')
-    expect(source).toContain('REVIEWER')
+    expect(source).toMatch(/import\s*\{\s*AGENT_ROLES\s*\}\s*from\s*['"]~\/lib\/agent-roles['"]/)
+    expect(source).toMatch(/availableRoles\s*=\s*AGENT_ROLES/)
+  })
+
+  test('shared AGENT_ROLES enumerates DEVELOPER, REVIEWER, VERIFIER, TRIAGER', () => {
+    const rolesPath = join(webDir, 'lib', 'agent-roles.ts')
+    const rolesSource = readFileSync(rolesPath, 'utf-8')
+    expect(rolesSource).toContain('DEVELOPER')
+    expect(rolesSource).toContain('REVIEWER')
+    expect(rolesSource).toContain('VERIFIER')
+    expect(rolesSource).toContain('TRIAGER')
   })
 
   test('source includes FormMessage for roles field error display', () => {

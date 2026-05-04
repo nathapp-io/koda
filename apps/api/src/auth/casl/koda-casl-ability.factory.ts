@@ -62,6 +62,8 @@ export class KodaCaslAbilityFactory extends BaseCaslAbilityFactory {
       { action: CaslPermissionAction.DELETE, subject: 'Comment', conditions: { authorAgentId: principal.id } },
       { action: CaslPermissionAction.MANAGE, subject: 'Label' },
       { action: CaslPermissionAction.CREATE, subject: 'Ticket' },
+      // Preserve pre-CASL behavior (commit 4ceb85e: "allow agents to soft-delete tickets")
+      { action: CaslPermissionAction.DELETE, subject: 'Ticket' },
       ...this.agentRoleDerivedPermissions(principal),
     ];
   }

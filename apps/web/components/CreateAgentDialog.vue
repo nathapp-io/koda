@@ -130,6 +130,7 @@ import * as z from 'zod'
 import { ref, watch } from 'vue'
 import { LucideX } from 'lucide-vue-next'
 import { normalizeCapabilities } from '~/lib/utils'
+import { AGENT_ROLES } from '~/lib/agent-roles'
 
 const props = defineProps<{
   open: boolean
@@ -143,7 +144,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const toast = useAppToast()
 
-const availableRoles = ['VERIFIER', 'DEVELOPER', 'REVIEWER'] as const
+const availableRoles = AGENT_ROLES
 
 // Tag input state for capabilities
 const capabilitiesInput = ref('')

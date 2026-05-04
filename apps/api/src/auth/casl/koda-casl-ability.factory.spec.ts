@@ -171,6 +171,12 @@ describe('KodaCaslAbilityFactory', () => {
     it('should grant create Ticket', () => {
       expect(perms).toContainEqual({ action: CaslPermissionAction.CREATE, subject: 'Ticket' });
     });
+
+    // Preserves pre-CASL behavior (commit 4ceb85e: "allow agents to soft-delete tickets").
+    // The original inline check only blocked non-ADMIN users; agents fell outside the predicate.
+    it('should grant DELETE Ticket (no conditions)', () => {
+      expect(perms).toContainEqual({ action: CaslPermissionAction.DELETE, subject: 'Ticket' });
+    });
   });
 
   describe('agent role-derived permissions', () => {
@@ -231,7 +237,7 @@ describe('KodaCaslAbilityFactory', () => {
       const principal = makeAgent({ agentRoles: ['DEVELOPER'] });
       const perms = await factory.getPermissions(principal);
 
-      const baseCount = 11; // AgentScope.read + 5 resource reads + Comment CRUD.* + Label.manage + Ticket.create
+      const baseCount = 12; // AgentScope.read + 5 resource reads + Comment CRUD.* + Label.manage + Ticket.create + Ticket.delete
       const derivedCount = 1; // TRANSITION Ticket
       expect(perms).toHaveLength(baseCount + derivedCount);
     });

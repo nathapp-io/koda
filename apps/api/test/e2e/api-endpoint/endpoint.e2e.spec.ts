@@ -922,7 +922,7 @@ describeIntegration('API Integration Tests', () => {
       const res = await request(httpServer)
         .post('/api/agents')
         .set('Authorization', `Bearer ${userAccessToken}`)
-        .send({ name: 'Temp Agent', slug: 'temp-agent' })
+        .send({ name: 'Temp Agent', slug: 'temp-agent', roles: ['DEVELOPER'] })
         .expect(201);
       deleteAgentSlug = body<{ agent: { slug: string } }>(res).agent.slug;
     });
@@ -1394,7 +1394,7 @@ describeIntegration('API Integration Tests', () => {
       const freshAgentRes = await request(httpServer)
         .post('/api/agents')
         .set('Authorization', `Bearer ${userAccessToken}`)
-        .send({ name: 'Pickup Empty Agent', slug: 'pickup-empty-agent' })
+        .send({ name: 'Pickup Empty Agent', slug: 'pickup-empty-agent', roles: ['DEVELOPER'] })
         .expect(201);
 
       const freshAgentSlug = body<{ agent: { slug: string } }>(freshAgentRes).agent.slug;
@@ -1450,13 +1450,16 @@ describeIntegration('API Integration Tests', () => {
       expect(data.id).toBeTruthy();
     });
 
-    it('AC-6: DELETE /api/projects/:slug/tickets/:ref — returns 403 with agent API key', async () => {
-      // Verifies that agents canNOT soft-delete tickets (spec: only ADMIN users can delete).
+    it('AC-6: DELETE /api/projects/:slug/tickets/:ref — returns 200 with agent API key', async () => {
+      // Preserves pre-CASL behavior: agents can soft-delete tickets.
       // Authorization is enforced by @RequiredPermission([DELETE, 'Ticket']) + KodaCaslAbilityFactory.
-      await request(httpServer)
+      const res = await request(httpServer)
         .delete(`/api/projects/${projectSlug}/tickets/${agentDeleteTicketRef}`)
         .set('Authorization', `Bearer ${agentApiKey}`)
-        .expect(403);
+        .expect(200);
+
+      const data = body<{ deletedAt: string | null }>(res);
+      expect(data.deletedAt).not.toBeNull();
     });
   });
 

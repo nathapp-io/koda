@@ -1,6 +1,6 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { IsString, IsOptional, IsNumber, IsArray, IsIn, MinLength } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsArray, IsIn, MinLength, ArrayMinSize } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
@@ -28,12 +28,12 @@ export class CreateAgentDto {
   @IsNumber()
   maxConcurrentTickets?: number;
 
-  @ApiProperty({ required: false, example: ['DEVELOPER', 'REVIEWER'] })
-  @IsOptional()
+  @ApiProperty({ example: ['DEVELOPER', 'REVIEWER'] })
   @IsArray()
+  @ArrayMinSize(1)
   @IsString({ each: true })
   @IsIn([...AGENT_ROLES], { each: true })
-  roles?: string[];
+  roles!: string[];
 
   @ApiProperty({ required: false, example: ['typescript', 'nestjs'] })
   @IsOptional()

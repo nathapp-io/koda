@@ -92,6 +92,7 @@ describe('AgentsController', () => {
       const createAgentDto = {
         name: 'Test Agent',
         slug: 'test-agent',
+        roles: ['DEVELOPER'],
       };
 
       const generatedKey = {
@@ -117,6 +118,7 @@ describe('AgentsController', () => {
       const createAgentDto = {
         name: 'Test Agent',
         slug: 'test-agent',
+        roles: ['DEVELOPER'],
       };
 
       mockAgentsService.generateApiKey.mockResolvedValue({
@@ -131,6 +133,7 @@ describe('AgentsController', () => {
       const createAgentDto = {
         name: 'Test Agent',
         slug: 'test-agent',
+        roles: ['DEVELOPER'],
       };
 
       const rawKey = 'b'.repeat(64);
@@ -155,6 +158,7 @@ describe('AgentsController', () => {
       const createAgentDto = {
         name: 'Test Agent',
         slug: 'test-agent',
+        roles: ['DEVELOPER'],
       };
 
       mockAgentsService.generateApiKey.mockResolvedValue({
@@ -171,6 +175,7 @@ describe('AgentsController', () => {
       const createAgentDto = {
         name: 'Test Agent',
         slug: 'test-agent',
+        roles: ['DEVELOPER'],
       };
 
       const generatedKey = {
@@ -659,7 +664,7 @@ describe('AgentsController', () => {
 
   describe('Authorization & Auth Guards', () => {
     it('POST /agents requires JWT auth with ADMIN role', async () => {
-      const createDto = { name: 'Test', slug: 'test' };
+      const createDto = { name: 'Test', slug: 'test', roles: ['DEVELOPER'] };
 
       mockAgentsService.generateApiKey.mockResolvedValue({ apiKey: 'a'.repeat(64), agent: mockAgent });
       await expect(controller.createAgent(createDto, mockMemberUser)).resolves.toBeDefined();
