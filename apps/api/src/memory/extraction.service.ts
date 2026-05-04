@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { MemoryKind } from '../common/enums';
 import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
 import { MemoryItemInput } from './memory-item-repository';
@@ -58,6 +59,8 @@ export interface WriteResult {
 
 @Injectable()
 export class ExtractionService {
+  private readonly logger = new Logger(ExtractionService.name);
+
   extractFromEvent(event: CanonicalEvent): MemoryExtractedItem[] {
     if (event.type === 'ticket_event') {
       return this.extractTicketEvent(event as TicketEvent);
@@ -77,7 +80,7 @@ export class ExtractionService {
     }
 
     if (!event.ticketId) {
-      console.warn(`Incomplete ticket_event payload: missing ticketId, event id: ${event.id}`);
+      this.logger.warn(`Incomplete ticket_event payload: missing ticketId, event id: ${event.id}`);
       return [];
     }
 

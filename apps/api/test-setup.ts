@@ -2,7 +2,15 @@
 // Load .env.test so tests that bootstrap AppModule have required env vars
 import { config } from 'dotenv';
 import { resolve } from 'path';
-config({ path: resolve(__dirname, '.env.test') });
+import { Logger } from '@nestjs/common';
+config({ path: resolve(__dirname, '.env.test'), quiet: true });
+
+// Mock NestJS Logger to no-ops to reduce test noise
+jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
+jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
+jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
+jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => {});
+jest.spyOn(Logger.prototype, 'verbose').mockImplementation(() => {});
 
 // @ts-ignore - expect is global in Jest test environment
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -1,10 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
+import { Logger } from '@nestjs/common';
 import * as crypto from 'crypto';
 
 @Injectable()
 export class WebhookDispatcherService {
+  private readonly logger = new Logger(WebhookDispatcherService.name);
+
   constructor(private prisma: PrismaService<PrismaClient>) {}
 
   async dispatch(projectId: string, event: string, payload: object): Promise<void> {
@@ -21,7 +24,7 @@ export class WebhookDispatcherService {
     for (const webhook of matchingWebhooks) {
       this.dispatchToWebhook(webhook.url, webhook.secret, event, payload).catch((err) => {
         // fire-and-forget — log but don't throw
-        console.warn(`Webhook dispatch failed for ${webhook.url}:`, err);
+        this.logger.warn(`Webhook dispatch failed for ${webhook.url}: ${err}`);
       });
     }
   }
