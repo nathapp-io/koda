@@ -53,7 +53,7 @@ describe('TicketTransitionsService', () => {
     name: 'test-agent',
     slug: 'test-agent',
     status: 'ACTIVE' as const,
-    agentRoles: ['WORKER'],
+    agentRoles: ['DEVELOPER'] as const,
     capabilities: [],
     blacklisted: false,
     revoked: false,

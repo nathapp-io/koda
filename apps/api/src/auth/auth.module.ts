@@ -6,13 +6,15 @@ import { AuthController } from './auth.controller';
 import { JwtAuthProvider } from './jwt-auth.provider';
 import { CombinedAuthGuard } from './guards/combined-auth.guard';
 import { AgentAuthProvider } from './agent-auth.provider';
+import { KodaCaslAbilityFactory } from './casl/koda-casl-ability.factory';
 
 @Module({
   imports: [
     NathappAuthModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      authProvider: { useClass: JwtAuthProvider },   // outside factory — JwtModuleAsyncOptions level
+      authProvider: { useClass: JwtAuthProvider },
+      caslAbilityFactory: KodaCaslAbilityFactory,
       useFactory: (config: ConfigService) => {
         const authConfig = config.get<{
           jwtSecret: string;
@@ -37,10 +39,8 @@ import { AgentAuthProvider } from './agent-auth.provider';
       },
     }),
   ],
-  // JwtStrategy + JwtRefreshStrategy must be in providers to register with Passport
-  // (@nathapp/nestjs-auth ARCH-2: not auto-registered by AuthModule)
-  providers: [AuthService, JwtAuthProvider, JwtStrategy, JwtRefreshStrategy, AgentAuthProvider, CombinedAuthGuard],
+  providers: [AuthService, JwtAuthProvider, JwtStrategy, JwtRefreshStrategy, AgentAuthProvider, CombinedAuthGuard, KodaCaslAbilityFactory],
   controllers: [AuthController],
-  exports: [AuthService, CombinedAuthGuard, AgentAuthProvider],
+  exports: [AuthService, CombinedAuthGuard, AgentAuthProvider, KodaCaslAbilityFactory],
 })
 export class AuthModule {}

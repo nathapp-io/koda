@@ -902,7 +902,8 @@ describeIntegration('API Integration Tests', () => {
         .expect(403);
     });
 
-    it('GET /api/agents/me — 403 when using user token', async () => {
+    it('GET /api/agents/me — returns 403 when using user token', async () => {
+      // AgentScope is not granted to any user principal (not even ADMIN).
       await request(httpServer)
         .get('/api/agents/me')
         .set('Authorization', `Bearer ${userAccessToken}`)
@@ -1449,15 +1450,13 @@ describeIntegration('API Integration Tests', () => {
       expect(data.id).toBeTruthy();
     });
 
-    it('AC-6: DELETE /api/projects/:slug/tickets/:ref — returns 200 with agent API key', async () => {
-      // Verifies that agents can soft-delete tickets (bug #19 fix: agent block removed from tickets.service.ts).
-      const res = await request(httpServer)
+    it('AC-6: DELETE /api/projects/:slug/tickets/:ref — returns 403 with agent API key', async () => {
+      // Verifies that agents canNOT soft-delete tickets (spec: only ADMIN users can delete).
+      // Authorization is enforced by @RequiredPermission([DELETE, 'Ticket']) + KodaCaslAbilityFactory.
+      await request(httpServer)
         .delete(`/api/projects/${projectSlug}/tickets/${agentDeleteTicketRef}`)
         .set('Authorization', `Bearer ${agentApiKey}`)
-        .expect(200);
-
-      const data = body<{ deletedAt: string | null }>(res);
-      expect(data.deletedAt).not.toBeNull();
+        .expect(403);
     });
   });
 

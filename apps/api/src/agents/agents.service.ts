@@ -1,12 +1,12 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { IsString, IsOptional, IsNumber, IsArray, MinLength } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsArray, IsIn, MinLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { createHmac, randomBytes } from 'crypto';
 import type { PrismaClient } from '@prisma/client';
-import { AgentRole } from '../common/enums';
+import { AGENT_ROLES, type AgentRoleNames } from '../common/enums';
 import { AgentResponseDto } from './dto/agent-response.dto';
 import { TicketResponseDto } from '../tickets/dto/ticket-response.dto';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
@@ -32,6 +32,7 @@ export class CreateAgentDto {
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
+  @IsIn([...AGENT_ROLES], { each: true })
   roles?: string[];
 
   @ApiProperty({ required: false, example: ['typescript', 'nestjs'] })
@@ -62,6 +63,7 @@ export class UpdateRolesDto {
   @ApiProperty({ example: ['DEVELOPER', 'REVIEWER'] })
   @IsArray()
   @IsString({ each: true })
+  @IsIn([...AGENT_ROLES], { each: true })
   roles!: string[];
 }
 
@@ -81,6 +83,13 @@ export class AgentsService {
     @Optional() private readonly agentAuthProvider?: AgentAuthProvider,
   ) {}
   private get db() { return this.prisma.client; }
+
+  private static assertAgentRole(role: string): AgentRoleNames {
+    if (!(AGENT_ROLES as readonly string[]).includes(role)) {
+      throw new ValidationAppException({}, 'agents');
+    }
+    return role as AgentRoleNames;
+  }
 
   /**
    * Records an agent action event through the KodaDomainWriter write gateway.
@@ -154,7 +163,7 @@ export class AgentsService {
       if (roles?.length) {
         for (const role of roles) {
           const entry = await this.db.agentRoleEntry.create({
-            data: { agentId: agent.id, role: role as AgentRole },
+            data: { agentId: agent.id, role: AgentsService.assertAgentRole(role) },
           });
           createdRoles.push(entry);
         }
@@ -254,7 +263,7 @@ export class AgentsService {
       await this.db.agentRoleEntry.createMany({
         data: updateData.roles.map((role) => ({
           agentId,
-          role: role as AgentRole,
+          role: AgentsService.assertAgentRole(role),
         })),
       });
     }

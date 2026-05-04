@@ -5,6 +5,7 @@ import { PrismaClient } from '@prisma/client';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import type { KodaAgentRole } from '../auth/principal/koda-principal.types';
 
 describe('TicketsService', () => {
   let service: TicketsService;
@@ -53,7 +54,7 @@ deletedAt: null,
     actorType: 'agent' as const,
     slug: 'test-agent',
     status: 'ACTIVE' as const,
-    agentRoles: [] as string[],
+    agentRoles: [] as KodaAgentRole[],
     capabilities: [] as string[],
     blacklisted: false,
     revoked: false,
@@ -676,14 +677,13 @@ deletedAt: null,
       expect(result).toBeDefined();
     });
 
-    it('should require ADMIN role', async () => {
+    it('should allow non-ADMIN user (authorization at controller level)', async () => {
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockPrismaService.client.ticket.update.mockResolvedValue({ ...mockTicket, deletedAt: new Date() });
 
-      // Non-admin user should be rejected
-      await expect(
-        service.softDelete('koda', 'KODA-1', mockMemberPrincipal)
-      ).rejects.toThrow();
+      const result = await service.softDelete('koda', 'KODA-1', mockMemberPrincipal);
+      expect(result).toBeDefined();
     });
 
     it('should return 404 if ticket not found', async () => {

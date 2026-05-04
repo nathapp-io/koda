@@ -6,6 +6,8 @@ import { CreateCommentDto, CommentTypeEnum } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { PrismaCommentRepository } from './prisma-comment.repository';
 import { COMMENT_REPOSITORY } from './domain/comment.domain';
+import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
+import type { KodaAgentRole } from '../auth/principal/koda-principal.types';
 
 describe('CommentsService', () => {
   let service: CommentsService;
@@ -95,7 +97,7 @@ describe('CommentsService', () => {
     actorType: 'agent' as const,
     slug: 'test-agent',
     status: 'ACTIVE' as const,
-    agentRoles: [] as string[],
+    agentRoles: [] as KodaAgentRole[],
     capabilities: [] as string[],
     blacklisted: false,
     revoked: false,
@@ -121,7 +123,7 @@ describe('CommentsService', () => {
     actorType: 'agent' as const,
     slug: 'test-agent-456',
     status: 'ACTIVE' as const,
-    agentRoles: [] as string[],
+    agentRoles: [] as KodaAgentRole[],
     capabilities: [] as string[],
     blacklisted: false,
     revoked: false,
@@ -162,12 +164,17 @@ describe('CommentsService', () => {
     delete: jest.fn(),
   };
 
+  let mockCaslCan: jest.Mock;
+
   beforeEach(async () => {
+    mockCaslCan = jest.fn().mockReturnValue(true);
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CommentsService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: COMMENT_REPOSITORY, useValue: mockCommentRepo },
+        { provide: KodaCaslAbilityFactory, useValue: { createForUser: jest.fn().mockResolvedValue({ can: mockCaslCan }) } },
       ],
     }).compile();
 
@@ -405,6 +412,7 @@ describe('CommentsService', () => {
         body: 'Unauthorized edit',
       };
 
+      mockCaslCan.mockReturnValue(false);
       mockCommentRepo.findById.mockResolvedValue(mockComment);
 
       await expect(
@@ -417,6 +425,7 @@ describe('CommentsService', () => {
         body: 'Unauthorized edit',
       };
 
+      mockCaslCan.mockReturnValue(false);
       mockCommentRepo.findById.mockResolvedValue(mockComment);
 
       await expect(
@@ -514,6 +523,7 @@ describe('CommentsService', () => {
     });
 
     it('should return 403 when non-author user tries to delete comment', async () => {
+      mockCaslCan.mockReturnValue(false);
       mockCommentRepo.findById.mockResolvedValue(mockComment);
 
       await expect(
@@ -522,6 +532,7 @@ describe('CommentsService', () => {
     });
 
     it('should return 403 when non-author agent tries to delete comment', async () => {
+      mockCaslCan.mockReturnValue(false);
       mockCommentRepo.findById.mockResolvedValue(mockComment);
 
       await expect(
@@ -547,6 +558,7 @@ describe('CommentsService', () => {
     });
 
     it('should not allow MEMBER users to delete others\' comments', async () => {
+      mockCaslCan.mockReturnValue(false);
       mockCommentRepo.findById.mockResolvedValue(mockComment);
 
       await expect(

@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
-import { ForbiddenAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 
 describe('AgentsController', () => {
   let controller: AgentsController;
@@ -25,7 +25,7 @@ describe('AgentsController', () => {
     name: 'test-agent',
     slug: 'test-agent',
     status: 'ACTIVE' as const,
-    agentRoles: ['WORKER'],
+    agentRoles: ['DEVELOPER'] as const,
     capabilities: [],
     blacklisted: false,
     revoked: false,
@@ -295,8 +295,9 @@ describe('AgentsController', () => {
       expect((result as any).apiKeyHash).not.toMatch(/^[a-f0-9]{64}$/);
     });
 
-    it('should return 403 when not authenticated', async () => {
-      await expect(controller.getMe(mockMemberUser)).rejects.toThrow(ForbiddenAppException);
+    it('should return 404 when non-agent user calls getMe (authorization at guard level)', async () => {
+      mockAgentsService.findMe.mockRejectedValue(new NotFoundAppException({}, 'agents'));
+      await expect(controller.getMe(mockMemberUser)).rejects.toThrow();
     });
   });
 

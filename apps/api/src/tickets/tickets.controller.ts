@@ -24,7 +24,7 @@ import { TicketResponseDto } from './dto/ticket-response.dto';
 import { TransitionWithCommentDto } from './dto/transition-with-comment.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { TicketType, TicketStatus, Priority } from '../common/enums';
-import { Principal } from '@nathapp/nestjs-auth';
+import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 @ApiTags('tickets')
@@ -210,6 +210,7 @@ export class TicketsController {
   @ApiResponse({ status: 200, type: TicketResponseDto })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
+  @RequiredPermission([CaslPermissionAction.DELETE, 'Ticket'])
   async softDelete(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
