@@ -91,6 +91,10 @@ export class AgentsService {
     return role as AgentRoleNames;
   }
 
+  private static validateAgentRoles(roles: readonly string[] | undefined): AgentRoleNames[] {
+    return roles?.map((role) => AgentsService.assertAgentRole(role)) ?? [];
+  }
+
   /**
    * Records an agent action event through the KodaDomainWriter write gateway.
    * No-op when KodaDomainWriter is not available (e.g., in isolated unit tests)
@@ -151,6 +155,7 @@ export class AgentsService {
     } else {
       // Separate scalar fields from relational fields
       const { roles, capabilities, ...scalarFields } = agentIdOrDto;
+      const validatedRoles = AgentsService.validateAgentRoles(roles);
       agent = await this.db.agent.create({
         data: {
           ...scalarFields,
@@ -160,10 +165,10 @@ export class AgentsService {
       await this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
       // Create role entries (sequential create — createMany not reliable on SQLite for junction tables)
       const createdRoles = [];
-      if (roles?.length) {
-        for (const role of roles) {
+      if (validatedRoles.length) {
+        for (const role of validatedRoles) {
           const entry = await this.db.agentRoleEntry.create({
-            data: { agentId: agent.id, role: AgentsService.assertAgentRole(role) },
+            data: { agentId: agent.id, role },
           });
           createdRoles.push(entry);
         }
@@ -253,17 +258,19 @@ export class AgentsService {
   }
 
   async updateRoles(agentId: string, updateData: UpdateRolesDto): Promise<AgentResponseDto> {
+    const validatedRoles = AgentsService.validateAgentRoles(updateData.roles);
+
     // Delete all existing roles
     await this.db.agentRoleEntry.deleteMany({
       where: { agentId },
     });
 
     // Create new roles if provided
-    if (updateData.roles && updateData.roles.length > 0) {
+    if (validatedRoles.length > 0) {
       await this.db.agentRoleEntry.createMany({
-        data: updateData.roles.map((role) => ({
+        data: validatedRoles.map((role) => ({
           agentId,
-          role: AgentsService.assertAgentRole(role),
+          role,
         })),
       });
     }

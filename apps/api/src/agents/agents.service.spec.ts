@@ -217,6 +217,18 @@ describe('AgentsService', () => {
         })).rejects.toThrow(ValidationAppException);
       });
 
+      it('should reject invalid roles before creating the agent', async () => {
+        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
+
+        await expect(service.generateApiKey({
+          name: 'Test Agent',
+          slug: 'test-agent',
+          roles: ['DEVLOPER'],
+        })).rejects.toThrow(ValidationAppException);
+
+        expect(prismaService.client.agent.create).not.toHaveBeenCalled();
+      });
+
       it('should return created agent in response', async () => {
         mockPrismaService.client.agent.create.mockResolvedValue(mockAgent);
         mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
@@ -542,6 +554,14 @@ describe('AgentsService', () => {
       const result = await service.updateRoles('agent-123', updateData);
 
       expect(result.roles.length).toBe(0);
+    });
+
+    it('should reject invalid roles before deleting existing roles', async () => {
+      await expect(service.updateRoles('agent-123', { roles: ['DEVLOPER'] }))
+        .rejects.toThrow(ValidationAppException);
+
+      expect(prismaService.client.agentRoleEntry.deleteMany).not.toHaveBeenCalled();
+      expect(prismaService.client.agentRoleEntry.createMany).not.toHaveBeenCalled();
     });
   });
 

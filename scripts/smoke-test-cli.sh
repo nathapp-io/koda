@@ -84,11 +84,26 @@ fi
 # STEP 2: Migrate DB
 # =============================================================================
 log "Step 2: Running migrations..."
-if (cd "$API_DIR" && DATABASE_URL="file:${TEST_DB}" npx prisma migrate deploy > /dev/null 2>&1); then
-  ok "DB migrations"
-else
+if ! command -v sqlite3 >/dev/null 2>&1; then
+  fail "DB migrations failed (sqlite3 not found)"; exit 1
+fi
+
+MIGRATE_FAILED=false
+while IFS= read -r migration_file; do
+  if ! sqlite3 "$TEST_DB" < "$migration_file" > /tmp/koda-smoke-migrate-$$.log 2>&1; then
+    MIGRATE_FAILED=true
+    echo ""
+    echo "--- Migration log ($migration_file) ---"
+    cat "/tmp/koda-smoke-migrate-$$.log"
+    echo "--------------------------------------"
+    break
+  fi
+done < <(find "$API_DIR/prisma/migrations" -mindepth 2 -maxdepth 2 -name migration.sql | sort)
+
+if [[ "$MIGRATE_FAILED" == true ]]; then
   fail "DB migrations failed"; exit 1
 fi
+ok "DB migrations"
 
 # =============================================================================
 # STEP 3: Start API
@@ -101,6 +116,7 @@ JWT_REFRESH_SECRET="smoke-refresh-secret" \
 JWT_EXPIRES_IN="1h" \
 JWT_REFRESH_EXPIRES_IN="7d" \
 API_KEY_SECRET="smoke-api-key-secret" \
+API_HOST="127.0.0.1" \
 API_PORT=$API_PORT \
 GLOBAL_PROJECT_SLUG="koda" \
 node dist/main > "$API_LOG" 2>&1 &
@@ -150,10 +166,8 @@ JWT=$(echo "$REGISTER" | python3 -c "import json,sys; d=json.load(sys.stdin); pr
 USER_ID=$(echo "$REGISTER" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',d)['user']['id'])" 2>/dev/null)
 
 # Promote user to ADMIN (first user is MEMBER by default)
-PROMOTE_OUT=$(cd "$API_DIR" && DATABASE_URL="file:${TEST_DB}" npx prisma db execute \
-  --schema prisma/schema.prisma --stdin <<< \
-  "UPDATE \"User\" SET \"role\" = 'ADMIN' WHERE \"id\" = '${USER_ID}';" 2>&1) || true
-if ! echo "$PROMOTE_OUT" | grep -qi "success\|executed"; then
+PROMOTE_OUT=$(sqlite3 "$TEST_DB" "UPDATE \"User\" SET \"role\" = 'ADMIN' WHERE \"id\" = '${USER_ID}'; SELECT changes();" 2>&1) || true
+if [[ "$PROMOTE_OUT" != *"1"* ]]; then
   fail "ADMIN promotion failed: $PROMOTE_OUT"; exit 1
 fi
 

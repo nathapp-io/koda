@@ -4,6 +4,8 @@ import { TicketsService } from './tickets.service';
 import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
+import { PERMISSION_KEY, CaslPermissionAction } from '@nathapp/nestjs-auth';
+import { KodaAction } from '../auth/casl/koda-action.enum';
 
 describe('TicketsController', () => {
   let controller: TicketsController;
@@ -364,6 +366,12 @@ describe('TicketsController', () => {
   });
 
   describe('PATCH /api/projects/:slug/tickets/:ref', () => {
+    it('requires UPDATE Ticket permission on the HTTP route', () => {
+      expect(Reflect.getMetadata(PERMISSION_KEY, controller.update)).toEqual([
+        [KodaAction.UPDATE as CaslPermissionAction, 'Ticket'],
+      ]);
+    });
+
     it('should update ticket', async () => {
       const updateDto: UpdateTicketDto = {
         title: 'Updated title',
@@ -442,6 +450,12 @@ describe('TicketsController', () => {
   });
 
   describe('DELETE /api/projects/:slug/tickets/:ref', () => {
+    it('requires DELETE Ticket permission on the HTTP route', () => {
+      expect(Reflect.getMetadata(PERMISSION_KEY, controller.softDelete)).toEqual([
+        [CaslPermissionAction.DELETE, 'Ticket'],
+      ]);
+    });
+
     it('should soft-delete ticket for ADMIN user', async () => {
       mockTicketsService.softDelete.mockResolvedValue({
         ...mockTicket,
@@ -544,6 +558,19 @@ describe('TicketsController', () => {
       await expect(
         controller.assignTicket('koda', 'KODA-999', { userId: 'user-456' })
       ).rejects.toThrow();
+    });
+  });
+
+  describe('ticket transition route permissions', () => {
+    const transitionPermission = [[KodaAction.TRANSITION as CaslPermissionAction, 'Ticket']];
+
+    it('requires TRANSITION Ticket permission on all transition HTTP routes', () => {
+      expect(Reflect.getMetadata(PERMISSION_KEY, controller.verify)).toEqual(transitionPermission);
+      expect(Reflect.getMetadata(PERMISSION_KEY, controller.start)).toEqual(transitionPermission);
+      expect(Reflect.getMetadata(PERMISSION_KEY, controller.fix)).toEqual(transitionPermission);
+      expect(Reflect.getMetadata(PERMISSION_KEY, controller.verifyFix)).toEqual(transitionPermission);
+      expect(Reflect.getMetadata(PERMISSION_KEY, controller.close)).toEqual(transitionPermission);
+      expect(Reflect.getMetadata(PERMISSION_KEY, controller.reject)).toEqual(transitionPermission);
     });
   });
 });
