@@ -1,11 +1,11 @@
 import { Controller, Get, HttpCode, HttpStatus, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { OutboxService, OutboxEventData } from './outbox.service';
-import { JwtAuthGuard } from '@nathapp/nestjs-auth';
+import { JwtAuthGuard, Principal, RequiredPermission } from '@nathapp/nestjs-auth';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
-type AdminUser = { extra?: { role?: string } } | null;
+type LegacyPrincipal = { authorities?: unknown[]; extra?: { role?: string } } | null;
 
 @ApiTags('admin')
 @ApiBearerAuth()
@@ -14,18 +14,27 @@ type AdminUser = { extra?: { role?: string } } | null;
 export class AdminController {
   constructor(private readonly outboxService: OutboxService) {}
 
+  private ensureAdmin(principal: KodaPrincipal | LegacyPrincipal): void {
+    const isAdmin = Boolean(
+      principal?.authorities?.some((authority) => String(authority) === 'ADMIN') ||
+      principal?.extra?.role === 'ADMIN',
+    );
+    if (!isAdmin) {
+      throw new ForbiddenAppException({}, 'admin');
+    }
+  }
+
   @Get('outbox')
   @HttpCode(200)
   @ApiOperation({ summary: 'Get outbox events by status' })
   @ApiResponse({ status: 200, description: 'Returns outbox events' })
   @ApiResponse({ status: 403, description: 'Forbidden - requires admin role' })
+  @RequiredPermission('ADMIN')
   async getOutbox(
-    @CurrentUser() currentUser: AdminUser,
+    @Principal() principal: KodaPrincipal | LegacyPrincipal,
     @Query('status') status?: string,
   ) {
-    if (currentUser?.extra?.role !== 'ADMIN') {
-      throw new ForbiddenAppException({}, 'admin');
-    }
+    this.ensureAdmin(principal);
     const events = status
       ? await this.outboxService.getEventsByStatus(status)
       : await this.outboxService.getPendingEvents();
@@ -41,13 +50,12 @@ export class AdminController {
   @ApiResponse({ status: 200, description: 'Event reset to pending' })
   @ApiResponse({ status: 403, description: 'Forbidden - requires admin role' })
   @ApiResponse({ status: 404, description: 'Event not found' })
+  @RequiredPermission('ADMIN')
   async retryOutboxEvent(
-    @CurrentUser() currentUser: AdminUser,
+    @Principal() principal: KodaPrincipal | LegacyPrincipal,
     @Param('eventId') eventId: string,
   ) {
-    if (currentUser?.extra?.role !== 'ADMIN') {
-      throw new ForbiddenAppException({}, 'admin');
-    }
+    this.ensureAdmin(principal);
     await this.outboxService.retryEvent(eventId);
   }
 }

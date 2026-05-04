@@ -19,9 +19,8 @@ import { CreateLabelDto } from './dto/create-label.dto';
 import { UpdateLabelDto } from './dto/update-label.dto';
 import { AssignLabelDto } from './dto/assign-label.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
-import { CurrentActor } from '../auth/decorators/current-user.decorator';
-
-type CurrentUser = { id: string; sub: string; role?: string } | null;
+import { Principal } from '@nathapp/nestjs-auth';
+import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 @ApiTags('labels')
 @ApiBearerAuth()
@@ -33,10 +32,10 @@ export class LabelsController {
   async create(
     slug: string,
     createLabelDto: CreateLabelDto,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal | Record<string, unknown>,
+    actorType?: 'user' | 'agent',
   ) {
-    return this.labelsService.create(slug, createLabelDto, currentUser, actorType);
+    return this.labelsService.create(slug, createLabelDto, principal, actorType);
   }
 
   async findByProject(slug: string) {
@@ -47,39 +46,39 @@ export class LabelsController {
     slug: string,
     labelId: string,
     updateLabelDto: UpdateLabelDto,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal | Record<string, unknown>,
+    actorType?: 'user' | 'agent',
   ) {
-    return this.labelsService.update(slug, labelId, updateLabelDto, currentUser, actorType);
+    return this.labelsService.update(slug, labelId, updateLabelDto, principal, actorType);
   }
 
   async delete(
     slug: string,
     labelId: string,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal | Record<string, unknown>,
+    actorType?: 'user' | 'agent',
   ) {
-    return this.labelsService.delete(slug, labelId, currentUser, actorType);
+    return this.labelsService.delete(slug, labelId, principal, actorType);
   }
 
   async assignLabel(
     slug: string,
     ref: string,
     assignLabelDto: AssignLabelDto,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal | Record<string, unknown>,
+    actorType?: 'user' | 'agent',
   ) {
-    return this.labelsService.assignToTicket(slug, ref, assignLabelDto, currentUser, actorType);
+    return this.labelsService.assignToTicket(slug, ref, assignLabelDto, principal, actorType);
   }
 
   async removeLabel(
     slug: string,
     ref: string,
     labelId: string,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal | Record<string, unknown>,
+    actorType?: 'user' | 'agent',
   ) {
-    return this.labelsService.removeFromTicket(slug, ref, labelId, currentUser, actorType);
+    return this.labelsService.removeFromTicket(slug, ref, labelId, principal, actorType);
   }
 
   // HTTP route handlers
@@ -93,10 +92,9 @@ export class LabelsController {
   async createFromHttp(
     @Param('slug') slug: string,
     @Body() createLabelDto: CreateLabelDto,
-    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
+    @Principal() principal: KodaPrincipal,
   ) {
-    const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    const data = await this.create(slug, createLabelDto, currentUser, actor.actorType ?? 'user');
+    const data = await this.create(slug, createLabelDto, principal);
     return JsonResponse.Ok(data);
   }
 
@@ -120,10 +118,9 @@ export class LabelsController {
     @Param('slug') slug: string,
     @Param('id') id: string,
     @Body() updateLabelDto: UpdateLabelDto,
-    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
+    @Principal() principal: KodaPrincipal,
   ) {
-    const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    const data = await this.update(slug, id, updateLabelDto, currentUser, actor.actorType ?? 'user');
+    const data = await this.update(slug, id, updateLabelDto, principal);
     return JsonResponse.Ok(data);
   }
 
@@ -136,10 +133,9 @@ export class LabelsController {
   async deleteFromHttp(
     @Param('slug') slug: string,
     @Param('id') id: string,
-    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
+    @Principal() principal: KodaPrincipal,
   ) {
-    const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    return this.delete(slug, id, currentUser, actor.actorType ?? 'user');
+    return this.delete(slug, id, principal);
   }
 
   @Post('projects/:slug/tickets/:ref/labels')
@@ -152,10 +148,9 @@ export class LabelsController {
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Body() assignLabelDto: AssignLabelDto,
-    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
+    @Principal() principal: KodaPrincipal,
   ) {
-    const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    const data = await this.assignLabel(slug, ref, assignLabelDto, currentUser, actor.actorType ?? 'user');
+    const data = await this.assignLabel(slug, ref, assignLabelDto, principal);
     return JsonResponse.Ok(data);
   }
 
@@ -168,9 +163,8 @@ export class LabelsController {
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Param('labelId') labelId: string,
-    @CurrentActor() actor: { currentUser: CurrentUser; actorType: 'user' | 'agent' | undefined },
+    @Principal() principal: KodaPrincipal,
   ) {
-    const currentUser = actor.currentUser ?? { id: '', sub: '' };
-    return this.removeLabel(slug, ref, labelId, currentUser, actor.actorType ?? 'user');
+    return this.removeLabel(slug, ref, labelId, principal);
   }
 }

@@ -158,7 +158,7 @@ describe('LabelsService', () => {
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.client.label.create.mockResolvedValue(mockLabel);
 
-      const result = await service.create('koda', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
+      const result = await service.create('koda', createDto, { id: 'user-123', sub: 'user-123', role: 'ADMIN' }, 'user');
 
       expect(result).toEqual(mockLabel);
       expect(result.name).toBe('typescript');
@@ -204,7 +204,7 @@ describe('LabelsService', () => {
       const labelWithoutColor = { ...mockLabel, name: 'frontend', color: null };
       mockPrismaService.client.label.create.mockResolvedValue(labelWithoutColor);
 
-      const result = await service.create('koda', createDto, { id: 'user-123', sub: 'user-123' }, 'user');
+      const result = await service.create('koda', createDto, { id: 'user-123', sub: 'user-123', role: 'ADMIN' }, 'user');
 
       expect(result.color).toBeNull();
     });
@@ -294,7 +294,7 @@ describe('LabelsService', () => {
       mockPrismaService.client.label.findUnique.mockResolvedValue(mockLabel);
       mockPrismaService.client.label.delete.mockResolvedValue(mockLabel);
 
-      await service.delete('koda', 'label-123', { id: 'user-123', sub: 'user-123' }, 'user');
+      await service.delete('koda', 'label-123', { id: 'user-123', sub: 'user-123', role: 'ADMIN' }, 'user');
 
       expect(prismaService.client.label.delete).toHaveBeenCalledWith({
         where: { id: 'label-123' },

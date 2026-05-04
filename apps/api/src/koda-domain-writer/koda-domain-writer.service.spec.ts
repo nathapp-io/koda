@@ -13,7 +13,7 @@ import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { KodaDomainWriter } from './koda-domain-writer.service';
 import { RagService } from '../rag/rag.service';
 import { OutboxService } from '../outbox/outbox.service';
-import { ActorResolver } from '../events/actor-resolver.service';
+import { AgentAuthProvider } from '../auth/agent-auth.provider';
 import { TicketEventService } from '../events/ticket-event.service';
 import { AgentEventService } from '../events/agent-event.service';
 import { DecisionEventService } from '../events/decision-event.service';
@@ -50,13 +50,10 @@ describe('KodaDomainWriter Unit Tests', () => {
     enqueue: jest.fn().mockResolvedValue({ id: 'outbox-1', status: 'pending' }),
   };
 
-  const mockActorResolver = {
-    resolve: jest.fn().mockResolvedValue({
-      actorType: 'agent',
-      actorId: 'agent-001',
-      projectRoles: ['AGENT'],
-      resourceRoles: [],
-    }),
+  const mockAgentAuthProvider = {
+    loadAgentRoles: jest.fn().mockResolvedValue(['AGENT']),
+    buildPrincipal: jest.fn(),
+    invalidateByTag: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -66,7 +63,7 @@ describe('KodaDomainWriter Unit Tests', () => {
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: RagService, useValue: mockRagService },
         { provide: OutboxService, useValue: mockOutboxService },
-        { provide: ActorResolver, useValue: mockActorResolver },
+        { provide: AgentAuthProvider, useValue: mockAgentAuthProvider },
         TicketEventService,
         AgentEventService,
         DecisionEventService,

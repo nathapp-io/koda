@@ -5,6 +5,7 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtAuthProvider } from './jwt-auth.provider';
 import { CombinedAuthGuard } from './guards/combined-auth.guard';
+import { AgentAuthProvider } from './agent-auth.provider';
 
 @Module({
   imports: [
@@ -38,8 +39,8 @@ import { CombinedAuthGuard } from './guards/combined-auth.guard';
   ],
   // JwtStrategy + JwtRefreshStrategy must be in providers to register with Passport
   // (@nathapp/nestjs-auth ARCH-2: not auto-registered by AuthModule)
-  providers: [AuthService, JwtAuthProvider, JwtStrategy, JwtRefreshStrategy, CombinedAuthGuard],
+  providers: [AuthService, JwtAuthProvider, JwtStrategy, JwtRefreshStrategy, AgentAuthProvider, CombinedAuthGuard],
   controllers: [AuthController],
-  exports: [AuthService, CombinedAuthGuard],
+  exports: [AuthService, CombinedAuthGuard, AgentAuthProvider],
 })
 export class AuthModule {}

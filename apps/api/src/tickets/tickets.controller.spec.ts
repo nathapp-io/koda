@@ -46,23 +46,44 @@ describe('TicketsController', () => {
   };
 
   const mockAdminUser = {
+    actorType: 'user' as const,
     id: 'user-123',
-    sub: 'user-123',
+    name: 'admin@example.com',
     email: 'admin@example.com',
-    role: 'ADMIN',
+    role: 'ADMIN' as const,
+    blacklisted: false,
+    revoked: false,
+    authorities: ['ADMIN'],
+    extra: {
+      sub: 'user-123',
+    },
   };
 
   const mockMemberUser = {
+    actorType: 'user' as const,
     id: 'user-456',
-    sub: 'user-456',
+    name: 'member@example.com',
     email: 'member@example.com',
-    role: 'MEMBER',
+    role: 'MEMBER' as const,
+    blacklisted: false,
+    revoked: false,
+    authorities: ['MEMBER'],
+    extra: {
+      sub: 'user-456',
+    },
   };
 
   const mockAgent = {
+    actorType: 'agent' as const,
     id: 'agent-123',
-    sub: 'agent-123',
+    name: 'test-agent',
     slug: 'test-agent',
+    status: 'ACTIVE' as const,
+    agentRoles: ['WORKER'],
+    capabilities: [],
+    blacklisted: false,
+    revoked: false,
+    authorities: ['WORKER'],
   };
 
   const mockTicketsService = {

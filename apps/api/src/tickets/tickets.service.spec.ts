@@ -609,7 +609,7 @@ describe('TicketsService', () => {
         deletedAt: now,
       });
 
-      const result = await service.softDelete('koda', 'KODA-1', { id: 'user-123', sub: 'user-123' }, 'user');
+      const result = await service.softDelete('koda', 'KODA-1', { id: 'user-123', sub: 'user-123', role: 'ADMIN' }, 'user');
 
       expect(result.deletedAt).not.toBeNull();
       expect(prismaService.client.ticket.update).toHaveBeenCalledWith({
@@ -630,7 +630,7 @@ describe('TicketsService', () => {
         deletedAt: new Date(),
       });
 
-      const result = await service.softDelete('koda', 'KODA-1', { id: 'user-123', sub: 'user-123' }, 'user');
+      const result = await service.softDelete('koda', 'KODA-1', { id: 'user-123', sub: 'user-123', role: 'ADMIN' }, 'user');
 
       expect(result.id).toBe(mockTicket.id); // ID still exists
       expect(result).toBeDefined();

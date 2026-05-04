@@ -8,12 +8,22 @@ import { UpdateCommentDto } from './dto/update-comment.dto';
 import { CommentResponseDto } from './dto/comment-response.dto';
 import { PrismaCommentRepository } from './prisma-comment.repository';
 import { COMMENT_REPOSITORY } from './domain/comment.domain';
+import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
 
-interface CurrentUser {
-  id: string;
-  sub: string;
+type LegacyPrincipal = {
+  id?: string;
+  sub?: string;
+  name?: string;
   role?: string;
-}
+  authorities?: unknown[];
+  extra?: {
+    sub?: string;
+    role?: string;
+    email?: string;
+    slug?: string;
+    actorType?: 'user' | 'agent';
+  };
+};
 
 @Injectable()
 export class CommentsService {
@@ -24,14 +34,58 @@ export class CommentsService {
 
   private get db() { return this.prisma.client; }
 
+  private normalizePrincipal(
+    principal: KodaPrincipal | LegacyPrincipal,
+    actorType?: 'user' | 'agent',
+  ): KodaPrincipal {
+    if ('actorType' in principal && (principal.actorType === 'user' || principal.actorType === 'agent')) {
+      return principal;
+    }
+
+    const resolvedActorType = actorType ?? principal.extra?.actorType ?? 'user';
+    const id = principal.id ?? principal.sub ?? principal.extra?.sub ?? '';
+
+    if (resolvedActorType === 'agent') {
+      const agentRoles = (principal.authorities ?? []).map((authority) => String(authority));
+      return {
+        actorType: 'agent',
+        id,
+        name: principal.name ?? principal.extra?.slug ?? id,
+        slug: principal.extra?.slug ?? principal.name ?? id,
+        status: 'ACTIVE',
+        agentRoles,
+        capabilities: [],
+        blacklisted: false,
+        revoked: false,
+        authorities: agentRoles,
+      };
+    }
+
+    const role = (principal.role ?? principal.extra?.role ?? 'MEMBER') as 'MEMBER' | 'ADMIN';
+    return {
+      actorType: 'user',
+      id,
+      name: principal.name ?? principal.extra?.email ?? id,
+      email: principal.extra?.email ?? id,
+      role,
+      blacklisted: false,
+      revoked: false,
+      authorities: [role],
+      extra: {
+        sub: id,
+      },
+    };
+  }
+
 
   async create(
     projectSlug: string,
     ticketRef: string,
     createCommentDto: CreateCommentDto,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal | LegacyPrincipal,
+    actorType?: 'user' | 'agent',
   ) {
+    const normalizedPrincipal = this.normalizePrincipal(principal, actorType);
     // Validate required fields
     if (!createCommentDto.body) {
       throw new ValidationAppException({}, 'comments');
@@ -87,8 +141,8 @@ export class CommentsService {
       ticketId: ticket.id,
       body: createCommentDto.body,
       type: createCommentDto.type as CommentType,
-      authorUserId: actorType === 'user' ? currentUser.id : null,
-      authorAgentId: actorType === 'agent' ? currentUser.id : null,
+      authorUserId: isUserPrincipal(normalizedPrincipal) ? normalizedPrincipal.id : null,
+      authorAgentId: isUserPrincipal(normalizedPrincipal) ? null : normalizedPrincipal.id,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -149,9 +203,10 @@ export class CommentsService {
   async update(
     commentId: string,
     updateCommentDto: UpdateCommentDto,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal | LegacyPrincipal,
+    actorType?: 'user' | 'agent',
   ) {
+    const normalizedPrincipal = this.normalizePrincipal(principal, actorType);
     // Find the comment via repository
     const comment = await this.commentRepo.findById(commentId);
 
@@ -160,11 +215,11 @@ export class CommentsService {
     }
 
     // Check authorization: only author or admin can edit
-    const isAuthor =
-      (actorType === 'user' && comment.authorUserId === currentUser.id) ||
-      (actorType === 'agent' && comment.authorAgentId === currentUser.id);
+    const isAuthor = isUserPrincipal(normalizedPrincipal)
+      ? comment.authorUserId === normalizedPrincipal.id
+      : comment.authorAgentId === normalizedPrincipal.id;
 
-    const isAdmin = actorType === 'user' && currentUser.role === 'ADMIN';
+    const isAdmin = isUserPrincipal(normalizedPrincipal) && normalizedPrincipal.role === 'ADMIN';
 
     if (!isAuthor && !isAdmin) {
       throw new ForbiddenAppException({}, 'comments');
@@ -180,9 +235,10 @@ export class CommentsService {
 
   async delete(
     commentId: string,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal | LegacyPrincipal,
+    actorType?: 'user' | 'agent',
   ) {
+    const normalizedPrincipal = this.normalizePrincipal(principal, actorType);
     // Find the comment via repository
     const comment = await this.commentRepo.findById(commentId);
 
@@ -191,11 +247,11 @@ export class CommentsService {
     }
 
     // Check authorization: only author or admin can delete
-    const isAuthor =
-      (actorType === 'user' && comment.authorUserId === currentUser.id) ||
-      (actorType === 'agent' && comment.authorAgentId === currentUser.id);
+    const isAuthor = isUserPrincipal(normalizedPrincipal)
+      ? comment.authorUserId === normalizedPrincipal.id
+      : comment.authorAgentId === normalizedPrincipal.id;
 
-    const isAdmin = actorType === 'user' && currentUser.role === 'ADMIN';
+    const isAdmin = isUserPrincipal(normalizedPrincipal) && normalizedPrincipal.role === 'ADMIN';
 
     if (!isAuthor && !isAdmin) {
       throw new ForbiddenAppException({}, 'comments');

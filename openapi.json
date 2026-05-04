@@ -856,6 +856,146 @@
         ]
       }
     },
+    "/api/projects/{slug}/timeline": {
+      "get": {
+        "operationId": "TimelineController_getTimeline",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actorId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ticketId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project timeline"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a project timeline",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/api/memory/extract": {
+      "post": {
+        "operationId": "MemoryController_extractFromEvent",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Memory items extracted"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Extract memory items from a canonical event (internal)",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/api/memory/decisions": {
+      "post": {
+        "operationId": "MemoryController_recordDecision",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Decision recorded"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Record a decision",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/api/memory": {
+      "post": {
+        "operationId": "MemoryController_createMemory",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Memory item created"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a memory item",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
     "/api/projects": {
       "post": {
         "operationId": "ProjectsController_create",
@@ -1031,6 +1171,85 @@
           }
         ],
         "summary": "Soft delete a project (admin only)",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/projects/{slug}/memory": {
+      "get": {
+        "operationId": "ProjectsController_getProjectMemory",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "required": false,
+            "in": "query",
+            "description": "Filter by memory kind",
+            "schema": {
+              "enum": [
+                "FACT",
+                "INCIDENT_PATTERN",
+                "DECISION"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "subjects",
+            "required": false,
+            "in": "query",
+            "description": "Filter by subject prefix",
+            "schema": {
+              "example": "ticket:123",
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "description": "Filter by status (active, superseded, rejected)",
+            "schema": {
+              "example": "active",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project memories retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectMemoryResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - no project access"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get project semantic memories",
         "tags": [
           "projects"
         ]
@@ -2836,86 +3055,6 @@
           "ci-webhooks"
         ]
       }
-    },
-    "/api/projects/{slug}/timeline": {
-      "get": {
-        "operationId": "TimelineController_getTimeline",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "actorId",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "ticketId",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "from",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "to",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "cursor",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Project timeline"
-          },
-          "404": {
-            "description": "Project not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Get a project timeline",
-        "tags": [
-          "memory"
-        ]
-      }
     }
   },
   "info": {
@@ -3370,6 +3509,91 @@
           }
         }
       },
+      "MemoryItemResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Memory item ID"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "Project ID"
+          },
+          "kind": {
+            "type": "string",
+            "description": "Memory kind",
+            "enum": [
+              "FACT",
+              "DECISION",
+              "PREFERENCE",
+              "CONSTRAINT",
+              "INCIDENT_PATTERN"
+            ]
+          },
+          "subject": {
+            "type": "string",
+            "description": "Memory subject",
+            "example": "ticket:123"
+          },
+          "predicate": {
+            "type": "string",
+            "description": "Memory predicate",
+            "example": "status"
+          },
+          "object": {
+            "type": "string",
+            "description": "Memory object value"
+          },
+          "confidence": {
+            "type": "number",
+            "description": "Confidence score (0.0 - 1.0)"
+          },
+          "supersededBy": {
+            "type": "string",
+            "description": "ID of the memory item that superseded this one"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Creation timestamp"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Last update timestamp"
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "kind",
+          "subject",
+          "predicate",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "ProjectMemoryResponseDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number",
+            "description": "Total number of matching memories"
+          },
+          "items": {
+            "description": "Memory items",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryItemResponseDto"
+            }
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ]
+      },
       "CreateTicketDto": {
         "type": "object",
         "properties": {
@@ -3729,16 +3953,14 @@
           "repoName": {
             "type": "string"
           },
+          "repoUrl": {
+            "type": "string"
+          },
           "token": {
             "type": "string"
           },
           "syncMode": {
-            "type": "string",
-            "enum": [
-              "off",
-              "polling",
-              "webhook"
-            ]
+            "type": "string"
           },
           "allowedAuthors": {
             "type": "array",
@@ -3764,6 +3986,9 @@
           "id": {
             "type": "string"
           },
+          "projectId": {
+            "type": "string"
+          },
           "provider": {
             "type": "string"
           },
@@ -3785,6 +4010,10 @@
           "pollingIntervalMs": {
             "type": "number"
           },
+          "webhookSecret": {
+            "type": "string",
+            "nullable": true
+          },
           "lastSyncedAt": {
             "type": "string",
             "nullable": true
@@ -3801,12 +4030,14 @@
         },
         "required": [
           "id",
+          "projectId",
           "provider",
           "repoOwner",
           "repoName",
           "syncMode",
           "allowedAuthors",
           "pollingIntervalMs",
+          "webhookSecret",
           "lastSyncedAt",
           "isActive",
           "createdAt",
@@ -3836,6 +4067,9 @@
           "pollingIntervalMs": {
             "type": "number",
             "minimum": 60000
+          },
+          "webhookSecret": {
+            "type": "string"
           }
         }
       },
@@ -3845,12 +4079,16 @@
           "ok": {
             "type": "boolean"
           },
+          "latencyMs": {
+            "type": "number"
+          },
           "error": {
             "type": "string"
           }
         },
         "required": [
-          "ok"
+          "ok",
+          "latencyMs"
         ]
       },
       "SyncResultDto": {

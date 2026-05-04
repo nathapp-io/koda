@@ -9,6 +9,9 @@ import { PrismaClient } from '@prisma/client';
 import { TicketType, TicketStatus, Priority } from '../common/enums';
 import { validateTransition } from './state-machine/ticket-transitions';
 import { buildGitUrl } from '../common/utils/git-url.util';
+import { actorForeignKeys } from '../auth/principal/actor-foreign-keys';
+import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
+import { LegacyPrincipal, normalizeKodaPrincipal } from '../auth/principal/normalize-koda-principal';
 
 interface FindAllFilters {
   status?: TicketStatus;
@@ -23,12 +26,6 @@ interface FindAllFilters {
 interface AssignInput {
   userId?: string;
   agentId?: string;
-}
-
-interface CurrentUser {
-  id: string;
-  sub: string;
-  role?: string;
 }
 
 @Injectable()
@@ -54,9 +51,10 @@ export class TicketsService {
   async create(
     projectSlug: string,
     createTicketDto: CreateTicketDto,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal | LegacyPrincipal,
+    actorType?: 'user' | 'agent',
   ) {
+    const normalizedPrincipal = normalizeKodaPrincipal(principal, actorType);
     // Find project by slug
     const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
@@ -97,8 +95,7 @@ export class TicketsService {
           description: createTicketDto.description || null,
           status: TicketStatus.CREATED,
           priority: createTicketDto.priority || Priority.MEDIUM,
-          createdByUserId: actorType === 'user' ? currentUser.id : null,
-          createdByAgentId: actorType === 'agent' ? currentUser.id : null,
+          ...actorForeignKeys(normalizedPrincipal, 'createdBy'),
         },
       });
     });
@@ -247,8 +244,8 @@ export class TicketsService {
     projectSlug: string,
     ref: string,
     updateTicketDto: UpdateTicketDto,
-    _currentUser: CurrentUser,
-    _actorType: 'user' | 'agent',
+    _principal: KodaPrincipal | LegacyPrincipal,
+    _actorType?: 'user' | 'agent',
   ) {
     // Find ticket by ref (returns TicketResponseDto)
     const ticket = await this.findByRef(projectSlug, ref);
@@ -299,11 +296,12 @@ export class TicketsService {
   async softDelete(
     projectSlug: string,
     ref: string,
-    currentUser: CurrentUser,
-    actorType: 'user' | 'agent',
+    principal: KodaPrincipal | LegacyPrincipal,
+    actorType?: 'user' | 'agent',
   ) {
+    const normalizedPrincipal = normalizeKodaPrincipal(principal, actorType);
     // Check if user has ADMIN role (only applies to users)
-    if (actorType === 'user' && currentUser.role && currentUser.role !== 'ADMIN') {
+    if (isUserPrincipal(normalizedPrincipal) && normalizedPrincipal.role !== 'ADMIN') {
       throw new ForbiddenAppException({}, 'tickets');
     }
 
