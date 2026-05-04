@@ -105,6 +105,44 @@ describe('LabelsService', () => {
     createdAt: new Date(),
   };
 
+  const mockUserPrincipal = {
+    id: 'user-123',
+    sub: 'user-123',
+    actorType: 'user' as const,
+    role: 'ADMIN' as const,
+    email: 'admin@example.com',
+    blacklisted: false,
+    revoked: false,
+    authorities: [] as string[],
+    name: 'Admin User',
+  };
+
+  const mockMemberPrincipal = {
+    id: 'user-456',
+    sub: 'user-456',
+    actorType: 'user' as const,
+    role: 'MEMBER' as const,
+    email: 'user456@example.com',
+    blacklisted: false,
+    revoked: false,
+    authorities: [] as string[],
+    name: 'Test User',
+  };
+
+  const mockAgentPrincipal = {
+    id: 'agent-123',
+    sub: 'agent-123',
+    actorType: 'agent' as const,
+    slug: 'test-agent',
+    status: 'ACTIVE' as const,
+    agentRoles: [] as string[],
+    capabilities: [] as string[],
+    blacklisted: false,
+    revoked: false,
+    authorities: [] as string[],
+    name: 'Test Agent',
+  };
+
   const mockPrismaService = {
     client: {
       project: {
@@ -158,7 +196,7 @@ describe('LabelsService', () => {
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.client.label.create.mockResolvedValue(mockLabel);
 
-      const result = await service.create('koda', createDto, { id: 'user-123', sub: 'user-123', role: 'ADMIN' }, 'user');
+      const result = await service.create('koda', createDto, mockUserPrincipal);
 
       expect(result).toEqual(mockLabel);
       expect(result.name).toBe('typescript');
@@ -172,10 +210,10 @@ describe('LabelsService', () => {
         color: '#0066CC',
       };
 
-      const memberUser = { id: 'user-456', sub: 'user-456', role: 'MEMBER' };
+      const memberUser = mockMemberPrincipal;
 
       await expect(
-        service.create('koda', createDto, memberUser, 'user')
+        service.create('koda', createDto, memberUser)
       ).rejects.toThrow();
     });
 
@@ -185,13 +223,13 @@ describe('LabelsService', () => {
         color: '#0066CC',
       };
 
-      const agent = { id: 'agent-123', sub: 'agent-123', slug: 'test-agent' };
+      const agent = mockAgentPrincipal;
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.client.label.create.mockResolvedValue({ ...mockLabel, name: 'typescript', color: '#0066CC' });
 
       await expect(
-        service.create('koda', createDto, agent, 'agent')
+        service.create('koda', createDto, agent)
       ).resolves.toMatchObject({ name: 'typescript', color: '#0066CC' });
     });
 
@@ -204,7 +242,7 @@ describe('LabelsService', () => {
       const labelWithoutColor = { ...mockLabel, name: 'frontend', color: null };
       mockPrismaService.client.label.create.mockResolvedValue(labelWithoutColor);
 
-      const result = await service.create('koda', createDto, { id: 'user-123', sub: 'user-123', role: 'ADMIN' }, 'user');
+      const result = await service.create('koda', createDto, mockUserPrincipal);
 
       expect(result.color).toBeNull();
     });
@@ -218,7 +256,7 @@ describe('LabelsService', () => {
       mockPrismaService.client.project.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.create('nonexistent', createDto, { id: 'user-123', sub: 'user-123' }, 'user')
+        service.create('nonexistent', createDto, mockUserPrincipal)
       ).rejects.toThrow();
     });
 
@@ -234,7 +272,7 @@ describe('LabelsService', () => {
       );
 
       await expect(
-        service.create('koda', createDto, { id: 'user-123', sub: 'user-123' }, 'user')
+        service.create('koda', createDto, mockUserPrincipal)
       ).rejects.toThrow();
     });
   });
@@ -294,7 +332,7 @@ describe('LabelsService', () => {
       mockPrismaService.client.label.findUnique.mockResolvedValue(mockLabel);
       mockPrismaService.client.label.delete.mockResolvedValue(mockLabel);
 
-      await service.delete('koda', 'label-123', { id: 'user-123', sub: 'user-123', role: 'ADMIN' }, 'user');
+      await service.delete('koda', 'label-123', mockUserPrincipal);
 
       expect(prismaService.client.label.delete).toHaveBeenCalledWith({
         where: { id: 'label-123' },
@@ -302,21 +340,19 @@ describe('LabelsService', () => {
     });
 
     it('should reject delete from non-ADMIN user', async () => {
-      const memberUser = { id: 'user-456', sub: 'user-456', role: 'MEMBER' };
-
       await expect(
-        service.delete('koda', 'label-123', memberUser, 'user')
+        service.delete('koda', 'label-123', mockMemberPrincipal)
       ).rejects.toThrow();
     });
 
     it('should allow delete from agent', async () => {
-      const agent = { id: 'agent-123', sub: 'agent-123', slug: 'test-agent' };
+      const agent = mockAgentPrincipal;
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.client.label.findUnique.mockResolvedValue(mockLabel);
 
       await expect(
-        service.delete('koda', 'label-123', agent, 'agent')
+        service.delete('koda', 'label-123', agent)
       ).resolves.toBeUndefined();
     });
 
@@ -324,7 +360,7 @@ describe('LabelsService', () => {
       mockPrismaService.client.project.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.delete('nonexistent', 'label-123', { id: 'user-123', sub: 'user-123' }, 'user')
+        service.delete('nonexistent', 'label-123', mockUserPrincipal)
       ).rejects.toThrow();
     });
 
@@ -333,7 +369,7 @@ describe('LabelsService', () => {
       mockPrismaService.client.label.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.delete('koda', 'nonexistent', { id: 'user-123', sub: 'user-123' }, 'user')
+        service.delete('koda', 'nonexistent', mockUserPrincipal)
       ).rejects.toThrow();
     });
 
@@ -344,7 +380,7 @@ describe('LabelsService', () => {
       mockPrismaService.client.label.findUnique.mockResolvedValue(otherProjectLabel);
 
       await expect(
-        service.delete('koda', 'label-123', { id: 'user-123', sub: 'user-123' }, 'user')
+        service.delete('koda', 'label-123', mockUserPrincipal)
       ).rejects.toThrow();
     });
   });
@@ -370,8 +406,7 @@ describe('LabelsService', () => {
         'koda',
         'KODA-1',
         assignDto,
-        { id: 'user-123', sub: 'user-123' },
-        'user'
+        mockUserPrincipal
       );
 
       expect(result.labels).toBeDefined();
@@ -398,8 +433,7 @@ describe('LabelsService', () => {
         'koda',
         'KODA-1',
         assignDto,
-        { id: 'user-123', sub: 'user-123' },
-        'user'
+        mockUserPrincipal
       );
 
       // Verify that txManager.run is called (wraps TicketActivity creation)
@@ -422,13 +456,12 @@ describe('LabelsService', () => {
       mockPrismaService.client.ticketLabel.create.mockResolvedValue({});
       mockPrismaService.client.ticketActivity.create.mockResolvedValue(mockActivity);
 
-      const memberUser = { id: 'user-456', sub: 'user-456', role: 'MEMBER' };
+      const memberUser = mockMemberPrincipal;
       const result = await service.assignToTicket(
         'koda',
         'KODA-1',
         assignDto,
-        memberUser,
-        'user'
+        mockUserPrincipal
       );
 
       expect(result).toBeDefined();
@@ -450,13 +483,12 @@ describe('LabelsService', () => {
       mockPrismaService.client.ticketLabel.create.mockResolvedValue({});
       mockPrismaService.client.ticketActivity.create.mockResolvedValue(mockActivity);
 
-      const agent = { id: 'agent-123', sub: 'agent-123', slug: 'test-agent' };
+      const agent = mockAgentPrincipal;
       const result = await service.assignToTicket(
         'koda',
         'KODA-1',
         assignDto,
-        agent,
-        'agent'
+        agent
       );
 
       expect(result).toBeDefined();
@@ -468,13 +500,12 @@ describe('LabelsService', () => {
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(null);
 
-      await expect(
+await expect(
         service.assignToTicket(
           'koda',
-          'KODA-999',
+          'KODA-1',
           assignDto,
-          { id: 'user-123', sub: 'user-123' },
-          'user'
+          mockUserPrincipal
         )
       ).rejects.toThrow();
     });
@@ -491,8 +522,7 @@ describe('LabelsService', () => {
           'koda',
           'KODA-1',
           assignDto,
-          { id: 'user-123', sub: 'user-123' },
-          'user'
+          mockUserPrincipal
         )
       ).rejects.toThrow();
     });
@@ -510,8 +540,7 @@ describe('LabelsService', () => {
           'koda',
           'KODA-1',
           assignDto,
-          { id: 'user-123', sub: 'user-123' },
-          'user'
+          mockUserPrincipal
         )
       ).rejects.toThrow();
     });
@@ -530,8 +559,7 @@ describe('LabelsService', () => {
           'koda',
           'KODA-1',
           assignDto,
-          { id: 'user-123', sub: 'user-123' },
-          'user'
+          mockUserPrincipal
         )
       ).rejects.toThrow();
     });
@@ -562,8 +590,7 @@ describe('LabelsService', () => {
         'koda',
         'KODA-1',
         assignDto,
-        { id: 'user-123', sub: 'user-123' },
-        'user'
+        mockUserPrincipal
       );
 
       expect(result.labels).toBeDefined();
@@ -594,8 +621,7 @@ describe('LabelsService', () => {
         'koda',
         'KODA-1',
         'label-123',
-        { id: 'user-123', sub: 'user-123' },
-        'user'
+        mockUserPrincipal
       );
 
       expect(result.labels).toBeDefined();
@@ -620,12 +646,11 @@ describe('LabelsService', () => {
       mockPrismaService.client.ticketLabel.delete.mockResolvedValue({});
       mockPrismaService.client.ticketActivity.create.mockResolvedValue(mockActivity);
 
-      await service.removeFromTicket(
+await service.removeFromTicket(
         'koda',
         'KODA-1',
         'label-123',
-        { id: 'user-123', sub: 'user-123' },
-        'user'
+        mockUserPrincipal
       );
 
       expect(mockTxManager.run).toHaveBeenCalled();
@@ -649,13 +674,12 @@ describe('LabelsService', () => {
       mockPrismaService.client.ticketLabel.delete.mockResolvedValue({});
       mockPrismaService.client.ticketActivity.create.mockResolvedValue(mockActivity);
 
-      const memberUser = { id: 'user-456', sub: 'user-456', role: 'MEMBER' };
-      const result = await service.removeFromTicket(
+      const memberUser = mockMemberPrincipal;
+const result = await service.removeFromTicket(
         'koda',
         'KODA-1',
         'label-123',
-        memberUser,
-        'user'
+        mockUserPrincipal
       );
 
       expect(result).toBeDefined();
@@ -679,13 +703,12 @@ describe('LabelsService', () => {
       mockPrismaService.client.ticketLabel.delete.mockResolvedValue({});
       mockPrismaService.client.ticketActivity.create.mockResolvedValue(mockActivity);
 
-      const agent = { id: 'agent-123', sub: 'agent-123', slug: 'test-agent' };
+      const agent = mockAgentPrincipal;
       const result = await service.removeFromTicket(
         'koda',
         'KODA-1',
         'label-123',
-        agent,
-        'agent'
+        agent
       );
 
       expect(result).toBeDefined();
@@ -700,8 +723,7 @@ describe('LabelsService', () => {
           'koda',
           'KODA-999',
           'label-123',
-          { id: 'user-123', sub: 'user-123' },
-          'user'
+          mockUserPrincipal
         )
       ).rejects.toThrow();
     });
@@ -716,8 +738,7 @@ describe('LabelsService', () => {
           'koda',
           'KODA-1',
           'label-123',
-          { id: 'user-123', sub: 'user-123' },
-          'user'
+          mockUserPrincipal
         )
       ).rejects.toThrow();
     });
@@ -744,8 +765,7 @@ describe('LabelsService', () => {
         'koda',
         'KODA-1',
         'label-123',
-        { id: 'user-123', sub: 'user-123' },
-        'user'
+        mockUserPrincipal
       );
 
       expect(result.labels).toBeDefined();
