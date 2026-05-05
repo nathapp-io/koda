@@ -30,11 +30,15 @@ export class AuthService {
 
     const passwordHash = await bcrypt.hash(password, 12);
 
+    const existingUsers = await this.db.user.findMany({ take: 1 });
+    const role = existingUsers.length === 0 ? 'ADMIN' : undefined;
+
     const user = await this.db.user.create({
       data: {
         email,
         name,
         passwordHash,
+        ...(role ? { role } : {}),
       },
     });
 

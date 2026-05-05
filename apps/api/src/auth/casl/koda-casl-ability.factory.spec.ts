@@ -63,11 +63,11 @@ describe('KodaCaslAbilityFactory', () => {
       expect(permissionSet(perms)).not.toContain('manage:AgentScope');
     });
 
-    it('should have exactly 6 permission rules', async () => {
+    it('should have exactly 7 permission rules', async () => {
       const principal = makeUser({ role: 'ADMIN' });
       const perms = await factory.getPermissions(principal);
 
-      expect(perms).toHaveLength(6);
+      expect(perms).toHaveLength(7);
     });
   });
 
@@ -241,7 +241,7 @@ describe('KodaCaslAbilityFactory', () => {
       const principal = makeAgent({ agentRoles: ['DEVELOPER'] });
       const perms = await factory.getPermissions(principal);
 
-      const baseCount = 13; // AgentScope.read + 5 resource reads + Comment CRUD.* + Label.manage + Ticket.create + Ticket.delete + CodeIntel.import
+      const baseCount = 14; // AgentScope.read + 5 resource reads + Comment CRUD.* + Label.manage + Ticket.create + Ticket.delete + CodeIntel.import + AstIndex.manage
       const derivedCount = 1; // TRANSITION Ticket
       expect(perms).toHaveLength(baseCount + derivedCount);
     });

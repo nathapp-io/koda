@@ -18,10 +18,11 @@ export class CreateAgentDto {
   @MinLength(1)
   name!: string;
 
-  @ApiProperty({ example: 'subrina-coder' })
+  @ApiProperty({ example: 'subrina-coder', required: false })
+  @IsOptional()
   @IsString()
   @MinLength(1)
-  slug!: string;
+  slug?: string;
 
   @ApiProperty({ required: false, minimum: 1 })
   @IsOptional()
@@ -156,9 +157,11 @@ export class AgentsService {
       // Separate scalar fields from relational fields
       const { roles, capabilities, ...scalarFields } = agentIdOrDto;
       const validatedRoles = AgentsService.validateAgentRoles(roles);
+      const slug = scalarFields.slug || scalarFields.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
       agent = await this.db.agent.create({
         data: {
           ...scalarFields,
+          slug,
           apiKeyHash,
         },
       });

@@ -28,6 +28,14 @@ export class CodeGraphService {
   parseSourceFile(path: string, content: string): ParsedSourceFile {
     const project = new Project({ useInMemoryFileSystem: true });
     const sourceFile = project.createSourceFile(path, content);
+    const diagnostics = sourceFile.getPreEmitDiagnostics();
+    const syntaxErrors = diagnostics.filter(
+      (d) => d.getCategory() === 1 && d.getCode() >= 1000 && d.getCode() < 2000,
+    );
+    if (syntaxErrors.length > 0) {
+      const messages = syntaxErrors.map((d) => d.getMessageText().toString()).join('; ');
+      throw new Error(`Parse error: ${messages}`);
+    }
     return { path, content, ast: sourceFile };
   }
 

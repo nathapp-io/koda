@@ -149,7 +149,6 @@ describe('AstIndexService', () => {
 
       expect(mockCodeGraph.parseSourceFile).toHaveBeenCalledTimes(1);
       expect(mockCodeGraph.parseSourceFile).toHaveBeenCalledWith('src/auth.ts', files[0].content);
-      expect(mockCodeGraph.parseSourceFile).not.toHaveBeenCalled();
     });
 
     it('AC-6: Symbol.signature should capture parameter types and return type', async () => {
