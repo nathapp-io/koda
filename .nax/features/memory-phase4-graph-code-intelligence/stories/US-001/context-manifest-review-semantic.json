@@ -1,7 +1,7 @@
 {
-  "requestId": "aaee9808-b723-49ff-9555-0da33a289982",
-  "stage": "tdd-test-writer",
-  "totalBudgetTokens": 8000,
+  "requestId": "70e0e718-181f-4528-8b49-ce6bbb5da34a",
+  "stage": "review-semantic",
+  "totalBudgetTokens": 6000,
   "usedTokens": 4192,
   "includedChunks": [
     "static-rules:api-auth:5a2f90f2",
@@ -25,7 +25,7 @@
     "static-rules:project-conventions:1c5c62ba"
   ],
   "digestTokens": 49,
-  "buildMs": 63,
+  "buildMs": 5,
   "providerResults": [
     {
       "providerId": "static-rules",
@@ -41,22 +41,6 @@
       "source": "stage-config",
       "chunkCount": 0,
       "durationMs": 1,
-      "tokensProduced": 0
-    },
-    {
-      "providerId": "session-scratch",
-      "status": "empty",
-      "source": "stage-config",
-      "chunkCount": 0,
-      "durationMs": 1,
-      "tokensProduced": 0
-    },
-    {
-      "providerId": "code-neighbor",
-      "status": "empty",
-      "source": "stage-config",
-      "chunkCount": 0,
-      "durationMs": 61,
       "tokensProduced": 0
     }
   ],
