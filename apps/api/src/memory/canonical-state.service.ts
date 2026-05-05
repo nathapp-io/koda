@@ -27,6 +27,7 @@ export interface CanonicalEvent {
   actorId: string;
   action: string;
   payload: Record<string, unknown>;
+  rationale: string | null;
   createdAt: Date;
 }
 
@@ -107,18 +108,19 @@ export class CanonicalStateService {
   private async loadEvents(
     query: CanonicalSnapshotQuery,
   ): Promise<CanonicalEvent[]> {
-    if (!query.timeWindow) {
+    const { from, to } = query.timeWindow ?? {};
+
+    if (!query.timeWindow && !query.actorId) {
       return [];
     }
 
-    const { from, to } = query.timeWindow;
+    const createdAtFilter: Record<string, unknown> = {};
+    if (from) createdAtFilter.gte = from;
+    if (to) createdAtFilter.lte = to;
 
-    const baseWhere = {
+    const baseWhere: Record<string, unknown> = {
       projectId: query.projectId,
-      createdAt: {
-        ...(from ? { gte: from } : {}),
-        ...(to ? { lte: to } : {}),
-      },
+      ...(Object.keys(createdAtFilter).length > 0 ? { createdAt: createdAtFilter } : {}),
     };
 
     const actorWhere = query.actorId
@@ -152,6 +154,7 @@ export class CanonicalStateService {
         actorId: e.actorId,
         action: e.action,
         payload: parsePayload(e.data),
+        rationale: null,
         createdAt: e.createdAt,
       });
     }
@@ -163,6 +166,7 @@ export class CanonicalStateService {
         actorId: e.actorId,
         action: e.action,
         payload: parsePayload(e.data),
+        rationale: null,
         createdAt: e.createdAt,
       });
     }
@@ -174,6 +178,7 @@ export class CanonicalStateService {
         actorId: e.agentId,
         action: e.action,
         payload: parsePayload(e.data),
+        rationale: e.rationale,
         createdAt: e.createdAt,
       });
     }
