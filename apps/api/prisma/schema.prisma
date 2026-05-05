@@ -104,6 +104,7 @@ model Project {
   graphNodes    GraphNode[]
   graphLinks    GraphLink[]
   memoryItems   MemoryItem[]
+  symbols       Symbol[]
 }
 
 model ProjectMember {
@@ -386,6 +387,32 @@ model GraphLink {
   @@index([projectId, sourceId])
   @@index([projectId, sourceId, targetId])
   @@unique([projectId, sourceId, targetId, relation])
+}
+
+model Symbol {
+  id         String   @id  // {repoId}:{filePath}::{SymbolName}
+  symbolId   String
+  projectId  String
+  repoId     String
+  commitHash String
+  name       String
+  kind       String   // class | method | function | interface | enum
+  file       String
+  startLine  Int
+  endLine    Int
+  signature  String?
+  callers    Json     @default("[]")
+  callees    Json     @default("[]")
+  docComment String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, symbolId])
+  @@index([projectId])
+  @@index([projectId, symbolId])
+  @@index([projectId, file])
 }
 
 model MemoryItem {

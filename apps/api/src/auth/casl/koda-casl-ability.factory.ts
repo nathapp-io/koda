@@ -45,6 +45,7 @@ export class KodaCaslAbilityFactory extends BaseCaslAbilityFactory {
           (subject) => ({ action: CaslPermissionAction.MANAGE, subject }),
         ),
         { action: KodaAction.IMPORT as CaslPermissionAction, subject: 'CodeIntel' },
+        { action: CaslPermissionAction.MANAGE, subject: 'AstIndex' },
       ];
     }
     return [
@@ -85,6 +86,7 @@ export class KodaCaslAbilityFactory extends BaseCaslAbilityFactory {
       switch (role) {
         case 'DEVELOPER':
           perms.push({ action: KodaAction.TRANSITION as CaslPermissionAction, subject: 'Ticket' });
+          perms.push({ action: CaslPermissionAction.MANAGE, subject: 'AstIndex' });
           break;
         case 'REVIEWER':
           perms.push({ action: KodaAction.TRANSITION as CaslPermissionAction, subject: 'Ticket' });

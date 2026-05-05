@@ -20,4 +20,5 @@ export type KodaSubject =
   | 'AgentScope'
   | 'AdminScope'
   | 'CodeIntel'
+  | 'AstIndex'
   | 'all';

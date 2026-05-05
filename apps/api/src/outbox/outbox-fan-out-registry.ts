@@ -1,8 +1,9 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { ExtractionService, MemoryExtractedItem } from '../memory/extraction.service';
 import { PrismaMemoryItemRepository } from '../memory/prisma-memory-item.repository';
 import { MemoryItemInput } from '../memory/memory-item-repository';
 import { MemoryKind } from '../common/enums';
+import { AstIndexService } from '../code-intel/ast-index.service';
 
 export interface OutboxHandler {
   eventType: string;
@@ -33,13 +34,16 @@ export class OutboxFanOutRegistry implements OnModuleInit {
   private lastDispatchFailureCount = 0;
   private extractionService: ExtractionService | null = null;
   private memoryRepository: PrismaMemoryItemRepository | null = null;
+  private astIndexService: AstIndexService | null = null;
 
   constructor(
-    extractionService?: ExtractionService,
-    memoryRepository?: PrismaMemoryItemRepository,
+    @Optional() extractionService?: ExtractionService,
+    @Optional() memoryRepository?: PrismaMemoryItemRepository,
+    @Optional() astIndexService?: AstIndexService,
   ) {
     this.extractionService = extractionService ?? null;
     this.memoryRepository = memoryRepository ?? null;
+    this.astIndexService = astIndexService ?? null;
 
     for (const { eventType, handler } of DEFAULT_HANDLERS) {
       this.register(eventType, handler);
@@ -48,10 +52,32 @@ export class OutboxFanOutRegistry implements OnModuleInit {
       this.register('ticket_event', this.handleTicketEvent.bind(this));
       this.register('agent_event', this.handleAgentEvent.bind(this));
     }
+    if (this.astIndexService) {
+      this.register('code_commit', this.handleCodeCommit.bind(this));
+    }
   }
 
   onModuleInit(): void {
-    this.logger.log(`Registered ${DEFAULT_HANDLERS.length + (this.extractionService ? 2 : 0)} handlers`);
+    this.logger.log(`Registered ${DEFAULT_HANDLERS.length + (this.extractionService ? 2 : 0) + (this.astIndexService ? 1 : 0)} handlers`);
+  }
+
+  private async handleCodeCommit(payload: unknown): Promise<void> {
+    if (!this.astIndexService) return;
+    const p = payload as {
+      repoId: string;
+      commitHash: string;
+      projectId: string;
+      files?: Array<{ path: string; content: string }>;
+      webhookOnly?: boolean;
+    };
+
+    if (p.webhookOnly || !p.files) {
+      this.logger.debug(`code_commit: webhook-only or no files, skipping indexing`);
+      return;
+    }
+
+    this.logger.log(`code_commit: indexing ${p.repoId} ${p.commitHash} (${p.files.length} files)`);
+    await this.astIndexService.indexCommit(p.repoId, p.commitHash, p.files, p.projectId);
   }
 
   private async persistExtractedItems(items: MemoryExtractedItem[]): Promise<void> {
