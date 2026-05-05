@@ -355,6 +355,42 @@ model OutboxEvent {
 }
 
 // ---------------------------------------------------------------------------
+// Entity Graph Models (Phase 4 - Durable Entity Graph)
+// ---------------------------------------------------------------------------
+
+model EntityNode {
+  id          String   @id @default(cuid())
+  projectId   String
+  entityId    String
+  entityType  String   // ticket | service | owner | incident | code_module
+  label       String
+  metadata    String   @default("{}") // JSON stored as string - tags, source refs, etc.
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, entityId])
+  @@index([projectId, entityType])
+}
+
+model EntityLink {
+  id          String   @id @default(cuid())
+  projectId   String
+  sourceId    String   // entityId of source node
+  targetId    String   // entityId of target node
+  relation    String   // ticket_to_service | ticket_to_owner | service_to_service | incident_to_ticket
+  metadata    String   @default("{}") // JSON stored as string
+  createdAt   DateTime @default(now())
+
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, sourceId])
+  @@index([projectId, targetId])
+  @@unique([projectId, sourceId, targetId, relation])
+}
+
+// ---------------------------------------------------------------------------
 // Memory Models (Semantic Memory)
 // ---------------------------------------------------------------------------
 

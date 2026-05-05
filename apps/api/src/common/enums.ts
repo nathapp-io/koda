@@ -79,3 +79,20 @@ export const MemoryKind = {
   INCIDENT_PATTERN: 'INCIDENT_PATTERN',
 } as const;
 export type MemoryKind = (typeof MemoryKind)[keyof typeof MemoryKind];
+
+export const EntityNodeType = {
+  TICKET: 'ticket',
+  SERVICE: 'service',
+  OWNER: 'owner',
+  INCIDENT: 'incident',
+  CODE_MODULE: 'code_module',
+} as const;
+export type EntityNodeType = (typeof EntityNodeType)[keyof typeof EntityNodeType];
+
+export const EntityLinkRelation = {
+  TICKET_TO_SERVICE: 'ticket_to_service',
+  TICKET_TO_OWNER: 'ticket_to_owner',
+  SERVICE_TO_SERVICE: 'service_to_service',
+  INCIDENT_TO_TICKET: 'incident_to_ticket',
+} as const;
+export type EntityLinkRelation = (typeof EntityLinkRelation)[keyof typeof EntityLinkRelation];
