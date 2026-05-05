@@ -81,5 +81,8 @@
         "**/*.spec.ts"
       ]
     }
+  },
+  "curator": {
+    "enabled": true
   }
 }
