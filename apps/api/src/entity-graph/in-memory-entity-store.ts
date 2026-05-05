@@ -22,9 +22,9 @@ export class InMemoryEntityStore implements IEntityStore {
   }
 
   async findNodesByType(projectId: string, entityType: EntityNodeType): Promise<EntityRecord[]> {
-    return Array.from(this.nodes.values()).filter(
-      (n) => n.entityId.startsWith(`${projectId}:`) && n.entityType === entityType,
-    );
+    return Array.from(this.nodes.entries())
+      .filter(([key, n]) => key.startsWith(`${projectId}:`) && n.entityType === entityType)
+      .map(([, n]) => n);
   }
 
   async findLinksBySource(projectId: string, sourceId: string): Promise<LinkRecord[]> {

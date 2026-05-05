@@ -99,12 +99,14 @@ export class EntityGraphService {
 
     for (const gn of graphNodes) {
       const entityId = `service:${gn.nodeId}`;
+      const existingNode = await this.entityStore.findNodeByEntityId(projectId, entityId);
       await this.entityStore.upsertNode(
         projectId,
         entityId,
         EntityNodeType.SERVICE,
         gn.label,
         {
+          ...(existingNode?.metadata ?? {}),
           nodeId: gn.nodeId,
           type: gn.type,
           sourceFile: gn.sourceFile ?? undefined,
@@ -132,6 +134,65 @@ export class EntityGraphService {
           EntityLinkRelation.SERVICE_TO_SERVICE,
           { relation: gl.relation },
         );
+      }
+    }
+
+    for (const ticket of tickets) {
+      if (ticket.priority === 'CRITICAL' || ticket.priority === 'HIGH') {
+        const incidentEntityId = `incident:${ticket.id}`;
+        await this.entityStore.upsertNode(
+          projectId,
+          incidentEntityId,
+          EntityNodeType.INCIDENT,
+          ticket.title,
+          {
+            ticketId: ticket.id,
+            priority: ticket.priority,
+            status: ticket.status,
+          },
+        );
+        await this.entityStore.upsertLink(
+          projectId,
+          incidentEntityId,
+          ticket.id,
+          EntityLinkRelation.INCIDENT_TO_TICKET,
+          {},
+        );
+      }
+    }
+
+    const serviceNodes = await this.entityStore.findNodesByType(projectId, EntityNodeType.SERVICE);
+
+    for (const ticket of tickets) {
+      const labelNames = ticket.labels.map((tl) => tl.label.name);
+
+      for (const serviceNode of serviceNodes) {
+        const serviceSourceFile = serviceNode.metadata?.sourceFile as string | undefined;
+        const serviceTags = serviceNode.metadata?.tags as string[] | undefined;
+        if (serviceSourceFile && ticket.gitRefFile && ticket.gitRefFile.includes(serviceSourceFile)) {
+          await this.entityStore.upsertLink(
+            projectId,
+            ticket.id,
+            serviceNode.entityId,
+            EntityLinkRelation.TICKET_TO_SERVICE,
+            { source: 'gitRefFile', refFile: ticket.gitRefFile },
+          );
+        }
+
+        if (labelNames.length > 0 && serviceTags) {
+          const hasMatchingTag = labelNames.some((l) =>
+            serviceTags.some((t) => t.toLowerCase() === l.toLowerCase()),
+          );
+          if (hasMatchingTag) {
+            await this.entityStore.upsertLink(
+              projectId,
+              ticket.id,
+              serviceNode.entityId,
+              EntityLinkRelation.TICKET_TO_SERVICE,
+              { source: 'label_tag', labels: labelNames },
+            );
+          }
+        }
       }
     }
 
@@ -364,13 +425,16 @@ export class EntityGraphService {
       projectId,
       incidentTicketId,
     );
-    if (!incidentNode) {
-      incidentNode = await this.entityStore.findNodeByEntityId(
+    if (!incidentNode || incidentNode.entityType !== EntityNodeType.INCIDENT) {
+      const prefixedNode = await this.entityStore.findNodeByEntityId(
         projectId,
         `incident:${incidentTicketId}`,
       );
+      if (prefixedNode) {
+        incidentNode = prefixedNode;
+      }
     }
-    if (!incidentNode) return result;
+    if (!incidentNode || incidentNode.entityType !== EntityNodeType.INCIDENT) return result;
 
     const visited = new Set<string>();
     visited.add(incidentNode.entityId);
