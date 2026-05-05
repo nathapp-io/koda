@@ -61,6 +61,11 @@ export class RagController {
       throw new ForbiddenAppException({}, 'rag');
     }
 
+    // ADMIN users have global permissions and do not need project membership.
+    if (principal.role === 'ADMIN') {
+      return;
+    }
+
     const membership = await this.db.projectMember.findUnique({
       where: {
         projectId_userId: {
@@ -183,9 +188,10 @@ export class RagController {
   async importGraphify(
     @Param('slug') slug: string,
     @Body() dto: ImportGraphifyDto,
-    @Principal() _principal: KodaPrincipal,
+    @Principal() principal: KodaPrincipal,
   ) {
     const project = await this.resolveProject(slug);
+    await this.checkProjectMembership(project.id, principal);
     if (!project.graphifyEnabled) throw new ValidationAppException({}, 'rag.graphifyDisabled');
     if (dto.nodes.length === 0) return JsonResponse.Ok({ imported: 0, cleared: 0 });
 

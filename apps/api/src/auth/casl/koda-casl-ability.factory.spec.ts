@@ -63,7 +63,7 @@ describe('KodaCaslAbilityFactory', () => {
       expect(permissionSet(perms)).not.toContain('manage:AgentScope');
     });
 
-    it('should have exactly 5 permission rules', async () => {
+    it('should have exactly 6 permission rules', async () => {
       const principal = makeUser({ role: 'ADMIN' });
       const perms = await factory.getPermissions(principal);
 
@@ -121,6 +121,10 @@ describe('KodaCaslAbilityFactory', () => {
 
     it('should NOT grant DELETE Ticket', () => {
       expect(permissionSet(perms)).not.toContain('delete:Ticket');
+    });
+
+    it('should grant IMPORT CodeIntel', () => {
+      expect(permissionSet(perms)).toContain('import:CodeIntel');
     });
   });
 
@@ -226,11 +230,11 @@ describe('KodaCaslAbilityFactory', () => {
   });
 
   describe('permission completeness', () => {
-    it('MEMBER user has exactly 9 permission rules', async () => {
+    it('MEMBER user has exactly 10 permission rules', async () => {
       const principal = makeUser({ role: 'MEMBER' });
       const perms = await factory.getPermissions(principal);
 
-      expect(perms).toHaveLength(9);
+      expect(perms).toHaveLength(10);
     });
 
     it('agent with DEVELOPER role has base + derived permissions', async () => {
