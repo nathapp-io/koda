@@ -10,7 +10,14 @@ import { VcsConnection, Project } from '@prisma/client';
 import type { OutboxEventDomain } from '../outbox/domain/outbox-event.domain';
 import type { OutboxEventInput } from '../outbox/outbox.service';
 
-function createMockPrismaService() {
+interface SharedEnqueuedEvent {
+  eventId: string;
+  eventType: string;
+  projectId: string;
+  createdAt: number;
+}
+
+function createMockPrismaService(sharedEnqueuedEvents?: SharedEnqueuedEvent[]) {
   return {
     client: {
       ticketLink: {
@@ -18,6 +25,23 @@ function createMockPrismaService() {
       },
       ticket: {
         findUnique: jest.fn().mockResolvedValue(null),
+      },
+      outboxEvent: {
+        findMany: jest.fn().mockImplementation((args: unknown) => {
+          if (!sharedEnqueuedEvents) return Promise.resolve([]);
+          const { where } = args as { where?: Record<string, unknown> };
+          if (!where) return Promise.resolve([]);
+          const dedupWindowMs = 5 * 60 * 1000;
+          const now = Date.now();
+          const matches = sharedEnqueuedEvents.filter(
+            (e) =>
+              e.projectId === where.projectId &&
+              e.eventType === where.eventType &&
+              e.eventId === where.eventId &&
+              now - e.createdAt < dedupWindowMs,
+          );
+          return Promise.resolve(matches.map((m) => ({ id: `existing-${m.eventId}` })));
+        }),
       },
     },
   };
@@ -128,11 +152,14 @@ function resolveOutboxEvent(overrides?: Partial<OutboxEventDomain>): OutboxEvent
   };
 }
 
-function buildTestingModule(enqueueMock: jest.Mock) {
+function buildTestingModule(
+  enqueueMock: jest.Mock,
+  sharedEnqueuedEvents?: SharedEnqueuedEvent[],
+) {
   return Test.createTestingModule({
     providers: [
       VcsWebhookService,
-      { provide: PrismaService, useValue: createMockPrismaService() },
+      { provide: PrismaService, useValue: createMockPrismaService(sharedEnqueuedEvents) },
       { provide: VcsSyncService, useValue: createMockSyncService() },
       { provide: VcsPrSyncService, useValue: createMockPrSyncService() },
       { provide: OutboxService, useValue: createMockOutboxService(enqueueMock) },
@@ -255,14 +282,25 @@ describe('VcsWebhookService — cross-instance deduplication', () => {
   // A commit pushed to two different instances within the 5-min window will be enqueued twice.
   // Spec: deduplication must work across instances (backed by shared state, not local memory).
   it('should prevent duplicate outbox events when the same commit is processed by two separate service instances within the deduplication window', async () => {
+    // Shared state simulating the outboxEvent DB table
+    const sharedEvents: SharedEnqueuedEvent[] = [];
+
     // Instance 1 — simulates pod A
-    const enqueue1 = jest.fn<Promise<OutboxEventDomain>, [OutboxEventInput]>().mockResolvedValue(resolveOutboxEvent());
-    const module1 = await buildTestingModule(enqueue1);
+    const enqueue1 = jest.fn<Promise<OutboxEventDomain>, [OutboxEventInput]>().mockImplementation((event: OutboxEventInput) => {
+      sharedEvents.push({
+        eventId: event.eventId,
+        eventType: event.eventType,
+        projectId: event.projectId,
+        createdAt: Date.now(),
+      });
+      return Promise.resolve(resolveOutboxEvent());
+    });
+    const module1 = await buildTestingModule(enqueue1, sharedEvents);
     const service1 = module1.get<VcsWebhookService>(VcsWebhookService);
 
     // Instance 2 — simulates pod B (fresh instance with its own in-memory Map)
     const enqueue2 = jest.fn<Promise<OutboxEventDomain>, [OutboxEventInput]>().mockResolvedValue(resolveOutboxEvent());
-    const module2 = await buildTestingModule(enqueue2);
+    const module2 = await buildTestingModule(enqueue2, sharedEvents);
     const service2 = module2.get<VcsWebhookService>(VcsWebhookService);
 
     const payload = createPushPayload({ commits: [sharedCommit] });
@@ -279,12 +317,11 @@ describe('VcsWebhookService — cross-instance deduplication', () => {
     );
 
     // Instance 2 (pod B) processes the same push independently.
-    // It has its own Map and no access to instance 1's dedup state.
+    // It has its own Map and no access to instance 1's in-memory dedup state.
     const result2 = await service2.handleWebhook(connection, 'push', payload);
 
     // SPEC: Instance 2 must NOT enqueue because instance 1 already did within the same window.
-    // The deduplication check must rely on shared state (e.g. outbox/database), not local memory.
-    // BUG: Instance 2 currently enqueues because each instance has its own in-memory Map.
+    // The deduplication check relies on shared DB state (outboxEvent table), not local memory.
     expect(enqueue2).not.toHaveBeenCalled();
     expect(result2.ignored).toBe(true);
   });
