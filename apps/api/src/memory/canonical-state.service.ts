@@ -113,25 +113,32 @@ export class CanonicalStateService {
 
     const { from, to } = query.timeWindow;
 
-    const where = {
+    const baseWhere = {
       projectId: query.projectId,
       createdAt: {
         ...(from ? { gte: from } : {}),
         ...(to ? { lte: to } : {}),
       },
-    } as const;
+    };
+
+    const actorWhere = query.actorId
+      ? { ...baseWhere, actorId: query.actorId }
+      : baseWhere;
+    const decisionWhere = query.actorId
+      ? { ...baseWhere, agentId: query.actorId }
+      : baseWhere;
 
     const [ticketRows, agentRows, decisionRows] = await Promise.all([
       this.db.ticketEvent.findMany({
-        where,
+        where: actorWhere,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       }),
       this.db.agentEvent.findMany({
-        where,
+        where: actorWhere,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       }),
       this.db.decisionEvent.findMany({
-        where,
+        where: decisionWhere,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       }),
     ]);
