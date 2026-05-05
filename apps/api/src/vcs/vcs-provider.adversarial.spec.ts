@@ -24,7 +24,7 @@ describe('Adversarial Review Findings — vcs-provider.ts', () => {
       const methodMatch = providerSource.match(/fetchCommitFiles\(([^)]*)\)/);
       expect(methodMatch).toBeTruthy();
 
-      const params = methodMatch![1];
+      const params = methodMatch?.[1];
       expect(params).toContain('repoId');
     });
 
@@ -32,7 +32,7 @@ describe('Adversarial Review Findings — vcs-provider.ts', () => {
       const methodMatch = providerSource.match(/fetchCommitFiles\(([^)]*)\)/);
       expect(methodMatch).toBeTruthy();
 
-      const params = methodMatch![1].trim();
+      const params = methodMatch?.[1]?.trim();
       expect(params).toMatch(/^repoId/);
     });
   });

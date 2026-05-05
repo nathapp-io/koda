@@ -42,7 +42,7 @@ describe('Adversarial Review Findings — code-commit-outbox-handler.ts', () => 
       );
 
       expect(configServiceEntry).toBeDefined();
-      expect(configServiceEntry!.param).toBeDefined();
+      expect(configServiceEntry?.param).toBeDefined();
     });
 
     it('should use @Inject() decorator in the constructor — not just import it', () => {
