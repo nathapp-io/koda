@@ -232,6 +232,20 @@ export class EntityGraphService {
         const ticketId = event.ticketId;
         if (!ticketId) break;
 
+        const existingTicket = await this.entityStore.findNodeByEntityId(
+          event.projectId,
+          ticketId,
+        );
+        if (!existingTicket) {
+          await this.entityStore.upsertNode(
+            event.projectId,
+            ticketId,
+            EntityNodeType.TICKET,
+            ticketId,
+            {},
+          );
+        }
+
         const assignedToUserId = event.data?.assignedToUserId as string | undefined;
         const assignedToAgentId = event.data?.assignedToAgentId as string | undefined;
 
@@ -270,6 +284,39 @@ export class EntityGraphService {
             {},
           );
         }
+        break;
+      }
+
+      case 'incident_linked': {
+        const ticketId = event.ticketId;
+        if (!ticketId) break;
+
+        const incidentTicketId = event.data?.incidentTicketId as string | undefined;
+        if (!incidentTicketId) break;
+
+        const incidentEntityId = `incident:${incidentTicketId}`;
+
+        const existingIncident = await this.entityStore.findNodeByEntityId(
+          event.projectId,
+          incidentEntityId,
+        );
+        if (!existingIncident) {
+          await this.entityStore.upsertNode(
+            event.projectId,
+            incidentEntityId,
+            EntityNodeType.INCIDENT,
+            incidentTicketId,
+            { ticketId: incidentTicketId },
+          );
+        }
+
+        await this.entityStore.upsertLink(
+          event.projectId,
+          incidentEntityId,
+          ticketId,
+          EntityLinkRelation.INCIDENT_TO_TICKET,
+          {},
+        );
         break;
       }
 

@@ -150,24 +150,70 @@ describe('EntityGraphService', () => {
       expect(serviceNode?.metadata?.tags).toEqual(['backend', 'auth']);
     });
 
-    it('AC5: Service linkage works from gitRefFile field', async () => {
-      await entityStore.upsertNode('project-123', 'ticket-1', EntityNodeType.TICKET, 'Bug: Auth fails', { gitRefFile: 'apps/api/src/auth.ts' });
-      await service.onGraphifyImport('project-123', [
-        { nodeId: 'auth-module', type: 'code_module', label: 'AuthService', tags: ['backend'] },
-      ]);
+    it('AC5: Service linkage works from gitRefFile field via rebuildGraph', async () => {
+      const mockPrisma = {
+        client: {
+          ticket: {
+            findMany: jest.fn().mockResolvedValue([
+              {
+                id: 'ticket-1',
+                title: 'Bug: Auth fails',
+                status: 'OPEN',
+                priority: 'MEDIUM',
+                type: 'BUG',
+                number: 1,
+                gitRefFile: 'apps/api/src/auth.ts',
+                gitRefVersion: null,
+                gitRefLine: null,
+                labels: [],
+                assignedToUserId: null,
+                assignedToAgentId: null,
+              },
+            ]),
+          },
+          graphNode: {
+            findMany: jest.fn().mockResolvedValue([
+              {
+                nodeId: 'auth-module',
+                label: 'AuthService',
+                type: 'code_module',
+                sourceFile: 'apps/api/src/auth.ts',
+                community: null,
+              },
+            ]),
+          },
+          graphLink: {
+            findMany: jest.fn().mockResolvedValue([]),
+          },
+        },
+      };
+      const serviceWithPrisma = new EntityGraphService(entityStore, mockPrisma as any);
+
+      await serviceWithPrisma.rebuildGraph('project-123');
+
       const links = await entityStore.findLinksBySource('project-123', 'ticket-1');
-      const ticketToServiceLink = links.find((l) => l.relation === EntityLinkRelation.TICKET_TO_SERVICE);
-      expect(ticketToServiceLink).toBeUndefined();
+      const ticketToServiceLink = links.find(
+        (l) => l.relation === EntityLinkRelation.TICKET_TO_SERVICE,
+      );
+      expect(ticketToServiceLink).toBeDefined();
+      expect(ticketToServiceLink?.targetId).toBe('service:auth-module');
     });
 
     it('AC9: onGraphifyImport creates service-to-service links from graphify relation=depends_on', async () => {
-      await service.onGraphifyImport('project-123', [
-        { nodeId: 'auth-module', type: 'code_module', label: 'AuthService', tags: ['backend'] },
-        { nodeId: 'db-module', type: 'code_module', label: 'DatabaseService', tags: ['backend'] },
-      ]);
+      await service.onGraphifyImport(
+        'project-123',
+        [
+          { nodeId: 'auth-module', type: 'code_module', label: 'AuthService', tags: ['backend'] },
+          { nodeId: 'db-module', type: 'code_module', label: 'DatabaseService', tags: ['backend'] },
+        ],
+        [{ sourceId: 'auth-module', targetId: 'db-module', relation: 'depends_on' }],
+      );
       const links = await entityStore.findLinksBySource('project-123', 'service:auth-module');
-      const dependsOnLink = links.find((l) => l.relation === EntityLinkRelation.SERVICE_TO_SERVICE);
-      expect(dependsOnLink).toBeUndefined();
+      const dependsOnLink = links.find(
+        (l) => l.relation === EntityLinkRelation.SERVICE_TO_SERVICE,
+      );
+      expect(dependsOnLink).toBeDefined();
+      expect(dependsOnLink?.targetId).toBe('service:db-module');
     });
   });
 
