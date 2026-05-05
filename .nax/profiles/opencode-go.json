@@ -1,0 +1,12 @@
+{
+  "models": {
+      "opencode": {
+          "fast": "opencode-go/minimax-m2.7",
+          "balanced": "opencode-go/deepseek-v4-pro",
+          "powerful": "opencode-go/kimi-k2.6"
+      }
+  },   
+    "agent": {
+        "default": "opencode"
+    }
+}
