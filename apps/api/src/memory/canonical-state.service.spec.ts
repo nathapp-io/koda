@@ -443,6 +443,81 @@ describe('CanonicalStateService', () => {
     });
   });
 
+  describe('Bug: actorId filtering on events', () => {
+    test('filters ticket and agent events by actorId when provided', async () => {
+      setupValidProject();
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+      mockPrismaClient.ticketEvent.findMany.mockResolvedValue([]);
+      mockPrismaClient.agentEvent.findMany.mockResolvedValue([]);
+      mockPrismaClient.decisionEvent.findMany.mockResolvedValue([]);
+
+      await service.getSnapshot({
+        projectId: 'project-123',
+        actorId: 'actor-42',
+        timeWindow: { from: new Date('2025-01-01') },
+      });
+
+      // ticketEvent should include actorId in where
+      expect(mockPrismaClient.ticketEvent.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ actorId: 'actor-42' }),
+        }),
+      );
+      // agentEvent should include actorId in where
+      expect(mockPrismaClient.agentEvent.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ actorId: 'actor-42' }),
+        }),
+      );
+    });
+
+    test('filters decision events by agentId when actorId provided', async () => {
+      setupValidProject();
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+      mockPrismaClient.ticketEvent.findMany.mockResolvedValue([]);
+      mockPrismaClient.agentEvent.findMany.mockResolvedValue([]);
+      mockPrismaClient.decisionEvent.findMany.mockResolvedValue([]);
+
+      await service.getSnapshot({
+        projectId: 'project-123',
+        actorId: 'agent-99',
+        timeWindow: { from: new Date('2025-01-01') },
+      });
+
+      // decisionEvent uses agentId column (not actorId) for filtering
+      expect(mockPrismaClient.decisionEvent.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ agentId: 'agent-99' }),
+        }),
+      );
+    });
+
+    test('does not filter by actorId when actorId is undefined', async () => {
+      setupValidProject();
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+      mockPrismaClient.ticketEvent.findMany.mockResolvedValue([]);
+      mockPrismaClient.agentEvent.findMany.mockResolvedValue([]);
+      mockPrismaClient.decisionEvent.findMany.mockResolvedValue([]);
+
+      await service.getSnapshot({
+        projectId: 'project-123',
+        timeWindow: { from: new Date('2025-01-01') },
+      });
+
+      // ticketEvent where should NOT contain actorId
+      const ticketCall = mockPrismaClient.ticketEvent.findMany.mock.calls[0][0];
+      expect(ticketCall.where).not.toHaveProperty('actorId');
+
+      // agentEvent where should NOT contain actorId
+      const agentCall = mockPrismaClient.agentEvent.findMany.mock.calls[0][0];
+      expect(agentCall.where).not.toHaveProperty('actorId');
+
+      // decisionEvent where should NOT contain agentId
+      const decisionCall = mockPrismaClient.decisionEvent.findMany.mock.calls[0][0];
+      expect(decisionCall.where).not.toHaveProperty('agentId');
+    });
+  });
+
   describe('AC-7: canonical Prisma reads only', () => {
     test('queries only Prisma models, no external stores', async () => {
       setupValidProject();
