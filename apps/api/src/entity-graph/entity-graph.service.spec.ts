@@ -74,6 +74,53 @@ describe('EntityGraphService', () => {
       expect(ownerNode).not.toBeNull();
       expect(ticketToOwnerLink).not.toBeUndefined();
     });
+
+    it('BUG-1: onTicketEvent(assigned) upserts the ticket node even when it does not already exist', async () => {
+      await service.onTicketEvent({
+        type: 'ticket_event',
+        id: 'event-1',
+        ticketId: 'new-ticket-1',
+        projectId: 'project-123',
+        actorId: 'user-1',
+        action: 'assigned',
+        data: { assignedToUserId: 'user-abc' },
+        timestamp: new Date(),
+      });
+
+      const ticketNode = await entityStore.findNodeByEntityId('project-123', 'new-ticket-1');
+      expect(ticketNode).not.toBeNull();
+      expect(ticketNode?.entityType).toBe(EntityNodeType.TICKET);
+
+      const ownerNode = await entityStore.findNodeByEntityId('project-123', 'owner:user-abc');
+      expect(ownerNode).not.toBeNull();
+      expect(ownerNode?.entityType).toBe(EntityNodeType.OWNER);
+
+      const links = await entityStore.findLinksBySource('project-123', 'new-ticket-1');
+      const ownerLink = links.find((l) => l.relation === EntityLinkRelation.TICKET_TO_OWNER && l.targetId === 'owner:user-abc');
+      expect(ownerLink).toBeDefined();
+    });
+
+    it('BUG-2: onTicketEvent(incident_linked) creates incident-to-ticket link', async () => {
+      await entityStore.upsertNode('project-123', 'incident:ticket-42', EntityNodeType.INCIDENT, 'Critical Outage', {});
+      await entityStore.upsertNode('project-123', 'ticket-99', EntityNodeType.TICKET, 'Related ticket', {});
+
+      await service.onTicketEvent({
+        type: 'ticket_event',
+        id: 'event-1',
+        ticketId: 'ticket-99',
+        projectId: 'project-123',
+        actorId: 'user-1',
+        action: 'incident_linked',
+        data: { incidentTicketId: 'ticket-42' },
+        timestamp: new Date(),
+      });
+
+      const links = await entityStore.findLinksBySource('project-123', 'incident:ticket-42');
+      const incidentLink = links.find(
+        (l) => l.relation === EntityLinkRelation.INCIDENT_TO_TICKET && l.targetId === 'ticket-99',
+      );
+      expect(incidentLink).toBeDefined();
+    });
   });
 
   describe('onGraphifyImport', () => {
