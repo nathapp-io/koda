@@ -2,7 +2,8 @@ import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { AstIndexService, SourceFile } from './ast-index.service';
-import { createVcsProvider, VcsProviderConfig } from '../vcs/factory';
+import { createVcsProvider } from '../vcs/factory';
+import type { VcsProviderConfig } from '../vcs/factory';
 
 interface CodeCommitPayload {
   repoId: string;
@@ -29,7 +30,7 @@ export class CodeCommitOutboxHandler {
   constructor(
     private readonly prisma: PrismaService,
     private readonly astIndexService: AstIndexService,
-    @Optional() private readonly configService?: ConfigService,
+    @Optional() @Inject(ConfigService) private readonly configService?: ConfigService,
   ) {}
 
   private get db() {
@@ -67,11 +68,12 @@ export class CodeCommitOutboxHandler {
       return;
     }
 
-    const provider = createVcsProvider(connection.provider, {
+    const providerConfig: VcsProviderConfig = {
       provider: connection.provider,
       token,
       repoUrl: `https://github.com/${connection.repoOwner}/${connection.repoName}`,
-    });
+    };
+    const provider = createVcsProvider(connection.provider, providerConfig);
 
     let sourceFiles: SourceFile[];
     try {
