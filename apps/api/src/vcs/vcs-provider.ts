@@ -1,4 +1,4 @@
-import { VcsIssue, VcsPullRequest, VcsPrStatus, VcsCommit, CreatePrParams } from './types';
+import { VcsIssue, VcsPullRequest, VcsPrStatus, VcsCommit, CreatePrParams, SourceFile } from './types';
 
 /**
  * Interface for VCS providers (GitHub, GitLab, etc.)
@@ -48,4 +48,11 @@ export interface IVcsProvider {
    * @param prNumber The pull request number
    */
   listPrCommits(prNumber: number): Promise<VcsCommit[]>;
+
+  /**
+   * Fetch the contents of files changed in a commit
+   * @param commitHash The SHA of the commit
+   * @param changedFiles List of file paths that were changed
+   */
+  fetchCommitFiles(commitHash: string, changedFiles: string[]): Promise<SourceFile[]>;
 }

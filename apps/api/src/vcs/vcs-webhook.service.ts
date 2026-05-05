@@ -7,6 +7,7 @@ import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { VcsLinkExtractorService } from './vcs-link-extractor.service';
 import { VcsIssue } from './types';
+import { OutboxService } from '../outbox/outbox.service';
 
 /**
  * GitHub webhook event payload (issues)
@@ -36,6 +37,32 @@ export interface GitHubWebhookPayload {
     merge_commit_sha?: string | null;
     base: { ref: string; repo: { full_name: string } };
     head: { ref: string; repo: { full_name: string } };
+  };
+  repository?: {
+    id: number;
+    full_name: string;
+    name: string;
+    owner: { login: string; id: number };
+  };
+  ref?: string;
+  commits?: Array<{
+    id: string;
+    message: string;
+    timestamp: string;
+    author: { name: string; email: string; username?: string };
+    added?: string[];
+    removed?: string[];
+    modified?: string[];
+  }>;
+  sender?: { id: number; login: string; type: string };
+  head_commit?: {
+    id: string;
+    message: string;
+    timestamp: string;
+    author: { name: string; email: string; username?: string };
+    added?: string[];
+    removed?: string[];
+    modified?: string[];
   };
 }
 
@@ -80,6 +107,7 @@ interface TicketLinkData {
 @Injectable()
 export class VcsWebhookService {
   private readonly logger = new Logger(VcsWebhookService.name);
+  private readonly recentCommitHashes = new Map<string, number>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -87,6 +115,7 @@ export class VcsWebhookService {
     private readonly prSyncService: VcsPrSyncService,
     @Optional() private readonly vcsLinkExtractorService?: VcsLinkExtractorService,
     @Optional() private readonly configService?: ConfigService,
+    @Optional() private readonly outboxService?: OutboxService,
   ) {}
 
   // PrismaClientLike from @nathapp/nestjs-prisma doesn't expose VCS models,
@@ -126,7 +155,6 @@ export class VcsWebhookService {
     event: string,
     payload: GitHubWebhookPayload,
   ): Promise<WebhookHandleResult> {
-    // Route to appropriate handler based on event type
     if (event === 'issues.opened') {
       return this.handleIssueOpened(connection, payload);
     }
@@ -135,7 +163,10 @@ export class VcsWebhookService {
       return this.handlePullRequest(connection, payload);
     }
 
-    // Unhandled event types are silently ignored
+    if (event === 'push') {
+      return this.handlePush(connection, payload);
+    }
+
     return {
       success: true,
       ignored: true,
@@ -547,6 +578,89 @@ export class VcsWebhookService {
       success: true,
       ignored: false,
     };
+  }
+
+  /**
+   * Handle push event
+   * Validates payload and enqueues code_commit outbox events for each commit.
+   */
+  private async handlePush(
+    connection: VcsConnection & { project: Project },
+    payload: GitHubWebhookPayload,
+  ): Promise<WebhookHandleResult> {
+    const repoId = payload.repository?.full_name ?? payload.repository?.name;
+    if (!repoId) {
+      return { success: false, reason: 'Missing repository identifier in push payload' };
+    }
+
+    const ref = payload.ref;
+    if (!ref) {
+      return { success: false, reason: 'Missing ref in push payload' };
+    }
+
+    const commits = payload.commits;
+    if (!Array.isArray(commits) || commits.length === 0) {
+      return { success: true, ignored: true, reason: 'No commits in push payload' };
+    }
+
+    const sender = payload.sender;
+    if (!sender || (!sender.id && !sender.login)) {
+      return { success: false, reason: 'Missing sender identifier in push payload' };
+    }
+
+    if (!this.outboxService) {
+      this.logger.error('[webhook] OutboxService not available for push handling');
+      return { success: false, reason: 'Outbox service not available' };
+    }
+
+    const now = Date.now();
+    const dedupWindowMs = 5 * 60 * 1000;
+
+    let enqueuedCount = 0;
+    for (const commit of commits) {
+      const commitHash = commit.id;
+      if (!commitHash) continue;
+
+      const recentKey = `${connection.projectId}:${commitHash}`;
+      const lastEnqueuedTime = this.recentCommitHashes.get(recentKey);
+      if (lastEnqueuedTime && (now - lastEnqueuedTime) < dedupWindowMs) {
+        this.logger.debug(`Skipping duplicate commit ${commitHash} within deduplication window`);
+        continue;
+      }
+
+      const changedFiles = [
+        ...(commit.added ?? []),
+        ...(commit.removed ?? []),
+        ...(commit.modified ?? []),
+      ];
+
+      const eventPayload = {
+        repoId,
+        commitHash,
+        ref,
+        changedFiles,
+        projectId: connection.projectId,
+        webhookOnly: true,
+      };
+
+      try {
+        await this.outboxService.enqueue({
+          projectId: connection.projectId,
+          eventType: 'code_commit',
+          eventId: commitHash,
+          payload: eventPayload,
+        });
+        this.recentCommitHashes.set(recentKey, now);
+        enqueuedCount++;
+      } catch (err) {
+        this.logger.error(`[webhook] Failed to enqueue code_commit for ${commitHash}: ${err instanceof Error ? err.message : String(err)}`);
+        return { success: false, reason: 'Failed to enqueue code_commit event' };
+      }
+    }
+
+    this.logger.debug(`Push handler enqueued ${enqueuedCount} code_commit events for project ${connection.projectId}`);
+
+    return { success: true, ignored: enqueuedCount === 0 };
   }
 
   /**

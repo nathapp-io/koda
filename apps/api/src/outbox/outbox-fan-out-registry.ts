@@ -4,6 +4,7 @@ import { PrismaMemoryItemRepository } from '../memory/prisma-memory-item.reposit
 import { MemoryItemInput } from '../memory/memory-item-repository';
 import { MemoryKind } from '../common/enums';
 import { AstIndexService } from '../code-intel/ast-index.service';
+import { CodeCommitOutboxHandler } from '../code-intel/code-commit-outbox-handler';
 import { EntityGraphService } from '../entity-graph/entity-graph.service';
 
 export interface OutboxHandler {
@@ -29,16 +30,19 @@ export class OutboxFanOutRegistry implements OnModuleInit {
   private extractionService: ExtractionService | null = null;
   private memoryRepository: PrismaMemoryItemRepository | null = null;
   private astIndexService: AstIndexService | null = null;
+  private codeCommitHandler: CodeCommitOutboxHandler | null = null;
 
   constructor(
     @Optional() extractionService?: ExtractionService,
     @Optional() memoryRepository?: PrismaMemoryItemRepository,
     @Optional() astIndexService?: AstIndexService,
+    @Optional() codeCommitHandler?: CodeCommitOutboxHandler,
     @Optional() private readonly entityGraphService?: EntityGraphService,
   ) {
     this.extractionService = extractionService ?? null;
     this.memoryRepository = memoryRepository ?? null;
     this.astIndexService = astIndexService ?? null;
+    this.codeCommitHandler = codeCommitHandler ?? null;
 
     for (const { eventType, handler } of DEFAULT_HANDLERS) {
       this.register(eventType, handler);
@@ -51,7 +55,7 @@ export class OutboxFanOutRegistry implements OnModuleInit {
       this.register('ticket_event', this.handleTicketEventForEntityGraph.bind(this));
       this.register('graphify_import', this.handleGraphifyImportForEntityGraph.bind(this));
     }
-    if (this.astIndexService) {
+    if (this.codeCommitHandler) {
       this.register('code_commit', this.handleCodeCommit.bind(this));
     }
   }
@@ -59,27 +63,35 @@ export class OutboxFanOutRegistry implements OnModuleInit {
   onModuleInit(): void {
     const extractionHandlers = this.extractionService && this.memoryRepository ? 2 : 0;
     const entityGraphHandlers = this.entityGraphService ? 2 : 0;
-    const astHandlers = this.astIndexService ? 1 : 0;
-    this.logger.log(`Registered ${DEFAULT_HANDLERS.length + extractionHandlers + entityGraphHandlers + astHandlers} handlers`);
+    const codeCommitHandlers = this.codeCommitHandler ? 1 : 0;
+    this.logger.log(`Registered ${DEFAULT_HANDLERS.length + extractionHandlers + entityGraphHandlers + codeCommitHandlers} handlers`);
   }
 
   private async handleCodeCommit(payload: unknown): Promise<void> {
-    if (!this.astIndexService) return;
+    if (!this.codeCommitHandler) return;
     const p = payload as {
       repoId: string;
       commitHash: string;
       projectId: string;
-      files?: Array<{ path: string; content: string }>;
+      changedFiles?: string[];
       webhookOnly?: boolean;
     };
 
-    if (p.webhookOnly || !p.files) {
-      this.logger.debug(`code_commit: webhook-only or no files, skipping indexing`);
+    if (p.webhookOnly) {
+      this.logger.debug(`code_commit: webhook-only, delegating to CodeCommitOutboxHandler`);
+      await this.codeCommitHandler.process(p);
       return;
     }
 
-    this.logger.log(`code_commit: indexing ${p.repoId} ${p.commitHash} (${p.files.length} files)`);
-    await this.astIndexService.indexCommit(p.repoId, p.commitHash, p.files, p.projectId);
+    if (!p.changedFiles) {
+      this.logger.debug(`code_commit: no changed files provided`);
+      return;
+    }
+
+    if (!this.astIndexService) return;
+
+    this.logger.log(`code_commit: indexing ${p.repoId} ${p.commitHash} (${p.changedFiles.length} files)`);
+    await this.astIndexService.indexCommit(p.repoId, p.commitHash, [], p.projectId);
   }
 
   private async persistExtractedItems(items: MemoryExtractedItem[]): Promise<void> {
