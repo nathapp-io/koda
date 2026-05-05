@@ -660,6 +660,7 @@ export class VcsWebhookService {
           }
         } catch (err) {
           this.logger.warn(`[webhook] Failed to check DB for duplicate commit ${commitHash}: ${err instanceof Error ? err.message : String(err)}`);
+          continue;
         }
       }
 
