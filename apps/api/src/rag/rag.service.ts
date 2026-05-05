@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional, Inject } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional, Inject, forwardRef } from '@nestjs/common';
 import { mkdirSync } from 'node:fs';
 import { ConfigService } from '@nestjs/config';
 import { ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
@@ -9,6 +9,7 @@ import { EmbeddingService } from './embedding.service';
 import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interface';
 import { LexicalIndex } from './lexical-index';
 import { GraphStoreService } from './graph-store.service';
+import { IncrementalGraphDiffService } from './incremental-graph-diff.service';
 import type { GraphifyNodeDto, GraphifyLinkDto } from './dto/import-graphify.dto';
 import type { KbResultDto, SearchKbResponseDto } from './dto/kb-result.dto';
 
@@ -159,6 +160,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     @Optional() private readonly lexicalIndex?: LexicalIndex,
     @Optional() @Inject(TRANSACTION_MANAGER) private readonly txManager?: ITransactionManager,
     @Optional() private readonly graphStore?: GraphStoreService,
+    @Optional() @Inject(forwardRef(() => IncrementalGraphDiffService)) private readonly incrementalDiff?: IncrementalGraphDiffService,
   ) {
     this.lancedbPath = configService.get<string>('rag.lancedbPath') ?? './lancedb';
     this.similarityHigh = configService.get<number>('rag.similarityHigh') ?? 0.85;
@@ -711,7 +713,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Imports a Graphify knowledge graph into the knowledge base for a project.
-   * Uses incremental diff-and-apply when GraphStoreService is available,
+   * Uses incremental diff-and-apply when IncrementalGraphDiffService is available,
    * falling back to full re-import otherwise.
    * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
    */
@@ -727,79 +729,12 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     const typedNodes = nodes as GraphifyNodeDto[];
     const typedLinks = links as GraphifyLinkDto[];
 
-    if (this.graphStore && this.txManager) {
-      return this.importGraphifyIncremental(projectId, typedNodes, typedLinks);
+    if (this.incrementalDiff) {
+      const result = await this.incrementalDiff.diffAndApply(projectId, typedNodes, typedLinks);
+      return { imported: typedNodes.length, cleared: result.removed };
     }
 
     return this.importGraphifyFull(projectId, typedNodes, typedLinks);
-  }
-
-  private async importGraphifyIncremental(
-    projectId: string,
-    nodes: GraphifyNodeDto[],
-    links: GraphifyLinkDto[],
-  ): Promise<{ imported: number; cleared: number }> {
-    const graphStore = this.graphStore;
-    const txManager = this.txManager;
-    if (!graphStore || !txManager) {
-      return this.importGraphifyFull(projectId, nodes, links);
-    }
-
-    const storedGraph = await graphStore.getStoredGraph(projectId);
-    const incomingNodeMap = new Map(nodes.map((n) => [n.id, n]));
-    const incomingLinksBySource = this.groupLinksBySource(links);
-
-    const addedNodes: GraphifyNodeDto[] = [];
-    const updatedNodes: GraphifyNodeDto[] = [];
-    const removedNodeIds: string[] = [];
-
-    for (const [nodeId] of storedGraph.nodeMap) {
-      if (!incomingNodeMap.has(nodeId)) {
-        removedNodeIds.push(nodeId);
-      }
-    }
-
-    for (const newNode of nodes) {
-      const storedNode = storedGraph.nodeMap.get(newNode.id);
-      if (!storedNode) {
-        addedNodes.push(newNode);
-      } else {
-        const storedLinks = storedGraph.linkMap.get(newNode.id) ?? [];
-        const incomingLinks = incomingLinksBySource.get(newNode.id) ?? [];
-        if (this.graphifyNodeContentChanged(storedNode, newNode, storedLinks, incomingLinks)) {
-          updatedNodes.push(newNode);
-        }
-      }
-    }
-
-    const cleared = removedNodeIds.length;
-
-    await txManager.run(async () => {
-      if (removedNodeIds.length > 0) {
-        await graphStore.deleteNodes(projectId, removedNodeIds);
-      }
-
-      const nodesToUpsert = [...addedNodes, ...updatedNodes];
-      if (nodesToUpsert.length > 0) {
-        const linksForUpsert = links.filter((l) =>
-          nodesToUpsert.some((n) => n.id === l.source),
-        );
-        await graphStore.upsertNodes(projectId, nodesToUpsert, linksForUpsert);
-      }
-    });
-
-    // LanceDB operations (outside Prisma transaction)
-    for (const nodeId of removedNodeIds) {
-      await this.deleteBySource(projectId, nodeId);
-    }
-
-    const nodesToIndex = [...addedNodes, ...updatedNodes];
-    for (const node of nodesToIndex) {
-      const nodeLinks = incomingLinksBySource.get(node.id) ?? [];
-      await this.indexGraphifyNode(projectId, node, nodeLinks, incomingNodeMap);
-    }
-
-    return { imported: nodes.length, cleared };
   }
 
   private async importGraphifyFull(
@@ -868,87 +803,5 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     }
 
     return { imported: nodes.length, cleared };
-  }
-
-  private groupLinksBySource(
-    links: GraphifyLinkDto[],
-  ): Map<string, GraphifyLinkDto[]> {
-    const map = new Map<string, GraphifyLinkDto[]>();
-    for (const link of links) {
-      const list = map.get(link.source);
-      if (list) {
-        list.push(link);
-      } else {
-        map.set(link.source, [link]);
-      }
-    }
-    return map;
-  }
-
-  private graphifyNodeContentChanged(
-    storedNode: GraphifyNodeDto,
-    newNode: GraphifyNodeDto,
-    storedLinks: GraphifyLinkDto[],
-    incomingLinks: GraphifyLinkDto[],
-  ): boolean {
-    if (storedNode.label !== newNode.label) return true;
-    if (storedNode.type !== newNode.type) return true;
-    if (storedNode.source_file !== newNode.source_file) return true;
-
-    if (storedLinks.length !== incomingLinks.length) return true;
-
-    const storedLinkSet = new Set(
-      storedLinks.map((l) => `${l.target}::${l.relation ?? ''}`),
-    );
-    for (const link of incomingLinks) {
-      if (!storedLinkSet.has(`${link.target}::${link.relation ?? ''}`)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  private async indexGraphifyNode(
-    projectId: string,
-    node: GraphifyNodeDto,
-    nodeLinks: GraphifyLinkDto[],
-    nodeMap: Map<string, GraphifyNodeDto>,
-  ): Promise<void> {
-    const type = node.type ?? 'node';
-    const label = node.label;
-    const sourceFile = node.source_file;
-    const community = node.community;
-
-    let content = `${type} ${label}`;
-    if (sourceFile) {
-      content += ` in ${sourceFile}`;
-    }
-
-    if (nodeLinks.length > 0) {
-      const linkStrings = nodeLinks
-        .map((link) => {
-          const targetNode = nodeMap.get(link.target);
-          const relation = link.relation ?? '';
-          const neighborLabel = targetNode?.label ?? '';
-          return relation ? `${relation} ${neighborLabel}` : neighborLabel;
-        })
-        .filter((s) => s);
-
-      if (linkStrings.length > 0) {
-        content += ': ' + linkStrings.join(', ');
-      }
-    }
-
-    const metadata: Record<string, unknown> = { label, type };
-    if (sourceFile) metadata.source_file = sourceFile;
-    if (community !== undefined) metadata.community = community;
-
-    await this.indexDocument(projectId, {
-      source: 'code',
-      sourceId: node.id,
-      content,
-      metadata,
-    });
   }
 }

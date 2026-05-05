@@ -22,202 +22,130 @@ jest.mock('@lancedb/lancedb', () => ({
   Index: { fts: jest.fn().mockReturnValue({}) },
 }));
 
-import { ConfigService } from '@nestjs/config';
-import { RagService } from './rag.service';
-import { EmbeddingService } from './embedding.service';
+import { IncrementalGraphDiffService } from './incremental-graph-diff.service';
+import { GraphStoreService } from './graph-store.service';
 import type { GraphifyNodeDto, GraphifyLinkDto } from './dto/import-graphify.dto';
-import type { ITransactionManager } from '@nathapp/nestjs-data';
-import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 
-class FakeEmbeddingService {
-  readonly providerName = 'fake';
-  readonly modelName = 'fake-v1';
-  readonly dimensions = 8;
-
-  async embed(text: string): Promise<number[]> {
-    const vec = Array.from({ length: 8 }, (_, i) => {
-      let h = 0;
-      for (const ch of text) h = ((h << 5) - h + ch.charCodeAt(0)) >>> 0;
-      return ((h + i * 1000) % 200) / 200;
-    });
-    return vec;
-  }
-
-  async embedBatch(texts: string[]): Promise<number[][]> {
-    return Promise.all(texts.map((t) => this.embed(t)));
-  }
+function makeStoredNode(id: string, overrides?: Partial<GraphifyNodeDto>): GraphifyNodeDto {
+  return { id, label: `Service_${id}`, type: 'class', ...overrides };
 }
 
-interface StoredGraph {
+function makeLink(source: string, target: string, relation = 'depends_on'): GraphifyLinkDto {
+  return { source, target, relation };
+}
+
+function storedGraphFromNodes(
+  nodes: GraphifyNodeDto[],
+  links: GraphifyLinkDto[] = [],
+): {
   nodeMap: Map<string, GraphifyNodeDto>;
   linkMap: Map<string, GraphifyLinkDto[]>;
+} {
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  const linkMap = new Map<string, GraphifyLinkDto[]>();
+  for (const link of links) {
+    const list = linkMap.get(link.source);
+    if (list) {
+      list.push(link);
+    } else {
+      linkMap.set(link.source, [link]);
+    }
+  }
+  return { nodeMap, linkMap };
 }
-
-interface DiffResult {
-  added: number;
-  updated: number;
-  removed: number;
-  indexed: number;
-  durationMs: number;
-}
-
-interface GraphStoreService {
-  getStoredGraph(projectId: string): Promise<StoredGraph>;
-  upsertNodes(projectId: string, nodes: GraphifyNodeDto[], links: GraphifyLinkDto[]): Promise<void>;
-  deleteNodes(projectId: string, nodeIds: string[]): Promise<void>;
-  deleteLinks(projectId: string, linkIds: string[]): Promise<void>;
-}
-
-interface IncrementalGraphDiffService {
-  diffAndApply(projectId: string, newNodes: GraphifyNodeDto[], newLinks: GraphifyLinkDto[]): Promise<DiffResult>;
-}
-
-const mockConfigService = {
-  get: (key: string): unknown => {
-    const config: Record<string, unknown> = {
-      'rag.lancedbPath': './lancedb-test',
-      'rag.inMemoryOnly': true,
-      'rag.ftsIndexMode': 'simple',
-      'rag.similarityHigh': 0.85,
-      'rag.similarityMedium': 0.70,
-      'rag.similarityLow': 0.50,
-    };
-    return config[key];
-  },
-};
 
 describe('IncrementalGraphDiffService', () => {
-  let mockGraphStore: jest.Mocked<GraphStoreService>;
-  let mockRagService: jest.Mocked<RagService>;
-  let incrementalDiffService: IncrementalGraphDiffService;
-  let mockTxManager: jest.Mocked<ITransactionManager>;
+  let service: IncrementalGraphDiffService;
+  let mockGraphStore: jest.Mocked<Pick<GraphStoreService, 'getStoredGraph' | 'upsertNodes' | 'deleteNodes'>>;
+  let mockRagService: { indexDocument: jest.Mock; deleteBySource: jest.Mock };
+  let mockTxManager: { run: jest.Mock };
 
   beforeEach(() => {
     mockTxManager = {
       run: jest.fn((fn: () => Promise<unknown>) => fn()),
-      getClient: jest.fn(),
-      isInTransaction: jest.fn(() => false),
-    } as unknown as jest.Mocked<ITransactionManager>;
+    };
 
     mockGraphStore = {
       getStoredGraph: jest.fn(),
       upsertNodes: jest.fn(),
       deleteNodes: jest.fn(),
-      deleteLinks: jest.fn(),
     };
 
     mockRagService = {
-      indexDocument: jest.fn(),
-      deleteBySource: jest.fn(),
-      importGraphify: jest.fn(),
-      validateProjectId: jest.fn(),
-    } as unknown as jest.Mocked<RagService>;
-
-    incrementalDiffService = {
-      diffAndApply: jest.fn(),
+      indexDocument: jest.fn().mockResolvedValue(undefined),
+      deleteBySource: jest.fn().mockResolvedValue(undefined),
     };
+
+    service = new IncrementalGraphDiffService(
+      mockGraphStore as unknown as GraphStoreService,
+      mockRagService as never,
+      mockTxManager as never,
+    );
   });
 
   describe('AC-1: diffAndApply computes and applies only the delta', () => {
     it('applies only added, modified, and removed nodes/links', async () => {
       const projectId = 'test-project';
 
-      const storedGraph: StoredGraph = {
-        nodeMap: new Map([
-          ['node-1', { id: 'node-1', label: 'AuthService', type: 'class' }],
-          ['node-2', { id: 'node-2', label: 'UserController', type: 'class' }],
-        ]),
-        linkMap: new Map([
-          ['node-1', [{ source: 'node-1', target: 'node-2', relation: 'depends_on' }]],
-        ]),
-      };
-
-      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraph);
-      mockGraphStore.upsertNodes.mockResolvedValue(undefined);
-      mockGraphStore.deleteNodes.mockResolvedValue(undefined);
-      mockGraphStore.deleteLinks.mockResolvedValue(undefined);
-      (incrementalDiffService.diffAndApply as jest.Mock).mockResolvedValue({
-        added: 1,
-        updated: 0,
-        removed: 1,
-        indexed: 1,
-        durationMs: 50,
-      });
+      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraphFromNodes([
+        makeStoredNode('node-1'),
+        makeStoredNode('node-2'),
+      ]));
 
       const newNodes: GraphifyNodeDto[] = [
-        { id: 'node-1', label: 'AuthService', type: 'class' },
+        makeStoredNode('node-1'),
         { id: 'node-3', label: 'NewService', type: 'class' },
       ];
       const newLinks: GraphifyLinkDto[] = [
-        { source: 'node-1', target: 'node-3', relation: 'uses' },
+        makeLink('node-1', 'node-3', 'uses'),
       ];
 
-      const result = await incrementalDiffService.diffAndApply(projectId, newNodes, newLinks);
+      const result = await service.diffAndApply(projectId, newNodes, newLinks);
 
       expect(result.added).toBe(1);
       expect(result.removed).toBe(1);
+      expect(mockGraphStore.deleteNodes).toHaveBeenCalledWith(projectId, ['node-2']);
+      expect(mockRagService.deleteBySource).toHaveBeenCalledWith(projectId, 'node-2');
     });
 
     it('deletes node-2 which is absent from incoming nodes', async () => {
       const projectId = 'test-project';
 
-      const storedGraph: StoredGraph = {
-        nodeMap: new Map([
-          ['node-1', { id: 'node-1', label: 'AuthService', type: 'class' }],
-          ['node-2', { id: 'node-2', label: 'UserController', type: 'class' }],
-        ]),
-        linkMap: new Map(),
-      };
-
-      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraph);
-      (incrementalDiffService.diffAndApply as jest.Mock).mockResolvedValue({
-        added: 0,
-        updated: 0,
-        removed: 1,
-        indexed: 0,
-        durationMs: 20,
-      });
+      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraphFromNodes([
+        makeStoredNode('node-1'),
+        makeStoredNode('node-2'),
+      ]));
 
       const newNodes: GraphifyNodeDto[] = [
-        { id: 'node-1', label: 'AuthService', type: 'class' },
+        makeStoredNode('node-1'),
       ];
 
-      const result = await incrementalDiffService.diffAndApply(projectId, newNodes, []);
+      const result = await service.diffAndApply(projectId, newNodes, []);
 
       expect(result.removed).toBe(1);
+      expect(mockGraphStore.deleteNodes).toHaveBeenCalledWith(projectId, ['node-2']);
+      expect(mockRagService.deleteBySource).toHaveBeenCalledWith(projectId, 'node-2');
     });
 
     it('does not re-process unchanged nodes', async () => {
       const projectId = 'test-project';
 
-      const storedGraph: StoredGraph = {
-        nodeMap: new Map([
-          ['node-1', { id: 'node-1', label: 'AuthService', type: 'class', source_file: 'auth.ts' }],
-        ]),
-        linkMap: new Map(),
-      };
-
-      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraph);
-      mockGraphStore.upsertNodes.mockResolvedValue(undefined);
-
-      (incrementalDiffService.diffAndApply as jest.Mock).mockResolvedValue({
-        added: 0,
-        updated: 0,
-        removed: 0,
-        indexed: 0,
-        durationMs: 10,
-      });
+      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraphFromNodes([
+        { id: 'node-1', label: 'AuthService', type: 'class', source_file: 'auth.ts' },
+      ]));
 
       const newNodes: GraphifyNodeDto[] = [
         { id: 'node-1', label: 'AuthService', type: 'class', source_file: 'auth.ts' },
       ];
 
-      const result = await incrementalDiffService.diffAndApply(projectId, newNodes, []);
+      const result = await service.diffAndApply(projectId, newNodes, []);
 
       expect(result.added).toBe(0);
       expect(result.updated).toBe(0);
       expect(result.removed).toBe(0);
       expect(result.indexed).toBe(0);
+      expect(mockGraphStore.upsertNodes).not.toHaveBeenCalled();
+      expect(mockRagService.indexDocument).not.toHaveBeenCalled();
     });
   });
 
@@ -230,7 +158,7 @@ describe('IncrementalGraphDiffService', () => {
         linkMap: new Map(),
       });
 
-      await mockGraphStore.getStoredGraph(projectId);
+      await service.getStoredGraph(projectId);
 
       expect(mockGraphStore.getStoredGraph).toHaveBeenCalledWith(projectId);
     });
@@ -250,24 +178,13 @@ describe('IncrementalGraphDiffService', () => {
         incomingNodes.push({ id: `node-${i}`, label: `Service${i}`, type: 'class' });
       }
 
-      const storedGraph: StoredGraph = {
-        nodeMap: new Map(storedNodes.map((n) => [n.id, n])),
-        linkMap: new Map(),
-      };
+      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraphFromNodes(storedNodes));
 
-      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraph);
-      (incrementalDiffService.diffAndApply as jest.Mock).mockResolvedValue({
-        added: 10,
-        updated: 0,
-        removed: 0,
-        indexed: 10,
-        durationMs: 100,
-      });
-
-      const result = await incrementalDiffService.diffAndApply(projectId, incomingNodes, []);
+      const result = await service.diffAndApply(projectId, incomingNodes, []);
 
       expect(result.added).toBe(10);
       expect(result.removed).toBe(0);
+      expect(mockRagService.indexDocument).toHaveBeenCalledTimes(10);
     });
   });
 
@@ -275,30 +192,17 @@ describe('IncrementalGraphDiffService', () => {
     it('returns removed count for nodes absent from incoming', async () => {
       const projectId = 'test-project';
 
-      const storedGraph: StoredGraph = {
-        nodeMap: new Map([
-          ['node-1', { id: 'node-1', label: 'AuthService', type: 'class' }],
-          ['node-2', { id: 'node-2', label: 'UserService', type: 'class' }],
-          ['node-3', { id: 'node-3', label: 'PaymentService', type: 'class' }],
-        ]),
-        linkMap: new Map(),
-      };
+      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraphFromNodes([
+        makeStoredNode('node-1'),
+        makeStoredNode('node-2'),
+        makeStoredNode('node-3'),
+      ]));
 
-      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraph);
-
-      (incrementalDiffService.diffAndApply as jest.Mock).mockResolvedValue({
-        added: 0,
-        updated: 0,
-        removed: 3,
-        indexed: 0,
-        durationMs: 30,
-      });
-
-      const newNodes: GraphifyNodeDto[] = [];
-
-      const result = await incrementalDiffService.diffAndApply(projectId, newNodes, []);
+      const result = await service.diffAndApply(projectId, [], []);
 
       expect(result.removed).toBe(3);
+      expect(mockGraphStore.deleteNodes).toHaveBeenCalledWith(projectId, ['node-1', 'node-2', 'node-3']);
+      expect(mockRagService.deleteBySource).toHaveBeenCalledTimes(3);
     });
   });
 
@@ -306,130 +210,62 @@ describe('IncrementalGraphDiffService', () => {
     it('skips node with unchanged label, type, source_file, and outgoing links', async () => {
       const projectId = 'test-project';
 
-      const storedGraph: StoredGraph = {
-        nodeMap: new Map([
-          ['node-1', { id: 'node-1', label: 'AuthService', type: 'class', source_file: 'auth.ts' }],
-        ]),
-        linkMap: new Map([
-          ['node-1', [{ source: 'node-1', target: 'node-2', relation: 'depends_on' }]],
-        ]),
-      };
-
-      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraph);
-
-      (incrementalDiffService.diffAndApply as jest.Mock).mockResolvedValue({
-        added: 0,
-        updated: 0,
-        removed: 0,
-        indexed: 0,
-        durationMs: 5,
-      });
+      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraphFromNodes(
+        [{ id: 'node-1', label: 'AuthService', type: 'class', source_file: 'auth.ts' }],
+        [makeLink('node-1', 'node-2', 'depends_on')],
+      ));
 
       const newNodes: GraphifyNodeDto[] = [
         { id: 'node-1', label: 'AuthService', type: 'class', source_file: 'auth.ts' },
       ];
       const newLinks: GraphifyLinkDto[] = [
-        { source: 'node-1', target: 'node-2', relation: 'depends_on' },
+        makeLink('node-1', 'node-2', 'depends_on'),
       ];
 
-      const result = await incrementalDiffService.diffAndApply(projectId, newNodes, newLinks);
+      const result = await service.diffAndApply(projectId, newNodes, newLinks);
 
       expect(result.indexed).toBe(0);
+      expect(mockRagService.indexDocument).not.toHaveBeenCalled();
     });
 
     it('re-indexes node when label changes', async () => {
       const projectId = 'test-project';
 
-      const storedGraph: StoredGraph = {
-        nodeMap: new Map([
-          ['node-1', { id: 'node-1', label: 'AuthService', type: 'class' }],
-        ]),
-        linkMap: new Map(),
-      };
-
-      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraph);
-      mockGraphStore.upsertNodes.mockResolvedValue(undefined);
-
-      (incrementalDiffService.diffAndApply as jest.Mock).mockResolvedValue({
-        added: 0,
-        updated: 1,
-        removed: 0,
-        indexed: 1,
-        durationMs: 20,
-      });
+      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraphFromNodes([
+        { id: 'node-1', label: 'AuthService', type: 'class' },
+      ]));
 
       const newNodes: GraphifyNodeDto[] = [
         { id: 'node-1', label: 'AuthServiceUpdated', type: 'class' },
       ];
 
-      const result = await incrementalDiffService.diffAndApply(projectId, newNodes, []);
+      const result = await service.diffAndApply(projectId, newNodes, []);
 
       expect(result.updated).toBe(1);
       expect(result.indexed).toBe(1);
+      expect(mockRagService.indexDocument).toHaveBeenCalledTimes(1);
     });
 
     it('re-indexes node when outgoing links change', async () => {
       const projectId = 'test-project';
 
-      const storedGraph: StoredGraph = {
-        nodeMap: new Map([
-          ['node-1', { id: 'node-1', label: 'AuthService', type: 'class' }],
-        ]),
-        linkMap: new Map([
-          ['node-1', [{ source: 'node-1', target: 'node-2', relation: 'depends_on' }]],
-        ]),
-      };
-
-      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraph);
-      mockGraphStore.upsertNodes.mockResolvedValue(undefined);
-
-      (incrementalDiffService.diffAndApply as jest.Mock).mockResolvedValue({
-        added: 0,
-        updated: 1,
-        removed: 0,
-        indexed: 1,
-        durationMs: 25,
-      });
+      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraphFromNodes(
+        [{ id: 'node-1', label: 'AuthService', type: 'class' }],
+        [makeLink('node-1', 'node-2', 'depends_on')],
+      ));
 
       const newNodes: GraphifyNodeDto[] = [
         { id: 'node-1', label: 'AuthService', type: 'class' },
       ];
       const newLinks: GraphifyLinkDto[] = [
-        { source: 'node-1', target: 'node-3', relation: 'uses' },
+        makeLink('node-1', 'node-3', 'uses'),
       ];
 
-      const result = await incrementalDiffService.diffAndApply(projectId, newNodes, newLinks);
+      const result = await service.diffAndApply(projectId, newNodes, newLinks);
 
       expect(result.updated).toBe(1);
       expect(result.indexed).toBe(1);
-    });
-  });
-
-  describe('AC-6: diffAndApply replaces deleteAllBySourceType in importGraphify', () => {
-    it('importGraphify calls diffAndApply instead of deleteAllBySourceType', async () => {
-      const projectId = 'test-project';
-      const mockRagServiceForImport = {
-        ...mockRagService,
-        deleteAllBySourceType: jest.fn().mockResolvedValue(0),
-        validateProjectId: jest.fn().mockResolvedValue(undefined),
-      };
-
-      (incrementalDiffService.diffAndApply as jest.Mock).mockResolvedValue({
-        added: 5,
-        updated: 0,
-        removed: 0,
-        indexed: 5,
-        durationMs: 100,
-      });
-
-      const nodes: GraphifyNodeDto[] = [
-        { id: 'node-1', label: 'Service1', type: 'class' },
-        { id: 'node-2', label: 'Service2', type: 'class' },
-      ];
-
-      await incrementalDiffService.diffAndApply(projectId, nodes, []);
-
-      expect(mockRagServiceForImport.deleteAllBySourceType).not.toHaveBeenCalled();
+      expect(mockRagService.indexDocument).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -437,22 +273,10 @@ describe('IncrementalGraphDiffService', () => {
     it('indexed = added + updated nodes, not total node count', async () => {
       const projectId = 'test-project';
 
-      const storedGraph: StoredGraph = {
-        nodeMap: new Map([
-          ['node-1', { id: 'node-1', label: 'UnchangedService', type: 'class' }],
-        ]),
-        linkMap: new Map(),
-      };
-
-      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraph);
-
-      (incrementalDiffService.diffAndApply as jest.Mock).mockResolvedValue({
-        added: 2,
-        updated: 1,
-        removed: 0,
-        indexed: 3,
-        durationMs: 50,
-      });
+      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraphFromNodes([
+        { id: 'node-1', label: 'UnchangedService', type: 'class' },
+        { id: 'node-4', label: 'OldService', type: 'class' },
+      ]));
 
       const newNodes: GraphifyNodeDto[] = [
         { id: 'node-1', label: 'UnchangedService', type: 'class' },
@@ -461,8 +285,9 @@ describe('IncrementalGraphDiffService', () => {
         { id: 'node-4', label: 'UpdatedService', type: 'interface' },
       ];
 
-      const result = await incrementalDiffService.diffAndApply(projectId, newNodes, []);
+      const result = await service.diffAndApply(projectId, newNodes, []);
 
+      // node-1: unchanged, node-2: added, node-3: added, node-4: updated (type changed)
       expect(result.indexed).toBe(3);
       expect(result.added).toBe(2);
       expect(result.updated).toBe(1);
@@ -474,42 +299,35 @@ describe('IncrementalGraphDiffService', () => {
       const projectId = 'test-project';
 
       const storedNodes: GraphifyNodeDto[] = [];
-      for (let i = 1; i <= 505; i++) {
+      // Nodes 1-500: unchanged (appear in both stored and incoming)
+      for (let i = 1; i <= 500; i++) {
+        storedNodes.push({ id: `node-${i}`, label: `Service${i}`, type: 'class' });
+      }
+      // Nodes 501-505: will be removed (in stored but not incoming)
+      for (let i = 501; i <= 505; i++) {
         storedNodes.push({ id: `node-${i}`, label: `Service${i}`, type: 'class' });
       }
 
-      const storedGraph: StoredGraph = {
-        nodeMap: new Map(storedNodes.map((n) => [n.id, n])),
-        linkMap: new Map(),
-      };
-
-      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraph);
-      mockGraphStore.upsertNodes.mockResolvedValue(undefined);
-      mockGraphStore.deleteNodes.mockResolvedValue(undefined);
-
-      (incrementalDiffService.diffAndApply as jest.Mock).mockImplementation(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-        return {
-          added: 10,
-          updated: 0,
-          removed: 5,
-          indexed: 10,
-          durationMs: 10,
-        };
-      });
+      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraphFromNodes(storedNodes));
 
       const newNodes: GraphifyNodeDto[] = [];
-      for (let i = 1; i <= 510; i++) {
+      // Nodes 1-500: unchanged
+      for (let i = 1; i <= 500; i++) {
+        newNodes.push({ id: `node-${i}`, label: `Service${i}`, type: 'class' });
+      }
+      // Nodes 601-610: newly added (not in stored)
+      for (let i = 601; i <= 610; i++) {
         newNodes.push({ id: `node-${i}`, label: `Service${i}`, type: 'class' });
       }
 
       const startTime = Date.now();
-      const result = await incrementalDiffService.diffAndApply(projectId, newNodes, []);
+      const result = await service.diffAndApply(projectId, newNodes, []);
       const duration = Date.now() - startTime;
 
       expect(duration).toBeLessThan(2000);
       expect(result.added).toBe(10);
       expect(result.removed).toBe(5);
+      expect(result.durationMs).toBeGreaterThanOrEqual(0);
     });
   });
 
@@ -522,27 +340,14 @@ describe('IncrementalGraphDiffService', () => {
         linkMap: new Map(),
       });
 
-      (incrementalDiffService.diffAndApply as jest.Mock).mockImplementation(async () => {
-        const start = Date.now();
-        await new Promise((resolve) => setTimeout(resolve, 50));
-        const duration = Date.now() - start;
-        return {
-          added: 5,
-          updated: 3,
-          removed: 2,
-          indexed: 8,
-          durationMs: duration,
-        };
-      });
-
       const newNodes: GraphifyNodeDto[] = [
         { id: 'node-1', label: 'Service1', type: 'class' },
         { id: 'node-2', label: 'Service2', type: 'class' },
       ];
 
-      const result = await incrementalDiffService.diffAndApply(projectId, newNodes, []);
+      const result = await service.diffAndApply(projectId, newNodes, []);
 
-      expect(result.durationMs).toBeGreaterThanOrEqual(50);
+      expect(result.durationMs).toBeGreaterThanOrEqual(0);
     });
   });
 
@@ -550,54 +355,92 @@ describe('IncrementalGraphDiffService', () => {
     it('import is project-scoped', async () => {
       const projectId = 'test-project-123';
 
-      const storedGraph: StoredGraph = {
+      mockGraphStore.getStoredGraph.mockResolvedValue({
         nodeMap: new Map(),
         linkMap: new Map(),
-      };
-
-      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraph);
-
-      (incrementalDiffService.diffAndApply as jest.Mock).mockResolvedValue({
-        added: 5,
-        updated: 0,
-        removed: 0,
-        indexed: 5,
-        durationMs: 30,
       });
 
       const newNodes: GraphifyNodeDto[] = [
         { id: 'node-1', label: 'Service1', type: 'class' },
       ];
 
-      const result = await incrementalDiffService.diffAndApply(projectId, newNodes, []);
+      const result = await service.diffAndApply(projectId, newNodes, []);
 
-      expect(result.added).toBe(5);
+      expect(mockGraphStore.getStoredGraph).toHaveBeenCalledWith(projectId);
+      expect(mockGraphStore.upsertNodes).toHaveBeenCalledWith(projectId, newNodes, []);
+      expect(mockRagService.indexDocument).toHaveBeenCalledWith(projectId, expect.objectContaining({ source: 'code', sourceId: 'node-1' }));
+      expect(result.added).toBe(1);
     });
 
-    it('honors graphifyEnabled flag on project', async () => {
+    it('uses projectId for all operations', async () => {
       const projectId = 'test-project';
-      const project = { id: projectId, graphifyEnabled: false };
 
-      const storedGraph: StoredGraph = {
+      mockGraphStore.getStoredGraph.mockResolvedValue({
         nodeMap: new Map(),
         linkMap: new Map(),
-      };
-
-      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraph);
-
-      (incrementalDiffService.diffAndApply as jest.Mock).mockResolvedValue({
-        added: 0,
-        updated: 0,
-        removed: 0,
-        indexed: 0,
-        durationMs: 0,
       });
 
-      const newNodes: GraphifyNodeDto[] = [];
+      await service.diffAndApply(projectId, [], []);
 
-      const result = await incrementalDiffService.diffAndApply(projectId, newNodes, []);
+      expect(mockGraphStore.getStoredGraph).toHaveBeenCalledWith(projectId);
+      expect(mockTxManager.run).toHaveBeenCalled();
+    });
+  });
 
-      expect(result).toBeDefined();
+  describe('Transaction safety', () => {
+    it('wraps Prisma writes in a transaction', async () => {
+      const projectId = 'test-project';
+
+      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraphFromNodes([
+        makeStoredNode('node-1'),
+        makeStoredNode('node-2'),
+      ]));
+
+      const newNodes: GraphifyNodeDto[] = [
+        makeStoredNode('node-1'),
+        { id: 'node-3', label: 'NewService', type: 'class' },
+      ];
+
+      await service.diffAndApply(projectId, newNodes, []);
+
+      expect(mockTxManager.run).toHaveBeenCalled();
+    });
+
+    it('LanceDB operations happen outside the Prisma transaction', async () => {
+      const calls: string[] = [];
+      mockTxManager.run.mockImplementation(async (fn: () => Promise<unknown>) => {
+        calls.push('tx-start');
+        await fn();
+        calls.push('tx-end');
+      });
+      mockGraphStore.deleteNodes.mockImplementation(async () => {
+        calls.push('deleteNodes');
+      });
+      mockRagService.deleteBySource.mockImplementation(async () => {
+        calls.push('deleteBySource');
+      });
+      mockRagService.indexDocument.mockImplementation(async () => {
+        calls.push('indexDocument');
+      });
+
+      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraphFromNodes([
+        makeStoredNode('old-node'),
+      ]));
+
+      await service.diffAndApply('test-project', [{ id: 'new-node', label: 'New', type: 'class' }], []);
+
+      // deleteNodes should happen inside the tx, deleteBySource/indexDocument outside
+      const txStartIdx = calls.indexOf('tx-start');
+      const txEndIdx = calls.indexOf('tx-end');
+      const deleteNodesIdx = calls.indexOf('deleteNodes');
+      const deleteBySourceIdx = calls.indexOf('deleteBySource');
+      const indexDocumentIdx = calls.indexOf('indexDocument');
+
+      expect(txStartIdx).toBeLessThan(deleteNodesIdx);
+      expect(deleteNodesIdx).toBeLessThan(txEndIdx);
+      // LanceDB ops (deleteBySource, indexDocument) should be after tx-end
+      expect(deleteBySourceIdx).toBeGreaterThan(txEndIdx);
+      expect(indexDocumentIdx).toBeGreaterThan(txEndIdx);
     });
   });
 });
