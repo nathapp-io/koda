@@ -273,4 +273,121 @@ describe('SymbolStore', () => {
       expect(mockPrismaClient.symbol.deleteMany).not.toHaveBeenCalled();
     });
   });
+
+  describe('BUG-3: findCallers should use filtered DB query instead of loading all project symbols', () => {
+    it('should query DB with callers filter rather than loading all symbols and filtering in memory', async () => {
+      const projectId = 'proj-bug3';
+      const symbolId = 'targetSymbol';
+
+      mockPrismaClient.symbol.findMany.mockResolvedValue([]);
+
+      await store.findCallers(projectId, symbolId);
+
+      const findManyArgs = mockPrismaClient.symbol.findMany.mock.calls[0][0];
+      const whereKeys = Object.keys(findManyArgs.where || {});
+      expect(whereKeys.length).toBeGreaterThan(1);
+      expect(findManyArgs.where).toHaveProperty('projectId');
+    });
+  });
+
+  describe('BUG-4: findCallees should resolve callees by name when symbolId formats differ', () => {
+    it('should match callees by unqualified name when DB stores qualified symbolIds', async () => {
+      const projectId = 'proj-bug4';
+      const symbolId = 'main';
+
+      const mainSymbol = {
+        id: 'repo:src/main.ts::main',
+        symbolId: 'main',
+        projectId,
+        repoId: 'repo',
+        commitHash: 'abc',
+        name: 'main',
+        kind: 'function' as const,
+        file: 'src/main.ts',
+        startLine: 1,
+        endLine: 10,
+        signature: undefined,
+        callers: [],
+        callees: ['authenticate', 'getUser'],
+        docComment: undefined,
+      };
+
+      const calleeSymbols = [
+        {
+          id: 'repo:src/auth.ts::UserService.authenticate',
+          symbolId: 'UserService.authenticate',
+          projectId,
+          repoId: 'repo',
+          commitHash: 'abc',
+          name: 'UserService.authenticate',
+          kind: 'method' as const,
+          file: 'src/auth.ts',
+          startLine: 5,
+          endLine: 7,
+          signature: '(token: string): Promise<User>',
+          callers: [],
+          callees: [],
+          docComment: undefined,
+        },
+        {
+          id: 'repo:src/user.ts::UserService.getUser',
+          symbolId: 'UserService.getUser',
+          projectId,
+          repoId: 'repo',
+          commitHash: 'abc',
+          name: 'UserService.getUser',
+          kind: 'method' as const,
+          file: 'src/user.ts',
+          startLine: 3,
+          endLine: 5,
+          signature: '(id: string): Promise<User>',
+          callers: [],
+          callees: [],
+          docComment: undefined,
+        },
+      ];
+
+      mockPrismaClient.symbol.findUnique.mockResolvedValue(mainSymbol);
+      mockPrismaClient.symbol.findMany.mockImplementation((args: Record<string, unknown>) => {
+        const where = args.where as { symbolId?: { in: string[] } };
+        const calleeIds = where?.symbolId?.in || [];
+        const matched = calleeSymbols.filter((s) => calleeIds.includes(s.symbolId));
+        return Promise.resolve(matched);
+      });
+
+      const result = await store.findCallees(projectId, symbolId);
+
+      expect(result).toHaveLength(2);
+      const resultSymbolIds = result.map((c) => c.symbolId);
+      expect(resultSymbolIds).toContain('UserService.authenticate');
+      expect(resultSymbolIds).toContain('UserService.getUser');
+    });
+  });
+
+  describe('BUG-5: indexCommit atomicity — SymbolStore should use transaction manager', () => {
+    it('should execute upsertSymbol within txManager.run for transactional safety', async () => {
+      const symbol = {
+        id: 'repo:src/auth.ts::authenticate',
+        symbolId: 'authenticate',
+        projectId: 'proj-tx',
+        repoId: 'repo-tx',
+        commitHash: 'tx123',
+        name: 'authenticate',
+        kind: 'function' as const,
+        file: 'src/auth.ts',
+        startLine: 1,
+        endLine: 1,
+        signature: '(userId: string): boolean',
+        callers: [],
+        callees: [],
+        docComment: undefined,
+      };
+
+      mockPrismaClient.symbol.upsert.mockResolvedValue(symbol);
+
+      await store.upsertSymbol(symbol);
+
+      expect(mockTxManager.run).toHaveBeenCalled();
+    });
+  });
 });

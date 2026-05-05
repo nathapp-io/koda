@@ -320,4 +320,121 @@ describe('AstIndexService', () => {
       expect(mockSymbolStore.findCallees).toHaveBeenCalledWith(projectId, symbolId);
     });
   });
+
+  describe('BUG-1: enrichSymbol() collision suffix', () => {
+    it('should append #N suffix to symbolIds when multiple symbols share the same name in the same file', async () => {
+      const repoId = 'repo-collision';
+      const commitHash = 'col123';
+      const projectId = 'proj-col';
+      const files = [
+        { path: 'src/overload.ts', content: 'function doSomething(a: string) {} function doSomething(a: number) {}' },
+      ];
+
+      const mockSymbols = [
+        {
+          name: 'doSomething',
+          kind: 'function' as const,
+          file: 'src/overload.ts',
+          startLine: 1,
+          endLine: 1,
+          signature: '(a: string): void',
+          callers: [],
+          callees: [],
+          docComment: undefined,
+        },
+        {
+          name: 'doSomething',
+          kind: 'function' as const,
+          file: 'src/overload.ts',
+          startLine: 2,
+          endLine: 2,
+          signature: '(a: number): void',
+          callers: [],
+          callees: [],
+          docComment: undefined,
+        },
+      ];
+
+      mockCodeGraph.parseSourceFile.mockReturnValue({
+        path: 'src/overload.ts',
+        content: files[0].content,
+        ast: {},
+      });
+      mockCodeGraph.extractSymbols.mockReturnValue(mockSymbols);
+      mockCodeGraph.extractCallers.mockReturnValue([]);
+      mockCodeGraph.extractCallees.mockReturnValue([]);
+      mockSymbolStore.upsertSymbol.mockResolvedValue(null);
+
+      await service.indexCommit(repoId, commitHash, files, projectId);
+
+      expect(mockSymbolStore.upsertSymbol).toHaveBeenCalledTimes(2);
+      const firstCall = mockSymbolStore.upsertSymbol.mock.calls[0][0];
+      const secondCall = mockSymbolStore.upsertSymbol.mock.calls[1][0];
+      expect(firstCall.symbolId).toBe('doSomething');
+      expect(secondCall.symbolId).toMatch(/^doSomething#\d+$/);
+      expect(firstCall.id).toBe(`${repoId}:src/overload.ts::doSomething`);
+      expect(secondCall.id).toMatch(new RegExp(`^${repoId}:src/overload\\.ts::doSomething#\\d+$`));
+    });
+  });
+
+  describe('BUG-5: indexCommit should use batch operation for atomicity', () => {
+    it('should propagate upsert failures without leaving prior writes committed', async () => {
+      const repoId = 'repo-tx';
+      const commitHash = 'tx123';
+      const projectId = 'proj-tx';
+      const files = [
+        { path: 'src/a.ts', content: 'function a() {}' },
+        { path: 'src/b.ts', content: 'function b() {}' },
+      ];
+
+      const symA = {
+        name: 'a',
+        kind: 'function' as const,
+        file: 'src/a.ts',
+        startLine: 1,
+        endLine: 1,
+        signature: '(): void',
+        callers: [],
+        callees: [],
+        docComment: undefined,
+      };
+      const symB = {
+        name: 'b',
+        kind: 'function' as const,
+        file: 'src/b.ts',
+        startLine: 1,
+        endLine: 1,
+        signature: '(): void',
+        callers: [],
+        callees: [],
+        docComment: undefined,
+      };
+
+      mockCodeGraph.parseSourceFile.mockImplementation((path: string, content: string) => ({
+        path,
+        content,
+        ast: {},
+      }));
+      mockCodeGraph.extractSymbols.mockImplementation((parsed: { path: string }) => {
+        if (parsed.path === 'src/a.ts') return [symA];
+        if (parsed.path === 'src/b.ts') return [symB];
+        return [];
+      });
+      mockCodeGraph.extractCallers.mockReturnValue([]);
+      mockCodeGraph.extractCallees.mockReturnValue([]);
+
+      let upsertCallCount = 0;
+      mockSymbolStore.upsertSymbol.mockImplementation(async () => {
+        upsertCallCount++;
+        if (upsertCallCount === 2) throw new Error('Simulated DB failure mid-batch');
+        return null;
+      });
+
+      await expect(service.indexCommit(repoId, commitHash, files, projectId)).rejects.toThrow(
+        'Simulated DB failure mid-batch',
+      );
+
+      expect(mockSymbolStore.upsertSymbol).toHaveBeenCalledTimes(2);
+    });
+  });
 });
