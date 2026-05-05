@@ -616,16 +616,51 @@ export class VcsWebhookService {
     const now = Date.now();
     const dedupWindowMs = 5 * 60 * 1000;
 
+    // Evict stale entries older than the dedup window
+    for (const [key, timestamp] of this.recentCommitHashes) {
+      if (now - timestamp > dedupWindowMs) {
+        this.recentCommitHashes.delete(key);
+      }
+    }
+
+    // DB-backed dedup check (authoritative, works across instances)
+    const rawClient = this.prisma.client as unknown as Record<string, unknown>;
+    const outboxDelegate = rawClient.outboxEvent as { findMany: (args: unknown) => Promise<unknown[]> } | undefined;
+
     let enqueuedCount = 0;
     for (const commit of commits) {
       const commitHash = commit.id;
       if (!commitHash) continue;
 
+      // Fast-path: in-memory dedup within this instance
       const recentKey = `${connection.projectId}:${commitHash}`;
       const lastEnqueuedTime = this.recentCommitHashes.get(recentKey);
       if (lastEnqueuedTime && (now - lastEnqueuedTime) < dedupWindowMs) {
         this.logger.debug(`Skipping duplicate commit ${commitHash} within deduplication window`);
         continue;
+      }
+
+      // Cross-instance dedup: check for existing recent outbox events in the DB
+      if (outboxDelegate) {
+        try {
+          const existingEvents = (await outboxDelegate.findMany({
+            where: {
+              projectId: connection.projectId,
+              eventType: 'code_commit',
+              eventId: commitHash,
+              status: { in: ['pending', 'processing'] },
+              createdAt: { gte: new Date(now - dedupWindowMs) },
+            },
+            select: { id: true },
+            take: 1,
+          })) as { id: string }[];
+          if (existingEvents.length > 0) {
+            this.logger.debug(`Skipping duplicate commit ${commitHash} (already enqueued in DB)`);
+            continue;
+          }
+        } catch (err) {
+          this.logger.warn(`[webhook] Failed to check DB for duplicate commit ${commitHash}: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
 
       const changedFiles = [
