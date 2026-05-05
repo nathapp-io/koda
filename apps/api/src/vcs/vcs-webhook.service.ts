@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -689,7 +689,7 @@ export class VcsWebhookService {
         enqueuedCount++;
       } catch (err) {
         this.logger.error(`[webhook] Failed to enqueue code_commit for ${commitHash}: ${err instanceof Error ? err.message : String(err)}`);
-        return { success: false, reason: 'Failed to enqueue code_commit event' };
+        throw new HttpException('Failed to enqueue code_commit event', HttpStatus.INTERNAL_SERVER_ERROR);
       }
     }
 
