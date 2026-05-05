@@ -510,11 +510,79 @@ describe('CanonicalStateService', () => {
 
       // agentEvent where should NOT contain actorId
       const agentCall = mockPrismaClient.agentEvent.findMany.mock.calls[0][0];
-      expect(agentCall.where).not.toHaveProperty('actorId');
+      expect(agentCall.where).not.toHaveProperty('agentId');
 
       // decisionEvent where should NOT contain agentId
       const decisionCall = mockPrismaClient.decisionEvent.findMany.mock.calls[0][0];
       expect(decisionCall.where).not.toHaveProperty('agentId');
+    });
+
+    test('filters events by actorId even when timeWindow is absent', async () => {
+      setupValidProject();
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+      mockPrismaClient.ticketEvent.findMany.mockResolvedValue([]);
+      mockPrismaClient.agentEvent.findMany.mockResolvedValue([]);
+      mockPrismaClient.decisionEvent.findMany.mockResolvedValue([]);
+
+      await service.getSnapshot({
+        projectId: 'project-123',
+        actorId: 'actor-42',
+      });
+
+      // ticketEvent should be queried with actorId filter even without timeWindow
+      expect(mockPrismaClient.ticketEvent.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ actorId: 'actor-42' }),
+        }),
+      );
+      // agentEvent should be queried with actorId filter even without timeWindow
+      expect(mockPrismaClient.agentEvent.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ actorId: 'actor-42' }),
+        }),
+      );
+      // decisionEvent should be queried with agentId filter even without timeWindow
+      expect(mockPrismaClient.decisionEvent.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ agentId: 'actor-42' }),
+        }),
+      );
+    });
+  });
+
+  describe('Bug: rationale field ignored in decision events', () => {
+    test('includes rationale from DecisionEvent in CanonicalEvent output', async () => {
+      setupValidProject();
+      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+      mockPrismaClient.ticketEvent.findMany.mockResolvedValue([]);
+      mockPrismaClient.agentEvent.findMany.mockResolvedValue([]);
+      mockPrismaClient.decisionEvent.findMany.mockResolvedValue([
+        {
+          id: 'de-1',
+          projectId: 'project-123',
+          agentId: 'agent-42',
+          action: 'decided',
+          decision: 'approved',
+          rationale: 'The approach aligns with architecture principles',
+          source: 'api',
+          data: '{"reason":"test"}',
+          timestamp: new Date('2025-01-01'),
+          createdAt: new Date('2025-01-01'),
+        },
+      ]);
+
+      const result = await service.getSnapshot({
+        projectId: 'project-123',
+        timeWindow: { from: new Date('2025-01-01') },
+      });
+
+      expect(result.recentEvents).toHaveLength(1);
+      const event = result.recentEvents[0];
+      expect(event.eventType).toBe('decision_event');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((event as any).rationale).toBe(
+        'The approach aligns with architecture principles',
+      );
     });
   });
 
