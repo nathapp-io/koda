@@ -77,7 +77,7 @@ export class CodeCommitOutboxHandler {
 
     let sourceFiles: SourceFile[];
     try {
-      sourceFiles = await provider.fetchCommitFiles(p.commitHash, p.changedFiles);
+      sourceFiles = await provider.fetchCommitFiles(p.repoId, p.commitHash, p.changedFiles);
     } catch (err) {
       this.logger.error(`code_commit: failed to fetch commit files: ${err instanceof Error ? err.message : String(err)}`);
       throw err;

@@ -51,8 +51,9 @@ export interface IVcsProvider {
 
   /**
    * Fetch the contents of files changed in a commit
+   * @param repoId The repository identifier
    * @param commitHash The SHA of the commit
    * @param changedFiles List of file paths that were changed
    */
-  fetchCommitFiles(commitHash: string, changedFiles: string[]): Promise<SourceFile[]>;
+  fetchCommitFiles(repoId: string, commitHash: string, changedFiles: string[]): Promise<SourceFile[]>;
 }

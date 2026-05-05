@@ -349,7 +349,7 @@ export class GitHubProvider implements IVcsProvider {
    * Fetch file contents for files changed in a commit.
    * Uses GitHub's contents API with the commit SHA as ref.
    */
-  async fetchCommitFiles(commitHash: string, changedFiles: string[]): Promise<SourceFile[]> {
+  async fetchCommitFiles(repoId: string, commitHash: string, changedFiles: string[]): Promise<SourceFile[]> {
     const files: SourceFile[] = [];
 
     for (const filePath of changedFiles) {

@@ -235,7 +235,7 @@ describe('CodeCommitOutboxHandler', () => {
         token: 'decrypted-token',
         repoUrl: 'https://github.com/test-owner/test-repo',
       }));
-      expect(mockProvider.fetchCommitFiles).toHaveBeenCalledWith('abc123', ['src/a.ts']);
+      expect(mockProvider.fetchCommitFiles).toHaveBeenCalledWith('repo-1', 'abc123', ['src/a.ts']);
       expect(mockAstIndex.indexCommit).toHaveBeenCalledWith(
         'repo-1',
         'abc123',
