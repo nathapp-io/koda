@@ -21,6 +21,10 @@ export interface ExtractedSymbol {
   docComment?: string;
 }
 
+export interface ResolvedSymbol extends ExtractedSymbol {
+  symbolId: string;
+}
+
 @Injectable()
 export class CodeGraphService {
   private readonly logger = new Logger(CodeGraphService.name);
@@ -112,11 +116,65 @@ export class CodeGraphService {
     return symbols;
   }
 
+  private getShortName(name: string): string {
+    const parts = name.split('.');
+    return parts[parts.length - 1];
+  }
+
+  resolveRelationships(symbols: ResolvedSymbol[]): void {
+    const nameToSymbolIds = new Map<string, string[]>();
+
+    for (const sym of symbols) {
+      const shortName = this.getShortName(sym.name);
+
+      if (!nameToSymbolIds.has(sym.name)) nameToSymbolIds.set(sym.name, []);
+      const symList = nameToSymbolIds.get(sym.name);
+      if (symList) symList.push(sym.symbolId);
+
+      if (shortName !== sym.name) {
+        if (!nameToSymbolIds.has(shortName)) nameToSymbolIds.set(shortName, []);
+        const shortList = nameToSymbolIds.get(shortName);
+        if (shortList && !shortList.includes(sym.symbolId)) {
+          shortList.push(sym.symbolId);
+        }
+      }
+    }
+
+    const calleeToCallerIds = new Map<string, string[]>();
+
+    for (const sym of symbols) {
+      const resolvedCalleeIds: string[] = [];
+
+      for (const rawCallee of sym.callees) {
+        if (rawCallee === sym.name) continue;
+        if (rawCallee === this.getShortName(sym.name)) continue;
+
+        const resolvedIds = nameToSymbolIds.get(rawCallee) || [];
+        resolvedCalleeIds.push(...resolvedIds);
+      }
+
+      const uniqueCallees = [...new Set(resolvedCalleeIds)];
+      sym.callees = uniqueCallees;
+
+      for (const calleeId of uniqueCallees) {
+        if (!calleeToCallerIds.has(calleeId)) calleeToCallerIds.set(calleeId, []);
+        const callerList = calleeToCallerIds.get(calleeId);
+        if (callerList) callerList.push(sym.symbolId);
+      }
+    }
+
+    for (const sym of symbols) {
+      sym.callers = calleeToCallerIds.get(sym.symbolId) || [];
+    }
+  }
+
   extractCallers(symbol: ExtractedSymbol, allSymbols: ExtractedSymbol[]): string[] {
     const callers: string[] = [];
+    const shortName = this.getShortName(symbol.name);
+
     for (const other of allSymbols) {
       if (other.name === symbol.name && other.file === symbol.file) continue;
-      if (other.callees.includes(symbol.name)) {
+      if (other.callees.includes(symbol.name) || other.callees.includes(shortName)) {
         callers.push(other.name);
       }
     }
@@ -125,8 +183,15 @@ export class CodeGraphService {
 
   extractCallees(symbol: ExtractedSymbol, allSymbols: ExtractedSymbol[]): string[] {
     const { name } = symbol;
-    const symbolNames = new Set(allSymbols.map((s) => s.name));
-    const callees = symbol.callees.filter((c) => symbolNames.has(c) && c !== name);
+    const symbolNames = new Set<string>();
+    for (const s of allSymbols) {
+      symbolNames.add(s.name);
+      if (s.name.includes('.')) {
+        symbolNames.add(this.getShortName(s.name));
+      }
+    }
+    const shortName = this.getShortName(name);
+    const callees = symbol.callees.filter((c) => symbolNames.has(c) && c !== name && c !== shortName);
     return [...new Set(callees)];
   }
 

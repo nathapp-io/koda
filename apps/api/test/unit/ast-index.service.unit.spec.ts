@@ -9,11 +9,18 @@ describe('AstIndexService', () => {
   let symbolStore: jest.Mocked<SymbolStore>;
   let codeGraph: jest.Mocked<CodeGraphService>;
 
+  const mockTxManager = {
+    run: jest.fn((fn: () => Promise<unknown>) => fn()),
+    getClient: jest.fn(),
+    isInTransaction: jest.fn(() => false),
+  };
+
   const mockCodeGraph = {
     parseSourceFile: jest.fn(),
     extractSymbols: jest.fn(),
     extractCallers: jest.fn(),
     extractCallees: jest.fn(),
+    resolveRelationships: jest.fn(),
   };
 
   const mockSymbolStore = {
@@ -30,6 +37,7 @@ describe('AstIndexService', () => {
         AstIndexService,
         { provide: SymbolStore, useValue: mockSymbolStore },
         { provide: CodeGraphService, useValue: mockCodeGraph },
+        { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
       ],
     }).compile();
 
@@ -53,13 +61,8 @@ describe('AstIndexService', () => {
 
       const mockSymbols = [
         {
-          id: `${repoId}:src/auth.ts::authenticate`,
-          symbolId: 'authenticate',
-          projectId,
-          repoId,
-          commitHash,
           name: 'authenticate',
-          kind: 'function',
+          kind: 'function' as const,
           file: 'src/auth.ts',
           startLine: 1,
           endLine: 1,
@@ -76,7 +79,10 @@ describe('AstIndexService', () => {
         ast: {},
       });
       mockCodeGraph.extractSymbols.mockReturnValue(mockSymbols);
-      mockSymbolStore.upsertSymbol.mockResolvedValue(mockSymbols[0]);
+      mockCodeGraph.resolveRelationships.mockImplementation((syms: Array<{ callers: string[]; callees: string[] }>) => {
+        for (const s of syms) { s.callers = []; s.callees = []; }
+      });
+      mockSymbolStore.upsertSymbol.mockResolvedValue(undefined as never);
 
       const result = await service.indexCommit(repoId, commitHash, files, projectId);
 
@@ -84,7 +90,7 @@ describe('AstIndexService', () => {
       expect(result.symbolsIndexed).toBe(1);
       expect(result.filesIndexed).toBe(1);
       expect(result.fileErrors).toHaveLength(0);
-      expect(mockSymbolStore.upsertSymbol).toHaveBeenCalledWith(mockSymbols[0]);
+      expect(mockSymbolStore.upsertSymbol).toHaveBeenCalledTimes(1);
     });
 
     it('AC-2: Symbol.symbolId should use convention {repoId}:{filePath}::{SymbolName}', async () => {
@@ -97,13 +103,8 @@ describe('AstIndexService', () => {
 
       const mockSymbols = [
         {
-          id: `${repoId}:src/services/user.ts::UserService`,
-          symbolId: 'UserService',
-          projectId,
-          repoId,
-          commitHash,
           name: 'UserService',
-          kind: 'class',
+          kind: 'class' as const,
           file: 'src/services/user.ts',
           startLine: 1,
           endLine: 1,
@@ -120,12 +121,16 @@ describe('AstIndexService', () => {
         ast: {},
       });
       mockCodeGraph.extractSymbols.mockReturnValue(mockSymbols);
-      mockSymbolStore.upsertSymbol.mockResolvedValue(mockSymbols[0]);
+      mockCodeGraph.resolveRelationships.mockImplementation((syms: Array<{ callers: string[]; callees: string[] }>) => {
+        for (const s of syms) { s.callers = []; s.callees = []; }
+      });
+      mockSymbolStore.upsertSymbol.mockResolvedValue(undefined as never);
 
       const result = await service.indexCommit(repoId, commitHash, files, projectId);
 
       const storedSymbol = mockSymbolStore.upsertSymbol.mock.calls[0][0];
       expect(storedSymbol.id).toBe(`${repoId}:src/services/user.ts::UserService`);
+      expect(storedSymbol.symbolId).toBe('UserService');
       expect(result.symbolsIndexed).toBe(1);
     });
 
@@ -143,7 +148,6 @@ describe('AstIndexService', () => {
         ast: {},
       });
       mockCodeGraph.extractSymbols.mockReturnValue([]);
-      mockSymbolStore.upsertSymbol.mockResolvedValue(null);
 
       await service.indexCommit(repoId, commitHash, files, projectId);
 
@@ -164,13 +168,8 @@ describe('AstIndexService', () => {
 
       const mockSymbols = [
         {
-          id: `${repoId}:src/user.ts::getUser`,
-          symbolId: 'getUser',
-          projectId,
-          repoId,
-          commitHash,
           name: 'getUser',
-          kind: 'function',
+          kind: 'function' as const,
           file: 'src/user.ts',
           startLine: 1,
           endLine: 1,
@@ -187,7 +186,10 @@ describe('AstIndexService', () => {
         ast: {},
       });
       mockCodeGraph.extractSymbols.mockReturnValue(mockSymbols);
-      mockSymbolStore.upsertSymbol.mockResolvedValue(mockSymbols[0]);
+      mockCodeGraph.resolveRelationships.mockImplementation((syms: Array<{ callers: string[]; callees: string[] }>) => {
+        for (const s of syms) { s.callers = []; s.callees = []; }
+      });
+      mockSymbolStore.upsertSymbol.mockResolvedValue(undefined as never);
 
       await service.indexCommit(repoId, commitHash, files, projectId);
 
@@ -210,7 +212,6 @@ describe('AstIndexService', () => {
         ast: {},
       }));
       mockCodeGraph.extractSymbols.mockReturnValue([]);
-      mockSymbolStore.upsertSymbol.mockResolvedValue(null);
 
       const startTime = Date.now();
       const result = await service.indexCommit(repoId, commitHash, files, projectId);
@@ -361,9 +362,10 @@ describe('AstIndexService', () => {
         ast: {},
       });
       mockCodeGraph.extractSymbols.mockReturnValue(mockSymbols);
-      mockCodeGraph.extractCallers.mockReturnValue([]);
-      mockCodeGraph.extractCallees.mockReturnValue([]);
-      mockSymbolStore.upsertSymbol.mockResolvedValue(null);
+      mockCodeGraph.resolveRelationships.mockImplementation((syms: Array<{ callers: string[]; callees: string[] }>) => {
+        for (const s of syms) { s.callers = []; s.callees = []; }
+      });
+      mockSymbolStore.upsertSymbol.mockResolvedValue(undefined as never);
 
       await service.indexCommit(repoId, commitHash, files, projectId);
 
@@ -420,14 +422,15 @@ describe('AstIndexService', () => {
         if (parsed.path === 'src/b.ts') return [symB];
         return [];
       });
-      mockCodeGraph.extractCallers.mockReturnValue([]);
-      mockCodeGraph.extractCallees.mockReturnValue([]);
+      mockCodeGraph.resolveRelationships.mockImplementation((syms: Array<{ callers: string[]; callees: string[] }>) => {
+        for (const s of syms) { s.callers = []; s.callees = []; }
+      });
 
       let upsertCallCount = 0;
       mockSymbolStore.upsertSymbol.mockImplementation(async () => {
         upsertCallCount++;
         if (upsertCallCount === 2) throw new Error('Simulated DB failure mid-batch');
-        return null;
+        return undefined as never;
       });
 
       await expect(service.indexCommit(repoId, commitHash, files, projectId)).rejects.toThrow(
@@ -435,6 +438,7 @@ describe('AstIndexService', () => {
       );
 
       expect(mockSymbolStore.upsertSymbol).toHaveBeenCalledTimes(2);
+      expect(mockTxManager.run).toHaveBeenCalled();
     });
   });
 });

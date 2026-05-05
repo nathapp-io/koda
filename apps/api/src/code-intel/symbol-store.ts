@@ -49,23 +49,25 @@ export class SymbolStore {
   }
 
   async upsertSymbol(symbol: SymbolData): Promise<SymbolData> {
-    const data = {
-      ...symbol,
-      callers: symbol.callers as unknown as string[],
-      callees: symbol.callees as unknown as string[],
-    };
+    return this.txManager.run(async () => {
+      const data = {
+        ...symbol,
+        callers: symbol.callers as unknown as string[],
+        callees: symbol.callees as unknown as string[],
+      };
 
-    const result = await this.db.symbol.upsert({
-      where: { id: symbol.id },
-      create: data as Parameters<typeof this.db.symbol.upsert>[0]['create'],
-      update: data as Parameters<typeof this.db.symbol.upsert>[0]['update'],
+      const result = await this.db.symbol.upsert({
+        where: { id: symbol.id },
+        create: data as Parameters<typeof this.db.symbol.upsert>[0]['create'],
+        update: data as Parameters<typeof this.db.symbol.upsert>[0]['update'],
+      });
+
+      return {
+        ...result,
+        callers: (result.callers as unknown as string[]) || [],
+        callees: (result.callees as unknown as string[]) || [],
+      } as SymbolData;
     });
-
-    return {
-      ...result,
-      callers: (result.callers as unknown as string[]) || [],
-      callees: (result.callees as unknown as string[]) || [],
-    } as SymbolData;
   }
 
   async findBySymbolId(projectId: string, symbolId: string): Promise<SymbolData | null> {
@@ -83,23 +85,20 @@ export class SymbolStore {
   }
 
   async findCallers(projectId: string, symbolId: string): Promise<CallerInfo[]> {
-    const symbols = await this.db.symbol.findMany({
-      where: { projectId },
-    });
+    const results = await this.db.$queryRawUnsafe<
+      Array<{ symbolId: string; file: string; name: string; kind: string }>
+    >(
+      `SELECT "symbolId", "file", "name", "kind" FROM "Symbol" WHERE "projectId" = $1 AND EXISTS (SELECT 1 FROM json_each("callers") WHERE value = $2)`,
+      projectId,
+      symbolId,
+    );
 
-    const callers = symbols
-      .filter((s) => {
-        const callersArr = (s.callers as unknown as string[]) || [];
-        return callersArr.includes(symbolId);
-      })
-      .map((s) => ({
-        symbolId: s.symbolId,
-        file: s.file,
-        name: s.name,
-        kind: s.kind,
-      }));
-
-    return callers;
+    return results.map((s) => ({
+      symbolId: s.symbolId,
+      file: s.file,
+      name: s.name,
+      kind: s.kind,
+    }));
   }
 
   async findCallees(projectId: string, symbolId: string): Promise<CalleeInfo[]> {
@@ -120,12 +119,17 @@ export class SymbolStore {
       },
     });
 
-    return calleeSymbols.map((s) => ({
-      symbolId: s.symbolId,
-      file: s.file,
-      name: s.name,
-      kind: s.kind,
-    }));
+    const found = new Map(calleeSymbols.map((s) => [s.symbolId, s]));
+
+    const result: CalleeInfo[] = [];
+    for (const id of calleesArr) {
+      const s = found.get(id);
+      if (s) {
+        result.push({ symbolId: s.symbolId, file: s.file, name: s.name, kind: s.kind });
+      }
+    }
+
+    return result;
   }
 
   async deleteByFile(projectId: string, repoId: string, file: string): Promise<void> {

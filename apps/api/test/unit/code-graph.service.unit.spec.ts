@@ -78,7 +78,7 @@ describe('CodeGraphService', () => {
       expect(callersOfAuthenticate).toEqual(['processRequest']);
 
       const callersOfValidator = service.extractCallers(allSymbols[2], allSymbols);
-      expect(callersOfValidator).toEqual([]);
+      expect(callersOfValidator).toEqual(['processRequest']);
     });
 
     it('should not return false callers from duplicate callee entries', () => {

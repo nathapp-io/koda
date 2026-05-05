@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { CodeGraphService, ExtractedSymbol } from './code-graph.service';
+import { Injectable, Logger, Inject } from '@nestjs/common';
+import { CodeGraphService, ExtractedSymbol, ResolvedSymbol } from './code-graph.service';
 import { SymbolStore, SymbolData, CallerInfo, CalleeInfo } from './symbol-store';
+import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 
 export type { CallerInfo, CalleeInfo } from './symbol-store';
 
@@ -41,6 +42,7 @@ export class AstIndexService {
   constructor(
     private readonly codeGraph: CodeGraphService,
     private readonly symbolStore: SymbolStore,
+    @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
 
   async indexCommit(
@@ -54,7 +56,7 @@ export class AstIndexService {
     let filesIndexed = 0;
     let symbolsIndexed = 0;
 
-    const allExtractedSymbols: (ExtractedSymbol & { symbolId: string })[] = [];
+    const allExtractedSymbols: ResolvedSymbol[] = [];
 
     for (const file of files) {
       try {
@@ -62,9 +64,7 @@ export class AstIndexService {
         const symbols = this.codeGraph.extractSymbols(parsed);
 
         for (const sym of symbols) {
-          const symbolId = sym.name;
-          const fullSymbol = this.enrichSymbol(sym, symbolId, repoId, commitHash, projectId, file.path);
-          allExtractedSymbols.push({ ...sym, symbolId });
+          allExtractedSymbols.push({ ...sym, symbolId: '' });
         }
 
         filesIndexed++;
@@ -77,32 +77,34 @@ export class AstIndexService {
       }
     }
 
-    for (const sym of allExtractedSymbols) {
-      const callers = this.codeGraph.extractCallers(sym, allExtractedSymbols) || [];
-      const callees = this.codeGraph.extractCallees(sym, allExtractedSymbols) || [];
+    this.assignSymbolIds(allExtractedSymbols);
+    this.codeGraph.resolveRelationships(allExtractedSymbols);
 
-      const fullId = `${repoId}:${sym.file}::${sym.name}`;
+    await this.txManager.run(async () => {
+      for (const sym of allExtractedSymbols) {
+        const fullId = `${repoId}:${sym.file}::${sym.symbolId}`;
 
-      const symbolData: SymbolData = {
-        id: fullId,
-        symbolId: sym.symbolId,
-        projectId,
-        repoId,
-        commitHash,
-        name: sym.name,
-        kind: sym.kind,
-        file: sym.file,
-        startLine: sym.startLine,
-        endLine: sym.endLine,
-        signature: sym.signature,
-        callers,
-        callees,
-        docComment: sym.docComment,
-      };
+        const symbolData: SymbolData = {
+          id: fullId,
+          symbolId: sym.symbolId,
+          projectId,
+          repoId,
+          commitHash,
+          name: sym.name,
+          kind: sym.kind,
+          file: sym.file,
+          startLine: sym.startLine,
+          endLine: sym.endLine,
+          signature: sym.signature,
+          callers: sym.callers,
+          callees: sym.callees,
+          docComment: sym.docComment,
+        };
 
-      await this.symbolStore.upsertSymbol(symbolData);
-      symbolsIndexed++;
-    }
+        await this.symbolStore.upsertSymbol(symbolData);
+        symbolsIndexed++;
+      }
+    });
 
     const durationMs = Date.now() - startTime;
 
@@ -129,15 +131,24 @@ export class AstIndexService {
     return this.symbolStore.findCallees(projectId, symbolId);
   }
 
-  private enrichSymbol(
-    sym: ExtractedSymbol,
-    symbolId: string,
-    repoId: string,
-    commitHash: string,
-    projectId: string,
-    filePath: string,
-  ): ExtractedSymbol & { symbolId: string } {
-    return { ...sym, symbolId };
+  private assignSymbolIds(symbols: ResolvedSymbol[]): void {
+    const fileCounts = new Map<string, Map<string, number>>();
+
+    for (const sym of symbols) {
+      let nameCounts = fileCounts.get(sym.file);
+      if (!nameCounts) {
+        nameCounts = new Map<string, number>();
+        fileCounts.set(sym.file, nameCounts);
+      }
+      const count = (nameCounts.get(sym.name) || 0) + 1;
+      nameCounts.set(sym.name, count);
+
+      if (count === 1) {
+        sym.symbolId = sym.name;
+      } else {
+        sym.symbolId = `${sym.name}#${count}`;
+      }
+    }
   }
 
   private toSymbol(data: SymbolData): Symbol {

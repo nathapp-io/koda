@@ -15,6 +15,7 @@ describe('SymbolStore', () => {
       findMany: jest.fn(),
       deleteMany: jest.fn(),
     },
+    $queryRawUnsafe: jest.fn(),
   };
 
   const mockTxManager = {
@@ -132,44 +133,11 @@ describe('SymbolStore', () => {
       const projectId = 'proj-123';
       const symbolId = 'authenticate';
       const callers = [
-        { symbolId: 'login', file: 'src/login.ts', name: 'login', kind: 'function' as const },
-        { symbolId: 'verify', file: 'src/verify.ts', name: 'verify', kind: 'method' as const },
+        { symbolId: 'login', file: 'src/login.ts', name: 'login', kind: 'function' },
+        { symbolId: 'verify', file: 'src/verify.ts', name: 'verify', kind: 'method' },
       ];
 
-      mockPrismaClient.symbol.findMany.mockResolvedValue([
-        {
-          id: `repo:src/login.ts::login`,
-          symbolId: 'login',
-          projectId,
-          repoId: 'repo',
-          commitHash: 'abc',
-          name: 'login',
-          kind: 'function',
-          file: 'src/login.ts',
-          startLine: 1,
-          endLine: 1,
-          signature: undefined,
-          callers: [symbolId],
-          callees: [],
-          docComment: undefined,
-        },
-        {
-          id: `repo:src/verify.ts::verify`,
-          symbolId: 'verify',
-          projectId,
-          repoId: 'repo',
-          commitHash: 'abc',
-          name: 'verify',
-          kind: 'method',
-          file: 'src/verify.ts',
-          startLine: 1,
-          endLine: 1,
-          signature: undefined,
-          callers: [symbolId],
-          callees: [],
-          docComment: undefined,
-        },
-      ]);
+      mockPrismaClient.$queryRawUnsafe.mockResolvedValue(callers);
 
       const result = await store.findCallers(projectId, symbolId);
 
@@ -251,7 +219,6 @@ describe('SymbolStore', () => {
       const projectId = 'proj-123';
       const repoId = 'repo-123';
       const commitHash = 'newcommit';
-      const files = [{ path: 'src/new.ts', content: 'export function newFunc() {}' }];
 
       await store.upsertSymbol({
         id: `${repoId}:src/new.ts::newFunc`,
@@ -279,14 +246,16 @@ describe('SymbolStore', () => {
       const projectId = 'proj-bug3';
       const symbolId = 'targetSymbol';
 
-      mockPrismaClient.symbol.findMany.mockResolvedValue([]);
+      mockPrismaClient.$queryRawUnsafe.mockResolvedValue([]);
 
       await store.findCallers(projectId, symbolId);
 
-      const findManyArgs = mockPrismaClient.symbol.findMany.mock.calls[0][0];
-      const whereKeys = Object.keys(findManyArgs.where || {});
-      expect(whereKeys.length).toBeGreaterThan(1);
-      expect(findManyArgs.where).toHaveProperty('projectId');
+      expect(mockPrismaClient.$queryRawUnsafe).toHaveBeenCalledTimes(1);
+      expect(mockPrismaClient.symbol.findMany).not.toHaveBeenCalled();
+      const callArgs = mockPrismaClient.$queryRawUnsafe.mock.calls[0];
+      expect(callArgs[0]).toContain('json_each');
+      expect(callArgs[1]).toBe(projectId);
+      expect(callArgs[2]).toBe(symbolId);
     });
   });
 
@@ -308,7 +277,7 @@ describe('SymbolStore', () => {
         endLine: 10,
         signature: undefined,
         callers: [],
-        callees: ['authenticate', 'getUser'],
+        callees: ['UserService.authenticate', 'UserService.getUser'],
         docComment: undefined,
       };
 
