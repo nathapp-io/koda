@@ -1,0 +1,322 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { VcsWebhookService, GitHubWebhookPayload, WebhookHandleResult } from './vcs-webhook.service';
+import { VcsSyncService } from './vcs-sync.service';
+import { VcsPrSyncService } from './vcs-pr-sync.service';
+import { OutboxService } from '../outbox/outbox.service';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { ConfigService } from '@nestjs/config';
+import { VcsLinkExtractorService } from './vcs-link-extractor.service';
+import { VcsConnection, Project } from '@prisma/client';
+import type { OutboxEventDomain } from '../outbox/domain/outbox-event.domain';
+import type { OutboxEventInput } from '../outbox/outbox.service';
+
+function createMockPrismaService() {
+  return {
+    client: {
+      ticketLink: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+      ticket: {
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
+    },
+  };
+}
+
+function createMockOutboxService(enqueueMock: jest.Mock) {
+  return {
+    enqueue: enqueueMock,
+    getPendingEvents: jest.fn(),
+    getEventsByStatus: jest.fn(),
+    processPending: jest.fn(),
+    processEvent: jest.fn(),
+    retry: jest.fn(),
+    markCompleted: jest.fn(),
+    markFailed: jest.fn(),
+    markDeadLetter: jest.fn(),
+    retryEvent: jest.fn(),
+  };
+}
+
+function createMockSyncService() {
+  return {
+    filterByAllowedAuthors: jest.fn().mockReturnValue([]),
+  };
+}
+
+function createMockPrSyncService() {
+  return {
+    handleMergedPrAutoTransition: jest.fn(),
+  };
+}
+
+function createMockConnection(): VcsConnection & { project: Project } {
+  return {
+    id: 'conn-1',
+    projectId: 'project-1',
+    provider: 'github',
+    repoOwner: 'owner',
+    repoName: 'repo',
+    encryptedToken: 'enc-token',
+    syncMode: 'webhook',
+    allowedAuthors: '[]',
+    pollingIntervalMs: 600000,
+    webhookSecret: 'secret',
+    lastSyncedAt: null,
+    isActive: true,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    project: {
+      id: 'project-1',
+      name: 'Test Project',
+      slug: 'test-project',
+      key: 'TEST',
+      description: null,
+      gitRemoteUrl: null,
+      autoIndexOnClose: true,
+      autoAssign: 'OFF',
+      graphifyEnabled: false,
+      graphifyLastImportedAt: null,
+      deletedAt: null,
+      ciWebhookToken: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as Project,
+  };
+}
+
+function createPushPayload(overrides?: Partial<GitHubWebhookPayload>): GitHubWebhookPayload {
+  return {
+    action: '',
+    repository: {
+      id: 12345,
+      full_name: 'owner/repo',
+      name: 'repo',
+      owner: { login: 'owner', id: 1 },
+    },
+    ref: 'refs/heads/main',
+    commits: [
+      {
+        id: 'abc123def456',
+        message: 'fix: resolve bug in component',
+        timestamp: '2024-01-01T00:00:00Z',
+        author: { name: 'Dev', email: 'dev@example.com', username: 'dev' },
+        added: ['src/new.ts'],
+        removed: [],
+        modified: ['src/updated.ts'],
+      },
+    ],
+    sender: { id: 1, login: 'dev', type: 'User' },
+    ...overrides,
+  };
+}
+
+function resolveOutboxEvent(overrides?: Partial<OutboxEventDomain>): OutboxEventDomain {
+  return {
+    id: 'outbox-evt-1',
+    projectId: 'project-1',
+    eventType: 'code_commit',
+    eventId: 'abc123def456',
+    payload: JSON.stringify({}),
+    status: 'pending',
+    attempts: 0,
+    lastError: null,
+    processedAt: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
+  };
+}
+
+function buildTestingModule(enqueueMock: jest.Mock) {
+  return Test.createTestingModule({
+    providers: [
+      VcsWebhookService,
+      { provide: PrismaService, useValue: createMockPrismaService() },
+      { provide: VcsSyncService, useValue: createMockSyncService() },
+      { provide: VcsPrSyncService, useValue: createMockPrSyncService() },
+      { provide: OutboxService, useValue: createMockOutboxService(enqueueMock) },
+      { provide: ConfigService, useValue: { get: jest.fn() } },
+      { provide: VcsLinkExtractorService, useValue: { extractLinksFromPr: jest.fn() } },
+    ],
+  }).compile();
+}
+
+describe('VcsWebhookService', () => {
+  describe('handlePush (via handleWebhook)', () => {
+    let service: VcsWebhookService;
+    let mockEnqueue: jest.Mock<Promise<OutboxEventDomain>, [OutboxEventInput]>;
+
+    beforeEach(async () => {
+      mockEnqueue = jest.fn().mockResolvedValue(resolveOutboxEvent());
+      const module: TestingModule = await buildTestingModule(mockEnqueue);
+      service = module.get<VcsWebhookService>(VcsWebhookService);
+    });
+
+    it('should enqueue a code_commit outbox event for each commit in the push payload', async () => {
+      const connection = createMockConnection();
+      const payload = createPushPayload({
+        commits: [
+          { id: 'commit-a', message: 'fix', timestamp: 't', author: { name: 'n', email: 'e' }, added: [], removed: [], modified: [] },
+          { id: 'commit-b', message: 'feat', timestamp: 't', author: { name: 'n', email: 'e' }, added: [], removed: [], modified: [] },
+        ],
+      });
+
+      await service.handleWebhook(connection, 'push', payload);
+
+      expect(mockEnqueue).toHaveBeenCalledTimes(2);
+      expect(mockEnqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: connection.projectId,
+          eventType: 'code_commit',
+          eventId: 'commit-a',
+          payload: expect.objectContaining({
+            repoId: 'owner/repo',
+            commitHash: 'commit-a',
+            ref: 'refs/heads/main',
+          }),
+        }),
+      );
+      expect(mockEnqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: connection.projectId,
+          eventType: 'code_commit',
+          eventId: 'commit-b',
+          payload: expect.objectContaining({
+            repoId: 'owner/repo',
+            commitHash: 'commit-b',
+            ref: 'refs/heads/main',
+          }),
+        }),
+      );
+    });
+
+    it('should skip commits within the 5-minute deduplication window', async () => {
+      const connection = createMockConnection();
+      const payload = createPushPayload({
+        commits: [
+          { id: 'commit-dup', message: 'm', timestamp: 't', author: { name: 'n', email: 'e' }, added: [], removed: [], modified: [] },
+        ],
+      });
+
+      // First push — enqueues
+      await service.handleWebhook(connection, 'push', payload);
+      expect(mockEnqueue).toHaveBeenCalledTimes(1);
+
+      // Second push within dedup window — should skip
+      await service.handleWebhook(connection, 'push', payload);
+      expect(mockEnqueue).toHaveBeenCalledTimes(1); // still 1
+    });
+
+    // Bug 1: recentCommitHashes is an unbounded in-memory Map that is never cleaned up.
+    // Entries older than the 5-minute dedup window should be evicted so the Map
+    // does not grow indefinitely on long-running server instances.
+    it('should evict stale entries from the deduplication map after the 5-minute window expires', async () => {
+      const connection = createMockConnection();
+
+      const commit1 = { id: 'commit-1', message: 'm', timestamp: 't', author: { name: 'n', email: 'e' }, added: [], removed: [], modified: [] };
+      const commit2 = { id: 'commit-2', message: 'm', timestamp: 't', author: { name: 'n', email: 'e' }, added: [], removed: [], modified: [] };
+      const commit3 = { id: 'commit-3', message: 'm', timestamp: 't', author: { name: 'n', email: 'e' }, added: [], removed: [], modified: [] };
+
+      let currentTime = 1700000000000;
+      const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => currentTime);
+
+      // Enqueue two different commits at T0
+      await service.handleWebhook(connection, 'push', createPushPayload({ commits: [commit1] }));
+      await service.handleWebhook(connection, 'push', createPushPayload({ commits: [commit2] }));
+
+      // Both entries should be stored in the dedup map
+      const mapAfterInsert: Map<string, number> = (service as unknown as { recentCommitHashes: Map<string, number> }).recentCommitHashes;
+      expect(mapAfterInsert.size).toBe(2);
+
+      // Advance time beyond the 5-minute dedup window (T0 + 6 minutes)
+      currentTime = 1700000000000 + 6 * 60 * 1000;
+
+      // Enqueue a third commit at T0+6min — eviction of stale entries should occur
+      await service.handleWebhook(connection, 'push', createPushPayload({ commits: [commit3] }));
+
+      // Spec: entries older than the 5-minute window (commit-1, commit-2) must be evicted.
+      // Only commit-3 (enqueued at T0+6min) should remain in the map.
+      // BUG: The map currently retains ALL entries forever — map size will be 3 instead of <= 1.
+      const mapAfterEviction: Map<string, number> = (service as unknown as { recentCommitHashes: Map<string, number> }).recentCommitHashes;
+      expect(mapAfterEviction.size).toBeLessThan(3);
+
+      nowSpy.mockRestore();
+    });
+  });
+});
+
+describe('VcsWebhookService — cross-instance deduplication', () => {
+  const connection = createMockConnection();
+  const sharedCommit = { id: 'cross-instance-commit', message: 'm', timestamp: 't', author: { name: 'n', email: 'e' }, added: [], removed: [], modified: [] };
+
+  // Bug 2: recentCommitHashes is an in-memory Map local to a single VcsWebhookService instance.
+  // In a multi-instance deployment, each pod has its own Map — deduplication is per-instance only.
+  // A commit pushed to two different instances within the 5-min window will be enqueued twice.
+  // Spec: deduplication must work across instances (backed by shared state, not local memory).
+  it('should prevent duplicate outbox events when the same commit is processed by two separate service instances within the deduplication window', async () => {
+    // Instance 1 — simulates pod A
+    const enqueue1 = jest.fn<Promise<OutboxEventDomain>, [OutboxEventInput]>().mockResolvedValue(resolveOutboxEvent());
+    const module1 = await buildTestingModule(enqueue1);
+    const service1 = module1.get<VcsWebhookService>(VcsWebhookService);
+
+    // Instance 2 — simulates pod B (fresh instance with its own in-memory Map)
+    const enqueue2 = jest.fn<Promise<OutboxEventDomain>, [OutboxEventInput]>().mockResolvedValue(resolveOutboxEvent());
+    const module2 = await buildTestingModule(enqueue2);
+    const service2 = module2.get<VcsWebhookService>(VcsWebhookService);
+
+    const payload = createPushPayload({ commits: [sharedCommit] });
+
+    // Instance 1 (pod A) processes the push
+    const result1 = await service1.handleWebhook(connection, 'push', payload);
+    expect(result1.success).toBe(true);
+    expect(enqueue1).toHaveBeenCalledTimes(1);
+    expect(enqueue1).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'code_commit',
+        eventId: sharedCommit.id,
+      }),
+    );
+
+    // Instance 2 (pod B) processes the same push independently.
+    // It has its own Map and no access to instance 1's dedup state.
+    const result2 = await service2.handleWebhook(connection, 'push', payload);
+
+    // SPEC: Instance 2 must NOT enqueue because instance 1 already did within the same window.
+    // The deduplication check must rely on shared state (e.g. outbox/database), not local memory.
+    // BUG: Instance 2 currently enqueues because each instance has its own in-memory Map.
+    expect(enqueue2).not.toHaveBeenCalled();
+    expect(result2.ignored).toBe(true);
+  });
+
+  it('should allow re-enqueue by a second instance after the first instance dedup window expires', async () => {
+    // Verify the spec-correct flow: instance 1 enqueues, time passes > 5 min,
+    // instance 2 is allowed to enqueue the same commitHash again.
+
+    const enqueue1 = jest.fn<Promise<OutboxEventDomain>, [OutboxEventInput]>().mockResolvedValue(resolveOutboxEvent());
+    const module1 = await buildTestingModule(enqueue1);
+    const service1 = module1.get<VcsWebhookService>(VcsWebhookService);
+
+    const enqueue2 = jest.fn<Promise<OutboxEventDomain>, [OutboxEventInput]>().mockResolvedValue(resolveOutboxEvent());
+    const module2 = await buildTestingModule(enqueue2);
+    const service2 = module2.get<VcsWebhookService>(VcsWebhookService);
+
+    let currentTime = 1700000000000;
+    const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => currentTime);
+
+    const payload = createPushPayload({ commits: [sharedCommit] });
+
+    // Instance 1 enqueues at T0
+    await service1.handleWebhook(connection, 'push', payload);
+    expect(enqueue1).toHaveBeenCalledTimes(1);
+
+    // Advance time beyond 5-minute window
+    currentTime = 1700000000000 + 6 * 60 * 1000;
+
+    // Instance 2 should be allowed to enqueue the same commit (not a duplicate — outside window)
+    await service2.handleWebhook(connection, 'push', payload);
+    expect(enqueue2).toHaveBeenCalledTimes(1);
+
+    nowSpy.mockRestore();
+  });
+});
