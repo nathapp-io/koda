@@ -105,6 +105,8 @@ model Project {
   graphLinks    GraphLink[]
   memoryItems   MemoryItem[]
   symbols       Symbol[]
+  entityNodes   EntityNode[]
+  entityLinks   EntityLink[]
 }
 
 model ProjectMember {
