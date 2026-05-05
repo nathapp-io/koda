@@ -20,7 +20,9 @@ import { AddDocumentDto } from './dto/add-document.dto';
 import { SearchKbDto } from './dto/search-kb.dto';
 import { ImportGraphifyDto } from './dto/import-graphify.dto';
 import { Principal, RequiredPermission } from '@nathapp/nestjs-auth';
+import type { CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { KodaPrincipal, isAgentPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
+import { KodaAction } from '../auth/casl/koda-action.enum';
 
 @ApiTags('knowledge-base')
 @ApiBearerAuth()
@@ -172,12 +174,12 @@ export class RagController {
 
   @Post('import/graphify')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Import graphify knowledge graph into the project knowledge base (admin only)' })
+  @ApiOperation({ summary: 'Import graphify knowledge graph into the project knowledge base' })
   @ApiResponse({ status: 200, description: 'Import successful' })
   @ApiResponse({ status: 400, description: 'Graphify not enabled for this project or validation error' })
-  @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  @RequiredPermission('ADMIN')
+  @RequiredPermission([KodaAction.IMPORT as CaslPermissionAction, 'CodeIntel'])
   async importGraphify(
     @Param('slug') slug: string,
     @Body() dto: ImportGraphifyDto,

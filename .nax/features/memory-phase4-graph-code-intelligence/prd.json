@@ -3,7 +3,7 @@
   "feature": "memory-phase4-graph-code-intelligence",
   "branchName": "feat/memory-phase4-graph-code-intelligence",
   "createdAt": "2026-04-26T12:00:00.000Z",
-  "updatedAt": "2026-05-05T03:49:33.983Z",
+  "updatedAt": "2026-05-05T07:03:01.593Z",
   "userStories": [
     {
       "id": "US-001",
@@ -36,7 +36,9 @@
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "complex",
+        "modelTier": "balanced"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -52,7 +54,11 @@
         "When the `GraphNode` table read fails or is unavailable, `diffAndApply` throws a descriptive error and does not modify LanceDB",
         "When a node's content is unchanged but its outgoing links changed, the node is marked as updated and re-indexed",
         "Concurrent calls to `diffAndApply` for the same `projectId` are safe due to Prisma unique constraints (no duplicate GraphNode rows)"
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "bd845a1aa8b38f1494ecdfd177910702fefbbe51"
     },
     {
       "id": "US-002",
@@ -103,7 +109,10 @@
         "When `getCallers` is called with a `symbolId` that has zero callers stored, it returns an empty array (not null or undefined)",
         "When `indexCommit` processes a file whose symbols were previously indexed in the same commitHash, old symbols for that file are replaced via unique constraint upsert",
         "When `ts-morph` encounters TypeScript syntax errors, the error is recorded in `fileErrors` with the file path and error message"
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -150,7 +159,10 @@
         "When `onTicketEvent` is called for a ticket that has no matching entity node, a new `ticket` entity node is created",
         "When `getIncidentImpact` is called for a non-incident ticket, `affectedServices` still returns linked services",
         "`EntityNode.tags` stored as a JSON-encoded string are correctly parsed back into a string array when read"
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -199,7 +211,10 @@
         "When `OutboxService.enqueue()` throws for a specific commit, other commits in the same push are still enqueued (partial failure is acceptable unless a critical error occurs)",
         "When the webhook secret for the project is null or undefined (no VCS connection configured), the webhook returns 401 before processing the payload",
         "When a `push` event references a branch deletion (ref deletion), no `code_commit` events are enqueued"
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -250,7 +265,10 @@
         "When `totalTickets` is 0, the ticket component of `impactScore` contributes 0",
         "When no `ticketId` is provided, `provenance` does not include ticket source metadata",
         "When the project has no services linked to any impacted symbol, `impactedServices` is an empty array and the service component of `impactScore` contributes 0"
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -293,7 +311,10 @@
         "When no active decisions exist for the project, `activeDecisions` is an empty array (not null or undefined)",
         "When `projectId` is valid but no tickets match the requested `ticketIds`, the `tickets` array is empty (not an error)",
         "When `timeWindow.from` is after `timeWindow.to`, `recentEvents` is empty"
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "## Architecture Overview\n\nPhase 4 introduces three new modules alongside modifications to existing ones:\n- `apps/api/src/graph/` — IncrementalGraphDiffService, GraphStoreService, EntityGraphService (NEW)\n- `apps/api/src/codeintel/` — AstIndexService, SymbolStore, ImpactAnalysisService, CodeIntelController (NEW)\n- `apps/api/src/memory/` — CanonicalStateService (added to existing module)\n- `apps/api/src/vcs/` — Push webhook handler in VcsWebhookController, fetchCommitFiles in IVcsProvider (MODIFY)\n- `apps/api/src/rag/` — importGraphify rewired to use IncrementalGraphDiffService (MODIFY)\n- `apps/api/src/auth/casl/` — KodaAction (add IMPORT), KodaSubject (add CodeIntel, AstIndex), factory (MODIFY)\n- `apps/api/prisma/schema.prisma` — GraphNode, GraphLink, EntityNode, EntityLink, Symbol models (ADD)\n\n### CASL/Authorization Extension (Phase 4)\n\nPhase 4 must extend the existing CASL infrastructure:\n\n**New action in `KodaAction` enum:**\n- `IMPORT: 'import'` — new action for graphify import operations\n\n**New subjects in `KodaSubject` type:**\n- `'CodeIntel'` — subject for code intelligence queries and imports\n- `'AstIndex'` — subject for direct AST indexing calls\n\n**New permission rules in `KodaCaslAbilityFactory`:**\n\n| Actor | Permission |\n|-------|-----------|\n| ADMIN user | MANAGE on CodeIntel, AstIndex (add to ADMIN_MANAGEABLE_RESOURCES) |\n| All agents (baseline) | IMPORT CodeIntel, READ CodeIntel |\n| User + DEVELOPER project role | IMPORT CodeIntel, READ CodeIntel |\n| Agent + DEVELOPER role | MANAGE AstIndex (via existing agentRoleDerivedPermissions switch) |\n| MEMBER user | No Phase 4 permissions (gets 403 from PermissionAuthGuard) |\n\n**Controller-level gates:**\n- `importGraphify` route: `@RequiredPermission([KodaAction.IMPORT, 'CodeIntel'])` (replaces existing `@RequiredPermission('ADMIN')`)\n- `indexCommit` controller: `@RequiredPermission([KodaAction.MANAGE, 'AstIndex'])`\n- `getChangeImpact` endpoint: `@RequiredPermission([KodaAction.READ, 'CodeIntel'])`\n\n**Architectural note on project-scoped users:** The spec keeps CodeIntel access for users with `DEVELOPER` project role as a required contract. Because project roles are project-scoped, implementation may require a project-membership lookup or equivalent resource-scoped authorization path rather than a principal-only ability factory shortcut. MEMBER users still receive 403 from the guard.\n\n**Critical rule (from `.nax/rules/api-auth.md`):** `caslAbilityFactory` in `AuthModule.forRootAsync` must remain a bare class (not `{ useClass: ... }`) — wrapping it causes silent CASL enforcement failure.\n\n### Existing Controller Pattern to Follow\n\nCurrent CASL-using controllers (RagController, TicketsController, CommentsController, LabelsController, AgentsController) use:\n- `@Principal() principal: KodaPrincipal` for actor injection\n- `@RequiredPermission([action, subject])` for route gates\n- `import { Principal, RequiredPermission } from '@nathapp/nestjs-auth'`\n- `import { KodaPrincipal, isAgentPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types'`\n- `JsonResponse.Ok(data)` for successful responses\n- `ForbiddenAppException`, `NotFoundAppException`, `ValidationAppException` from `@nathapp/nestjs-common` for errors\n\n### Repository Pattern to Follow\n\nNew Phase 4 persistence should use the repository abstraction:\n- Extend `AbstractPrismaRepository<Domain, Model, IdType>` from `@nathapp/nestjs-prisma`\n- Inject `@Inject(TRANSACTION_MANAGER) tx: ITransactionManager` from `@nathapp/nestjs-data`\n- Implement `modelDelegate`, `toDomain`, `toPersistenceCreate`, `toPersistenceUpdate`\n- Use `this.txManager.run(async () => { ... })` for multi-write consistency\n- Reference implementations: `PrismaMemoryItemRepository` (241 lines), `PrismaCommentRepository` (60 lines)\n\n### Key Existing Files to Modify\n\n1. **`apps/api/src/rag/rag.service.ts`** — `importGraphify()` currently does `deleteAllBySourceType('code')` then full re-index. Must be refactored to call `IncrementalGraphDiffService.diffAndApply()`. Method signature stays the same; internal behavior changes.\n2. **`apps/api/src/rag/rag.controller.ts`** — `importGraphify` route (line ~180) changes from `@RequiredPermission('ADMIN')` to `@RequiredPermission([KodaAction.IMPORT, 'CodeIntel'])`. The existing `checkProjectMembership()` helper is NOT called for this route — the CASL guard replaces it.\n3. **`apps/api/src/auth/casl/koda-action.enum.ts`** — Add `IMPORT: 'import'` to KodaAction const, add `'CodeIntel'` and `'AstIndex'` to KodaSubject type.\n4. **`apps/api/src/auth/casl/koda-casl-ability.factory.ts`** — Add CodeIntel/AstIndex to ADMIN_MANAGEABLE_RESOURCES; add IMPORT CodeIntel + READ CodeIntel to agentPermissions(); add MANAGE AstIndex to agentRoleDerivedPermissions for DEVELOPER role.\n5. **`apps/api/src/rag/dto/import-graphify.dto.ts`** — `GraphifyNodeDto` and `GraphifyLinkDto` are reused by new graph services. May need minor extensions.\n6. **`apps/api/src/outbox/outbox-fan-out-registry.ts`** — Register new handlers: `code_commit` (US-002/US-004), `ticket_event` fan-out for entity graph updates (US-003).\n7. **`apps/api/src/vcs/vcs-webhook.controller.ts`** — Currently handles `issues.opened` and `pull_request` events. Extend to handle `push` events. Controller is PUBLIC (`@Public()`); signature verification already exists via `x-hub-signature-256`.\n8. **`apps/api/src/vcs/vcs-webhook.service.ts`** — Add `handlePush()` method. Parse push payload, validate, enqueue `code_commit` outbox events per commit.\n9. **`apps/api/src/vcs/vcs-provider.ts`** / **`apps/api/src/vcs/providers/github.provider.ts`** — Add `fetchCommitFiles(repoId, commitHash, changedFiles)` to IVcsProvider interface and implement in GitHub provider.\n10. **`apps/api/src/rag/entity-store.ts`** — Existing in-memory store (Phase 2). Phase 4's `EntityGraphService` replaces its persistence role. In-memory store continues for hybrid search ranking.\n\n### New Prisma Models\n\nAll new models use JSON-string-encoded array/object fields for SQLite compatibility (no scalar lists, no native JSON provider behavior).\n\n- **GraphNode**: `projectId + nodeId` unique, stores graphify code nodes (label, type, sourceFile, community, metadata as JSON string). Relations to GraphLink.\n- **GraphLink**: `projectId + sourceGraphNodeId + targetGraphNodeId + relation` unique, cascades on source/target node delete.\n- **EntityNode**: `projectId + entityId` unique, types: ticket/service/owner/incident/code_module. Tags and metadata as JSON strings.\n- **EntityLink**: `projectId + sourceEntityNodeId + targetEntityNodeId + relation` unique, cascades on source/target node delete, confidence float.\n- **Symbol**: `projectId + symbolId` unique, kind enum as string, callers/callees as JSON strings, indexed by repoId and commitHash.\n\n**Link storage:** Repositories resolve stable `nodeId`/`entityId` to Prisma row IDs before writing GraphLink/EntityLink records to keep FK simple and Prisma-compatible.\n\n### Architecture Decisions\n\n1. **Deterministic parser for AST:** `ts-morph` (preferred for TypeScript projects). Parser is the sole source of truth for symbol names, locations, signatures, callers, callees. LLM must not be used for identification.\n2. **Incremental over full rebuild:** Diff algorithm computes delta from stored GraphNode/GraphLink tables (not LanceDB). Only changed nodes re-indexed into LanceDB.\n3. **Outbox-driven async processing:** Webhook controller synchronously validates and enqueues `code_commit` events. Outbox processor asynchronously fetches file contents and calls `indexCommit()`. Prevents synchronous blocking, provides retry/durability.\n4. **Project isolation:** All graph, entity, symbol, and canonical state queries are scoped to `projectId`. Existing graphify imports remain project-scoped and continue to honor `Project.graphifyEnabled`; VCS-driven code indexing resolves `repoId → projectId` through the VCS connection record.\n5. **Separate persistence for entity graph:** US-003 creates durable EntityNode/EntityLink tables. Existing in-memory EntityStore continues for hybrid search ranking but is not used for graph traversal.\n6. **CanonicalStateService is read-only:** Composes Prisma reads across existing models only (Ticket, TicketEvent, AgentEvent, DecisionEvent, MemoryItem). Does not query LanceDB, BM25, entity graph, or derived stores.\n7. **Error classes:** Use `ForbiddenAppException`, `NotFoundAppException`, `ValidationAppException` from `@nathapp/nestjs-common` — not a custom KodaError class. The spec references \"KodaError/Nathapp exception style\" meaning these Nathapp exception classes.\n\n### Integration Points\n\n- **Phase 2 (Retrieval):** Phase 4 feeds code/entity metadata into retrieval scoring via existing in-memory EntityStore and LanceDB documents. Does not modify Phase 2 scoring logic.\n- **Phase 3 (Semantic Memory):** Phase 4 does not extract semantic memories. May link memories through provenance but does not create/modify MemoryItem rows (except as read by CanonicalStateService).\n- **Phase 5 (Shared Agent Context):** Phase 4 exposes APIs and services. CanonicalStateService is the single canonical read path Phase 5 will consume.\n- **Existing graphify import:** The `POST /projects/:slug/kb/import/graphify` endpoint continues to work with the same DTO. Internal implementation switches from full re-import to incremental diff. It remains project-scoped, continues to honor `Project.graphifyEnabled`, and authorization broadens from ADMIN-only to include all agents plus DEVELOPER project-role users when project membership is implemented.\n\n### Test Infrastructure\n\n- **Framework:** Jest (configured in `apps/api/package.json`)\n- **Unit test location:** `src/**/*.spec.ts` (co-located with source)\n- **Integration test location:** `test/integration/**/*.integration.spec.ts`\n- **E2E test location:** `test/e2e/**/*.e2e.spec.ts`\n- **Test setup:** `test-setup.ts` loads `.env.test`, uses SQLite test database\n- **CASL factory tests:** `src/auth/casl/koda-casl-ability.factory.spec.ts` (245 lines, covers all current permission combinations)\n- **Patterns:** Use `@nestjs/testing` Test.createTestingModule, mock PrismaService/TRANSACTION_MANAGER. For repository tests, use in-memory SQLite or jest.fn().\n\n### Risks and Migration\n\n1. **Authorization expansion:** `importGraphify` changes from `@RequiredPermission('ADMIN')` to `@RequiredPermission([IMPORT, 'CodeIntel'])`. Previously ADMIN-only; now all agents can call. This is intentional per spec.\n2. **`ts-morph` dependency:** Medium bundle size increase. Non-TS repos get fileErrors, not crashes.\n3. **Data migration:** No existing GraphNode/EntityNode/Symbol tables — net-new. Existing LanceDB `code_document` rows remain, managed by incremental diff.\n4. **Outbox event schema:** New `code_commit` event type. Existing OutboxEvent table uses flexible JSON payload — no schema migration needed.\n5. **VCS provider interface:** Adding `fetchCommitFiles()` to IVcsProvider requires GitHub implementation. Other providers should throw descriptive errors.\n6. **Performance:** 2-second diff-and-apply target requires efficient bulk operations. Use Prisma `createMany`/`updateMany`/`deleteMany` — avoid per-node Prisma calls.\n\n### Story Dependency Order (within Phase 4)\n\n```\nUS-001 (Incremental Graph Diff) ───┐\n                                    ├── US-004 (VCS Webhook → code_commit)\nUS-002 (AST/Symbol Index) ─────────┘       │\n                                    ┌──────┘\nUS-003 (Ticket/Entity Graph) ───────┤\n                                    └── US-005 (getChangeImpact API)\n\nUS-006 (CanonicalStateService) — independent (reads existing models only)\n```\n\nUS-001, US-002, US-003, and US-006 can be built in parallel. US-004 requires US-001 + US-002. US-005 requires all three of US-001 + US-002 + US-003."

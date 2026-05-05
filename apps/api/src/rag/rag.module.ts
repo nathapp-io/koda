@@ -9,6 +9,8 @@ import { EmbeddingService } from './embedding.service';
 import { HybridRetrieverService } from './hybrid-retriever.service';
 import { LexicalIndex } from './lexical-index';
 import { EntityStore } from './entity-store';
+import { GraphStoreService } from './graph-store.service';
+import { IncrementalGraphDiffService } from './incremental-graph-diff.service';
 import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interface';
 import { CounterOptimizeStrategy } from './strategies/counter-optimize.strategy';
 import { CronOptimizeStrategy } from './strategies/cron-optimize.strategy';
@@ -133,6 +135,8 @@ class EntityStoreWarmup implements OnModuleInit {
     LexicalIndexWarmup,
     EntityStore,
     EntityStoreWarmup,
+    GraphStoreService,
+    IncrementalGraphDiffService,
     {
       provide: FTS_OPTIMIZE_STRATEGY,
       useFactory: (configService: ConfigService, schedulerRegistry: SchedulerRegistry): FtsOptimizeStrategy => {
@@ -151,6 +155,6 @@ class EntityStoreWarmup implements OnModuleInit {
       inject: [ConfigService, SchedulerRegistry],
     },
   ],
-  exports: [RagService, HybridRetrieverService, LexicalIndex, EntityStore, FTS_OPTIMIZE_STRATEGY],
+  exports: [RagService, HybridRetrieverService, LexicalIndex, EntityStore, FTS_OPTIMIZE_STRATEGY, IncrementalGraphDiffService],
 })
 export class RagModule {}

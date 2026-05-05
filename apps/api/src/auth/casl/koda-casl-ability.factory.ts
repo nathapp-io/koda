@@ -28,7 +28,7 @@ export class KodaCaslAbilityFactory extends BaseCaslAbilityFactory {
    * (AgentScope, AdminScope) so that agent-only routes stay gated.
    */
   private static readonly ADMIN_MANAGEABLE_RESOURCES = [
-    'Comment', 'Label', 'Ticket', 'Project', 'Agent',
+    'Comment', 'Label', 'Ticket', 'Project', 'Agent', 'CodeIntel',
   ] as const;
 
   async getPermissions(principal: KodaPrincipal): Promise<CaslPermission[]> {
@@ -40,9 +40,12 @@ export class KodaCaslAbilityFactory extends BaseCaslAbilityFactory {
 
   private userPermissions(principal: UserPrincipal): CaslPermission[] {
     if (principal.role === 'ADMIN') {
-      return KodaCaslAbilityFactory.ADMIN_MANAGEABLE_RESOURCES.map(
-        (subject) => ({ action: CaslPermissionAction.MANAGE, subject }),
-      );
+      return [
+        ...KodaCaslAbilityFactory.ADMIN_MANAGEABLE_RESOURCES.map(
+          (subject) => ({ action: CaslPermissionAction.MANAGE, subject }),
+        ),
+        { action: KodaAction.IMPORT as CaslPermissionAction, subject: 'CodeIntel' },
+      ];
     }
     return [
       ...this.readPermissions(),
@@ -64,6 +67,7 @@ export class KodaCaslAbilityFactory extends BaseCaslAbilityFactory {
       { action: CaslPermissionAction.CREATE, subject: 'Ticket' },
       // Preserve pre-CASL behavior (commit 4ceb85e: "allow agents to soft-delete tickets")
       { action: CaslPermissionAction.DELETE, subject: 'Ticket' },
+      { action: KodaAction.IMPORT as CaslPermissionAction, subject: 'CodeIntel' },
       ...this.agentRoleDerivedPermissions(principal),
     ];
   }

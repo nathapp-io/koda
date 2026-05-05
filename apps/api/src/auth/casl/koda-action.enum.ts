@@ -7,6 +7,7 @@ export const KodaAction = {
   ASSIGN: 'assign',
   TRANSITION: 'transition',
   ROTATE_KEY: 'rotateKey',
+  IMPORT: 'import',
 } as const;
 export type KodaAction = (typeof KodaAction)[keyof typeof KodaAction];
 
@@ -18,4 +19,5 @@ export type KodaSubject =
   | 'Agent'
   | 'AgentScope'
   | 'AdminScope'
+  | 'CodeIntel'
   | 'all';
