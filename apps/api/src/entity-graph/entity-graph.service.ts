@@ -148,8 +148,8 @@ export class EntityGraphService {
     }> = [{ entityId, path: [startNode], currentDepth: 0 }];
 
     while (queue.length > 0) {
-      const entry = queue.shift()!;
-      if (entry.currentDepth >= depth) continue;
+      const entry = queue.shift();
+      if (!entry || entry.currentDepth >= depth) continue;
 
       const links = await this.entityStore.findLinksBySource(projectId, entry.entityId);
 
@@ -212,7 +212,8 @@ export class EntityGraphService {
     const queue: string[] = [incidentNode.entityId];
 
     while (queue.length > 0) {
-      const currentId = queue.shift()!;
+      const currentId = queue.shift();
+      if (!currentId) continue;
 
       const links = await this.entityStore.findLinksBySource(projectId, currentId);
 
