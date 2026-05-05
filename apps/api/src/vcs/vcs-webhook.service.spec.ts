@@ -235,6 +235,40 @@ describe('VcsWebhookService', () => {
       expect(mockEnqueue).toHaveBeenCalledTimes(1); // still 1
     });
 
+    it('should NOT enqueue when DB dedup check throws — must not create duplicates when DB is unavailable', async () => {
+      const connection = createMockConnection();
+      const payload = createPushPayload({
+        commits: [
+          { id: 'commit-db-down', message: 'm', timestamp: 't', author: { name: 'n', email: 'e' }, added: [], removed: [], modified: [] },
+        ],
+      });
+
+      // Simulate DB dedup check failure — outboxEvent.findMany throws
+      const outboxFindMany = (service as unknown as { prisma: { client: { outboxEvent: { findMany: jest.Mock } } } }).prisma.client.outboxEvent.findMany;
+      outboxFindMany.mockRejectedValueOnce(new Error('DB connection timeout'));
+
+      // SPEC: when DB dedup check fails, the handler must NOT fall through to enqueue.
+      // If we cannot verify there is no duplicate, we must fail the request so the
+      // provider retries later when the DB is available.
+      // BUG: catch block at line 661-663 logs a warning but does NOT break or continue.
+      // Execution falls through to line 666 where it enqueues the event, creating duplicates.
+      let thrownError: unknown = null;
+      try {
+        await service.handleWebhook(connection, 'push', payload);
+      } catch (e) {
+        thrownError = e;
+      }
+
+      // The handler must NOT silently enqueue when the dedup check failed.
+      // Either throw an error (so provider retries) or return failure.
+      expect(mockEnqueue).not.toHaveBeenCalled();
+      if (!thrownError) {
+        // If no error was thrown, we expect the result to indicate failure
+        // (non-2xx response so provider retries)
+        fail('Expected HttpException or failure result when DB dedup check throws, but got neither');
+      }
+    });
+
     // Bug 1: recentCommitHashes is an unbounded in-memory Map that is never cleaned up.
     // Entries older than the 5-minute dedup window should be evicted so the Map
     // does not grow indefinitely on long-running server instances.
@@ -324,6 +358,59 @@ describe('VcsWebhookService — cross-instance deduplication', () => {
     // The deduplication check relies on shared DB state (outboxEvent table), not local memory.
     expect(enqueue2).not.toHaveBeenCalled();
     expect(result2.ignored).toBe(true);
+  });
+
+  it('should not silently skip re-enqueue when previous event was consumed and a new push arrives within the dedup window', async () => {
+    // Shared DB state simulating the outboxEvent table
+    const sharedEvents: SharedEnqueuedEvent[] = [];
+
+    const enqueueWithTracking = jest.fn<Promise<OutboxEventDomain>, [OutboxEventInput]>()
+      .mockImplementation((event: OutboxEventInput) => {
+        sharedEvents.push({
+          eventId: event.eventId,
+          eventType: event.eventType,
+          projectId: event.projectId,
+          createdAt: Date.now(),
+        });
+        return Promise.resolve(resolveOutboxEvent());
+      });
+
+    const module = await buildTestingModule(enqueueWithTracking, sharedEvents);
+    const svc = module.get<VcsWebhookService>(VcsWebhookService);
+
+    const connection = createMockConnection();
+    const commitHash = 'commit-retry-after-consume';
+    const payload = createPushPayload({
+      commits: [
+        { id: commitHash, message: 'm', timestamp: 't', author: { name: 'n', email: 'e' }, added: [], removed: [], modified: [] },
+      ],
+    });
+
+    // First push — enqueues successfully, in-memory map gets the entry
+    const result1 = await svc.handleWebhook(connection, 'push', payload);
+    expect(result1.success).toBe(true);
+    expect(enqueueWithTracking).toHaveBeenCalledTimes(1);
+    expect(enqueueWithTracking).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: 'code_commit', eventId: commitHash }),
+    );
+
+    // Simulate: outbox processor consumes the event.
+    // The DB row status changes to 'completed' — no longer 'pending' or 'processing'.
+    // Clear sharedEvents so the DB dedup mock returns empty (no pending events in DB).
+    sharedEvents.length = 0;
+
+    // Second push of the SAME commitHash within 5-minute dedup window.
+    // SPEC: Since the previous event was consumed (no longer pending/processing),
+    // this should create a NEW outbox event. The DB dedup check would return
+    // empty, so enqueue should proceed normally.
+    // BUG: The in-memory fast-path at line 638-641 finds the stale Map entry
+    // (it doesn't know the event was consumed) and skips without ever reaching
+    // the DB dedup check. `enqueue` is never called on this second push,
+    // silently dropping a legitimate re-enqueue.
+    const result2 = await svc.handleWebhook(connection, 'push', payload);
+
+    expect(enqueueWithTracking).toHaveBeenCalledTimes(2);
+    expect(result2.ignored).toBe(false);
   });
 
   it('should allow re-enqueue by a second instance after the first instance dedup window expires', async () => {
