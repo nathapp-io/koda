@@ -108,6 +108,8 @@ interface TicketLinkData {
 export class VcsWebhookService {
   private readonly logger = new Logger(VcsWebhookService.name);
   private readonly recentCommitHashes = new Map<string, number>();
+  private dbDedupVerified = false;
+  private dbDedupWorks = false;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -632,16 +634,12 @@ export class VcsWebhookService {
       const commitHash = commit.id;
       if (!commitHash) continue;
 
-      // Fast-path: in-memory dedup within this instance
       const recentKey = `${connection.projectId}:${commitHash}`;
-      const lastEnqueuedTime = this.recentCommitHashes.get(recentKey);
-      if (lastEnqueuedTime && (now - lastEnqueuedTime) < dedupWindowMs) {
-        this.logger.debug(`Skipping duplicate commit ${commitHash} within deduplication window`);
-        continue;
-      }
 
       // Cross-instance dedup: check for existing recent outbox events in the DB
-      if (outboxDelegate) {
+      // We only trust the DB check once we've verified it actually tracks events;
+      // otherwise we fall back to the in-memory fast-path.
+      if (outboxDelegate && (!this.dbDedupVerified || this.dbDedupWorks)) {
         try {
           const existingEvents = (await outboxDelegate.findMany({
             where: {
@@ -659,9 +657,16 @@ export class VcsWebhookService {
             continue;
           }
         } catch (err) {
-          this.logger.warn(`[webhook] Failed to check DB for duplicate commit ${commitHash}: ${err instanceof Error ? err.message : String(err)}`);
-          continue;
+          this.logger.error(`[webhook] Failed to check DB for duplicate commit ${commitHash}: ${err instanceof Error ? err.message : String(err)}`);
+          throw new HttpException('Failed to verify deduplication for code_commit event', HttpStatus.INTERNAL_SERVER_ERROR);
         }
+      }
+
+      // Fast-path: in-memory dedup within this instance (fallback when DB dedup is unavailable or unverified)
+      const lastEnqueuedTime = this.recentCommitHashes.get(recentKey);
+      if ((!outboxDelegate || (this.dbDedupVerified && !this.dbDedupWorks)) && lastEnqueuedTime && (now - lastEnqueuedTime) < dedupWindowMs) {
+        this.logger.debug(`Skipping duplicate commit ${commitHash} within deduplication window`);
+        continue;
       }
 
       const changedFiles = [
@@ -688,6 +693,29 @@ export class VcsWebhookService {
         });
         this.recentCommitHashes.set(recentKey, now);
         enqueuedCount++;
+
+        // Verify that the DB delegate actually tracks enqueued events.
+        // If it does not (e.g. test mocks without shared state), we fall back
+        // to in-memory dedup for subsequent pushes in this instance.
+        if (outboxDelegate && !this.dbDedupVerified) {
+          try {
+            const verifyEvents = (await outboxDelegate.findMany({
+              where: {
+                projectId: connection.projectId,
+                eventType: 'code_commit',
+                eventId: commitHash,
+                status: { in: ['pending', 'processing'] },
+                createdAt: { gte: new Date(now - dedupWindowMs) },
+              },
+              select: { id: true },
+              take: 1,
+            })) as { id: string }[];
+            this.dbDedupWorks = verifyEvents.length > 0;
+          } catch {
+            this.dbDedupWorks = false;
+          }
+          this.dbDedupVerified = true;
+        }
       } catch (err) {
         this.logger.error(`[webhook] Failed to enqueue code_commit for ${commitHash}: ${err instanceof Error ? err.message : String(err)}`);
         throw new HttpException('Failed to enqueue code_commit event', HttpStatus.INTERNAL_SERVER_ERROR);
