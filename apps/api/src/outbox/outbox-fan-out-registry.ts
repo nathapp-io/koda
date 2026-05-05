@@ -4,6 +4,7 @@ import { PrismaMemoryItemRepository } from '../memory/prisma-memory-item.reposit
 import { MemoryItemInput } from '../memory/memory-item-repository';
 import { MemoryKind } from '../common/enums';
 import { AstIndexService } from '../code-intel/ast-index.service';
+import { EntityGraphService } from '../entity-graph/entity-graph.service';
 
 export interface OutboxHandler {
   eventType: string;
@@ -16,13 +17,6 @@ export const DEFAULT_HANDLERS: OutboxHandler[] = [
     handler: async (payload: unknown) => {
       const p = payload as { sourceId: string; content: string; metadata: Record<string, unknown> };
       new Logger('OutboxFanOutRegistry').debug(`document_indexed: ${p.sourceId}`);
-    },
-  },
-  {
-    eventType: 'graphify_import',
-    handler: async (payload: unknown) => {
-      const p = payload as { projectId: string; nodeCount: number; linkCount: number };
-      new Logger('OutboxFanOutRegistry').debug(`graphify_import: ${p.projectId}`);
     },
   },
 ];
@@ -40,6 +34,7 @@ export class OutboxFanOutRegistry implements OnModuleInit {
     @Optional() extractionService?: ExtractionService,
     @Optional() memoryRepository?: PrismaMemoryItemRepository,
     @Optional() astIndexService?: AstIndexService,
+    @Optional() private readonly entityGraphService?: EntityGraphService,
   ) {
     this.extractionService = extractionService ?? null;
     this.memoryRepository = memoryRepository ?? null;
@@ -52,13 +47,20 @@ export class OutboxFanOutRegistry implements OnModuleInit {
       this.register('ticket_event', this.handleTicketEvent.bind(this));
       this.register('agent_event', this.handleAgentEvent.bind(this));
     }
+    if (this.entityGraphService) {
+      this.register('ticket_event', this.handleTicketEventForEntityGraph.bind(this));
+      this.register('graphify_import', this.handleGraphifyImportForEntityGraph.bind(this));
+    }
     if (this.astIndexService) {
       this.register('code_commit', this.handleCodeCommit.bind(this));
     }
   }
 
   onModuleInit(): void {
-    this.logger.log(`Registered ${DEFAULT_HANDLERS.length + (this.extractionService ? 2 : 0) + (this.astIndexService ? 1 : 0)} handlers`);
+    const extractionHandlers = this.extractionService && this.memoryRepository ? 2 : 0;
+    const entityGraphHandlers = this.entityGraphService ? 2 : 0;
+    const astHandlers = this.astIndexService ? 1 : 0;
+    this.logger.log(`Registered ${DEFAULT_HANDLERS.length + extractionHandlers + entityGraphHandlers + astHandlers} handlers`);
   }
 
   private async handleCodeCommit(payload: unknown): Promise<void> {
@@ -120,6 +122,57 @@ export class OutboxFanOutRegistry implements OnModuleInit {
       timestamp: new Date(event.timestamp),
     });
     await this.persistExtractedItems(items);
+  }
+
+  private async handleTicketEventForEntityGraph(payload: unknown): Promise<void> {
+    if (!this.entityGraphService) return;
+    const p = payload as {
+      type: string;
+      id: string;
+      ticketId?: string;
+      projectId: string;
+      actorId: string;
+      action: string;
+      data: Record<string, unknown>;
+      timestamp: string;
+    };
+    await this.entityGraphService.onTicketEvent({
+      type: 'ticket_event',
+      id: p.id,
+      ticketId: p.ticketId,
+      projectId: p.projectId,
+      actorId: p.actorId,
+      action: p.action,
+      data: p.data ?? {},
+      timestamp: new Date(p.timestamp),
+    });
+  }
+
+  private async handleGraphifyImportForEntityGraph(payload: unknown): Promise<void> {
+    if (!this.entityGraphService) return;
+    const p = payload as {
+      projectId: string;
+      nodeCount?: number;
+      linkCount?: number;
+      nodes?: Array<{ nodeId: string; type: string; label: string; tags?: string[]; metadata?: Record<string, unknown> }>;
+      links?: Array<{ sourceId: string; targetId: string; relation: string }>;
+    };
+
+    const nodes = (p.nodes ?? []).map((n) => ({
+      nodeId: n.nodeId ?? n.nodeId,
+      type: n.type,
+      label: n.label,
+      tags: n.tags,
+      metadata: n.metadata,
+    }));
+
+    const links = (p.links ?? []).map((l) => ({
+      sourceId: l.sourceId,
+      targetId: l.targetId,
+      relation: l.relation,
+    }));
+
+    await this.entityGraphService.onGraphifyImport(p.projectId, nodes, links);
   }
 
   register(eventType: string, handler: (payload: unknown) => void | Promise<void>): void {

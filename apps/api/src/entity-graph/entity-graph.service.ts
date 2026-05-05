@@ -1,23 +1,141 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import {
   EntityRecord,
   EntityPath,
   ImpactAnalysis,
   TicketEvent,
   GraphifyNodeDto,
+  GraphifyLinkDto,
   IEntityStore,
   EntityNodeType,
   EntityLinkRelation,
 } from './dto/entity-graph.types';
+import { ENTITY_GRAPH_STORE } from './entity-graph.tokens';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaClient } from '@prisma/client';
 
 @Injectable()
 export class EntityGraphService {
   private readonly logger = new Logger(EntityGraphService.name);
 
-  constructor(private readonly entityStore: IEntityStore) {}
+  constructor(
+    @Inject(ENTITY_GRAPH_STORE) private readonly entityStore: IEntityStore,
+    @Optional() private readonly prisma?: PrismaService<PrismaClient>,
+  ) {}
 
   async rebuildGraph(projectId: string): Promise<void> {
     this.logger.debug(`rebuildGraph called with projectId=${projectId}`);
+
+    if (!this.prisma) {
+      this.logger.warn('rebuildGraph requires PrismaService; skipping');
+      return;
+    }
+
+    const tickets = await this.prisma.client.ticket.findMany({
+      where: { projectId, deletedAt: null },
+      include: { labels: { include: { label: true } }, links: true },
+    });
+
+    for (const ticket of tickets) {
+      const labelNames = ticket.labels.map((tl) => tl.label.name);
+
+      await this.entityStore.upsertNode(
+        projectId,
+        ticket.id,
+        EntityNodeType.TICKET,
+        ticket.title,
+        {
+          status: ticket.status,
+          priority: ticket.priority,
+          type: ticket.type,
+          number: ticket.number,
+          gitRefFile: ticket.gitRefFile ?? undefined,
+          gitRefVersion: ticket.gitRefVersion ?? undefined,
+          gitRefLine: ticket.gitRefLine ?? undefined,
+          labels: labelNames,
+        },
+      );
+
+      if (ticket.assignedToUserId) {
+        const ownerEntityId = `owner:${ticket.assignedToUserId}`;
+        await this.entityStore.upsertNode(
+          projectId,
+          ownerEntityId,
+          EntityNodeType.OWNER,
+          `User ${ticket.assignedToUserId}`,
+          { userId: ticket.assignedToUserId },
+        );
+        await this.entityStore.upsertLink(
+          projectId,
+          ticket.id,
+          ownerEntityId,
+          EntityLinkRelation.TICKET_TO_OWNER,
+          {},
+        );
+      }
+
+      if (ticket.assignedToAgentId) {
+        const ownerEntityId = `owner:${ticket.assignedToAgentId}`;
+        await this.entityStore.upsertNode(
+          projectId,
+          ownerEntityId,
+          EntityNodeType.OWNER,
+          `Agent ${ticket.assignedToAgentId}`,
+          { agentId: ticket.assignedToAgentId },
+        );
+        await this.entityStore.upsertLink(
+          projectId,
+          ticket.id,
+          ownerEntityId,
+          EntityLinkRelation.TICKET_TO_OWNER,
+          {},
+        );
+      }
+    }
+
+    const graphNodes = await this.prisma.client.graphNode.findMany({
+      where: { projectId, type: 'code_module' },
+    });
+
+    for (const gn of graphNodes) {
+      const entityId = `service:${gn.nodeId}`;
+      await this.entityStore.upsertNode(
+        projectId,
+        entityId,
+        EntityNodeType.SERVICE,
+        gn.label,
+        {
+          nodeId: gn.nodeId,
+          type: gn.type,
+          sourceFile: gn.sourceFile ?? undefined,
+          community: gn.community ?? undefined,
+        },
+      );
+    }
+
+    const graphLinks = await this.prisma.client.graphLink.findMany({
+      where: { projectId, relation: 'depends_on' },
+    });
+
+    for (const gl of graphLinks) {
+      const sourceEntityId = `service:${gl.sourceId}`;
+      const targetEntityId = `service:${gl.targetId}`;
+
+      const sourceExists = await this.entityStore.findNodeByEntityId(projectId, sourceEntityId);
+      const targetExists = await this.entityStore.findNodeByEntityId(projectId, targetEntityId);
+
+      if (sourceExists && targetExists) {
+        await this.entityStore.upsertLink(
+          projectId,
+          sourceEntityId,
+          targetEntityId,
+          EntityLinkRelation.SERVICE_TO_SERVICE,
+          { relation: gl.relation },
+        );
+      }
+    }
+
+    this.logger.log(`rebuildGraph completed for projectId=${projectId}: ${tickets.length} tickets, ${graphNodes.length} services, ${graphLinks.length} graph links`);
   }
 
   async onTicketEvent(event: TicketEvent): Promise<void> {
@@ -100,9 +218,9 @@ export class EntityGraphService {
     }
   }
 
-  async onGraphifyImport(projectId: string, nodes: GraphifyNodeDto[]): Promise<void> {
+  async onGraphifyImport(projectId: string, nodes: GraphifyNodeDto[], links?: GraphifyLinkDto[]): Promise<void> {
     this.logger.debug(
-      `onGraphifyImport called with projectId=${projectId}, nodeCount=${nodes.length}`,
+      `onGraphifyImport called with projectId=${projectId}, nodeCount=${nodes.length}, linkCount=${links?.length ?? 0}`,
     );
 
     for (const node of nodes) {
@@ -126,6 +244,53 @@ export class EntityGraphService {
         node.label,
         metadata,
       );
+    }
+
+    if (links && links.length > 0) {
+      for (const link of links) {
+        if (link.relation !== 'depends_on') continue;
+
+        const sourceEntityId = `service:${link.sourceId}`;
+        const targetEntityId = `service:${link.targetId}`;
+
+        await this.entityStore.upsertLink(
+          projectId,
+          sourceEntityId,
+          targetEntityId,
+          EntityLinkRelation.SERVICE_TO_SERVICE,
+          { relation: link.relation },
+        );
+      }
+    }
+
+    if (!links || links.length === 0) {
+      await this.inferServiceLinksFromDb(projectId);
+    }
+  }
+
+  private async inferServiceLinksFromDb(projectId: string): Promise<void> {
+    if (!this.prisma) return;
+
+    const graphLinks = await this.prisma.client.graphLink.findMany({
+      where: { projectId, relation: 'depends_on' },
+    });
+
+    for (const gl of graphLinks) {
+      const sourceEntityId = `service:${gl.sourceId}`;
+      const targetEntityId = `service:${gl.targetId}`;
+
+      const sourceExists = await this.entityStore.findNodeByEntityId(projectId, sourceEntityId);
+      const targetExists = await this.entityStore.findNodeByEntityId(projectId, targetEntityId);
+
+      if (sourceExists && targetExists) {
+        await this.entityStore.upsertLink(
+          projectId,
+          sourceEntityId,
+          targetEntityId,
+          EntityLinkRelation.SERVICE_TO_SERVICE,
+          { relation: gl.relation },
+        );
+      }
     }
   }
 
