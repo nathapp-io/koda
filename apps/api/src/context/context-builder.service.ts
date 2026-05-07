@@ -1,6 +1,6 @@
 import { performance } from 'perf_hooks';
 import { Injectable, Logger } from '@nestjs/common';
-import { NotFoundAppException, InternalAppException } from '@nathapp/nestjs-common';
+import { AppException, NotFoundAppException, InternalAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
 import { CanonicalStateService, CanonicalTicket, CanonicalEvent, CanonicalDecision } from '../memory/canonical-state.service';
@@ -112,7 +112,7 @@ export class ContextBuilderService {
         this.fetchDocuments(query),
       ]);
     } catch (err) {
-      if (err instanceof NotFoundAppException) {
+      if (err instanceof AppException) {
         throw err;
       }
       throw new InternalAppException({}, 'context');
