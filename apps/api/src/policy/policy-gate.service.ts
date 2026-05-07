@@ -185,11 +185,11 @@ export class PolicyGateService {
 
   async runAllGates(projectId: string): Promise<PolicyGateResult> {
     const gates = await Promise.all([
-      this.runIsolationGate(),
-      this.runProvenanceGate(),
+      this.runIsolationGate(projectId),
+      this.runProvenanceGate(projectId),
       this.runTruthConsistencyGate(projectId),
       this.runWriteGate(projectId),
-      this.runGraphifyEnabledGate(),
+      this.runGraphifyEnabledGate(projectId),
       this.runTokenBudgetGate(projectId),
     ]);
 
@@ -207,14 +207,14 @@ export class PolicyGateService {
     };
   }
 
-  private async runIsolationGate(): Promise<GateResult> {
+  private async runIsolationGate(projectId: string): Promise<GateResult> {
     try {
       const violations: string[] = [];
 
-      // AC-1: 10 queries scoped to fixture project-A must return 0 cross-project results
+      // AC-1: 10 queries scoped to the target project must return 0 cross-project results
       for (let i = 0; i < 10; i++) {
-        const results = await this.queryProjectScoped(FIXTURE_PROJECT_A, `isolation-query-${i}`);
-        const crossProjectResults = results.filter((r) => r.projectId && r.projectId !== FIXTURE_PROJECT_A);
+        const results = await this.queryProjectScoped(projectId, `isolation-query-${i}`);
+        const crossProjectResults = results.filter((r) => r.projectId && r.projectId !== projectId);
         if (crossProjectResults.length > 0) {
           violations.push(`Query ${i}: ${crossProjectResults.length} cross-project result(s) leaked into project-A scope`);
         }
@@ -223,7 +223,7 @@ export class PolicyGateService {
       // AC-2: Seed project-A and project-B; query project-B-specific terms scoped to project-A;
       // assert no project-B data is returned (fixture store scopes results by projectId)
       for (let i = 0; i < 10; i++) {
-        const results = await this.queryProjectScoped(FIXTURE_PROJECT_A, `fixture-b-${i}`);
+        const results = await this.queryProjectScoped(projectId, `fixture-b-${i}`);
         const projectBResults = results.filter((r) => r.projectId === FIXTURE_PROJECT_B);
         if (projectBResults.length > 0) {
           violations.push(`project-B data leaked into project-A scope on query ${i}`);
@@ -252,14 +252,14 @@ export class PolicyGateService {
     }
   }
 
-  private async runProvenanceGate(): Promise<GateResult> {
+  private async runProvenanceGate(projectId: string): Promise<GateResult> {
     try {
       // Run 20 fixture search queries (with known matching results) and verify every
       // non-empty response has provenance.sources.length > 0
       const violationsWithoutProvenance: number[] = [];
 
       for (let i = 0; i < 20; i++) {
-        const results = await this.searchFixture(FIXTURE_PROJECT_A, `provenance-fixture-${i}`);
+        const results = await this.searchFixture(projectId, `provenance-fixture-${i}`);
         const nonEmptyWithoutProvenance = results.filter(
           (r) => !r.provenance || !Array.isArray(r.provenance.sources) || r.provenance.sources.length === 0,
         );
@@ -388,16 +388,16 @@ export class PolicyGateService {
     }
   }
 
-  private async runGraphifyEnabledGate(): Promise<GateResult> {
+  private async runGraphifyEnabledGate(projectId: string): Promise<GateResult> {
     try {
       // AC-6: Run 10 queries against a fixture project with graphifyEnabled=false
       // and assert zero results have source='code'
       const codeSourceLeaks: number[] = [];
 
-      const graphifyEnabled = await this.getProjectGraphifyEnabled(FIXTURE_GRAPHIFY_OFF);
+      const graphifyEnabled = await this.getProjectGraphifyEnabled(projectId);
 
       for (let i = 0; i < 10; i++) {
-        const results = await this.queryProjectScoped(FIXTURE_GRAPHIFY_OFF, `graphify-query-${i}`);
+        const results = await this.queryProjectScoped(projectId, `graphify-query-${i}`);
         const codeResults = results.filter((r) => r.source === 'code');
         if (!graphifyEnabled && codeResults.length > 0) {
           codeSourceLeaks.push(i);
