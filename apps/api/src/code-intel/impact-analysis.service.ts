@@ -110,8 +110,57 @@ export class ImpactAnalysisService {
     symbols: SymbolData[],
   ): Promise<EntityRecord[]> {
     if (symbols.length === 0) return [];
+    if (!this.prisma) return [];
 
     const serviceSet = new Map<string, EntityRecord>();
+    const changedFiles = [...new Set(symbols.map((s) => s.file))];
+
+    const graphNodes = await this.prisma.client.graphNode.findMany({
+      where: {
+        projectId,
+        type: 'code_module',
+      },
+    });
+
+    const matchedGraphNodes = graphNodes.filter((node) => {
+      if (!node.sourceFile) return false;
+      return changedFiles.some(
+        (file) => file === node.sourceFile || file.includes(node.sourceFile) || node.sourceFile?.includes(file),
+      );
+    });
+
+    if (matchedGraphNodes.length > 0) {
+      const serviceIds = matchedGraphNodes.map((node) => `service:${node.nodeId}`);
+      const serviceRows = await this.prisma.client.entityNode.findMany({
+        where: {
+          projectId,
+          entityId: { in: serviceIds },
+        },
+      });
+      const serviceRowsById = new Map(serviceRows.map((row) => [row.entityId, row]));
+
+      for (const node of matchedGraphNodes) {
+        const entityId = `service:${node.nodeId}`;
+        const row = serviceRowsById.get(entityId);
+        serviceSet.set(entityId, row
+          ? {
+              entityId: row.entityId,
+              entityType: row.entityType as EntityNodeType,
+              label: row.label,
+              metadata: this.parseMetadata(row.metadata),
+            }
+          : {
+              entityId,
+              entityType: EntityNodeType.SERVICE,
+              label: node.label,
+              metadata: {
+                nodeId: node.nodeId,
+                sourceFile: node.sourceFile,
+                community: node.community ?? undefined,
+              },
+            });
+      }
+    }
 
     for (const symbol of symbols) {
       try {
@@ -140,8 +189,37 @@ export class ImpactAnalysisService {
     services: EntityRecord[],
   ): Promise<EntityRecord[]> {
     if (services.length === 0) return [];
+    if (!this.prisma) return [];
 
     const ticketSet = new Map<string, EntityRecord>();
+    const serviceIds = services.map((service) => service.entityId);
+
+    const ticketLinks = await this.prisma.client.entityLink.findMany({
+      where: {
+        projectId,
+        targetId: { in: serviceIds },
+        relation: 'ticket_to_service',
+      },
+    });
+
+    if (ticketLinks.length > 0) {
+      const ticketIds = [...new Set(ticketLinks.map((link) => link.sourceId))];
+      const ticketRows = await this.prisma.client.entityNode.findMany({
+        where: {
+          projectId,
+          entityId: { in: ticketIds },
+          entityType: EntityNodeType.TICKET,
+        },
+      });
+      for (const row of ticketRows) {
+        ticketSet.set(row.entityId, {
+          entityId: row.entityId,
+          entityType: row.entityType as EntityNodeType,
+          label: row.label,
+          metadata: this.parseMetadata(row.metadata),
+        });
+      }
+    }
 
     for (const service of services) {
       try {
@@ -190,13 +268,13 @@ export class ImpactAnalysisService {
         this.prisma.client.entityNode.count({
           where: {
             projectId,
-            entityType: { in: ['SERVICE', 'CODE_MODULE'] },
+            entityType: { in: [EntityNodeType.SERVICE, EntityNodeType.CODE_MODULE] },
           },
         }),
         this.prisma.client.entityNode.count({
           where: {
             projectId,
-            entityType: 'TICKET',
+            entityType: EntityNodeType.TICKET,
           },
         }),
       ]);
@@ -236,5 +314,13 @@ export class ImpactAnalysisService {
     tickets.forEach((t) => sources.add(t.label || t.entityId));
 
     return Array.from(sources);
+  }
+
+  private parseMetadata(metadata: string): Record<string, unknown> {
+    try {
+      return JSON.parse(metadata) as Record<string, unknown>;
+    } catch {
+      return {};
+    }
   }
 }

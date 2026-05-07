@@ -57,6 +57,10 @@ export class ProjectsController {
       return;
     }
 
+    if (principal.role === 'ADMIN') {
+      return;
+    }
+
     const membership = await this.db.projectMember.findUnique({
       where: {
         projectId_userId: {
@@ -195,7 +199,7 @@ export class ProjectsController {
     @Query('repoId') repoId: string,
     @Query('commitHash') commitHash: string,
     @Query('changedFiles') changedFilesStr: string,
-    @Principal() _principal: KodaPrincipal,
+    @Principal() principal: KodaPrincipal,
     @Query('ticketId') ticketId?: string,
   ) {
     if (!repoId || !commitHash || !changedFilesStr) {
@@ -203,6 +207,7 @@ export class ProjectsController {
     }
 
     const project = await this.projectsService.findBySlug(slug);
+    await this.checkProjectMembership(project.id, principal);
 
     const changedFiles = changedFilesStr.split(',').map((f) => f.trim());
 

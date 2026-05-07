@@ -111,7 +111,7 @@ class InMemoryTable {
   async add(records: LanceRecord[]): Promise<void> { this.records = [...this.records, ...records]; }
   async countRows(): Promise<number> { return this.records.length; }
   async delete(filter: string): Promise<void> {
-    const sourceIdFilter = /^source_id\s*=\s*'([a-zA-Z0-9_-]+)'$/.exec(filter);
+    const sourceIdFilter = /^source_id\s*=\s*'([^']+)'$/.exec(filter);
     if (sourceIdFilter) {
       const sourceId = sourceIdFilter[1];
       this.records = this.records.filter((record) => record.source_id !== sourceId);
@@ -620,8 +620,16 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
   async deleteBySource(projectId: string, sourceId: string): Promise<void> {
     await this.validateProjectId(projectId);
 
-    // Validate sourceId to prevent SQL injection (only allow safe characters)
-    if (!/^[a-zA-Z0-9_-]+$/.test(sourceId)) {
+    // Graph/code source IDs are often path-like, so allow punctuation used in
+    // repo paths while rejecting quote/control characters used to break filters.
+    if (
+      !sourceId ||
+      sourceId.includes("'") ||
+      [...sourceId].some((char) => {
+        const code = char.charCodeAt(0);
+        return code < 32 || code === 127;
+      })
+    ) {
       throw new ValidationAppException();
     }
     const table = await this.getOrCreateTable(projectId);

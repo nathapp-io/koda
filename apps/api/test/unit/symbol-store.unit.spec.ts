@@ -131,19 +131,35 @@ describe('SymbolStore', () => {
   describe('AC-3: findCallers returns symbols with symbolId in callers list', () => {
     it('should find all symbols that call the given symbol', async () => {
       const projectId = 'proj-123';
-      const symbolId = 'authenticate';
+      const symbolId = 'repo:src/auth.ts::authenticate';
       const callers = [
-        { symbolId: 'login', file: 'src/login.ts', name: 'login', kind: 'function' },
-        { symbolId: 'verify', file: 'src/verify.ts', name: 'verify', kind: 'method' },
+        { symbolId: 'repo:src/login.ts::login', file: 'src/login.ts', name: 'login', kind: 'function' },
+        { symbolId: 'repo:src/verify.ts::verify', file: 'src/verify.ts', name: 'verify', kind: 'method' },
       ];
 
-      mockPrismaClient.$queryRawUnsafe.mockResolvedValue(callers);
+      mockPrismaClient.symbol.findUnique.mockResolvedValue({
+        id: symbolId,
+        symbolId,
+        projectId,
+        repoId: 'repo',
+        commitHash: 'abc',
+        name: 'authenticate',
+        kind: 'function',
+        file: 'src/auth.ts',
+        startLine: 1,
+        endLine: 1,
+        signature: undefined,
+        callers: callers.map((c) => c.symbolId),
+        callees: [],
+        docComment: undefined,
+      });
+      mockPrismaClient.symbol.findMany.mockResolvedValue(callers);
 
       const result = await store.findCallers(projectId, symbolId);
 
       expect(result).toHaveLength(2);
-      expect(result[0].symbolId).toBe('login');
-      expect(result[1].symbolId).toBe('verify');
+      expect(result[0].symbolId).toBe('repo:src/login.ts::login');
+      expect(result[1].symbolId).toBe('repo:src/verify.ts::verify');
     });
   });
 
@@ -241,21 +257,41 @@ describe('SymbolStore', () => {
     });
   });
 
-  describe('BUG-3: findCallers should use filtered DB query instead of loading all project symbols', () => {
-    it('should query DB with callers filter rather than loading all symbols and filtering in memory', async () => {
+  describe('BUG-3: findCallers should read the target symbol caller list directly', () => {
+    it('should load only symbols referenced by the target symbol caller list', async () => {
       const projectId = 'proj-bug3';
-      const symbolId = 'targetSymbol';
+      const symbolId = 'repo:src/target.ts::targetSymbol';
+      const callerId = 'repo:src/caller.ts::callerSymbol';
 
-      mockPrismaClient.$queryRawUnsafe.mockResolvedValue([]);
+      mockPrismaClient.symbol.findUnique.mockResolvedValue({
+        id: symbolId,
+        symbolId,
+        projectId,
+        repoId: 'repo',
+        commitHash: 'abc',
+        name: 'targetSymbol',
+        kind: 'function',
+        file: 'src/target.ts',
+        startLine: 1,
+        endLine: 1,
+        signature: undefined,
+        callers: [callerId],
+        callees: [],
+        docComment: undefined,
+      });
+      mockPrismaClient.symbol.findMany.mockResolvedValue([
+        { symbolId: callerId, file: 'src/caller.ts', name: 'callerSymbol', kind: 'function' },
+      ]);
 
       await store.findCallers(projectId, symbolId);
 
-      expect(mockPrismaClient.$queryRawUnsafe).toHaveBeenCalledTimes(1);
-      expect(mockPrismaClient.symbol.findMany).not.toHaveBeenCalled();
-      const callArgs = mockPrismaClient.$queryRawUnsafe.mock.calls[0];
-      expect(callArgs[0]).toContain('json_each');
-      expect(callArgs[1]).toBe(projectId);
-      expect(callArgs[2]).toBe(symbolId);
+      expect(mockPrismaClient.$queryRawUnsafe).not.toHaveBeenCalled();
+      expect(mockPrismaClient.symbol.findMany).toHaveBeenCalledWith({
+        where: {
+          projectId,
+          symbolId: { in: [callerId] },
+        },
+      });
     });
   });
 
@@ -318,9 +354,10 @@ describe('SymbolStore', () => {
 
       mockPrismaClient.symbol.findUnique.mockResolvedValue(mainSymbol);
       mockPrismaClient.symbol.findMany.mockImplementation((args: Record<string, unknown>) => {
-        const where = args.where as { symbolId?: { in: string[] } };
-        const calleeIds = where?.symbolId?.in || [];
-        const matched = calleeSymbols.filter((s) => calleeIds.includes(s.symbolId));
+        const where = args.where as { OR?: Array<{ symbolId?: { in: string[] }; name?: { in: string[] } }> };
+        const symbolIds = where.OR?.flatMap((clause) => clause.symbolId?.in ?? []) ?? [];
+        const names = where.OR?.flatMap((clause) => clause.name?.in ?? []) ?? [];
+        const matched = calleeSymbols.filter((s) => symbolIds.includes(s.symbolId) || names.includes(s.name));
         return Promise.resolve(matched);
       });
 

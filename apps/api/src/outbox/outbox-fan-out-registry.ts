@@ -76,11 +76,14 @@ export class OutboxFanOutRegistry implements OnModuleInit {
     const changedFiles = (p.changedFiles as SourceFile[] | undefined)
       ?? (p.files as SourceFile[] | undefined);
 
+    if (this.codeCommitHandler) {
+      this.logger.debug(`code_commit: delegating to CodeCommitOutboxHandler`);
+      await this.codeCommitHandler.process(p);
+      return;
+    }
+
     if (webhookOnly) {
-      if (this.codeCommitHandler) {
-        this.logger.debug(`code_commit: webhook-only, delegating to CodeCommitOutboxHandler`);
-        await this.codeCommitHandler.process(p);
-      }
+      this.logger.warn('code_commit: webhook payload requires CodeCommitOutboxHandler, but it is not registered');
       return;
     }
 

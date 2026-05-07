@@ -82,11 +82,12 @@ export class AstIndexService {
 
     await this.txManager.run(async () => {
       for (const sym of allExtractedSymbols) {
-        const fullId = `${repoId}:${sym.file}::${sym.symbolId}`;
+        const localSymbolId = sym.symbolId;
+        const fullId = `${repoId}:${sym.file}::${localSymbolId}`;
 
         const symbolData: SymbolData = {
           id: fullId,
-          symbolId: sym.symbolId,
+          symbolId: fullId,
           projectId,
           repoId,
           commitHash,
@@ -96,8 +97,14 @@ export class AstIndexService {
           startLine: sym.startLine,
           endLine: sym.endLine,
           signature: sym.signature,
-          callers: sym.callers,
-          callees: sym.callees,
+          callers: sym.callers.map((callerId) => {
+            const caller = allExtractedSymbols.find((candidate) => candidate.symbolId === callerId);
+            return `${repoId}:${caller?.file ?? sym.file}::${callerId}`;
+          }),
+          callees: sym.callees.map((calleeId) => {
+            const callee = allExtractedSymbols.find((candidate) => candidate.symbolId === calleeId);
+            return `${repoId}:${callee?.file ?? sym.file}::${calleeId}`;
+          }),
           docComment: sym.docComment,
         };
 

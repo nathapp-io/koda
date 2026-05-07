@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, Optional } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
@@ -41,7 +41,7 @@ export class SymbolStore {
 
   constructor(
     private readonly prisma: PrismaService<PrismaClient>,
-    @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    @Optional() @Inject(TRANSACTION_MANAGER) private readonly txManager?: ITransactionManager,
   ) {}
 
   private get db() {
@@ -49,7 +49,7 @@ export class SymbolStore {
   }
 
   async upsertSymbol(symbol: SymbolData): Promise<SymbolData> {
-    return this.txManager.run(async () => {
+    const write = async () => {
       const data = {
         ...symbol,
         callers: symbol.callers as unknown as string[],
@@ -67,13 +67,13 @@ export class SymbolStore {
         callers: (result.callers as unknown as string[]) || [],
         callees: (result.callees as unknown as string[]) || [],
       } as SymbolData;
-    });
+    };
+
+    return this.txManager ? this.txManager.run(write) : write();
   }
 
   async findBySymbolId(projectId: string, symbolId: string): Promise<SymbolData | null> {
-    const result = await this.db.symbol.findUnique({
-      where: { projectId_symbolId: { projectId, symbolId } },
-    });
+    const result = await this.findSymbolRecord(projectId, symbolId);
 
     if (!result) return null;
 
@@ -85,26 +85,35 @@ export class SymbolStore {
   }
 
   async findCallers(projectId: string, symbolId: string): Promise<CallerInfo[]> {
-    const results = await this.db.$queryRawUnsafe<
-      Array<{ symbolId: string; file: string; name: string; kind: string }>
-    >(
-      `SELECT "symbolId", "file", "name", "kind" FROM "Symbol" WHERE "projectId" = $1 AND EXISTS (SELECT 1 FROM json_each("callers") WHERE value = $2)`,
-      projectId,
-      symbolId,
-    );
+    const symbol = await this.findSymbolRecord(projectId, symbolId);
 
-    return results.map((s) => ({
+    if (!symbol) return [];
+
+    const callerIds = (symbol.callers as unknown as string[]) || [];
+    if (callerIds.length === 0) return [];
+
+    const callerSymbols = await this.db.symbol.findMany({
+      where: {
+        projectId,
+        symbolId: { in: callerIds },
+      },
+    });
+
+    const found = new Map(callerSymbols.map((s) => [s.symbolId, s]));
+    return callerIds.flatMap((id) => {
+      const s = found.get(id);
+      if (!s) return [];
+      return [{
       symbolId: s.symbolId,
       file: s.file,
       name: s.name,
       kind: s.kind,
-    }));
+      }];
+    });
   }
 
   async findCallees(projectId: string, symbolId: string): Promise<CalleeInfo[]> {
-    const symbol = await this.db.symbol.findUnique({
-      where: { projectId_symbolId: { projectId, symbolId } },
-    });
+    const symbol = await this.findSymbolRecord(projectId, symbolId);
 
     if (!symbol) return [];
 
@@ -115,11 +124,18 @@ export class SymbolStore {
     const calleeSymbols = await this.db.symbol.findMany({
       where: {
         projectId,
-        symbolId: { in: calleesArr },
+        OR: [
+          { symbolId: { in: calleesArr } },
+          { name: { in: calleesArr } },
+        ],
       },
     });
 
-    const found = new Map(calleeSymbols.map((s) => [s.symbolId, s]));
+    const found = new Map<string, typeof calleeSymbols[number]>();
+    for (const s of calleeSymbols) {
+      found.set(s.symbolId, s);
+      found.set(s.name, s);
+    }
 
     const result: CalleeInfo[] = [];
     for (const id of calleesArr) {
@@ -136,5 +152,24 @@ export class SymbolStore {
     await this.db.symbol.deleteMany({
       where: { projectId, repoId, file },
     });
+  }
+
+  private async findSymbolRecord(projectId: string, symbolId: string) {
+    const exact = await this.db.symbol.findUnique({
+      where: { projectId_symbolId: { projectId, symbolId } },
+    });
+    if (exact) return exact;
+
+    const [fallback] = await this.db.symbol.findMany({
+      where: {
+        projectId,
+        OR: [
+          { symbolId: { endsWith: `::${symbolId}` } },
+          { name: symbolId },
+        ],
+      },
+      take: 1,
+    });
+    return fallback ?? null;
   }
 }

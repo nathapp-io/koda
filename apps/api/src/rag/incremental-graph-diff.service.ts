@@ -84,6 +84,10 @@ export class IncrementalGraphDiffService {
       await this.rag.deleteBySource(projectId, nodeId);
     }
 
+    for (const node of updatedNodes) {
+      await this.rag.deleteBySource(projectId, node.id);
+    }
+
     const nodesToIndex = [...addedNodes, ...updatedNodes];
     for (const node of nodesToIndex) {
       const nodeLinks = incomingLinksBySource.get(node.id) ?? [];

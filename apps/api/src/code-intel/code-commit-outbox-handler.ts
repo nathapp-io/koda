@@ -40,8 +40,8 @@ export class CodeCommitOutboxHandler {
   async process(payload: unknown): Promise<void> {
     const p = payload as CodeCommitPayload;
 
-    if (p.webhookOnly || !p.changedFiles || p.changedFiles.length === 0) {
-      this.logger.debug(`code_commit: webhook-only or no changed files, skipping indexing`);
+    if (!p.changedFiles || p.changedFiles.length === 0) {
+      this.logger.debug(`code_commit: no changed files, skipping indexing`);
       return;
     }
 

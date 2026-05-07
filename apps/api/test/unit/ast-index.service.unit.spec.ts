@@ -130,7 +130,7 @@ describe('AstIndexService', () => {
 
       const storedSymbol = mockSymbolStore.upsertSymbol.mock.calls[0][0];
       expect(storedSymbol.id).toBe(`${repoId}:src/services/user.ts::UserService`);
-      expect(storedSymbol.symbolId).toBe('UserService');
+      expect(storedSymbol.symbolId).toBe(`${repoId}:src/services/user.ts::UserService`);
       expect(result.symbolsIndexed).toBe(1);
     });
 
@@ -372,8 +372,8 @@ describe('AstIndexService', () => {
       expect(mockSymbolStore.upsertSymbol).toHaveBeenCalledTimes(2);
       const firstCall = mockSymbolStore.upsertSymbol.mock.calls[0][0];
       const secondCall = mockSymbolStore.upsertSymbol.mock.calls[1][0];
-      expect(firstCall.symbolId).toBe('doSomething');
-      expect(secondCall.symbolId).toMatch(/^doSomething#\d+$/);
+      expect(firstCall.symbolId).toBe(`${repoId}:src/overload.ts::doSomething`);
+      expect(secondCall.symbolId).toMatch(new RegExp(`^${repoId}:src/overload\\.ts::doSomething#\\d+$`));
       expect(firstCall.id).toBe(`${repoId}:src/overload.ts::doSomething`);
       expect(secondCall.id).toMatch(new RegExp(`^${repoId}:src/overload\\.ts::doSomething#\\d+$`));
     });

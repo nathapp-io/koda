@@ -15,9 +15,9 @@ import {
   ApiResponse,
   ApiQuery,
 } from '@nestjs/swagger';
-import { JsonResponse } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, JsonResponse } from '@nathapp/nestjs-common';
 import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
-import { KodaPrincipal } from '../auth/principal/koda-principal.types';
+import { KodaPrincipal, isAgentPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
 import { AstIndexService } from './ast-index.service';
 import { IndexCommitDto } from './dto/index-commit.dto';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -42,6 +42,40 @@ export class CodeIntelController {
     return this.prisma.client;
   }
 
+  private async checkProjectMembership(
+    projectId: string,
+    principal: KodaPrincipal | null,
+  ): Promise<void> {
+    if (!principal) {
+      throw new ForbiddenAppException({}, 'code-intel');
+    }
+
+    if (isAgentPrincipal(principal)) {
+      return;
+    }
+
+    if (!isUserPrincipal(principal)) {
+      throw new ForbiddenAppException({}, 'code-intel');
+    }
+
+    if (principal.role === 'ADMIN') {
+      return;
+    }
+
+    const membership = await this.db.projectMember.findUnique({
+      where: {
+        projectId_userId: {
+          projectId,
+          userId: principal.id,
+        },
+      },
+    });
+
+    if (!membership) {
+      throw new ForbiddenAppException({}, 'code-intel');
+    }
+  }
+
   @Post('index')
   @HttpCode(201)
   @ApiOperation({ summary: 'Index a commit for AST symbol extraction' })
@@ -59,6 +93,7 @@ export class CodeIntelController {
     if (!project) {
       throw new NotFoundException(`Project not found: ${dto.projectSlug}`);
     }
+    await this.checkProjectMembership(project.id, principal);
 
     const result = await this.astIndexService.indexCommit(
       dto.repoId,
@@ -76,7 +111,7 @@ export class CodeIntelController {
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Symbol not found' })
   @ApiQuery({ name: 'projectSlug', required: true })
-  @RequiredPermission([CaslPermissionAction.MANAGE, 'AstIndex'])
+  @RequiredPermission([CaslPermissionAction.READ, 'CodeIntel'])
   async getSymbol(
     @Param('symbolId') symbolId: string,
     @Query('projectSlug') projectSlug: string,
@@ -89,6 +124,7 @@ export class CodeIntelController {
     if (!project) {
       throw new NotFoundException(`Project not found: ${projectSlug}`);
     }
+    await this.checkProjectMembership(project.id, principal);
 
     const data = await this.astIndexService.getSymbol(project.id, symbolId);
     if (!data) {
@@ -102,7 +138,7 @@ export class CodeIntelController {
   @ApiResponse({ status: 200, description: 'List of caller symbols' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiQuery({ name: 'projectSlug', required: true })
-  @RequiredPermission([CaslPermissionAction.MANAGE, 'AstIndex'])
+  @RequiredPermission([CaslPermissionAction.READ, 'CodeIntel'])
   async getCallers(
     @Param('symbolId') symbolId: string,
     @Query('projectSlug') projectSlug: string,
@@ -115,6 +151,7 @@ export class CodeIntelController {
     if (!project) {
       throw new NotFoundException(`Project not found: ${projectSlug}`);
     }
+    await this.checkProjectMembership(project.id, principal);
 
     const data = await this.astIndexService.getCallers(project.id, symbolId);
     return JsonResponse.Ok(data);
@@ -125,7 +162,7 @@ export class CodeIntelController {
   @ApiResponse({ status: 200, description: 'List of callee symbols' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiQuery({ name: 'projectSlug', required: true })
-  @RequiredPermission([CaslPermissionAction.MANAGE, 'AstIndex'])
+  @RequiredPermission([CaslPermissionAction.READ, 'CodeIntel'])
   async getCallees(
     @Param('symbolId') symbolId: string,
     @Query('projectSlug') projectSlug: string,
@@ -138,6 +175,7 @@ export class CodeIntelController {
     if (!project) {
       throw new NotFoundException(`Project not found: ${projectSlug}`);
     }
+    await this.checkProjectMembership(project.id, principal);
 
     const data = await this.astIndexService.getCallees(project.id, symbolId);
     return JsonResponse.Ok(data);
