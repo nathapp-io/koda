@@ -49,7 +49,7 @@ export class KodaCaslAbilityFactory extends BaseCaslAbilityFactory {
         { action: CaslPermissionAction.MANAGE, subject: 'AstIndex' },
       ];
     }
-    return [
+    const perms: CaslPermission[] = [
       ...this.readPermissions(),
       { action: CaslPermissionAction.CREATE, subject: 'Comment' },
       { action: CaslPermissionAction.UPDATE, subject: 'Comment', conditions: { authorUserId: principal.id } },
@@ -57,6 +57,10 @@ export class KodaCaslAbilityFactory extends BaseCaslAbilityFactory {
       { action: CaslPermissionAction.CREATE, subject: 'Ticket' },
       { action: KodaAction.IMPORT as CaslPermissionAction, subject: 'CodeIntel' },
     ];
+    if (principal.projectRole === 'DEVELOPER') {
+      perms.push({ action: CaslPermissionAction.READ, subject: 'CodeIntel' });
+    }
+    return perms;
   }
 
   private agentPermissions(principal: AgentPrincipal): CaslPermission[] {

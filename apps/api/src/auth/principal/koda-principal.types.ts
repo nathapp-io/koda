@@ -11,6 +11,7 @@ export interface UserPrincipal extends IPrincipal {
   readonly sub?: string;
   role: KodaUserRole;
   email: string;
+  projectRole?: string;
 }
 
 export interface AgentPrincipal extends IPrincipal {
