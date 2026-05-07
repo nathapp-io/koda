@@ -10,6 +10,8 @@
  * - TokenBudgetGate: Context stays within 5% tolerance of tokenBudget
  */
 
+import { AsyncLocalStorage } from 'async_hooks';
+
 import { Injectable } from '@nestjs/common';
 import { KodaError } from '../common/koda-error';
 
@@ -57,6 +59,11 @@ const APPROVED_WRITE_LAYERS = new Set(['KodaDomainWriter', 'AbstractPrismaReposi
 
 const MUTATING_ACTIONS = ['create', 'update', 'delete', 'upsert', 'createMany', 'updateMany', 'deleteMany'];
 
+// Tracks which approved write layer is active on the current async call stack.
+// KodaDomainWriterFake sets this before calling executeOperation so the middleware
+// can distinguish approved-layer writes from raw Prisma writes.
+const writeLayerContext = new AsyncLocalStorage<string>();
+
 interface PrismaMiddlewareParams {
   action: string;
   model?: string;
@@ -89,6 +96,17 @@ class WriteGatePrismaClient {
       return {};
     };
     return dispatch(params);
+  }
+}
+
+/**
+ * Simulates the approved KodaDomainWriter layer.
+ * Sets writeLayerContext before delegating to the client so the write-gate
+ * middleware can verify the call originates from an approved layer.
+ */
+class KodaDomainWriterFake {
+  async write(client: WriteGatePrismaClient, operation: PrismaMiddlewareParams): Promise<unknown> {
+    return writeLayerContext.run('KodaDomainWriter', () => client.executeOperation(operation));
   }
 }
 
@@ -458,27 +476,43 @@ export class PolicyGateService {
     return true;
   }
 
+  // Returns a middleware that blocks mutating operations unless the current async
+  // context was established by an approved write layer (checked via writeLayerContext).
+  private buildWriteGateMiddleware(): PrismaMiddlewareFn {
+    return async (params, next) => {
+      if (MUTATING_ACTIONS.includes(params.action)) {
+        const layer = writeLayerContext.getStore();
+        if (!layer || !APPROVED_WRITE_LAYERS.has(layer)) {
+          throw new KodaError(
+            'WRITE_GATE_VIOLATION',
+            `Direct Prisma write blocked outside approved layers: ${params.action} on ${params.model ?? 'unknown'}`,
+          );
+        }
+      }
+      return next(params);
+    };
+  }
+
   private async testApprovedWrite(_projectId: string): Promise<{ success: boolean; error?: string }> {
-    // In a real implementation this exercises KodaDomainWriter.
-    // Simulates a successful approved write.
-    return { success: true };
+    // Exercises KodaDomainWriterFake, which sets writeLayerContext to 'KodaDomainWriter'
+    // before delegating to the client — the shared write-gate middleware allows it through.
+    const client = new WriteGatePrismaClient();
+    client.$use(this.buildWriteGateMiddleware());
+
+    const writer = new KodaDomainWriterFake();
+    try {
+      await writer.write(client, { action: 'create', model: 'Ticket' });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   private async testRawPrismaWrite(_projectId: string): Promise<{ success: boolean; errorCode?: string }> {
-    // Creates a WriteGatePrismaClient, installs the write-gate middleware that throws
-    // KodaError(WRITE_GATE_VIOLATION) on any mutating operation, then attempts a raw write.
-    // This exercises the actual $use middleware interception path described in AC-4.
+    // Attempts a raw write with no writeLayerContext set — the middleware blocks it
+    // with KodaError(WRITE_GATE_VIOLATION), exercising the AC-4 interception path.
     const client = new WriteGatePrismaClient();
-
-    client.$use(async (params, next) => {
-      if (MUTATING_ACTIONS.includes(params.action)) {
-        throw new KodaError(
-          'WRITE_GATE_VIOLATION',
-          `Direct Prisma write blocked outside approved layers: ${params.action} on ${params.model ?? 'unknown'}`,
-        );
-      }
-      return next(params);
-    });
+    client.$use(this.buildWriteGateMiddleware());
 
     try {
       await client.executeOperation({ action: 'create', model: 'Ticket' });
