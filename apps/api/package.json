@@ -26,7 +26,8 @@
     "seed:e2e": "bun prisma/seed-e2e.ts",
     "seed:prod": "bun prisma/seed.ts",
     "seed:eval:documents": "bun scripts/seed-eval-documents.ts",
-    "evaluate:retrieval": "bun scripts/evaluate-retrieval.ts"
+    "evaluate:retrieval": "bun scripts/evaluate-retrieval.ts",
+    "policy:gates": "bun scripts/policy-gates-runner.ts"
   },
   "dependencies": {
     "@casl/ability": "^6.8.1",
