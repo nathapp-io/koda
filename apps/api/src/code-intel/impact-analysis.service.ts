@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { SymbolStore, SymbolData } from './symbol-store';
 import { EntityGraphService } from '../entity-graph/entity-graph.service';
 import { GraphStoreService } from '../rag/graph-store.service';
@@ -51,7 +51,8 @@ export class ImpactAnalysisService {
     const impactedServices = await this.getImpactedServices(projectId, impactedSymbols);
     const impactedTickets = await this.getImpactedTickets(projectId, impactedServices);
 
-    const impactScore = this.calculateImpactScore(
+    const impactScore = await this.calculateImpactScore(
+      projectId,
       impactedSymbols,
       impactedServices,
       impactedTickets,
@@ -168,18 +169,41 @@ export class ImpactAnalysisService {
     return Array.from(ticketSet.values());
   }
 
-  private calculateImpactScore(
+  private async calculateImpactScore(
+    projectId: string,
     symbols: SymbolData[],
     services: EntityRecord[],
     tickets: EntityRecord[],
-  ): number {
+  ): Promise<number> {
     if (symbols.length === 0 && services.length === 0 && tickets.length === 0) {
       return 0;
     }
 
-    const totalSymbols = Math.max(1, symbols.length);
-    const totalServices = Math.max(1, services.length);
-    const totalTickets = Math.max(1, tickets.length);
+    let totalSymbols = 1;
+    let totalServices = 1;
+    let totalTickets = 1;
+
+    // Query actual project totals from database
+    if (this.prisma) {
+      const [symbolCount, serviceCount, ticketCount] = await Promise.all([
+        this.prisma.client.symbol.count({ where: { projectId } }),
+        this.prisma.client.entityNode.count({
+          where: {
+            projectId,
+            entityType: { in: ['SERVICE', 'CODE_MODULE'] },
+          },
+        }),
+        this.prisma.client.entityNode.count({
+          where: {
+            projectId,
+            entityType: 'TICKET',
+          },
+        }),
+      ]);
+      totalSymbols = Math.max(1, symbolCount);
+      totalServices = Math.max(1, serviceCount);
+      totalTickets = Math.max(1, ticketCount);
+    }
 
     const affectedSymbols = symbols.length > 0 ? symbols.length : 0;
     const affectedServices = services.length > 0 ? services.length : 0;

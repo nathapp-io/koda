@@ -25,10 +25,11 @@ import {
 import { PrismaMemoryItemRepository } from '../memory/prisma-memory-item.repository';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
-import { Principal } from '@nathapp/nestjs-auth';
+import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
 import { ActorRole } from '../common/enums';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
+import { KodaAction } from '../auth/casl/koda-action.enum';
 
 @ApiTags('projects')
 @ApiBearerAuth()
@@ -188,6 +189,7 @@ export class ProjectsController {
   @ApiQuery({ name: 'commitHash', required: true })
   @ApiQuery({ name: 'changedFiles', required: true })
   @ApiQuery({ name: 'ticketId', required: false })
+  @RequiredPermission([KodaAction.READ as CaslPermissionAction, 'CodeIntel'])
   async getChangeImpact(
     @Param('slug') slug: string,
     @Query('repoId') repoId: string,

@@ -44,6 +44,7 @@ export class KodaCaslAbilityFactory extends BaseCaslAbilityFactory {
         ...KodaCaslAbilityFactory.ADMIN_MANAGEABLE_RESOURCES.map(
           (subject) => ({ action: CaslPermissionAction.MANAGE, subject }),
         ),
+        { action: CaslPermissionAction.READ, subject: 'CodeIntel' },
         { action: KodaAction.IMPORT as CaslPermissionAction, subject: 'CodeIntel' },
         { action: CaslPermissionAction.MANAGE, subject: 'AstIndex' },
       ];
@@ -54,6 +55,7 @@ export class KodaCaslAbilityFactory extends BaseCaslAbilityFactory {
       { action: CaslPermissionAction.UPDATE, subject: 'Comment', conditions: { authorUserId: principal.id } },
       { action: CaslPermissionAction.DELETE, subject: 'Comment', conditions: { authorUserId: principal.id } },
       { action: CaslPermissionAction.CREATE, subject: 'Ticket' },
+      { action: CaslPermissionAction.READ, subject: 'CodeIntel' },
       { action: KodaAction.IMPORT as CaslPermissionAction, subject: 'CodeIntel' },
     ];
   }
@@ -69,6 +71,7 @@ export class KodaCaslAbilityFactory extends BaseCaslAbilityFactory {
       { action: CaslPermissionAction.CREATE, subject: 'Ticket' },
       // Preserve pre-CASL behavior (commit 4ceb85e: "allow agents to soft-delete tickets")
       { action: CaslPermissionAction.DELETE, subject: 'Ticket' },
+      { action: CaslPermissionAction.READ, subject: 'CodeIntel' },
       { action: KodaAction.IMPORT as CaslPermissionAction, subject: 'CodeIntel' },
       ...this.agentRoleDerivedPermissions(principal),
     ];
