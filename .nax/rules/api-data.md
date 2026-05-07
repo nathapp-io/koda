@@ -146,9 +146,14 @@ const mockTxManager = {
 - Before writing any `prisma.client.<model>.*` call or repository, verify the model exists in `apps/api/prisma/schema.prisma`
 - If the model is missing, add it to the schema and run `bun run db:migrate` + `bun run db:generate` before implementing the service or repository layer
 - Never reference a Prisma model in code and defer schema work to a follow-up — missing models cause runtime errors that TypeScript cannot catch until after client regeneration
+- Before writing a filtered `findMany`/`findFirst` on a field, verify `@@index` covers that field in schema.prisma; a missing index causes a full table scan
 
 ## Pagination Anti-Patterns
 - Do not write unbounded `do { ... } while (hasMore)` loops without a hard iteration cap
 - Do not hardcode the page-size literal in the termination predicate (`length === 100`); reference a `PAGE_SIZE` constant
 - Always pair pagination with a `MAX_PAGES` safety bound and a `logger.warn` on overflow
 - Prefer `data.length >= PAGE_SIZE` over `data.length === PAGE_SIZE`
+- Every `findMany` on an unbounded table must include `take`; never issue a bare `findMany` that returns all rows
+
+## Query Guard Pattern
+- When an early return guards a conditional block, all downstream filters that depend on that condition must be INSIDE the guard — not after it. A filter placed after an early return is silently skipped when the condition is absent.

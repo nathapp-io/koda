@@ -26,6 +26,7 @@ describe('AuthService', () => {
       user: {
         create: jest.fn(),
         findUnique: jest.fn(),
+        findMany: jest.fn(),
       },
     },
   };
@@ -59,6 +60,7 @@ describe('AuthService', () => {
     // Default mock values
     mockJwtStrategyProvider.sign.mockReturnValue('mock-token');
     mockJwtRefreshStrategyProvider.sign.mockReturnValue('mock-token');
+    mockPrismaService.client.user.findMany.mockResolvedValue([]);
   });
 
   afterEach(() => {

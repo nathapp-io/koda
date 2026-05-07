@@ -1815,4 +1815,265 @@ describeIntegration('API Integration Tests', () => {
         .expect(404);
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────
+  // Code Intelligence — Change Impact Analysis (Phase 4)
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('Code Intelligence — Change Impact Analysis', () => {
+    it('AC1: GET /projects/:slug/codeintel/impact — returns ChangeImpactResult with schema fields', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/codeintel/impact`)
+        .query({
+          repoId: 'test-repo',
+          commitHash: 'abc123def456',
+          changedFiles: 'src/auth.ts,src/users.ts',
+        })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const data = body<{
+        commitHash: string;
+        changedFiles: string[];
+        impactedSymbols: unknown[];
+        impactedServices: unknown[];
+        impactedTickets: unknown[];
+        impactScore: number;
+      }>(res);
+
+      expect(data.commitHash).toBe('abc123def456');
+      expect(Array.isArray(data.changedFiles)).toBe(true);
+      expect(Array.isArray(data.impactedSymbols)).toBe(true);
+      expect(Array.isArray(data.impactedServices)).toBe(true);
+      expect(Array.isArray(data.impactedTickets)).toBe(true);
+      expect(typeof data.impactScore).toBe('number');
+    });
+
+    it('AC2: impactedSymbols contains symbols whose file matches changedFiles', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/codeintel/impact`)
+        .query({
+          repoId: 'test-repo',
+          commitHash: 'abc123',
+          changedFiles: 'src/auth.ts',
+        })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const data = body<{
+        changedFiles: string[];
+        impactedSymbols: Array<{ file: string }>;
+      }>(res);
+
+      data.impactedSymbols.forEach((symbol) => {
+        expect(data.changedFiles).toContain(symbol.file);
+      });
+    });
+
+    it('AC3: impactedServices contains services linked to impacted symbols', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/codeintel/impact`)
+        .query({
+          repoId: 'test-repo',
+          commitHash: 'abc123',
+          changedFiles: 'src/auth.ts',
+        })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const data = body<{
+        impactedServices: Array<{ entityType: string }>;
+      }>(res);
+
+      data.impactedServices.forEach((service) => {
+        expect(['service', 'code_module']).toContain(service.entityType);
+      });
+    });
+
+    it('AC4: impactedTickets contains tickets linked to impacted services', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/codeintel/impact`)
+        .query({
+          repoId: 'test-repo',
+          commitHash: 'abc123',
+          changedFiles: 'src/auth.ts',
+        })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const data = body<{
+        impactedTickets: Array<{ entityType: string }>;
+      }>(res);
+
+      data.impactedTickets.forEach((ticket) => {
+        expect(ticket.entityType).toBe('ticket');
+      });
+    });
+
+    it('AC5: impactScore is between 0-100 and computed with weighted formula', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/codeintel/impact`)
+        .query({
+          repoId: 'test-repo',
+          commitHash: 'abc123',
+          changedFiles: 'src/auth.ts,src/users.ts',
+        })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const data = body<{ impactScore: number }>(res);
+
+      expect(data.impactScore).toBeGreaterThanOrEqual(0);
+      expect(data.impactScore).toBeLessThanOrEqual(100);
+      expect(typeof data.impactScore).toBe('number');
+      expect(isNaN(data.impactScore)).toBe(false);
+    });
+
+    it('AC5b: impactScore handles zero denominators gracefully', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/codeintel/impact`)
+        .query({
+          repoId: 'test-repo',
+          commitHash: 'abc123',
+          changedFiles: 'nonexistent-file.ts',
+        })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const data = body<{ impactScore: number }>(res);
+
+      // Should not be NaN or Infinity
+      expect(isNaN(data.impactScore)).toBe(false);
+      expect(isFinite(data.impactScore)).toBe(true);
+      expect(data.impactScore).toBeGreaterThanOrEqual(0);
+      expect(data.impactScore).toBeLessThanOrEqual(100);
+    });
+
+    it('AC6: includes provenance when ticketId query parameter is provided', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/codeintel/impact`)
+        .query({
+          repoId: 'test-repo',
+          commitHash: 'abc123',
+          changedFiles: 'src/auth.ts',
+          ticketId: bugTicketRef,
+        })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const data = body<{
+        provenance?: { ticketId: string; sources: string[] };
+      }>(res);
+
+      expect(data.provenance).toBeDefined();
+      expect(data.provenance).toHaveProperty('ticketId');
+      expect(data.provenance).toHaveProperty('sources');
+      expect(Array.isArray(data.provenance?.sources)).toBe(true);
+    });
+
+    it('AC6b: does not include provenance when ticketId is not provided', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/codeintel/impact`)
+        .query({
+          repoId: 'test-repo',
+          commitHash: 'abc123',
+          changedFiles: 'src/auth.ts',
+        })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const data = body<{
+        provenance?: { ticketId: string; sources: string[] };
+      }>(res);
+
+      expect(data.provenance).toBeUndefined();
+    });
+
+    it('AC7: response completes in under 5 seconds for up to 50 changed files', async () => {
+      const changedFiles = Array.from({ length: 50 }, (_, i) => `src/file${i}.ts`);
+
+      const startTime = Date.now();
+
+      await request(httpServer)
+        .get(`/api/projects/${projectSlug}/codeintel/impact`)
+        .query({
+          repoId: 'test-repo',
+          commitHash: 'abc123',
+          changedFiles: changedFiles.join(','),
+        })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const elapsed = Date.now() - startTime;
+      expect(elapsed).toBeLessThan(5000);
+    });
+
+    it('AC8: returns 403 when user lacks READ permission for CodeIntel', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/codeintel/impact`)
+        .query({
+          repoId: 'test-repo',
+          commitHash: 'abc123',
+          changedFiles: 'src/auth.ts',
+        })
+        .set('Authorization', `Bearer ${nonAdminUserAccessToken}`)
+        .expect(403);
+
+      expect(res.body).toHaveProperty('ret');
+    });
+
+    it('AC8b: returns 401 when missing authentication token', async () => {
+      await request(httpServer)
+        .get(`/api/projects/${projectSlug}/codeintel/impact`)
+        .query({
+          repoId: 'test-repo',
+          commitHash: 'abc123',
+          changedFiles: 'src/auth.ts',
+        })
+        .expect(401);
+    });
+
+    it('returns 404 when project does not exist', async () => {
+      await request(httpServer)
+        .get('/api/projects/nonexistent-project/codeintel/impact')
+        .query({
+          repoId: 'test-repo',
+          commitHash: 'abc123',
+          changedFiles: 'src/auth.ts',
+        })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(404);
+    });
+
+    it('returns 400 when required query parameters are missing', async () => {
+      await request(httpServer)
+        .get(`/api/projects/${projectSlug}/codeintel/impact`)
+        .query({
+          repoId: 'test-repo',
+          // Missing commitHash and changedFiles
+        })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(400);
+    });
+
+    it('returns 200 with agent API key', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/codeintel/impact`)
+        .query({
+          repoId: 'test-repo',
+          commitHash: 'abc123',
+          changedFiles: 'src/auth.ts',
+        })
+        .set('Authorization', `Bearer ${agentApiKey}`)
+        .expect(200);
+
+      const data = body<{
+        commitHash: string;
+        impactScore: number;
+      }>(res);
+
+      expect(data.commitHash).toBeTruthy();
+      expect(typeof data.impactScore).toBe('number');
+    });
+  });
 });

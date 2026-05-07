@@ -1,0 +1,387 @@
+[
+  {
+    "acId": "AC-1",
+    "original": "IncrementalGraphDiffService.diffAndApply() computes a diff and applies only the delta (added, modified, removed nodes/links)",
+    "refined": "diffAndApply() returns a DiffResult with added, updated, and removed counts that match the exact cardinality difference between incoming and stored nodes/links, and only Prisma upsert/delete operations are executed for those delta items",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-2",
+    "original": "Stored graph is loaded from `GraphNode` and `GraphLink` Prisma tables, not from LanceDB",
+    "refined": "getStoredGraph() calls only prisma.graphNode.findMany() and prisma.graphLink.findMany(), with no calls to LanceDB client or RAG service retrieval methods",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-3",
+    "original": "When `newNodes` has 100 nodes and stored has 90 matching nodes, `DiffResult.added` equals 10 and `DiffResult.removed` equals 0",
+    "refined": "Given 100 incoming nodes and 90 stored nodes with 80 matching by nodeId, diffAndApply() returns DiffResult with added=20, removed=10, updated determined by content changes",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-4",
+    "original": "When a stored node is absent from `newNodes`, it is deleted from both the `GraphNode` Prisma table and LanceDB (by graphify nodeId / RAG sourceId)",
+    "refined": "For each stored node not present in incoming nodes, diffAndApply() calls prisma.graphNode.delete() with the stored nodeId and calls the RAG/LanceDB delete method with the same sourceId",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-5",
+    "original": "When a node exists in both stored and incoming with unchanged content (label, type, sourceFile, outgoing links), it is skipped with no re-index into LanceDB",
+    "refined": "For nodes where nodeId matches and label, type, sourceFile, and outgoing links are byte-identical, no upsert is called to the LanceDB client; the node is counted in stored but not in indexed",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-6",
+    "original": "`diffAndApply` is called by the existing `importGraphify` endpoint, replacing the current `deleteAllBySourceType` logic",
+    "refined": "The importGraphify() controller method calls diffAndApply() with projectId and incoming nodes/links; no call to deleteAllBySourceType('code') or similar bulk-delete method exists in the method body",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-7",
+    "original": "`DiffResult.indexed` reflects only the number of nodes actually written to LanceDB (added + updated), not the total node count",
+    "refined": "DiffResult.indexed equals the count of distinct nodes for which a LanceDB upsert was called, computed as nodes with added=true or updated=true (where content changed)",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-8",
+    "original": "A diff-and-apply of 500 unchanged nodes + 10 added + 5 removed completes in under 2 seconds",
+    "refined": "Execution of diffAndApply() with 515 stored nodes, 505 incoming nodes (10 new, 5 removed), and 500 with identical content completes with durationMs < 2000",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-9",
+    "original": "`DiffResult` includes `durationMs` measuring the total diff-and-apply time",
+    "refined": "DiffResult object includes a durationMs property that is a positive integer representing milliseconds elapsed from diffAndApply() start to return",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-10",
+    "original": "Existing graphify imports remain project-scoped and continue to honor `Project.graphifyEnabled`",
+    "refined": "diffAndApply() filters stored nodes by projectId before diff; importGraphify controller returns 400 if Project.graphifyEnabled is false, preventing diffAndApply() invocation",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-11",
+    "original": "The `importGraphify` route is gated with `@RequiredPermission([KodaAction.IMPORT, 'CodeIntel'])`. The factory grants this permission to ADMIN users, all agents, and users with `DEVELOPER` project role (when project membership is implemented). Non-permitted callers receive 403 from `PermissionAuthGuard` with no inline check in the controller",
+    "refined": "importGraphify controller has @RequiredPermission([KodaAction.IMPORT, 'CodeIntel']) decorator; permission factory grants permission to users with role ADMIN or DEVELOPER or subject=agent; callers without permission receive 403 from PermissionAuthGuard before controller code executes; no permission check logic appears in controller method body",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-12",
+    "original": "AstIndexService.indexCommit() parses source files and stores symbol metadata in the Symbol Prisma table",
+    "refined": "After calling indexCommit(repoId, commitHash, files), Symbol table contains rows where projectId matches repoId, commitHash matches input, and symbolsIndexed > 0 for non-empty file input",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-13",
+    "original": "Symbol.symbolId uses the convention {repoId}:{filePath}::{SymbolName} and is globally unique within a project",
+    "refined": "Every Symbol record has symbolId matching regex ^[^:]+:[^:]+::[^:]+$; for each projectId, no two Symbol records share the same symbolId",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-14",
+    "original": "getCallers(symbolId) returns all symbols that include the given symbolId in their JSON callers list",
+    "refined": "getCallers(projectId, symbolId) returns an array where every returned symbol has the input symbolId in its callers array; caller count matches the number of symbols with input symbolId in their callers list",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-15",
+    "original": "getCallees(symbolId) returns all symbols listed in the given symbol's JSON callees list",
+    "refined": "getCallees(projectId, symbolId) returns an array of symbols where each returned symbol's symbolId is in the input symbol's callees array; returned array length equals input symbol's callees array length",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-16",
+    "original": "When indexCommit is called with files=[{path: 'src/auth.ts', content: '...'}], only src/auth.ts is parsed and existing symbols for unchanged files are preserved",
+    "refined": "After indexCommit(repoId, commitHash, [src/auth.ts]), symbols from other files in the same repoId retain their previous commitHash; only symbols for src/auth.ts have the new commitHash",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-17",
+    "original": "Symbol.signature captures parameter types and return type in a format such as (userId: string): Promise<User>",
+    "refined": "For all Symbol records with kind in [function, method, class], signature field matches pattern (param1: type1, ...): ReturnType or (): ReturnType; signature is non-empty string",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-18",
+    "original": "Indexing is triggered by a code_commit outbox event, which is fired by the VCS webhook handler (see US-004)",
+    "refined": "When code_commit outbox event is enqueued with repoId and commitHash, the outbox handler invokes AstIndexService.indexCommit(repoId, commitHash, resolvedFiles) with resolved file contents from VCS provider",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-19",
+    "original": "A commit with 20 files (average 200 lines each) is indexed in under 30 seconds",
+    "refined": "indexCommit(repoId, commitHash, 20 files with ~200 lines each) completes with SymbolIndexResult.durationMs ≤ 30000",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-20",
+    "original": "Direct calls to the indexCommit() controller endpoint are gated with @RequiredPermission([KodaAction.MANAGE, 'AstIndex']) and the factory grants this to ADMIN users and agents with DEVELOPER role only; other callers receive 403 from PermissionAuthGuard",
+    "refined": "POST /codeintel/indexCommit returns 403 Forbidden unless caller has KodaAction.MANAGE and 'AstIndex' permission; CASL factory grants permission only to ADMIN users and agents with DEVELOPER project role",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-21",
+    "original": "Parser failures for one file are recorded in SymbolIndexResult.fileErrors and do not prevent other files in the same commit from being indexed",
+    "refined": "When indexCommit encounters parse error in one file, error is recorded in SymbolIndexResult.fileErrors with {path, error}; remaining files are parsed; filesIndexed + fileErrors.length equals input file count",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-22",
+    "original": "The code_commit outbox handler resolves changed file contents via the VCS provider before calling indexCommit(); the webhook controller only enqueues commit metadata",
+    "refined": "Webhook controller enqueues outbox message with only repoId and commitHash; outbox handler calls CodeGraphService or VCS provider to fetch file contents before invoking indexCommit()",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-23",
+    "original": "EntityGraphService.rebuildGraph(projectId) rebuilds all entity nodes and links for a project from existing data",
+    "refined": "After calling rebuildGraph(projectId), EntityNode table contains records for all tickets, services (from graphify type=code_module), owners, and incidents (priority=critical or priority=high tickets) for that project; EntityLink table contains all inferred ticket→service, ticket→owner, service→service (depends_on), and incident→ticket relationships; counts match source data in Ticket, User/Agent, and graphify tables",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-24",
+    "original": "Entity graph data is persisted in EntityNode and EntityLink Prisma tables, not only in Phase 2's in-memory EntityStore",
+    "refined": "After calling rebuildGraph or onTicketEvent, querying EntityNode and EntityLink tables directly returns all graph nodes and edges without requiring in-memory EntityStore; data survives service restart and is queryable via raw Prisma client",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-25",
+    "original": "onTicketEvent(status_changed) updates the entity node for that ticket if it exists in the entity graph",
+    "refined": "When onTicketEvent is called with action=status_changed for a ticket with an existing EntityNode, the EntityNode record's metadata field is updated with the new status value within 100ms and no new EntityNode is created",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-26",
+    "original": "onGraphifyImport() extracts service entity nodes from graphify nodes with type=code_module",
+    "refined": "When onGraphifyImport(projectId, nodes) is called with nodes containing type='code_module', EntityNode records of nodeType='service' are inserted for each code_module node with externalId matching the graphify node id and externalSource='graphify'",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-27",
+    "original": "Service linkage works from current Koda fields (gitRefFile, labels, linked code/module references) without requiring a Ticket.serviceId column",
+    "refined": "For a ticket with gitRefFile, labels, or code references, EntityLink records of type='REFERENCES' are created connecting the ticket EntityNode to service EntityNodes inferred by matching gitRefFile paths, label prefixes, and code module references against existing service nodes",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-28",
+    "original": "getRelatedEntities(projectId, entityId, depth=2) returns all entity nodes reachable within 2 hops from the given entity",
+    "refined": "For a given entityId, getRelatedEntities returns EntityPath[] where each path.depth ≤ 2, all entities in path are connected via EntityLink traversal, each path terminates at a leaf node with no outgoing links (within depth limit), and no entity id appears twice in a single path",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-29",
+    "original": "getIncidentImpact(projectId, incidentTicketId) returns all entity nodes linked to the incident ticket",
+    "refined": "For an incident ticket EntityNode, getIncidentImpact returns ImpactAnalysis where affectedServices, affectedTickets, and affectedCodeModules arrays contain all EntityRecord objects reachable via EntityLink traversal (direct and transitive) filtered by nodeType, with no duplicates",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-30",
+    "original": "Service entities extracted from graphify inherit tags from the graphify node (e.g. ['backend', 'auth'])",
+    "refined": "When onGraphifyImport creates an EntityNode from a graphify node with type='code_module', the EntityNode.metadata.tags field contains an array matching the tags field from the source graphify node; if source has no tags, metadata.tags is an empty array",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-31",
+    "original": "Entity graph is updated incrementally via outbox fan-out handlers; no full rebuild is performed on every event",
+    "refined": "When onTicketEvent or onGraphifyImport is called, only the affected EntityNode and EntityLink records are inserted/updated in a single transaction; rebuildGraph is not invoked and entities unrelated to the event remain unchanged in the database",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-32",
+    "original": "A graph with 500 nodes and 2000 edges returns getRelatedEntities in under 50ms",
+    "refined": "For a test project with 500 EntityNode records and 2000 EntityLink records, calling getRelatedEntities(projectId, randomEntityId, depth=2) completes and returns results in ≤50ms measured as p95 latency across 100 sequential calls with different random entityIds",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-33",
+    "original": "VcsWebhookController handles `push` events at `POST /projects/:slug/vcs-webhook` in addition to existing issue and PR events",
+    "refined": "POST /projects/:slug/vcs-webhook with event type 'push' in payload is routed to push event handler; request completes with HTTP 202 status after outbox events are enqueued",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-34",
+    "original": "Webhook payload is validated for presence of repository identifier, `ref`, `commits[]` array, and sender identifier (sender.id, sender.login, or provider equivalent)",
+    "refined": "POST /projects/:slug/vcs-webhook missing any of (repository identifier, ref, commits array, sender identifier) returns HTTP 400 with validation error; payload containing all four required fields returns HTTP 202",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-35",
+    "original": "For each commit in the push payload, a `code_commit` outbox event is enqueued with payload `{ repoId, commitHash, ref, changedFiles }`",
+    "refined": "POST /projects/:slug/vcs-webhook with N commits creates exactly N outbox events of type 'code_commit'; each event contains payload fields repoId, commitHash, ref, and changedFiles matching the commit data",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-36",
+    "original": "`AstIndexService.indexCommit()` is called by the `code_commit` outbox handler, not synchronously by the webhook controller",
+    "refined": "After POST /projects/:slug/vcs-webhook completes successfully, AstIndexService.indexCommit() has not been called; when outbox handler processes a code_commit event, AstIndexService.indexCommit() is called exactly once per event with correct arguments",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-37",
+    "original": "If `OutboxService.enqueue()` fails, the webhook logs the failure and returns a non-2xx response so the provider can retry",
+    "refined": "POST /projects/:slug/vcs-webhook where OutboxService.enqueue() throws an exception returns HTTP 500; error message containing OutboxService exception details is logged",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-38",
+    "original": "GitHub webhook signature verification reuses the existing `x-hub-signature-256` HMAC-SHA256 flow; invalid signatures return 401",
+    "refined": "POST /projects/:slug/vcs-webhook with missing x-hub-signature-256 header returns HTTP 401; POST with x-hub-signature-256 header that does not match HMAC-SHA256(secret, body) returns HTTP 401; POST with valid x-hub-signature-256 matching computed HMAC returns HTTP 202",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-39",
+    "original": "The webhook secret continues to come from the project's `VcsConnection` record and is never hard-coded",
+    "refined": "HMAC-SHA256 signature verification retrieves webhook secret from VcsConnection.secret for the project slug; no hard-coded string secrets appear in VcsWebhookController or VcsWebhookService source code",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-40",
+    "original": "Pushing the same `commitHash` twice within a 5-minute window does not create duplicate outbox events (deduplication enforced)",
+    "refined": "Two sequential POST /projects/:slug/vcs-webhook requests with identical commitHash within 5 minutes result in exactly one code_commit outbox event being created; second request returns HTTP 202 but does not create a second outbox event",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-41",
+    "original": "GET /projects/:slug/codeintel/impact?repoId=X&commitHash=Y&changedFiles=file1,file2 returns a ChangeImpactResult with the expected schema fields",
+    "refined": "HTTP GET /projects/:slug/codeintel/impact with query parameters repoId, commitHash, changedFiles returns HTTP 200 with JSON body containing fields: commitHash (string), changedFiles (string[]), impactedSymbols (array), impactedServices (array), impactedTickets (array), impactScore (number), provenance (object)",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-42",
+    "original": "impactedSymbols contains symbols whose file property matches any entry in the changedFiles query parameter",
+    "refined": "For all symbols in response.impactedSymbols, each symbol.file value must be present in the changedFiles query parameter array",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-43",
+    "original": "impactedServices contains service entity nodes linked to impacted symbols through matching Symbol.file to GraphNode.sourceFile or EntityNode.sourceId",
+    "refined": "For each service in response.impactedServices, there exists at least one symbol in impactedSymbols where the symbol's file matches the service's GraphNode.sourceFile, or the symbol's id matches an EntityNode.sourceId that links to the service",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-44",
+    "original": "impactedTickets contains ticket entity nodes linked to any impactedServices",
+    "refined": "For each ticket in response.impactedTickets, there exists at least one service in impactedServices such that the entity graph contains an edge linking that service to this ticket",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-45",
+    "original": "impactScore is a number between 0 and 100 computed by the formula: 0.3 × (affectedSymbols / totalSymbols × 100) + 0.3 × (affectedServices / totalServices × 100) + 0.2 × (affectedTickets / totalTickets × 100) + 0.2 × (linkedIncidents > 0 ? 100 : 0)",
+    "refined": "response.impactScore is a number in range [0, 100] equal to: 0.3 × ((impactedSymbols.length / totalSymbols) × 100 or 0) + 0.3 × ((impactedServices.length / totalServices) × 100 or 0) + 0.2 × ((impactedTickets.length / totalTickets) × 100 or 0) + 0.2 × (linkedIncidents > 0 ? 100 : 0), clamped to [0, 100]",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-46",
+    "original": "When called with a ticketId query parameter, the result includes provenance source metadata pointing to that ticket",
+    "refined": "When GET request includes query parameter ticketId=T, response.provenance object contains a reference to ticket T (e.g., provenance.sourceTicketId === T or provenance includes an entry referencing T)",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-47",
+    "original": "The endpoint returns a response in under 5 seconds for a commit touching up to 50 changed files",
+    "refined": "HTTP GET request with changedFiles array of length ≤ 50 completes with response HTTP 200 in ≤ 5000 milliseconds",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-48",
+    "original": "The endpoint is gated with @RequiredPermission([KodaAction.READ, 'CodeIntel']). The factory grants this to ADMIN users, all agents, and users with DEVELOPER project role (when project membership is implemented). Controller uses @Principal() principal: KodaPrincipal; non-permitted callers receive 403 from PermissionAuthGuard with no inline role check",
+    "refined": "ADMIN users receive HTTP 200; all agents receive HTTP 200; users with DEVELOPER project role receive HTTP 200; users without required permissions receive HTTP 403 from PermissionAuthGuard. Controller method uses @RequiredPermission decorator and @Principal() parameter injection; no inline permission checks in controller method body",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-49",
+    "original": "CanonicalStateService.getSnapshot(query) returns retrievedAt set to the server timestamp at the time of snapshot creation",
+    "refined": "The retrievedAt field in the returned CanonicalSnapshot is a Date object set to the server's current time when the query method completes, with tolerance ±1 second",
+    "testable": true,
+    "storyId": "US-006"
+  },
+  {
+    "acId": "AC-50",
+    "original": "When ticketIds are provided, tickets contains only tickets belonging to the requested projectId and matching the given IDs",
+    "refined": "For each ticket in the returned tickets array: ticket.id is in the provided ticketIds array AND the ticket's projectId matches the requested projectId",
+    "testable": true,
+    "storyId": "US-006"
+  },
+  {
+    "acId": "AC-51",
+    "original": "When ticketIds is empty or undefined, the tickets array is empty",
+    "refined": "When query.ticketIds is undefined or an empty array, the returned tickets array is empty",
+    "testable": true,
+    "storyId": "US-006"
+  },
+  {
+    "acId": "AC-52",
+    "original": "When timeWindow is provided, recentEvents contains only events within the time window, ordered by createdAt descending",
+    "refined": "When query.timeWindow is provided: all events in recentEvents satisfy (event.createdAt >= timeWindow.from) AND (event.createdAt <= timeWindow.to); recentEvents are sorted by createdAt in descending order (most recent first)",
+    "testable": true,
+    "storyId": "US-006"
+  },
+  {
+    "acId": "AC-53",
+    "original": "activeDecisions is populated from active MemoryItem rows where kind='DECISION' and status='active' in the project",
+    "refined": "The activeDecisions array contains all MemoryItem records matching projectId, kind='DECISION', and status='active', each mapped to { id, topic, decision, rationale, createdAt }",
+    "testable": true,
+    "storyId": "US-006"
+  },
+  {
+    "acId": "AC-54",
+    "original": "When a non-existent or unauthorized projectId is requested, the service throws a ForbiddenAppException or NotFoundAppException matching the Nathapp exception style used by existing memory endpoints",
+    "refined": "When projectId does not exist or actorId lacks read access: throw NotFoundAppException if project does not exist; throw ForbiddenAppException if project exists but actor is unauthorized; both exceptions conform to NathApp error format (status, code, message fields)",
+    "testable": true,
+    "storyId": "US-006"
+  },
+  {
+    "acId": "AC-55",
+    "original": "The service performs canonical Prisma reads only; it does not query LanceDB, BM25, entity graph, or other derived stores",
+    "refined": "The implementation invokes only PrismaService query methods (find, findMany, findUnique, etc.) and does not call any external service APIs, LanceDB, BM25, entity-graph service, or RAG systems",
+    "testable": true,
+    "storyId": "US-006"
+  }
+]

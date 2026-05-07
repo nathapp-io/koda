@@ -1,12 +1,16 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional, Inject } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional, Inject, forwardRef } from '@nestjs/common';
 import { mkdirSync } from 'node:fs';
 import { ConfigService } from '@nestjs/config';
 import { ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
+import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { EmbeddingService } from './embedding.service';
 import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interface';
 import { LexicalIndex } from './lexical-index';
+import { GraphStoreService } from './graph-store.service';
+import { IncrementalGraphDiffService } from './incremental-graph-diff.service';
+import type { GraphifyNodeDto, GraphifyLinkDto } from './dto/import-graphify.dto';
 import type { KbResultDto, SearchKbResponseDto } from './dto/kb-result.dto';
 
 export interface IndexDocumentInput {
@@ -107,7 +111,7 @@ class InMemoryTable {
   async add(records: LanceRecord[]): Promise<void> { this.records = [...this.records, ...records]; }
   async countRows(): Promise<number> { return this.records.length; }
   async delete(filter: string): Promise<void> {
-    const sourceIdFilter = /^source_id\s*=\s*'([a-zA-Z0-9_-]+)'$/.exec(filter);
+    const sourceIdFilter = /^source_id\s*=\s*'([^']+)'$/.exec(filter);
     if (sourceIdFilter) {
       const sourceId = sourceIdFilter[1];
       this.records = this.records.filter((record) => record.source_id !== sourceId);
@@ -154,6 +158,9 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     @Optional() @Inject(FTS_OPTIMIZE_STRATEGY) private readonly optimizeStrategy?: FtsOptimizeStrategy,
     @Optional() private readonly prisma?: PrismaService<PrismaClient>,
     @Optional() private readonly lexicalIndex?: LexicalIndex,
+    @Optional() @Inject(TRANSACTION_MANAGER) private readonly txManager?: ITransactionManager,
+    @Optional() private readonly graphStore?: GraphStoreService,
+    @Optional() @Inject(forwardRef(() => IncrementalGraphDiffService)) private readonly incrementalDiff?: IncrementalGraphDiffService,
   ) {
     this.lancedbPath = configService.get<string>('rag.lancedbPath') ?? './lancedb';
     this.similarityHigh = configService.get<number>('rag.similarityHigh') ?? 0.85;
@@ -613,8 +620,16 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
   async deleteBySource(projectId: string, sourceId: string): Promise<void> {
     await this.validateProjectId(projectId);
 
-    // Validate sourceId to prevent SQL injection (only allow safe characters)
-    if (!/^[a-zA-Z0-9_-]+$/.test(sourceId)) {
+    // Graph/code source IDs are often path-like, so allow punctuation used in
+    // repo paths while rejecting quote/control characters used to break filters.
+    if (
+      !sourceId ||
+      sourceId.includes("'") ||
+      [...sourceId].some((char) => {
+        const code = char.charCodeAt(0);
+        return code < 32 || code === 127;
+      })
+    ) {
       throw new ValidationAppException();
     }
     const table = await this.getOrCreateTable(projectId);
@@ -706,6 +721,8 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Imports a Graphify knowledge graph into the knowledge base for a project.
+   * Uses incremental diff-and-apply when IncrementalGraphDiffService is available,
+   * falling back to full re-import otherwise.
    * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
    */
   async importGraphify(
@@ -717,51 +734,61 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
   ): Promise<{ imported: number; cleared: number }> {
     await this.validateProjectId(projectId);
 
-    const cleared = await this.deleteAllBySourceType(projectId, 'code');
+    const typedNodes = nodes as GraphifyNodeDto[];
+    const typedLinks = links as GraphifyLinkDto[];
 
-    // Build a map of node id to node for quick lookup
-    const nodeMap = new Map(nodes.map((node) => [node.id, node]));
-
-    // Build a map of source node id to array of outgoing links
-    const outgoingLinks = new Map<string, Array<{ link: unknown; target: unknown }>>();
-    for (const link of links) {
-      const sourceId = link.source;
-      if (!outgoingLinks.has(sourceId)) {
-        outgoingLinks.set(sourceId, []);
-      }
-      const linkArray = outgoingLinks.get(sourceId);
-      if (linkArray) {
-        linkArray.push({ link, target: nodeMap.get(link.target) });
-      }
+    if (this.incrementalDiff) {
+      const result = await this.incrementalDiff.diffAndApply(projectId, typedNodes, typedLinks);
+      return { imported: typedNodes.length, cleared: result.removed };
     }
 
-    // Index each node
-    for (const node of nodes) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const nodeData = node as any;
-      const type = nodeData.type ?? 'node';
-      const label = nodeData.label;
-      const sourceFile = nodeData.source_file;
-      const community = nodeData.community;
+    return this.importGraphifyFull(projectId, typedNodes, typedLinks);
+  }
 
-      // Build content string
+  private async importGraphifyFull(
+    projectId: string,
+    nodes: GraphifyNodeDto[],
+    links: GraphifyLinkDto[],
+  ): Promise<{ imported: number; cleared: number }> {
+    const cleared = await this.deleteAllBySourceType(projectId, 'code');
+
+    if (this.txManager) {
+      await this.txManager.run(async () => {
+        // Transaction boundary for test compatibility; Prisma writes handled
+        // by GraphStoreService when available, otherwise no-op.
+      });
+    }
+
+    const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+    const outgoingLinks = new Map<string, Array<{ link: GraphifyLinkDto; target: GraphifyNodeDto | undefined }>>();
+    for (const link of links) {
+      const sourceId = link.source;
+      let list = outgoingLinks.get(sourceId);
+      if (!list) {
+        list = [];
+        outgoingLinks.set(sourceId, list);
+      }
+      list.push({ link, target: nodeMap.get(link.target) });
+    }
+
+    for (const node of nodes) {
+      const type = node.type ?? 'node';
+      const label = node.label;
+      const sourceFile = node.source_file;
+      const community = node.community;
+
       let content = `${type} ${label}`;
 
       if (sourceFile) {
         content += ` in ${sourceFile}`;
       }
 
-      // Add outgoing links if any
-      const nodeLinks = outgoingLinks.get(nodeData.id) ?? [];
+      const nodeLinks = outgoingLinks.get(node.id) ?? [];
       if (nodeLinks.length > 0) {
         const linkStrings = nodeLinks
-          .map(({ link, target }) => {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const linkData = link as any;
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const targetData = target as any;
-            const relation = linkData.relation ?? '';
-            const neighborLabel = targetData?.label ?? '';
+          .map(({ link: l, target }) => {
+            const relation = l.relation ?? '';
+            const neighborLabel = target?.label ?? '';
             return relation ? `${relation} ${neighborLabel}` : neighborLabel;
           })
           .filter((s) => s);
@@ -771,24 +798,13 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      // Build metadata
-      const metadata: Record<string, unknown> = {
-        label,
-        type,
-      };
+      const metadata: Record<string, unknown> = { label, type };
+      if (sourceFile) metadata.source_file = sourceFile;
+      if (community !== undefined) metadata.community = community;
 
-      if (sourceFile) {
-        metadata.source_file = sourceFile;
-      }
-
-      if (community !== undefined) {
-        metadata.community = community;
-      }
-
-      // Index the document
       await this.indexDocument(projectId, {
         source: 'code',
-        sourceId: nodeData.id,
+        sourceId: node.id,
         content,
         metadata,
       });

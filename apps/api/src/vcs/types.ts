@@ -60,3 +60,11 @@ export interface VcsCommit {
   url: string;
   date: Date;
 }
+
+/**
+ * Represents a source file with its path and content
+ */
+export interface SourceFile {
+  path: string;
+  content: string;
+}

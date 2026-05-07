@@ -8,13 +8,16 @@ export type KodaAgentRole = AgentRoleNames;
 export interface UserPrincipal extends IPrincipal {
   actorType: 'user';
   id: string;
+  readonly sub?: string;
   role: KodaUserRole;
   email: string;
+  projectRole?: string;
 }
 
 export interface AgentPrincipal extends IPrincipal {
   actorType: 'agent';
   id: string;
+  readonly sub?: string;
   slug: string;
   status: KodaAgentStatus;
   agentRoles: readonly KodaAgentRole[];

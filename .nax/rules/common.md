@@ -34,6 +34,7 @@
 ## Type Safety
 - TypeScript strict mode applies across apps
 - Do not suppress typing with `eslint-disable`
+- Remove unused imports before committing
 
 ## Error Handling
 - Use structured error codes, not message-string matching

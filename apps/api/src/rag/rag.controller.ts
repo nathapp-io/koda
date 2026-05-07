@@ -20,7 +20,9 @@ import { AddDocumentDto } from './dto/add-document.dto';
 import { SearchKbDto } from './dto/search-kb.dto';
 import { ImportGraphifyDto } from './dto/import-graphify.dto';
 import { Principal, RequiredPermission } from '@nathapp/nestjs-auth';
+import type { CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { KodaPrincipal, isAgentPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
+import { KodaAction } from '../auth/casl/koda-action.enum';
 
 @ApiTags('knowledge-base')
 @ApiBearerAuth()
@@ -57,6 +59,11 @@ export class RagController {
 
     if (!isUserPrincipal(principal)) {
       throw new ForbiddenAppException({}, 'rag');
+    }
+
+    // ADMIN users have global permissions and do not need project membership.
+    if (principal.role === 'ADMIN') {
+      return;
     }
 
     const membership = await this.db.projectMember.findUnique({
@@ -172,29 +179,32 @@ export class RagController {
 
   @Post('import/graphify')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Import graphify knowledge graph into the project knowledge base (admin only)' })
+  @ApiOperation({ summary: 'Import graphify knowledge graph into the project knowledge base' })
   @ApiResponse({ status: 200, description: 'Import successful' })
   @ApiResponse({ status: 400, description: 'Graphify not enabled for this project or validation error' })
-  @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  @RequiredPermission('ADMIN')
+  @RequiredPermission([KodaAction.IMPORT as CaslPermissionAction, 'CodeIntel'])
   async importGraphify(
     @Param('slug') slug: string,
     @Body() dto: ImportGraphifyDto,
-    @Principal() _principal: KodaPrincipal,
+    @Principal() principal: KodaPrincipal,
   ) {
     const project = await this.resolveProject(slug);
+    await this.checkProjectMembership(project.id, principal);
     if (!project.graphifyEnabled) throw new ValidationAppException({}, 'rag.graphifyDisabled');
     if (dto.nodes.length === 0) return JsonResponse.Ok({ imported: 0, cleared: 0 });
-    const result = await this.db.$transaction(async (tx) => {
-      const importResult = await this.ragService.importGraphify(project.id, dto.nodes, dto.links ?? []);
+
+    const importResult = await this.ragService.importGraphify(project.id, dto.nodes, dto.links ?? []);
+
+    await this.db.$transaction(async (tx) => {
       await tx.project.update({
         where: { id: project.id },
         data: { graphifyLastImportedAt: new Date() },
       });
-      return importResult;
     });
-    return JsonResponse.Ok(result);
+
+    return JsonResponse.Ok(importResult);
   }
 
   @Post('optimize')

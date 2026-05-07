@@ -40,17 +40,27 @@ export class KodaCaslAbilityFactory extends BaseCaslAbilityFactory {
 
   private userPermissions(principal: UserPrincipal): CaslPermission[] {
     if (principal.role === 'ADMIN') {
-      return KodaCaslAbilityFactory.ADMIN_MANAGEABLE_RESOURCES.map(
-        (subject) => ({ action: CaslPermissionAction.MANAGE, subject }),
-      );
+      return [
+        ...KodaCaslAbilityFactory.ADMIN_MANAGEABLE_RESOURCES.map(
+          (subject) => ({ action: CaslPermissionAction.MANAGE, subject }),
+        ),
+        { action: CaslPermissionAction.READ, subject: 'CodeIntel' },
+        { action: KodaAction.IMPORT as CaslPermissionAction, subject: 'CodeIntel' },
+        { action: CaslPermissionAction.MANAGE, subject: 'AstIndex' },
+      ];
     }
-    return [
+    const perms: CaslPermission[] = [
       ...this.readPermissions(),
       { action: CaslPermissionAction.CREATE, subject: 'Comment' },
       { action: CaslPermissionAction.UPDATE, subject: 'Comment', conditions: { authorUserId: principal.id } },
       { action: CaslPermissionAction.DELETE, subject: 'Comment', conditions: { authorUserId: principal.id } },
       { action: CaslPermissionAction.CREATE, subject: 'Ticket' },
+      { action: KodaAction.IMPORT as CaslPermissionAction, subject: 'CodeIntel' },
     ];
+    if (principal.projectRole === 'DEVELOPER') {
+      perms.push({ action: CaslPermissionAction.READ, subject: 'CodeIntel' });
+    }
+    return perms;
   }
 
   private agentPermissions(principal: AgentPrincipal): CaslPermission[] {
@@ -64,6 +74,8 @@ export class KodaCaslAbilityFactory extends BaseCaslAbilityFactory {
       { action: CaslPermissionAction.CREATE, subject: 'Ticket' },
       // Preserve pre-CASL behavior (commit 4ceb85e: "allow agents to soft-delete tickets")
       { action: CaslPermissionAction.DELETE, subject: 'Ticket' },
+      { action: CaslPermissionAction.READ, subject: 'CodeIntel' },
+      { action: KodaAction.IMPORT as CaslPermissionAction, subject: 'CodeIntel' },
       ...this.agentRoleDerivedPermissions(principal),
     ];
   }
@@ -80,6 +92,7 @@ export class KodaCaslAbilityFactory extends BaseCaslAbilityFactory {
       switch (role) {
         case 'DEVELOPER':
           perms.push({ action: KodaAction.TRANSITION as CaslPermissionAction, subject: 'Ticket' });
+          perms.push({ action: CaslPermissionAction.MANAGE, subject: 'AstIndex' });
           break;
         case 'REVIEWER':
           perms.push({ action: KodaAction.TRANSITION as CaslPermissionAction, subject: 'Ticket' });

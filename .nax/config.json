@@ -1,85 +1,77 @@
 {
-  "name": "koda",
-  "version": 1,
-  "models": {
-      "claude": {
-          "fast": "haiku",
-          "balanced": "sonnet",
-          "powerful": "opus"
-      },
-      "opencode": {
-          "fast": "minimax/MiniMax-M2.7",
-          "balanced": "minimax/MiniMax-M2.7",
-          "powerful": "minimax/MiniMax-M2.7"
-      },
-      "codex": {
-          "fast": "gpt-5.4-mini/medium",
-          "balanced": "gpt-5.3-codex/medium",
-          "powerful": "gpt-5.4/medium"
-      }
-  },    
-  "quality": {
-    "requireTypecheck": true,
-    "requireLint": true,
-    "requireTests": true,
-    "commands": {
-      "test": "npx turbo test",
-      "testScoped": "npx turbo test --filter=[HEAD^1]",
-      "typecheck": "bunx turbo type-check",
-      "lint": "bunx turbo lint",
-      "lintFix": "bunx turbo lint:fix",
-      "formatFix": "bunx turbo lint:fix"
+    "name": "koda",
+    "version": 1,
+    "models": {
+        "claude": {
+            "fast": "haiku",
+            "balanced": "sonnet",
+            "powerful": "sonnet"
+        },
+        "opencode": {
+            "fast": "minimax/MiniMax-M2.7",
+            "balanced": "minimax/MiniMax-M2.7",
+            "powerful": "minimax/MiniMax-M2.7"
+        },
+        "codex": {
+            "fast": "gpt-5.4-mini/medium",
+            "balanced": "gpt-5.3-codex/medium",
+            "powerful": "gpt-5.4/medium"
+        }
+    },
+    "quality": {
+        "requireTypecheck": true,
+        "requireLint": true,
+        "requireTests": true,
+        "commands": {
+            "test": "npx turbo test",
+            "testScoped": "npx turbo test --filter=[HEAD^1]",
+            "typecheck": "bunx turbo type-check",
+            "lint": "bunx turbo lint",
+            "lintFix": "bunx turbo lint:fix",
+            "formatFix": "bunx turbo lint:fix"
+        }
+    },
+    "review": {
+        "enabled": true,
+        "checks": ["build", "typecheck", "lint", "semantic", "adversarial"],
+        "commands": {
+            "build": "bun run build",
+            "typecheck": "bunx turbo type-check",
+            "lint": "bunx turbo lint",
+            "lintFix": "bunx turbo lint:fix"
+        }
+    },
+    "context": {
+        "fileInjection": "keyword",
+        "featureEngine": {
+            "enabled": true,
+            "budgetTokens": 2048
+        },
+        "v2": {
+            "enabled": true,
+            "minScore": 0.1,
+            "rules": {
+                "allowLegacyClaudeMd": false
+            }
+        }
+    },
+    "plan": {
+        "model": "balanced"
+    },
+    "acceptance": {
+        "enabled": true,
+        "maxRetries": 3
+    },
+    "precheck": {
+        "storySizeGate": {
+            "enabled": true,
+            "maxAcCount": 15,
+            "maxBulletPoints": 15
+        }
+    },
+    "execution": {
+        "smartTestRunner": {
+            "testFilePatterns": ["**/*.spec.ts"]
+        }
     }
-  },
-  "review": {
-    "enabled": true,
-    "checks": [
-      "build",
-      "typecheck",
-      "lint",
-      "semantic",
-      "adversarial"
-    ],
-    "commands": {
-      "build": "bun run build",
-      "typecheck": "bunx turbo type-check",
-      "lint": "bunx turbo lint",
-      "lintFix": "bunx turbo lint:fix"
-    }
-  },
-  "context": {
-    "fileInjection": "keyword",
-    "featureEngine": {
-      "enabled": true,
-      "budgetTokens": 2048
-    },    
-    "v2": {
-      "enabled": true,
-      "minScore": 0.1,
-      "rules": {
-        "allowLegacyClaudeMd": false
-      }
-    }
-  },
-  "plan": {
-    "model": "balanced"
-  },
-  "acceptance": {
-    "enabled": true,
-    "maxRetries": 3
-  },
-  "precheck": {
-    "storySizeGate": {
-      "enabled": true,
-      "maxAcCount": 15,
-      "maxBulletPoints": 15
-    }
-  },
-  "execution": {
-    "smartTestRunner": {
-      "testFilePatterns": [
-        "**/*.spec.ts"
-      ]
-    }
-  }
 }

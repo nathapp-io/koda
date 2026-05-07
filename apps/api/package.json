@@ -51,7 +51,8 @@
     "class-validator": "^0.14.0",
     "joi": "^18.0.2",
     "reflect-metadata": "^0.2.0",
-    "rxjs": "^7.8.0"
+    "rxjs": "^7.8.0",
+    "ts-morph": "^28.0.0"
   },
   "devDependencies": {
     "@nathapp/eslint-config": "workspace:*",
@@ -78,6 +79,7 @@
     "rootDir": "src",
     "roots": [
       "<rootDir>",
+      "<rootDir>/../test/unit",
       "<rootDir>/../test/e2e",
       "<rootDir>/../test/integration"
     ],

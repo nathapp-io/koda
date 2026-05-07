@@ -1,5 +1,5 @@
 import { IVcsProvider } from './vcs-provider';
-import { VcsIssue, VcsPullRequest, VcsPrStatus, CreatePrParams, VcsCommit } from './types';
+import { VcsIssue, VcsPullRequest, VcsPrStatus, CreatePrParams, VcsCommit, SourceFile } from './types';
 
 describe('VcsIssue Type', () => {
   describe('VcsIssue type structure', () => {
@@ -170,6 +170,10 @@ describe('IVcsProvider Interface', () => {
         async listPrCommits(prNumber: number): Promise<VcsCommit[]> {
           return [];
         }
+
+        async fetchCommitFiles(repoId: string, commitHash: string, changedFiles: string[]): Promise<SourceFile[]> {
+          return [];
+        }
       }
 
       const provider = new MockVcsProvider();
@@ -220,6 +224,10 @@ describe('IVcsProvider Interface', () => {
         async listPrCommits(prNumber: number): Promise<VcsCommit[]> {
           return [];
         }
+
+        async fetchCommitFiles(repoId: string, commitHash: string, changedFiles: string[]): Promise<SourceFile[]> {
+          return [];
+        }
       }
 
       const provider = new MockVcsProvider();
@@ -262,6 +270,10 @@ describe('IVcsProvider Interface', () => {
         }
 
         async listPrCommits(prNumber: number): Promise<VcsCommit[]> {
+          return [];
+        }
+
+        async fetchCommitFiles(repoId: string, commitHash: string, changedFiles: string[]): Promise<SourceFile[]> {
           return [];
         }
       }
@@ -313,6 +325,10 @@ describe('IVcsProvider Interface', () => {
         async listPrCommits(prNumber: number): Promise<VcsCommit[]> {
           return [];
         }
+
+        async fetchCommitFiles(repoId: string, commitHash: string, changedFiles: string[]): Promise<SourceFile[]> {
+          return [];
+        }
       }
 
       const provider = new MockVcsProvider();
@@ -360,6 +376,10 @@ describe('IVcsProvider Interface', () => {
         async listPrCommits(prNumber: number): Promise<VcsCommit[]> {
           return [];
         }
+
+        async fetchCommitFiles(repoId: string, commitHash: string, changedFiles: string[]): Promise<SourceFile[]> {
+          return [];
+        }
       }
 
       const provider = new MockVcsProvider();
@@ -401,6 +421,10 @@ describe('IVcsProvider Interface', () => {
         async listPrCommits(prNumber: number): Promise<VcsCommit[]> {
           return [];
         }
+
+        async fetchCommitFiles(repoId: string, commitHash: string, changedFiles: string[]): Promise<SourceFile[]> {
+          return [];
+        }
       }
 
       const provider = new MockVcsProvider();
@@ -438,6 +462,10 @@ describe('IVcsProvider Interface', () => {
         }
 
         async listPrCommits(prNumber: number): Promise<VcsCommit[]> {
+          return [];
+        }
+
+        async fetchCommitFiles(repoId: string, commitHash: string, changedFiles: string[]): Promise<SourceFile[]> {
           return [];
         }
       }
@@ -479,6 +507,10 @@ describe('IVcsProvider Interface', () => {
         }
 
         async listPrCommits(prNumber: number): Promise<VcsCommit[]> {
+          return [];
+        }
+
+        async fetchCommitFiles(repoId: string, commitHash: string, changedFiles: string[]): Promise<SourceFile[]> {
           return [];
         }
       }
@@ -536,6 +568,10 @@ describe('VcsIssue and IVcsProvider exports', () => {
       }
 
       async listPrCommits(prNumber: number): Promise<VcsCommit[]> {
+        return [];
+      }
+
+      async fetchCommitFiles(repoId: string, commitHash: string, changedFiles: string[]): Promise<SourceFile[]> {
         return [];
       }
     }

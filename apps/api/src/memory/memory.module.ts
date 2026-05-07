@@ -9,6 +9,7 @@ import { MemoryGovernanceService } from './memory-governance.service';
 import { MemoryGovernanceProcessor } from './memory-governance.processor';
 import { ExtractionService } from './extraction.service';
 import { MemoryController } from './memory.controller';
+import { CanonicalStateService } from './canonical-state.service';
 
 @Module({
   imports: [PrismaModule],
@@ -16,6 +17,7 @@ import { MemoryController } from './memory.controller';
   providers: [
     TimelineService,
     ContextBuilderService,
+    CanonicalStateService,
     PrismaMemoryItemRepository,
     { provide: MEMORY_ITEM_REPOSITORY, useExisting: PrismaMemoryItemRepository },
     MemoryGovernanceService,
@@ -25,6 +27,7 @@ import { MemoryController } from './memory.controller';
   exports: [
     TimelineService,
     ContextBuilderService,
+    CanonicalStateService,
     PrismaMemoryItemRepository,
     { provide: MEMORY_ITEM_REPOSITORY, useExisting: PrismaMemoryItemRepository },
     MemoryGovernanceService,

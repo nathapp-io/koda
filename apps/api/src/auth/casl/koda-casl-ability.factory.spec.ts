@@ -63,11 +63,11 @@ describe('KodaCaslAbilityFactory', () => {
       expect(permissionSet(perms)).not.toContain('manage:AgentScope');
     });
 
-    it('should have exactly 5 permission rules', async () => {
+    it('should have exactly 7 permission rules', async () => {
       const principal = makeUser({ role: 'ADMIN' });
       const perms = await factory.getPermissions(principal);
 
-      expect(perms).toHaveLength(5);
+      expect(perms).toHaveLength(8);
     });
   });
 
@@ -121,6 +121,10 @@ describe('KodaCaslAbilityFactory', () => {
 
     it('should NOT grant DELETE Ticket', () => {
       expect(permissionSet(perms)).not.toContain('delete:Ticket');
+    });
+
+    it('should grant IMPORT CodeIntel', () => {
+      expect(permissionSet(perms)).toContain('import:CodeIntel');
     });
   });
 
@@ -226,19 +230,19 @@ describe('KodaCaslAbilityFactory', () => {
   });
 
   describe('permission completeness', () => {
-    it('MEMBER user has exactly 9 permission rules', async () => {
+    it('MEMBER user has exactly 10 permission rules', async () => {
       const principal = makeUser({ role: 'MEMBER' });
       const perms = await factory.getPermissions(principal);
 
-      expect(perms).toHaveLength(9);
+      expect(perms).toHaveLength(10);
     });
 
     it('agent with DEVELOPER role has base + derived permissions', async () => {
       const principal = makeAgent({ agentRoles: ['DEVELOPER'] });
       const perms = await factory.getPermissions(principal);
 
-      const baseCount = 12; // AgentScope.read + 5 resource reads + Comment CRUD.* + Label.manage + Ticket.create + Ticket.delete
-      const derivedCount = 1; // TRANSITION Ticket
+      const baseCount = 14; // AgentScope.read + 5 resource reads + Comment CRUD.* + Label.manage + Ticket.create + Ticket.delete + CodeIntel.read + CodeIntel.import
+      const derivedCount = 2; // TRANSITION Ticket + AstIndex.manage (both from DEVELOPER role)
       expect(perms).toHaveLength(baseCount + derivedCount);
     });
   });

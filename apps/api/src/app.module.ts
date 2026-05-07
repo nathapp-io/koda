@@ -22,6 +22,8 @@ import { VcsModule } from './vcs/vcs.module';
 import { KodaDomainWriterModule } from './koda-domain-writer/koda-domain-writer.module';
 import { OutboxModule } from './outbox/outbox.module';
 import { MemoryModule } from './memory/memory.module';
+import { CodeIntelModule } from './code-intel/code-intel.module';
+import { EntityGraphModule } from './entity-graph/entity-graph.module';
 import { appConfig } from './config/app.config';
 import { authConfig } from './config/auth.config';
 import { databaseConfig } from './config/database.config';
@@ -78,6 +80,8 @@ import { validate } from './config/env.validation';
     OutboxModule,
     KodaDomainWriterModule,
     MemoryModule,
+    CodeIntelModule,
+    EntityGraphModule,
   ],
 })
 export class AppModule {}

@@ -1,6 +1,6 @@
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { IVcsProvider } from '../vcs-provider';
-import { VcsIssue, VcsPullRequest, VcsPrStatus, VcsCommit, CreatePrParams } from '../types';
+import { VcsIssue, VcsPullRequest, VcsPrStatus, VcsCommit, CreatePrParams, SourceFile } from '../types';
 import { HttpClient } from '../factory';
 
 /**
@@ -343,5 +343,39 @@ export class GitHubProvider implements IVcsProvider {
       url: gitHubCommit.html_url,
       date: new Date(gitHubCommit.commit.author.date),
     };
+  }
+
+  /**
+   * Fetch file contents for files changed in a commit.
+   * Uses GitHub's contents API with the commit SHA as ref.
+   */
+  async fetchCommitFiles(repoId: string, commitHash: string, changedFiles: string[]): Promise<SourceFile[]> {
+    const files: SourceFile[] = [];
+
+    for (const filePath of changedFiles) {
+      try {
+        const url = `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/contents/${encodeURIComponent(filePath)}?ref=${commitHash}`;
+        const response = await this.httpClient.get(url, {
+          headers: {
+            Authorization: `Bearer ${this.token}`,
+            Accept: 'application/vnd.github.v3+json',
+          },
+        });
+
+        const data = response.data as { content?: string; encoding?: string };
+        if (data.content && data.encoding === 'base64') {
+          const content = Buffer.from(data.content.replace(/\n/g, ''), 'base64').toString('utf-8');
+          files.push({ path: filePath, content });
+        }
+      } catch (error: unknown) {
+        const errorObj = error as Record<string, unknown>;
+        const status = (errorObj?.response as Record<string, unknown>)?.status;
+        if (status !== 404) {
+          throw error;
+        }
+      }
+    }
+
+    return files;
   }
 }
