@@ -459,7 +459,7 @@ describe('ContextBuilderService', () => {
           },
           semanticMemory: [{ id: 'mem-1', kind: 'FACT', subject: 's', predicate: 'p', confidence: 0.9, createdAt: new Date(), updatedAt: new Date() }],
           graphPaths: [{ id: 'path-1', nodes: [] }],
-          codeIntel: [{ id: 'change-1', impactedFiles: [] }],
+          codeIntel: undefined,
         },
         provenance: { sources: [], retrievalStrategy: 'hybrid' },
         meta: {

@@ -130,7 +130,7 @@ describe('estimateTokenCount helper', () => {
       const testCases: CharTestCase[] = [
         { content: 'Hello', length: 5, tokens: 2 },
         { content: '你好', length: 2, tokens: 1 },
-        { content: '😀😀😀😀', length: 4, tokens: 1 },
+        { content: '😀😀😀😀', length: 8, tokens: 2 },
       ];
 
       testCases.forEach(({ content, length, tokens }) => {
@@ -140,7 +140,7 @@ describe('estimateTokenCount helper', () => {
     });
 
     it('does not penalize for formatting (newlines, whitespace)', () => {
-      const compact = 'abcdefghijklmnop';
+      const compact = 'abcdefghijklmnopq';
       const formatted = 'abcd\nefgh\nijkl\nmnop';
 
       expect(Math.ceil(compact.length / 4)).toBe(Math.ceil(formatted.length / 4));

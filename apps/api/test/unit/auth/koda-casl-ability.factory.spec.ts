@@ -121,7 +121,7 @@ describe('KodaCaslAbilityFactory — ProjectContext Authorization', () => {
         antpattern: '{ useClass: KodaCaslAbilityFactory }',
       };
 
-      expect(factorySetupPattern.usage).toContain('bare class');
+      expect(factorySetupPattern.type).toContain('bare class');
     });
 
     it('avoids "manage all" pattern to prevent unintended access to virtual subjects', () => {
