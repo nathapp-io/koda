@@ -1,0 +1,296 @@
+[
+  {
+    "acId": "AC-1",
+    "original": "getProjectContext(query) returns all four top-level blocks: canonicalState, retrievedContext, provenance, and meta",
+    "refined": "GetProjectContextResponse object includes non-null canonicalState object, retrievedContext object, provenance object, and meta object; canonicalState contains tickets and activeDecisions arrays (or empty arrays); retrievedContext contains documents, semanticMemory arrays and optional graphPaths/codeIntel arrays",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-2",
+    "original": "canonicalState.recentEvents is ordered by createdAt DESC and limited to 20 events",
+    "refined": "canonicalState.recentEvents array contains at most 20 items; consecutive items satisfy recentEvents[i].createdAt >= recentEvents[i+1].createdAt (descending order by createdAt timestamp)",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-3",
+    "original": "retrievedContext.semanticMemory is ordered by confidence DESC and limited to 10 items",
+    "refined": "retrievedContext.semanticMemory array contains at most 10 items; consecutive items satisfy semanticMemory[i].confidence >= semanticMemory[i+1].confidence (descending order by confidence score)",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-4",
+    "original": "retrievedContext.documents calls HybridRetrieverService.search() internally",
+    "refined": "When query is non-blank and retrieval is performed, HybridRetrieverService.search() is called exactly once; retrievedContext.documents.results array is populated from the search result or remains empty if search returns no results",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-5",
+    "original": "When query is blank or absent, retrievedContext.documents.results is an empty array and HybridRetrieverService.search() is not called",
+    "refined": "If query is null, undefined, or empty string (''), then retrievedContext.documents.results equals [] and HybridRetrieverService.search() is never invoked during execution",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-6",
+    "original": "When intent='plan', getProjectContext excludes canonicalState.recentEvents from the response",
+    "refined": "When intent='plan', the returned GetProjectContextResponse has no recentEvents field in canonicalState object (or recentEvents is undefined/null regardless of token budget state)",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-7",
+    "original": "tokenBudget truncation removes lower-priority blocks first (codeIntel before graphPaths before documents before semanticMemory) and never removes canonicalState.tickets or canonicalState.activeDecisions; when intent='plan', canonicalState.recentEvents is always excluded unconditionally (not as a budget-truncation step)",
+    "refined": "Token budget enforcement: (1) exclude recentEvents unconditionally if intent='plan' before calculating tokens; (2) canonicalState.tickets and canonicalState.activeDecisions are never omitted; (3) if tokensUsed exceeds tokenBudget, remove or truncate blocks in reverse priority order: codeIntel → graphPaths → documents → semanticMemory; (4) canonicalState block token cost is always included in tokensUsed and never causes truncation of other blocks",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-8",
+    "original": "meta.latencyMs measures wall-clock time from entry to return (excluding network)",
+    "refined": "meta.latencyMs is a positive integer (milliseconds) captured via high-resolution timer (e.g., performance.now()) from the first line of getProjectContext() entry to the final return statement; network I/O time is included (only CPU-external blocking I/O such as database calls are included, not external HTTP requests outside this service)",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-9",
+    "original": "When getProjectContext is called with a non-existent projectId, it throws ProjectNotFoundError with code='PROJECT_NOT_FOUND'",
+    "refined": "If projectId does not exist in the database, getProjectContext() throws an error instance where error instanceof ProjectNotFoundError is true and error.code === 'PROJECT_NOT_FOUND'",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-10",
+    "original": "All errors thrown by getProjectContext are KodaError subclasses and serialize to the ErrorEnvelope format",
+    "refined": "Any error thrown or caught by getProjectContext is an instance of a KodaError subclass; when serialized via ErrorEnvelope, the result is a JSON object with properties: code (string), message (string), statusCode (number), and metadata (object)",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-11",
+    "original": "The context controller route is gated with @RequiredPermission([KodaAction.READ, 'ProjectContext']) and additionally enforces project membership via a checkProjectMembership() inline call (following the existing pattern in ProjectsController — no ProjectMembershipGuard class exists; do not create one); the controller uses @Principal() principal: KodaPrincipal with no inline actorType or role checks",
+    "refined": "The context controller endpoint method (1) is decorated with @RequiredPermission([KodaAction.READ, 'ProjectContext']); (2) contains a checkProjectMembership(projectId, principal.actorId) call before invoking ContextBuilderService; (3) accepts @Principal() principal: KodaPrincipal as a parameter; (4) contains no inline checks of principal.actorType or principal.role",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-12",
+    "original": "Repeated calls with identical input and unchanged underlying data produce the same result ordering across all agent adapters",
+    "refined": "Two calls to getProjectContext(query) with identical query object and no database/service mutations between invocations return GetProjectContextResponse objects with identical element ordering in all array fields: canonicalState.recentEvents, canonicalState.tickets, canonicalState.activeDecisions, retrievedContext.semanticMemory, retrievedContext.documents.results, retrievedContext.graphPaths, and retrievedContext.codeIntel",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-13",
+    "original": "IsolationGate runs 10 queries that should return 0 results for project-A and asserts all 10 return 0 results",
+    "refined": "IsolationGate creates 10 deterministic test queries with no matching data in project-A's scope; executes all 10 queries with project scope='project-A'; asserts all 10 query result sets have length === 0",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-14",
+    "original": "IsolationGate seeds project-A and project-B, then queries project-B-specific terms while scoped to project-A, and asserts no project-B data is returned",
+    "refined": "IsolationGate creates fixture data in project-B with unique identifiable terms; executes searches for those project-B-specific terms with project scope='project-A'; asserts query results.length === 0 (no cross-project data leaked)",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-15",
+    "original": "ProvenanceGate runs 20 fixture search queries with known matching results and asserts every non-empty response has provenance.sources.length > 0",
+    "refined": "ProvenanceGate executes 20 deterministic search queries against fixture data; for each response with results.length > 0, asserts response.provenance.sources is defined and is an array with length > 0; fails if any result-bearing response has provenance.sources === undefined or length === 0",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-16",
+    "original": "WriteGate runs KodaDomainWriter writes and asserts they succeed; direct raw Prisma writes (PrismaService.client.*) outside approved layers in CI test mode throw a KodaError with code='WRITE_GATE_VIOLATION'",
+    "refined": "WriteGate installs Prisma $use middleware intercepting mutating operations (create, update, delete, upsert, createMany, updateMany, deleteMany); (a) executes writes via KodaDomainWriter and asserts completion without error; (b) executes equivalent raw Prisma writes outside KodaDomainWriter and asserts KodaError is thrown with code='WRITE_GATE_VIOLATION'; gate passes only if both conditions hold",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-17",
+    "original": "TruthConsistencyGate picks 10 random canonical ticket IDs, queries both CanonicalStateService.getSnapshot() and raw Prisma ticket rows (prisma.client.ticket.findMany), and asserts that status, priority, and title match for each ticket (any field mismatch counts as a discrepancy); this is the definition of 'derived store' in this gate",
+    "refined": "TruthConsistencyGate: (1) creates 10 fixture tickets with deterministic status, priority, title; (2) reads canonical state via CanonicalStateService.getSnapshot(); (3) reads same tickets via prisma.client.ticket.findMany(); (4) compares status, priority, title fields between canonical and prisma rows for each ticket; (5) asserts all 10 tickets have 0 field mismatches; gate fails if any field differs",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-18",
+    "original": "GraphifyEnabledGate runs 10 queries on a project with graphifyEnabled=false and asserts zero results have source='code'",
+    "refined": "GraphifyEnabledGate: (1) creates test project with Project.graphifyEnabled=false; (2) executes 10 deterministic search queries against that project; (3) collects all results across 10 queries; (4) asserts all results satisfy result.source !== 'code'; gate fails if any result.source === 'code'",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-19",
+    "original": "TokenBudgetGate calls getProjectContext with tokenBudget=1000, measures meta.tokensUsed, and asserts tokensUsed <= 1050",
+    "refined": "TokenBudgetGate: (1) calls getProjectContext(projectId, { tokenBudget: 1000 }); (2) extracts meta.tokensUsed from response; (3) asserts meta.tokensUsed <= 1050; gate fails if meta.tokensUsed > 1050",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-20",
+    "original": "All gates are runnable via bun run policy:gates -- --project=X",
+    "refined": "PolicyGateService CLI: `bun run policy:gates -- --project=<projectId>` accepts --project flag, invokes PolicyGateService.runAllGates(projectId), exits with code 0 if PolicyGateResult.passed === true, exits with code 1 if PolicyGateResult.passed === false",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-21",
+    "original": "When any gate fails, PolicyGateResult.blockedReason is non-null and describes the failure",
+    "refined": "When PolicyGateResult.passed === false (any GateResult.passed === false), PolicyGateResult.blockedReason is a non-empty string identifying failed gate(s) and failure reason; when PolicyGateResult.passed === true, blockedReason is undefined or null",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-22",
+    "original": "Gate results are written to apps/api/test/policy-gates/results.json for CI artifact capture",
+    "refined": "After PolicyGateService.runAllGates() completes, a JSON file is written to apps/api/test/policy-gates/results.json containing PolicyGateResult structure: { passed: boolean, gates: [{ name, passed, details?, error? }], blockedReason?: string }; file write occurs before CLI exit",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-23",
+    "original": "Policy gates set up deterministic fixture data and do not read production, staging, or developer-local projects",
+    "refined": "Each gate creates all fixture data within its own test execution; gates never query project IDs matching patterns 'production', 'staging', 'dev-*', or any environment-specific project identifier; gates use deterministic seeding (identical seed produces identical fixture state across runs); database context is isolated from production, staging, and developer-local databases",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-24",
+    "original": "AgentRegistryService.register() stores the adapter and it is retrievable by agentId via getAdapter()",
+    "refined": "After calling AgentRegistryService.register(agentId, adapter), calling getAdapter(agentId) returns the exact same adapter instance",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-25",
+    "original": "AgentRegistryService.getAdapter('claude-code') returns an adapter with formatContext() that formats GetProjectContextResponse as a Claude Code prompt fragment",
+    "refined": "AgentRegistryService.getAdapter('claude-code') returns an object with agentId='claude-code' and a formatContext(ctx: GetProjectContextResponse): string method that returns a non-empty string when passed a valid GetProjectContextResponse",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-26",
+    "original": "AgentRegistryService.getAdapter('nax') returns an adapter with formatContext() that formats GetProjectContextResponse for nax prompt injection",
+    "refined": "AgentRegistryService.getAdapter('nax') returns an object with agentId='nax' and a formatContext(ctx: GetProjectContextResponse): string method that returns a non-empty string when passed a valid GetProjectContextResponse",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-27",
+    "original": "Calling register() twice with the same agentId replaces the existing adapter",
+    "refined": "After calling AgentRegistryService.register(agentId, adapter1) followed by register(agentId, adapter2), getAdapter(agentId) returns adapter2 and formatContext() calls invoke adapter2's implementation, not adapter1's",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-28",
+    "original": "KodaAgentAdapter.getContextForAgent(agentId, query) calls ContextBuilderService.getProjectContext() and then registry.getAdapter(agentId).formatContext()",
+    "refined": "KodaAgentAdapter.getContextForAgent(agentId, query) invokes ContextBuilderService.getProjectContext(query) exactly once, passes the returned GetProjectContextResponse to registry.getAdapter(agentId).formatContext(), and returns the formatted string result",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-29",
+    "original": "The registry is seeded with adapters for claude-code and nax on app startup (onModuleInit or equivalent)",
+    "refined": "After AgentsModule onModuleInit() completes, AgentRegistryService.listAgents() returns an array containing entries with agentId='claude-code' and agentId='nax', each with a non-empty capabilities array",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-30",
+    "original": "Adapters cannot call retrieval, memory, graph, or code-intel services directly; they only receive the already-built GetProjectContextResponse",
+    "refined": "AgentAdapter implementations accept only GetProjectContextResponse as input parameter and do not instantiate, inject, or invoke retrieval, memory, graph, or code-intel service dependencies in their formatContext() method",
+    "testable": false,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-31",
+    "original": "recordQueryMetric() persists a MemoryQueryMetric record with fields: projectId, latencyMs, intent, tokensUsed, hadProvenance, staleHitCount, resultCount, and createdAt",
+    "refined": "Calling recordQueryMetric(input) creates a database record in MemoryQueryMetric table with projectId, intent, latencyMs, tokensUsed, hadProvenance, staleHitCount, resultCount matching input values; createdAt is auto-populated with current timestamp; record is queryable by projectId",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-32",
+    "original": "getSloMetrics({ from, to }) computes p50, p95, and p99 latency percentiles from persisted latencyMs records in the time window",
+    "refined": "getSloMetrics(timeWindow) returns retrievalLatency object with p50, p95, p99 fields containing the 50th, 95th, and 99th percentiles of latencyMs values from records where createdAt >= from AND createdAt <= to; includes sampleCount field with count of qualifying records",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-33",
+    "original": "staleHitRate is computed as sum(staleHitCount) / sum(resultCount) in the time window, returning 0 when sum(resultCount) is 0",
+    "refined": "getSloMetrics(timeWindow) returns staleHitRate field computed as sum(staleHitCount) / sum(resultCount) for records with createdAt >= from AND createdAt <= to; returns 0.0 if sum(resultCount) equals 0",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-34",
+    "original": "provenanceCoverage is computed as count(hadProvenance=true) / count(total queries in window)",
+    "refined": "getSloMetrics(timeWindow) returns provenanceCoverage field computed as count(records where hadProvenance=true) / count(all records) for records with createdAt >= from AND createdAt <= to",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-35",
+    "original": "Stale hit counts are recorded when HybridRetrieverService.search() returns results whose indexedAt is more than 7 days old",
+    "refined": "recordQueryMetric() is invoked from ContextBuilderService.getProjectContext() with staleHitCount parameter; staleHitCount is populated with count of results from HybridRetrieverService.search() where (Date.now() - result.indexedAt) > 7 days in milliseconds",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-36",
+    "original": "leakageIncidents is computed as sum(leakageIncidentCount) over all records in the time window",
+    "refined": "getSloMetrics(timeWindow) returns leakageIncidents field computed as sum(leakageIncidentCount) for all records with createdAt >= from AND createdAt <= to; defaults to 0 if no records exist in window",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-37",
+    "original": "GET /admin/slos?from=X&to=Y returns the full SloMetrics object as JSON",
+    "refined": "GET /admin/slos?from=ISO8601&to=ISO8601 returns HTTP 200 with Content-Type application/json; response body matches SloMetrics interface containing retrievalLatency (p50, p95, p99, sampleCount), staleHitRate, provenanceCoverage, leakageIncidents, memoryGrowthRate fields; from and to query parameters are required and must parse as valid ISO 8601 timestamps",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-38",
+    "original": "Metrics persist enough fields to compute all SloMetrics fields without reading raw context response bodies",
+    "refined": "MemoryQueryMetric Prisma model includes all required fields: projectId (for filtering), latencyMs (for p50/p95/p99), hadProvenance (for coverage), staleHitCount and resultCount (for stale rate), leakageIncidentCount (for incidents), createdAt (for time windowing); SloMetrics computation queries only MemoryQueryMetric table without external dependencies",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-39",
+    "original": "CI pipeline runs bun run policy:gates -- --project=test-project on every PR",
+    "refined": "GitHub Actions workflow contains a job step that executes 'bun run policy:gates -- --project=test-project' on every pull_request event, and the step is required to complete before merge",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-40",
+    "original": "CI pipeline fails with exit code 1 when PolicyGateResult.passed === false",
+    "refined": "When PolicyGateResult.passed === false, the 'policy:gates' npm script exits with code 1, causing the containing GitHub Actions job to report status 'failure' and block PR merge",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-41",
+    "original": "bun run policy:gates outputs a summary table to stdout with PASS or FAIL per gate",
+    "refined": "Executing 'bun run policy:gates' prints a formatted table to stdout containing one row per gate from PolicyGateService.runAllGates(), with columns showing gate name and result (PASS or FAIL)",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-42",
+    "original": "SLO metrics are exported to a JSON artifact after each CI run",
+    "refined": "After 'bun run policy:gates' completes, a subsequent GitHub Actions step exports the current SLO metrics snapshot to apps/api/test/policy-gates/slo-metrics.json and uploads it as a named artifact accessible in the PR workflow run artifacts list",
+    "testable": true,
+    "storyId": "US-005"
+  }
+]
