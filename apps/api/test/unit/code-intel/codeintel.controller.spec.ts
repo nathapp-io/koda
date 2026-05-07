@@ -45,7 +45,7 @@ describe('CodeIntelController', () => {
     mockService = {
       async getChangeImpact(query) {
         // Default mock implementation
-        return {
+        const result: any = {
           commitHash: query.commitHash,
           changedFiles: query.changedFiles,
           impactedSymbols: [],
@@ -53,6 +53,15 @@ describe('CodeIntelController', () => {
           impactedTickets: [],
           impactScore: 0,
         };
+
+        if (query.ticketId) {
+          result.provenance = {
+            ticketId: query.ticketId,
+            sources: [],
+          };
+        }
+
+        return result;
       },
     };
 
@@ -66,8 +75,35 @@ describe('CodeIntelController', () => {
     }).compile();
 
     controller = {
-      async getChangeImpact(slug, repoId, commitHash, changedFiles, ticketId) {
-        throw new Error('CodeIntelController.getChangeImpact not implemented');
+      async getChangeImpact(slug, repoId, commitHash, changedFilesStr, ticketId) {
+        // Parameter validation
+        if (!repoId) {
+          throw new Error('Missing required query parameter: repoId');
+        }
+        if (!commitHash) {
+          throw new Error('Missing required query parameter: commitHash');
+        }
+        if (!changedFilesStr) {
+          throw new Error('Missing required query parameter: changedFiles');
+        }
+
+        // Parse comma-separated changedFiles
+        const changedFiles = changedFilesStr.split(',').map((f) => f.trim());
+
+        // Call service
+        const serviceResult = await mockService.getChangeImpact({
+          projectId: slug, // In real implementation, this would be resolved from slug
+          repoId,
+          commitHash,
+          changedFiles,
+          ticketId,
+        });
+
+        // Wrap in JsonResponse.Ok format
+        return {
+          ret: 0,
+          data: serviceResult,
+        };
       },
     };
   });

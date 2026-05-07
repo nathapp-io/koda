@@ -8,6 +8,7 @@ import {
   Param,
   Query,
   HttpCode,
+  BadRequestException,
 } from '@nestjs/common';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
@@ -24,7 +25,7 @@ import {
 import { PrismaMemoryItemRepository } from '../memory/prisma-memory-item.repository';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
-import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
+import { Principal } from '@nathapp/nestjs-auth';
 import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
 import { ActorRole } from '../common/enums';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
@@ -187,7 +188,6 @@ export class ProjectsController {
   @ApiQuery({ name: 'commitHash', required: true })
   @ApiQuery({ name: 'changedFiles', required: true })
   @ApiQuery({ name: 'ticketId', required: false })
-  @RequiredPermission([CaslPermissionAction.READ, 'CodeIntel'])
   async getChangeImpact(
     @Param('slug') slug: string,
     @Query('repoId') repoId: string,
@@ -197,10 +197,11 @@ export class ProjectsController {
     @Principal() principal?: KodaPrincipal,
   ) {
     if (!repoId || !commitHash || !changedFilesStr) {
-      throw new Error('Missing required query parameters');
+      throw new BadRequestException('Missing required query parameters: repoId, commitHash, changedFiles');
     }
 
     const project = await this.projectsService.findBySlug(slug);
+    await this.checkProjectMembership(project.id, principal);
 
     const changedFiles = changedFilesStr.split(',').map((f) => f.trim());
 

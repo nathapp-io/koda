@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { ConfigModule } from '@nestjs/config';
 import { CodeIntelController } from './code-intel.controller';
@@ -11,7 +11,7 @@ import { EntityGraphModule } from '../entity-graph/entity-graph.module';
 import { RagModule } from '../rag/rag.module';
 
 @Module({
-  imports: [PrismaModule, ConfigModule, EntityGraphModule, RagModule],
+  imports: [PrismaModule, ConfigModule, EntityGraphModule, forwardRef(() => RagModule)],
   controllers: [CodeIntelController],
   providers: [AstIndexService, SymbolStore, CodeGraphService, CodeCommitOutboxHandler, ImpactAnalysisService],
   exports: [AstIndexService, SymbolStore, CodeGraphService, CodeCommitOutboxHandler, ImpactAnalysisService],
