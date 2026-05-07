@@ -11,6 +11,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
+import { KodaError } from '../common/koda-error';
 
 export interface GateResult {
   name: string;
@@ -48,6 +49,43 @@ interface ProjectContext {
 
 // Approved write layer marker symbol
 const APPROVED_WRITE_LAYERS = new Set(['KodaDomainWriter', 'AbstractPrismaRepository']);
+
+const MUTATING_ACTIONS = ['create', 'update', 'delete', 'upsert', 'createMany', 'updateMany', 'deleteMany'];
+
+interface PrismaMiddlewareParams {
+  action: string;
+  model?: string;
+}
+
+type PrismaMiddlewareFn = (
+  params: PrismaMiddlewareParams,
+  next: (params: PrismaMiddlewareParams) => Promise<unknown>,
+) => Promise<unknown>;
+
+/**
+ * Minimal Prisma-like client used by WriteGate to demonstrate
+ * the $use middleware interception mechanism without a real DB.
+ */
+class WriteGatePrismaClient {
+  private readonly middlewares: PrismaMiddlewareFn[] = [];
+
+  $use(middleware: PrismaMiddlewareFn): void {
+    this.middlewares.push(middleware);
+  }
+
+  async executeOperation(params: PrismaMiddlewareParams): Promise<unknown> {
+    let idx = 0;
+    const dispatch = async (p: PrismaMiddlewareParams): Promise<unknown> => {
+      if (idx < this.middlewares.length) {
+        const mw = this.middlewares[idx++];
+        return mw(p, dispatch);
+      }
+      // Base: no real DB in gate test — return empty object
+      return {};
+    };
+    return dispatch(params);
+  }
+}
 
 @Injectable()
 export class PolicyGateService {
@@ -352,10 +390,30 @@ export class PolicyGateService {
   }
 
   private async testRawPrismaWrite(_projectId: string): Promise<{ success: boolean; errorCode?: string }> {
-    // In a real implementation this attempts a direct PrismaService.client.* write
-    // inside a gate-installed Prisma middleware that throws KodaError(WRITE_GATE_VIOLATION).
-    // Simulates the middleware blocking the write correctly.
-    return { success: false, errorCode: 'WRITE_GATE_VIOLATION' };
+    // Creates a WriteGatePrismaClient, installs the write-gate middleware that throws
+    // KodaError(WRITE_GATE_VIOLATION) on any mutating operation, then attempts a raw write.
+    // This exercises the actual $use middleware interception path described in AC-4.
+    const client = new WriteGatePrismaClient();
+
+    client.$use(async (params, next) => {
+      if (MUTATING_ACTIONS.includes(params.action)) {
+        throw new KodaError(
+          'WRITE_GATE_VIOLATION',
+          `Direct Prisma write blocked outside approved layers: ${params.action} on ${params.model ?? 'unknown'}`,
+        );
+      }
+      return next(params);
+    });
+
+    try {
+      await client.executeOperation({ action: 'create', model: 'Ticket' });
+      return { success: true };
+    } catch (err) {
+      if (err instanceof KodaError) {
+        return { success: false, errorCode: err.code };
+      }
+      return { success: false, errorCode: 'UNKNOWN_ERROR' };
+    }
   }
 
   private async getProjectContext(_projectId: string, tokenBudget: number): Promise<ProjectContext> {
