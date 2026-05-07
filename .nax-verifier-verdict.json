@@ -3,51 +3,52 @@
   "approved": true,
   "tests": {
     "allPassing": true,
-    "passCount": 15,
+    "passCount": 38,
     "failCount": 0
   },
   "testModifications": {
     "detected": true,
     "files": [
-      "src/vcs/vcs-webhook.service.spec.ts",
-      "src/code-intel/code-commit-outbox-handler.spec.ts"
+      "apps/api/src/vcs/vcs-webhook.service.spec.ts",
+      "apps/api/src/vcs/vcs-provider.spec.ts",
+      "apps/api/src/code-intel/code-commit-outbox-handler.spec.ts"
     ],
     "legitimate": true,
-    "reasoning": "Implementer added proper shared-state mocking infrastructure for cross-instance deduplication tests, improved DB error simulation, and enhanced test coverage for edge cases. All changes improve test fidelity — no loosening of assertions to mask bugs. vcs-provider.spec.ts pre-existing failure is unrelated (MockVcsProvider missing fetchCommitFiles after interface extension)."
+    "reasoning": "Implementer added necessary test infrastructure to support DB-backed deduplication testing. In vcs-webhook.service.spec.ts: added SharedEnqueuedEvent interface and enhanced createMockPrismaService to simulate shared DB state, added DB dedup error handling tests and re-enqueue-after-consumption tests. In vcs-provider.spec.ts: added fetchCommitFiles implementations to all mock providers to match updated interface. Created new CodeCommitOutboxHandler test file with comprehensive tests for async file fetching and indexing. These modifications strengthen test coverage without weakening assertions—they test spec compliance for complex dedup edge cases and cross-instance coordination."
   },
   "acceptanceCriteria": {
     "allMet": true,
     "criteria": [
       {
-        "criterion": "VcsWebhookController handles push events at POST /projects/:slug/vcs-webhook",
+        "criterion": "VcsWebhookController handles push events at POST /projects/:slug/vcs-webhook in addition to existing issue and PR events",
         "met": true
       },
       {
-        "criterion": "Webhook payload validated for repository, ref, commits[], sender",
+        "criterion": "Webhook payload is validated for presence of repository identifier, ref, commits[] array, and sender identifier",
         "met": true
       },
       {
-        "criterion": "Each commit enqueues code_commit outbox event",
+        "criterion": "For each commit in the push payload, a code_commit outbox event is enqueued with payload { repoId, commitHash, ref, changedFiles }",
         "met": true
       },
       {
-        "criterion": "AstIndexService.indexCommit() called by outbox handler",
+        "criterion": "AstIndexService.indexCommit() is called by the code_commit outbox handler, not synchronously by the webhook controller",
         "met": true
       },
       {
-        "criterion": "OutboxService.enqueue() failure returns non-2xx for retry",
+        "criterion": "If OutboxService.enqueue() fails, the webhook logs the failure and returns a non-2xx response so the provider can retry",
         "met": true
       },
       {
-        "criterion": "GitHub signature verification reused",
+        "criterion": "GitHub webhook signature verification reuses the existing x-hub-signature-256 HMAC-SHA256 flow; invalid signatures return 401",
         "met": true
       },
       {
-        "criterion": "Webhook secret from VcsConnection record",
+        "criterion": "The webhook secret continues to come from the project's VcsConnection record and is never hard-coded",
         "met": true
       },
       {
-        "criterion": "5-minute deduplication window enforced",
+        "criterion": "Pushing the same commitHash twice within a 5-minute window does not create duplicate outbox events (deduplication enforced)",
         "met": true
       }
     ]
@@ -57,5 +58,5 @@
     "issues": []
   },
   "fixes": [],
-  "reasoning": "Story-scoped tests (vcs-webhook.service.spec.ts + code-commit-outbox-handler.spec.ts) all pass. Implementer modified test files but changes are legitimate: proper shared-state simulation for cross-instance dedup tests and improved DB error simulation. No loosening of assertions. Pre-existing vcs-provider.spec.ts failure is unrelated to this story."
+  "reasoning": "All 38 story-scoped tests pass (vcs-webhook.service.spec: 7 tests, code-commit-outbox-handler.spec: 10 tests, code-commit-outbox-handler.adversarial.spec: 3 tests, vcs-provider.spec: 10 tests, vcs-provider.adversarial.spec: 2 tests, factory.spec: 6 tests). Test modifications are legitimate infrastructure enhancements for DB-backed dedup testing. Implementation fully satisfies all 8 acceptance criteria: handlePush validates payload (repoId, ref, commits, sender), enqueues code_commit events asynchronously, implements dual-layer deduplication (in-memory fast-path + DB-backed cross-instance check with 5-minute window), handles enqueue failures with HTTP 500 for provider retry, preserves signature verification and secret management patterns. GitHub provider implements fetchCommitFiles() fetching base64-encoded file contents. CodeCommitOutboxHandler fetches files asynchronously and calls AstIndexService.indexCommit(). Tests verify spec compliance including DB error handling, cross-instance coordination via shared DB state, and re-enqueue after event consumption."
 }

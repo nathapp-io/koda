@@ -155,6 +155,6 @@ class EntityStoreWarmup implements OnModuleInit {
       inject: [ConfigService, SchedulerRegistry],
     },
   ],
-  exports: [RagService, HybridRetrieverService, LexicalIndex, EntityStore, FTS_OPTIMIZE_STRATEGY, IncrementalGraphDiffService],
+  exports: [RagService, HybridRetrieverService, LexicalIndex, EntityStore, GraphStoreService, FTS_OPTIMIZE_STRATEGY, IncrementalGraphDiffService],
 })
 export class RagModule {}

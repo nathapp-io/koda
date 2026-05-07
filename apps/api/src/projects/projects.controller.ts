@@ -24,9 +24,10 @@ import {
 import { PrismaMemoryItemRepository } from '../memory/prisma-memory-item.repository';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
-import { Principal } from '@nathapp/nestjs-auth';
+import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
 import { ActorRole } from '../common/enums';
+import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
 
 @ApiTags('projects')
 @ApiBearerAuth()
@@ -35,6 +36,7 @@ export class ProjectsController {
   constructor(
     private projectsService: ProjectsService,
     private memoryItemRepository: PrismaMemoryItemRepository,
+    private impactAnalysisService: ImpactAnalysisService,
     private prisma: PrismaService,
   ) {}
 
@@ -169,5 +171,47 @@ export class ProjectsController {
         updatedAt: item.updatedAt,
       })),
     });
+  }
+
+  @Get(':slug/codeintel/impact')
+  @ApiOperation({ summary: 'Get change impact analysis for a commit' })
+  @ApiResponse({
+    status: 200,
+    description: 'Change impact analysis result',
+  })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Project not found' })
+  @ApiQuery({ name: 'repoId', required: true })
+  @ApiQuery({ name: 'commitHash', required: true })
+  @ApiQuery({ name: 'changedFiles', required: true })
+  @ApiQuery({ name: 'ticketId', required: false })
+  @RequiredPermission([CaslPermissionAction.READ, 'CodeIntel'])
+  async getChangeImpact(
+    @Param('slug') slug: string,
+    @Query('repoId') repoId: string,
+    @Query('commitHash') commitHash: string,
+    @Query('changedFiles') changedFilesStr: string,
+    @Query('ticketId') ticketId?: string,
+    @Principal() principal?: KodaPrincipal,
+  ) {
+    if (!repoId || !commitHash || !changedFilesStr) {
+      throw new Error('Missing required query parameters');
+    }
+
+    const project = await this.projectsService.findBySlug(slug);
+
+    const changedFiles = changedFilesStr.split(',').map((f) => f.trim());
+
+    const result = await this.impactAnalysisService.getChangeImpact({
+      projectId: project.id,
+      repoId,
+      commitHash,
+      changedFiles,
+      ticketId,
+    });
+
+    return JsonResponse.Ok(result);
   }
 }
