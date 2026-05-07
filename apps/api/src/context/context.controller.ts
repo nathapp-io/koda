@@ -11,7 +11,6 @@ import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagg
 import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { JsonResponse, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient } from '@prisma/client';
 import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
 import { ActorRole } from '../common/enums';
 import { KodaAction } from '../auth/casl/koda-action.enum';
@@ -33,14 +32,8 @@ class GetContextQueryDto {
 export class ContextController {
   constructor(
     private readonly contextBuilderService: ContextBuilderService,
-    private readonly prisma: PrismaService<PrismaClient>,
+    private readonly prisma: PrismaService,
   ) {}
-
-  private get db() {
-    return this.prisma.client as unknown as {
-      projectMember: { findUnique(options: unknown): Promise<unknown> };
-    };
-  }
 
   private async checkProjectMembership(
     projectId: string,
@@ -58,7 +51,10 @@ export class ContextController {
       return;
     }
 
-    const membership = await this.db.projectMember.findUnique({
+    const projectMemberDelegate = (this.prisma.client as unknown as Record<string, unknown>)['projectMember'] as {
+      findUnique(options: unknown): Promise<unknown>;
+    };
+    const membership = await projectMemberDelegate.findUnique({
       where: {
         projectId_userId: {
           projectId,
