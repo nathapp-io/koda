@@ -38,6 +38,28 @@
  *   Fix: create a ProjectNotFoundError class (a KodaError subclass) whose .code
  *        property equals the string 'PROJECT_NOT_FOUND', then throw it instead of
  *        NotFoundAppException.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * Bug #3 — AC-10: Promise.all for canonicalState + semanticMemory has no try-catch
+ *
+ *   File:    apps/api/src/context/context-builder.service.ts:96–109
+ *   Current: const [snapshot, semanticMemoryResult, documents] = await Promise.all([
+ *              this.canonicalStateService.getSnapshot({ ... }),
+ *              this.memoryItemRepository.findByProjectMemory({ ... }),
+ *              this.fetchDocuments(query),
+ *            ]);
+ *   Spec:    AC-10: "All errors thrown by getProjectContext are KodaError subclasses
+ *            and serialize to the ErrorEnvelope format."
+ *
+ *   getSnapshot() and findByProjectMemory() execute Prisma queries internally.
+ *   A Prisma failure (PrismaClientKnownRequestError, PrismaClientUnknownRequestError,
+ *   or any other infrastructure error) is NOT an AppException. Because the Promise.all
+ *   is not wrapped in a try-catch, these raw errors escape getProjectContext()
+ *   uncaught, violating AC-10.
+ *
+ *   Fix: wrap the Promise.all (or individual calls) in a try-catch block that
+ *        converts non-AppException errors into an AppException subclass (e.g.
+ *        InternalAppException) before re-throwing.
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -302,5 +324,122 @@ describe('ContextBuilderService — AC-9 adversarial: ProjectNotFoundError has c
 
     expect(thrown).toBeDefined();
     expect(thrown).toBeInstanceOf(ProjectNotFoundError);
+  });
+});
+
+// ─── Bug #3 — AC-10: raw Prisma errors from Promise.all must be wrapped ──────
+
+describe('ContextBuilderService — AC-10 adversarial: non-AppException errors from data layer are wrapped', () => {
+  // AppException is the base class for all errors that serialize to ErrorEnvelope.
+  // AC-10 requires getProjectContext() to only propagate AppException subclasses.
+  // The bug: the Promise.all at line 96 has no try-catch, so Prisma errors escape
+  // as raw Error instances, not AppException subclasses.
+
+  async function buildService(overrides: ModuleOverrides): Promise<ContextBuilderService> {
+    const module: TestingModule = await makeModule(overrides);
+    return module.get(ContextBuilderService);
+  }
+
+  function makePrismaLikeError(message: string): Error {
+    // Simulates a PrismaClientKnownRequestError: a plain infrastructure error
+    // that is NOT an AppException subclass.
+    const err = new Error(message);
+    err.name = 'PrismaClientKnownRequestError';
+    (err as any).code = 'P2025'; // Prisma "record not found" error code
+    return err;
+  }
+
+  it('wraps a raw Error thrown by canonicalStateService.getSnapshot() into an AppException', async () => {
+    // Import AppException to use as the instanceof check target.
+    const { AppException } = await import('@nathapp/nestjs-common');
+
+    const prismaError = makePrismaLikeError('An operation failed because it depends on one or more records');
+
+    const service = await buildService({
+      canonical: {
+        getSnapshot: jest.fn().mockRejectedValue(prismaError),
+      },
+    });
+
+    const query: GetProjectContextQuery = {
+      projectId: PROJECT_ID,
+      actorId: 'actor-1',
+      intent: 'answer',
+    };
+
+    let thrown: unknown;
+    try {
+      await service.getProjectContext(query);
+    } catch (err) {
+      thrown = err;
+    }
+
+    // AC-10: error must be an AppException subclass (serializable to ErrorEnvelope).
+    // Bug: the raw PrismaClientKnownRequestError propagates — it is NOT an AppException.
+    expect(thrown).toBeDefined();
+    expect(thrown).toBeInstanceOf(AppException);
+  });
+
+  it('wraps a raw Error thrown by memoryItemRepository.findByProjectMemory() into an AppException', async () => {
+    const { AppException } = await import('@nathapp/nestjs-common');
+
+    const prismaError = makePrismaLikeError('Connection to database lost');
+    prismaError.name = 'PrismaClientUnknownRequestError';
+
+    const service = await buildService({
+      memoryRepo: {
+        findByProjectMemory: jest.fn().mockRejectedValue(prismaError),
+      },
+    });
+
+    const query: GetProjectContextQuery = {
+      projectId: PROJECT_ID,
+      actorId: 'actor-1',
+      intent: 'answer',
+    };
+
+    let thrown: unknown;
+    try {
+      await service.getProjectContext(query);
+    } catch (err) {
+      thrown = err;
+    }
+
+    // AC-10: error must be an AppException subclass.
+    // Bug: the raw error propagates uncaught from the unwrapped Promise.all.
+    expect(thrown).toBeDefined();
+    expect(thrown).toBeInstanceOf(AppException);
+  });
+
+  it('does not expose raw infrastructure error details when data layer throws', async () => {
+    const { AppException } = await import('@nathapp/nestjs-common');
+
+    const prismaError = makePrismaLikeError('Internal connection pool exhausted');
+
+    const service = await buildService({
+      canonical: {
+        getSnapshot: jest.fn().mockRejectedValue(prismaError),
+      },
+    });
+
+    const query: GetProjectContextQuery = {
+      projectId: PROJECT_ID,
+      actorId: 'actor-1',
+      intent: 'answer',
+    };
+
+    let thrown: unknown;
+    try {
+      await service.getProjectContext(query);
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(thrown).toBeDefined();
+    // The thrown error must be an AppException so that the global exception filter
+    // can serialize it to ErrorEnvelope. A raw Error would bypass the filter.
+    expect(thrown).toBeInstanceOf(AppException);
+    // The raw Prisma error itself must NOT be the top-level thrown value.
+    expect(thrown).not.toBe(prismaError);
   });
 });
