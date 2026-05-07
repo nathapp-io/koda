@@ -195,15 +195,14 @@ export class ProjectsController {
     @Query('repoId') repoId: string,
     @Query('commitHash') commitHash: string,
     @Query('changedFiles') changedFilesStr: string,
+    @Principal() _principal: KodaPrincipal,
     @Query('ticketId') ticketId?: string,
-    @Principal() principal?: KodaPrincipal,
   ) {
     if (!repoId || !commitHash || !changedFilesStr) {
       throw new BadRequestException('Missing required query parameters: repoId, commitHash, changedFiles');
     }
 
     const project = await this.projectsService.findBySlug(slug);
-    await this.checkProjectMembership(project.id, principal);
 
     const changedFiles = changedFilesStr.split(',').map((f) => f.trim());
 
