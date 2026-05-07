@@ -15,6 +15,9 @@ priority: 80
 - Assert exact status codes
 - When mocking DB access in unit/integration tests, use official mock helpers as provider values
 
+## Controller Coverage
+- Controller-level fallback paths (event-type detection, header absence, unknown payload routing) need integration or e2e coverage — service unit tests alone are insufficient
+
 ## Testing Anti-Patterns
 - Do not create `Test.createTestingModule(...).compile()` inline inside `it(...)` bodies without `beforeEach`/`afterEach` cleanup. NestJS DI containers retain reflector metadata, module compiler caches, and injector graphs even after the test returns; ~30+ uncleaned modules per file is enough to OOM Jest
 - If a service has only constructor-injected dependencies and no Nest lifecycle (no `OnModuleInit`, no decorator metadata under test), prefer **direct instantiation** (`new ServiceClass(mockDep)`) over `Test.createTestingModule`. It is faster, allocates orders of magnitude less, and avoids the cleanup requirement entirely

@@ -23,6 +23,10 @@ priority: 50
 - `bun run --cwd apps/api type-check`
 - `cd apps/api && DATABASE_URL=file:./koda-test.db npx jest --forceExit test/e2e`
 
+## Async Patterns
+- Use `Promise.all([...])` for independent async calls — do not chain sequential `await` when calls have no data dependency
+- Maps/Sets used for deduplication or short-term caching must have an explicit eviction strategy or size cap; unbounded collections grow without limit in long-running services
+
 ## Implementation Anti-Patterns
 - Do not use `@Req() req: any`; use `@Principal() principal: KodaPrincipal`
 - Do not pass request-derived actor data through long method chains
