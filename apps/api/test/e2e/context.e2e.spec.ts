@@ -26,6 +26,16 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
 import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
 
+interface ContextApiResponse {
+  projectId?: string;
+  canonicalState?: { recentEvents?: unknown[] };
+  retrievedContext?: {
+    semanticMemory?: unknown[];
+    documents?: { results: unknown[] };
+  };
+  meta?: { latencyMs: number };
+}
+
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = DATABASE_URL ? describe : describe.skip;
 
@@ -126,7 +136,7 @@ describeIntegration('Context API E2E', () => {
         .set('Authorization', `Bearer ${adminAccessToken}`)
         .expect(200);
 
-      const response = body(res);
+      const response = body<ContextApiResponse>(res);
       const recentEvents = response.canonicalState?.recentEvents;
 
       if (recentEvents && recentEvents.length > 0) {
@@ -141,7 +151,7 @@ describeIntegration('Context API E2E', () => {
         .set('Authorization', `Bearer ${adminAccessToken}`)
         .expect(200);
 
-      const response = body(res);
+      const response = body<ContextApiResponse>(res);
       const semanticMemory = response.retrievedContext?.semanticMemory;
 
       if (semanticMemory && semanticMemory.length > 0) {
@@ -156,7 +166,7 @@ describeIntegration('Context API E2E', () => {
         .set('Authorization', `Bearer ${adminAccessToken}`)
         .expect(200);
 
-      const response = body(res);
+      const response = body<ContextApiResponse>(res);
       expect(response.retrievedContext?.documents?.results).toEqual([]);
     });
 
@@ -167,7 +177,7 @@ describeIntegration('Context API E2E', () => {
         .set('Authorization', `Bearer ${adminAccessToken}`)
         .expect(200);
 
-      const response = body(res);
+      const response = body<ContextApiResponse>(res);
       expect(response.canonicalState?.recentEvents).toBeUndefined();
     });
 
@@ -178,7 +188,7 @@ describeIntegration('Context API E2E', () => {
         .set('Authorization', `Bearer ${adminAccessToken}`)
         .expect(200);
 
-      const response = body(res);
+      const response = body<ContextApiResponse>(res);
       expect(response.meta?.latencyMs).toBeGreaterThan(0);
     });
 
@@ -212,7 +222,17 @@ describeIntegration('Context API E2E', () => {
         .set('Authorization', `Bearer ${adminAccessToken}`)
         .expect(200);
 
-      expect(JSON.stringify(body(res1))).toBe(JSON.stringify(body(res2)));
+      const stripVolatile = (r: ContextApiResponse) => {
+        const s = JSON.parse(JSON.stringify(r)) as Record<string, unknown>;
+        const meta = s['meta'] as Record<string, unknown> | undefined;
+        if (meta) { delete meta['retrievedAt']; delete meta['latencyMs']; }
+        const docs = (s['retrievedContext'] as Record<string, unknown> | undefined)?.['documents'] as Record<string, unknown> | undefined;
+        if (docs) delete docs['retrievedAt'];
+        return s;
+      };
+      expect(JSON.stringify(stripVolatile(body<ContextApiResponse>(res1)))).toBe(
+        JSON.stringify(stripVolatile(body<ContextApiResponse>(res2))),
+      );
     });
   });
 

@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  HttpCode,
   Post,
   Body,
   Param,
@@ -116,6 +117,7 @@ export class ContextController {
   }
 
   @Post(':projectId/query')
+  @HttpCode(200)
   @ApiOperation({ summary: 'Query project context with request body' })
   @ApiResponse({ status: 200, description: 'Project context retrieved' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
