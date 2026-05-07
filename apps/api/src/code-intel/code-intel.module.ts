@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { ConfigModule } from '@nestjs/config';
 import { CodeIntelController } from './code-intel.controller';
+import { ProjectCodeIntelController } from './project-codeintel.controller';
 import { AstIndexService } from './ast-index.service';
 import { SymbolStore } from './symbol-store';
 import { CodeGraphService } from './code-graph.service';
@@ -12,7 +13,7 @@ import { RagModule } from '../rag/rag.module';
 
 @Module({
   imports: [PrismaModule, ConfigModule, EntityGraphModule, forwardRef(() => RagModule)],
-  controllers: [CodeIntelController],
+  controllers: [CodeIntelController, ProjectCodeIntelController],
   providers: [AstIndexService, SymbolStore, CodeGraphService, CodeCommitOutboxHandler, ImpactAnalysisService],
   exports: [AstIndexService, SymbolStore, CodeGraphService, CodeCommitOutboxHandler, ImpactAnalysisService],
 })
