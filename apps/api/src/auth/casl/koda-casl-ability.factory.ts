@@ -55,7 +55,6 @@ export class KodaCaslAbilityFactory extends BaseCaslAbilityFactory {
       { action: CaslPermissionAction.UPDATE, subject: 'Comment', conditions: { authorUserId: principal.id } },
       { action: CaslPermissionAction.DELETE, subject: 'Comment', conditions: { authorUserId: principal.id } },
       { action: CaslPermissionAction.CREATE, subject: 'Ticket' },
-      { action: CaslPermissionAction.READ, subject: 'CodeIntel' },
       { action: KodaAction.IMPORT as CaslPermissionAction, subject: 'CodeIntel' },
     ];
   }
