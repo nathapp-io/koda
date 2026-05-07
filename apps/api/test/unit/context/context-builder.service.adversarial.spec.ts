@@ -443,3 +443,115 @@ describe('ContextBuilderService — AC-10 adversarial: non-AppException errors f
     expect(thrown).not.toBe(prismaError);
   });
 });
+
+// ─── Bug #4 — AC-10: non-NotFoundAppException AppException subclasses must be preserved ─
+//
+// Source finding (apps/api/src/context/context-builder.service.ts:3, :115):
+//
+//   The catch block at line 114 only re-throws NotFoundAppException. Any other
+//   AppException subclass (e.g. ForbiddenAppException → HTTP 403, ValidationAppException
+//   → HTTP 400) is swallowed and converted to InternalAppException (HTTP 500).
+//   AppException is not imported, so the check `err instanceof AppException` is not
+//   even available as a guard.
+//
+//   Spec-correct behavior (AC-10): ALL AppException subclasses must be re-thrown
+//   as-is; only non-AppException errors should be wrapped in InternalAppException.
+
+describe('ContextBuilderService — AC-10 adversarial: AppException subclasses from data layer are preserved', () => {
+  async function buildService(overrides: ModuleOverrides): Promise<ContextBuilderService> {
+    const module: TestingModule = await makeModule(overrides);
+    return module.get(ContextBuilderService);
+  }
+
+  it('re-throws ForbiddenAppException thrown by canonicalStateService.getSnapshot() unchanged', async () => {
+    const { ForbiddenAppException } = await import('@nathapp/nestjs-common');
+
+    const forbiddenError = new ForbiddenAppException({}, 'context');
+
+    const service = await buildService({
+      canonical: {
+        getSnapshot: jest.fn().mockRejectedValue(forbiddenError),
+      },
+    });
+
+    const query: GetProjectContextQuery = {
+      projectId: PROJECT_ID,
+      actorId: 'actor-1',
+      intent: 'answer',
+    };
+
+    let thrown: unknown;
+    try {
+      await service.getProjectContext(query);
+    } catch (err) {
+      thrown = err;
+    }
+
+    // AC-10: ForbiddenAppException must propagate as-is (HTTP 403).
+    // Bug: the catch block converts it to InternalAppException (HTTP 500).
+    expect(thrown).toBeDefined();
+    expect(thrown).toBeInstanceOf(ForbiddenAppException);
+    expect(thrown).toBe(forbiddenError);
+  });
+
+  it('re-throws ValidationAppException thrown by memoryItemRepository.findByProjectMemory() unchanged', async () => {
+    const { ValidationAppException } = await import('@nathapp/nestjs-common');
+
+    const validationError = new ValidationAppException({}, 'context');
+
+    const service = await buildService({
+      memoryRepo: {
+        findByProjectMemory: jest.fn().mockRejectedValue(validationError),
+      },
+    });
+
+    const query: GetProjectContextQuery = {
+      projectId: PROJECT_ID,
+      actorId: 'actor-1',
+      intent: 'answer',
+    };
+
+    let thrown: unknown;
+    try {
+      await service.getProjectContext(query);
+    } catch (err) {
+      thrown = err;
+    }
+
+    // AC-10: ValidationAppException must propagate as-is (HTTP 400).
+    // Bug: the catch block converts it to InternalAppException (HTTP 500).
+    expect(thrown).toBeDefined();
+    expect(thrown).toBeInstanceOf(ValidationAppException);
+    expect(thrown).toBe(validationError);
+  });
+
+  it('does not convert a ForbiddenAppException to InternalAppException', async () => {
+    const { ForbiddenAppException, InternalAppException } = await import('@nathapp/nestjs-common');
+
+    const forbiddenError = new ForbiddenAppException({}, 'context');
+
+    const service = await buildService({
+      canonical: {
+        getSnapshot: jest.fn().mockRejectedValue(forbiddenError),
+      },
+    });
+
+    const query: GetProjectContextQuery = {
+      projectId: PROJECT_ID,
+      actorId: 'actor-1',
+      intent: 'answer',
+    };
+
+    let thrown: unknown;
+    try {
+      await service.getProjectContext(query);
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(thrown).toBeDefined();
+    // The thrown value must NOT be an InternalAppException — that would mask the real error type.
+    expect(thrown).not.toBeInstanceOf(InternalAppException);
+    expect(thrown).toBeInstanceOf(ForbiddenAppException);
+  });
+});
