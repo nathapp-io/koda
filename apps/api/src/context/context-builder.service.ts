@@ -1,5 +1,6 @@
 import { performance } from 'perf_hooks';
 import { Injectable, Logger } from '@nestjs/common';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
 import { CanonicalStateService, CanonicalTicket, CanonicalEvent, CanonicalDecision } from '../memory/canonical-state.service';
@@ -12,13 +13,19 @@ import { EntityPath } from '../entity-graph/dto/entity-graph.types';
 import { ImpactAnalysisService, ChangeImpactResult } from '../code-intel/impact-analysis.service';
 import { estimateTokenCount } from './token-estimator';
 
-export class ProjectNotFoundError extends Error {
-  readonly code = 'PROJECT_NOT_FOUND';
+export class ProjectNotFoundError extends NotFoundAppException {
   constructor() {
-    super('Project not found');
+    super({}, 'projects');
     this.name = 'ProjectNotFoundError';
   }
 }
+// Override the numeric code getter inherited from AppException with the string 'PROJECT_NOT_FOUND'.
+// The getter on AppException.prototype is configurable so this is safe.
+Object.defineProperty(ProjectNotFoundError.prototype, 'code', {
+  get() { return 'PROJECT_NOT_FOUND'; },
+  configurable: true,
+  enumerable: false,
+});
 
 export type ContextIntent = 'answer' | 'diagnose' | 'plan' | 'update' | 'search';
 
