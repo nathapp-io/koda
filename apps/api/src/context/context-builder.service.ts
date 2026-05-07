@@ -151,7 +151,7 @@ export class ContextBuilderService {
       select: { id: true, deletedAt: true },
     });
     if (!project || project.deletedAt) {
-      throw new NotFoundAppException({}, 'context');
+      throw new NotFoundAppException({}, 'projects');
     }
   }
 
