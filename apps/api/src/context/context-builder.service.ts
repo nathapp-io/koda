@@ -233,8 +233,6 @@ export class ContextBuilderService {
     },
     budget: number,
   ): GetProjectContextResponse['retrievedContext'] {
-    let used = 0;
-
     const semanticTokens = estimateTokenCount(JSON.stringify(ctx.semanticMemory));
     const docTokens = estimateTokenCount(JSON.stringify(ctx.documents));
     const graphTokens = ctx.graphPaths ? estimateTokenCount(JSON.stringify(ctx.graphPaths)) : 0;
@@ -248,25 +246,24 @@ export class ContextBuilderService {
     let documents = ctx.documents;
     let semanticMemory = ctx.semanticMemory;
 
-    used += semanticTokens + docTokens;
+    let used = semanticTokens + docTokens + graphTokens + codeIntelTokens;
 
-    if (used + codeIntelTokens > budget) {
+    if (used > budget && codeIntel !== undefined) {
       codeIntel = undefined;
-    } else {
-      used += codeIntelTokens;
+      used -= codeIntelTokens;
     }
 
-    if (used + graphTokens > budget) {
+    if (used > budget && graphPaths !== undefined) {
       graphPaths = undefined;
-    } else {
-      used += graphTokens;
+      used -= graphTokens;
     }
 
     if (used > budget) {
       documents = { results: [], scores: [], retrievedAt: ctx.documents.retrievedAt };
+      used -= docTokens;
     }
 
-    if (used - docTokens > budget) {
+    if (used > budget) {
       semanticMemory = [];
     }
 
