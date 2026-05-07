@@ -1,3 +1,4 @@
+import { performance } from 'perf_hooks';
 import { Injectable, Logger } from '@nestjs/common';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -72,7 +73,7 @@ export class ContextBuilderService {
   ) {}
 
   async getProjectContext(query: GetProjectContextQuery): Promise<GetProjectContextResponse> {
-    const startTime = Date.now();
+    const startTime = performance.now();
 
     await this.verifyProjectExists(query.projectId);
 
@@ -139,7 +140,7 @@ export class ContextBuilderService {
         intent: query.intent,
         tokensUsed,
         retrievedAt: new Date(),
-        latencyMs: Date.now() - startTime,
+        latencyMs: Math.ceil(performance.now() - startTime),
       },
     };
   }
