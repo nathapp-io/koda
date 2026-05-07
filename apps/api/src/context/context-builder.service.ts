@@ -1,6 +1,6 @@
 import { performance } from 'perf_hooks';
 import { Injectable, Logger } from '@nestjs/common';
-import { NotFoundAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException, InternalAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
 import { CanonicalStateService, CanonicalTicket, CanonicalEvent, CanonicalDecision } from '../memory/canonical-state.service';
@@ -93,20 +93,30 @@ export class ContextBuilderService {
 
     const tokenBudget = query.tokenBudget ?? DEFAULT_TOKEN_BUDGET;
 
-    const [snapshot, semanticMemoryResult, documents] = await Promise.all([
-      this.canonicalStateService.getSnapshot({
-        projectId: query.projectId,
-        ticketIds: query.ticketIds,
-        actorId: query.actorId,
-        timeWindow: query.timeWindow ?? { from: new Date(0) },
-      }),
-      this.memoryItemRepository.findByProjectMemory({
-        projectId: query.projectId,
-        orderBy: 'confidence',
-        limit: MAX_SEMANTIC_MEMORY,
-      }),
-      this.fetchDocuments(query),
-    ]);
+    let snapshot: Awaited<ReturnType<typeof this.canonicalStateService.getSnapshot>>;
+    let semanticMemoryResult: Awaited<ReturnType<typeof this.memoryItemRepository.findByProjectMemory>>;
+    let documents: HybridSearchResult;
+    try {
+      [snapshot, semanticMemoryResult, documents] = await Promise.all([
+        this.canonicalStateService.getSnapshot({
+          projectId: query.projectId,
+          ticketIds: query.ticketIds,
+          actorId: query.actorId,
+          timeWindow: query.timeWindow ?? { from: new Date(0) },
+        }),
+        this.memoryItemRepository.findByProjectMemory({
+          projectId: query.projectId,
+          orderBy: 'confidence',
+          limit: MAX_SEMANTIC_MEMORY,
+        }),
+        this.fetchDocuments(query),
+      ]);
+    } catch (err) {
+      if (err instanceof NotFoundAppException) {
+        throw err;
+      }
+      throw new InternalAppException({}, 'context');
+    }
 
     const recentEvents = this.buildRecentEvents(query.intent, snapshot.recentEvents);
 
