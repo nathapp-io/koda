@@ -1,6 +1,5 @@
 import { performance } from 'perf_hooks';
 import { Injectable, Logger } from '@nestjs/common';
-import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
 import { CanonicalStateService, CanonicalTicket, CanonicalEvent, CanonicalDecision } from '../memory/canonical-state.service';
@@ -12,6 +11,14 @@ import { EntityGraphService } from '../entity-graph/entity-graph.service';
 import { EntityPath } from '../entity-graph/dto/entity-graph.types';
 import { ImpactAnalysisService, ChangeImpactResult } from '../code-intel/impact-analysis.service';
 import { estimateTokenCount } from './token-estimator';
+
+export class ProjectNotFoundError extends Error {
+  readonly code = 'PROJECT_NOT_FOUND';
+  constructor() {
+    super('Project not found');
+    this.name = 'ProjectNotFoundError';
+  }
+}
 
 export type ContextIntent = 'answer' | 'diagnose' | 'plan' | 'update' | 'search';
 
@@ -125,15 +132,19 @@ export class ContextBuilderService {
       retrievalStrategy: hasQuery ? 'hybrid' : 'canonical-only',
     };
 
-    const tokensUsed = estimateTokenCount(JSON.stringify(retrievedContext));
+    const canonicalState = {
+      tickets: snapshot.tickets,
+      recentEvents,
+      activeDecisions: snapshot.activeDecisions,
+    };
+
+    const tokensUsed =
+      estimateTokenCount(JSON.stringify(canonicalState)) +
+      estimateTokenCount(JSON.stringify(retrievedContext));
 
     return {
       projectId: query.projectId,
-      canonicalState: {
-        tickets: snapshot.tickets,
-        recentEvents,
-        activeDecisions: snapshot.activeDecisions,
-      },
+      canonicalState,
       retrievedContext,
       provenance,
       meta: {
@@ -151,7 +162,7 @@ export class ContextBuilderService {
       select: { id: true, deletedAt: true },
     });
     if (!project || project.deletedAt) {
-      throw new NotFoundAppException({}, 'projects');
+      throw new ProjectNotFoundError();
     }
   }
 
