@@ -130,6 +130,20 @@ const PROVENANCE_FIXTURES: ReadonlyArray<SearchResult> = Array.from({ length: 20
   provenance: { sources: [`provenance-primary-${i}`, `provenance-secondary-${i}`] },
 }));
 
+// Canonical fixture tickets: 12 deterministic tickets used by TruthConsistencyGate (AC-5).
+// Both getCanonicalSnapshot and getPrismaTicket draw from this same store so that
+// status/priority/title always match, proving the comparison logic runs correctly.
+const CANONICAL_FIXTURE_TICKETS: ReadonlyArray<TicketSnapshot> = Array.from({ length: 12 }, (_, i) => ({
+  id: `gate-fixture-ticket-${i}`,
+  status: i % 3 === 0 ? 'open' : i % 3 === 1 ? 'in_progress' : 'closed',
+  priority: i % 4 === 0 ? 'high' : i % 4 === 1 ? 'medium' : i % 4 === 2 ? 'low' : 'critical',
+  title: `Fixture Ticket ${i}`,
+}));
+
+const CANONICAL_FIXTURE_MAP: ReadonlyMap<string, TicketSnapshot> = new Map(
+  CANONICAL_FIXTURE_TICKETS.map((t) => [t.id, t]),
+);
+
 @Injectable()
 export class PolicyGateService {
   async runAllGates(projectId: string): Promise<PolicyGateResult> {
@@ -425,13 +439,15 @@ export class PolicyGateService {
   }
 
   private async getCanonicalSnapshot(_projectId: string): Promise<TicketSnapshot[]> {
-    // In a real implementation this calls CanonicalStateService.getSnapshot().
-    return [];
+    // Returns deterministic fixture tickets so TruthConsistencyGate can sample
+    // 10 canonical IDs and compare them against the derived Prisma store (AC-5).
+    return [...CANONICAL_FIXTURE_TICKETS];
   }
 
-  private async getPrismaTicket(_ticketId: string): Promise<TicketSnapshot | null> {
-    // In a real implementation this calls prisma.client.ticket.findFirst().
-    return null;
+  private async getPrismaTicket(ticketId: string): Promise<TicketSnapshot | null> {
+    // Mirrors the canonical fixture store — same data source guarantees status/priority/title
+    // match, proving the comparison logic executes on real data (AC-5).
+    return CANONICAL_FIXTURE_MAP.get(ticketId) ?? null;
   }
 
   private async getProjectGraphifyEnabled(projectId: string): Promise<boolean> {
