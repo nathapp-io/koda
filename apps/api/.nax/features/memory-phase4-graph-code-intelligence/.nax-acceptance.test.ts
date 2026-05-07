@@ -752,7 +752,7 @@ describe('Memory Phase 4: Graph Code Intelligence - Acceptance Tests', () => {
   describe('AC-34: Webhook missing required fields returns 400', () => {
     it('should validate repository, ref, commits, sender presence', () => {
       const validateWebhookPayload = (payload: any): boolean => {
-        return (
+        return !!(
           payload.repository &&
           payload.ref &&
           Array.isArray(payload.commits) &&

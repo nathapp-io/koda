@@ -3,7 +3,7 @@
   "feature": "memory-phase4-graph-code-intelligence",
   "branchName": "feat/memory-phase4-graph-code-intelligence",
   "createdAt": "2026-04-26T12:00:00.000Z",
-  "updatedAt": "2026-05-07T05:32:31.009Z",
+  "updatedAt": "2026-05-07T05:43:26.310Z",
   "userStories": [
     {
       "id": "US-001",
@@ -20,7 +20,12 @@
         "A diff-and-apply of 500 unchanged nodes + 10 added + 5 removed completes in under 2 seconds",
         "`DiffResult` includes `durationMs` measuring the total diff-and-apply time",
         "Existing graphify imports remain project-scoped and continue to honor `Project.graphifyEnabled`",
-        "The `importGraphify` route is gated with `@RequiredPermission([KodaAction.IMPORT, 'CodeIntel'])`. The factory grants this permission to ADMIN users, all agents, and users with `DEVELOPER` project role (when project membership is implemented). Non-permitted callers receive 403 from `PermissionAuthGuard` with no inline check in the controller"
+        "The `importGraphify` route is gated with `@RequiredPermission([KodaAction.IMPORT, 'CodeIntel'])`. The factory grants this permission to ADMIN users, all agents, and users with `DEVELOPER` project role (when project membership is implemented). Non-permitted callers receive 403 from `PermissionAuthGuard` with no inline check in the controller",
+        "When incoming graph is empty and stored graph has nodes, all stored nodes are removed from both Prisma and LanceDB",
+        "When `diffAndApply` is called with duplicate `nodeId` values in `newNodes`, the last entry wins for content comparison and upsert",
+        "When the `GraphNode` table read fails or is unavailable, `diffAndApply` throws a descriptive error and does not modify LanceDB",
+        "When a node's content is unchanged but its outgoing links changed, the node is marked as updated and re-indexed",
+        "Concurrent calls to `diffAndApply` for the same `projectId` are safe due to Prisma unique constraints (no duplicate GraphNode rows)"
       ],
       "tags": [
         "feature",
@@ -48,13 +53,6 @@
         "apps/api/src/auth/casl/koda-casl-ability.factory.ts",
         "apps/api/prisma/schema.prisma"
       ],
-      "suggestedCriteria": [
-        "When incoming graph is empty and stored graph has nodes, all stored nodes are removed from both Prisma and LanceDB",
-        "When `diffAndApply` is called with duplicate `nodeId` values in `newNodes`, the last entry wins for content comparison and upsert",
-        "When the `GraphNode` table read fails or is unavailable, `diffAndApply` throws a descriptive error and does not modify LanceDB",
-        "When a node's content is unchanged but its outgoing links changed, the node is marked as updated and re-indexed",
-        "Concurrent calls to `diffAndApply` for the same `projectId` are safe due to Prisma unique constraints (no duplicate GraphNode rows)"
-      ],
       "priorErrors": [],
       "priorFailures": [],
       "storyPoints": 1,
@@ -75,7 +73,12 @@
         "A commit with 20 files (average 200 lines each) is indexed in under 30 seconds",
         "Direct calls to the `indexCommit()` controller endpoint are gated with `@RequiredPermission([KodaAction.MANAGE, 'AstIndex'])` and the factory grants this to ADMIN users and agents with DEVELOPER role only; other callers receive 403 from PermissionAuthGuard",
         "Parser failures for one file are recorded in `SymbolIndexResult.fileErrors` and do not prevent other files in the same commit from being indexed",
-        "The `code_commit` outbox handler resolves changed file contents via the VCS provider before calling `indexCommit()`; the webhook controller only enqueues commit metadata"
+        "The `code_commit` outbox handler resolves changed file contents via the VCS provider before calling `indexCommit()`; the webhook controller only enqueues commit metadata",
+        "When `indexCommit` is called with an empty files array, it returns `symbolsIndexed: 0` and does not throw",
+        "When a source file has no parsable symbols (only comments, whitespace, or imports), it is skipped and recorded in `fileErrors` with a descriptive message",
+        "When `getCallers` is called with a `symbolId` that has zero callers stored, it returns an empty array (not null or undefined)",
+        "When `indexCommit` processes a file whose symbols were previously indexed in the same commitHash, old symbols for that file are replaced via unique constraint upsert",
+        "When `ts-morph` encounters TypeScript syntax errors, the error is recorded in `fileErrors` with the file path and error message"
       ],
       "tags": [
         "feature",
@@ -105,13 +108,6 @@
         "apps/api/src/outbox/outbox-fan-out-registry.ts",
         "apps/api/src/vcs/types.ts"
       ],
-      "suggestedCriteria": [
-        "When `indexCommit` is called with an empty files array, it returns `symbolsIndexed: 0` and does not throw",
-        "When a source file has no parsable symbols (only comments, whitespace, or imports), it is skipped and recorded in `fileErrors` with a descriptive message",
-        "When `getCallers` is called with a `symbolId` that has zero callers stored, it returns an empty array (not null or undefined)",
-        "When `indexCommit` processes a file whose symbols were previously indexed in the same commitHash, old symbols for that file are replaced via unique constraint upsert",
-        "When `ts-morph` encounters TypeScript syntax errors, the error is recorded in `fileErrors` with the file path and error message"
-      ],
       "priorErrors": [],
       "priorFailures": [],
       "storyPoints": 1,
@@ -131,7 +127,12 @@
         "`getIncidentImpact(projectId, incidentTicketId)` returns all entity nodes linked to the incident ticket",
         "Service entities extracted from graphify inherit `tags` from the graphify node (e.g. `['backend', 'auth']`)",
         "Entity graph is updated incrementally via outbox fan-out handlers; no full rebuild is performed on every event",
-        "A graph with 500 nodes and 2000 edges returns `getRelatedEntities` in under 50ms"
+        "A graph with 500 nodes and 2000 edges returns `getRelatedEntities` in under 50ms",
+        "When `getRelatedEntities` is called with `depth=0`, it returns only the requested entity node (if it exists)",
+        "When `getRelatedEntities` is called for a non-existent `entityId`, it returns an empty array",
+        "When `onTicketEvent` is called for a ticket that has no matching entity node, a new `ticket` entity node is created",
+        "When `getIncidentImpact` is called for a non-incident ticket, `affectedServices` still returns linked services",
+        "`EntityNode.tags` stored as a JSON-encoded string are correctly parsed back into a string array when read"
       ],
       "tags": [
         "feature",
@@ -164,13 +165,6 @@
         "apps/api/prisma/schema.prisma",
         "apps/api/src/events/ticket-event.service.ts",
         "apps/api/src/outbox/outbox-fan-out-registry.ts"
-      ],
-      "suggestedCriteria": [
-        "When `getRelatedEntities` is called with `depth=0`, it returns only the requested entity node (if it exists)",
-        "When `getRelatedEntities` is called for a non-existent `entityId`, it returns an empty array",
-        "When `onTicketEvent` is called for a ticket that has no matching entity node, a new `ticket` entity node is created",
-        "When `getIncidentImpact` is called for a non-incident ticket, `affectedServices` still returns linked services",
-        "`EntityNode.tags` stored as a JSON-encoded string are correctly parsed back into a string array when read"
       ],
       "priorErrors": [
         "Attempt 1 failed with model tier: balanced: Reviewer contradiction: Cannot add TICKET_TO_SERVICE linkage to `onGraphifyImport` because the existing AC5 test at `entity-graph.service.spec.ts:106-114` explicitly asserts `toBeUndefined()` for such links from `onGraphifyImport`, and modifying test files is not permitted. The linkage is implemented in `rebuildGraph` only."
@@ -256,7 +250,12 @@
         "If `OutboxService.enqueue()` fails, the webhook logs the failure and returns a non-2xx response so the provider can retry",
         "GitHub webhook signature verification reuses the existing `x-hub-signature-256` HMAC-SHA256 flow; invalid signatures return 401",
         "The webhook secret continues to come from the project's `VcsConnection` record and is never hard-coded",
-        "Pushing the same `commitHash` twice within a 5-minute window does not create duplicate outbox events (deduplication enforced)"
+        "Pushing the same `commitHash` twice within a 5-minute window does not create duplicate outbox events (deduplication enforced)",
+        "When webhook payload contains zero commits (e.g., tag creation push with no commits), no outbox events are enqueued and HTTP 200 is returned",
+        "When the `x-hub-signature-256` header is absent from the request, the webhook returns 401",
+        "When `OutboxService.enqueue()` throws for a specific commit, other commits in the same push are still enqueued (partial failure is acceptable unless a critical error occurs)",
+        "When the webhook secret for the project is null or undefined (no VCS connection configured), the webhook returns 401 before processing the payload",
+        "When a `push` event references a branch deletion (ref deletion), no `code_commit` events are enqueued"
       ],
       "tags": [
         "feature",
@@ -299,13 +298,6 @@
         "apps/api/src/vcs/vcs-provider.ts",
         "apps/api/src/vcs/providers/github.provider.ts",
         "apps/api/src/outbox/outbox.service.ts"
-      ],
-      "suggestedCriteria": [
-        "When webhook payload contains zero commits (e.g., tag creation push with no commits), no outbox events are enqueued and HTTP 200 is returned",
-        "When the `x-hub-signature-256` header is absent from the request, the webhook returns 401",
-        "When `OutboxService.enqueue()` throws for a specific commit, other commits in the same push are still enqueued (partial failure is acceptable unless a critical error occurs)",
-        "When the webhook secret for the project is null or undefined (no VCS connection configured), the webhook returns 401 before processing the payload",
-        "When a `push` event references a branch deletion (ref deletion), no `code_commit` events are enqueued"
       ],
       "priorErrors": [
         "Attempt 1 failed with model tier: fast: Reviewer contradiction: The cross-instance deduplication test at `vcs-webhook.service.spec.ts:257` cannot pass because its `PrismaService` mock lacks the `outboxEvent` delegate. The DB-level dedup guard activates only in production where Prisma exposes all schema models. Without adding `outboxEvent` to the test mock, the guard stays inactive and the in-memory Map (per-instance) cannot provide cross-instance deduplication.",
@@ -364,7 +356,13 @@
         "`impactScore` is a number between 0 and 100 computed by the formula: 0.3 × (affectedSymbols / totalSymbols × 100) + 0.3 × (affectedServices / totalServices × 100) + 0.2 × (affectedTickets / totalTickets × 100) + 0.2 × (linkedIncidents > 0 ? 100 : 0)",
         "When called with a `ticketId` query parameter, the result includes provenance source metadata pointing to that ticket",
         "The endpoint returns a response in under 5 seconds for a commit touching up to 50 changed files",
-        "The endpoint is gated with `@RequiredPermission([KodaAction.READ, 'CodeIntel'])`. The factory grants this to ADMIN users, all agents, and users with `DEVELOPER` project role (when project membership is implemented). Controller uses `@Principal() principal: KodaPrincipal`; non-permitted callers receive 403 from PermissionAuthGuard with no inline role check"
+        "The endpoint is gated with `@RequiredPermission([KodaAction.READ, 'CodeIntel'])`. The factory grants this to ADMIN users, all agents, and users with `DEVELOPER` project role (when project membership is implemented). Controller uses `@Principal() principal: KodaPrincipal`; non-permitted callers receive 403 from PermissionAuthGuard with no inline role check",
+        "When `changedFiles` contains a file path not indexed in the `Symbol` table, `impactedSymbols` does not include entries for that file",
+        "When `totalSymbols` is 0 (no symbols indexed for the project), the symbol component of `impactScore` contributes 0 instead of dividing by zero",
+        "When `totalServices` is 0 (no services indexed), the service component of `impactScore` contributes 0",
+        "When `totalTickets` is 0, the ticket component of `impactScore` contributes 0",
+        "When no `ticketId` is provided, `provenance` does not include ticket source metadata",
+        "When the project has no services linked to any impacted symbol, `impactedServices` is an empty array and the service component of `impactScore` contributes 0"
       ],
       "tags": [
         "feature",
@@ -402,14 +400,6 @@
         "apps/api/prisma/schema.prisma",
         "apps/api/src/tickets/tickets.controller.ts",
         "apps/api/src/auth/principal/koda-principal.types.ts"
-      ],
-      "suggestedCriteria": [
-        "When `changedFiles` contains a file path not indexed in the `Symbol` table, `impactedSymbols` does not include entries for that file",
-        "When `totalSymbols` is 0 (no symbols indexed for the project), the symbol component of `impactScore` contributes 0 instead of dividing by zero",
-        "When `totalServices` is 0 (no services indexed), the service component of `impactScore` contributes 0",
-        "When `totalTickets` is 0, the ticket component of `impactScore` contributes 0",
-        "When no `ticketId` is provided, `provenance` does not include ticket source metadata",
-        "When the project has no services linked to any impacted symbol, `impactedServices` is an empty array and the service component of `impactScore` contributes 0"
       ],
       "priorErrors": [
         "Attempt 1 failed with model tier: fast: Autofix exhausted: 2 findings remain\n  - assumption in apps/api/src/auth/casl/koda-casl-ability.factory.ts\n  - convention in apps/api/src/projects/projects.controller.ts"
@@ -460,7 +450,11 @@
         "When `timeWindow` is provided, `recentEvents` contains only events within the time window, ordered by `createdAt` descending",
         "`activeDecisions` is populated from active `MemoryItem` rows where `kind='DECISION'` and `status='active'` in the project",
         "When a non-existent or unauthorized `projectId` is requested, the service throws a `ForbiddenAppException` or `NotFoundAppException` matching the Nathapp exception style used by existing memory endpoints",
-        "The service performs canonical Prisma reads only; it does not query LanceDB, BM25, entity graph, or other derived stores"
+        "The service performs canonical Prisma reads only; it does not query LanceDB, BM25, entity graph, or other derived stores",
+        "When `actorId` is provided, `recentEvents` are filtered to events where `actorId` matches",
+        "When no active decisions exist for the project, `activeDecisions` is an empty array (not null or undefined)",
+        "When `projectId` is valid but no tickets match the requested `ticketIds`, the `tickets` array is empty (not an error)",
+        "When `timeWindow.from` is after `timeWindow.to`, `recentEvents` is empty"
       ],
       "tags": [
         "feature",
@@ -499,12 +493,6 @@
         "apps/api/src/memory/memory.module.ts",
         "apps/api/src/common/enums.ts",
         "apps/api/src/auth/principal/koda-principal.types.ts"
-      ],
-      "suggestedCriteria": [
-        "When `actorId` is provided, `recentEvents` are filtered to events where `actorId` matches",
-        "When no active decisions exist for the project, `activeDecisions` is an empty array (not null or undefined)",
-        "When `projectId` is valid but no tickets match the requested `ticketIds`, the `tickets` array is empty (not an error)",
-        "When `timeWindow.from` is after `timeWindow.to`, `recentEvents` is empty"
       ],
       "priorErrors": [
         "Attempt 1 failed with model tier: fast: Reviewer contradiction: Both lint errors are in test files (`code-commit-outbox-handler.adversarial.spec.ts` and `vcs-provider.adversarial.spec.ts`), but the instruction says \"Do NOT change test files.\" Fixing `@typescript-eslint/no-non-null-assertion` violations requires editing the test files to replace `!` with `?.` — this contradicts the constraint. These two directives cannot be satisfied simultaneously.",
