@@ -37,6 +37,11 @@ function printSummaryTable(projectId: string, gateResults: PolicyGateResult): vo
   console.log('║ Gate Name                        │ Status         ║');
   console.log('╟──────────────────────────────────┼────────────────╢');
 
+  if (!Array.isArray(gateResults.gates)) {
+    console.error('Invalid gate results: gates is not an array');
+    return;
+  }
+
   for (const gate of gateResults.gates) {
     const status = gate.passed ? 'PASS' : 'FAIL';
     const paddedName = gate.name.padEnd(32);
