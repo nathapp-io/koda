@@ -175,7 +175,7 @@ describe('PolicyGateService (Integration)', () => {
       if (!result.passed) {
         expect(result.blockedReason).toBeDefined();
         expect(typeof result.blockedReason).toBe('string');
-        expect(result.blockedReason!.length).toBeGreaterThan(0);
+        expect((result.blockedReason ?? '').length).toBeGreaterThan(0);
       }
     });
 
