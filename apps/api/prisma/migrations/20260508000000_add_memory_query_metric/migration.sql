@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS "MemoryQueryMetric" (
     "hadProvenance" BOOLEAN NOT NULL,
     "staleHitCount" INTEGER NOT NULL DEFAULT 0,
     "resultCount" INTEGER NOT NULL DEFAULT 0,
+    "docId" TEXT,
     "leakageIncidentCount" INTEGER NOT NULL DEFAULT 0,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "MemoryQueryMetric_projectId_fkey" FOREIGN KEY ("projectId") REFERENCES "Project" ("id") ON DELETE CASCADE
