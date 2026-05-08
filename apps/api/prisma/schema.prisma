@@ -498,6 +498,7 @@ model MemoryQueryMetric {
   hadProvenance         Boolean
   staleHitCount         Int      @default(0)
   resultCount           Int      @default(0)
+  docId                 String?
   leakageIncidentCount  Int      @default(0)
   createdAt             DateTime @default(now())
 

@@ -136,7 +136,7 @@ export class ContextBuilderService {
       codeIntel = await this.fetchCodeIntel(query.projectId, query.repoRefs);
     }
 
-    const retrievedContext = this.enforceTokenBudget(
+    const { retrievedContext, leakageIncidentCount } = this.enforceTokenBudget(
       { documents, semanticMemory, graphPaths, codeIntel },
       tokenBudget,
     );
@@ -166,9 +166,10 @@ export class ContextBuilderService {
       intent: query.intent,
       latencyMs,
       tokensUsed,
-      hadProvenance: documents.results.length > 0,
+      hadProvenance: documents.results.some((r) => r.provenance != null),
       staleHitCount,
       resultCount: documents.results.length,
+      leakageIncidentCount,
     });
 
     return {
@@ -275,14 +276,11 @@ export class ContextBuilderService {
       codeIntel?: ChangeImpactResult[];
     },
     budget: number,
-  ): GetProjectContextResponse['retrievedContext'] {
+  ): { retrievedContext: GetProjectContextResponse['retrievedContext']; leakageIncidentCount: number } {
     const semanticTokens = estimateTokenCount(JSON.stringify(ctx.semanticMemory));
     const docTokens = estimateTokenCount(JSON.stringify(ctx.documents));
     const graphTokens = ctx.graphPaths ? estimateTokenCount(JSON.stringify(ctx.graphPaths)) : 0;
     const codeIntelTokens = ctx.codeIntel ? estimateTokenCount(JSON.stringify(ctx.codeIntel)) : 0;
-
-    // canonicalState blocks are never removed; only retrievedContext is subject to truncation.
-    // Priority (lowest removed first): codeIntel → graphPaths → documents → semanticMemory
 
     let codeIntel: ChangeImpactResult[] | undefined = ctx.codeIntel;
     let graphPaths: EntityPath[] | undefined = ctx.graphPaths;
@@ -290,27 +288,35 @@ export class ContextBuilderService {
     let semanticMemory = ctx.semanticMemory;
 
     let used = semanticTokens + docTokens + graphTokens + codeIntelTokens;
+    let leakageIncidentCount = 0;
 
     if (used > budget && codeIntel !== undefined) {
       codeIntel = undefined;
       used -= codeIntelTokens;
+      leakageIncidentCount++;
     }
 
     if (used > budget && graphPaths !== undefined) {
       graphPaths = undefined;
       used -= graphTokens;
+      leakageIncidentCount++;
     }
 
     if (used > budget) {
       documents = { results: [], scores: [], retrievedAt: ctx.documents.retrievedAt };
       used -= docTokens;
+      leakageIncidentCount++;
     }
 
     if (used > budget) {
       semanticMemory = [];
+      leakageIncidentCount++;
     }
 
-    return { documents, semanticMemory, graphPaths, codeIntel };
+    return {
+      retrievedContext: { documents, semanticMemory, graphPaths, codeIntel },
+      leakageIncidentCount,
+    };
   }
 
   private countStaleHits(documents: HybridSearchResult): number {
@@ -332,12 +338,10 @@ export class ContextBuilderService {
     hadProvenance: boolean;
     staleHitCount: number;
     resultCount: number;
+    leakageIncidentCount: number;
   }): void {
     this.sloDashboardService
-      .recordQueryMetric({
-        ...metric,
-        leakageIncidentCount: 0,
-      })
+      .recordQueryMetric(metric)
       .catch((err: Error) => {
         this.logger.warn(`Failed to record query metric: ${err.message}`);
       });

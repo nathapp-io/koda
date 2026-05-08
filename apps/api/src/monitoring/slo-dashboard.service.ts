@@ -49,7 +49,7 @@ export class SloDashboardService {
     });
   }
 
-  async recordStaleHit(projectId: string, _docId: string): Promise<void> {
+  async recordStaleHit(projectId: string, docId: string): Promise<void> {
     await this.prisma.client.memoryQueryMetric.create({
       data: {
         projectId,
@@ -59,6 +59,7 @@ export class SloDashboardService {
         hadProvenance: true,
         staleHitCount: 1,
         resultCount: 1,
+        docId,
         leakageIncidentCount: 0,
       },
     });
