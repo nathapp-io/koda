@@ -55,7 +55,10 @@ export class NaxAdapter implements AgentAdapter {
 
   private formatEvents(ctx: GetProjectContextResponse, lines: string[]): void {
     const { recentEvents } = ctx.canonicalState;
-    if (!recentEvents || recentEvents.length === 0) return;
+    if (!recentEvents || recentEvents.length === 0) {
+      lines.push('EVENTS: []');
+      return;
+    }
 
     for (const e of recentEvents) {
       const payloadStr = e.payload ? JSON.stringify(e.payload) : '{}';
@@ -69,7 +72,10 @@ export class NaxAdapter implements AgentAdapter {
 
   private formatDecisions(ctx: GetProjectContextResponse, lines: string[]): void {
     const { activeDecisions } = ctx.canonicalState;
-    if (!activeDecisions || activeDecisions.length === 0) return;
+    if (!activeDecisions || activeDecisions.length === 0) {
+      lines.push('DECISIONS: []');
+      return;
+    }
 
     for (const d of activeDecisions) {
       const rationale = d.rationale ? ` rationale="${d.rationale}"` : '';
@@ -81,7 +87,10 @@ export class NaxAdapter implements AgentAdapter {
 
   private formatDocuments(ctx: GetProjectContextResponse, lines: string[]): void {
     const { documents } = ctx.retrievedContext;
-    if (documents.results.length === 0) return;
+    if (documents.results.length === 0) {
+      lines.push('DOCS: []');
+      return;
+    }
 
     for (const doc of documents.results) {
       lines.push(
@@ -93,7 +102,10 @@ export class NaxAdapter implements AgentAdapter {
 
   private formatMemory(ctx: GetProjectContextResponse, lines: string[]): void {
     const { semanticMemory } = ctx.retrievedContext;
-    if (semanticMemory.length === 0) return;
+    if (semanticMemory.length === 0) {
+      lines.push('MEMORY: []');
+      return;
+    }
 
     for (const m of semanticMemory) {
       const obj = m.object ? ` object="${m.object}"` : '';

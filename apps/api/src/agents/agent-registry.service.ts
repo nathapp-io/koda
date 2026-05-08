@@ -19,9 +19,22 @@ export interface AgentInfo {
 @Injectable()
 export class AgentRegistryService {
   private readonly adapters = new Map<string, AgentAdapter>();
+  private readonly knownAgentIds = new Set<string>(['claude-code', 'nax']);
 
   register(agentId: string, adapter: AgentAdapter): void {
-    this.adapters.set(agentId, adapter);
+    if (!this.knownAgentIds.has(adapter.agentId)) {
+      throw new InternalServerErrorException(
+        `Unknown agent type: ${adapter.agentId}`,
+      );
+    }
+
+    if (this.knownAgentIds.has(agentId) && agentId !== adapter.agentId) {
+      throw new InternalServerErrorException(
+        `Agent ID mismatch: ${agentId} vs ${adapter.agentId}`,
+      );
+    }
+
+    this.adapters.set(adapter.agentId, adapter);
   }
 
   getAdapter(agentId: string): AgentAdapter {
