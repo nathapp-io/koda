@@ -314,13 +314,10 @@ export class ContextBuilderService {
   }
 
   private countStaleHits(documents: HybridSearchResult): number {
-    const thresholdMs = 7 * 24 * 60 * 60 * 1000;
-    const now = Date.now();
     let count = 0;
     for (const result of documents.results) {
       const indexedAt = result.provenance?.indexedAt ?? result.createdAt;
-      const ageMs = now - new Date(indexedAt).getTime();
-      if (ageMs > thresholdMs) {
+      if (this.sloDashboardService.isStaleHit(indexedAt)) {
         count++;
       }
     }
