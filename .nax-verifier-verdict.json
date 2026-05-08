@@ -1,108 +1,39 @@
 {
   "version": 1,
-  "approved": false,
+  "approved": true,
   "tests": {
-    "allPassing": false,
-    "passCount": 30,
-    "failCount": 6
+    "allPassing": true,
+    "passCount": 21,
+    "failCount": 0
   },
   "testModifications": {
-    "detected": false,
-    "files": [],
+    "detected": true,
+    "files": [
+      "test/integration/policy/policy-gate.service.spec.ts"
+    ],
     "legitimate": true,
-    "reasoning": "Test files show no modifications. All test files are in their original test-writer state."
+    "reasoning": "Implementer modified test stubs in commit a5a48ef. The original tests used `await expect(service.runAllGates(...)).rejects.toThrow()` which was always failing because `runAllGates()` never rejects — it returns a Promise<PolicyGateResult> that resolves. The implementer replaced these stub assertions with correct assertions that check the actual `GateResult` shape. This was a legitimate fix required because the service API returns a resolved result object, not a thrown error."
   },
   "acceptanceCriteria": {
-    "allMet": false,
+    "allMet": true,
     "criteria": [
-      {
-        "criterion": "AC-1: getProjectContext returns all four top-level blocks (canonicalState, retrievedContext, provenance, meta)",
-        "met": false,
-        "notes": "Cannot verify - adversarial tests fail before reaching assertions"
-      },
-      {
-        "criterion": "AC-2: canonicalState.recentEvents ordered by createdAt DESC, limited to 20 items",
-        "met": false,
-        "notes": "Cannot verify - blocked by AC-1 verification failure"
-      },
-      {
-        "criterion": "AC-3: retrievedContext.semanticMemory ordered by confidence DESC, limited to 10 items",
-        "met": false,
-        "notes": "Cannot verify - blocked by AC-1 verification failure"
-      },
-      {
-        "criterion": "AC-4: retrievedContext.documents calls HybridRetrieverService.search()",
-        "met": false,
-        "notes": "Cannot verify - blocked by AC-1 verification failure"
-      },
-      {
-        "criterion": "AC-5: blank/absent query returns empty documents.results and does not call search()",
-        "met": false,
-        "notes": "Cannot verify - blocked by AC-1 verification failure"
-      },
-      {
-        "criterion": "AC-6: intent='plan' excludes canonicalState.recentEvents from response",
-        "met": false,
-        "notes": "Cannot verify - blocked by AC-1 verification failure"
-      },
-      {
-        "criterion": "AC-7: tokenBudget truncation removes lower-priority blocks first, never removes canonicalState.tickets or activeDecisions",
-        "met": false,
-        "notes": "Token-budget test fails with DI error at first invocation"
-      },
-      {
-        "criterion": "AC-8: meta.latencyMs measures wall-clock time from entry to return using performance.now()",
-        "met": false,
-        "notes": "Cannot verify - blocked by AC-1 verification failure"
-      },
-      {
-        "criterion": "AC-9: ProjectNotFoundError thrown for non-existent projectId with code='PROJECT_NOT_FOUND' (string)",
-        "met": false,
-        "notes": "Adversarial test fails: (a) DI injection fails making service unusable, (b) when DI fails are worked around, thrown error.code is undefined instead of string 'PROJECT_NOT_FOUND'"
-      },
-      {
-        "criterion": "AC-10: All errors are KodaError (AppException) subclasses",
-        "met": false,
-        "notes": "Cannot verify - blocked by AC-9 verification failure"
-      },
-      {
-        "criterion": "AC-11: Controller gated with @RequiredPermission and checkProjectMembership(), uses @Principal()",
-        "met": true,
-        "notes": "Integration test verifies decorator structure is correct"
-      },
-      {
-        "criterion": "AC-12: Repeated calls with identical input produce same result ordering",
-        "met": false,
-        "notes": "Cannot verify - blocked by AC-1 verification failure"
-      }
+      {"criterion": "AC-1: IsolationGate runs 10 queries returning 0 results for empty project", "met": true},
+      {"criterion": "AC-2: IsolationGate blocks cross-project data leaks", "met": true},
+      {"criterion": "AC-3: ProvenanceGate validates search response provenance", "met": true},
+      {"criterion": "AC-4: WriteGate allows KodaDomainWriter writes but blocks raw Prisma writes", "met": true},
+      {"criterion": "AC-5: TruthConsistencyGate compares canonical state to Prisma data", "met": true},
+      {"criterion": "AC-6: GraphifyEnabledGate hides code results when graphifyEnabled=false", "met": true},
+      {"criterion": "AC-7: TokenBudgetGate enforces 5% token budget tolerance", "met": true},
+      {"criterion": "AC-8: All gates runnable via policy:gates script", "met": true},
+      {"criterion": "AC-9: blockedReason populated when any gate fails", "met": true},
+      {"criterion": "AC-10: Gate results written to results.json artifact", "met": true},
+      {"criterion": "AC-11: Policy gates use deterministic fixture data", "met": true}
     ]
   },
   "quality": {
-    "rating": "poor",
-    "issues": [
-      {
-        "severity": "CRITICAL",
-        "issue": "Dependency injection failure in real service tests",
-        "description": "6 critical test failures due to dependency injection: 5 failures in context-builder.service.adversarial.spec.ts and 1 in context-builder.service.token-budget.spec.ts. Error: 'TypeError: undefined is not an object (evaluating 'this.prisma.client')' at line 167 of context-builder.service.ts in verifyProjectExists method.",
-        "testsCaffected": [
-          "context-builder.service.adversarial.spec.ts: AC-7 adversarial > reports tokensUsed that is at least as large as the canonicalState token cost alone",
-          "context-builder.service.adversarial.spec.ts: AC-7 adversarial > reports tokensUsed equal to the sum of canonicalState + retrievedContext tokens",
-          "context-builder.service.adversarial.spec.ts: AC-9 adversarial > throws an error with code === 'PROJECT_NOT_FOUND' (string) when projectId does not exist",
-          "context-builder.service.adversarial.spec.ts: AC-9 adversarial > throws an error whose code is a string, not a numeric HTTP status",
-          "context-builder.service.adversarial.spec.ts: AC-9 adversarial > throws an error that is an instance of ProjectNotFoundError",
-          "context-builder.service.token-budget.spec.ts: AC-7 token budget truncation priority > removes codeIntel (lowest priority) before graphPaths"
-        ],
-        "rootCause": "When TestingModule instantiates ContextBuilderService with mocked dependencies, the PrismaService injection fails. The 'this.prisma' field remains undefined despite being provided in the test module's providers array. This prevents the real service implementation from being executed and tested."
-      },
-      {
-        "severity": "HIGH",
-        "issue": "AC-9 bug not fixed: ProjectNotFoundError.code returns wrong type",
-        "description": "Tests attempt to verify that ProjectNotFoundError.code equals the string 'PROJECT_NOT_FOUND'. Current thrown error.code is undefined (not a string). The implementation at lines 16-28 attempts to override the code property using Object.defineProperty, but this override is not working as intended.",
-        "notes": "This issue cannot be fully verified because of the prior DI failure blocking test execution."
-      }
-    ]
+    "rating": "good",
+    "issues": []
   },
   "fixes": [],
-  "reasoning": "Story-scoped test suite has 6 failing tests (17% failure rate) out of 36 total. The primary blocker is a dependency injection issue in the TestingModule setup that prevents the real ContextBuilderService from being instantiated with mocked dependencies. This cascades into 5 adversarial tests and 1 token-budget test failing before their core assertions can execute. The adversarial test comments indicate these are tests for bugs that should be fixed, but the DI issue prevents verification of whether those bugs are fixed. Test files show no signs of compromise (no test modifications detected, no assertion weakening). The implementation can be unit-tested (context-builder.service.spec.ts passes with 13/13 tests when service is fully mocked) and token-estimator utilities work correctly (8/8 tests pass), but the real service code cannot be tested due to DI configuration issues. Verdict: NOT APPROVED - critical test failures prevent verification of story acceptance criteria."
+  "reasoning": "All 21 story-scoped tests pass. The implementer made legitimate test modifications in commit a5a48ef — fixing stub assertions that were incorrectly expecting rejections from a service that always resolves with a PolicyGateResult object. The param-scope tests (4 tests) confirm the three parameter-scope bugs (IsolationGate, ProvenanceGate, GraphifyEnabledGate using hardcoded FIXTURE constants instead of the caller-provided projectId) were properly fixed in commit d6d606c. No loosening of assertions or shortcuts detected. results.json confirms all 6 gates pass."
 }
-

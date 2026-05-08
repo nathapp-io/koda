@@ -1,5 +1,5 @@
 {
-  "requestId": "c26adb33-48b9-401c-8329-7d5faa0ac5b6",
+  "requestId": "36320e60-1fd2-4066-8e02-0ae4c8dd10b0",
   "stage": "context",
   "totalBudgetTokens": 2048,
   "usedTokens": 4316,
@@ -12,7 +12,12 @@
     "static-rules:common:2b8100fd",
     "static-rules:project-conventions:1c5c62ba"
   ],
-  "excludedChunks": [],
+  "excludedChunks": [
+    {
+      "id": "code-neighbor:53e359eb",
+      "reason": "budget"
+    }
+  ],
   "floorItems": [
     "static-rules:api-auth:5a2f90f2",
     "static-rules:api-core:60372c99",
@@ -30,14 +35,14 @@
     "static-rules:project-conventions:1c5c62ba"
   ],
   "digestTokens": 42,
-  "buildMs": 595,
+  "buildMs": 684,
   "providerResults": [
     {
       "providerId": "static-rules",
       "status": "ok",
       "source": "stage-config",
       "chunkCount": 7,
-      "durationMs": 14,
+      "durationMs": 16,
       "tokensProduced": 4274
     },
     {
@@ -45,7 +50,7 @@
       "status": "empty",
       "source": "stage-config",
       "chunkCount": 0,
-      "durationMs": 2,
+      "durationMs": 1,
       "tokensProduced": 0
     },
     {
@@ -61,7 +66,7 @@
       "status": "empty",
       "source": "stage-config",
       "chunkCount": 0,
-      "durationMs": 2,
+      "durationMs": 3,
       "tokensProduced": 0
     },
     {
@@ -69,16 +74,16 @@
       "status": "empty",
       "source": "stage-config",
       "chunkCount": 0,
-      "durationMs": 593,
+      "durationMs": 683,
       "tokensProduced": 0
     },
     {
       "providerId": "code-neighbor",
-      "status": "empty",
+      "status": "ok",
       "source": "stage-config",
-      "chunkCount": 0,
-      "durationMs": 136,
-      "tokensProduced": 0
+      "chunkCount": 1,
+      "durationMs": 122,
+      "tokensProduced": 34
     }
   ],
   "repoRoot": ".",
@@ -91,34 +96,5 @@
     "static-rules:api-i18n:d4901a77": "### api-i18n.md\n\n# API i18n — apps/api\n\n## i18n\n- API translation files: `src/i18n/{en,zh}/*.json`\n- Keep one file per module; create in both locales for new modules\n- Use keys (for example `this.i18n.t('tickets.notFound')`) instead of hardcoded text",
     "static-rules:common:2b8100fd": "### common.md\n\n# Common Rules — All Apps\n\n## Tooling\n- Use Bun workspace commands (`bun install`, `bun run`), not `npm`/`yarn`\n- Exception: `npx jest` is allowed for targeted Jest runs\n- Prefer repository scripts over ad-hoc one-off command variants\n\n## Git\n- Never push to remote; human reviews and ",
     "static-rules:project-conventions:1c5c62ba": "### project-conventions.md\n\n# Project Conventions\n\nArchitecture, folder map, ownership, commands, and test/i18n layout are in `.nax/context.md`.\nReview checklist is in `common.md`."
-  },
-  "chunkEffectiveness": {
-    "static-rules:api-auth:5a2f90f2": {
-      "signal": "ignored"
-    },
-    "static-rules:api-core:60372c99": {
-      "signal": "followed",
-      "evidence": "terms found in diff"
-    },
-    "static-rules:api-data:5494b250": {
-      "signal": "followed",
-      "evidence": "terms found in diff"
-    },
-    "static-rules:api-testing:0a0fd8e5": {
-      "signal": "followed",
-      "evidence": "terms found in diff"
-    },
-    "static-rules:api-i18n:d4901a77": {
-      "signal": "followed",
-      "evidence": "terms found in diff"
-    },
-    "static-rules:common:2b8100fd": {
-      "signal": "followed",
-      "evidence": "terms found in diff"
-    },
-    "static-rules:project-conventions:1c5c62ba": {
-      "signal": "followed",
-      "evidence": "terms found in diff"
-    }
   }
 }

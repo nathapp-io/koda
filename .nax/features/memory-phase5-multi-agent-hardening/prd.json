@@ -3,7 +3,7 @@
   "feature": "memory-phase5-multi-agent-hardening",
   "branchName": "feat/memory-phase5-multi-agent-hardening",
   "createdAt": "2026-05-07T00:00:00.000Z",
-  "updatedAt": "2026-05-08T02:10:30.326Z",
+  "updatedAt": "2026-05-08T08:31:50.808Z",
   "userStories": [
     {
       "id": "US-001",
@@ -128,8 +128,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 1,
       "escalations": [
         {
@@ -239,16 +239,23 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
-      "escalations": [],
+      "escalations": [
+        {
+          "fromTier": "fast",
+          "toTier": "balanced",
+          "reason": "Autofix exhausted: 1 finding remain\n  - abandonment in apps/api/src/agents/agent-registry.service.ts",
+          "timestamp": "2026-05-08T04:39:45.131Z"
+        }
+      ],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
         "reasoning": "validated from LLM output",
         "initialComplexity": "medium",
-        "modelTier": "fast"
+        "modelTier": "balanced"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -263,8 +270,19 @@
         "When formatContext() is called on the nax adapter, the returned string contains the projectId and intent from response.meta",
         "When formatContext() is called on the claude-code adapter, the returned string contains a structured prompt fragment with canonicalState and retrievedContext sections"
       ],
-      "priorErrors": [],
-      "priorFailures": [],
+      "priorErrors": [
+        "Attempt 1 failed with model tier: fast: Autofix exhausted: 1 finding remain\n  - abandonment in apps/api/src/agents/agent-registry.service.ts"
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "fast",
+          "stage": "escalation",
+          "summary": "Failed with tier fast, escalating to next tier",
+          "cost": 0.052823,
+          "timestamp": "2026-05-08T04:39:45.131Z"
+        }
+      ],
       "storyPoints": 1,
       "storyGitRef": "d6d606ccb4a85c4f455363c7e65a6fc763405314"
     },
@@ -291,14 +309,29 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
+      "status": "failed",
       "passes": false,
-      "attempts": 0,
-      "escalations": [],
+      "attempts": 1,
+      "escalations": [
+        {
+          "fromTier": "fast",
+          "toTier": "balanced",
+          "reason": "Reviewer contradiction: **Finding #1** (`recordStaleHit` orphaned) — Removing dead code would cause compilation errors in `slo-dashboard.service.spec.ts` (line 295 directly calls the method) and assertion failures in the adversarial test (Bug #4 at `context-builder.service.slo-adversarial.spec.ts:639`). The \"do not modify test files\" rule prevents fixing the downstream test breakage. Wiring `recordStaleHit` into the hybrid retriever would be a new feature beyond the scope of defect fixing.",
+          "timestamp": "2026-05-08T07:18:12.776Z"
+        },
+        {
+          "fromTier": "balanced",
+          "toTier": "powerful",
+          "reason": "Rectification exhausted after 2 attempts (8 test failures)",
+          "timestamp": "2026-05-08T08:11:14.474Z"
+        }
+      ],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
-        "reasoning": "validated from LLM output"
+        "reasoning": "validated from LLM output",
+        "initialComplexity": "medium",
+        "modelTier": "powerful"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -313,9 +346,30 @@
         "GET /admin/slos is gated with @RequiredPermission([KodaAction.READ, 'AdminScope']) and returns 403 for non-admin principals; KodaCaslAbilityFactory must be updated to grant READ AdminScope to ADMIN users (the current factory only grants MANAGE on ADMIN_MANAGEABLE_RESOURCES and does not include AdminScope — add { action: READ, subject: 'AdminScope' } to the ADMIN branch in userPermissions())",
         "memoryGrowthRate is computed from MemoryItem.createdAt over the last 7 days, not from MemoryQueryMetric records"
       ],
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1
+      "priorErrors": [
+        "Attempt 1 failed with model tier: fast: Reviewer contradiction: **Finding #1** (`recordStaleHit` orphaned) — Removing dead code would cause compilation errors in `slo-dashboard.service.spec.ts` (line 295 directly calls the method) and assertion failures in the adversarial test (Bug #4 at `context-builder.service.slo-adversarial.spec.ts:639`<UNVERIFIED_QUOTE> `recordStaleHit` into the hybrid retriever would be a new feature beyond the scope of defect fixing.",
+        "Attempt 1 failed with model tier: balanced: Rectification exhausted after 2 attempts (8 test failures)"
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "fast",
+          "stage": "escalation",
+          "summary": "Failed with tier fast, escalating to next tier",
+          "cost": 0.059963999999999996,
+          "timestamp": "2026-05-08T07:18:12.776Z"
+        },
+        {
+          "attempt": 1,
+          "modelTier": "balanced",
+          "stage": "escalation",
+          "summary": "Failed with tier balanced, escalating to next tier",
+          "cost": 0.050862,
+          "timestamp": "2026-05-08T08:11:14.474Z"
+        }
+      ],
+      "storyPoints": 1,
+      "storyGitRef": "ad13f3da3409b583cbfd3658fe7eabb62194a307"
     },
     {
       "id": "US-005",

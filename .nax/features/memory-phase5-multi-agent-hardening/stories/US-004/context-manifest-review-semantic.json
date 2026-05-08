@@ -1,8 +1,8 @@
 {
-  "requestId": "c26adb33-48b9-401c-8329-7d5faa0ac5b6",
-  "stage": "context",
-  "totalBudgetTokens": 2048,
-  "usedTokens": 4316,
+  "requestId": "f2aededb-2900-42c3-ae1b-f37436c45b43",
+  "stage": "review-semantic",
+  "totalBudgetTokens": 6000,
+  "usedTokens": 4422,
   "includedChunks": [
     "static-rules:api-auth:5a2f90f2",
     "static-rules:api-core:60372c99",
@@ -10,7 +10,8 @@
     "static-rules:api-testing:0a0fd8e5",
     "static-rules:api-i18n:d4901a77",
     "static-rules:common:2b8100fd",
-    "static-rules:project-conventions:1c5c62ba"
+    "static-rules:project-conventions:1c5c62ba",
+    "plan-digest:01609d1e"
   ],
   "excludedChunks": [],
   "floorItems": [
@@ -22,22 +23,15 @@
     "static-rules:common:2b8100fd",
     "static-rules:project-conventions:1c5c62ba"
   ],
-  "floorOverageItems": [
-    "static-rules:api-data:5494b250",
-    "static-rules:api-testing:0a0fd8e5",
-    "static-rules:api-i18n:d4901a77",
-    "static-rules:common:2b8100fd",
-    "static-rules:project-conventions:1c5c62ba"
-  ],
-  "digestTokens": 42,
-  "buildMs": 595,
+  "digestTokens": 50,
+  "buildMs": 5,
   "providerResults": [
     {
       "providerId": "static-rules",
       "status": "ok",
       "source": "stage-config",
       "chunkCount": 7,
-      "durationMs": 14,
+      "durationMs": 4,
       "tokensProduced": 4274
     },
     {
@@ -45,40 +39,15 @@
       "status": "empty",
       "source": "stage-config",
       "chunkCount": 0,
-      "durationMs": 2,
+      "durationMs": 0,
       "tokensProduced": 0
     },
     {
-      "providerId": "test-coverage",
-      "status": "empty",
-      "source": "stage-config",
-      "chunkCount": 0,
-      "durationMs": 15,
-      "tokensProduced": 0
-    },
-    {
-      "providerId": "session-scratch",
-      "status": "empty",
-      "source": "stage-config",
-      "chunkCount": 0,
-      "durationMs": 2,
-      "tokensProduced": 0
-    },
-    {
-      "providerId": "git-history",
-      "status": "empty",
-      "source": "stage-config",
-      "chunkCount": 0,
-      "durationMs": 593,
-      "tokensProduced": 0
-    },
-    {
-      "providerId": "code-neighbor",
-      "status": "empty",
-      "source": "stage-config",
-      "chunkCount": 0,
-      "durationMs": 136,
-      "tokensProduced": 0
+      "providerId": "plan-digest",
+      "status": "ok",
+      "chunkCount": 1,
+      "durationMs": 0,
+      "tokensProduced": 98
     }
   ],
   "repoRoot": ".",
@@ -90,35 +59,7 @@
     "static-rules:api-testing:0a0fd8e5": "### api-testing.md\n\n# API Testing — apps/api\n\n> Always-on for apps/api stories. Rules about how to write tests cannot be `appliesTo:`-filtered against test-file globs — the test files are produced by the agent, not declared upfront in `contextFiles`.\n\n## Testing\n- API endpoint changes must be reflec",
     "static-rules:api-i18n:d4901a77": "### api-i18n.md\n\n# API i18n — apps/api\n\n## i18n\n- API translation files: `src/i18n/{en,zh}/*.json`\n- Keep one file per module; create in both locales for new modules\n- Use keys (for example `this.i18n.t('tickets.notFound')`) instead of hardcoded text",
     "static-rules:common:2b8100fd": "### common.md\n\n# Common Rules — All Apps\n\n## Tooling\n- Use Bun workspace commands (`bun install`, `bun run`), not `npm`/`yarn`\n- Exception: `npx jest` is allowed for targeted Jest runs\n- Prefer repository scripts over ad-hoc one-off command variants\n\n## Git\n- Never push to remote; human reviews and ",
-    "static-rules:project-conventions:1c5c62ba": "### project-conventions.md\n\n# Project Conventions\n\nArchitecture, folder map, ownership, commands, and test/i18n layout are in `.nax/context.md`.\nReview checklist is in `common.md`."
-  },
-  "chunkEffectiveness": {
-    "static-rules:api-auth:5a2f90f2": {
-      "signal": "ignored"
-    },
-    "static-rules:api-core:60372c99": {
-      "signal": "followed",
-      "evidence": "terms found in diff"
-    },
-    "static-rules:api-data:5494b250": {
-      "signal": "followed",
-      "evidence": "terms found in diff"
-    },
-    "static-rules:api-testing:0a0fd8e5": {
-      "signal": "followed",
-      "evidence": "terms found in diff"
-    },
-    "static-rules:api-i18n:d4901a77": {
-      "signal": "followed",
-      "evidence": "terms found in diff"
-    },
-    "static-rules:common:2b8100fd": {
-      "signal": "followed",
-      "evidence": "terms found in diff"
-    },
-    "static-rules:project-conventions:1c5c62ba": {
-      "signal": "followed",
-      "evidence": "terms found in diff"
-    }
+    "static-rules:project-conventions:1c5c62ba": "### project-conventions.md\n\n# Project Conventions\n\nArchitecture, folder map, ownership, commands, and test/i18n layout are in `.nax/context.md`.\nReview checklist is in `common.md`.",
+    "plan-digest:01609d1e": "[project] api-auth.md\n[project] api-core.md\n[project] api-data.md\n[project] api-i18n.md\n[project] api-testing.md\n[project] common.md\n[project] project-conventions.md\n[session] [project] api-auth.md\n[session] **Self-verify** at 2026-05-08T07:29:30.510Z: lint=pass, typecheck=pass, pre_existing=0\n[sess"
   }
 }
