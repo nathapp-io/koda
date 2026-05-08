@@ -1,0 +1,6 @@
+{
+  "slos": {
+    "latencyHigh": "Latency is above threshold",
+    "latencyOk": "Latency is within SLO"
+  }
+}

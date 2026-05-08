@@ -26,6 +26,7 @@ import { CodeIntelModule } from './code-intel/code-intel.module';
 import { EntityGraphModule } from './entity-graph/entity-graph.module';
 import { ContextModule } from './context/context.module';
 import { PolicyModule } from './policy/policy.module';
+import { MonitoringModule } from './monitoring/monitoring.module';
 import { appConfig } from './config/app.config';
 import { authConfig } from './config/auth.config';
 import { databaseConfig } from './config/database.config';
@@ -86,6 +87,7 @@ import { validate } from './config/env.validation';
     EntityGraphModule,
     ContextModule,
     PolicyModule,
+    MonitoringModule,
   ],
 })
 export class AppModule {}

@@ -12,6 +12,7 @@ import { EntityGraphService } from '../entity-graph/entity-graph.service';
 import { EntityPath } from '../entity-graph/dto/entity-graph.types';
 import { ImpactAnalysisService, ChangeImpactResult } from '../code-intel/impact-analysis.service';
 import { estimateTokenCount } from './token-estimator';
+import { SloDashboardService } from '../monitoring/slo-dashboard.service';
 
 export class ProjectNotFoundError extends NotFoundAppException {
   constructor() {
@@ -84,6 +85,7 @@ export class ContextBuilderService {
     private readonly entityGraphService: EntityGraphService,
     private readonly impactAnalysisService: ImpactAnalysisService,
     private readonly prisma: PrismaService<PrismaClient>,
+    private readonly sloDashboardService: SloDashboardService,
   ) {}
 
   async getProjectContext(query: GetProjectContextQuery): Promise<GetProjectContextResponse> {
@@ -140,14 +142,6 @@ export class ContextBuilderService {
     );
 
     const hasQuery = query.query && query.query.trim().length > 0;
-    const provenance: ResponseProvenance = {
-      sources: documents.results.map((r) => ({
-        sourceType: r.source,
-        sourceId: r.sourceId,
-        score: r.score,
-      })),
-      retrievalStrategy: hasQuery ? 'hybrid' : 'canonical-only',
-    };
 
     const canonicalState = {
       tickets: snapshot.tickets,
@@ -159,16 +153,37 @@ export class ContextBuilderService {
       estimateTokenCount(JSON.stringify(canonicalState)) +
       estimateTokenCount(JSON.stringify(retrievedContext));
 
+    const latencyMs = Math.ceil(performance.now() - startTime);
+    const staleHitCount = this.countStaleHits(documents);
+    const provenanceSources = documents.results.map((r) => ({
+      sourceType: r.source,
+      sourceId: r.sourceId,
+      score: r.score,
+    }));
+
+    void this.recordQueryMetricFireAndForget({
+      projectId: query.projectId,
+      intent: query.intent,
+      latencyMs,
+      tokensUsed,
+      hadProvenance: documents.results.length > 0,
+      staleHitCount,
+      resultCount: documents.results.length,
+    });
+
     return {
       projectId: query.projectId,
       canonicalState,
       retrievedContext,
-      provenance,
+      provenance: {
+        sources: provenanceSources,
+        retrievalStrategy: hasQuery ? 'hybrid' : 'canonical-only',
+      },
       meta: {
         intent: query.intent,
         tokensUsed,
         retrievedAt: new Date(),
-        latencyMs: Math.ceil(performance.now() - startTime),
+        latencyMs,
       },
     };
   }
@@ -296,5 +311,38 @@ export class ContextBuilderService {
     }
 
     return { documents, semanticMemory, graphPaths, codeIntel };
+  }
+
+  private countStaleHits(documents: HybridSearchResult): number {
+    const thresholdMs = 7 * 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    let count = 0;
+    for (const result of documents.results) {
+      const indexedAt = result.provenance?.indexedAt ?? result.createdAt;
+      const ageMs = now - new Date(indexedAt).getTime();
+      if (ageMs > thresholdMs) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  private recordQueryMetricFireAndForget(metric: {
+    projectId: string;
+    intent: string;
+    latencyMs: number;
+    tokensUsed: number;
+    hadProvenance: boolean;
+    staleHitCount: number;
+    resultCount: number;
+  }): void {
+    this.sloDashboardService
+      .recordQueryMetric({
+        ...metric,
+        leakageIncidentCount: 0,
+      })
+      .catch((err: Error) => {
+        this.logger.warn(`Failed to record query metric: ${err.message}`);
+      });
   }
 }
