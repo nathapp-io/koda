@@ -1817,6 +1817,60 @@ describeIntegration('API Integration Tests', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────
+  // SLO Dashboard — GET /admin/slos
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('SLO Dashboard — GET /admin/slos', () => {
+    it('AC-7: GET /admin/slos — returns 200 with full SloMetrics for ADMIN user', async () => {
+      const res = await request(httpServer)
+        .get('/admin/slos')
+        .query({ from: '2026-05-01T00:00:00Z', to: '2026-05-08T00:00:00Z' })
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const data = body<{
+        retrievalLatency: { p50: number; p95: number; p99: number; sampleCount: number };
+        staleHitRate: number;
+        provenanceCoverage: number;
+        leakageIncidents: number;
+        memoryGrowthRate: number;
+      }>(res);
+
+      expect(data.retrievalLatency).toHaveProperty('p50');
+      expect(data.retrievalLatency).toHaveProperty('p95');
+      expect(data.retrievalLatency).toHaveProperty('p99');
+      expect(data.retrievalLatency).toHaveProperty('sampleCount');
+      expect(typeof data.staleHitRate).toBe('number');
+      expect(typeof data.provenanceCoverage).toBe('number');
+      expect(typeof data.leakageIncidents).toBe('number');
+      expect(typeof data.memoryGrowthRate).toBe('number');
+    });
+
+    it('GET /admin/slos — defaults to 7-day window when no query params', async () => {
+      const res = await request(httpServer)
+        .get('/admin/slos')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const data = body<{ retrievalLatency: { sampleCount: number } }>(res);
+      expect(data.retrievalLatency.sampleCount).toBeGreaterThanOrEqual(0);
+    });
+
+    it('GET /admin/slos — returns 403 for non-admin user', async () => {
+      await request(httpServer)
+        .get('/admin/slos')
+        .set('Authorization', `Bearer ${nonAdminUserAccessToken}`)
+        .expect(403);
+    });
+
+    it('GET /admin/slos — returns 401 without token', async () => {
+      await request(httpServer)
+        .get('/admin/slos')
+        .expect(401);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
   // Code Intelligence — Change Impact Analysis (Phase 4)
   // ─────────────────────────────────────────────────────────────────
 
