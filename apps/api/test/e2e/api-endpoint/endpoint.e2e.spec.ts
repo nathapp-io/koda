@@ -1823,7 +1823,7 @@ describeIntegration('API Integration Tests', () => {
   describe('SLO Dashboard — GET /admin/slos', () => {
     it('AC-7: GET /admin/slos — returns 200 with full SloMetrics for ADMIN user', async () => {
       const res = await request(httpServer)
-        .get('/admin/slos')
+        .get('/api/admin/slos')
         .query({ from: '2026-05-01T00:00:00Z', to: '2026-05-08T00:00:00Z' })
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(200);
@@ -1848,7 +1848,7 @@ describeIntegration('API Integration Tests', () => {
 
     it('GET /admin/slos — defaults to 7-day window when no query params', async () => {
       const res = await request(httpServer)
-        .get('/admin/slos')
+        .get('/api/admin/slos')
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(200);
 
@@ -1858,14 +1858,14 @@ describeIntegration('API Integration Tests', () => {
 
     it('GET /admin/slos — returns 403 for non-admin user', async () => {
       await request(httpServer)
-        .get('/admin/slos')
+        .get('/api/admin/slos')
         .set('Authorization', `Bearer ${nonAdminUserAccessToken}`)
         .expect(403);
     });
 
     it('GET /admin/slos — returns 401 without token', async () => {
       await request(httpServer)
-        .get('/admin/slos')
+        .get('/api/admin/slos')
         .expect(401);
     });
   });

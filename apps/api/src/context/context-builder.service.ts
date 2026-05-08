@@ -1,5 +1,5 @@
 import { performance } from 'perf_hooks';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { AppException, NotFoundAppException, InternalAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
@@ -85,7 +85,7 @@ export class ContextBuilderService {
     private readonly entityGraphService: EntityGraphService,
     private readonly impactAnalysisService: ImpactAnalysisService,
     private readonly prisma: PrismaService<PrismaClient>,
-    private readonly sloDashboardService: SloDashboardService,
+    @Optional() private readonly sloDashboardService?: SloDashboardService,
   ) {}
 
   async getProjectContext(query: GetProjectContextQuery): Promise<GetProjectContextResponse> {
@@ -320,6 +320,7 @@ export class ContextBuilderService {
   }
 
   private countStaleHits(documents: HybridSearchResult): number {
+    if (!this.sloDashboardService) return 0;
     let count = 0;
     for (const result of documents.results) {
       const indexedAt = result.provenance?.indexedAt ?? result.createdAt;
@@ -340,6 +341,7 @@ export class ContextBuilderService {
     resultCount: number;
     leakageIncidentCount: number;
   }): void {
+    if (!this.sloDashboardService) return;
     this.sloDashboardService
       .recordQueryMetric(metric)
       .catch((err: Error) => {
