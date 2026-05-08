@@ -13,30 +13,16 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
-import { PrismaModule } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
-import { appConfig } from '../src/config/app.config';
-import { databaseConfig } from '../src/config/database.config';
-import { ragConfig } from '../src/config/rag.config';
-import { vcsConfig } from '../src/config/vcs.config';
 import { PolicyGateService, type PolicyGateResult, type GateResult } from '../src/policy/policy-gate.service';
 
-// Lean bootstrap module — deliberately excludes AppModule and PolicyModule to avoid
-// loading controllers with @nestjs/swagger decorators (TimelineController, MemoryController),
-// which crash Bun's reflect-metadata polyfill via Reflect.getMetadata on undefined descriptor.
-// PolicyGateService declares all three dependencies as @Optional, so it falls back to
-// fixture data when no database is present.
+// Lean bootstrap module — provides only PolicyGateService with no transitive imports.
+// Deliberately excludes PrismaModule (requires DATABASE_URL, unavailable in CI),
+// PolicyModule/MemoryModule (pull in controllers with @nestjs/swagger decorators that
+// crash Bun's reflect-metadata polyfill), and AppModule.
+// PolicyGateService declares all three dependencies as @Optional so it falls back to
+// fixture data gracefully when no database is present.
 @Module({
-  imports: [
-    ConfigModule.forRoot({
-      isGlobal: true,
-      envFilePath: '.env',
-      load: [appConfig, databaseConfig, ragConfig, vcsConfig],
-    }),
-    PrismaModule.forRoot({ isGlobal: true, client: PrismaClient }),
-  ],
   providers: [PolicyGateService],
 })
 class PolicyGatesRunnerModule {}
