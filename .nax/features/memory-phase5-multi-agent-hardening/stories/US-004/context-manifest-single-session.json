@@ -1,8 +1,8 @@
 {
-  "requestId": "c1fbff80-689d-4cba-afd3-bc46912f1e94",
+  "requestId": "5897e0f2-0e3c-4622-9802-9638da18a3cb",
   "stage": "single-session",
   "totalBudgetTokens": 12000,
-  "usedTokens": 4635,
+  "usedTokens": 4859,
   "includedChunks": [
     "static-rules:api-auth:5a2f90f2",
     "static-rules:api-core:60372c99",
@@ -12,6 +12,7 @@
     "static-rules:common:2b8100fd",
     "static-rules:project-conventions:1c5c62ba",
     "plan-digest:270a1a61",
+    "session-scratch:8d30ae85",
     "session-scratch:a398670d",
     "session-scratch:4ce29646"
   ],
@@ -25,15 +26,15 @@
     "static-rules:common:2b8100fd",
     "static-rules:project-conventions:1c5c62ba"
   ],
-  "digestTokens": 98,
-  "buildMs": 347,
+  "digestTokens": 122,
+  "buildMs": 318,
   "providerResults": [
     {
       "providerId": "static-rules",
       "status": "ok",
       "source": "stage-config",
       "chunkCount": 7,
-      "durationMs": 8,
+      "durationMs": 5,
       "tokensProduced": 4274
     },
     {
@@ -41,7 +42,7 @@
       "status": "empty",
       "source": "stage-config",
       "chunkCount": 0,
-      "durationMs": 1,
+      "durationMs": 0,
       "tokensProduced": 0
     },
     {
@@ -49,23 +50,23 @@
       "status": "empty",
       "source": "stage-config",
       "chunkCount": 0,
-      "durationMs": 9,
+      "durationMs": 6,
       "tokensProduced": 0
     },
     {
       "providerId": "session-scratch",
       "status": "ok",
       "source": "stage-config",
-      "chunkCount": 2,
-      "durationMs": 7,
-      "tokensProduced": 221
+      "chunkCount": 3,
+      "durationMs": 5,
+      "tokensProduced": 421
     },
     {
       "providerId": "git-history",
       "status": "empty",
       "source": "stage-config",
       "chunkCount": 0,
-      "durationMs": 345,
+      "durationMs": 317,
       "tokensProduced": 0
     },
     {
@@ -73,7 +74,7 @@
       "status": "empty",
       "source": "stage-config",
       "chunkCount": 0,
-      "durationMs": 88,
+      "durationMs": 75,
       "tokensProduced": 0
     },
     {
@@ -95,7 +96,50 @@
     "static-rules:common:2b8100fd": "### common.md\n\n# Common Rules — All Apps\n\n## Tooling\n- Use Bun workspace commands (`bun install`, `bun run`), not `npm`/`yarn`\n- Exception: `npx jest` is allowed for targeted Jest runs\n- Prefer repository scripts over ad-hoc one-off command variants\n\n## Git\n- Never push to remote; human reviews and ",
     "static-rules:project-conventions:1c5c62ba": "### project-conventions.md\n\n# Project Conventions\n\nArchitecture, folder map, ownership, commands, and test/i18n layout are in `.nax/context.md`.\nReview checklist is in `common.md`.",
     "plan-digest:270a1a61": "[project] api-auth.md\n[project] api-core.md\n[project] api-data.md\n[project] api-i18n.md\n[project] api-testing.md\n[project] common.md\n[project] project-conventions.md",
+    "session-scratch:8d30ae85": "**Self-verify** at 2026-05-08T08:12:36.743Z: lint=pass, typecheck=pass, pre_existing=1\n\n**Verify** at 2026-05-08T08:12:42.473Z: FAIL (4 failures) — 162 pass / 4 fail\n```\ns\\/koda\\/apps\\/api\\/src\\/monitoring\\/slo-dashboard.service.spec.ts|\\/Users\\/williamkhoo\\/workspace\\/subrina-coder\\/projects\\/koda\\",
     "session-scratch:a398670d": "**Self-verify** at 2026-05-08T06:31:25.527Z: lint=pass, typecheck=pass, pre_existing=0\n\n**Verify** at 2026-05-08T06:31:30.428Z: PASS — 0 pass / 0 fail",
     "session-scratch:4ce29646": "**Self-verify** at 2026-05-08T07:29:30.510Z: lint=pass, typecheck=pass, pre_existing=0\n\n**Verify** at 2026-05-08T07:29:36.685Z: FAIL (8 failures) — 158 pass / 8 fail\n```\ns\\/koda\\/apps\\/api\\/src\\/monitoring\\/slo-dashboard.service.spec.ts|\\/Users\\/williamkhoo\\/workspace\\/subrina-coder\\/projects\\/koda\\"
+  },
+  "chunkEffectiveness": {
+    "static-rules:api-auth:5a2f90f2": {
+      "signal": "ignored"
+    },
+    "static-rules:api-core:60372c99": {
+      "signal": "followed",
+      "evidence": "terms found in diff"
+    },
+    "static-rules:api-data:5494b250": {
+      "signal": "followed",
+      "evidence": "terms found in diff"
+    },
+    "static-rules:api-testing:0a0fd8e5": {
+      "signal": "followed",
+      "evidence": "terms found in diff"
+    },
+    "static-rules:api-i18n:d4901a77": {
+      "signal": "followed",
+      "evidence": "terms found in diff"
+    },
+    "static-rules:common:2b8100fd": {
+      "signal": "ignored"
+    },
+    "static-rules:project-conventions:1c5c62ba": {
+      "signal": "followed",
+      "evidence": "terms found in diff"
+    },
+    "plan-digest:270a1a61": {
+      "signal": "ignored"
+    },
+    "session-scratch:8d30ae85": {
+      "signal": "followed",
+      "evidence": "terms found in diff"
+    },
+    "session-scratch:a398670d": {
+      "signal": "ignored"
+    },
+    "session-scratch:4ce29646": {
+      "signal": "followed",
+      "evidence": "terms found in diff"
+    }
   }
 }
