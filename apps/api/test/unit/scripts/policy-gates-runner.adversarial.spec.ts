@@ -45,6 +45,22 @@ jest.mock('../../../src/policy/policy-gate.service', () => ({
   },
 }));
 
+// Prevent NestFactory from attempting a real NestJS bootstrap in unit tests.
+// The get() call returns an instance of the already-mocked PolicyGateService so
+// runAllGates() reads from mockGateResult as before.
+jest.mock('@nestjs/core', () => ({
+  NestFactory: {
+    createApplicationContext: async () => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { PolicyGateService: Svc } = require('../../../src/policy/policy-gate.service');
+      return {
+        get: () => new Svc(),
+        close: async () => Promise.resolve(),
+      };
+    },
+  },
+}));
+
 // Prevent real filesystem I/O; simple arrow functions survive jest.resetModules().
 jest.mock('fs/promises', () => ({
   mkdir: () => Promise.resolve(undefined),
