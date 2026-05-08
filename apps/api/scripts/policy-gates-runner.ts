@@ -12,9 +12,34 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from '../src/app.module';
+import { PrismaModule } from '@nathapp/nestjs-prisma';
+import { PrismaClient } from '@prisma/client';
+import { PolicyModule } from '../src/policy/policy.module';
+import { appConfig } from '../src/config/app.config';
+import { databaseConfig } from '../src/config/database.config';
+import { ragConfig } from '../src/config/rag.config';
+import { vcsConfig } from '../src/config/vcs.config';
 import { PolicyGateService, type PolicyGateResult, type GateResult } from '../src/policy/policy-gate.service';
+
+// Lean bootstrap module — deliberately excludes AppModule to avoid loading
+// AuthModule's Swagger-decorated DTOs, which crash Bun's reflect-metadata polyfill.
+// All PolicyGateService dependencies are @Optional so services unavailable in
+// environments without a database fall back gracefully to fixture data.
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: '.env',
+      load: [appConfig, databaseConfig, ragConfig, vcsConfig],
+    }),
+    PrismaModule.forRoot({ isGlobal: true, client: PrismaClient }),
+    PolicyModule,
+  ],
+})
+class PolicyGatesRunnerModule {}
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -128,7 +153,7 @@ async function main() {
 
   console.log(`Running policy gates for project: ${projectId}`);
 
-  const app = await NestFactory.createApplicationContext(AppModule, { logger: false });
+  const app = await NestFactory.createApplicationContext(PolicyGatesRunnerModule, { logger: false });
 
   try {
     const service = app.get(PolicyGateService);
