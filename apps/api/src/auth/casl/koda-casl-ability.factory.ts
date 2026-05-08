@@ -20,7 +20,7 @@ export class KodaCaslAbilityFactory extends BaseCaslAbilityFactory {
    * are granted selectively by the factory.
    */
   private static readonly READABLE_RESOURCES = [
-    'Comment', 'Label', 'Ticket', 'Project', 'Agent',
+    'Comment', 'Label', 'Ticket', 'Project', 'Agent', 'ProjectContext',
   ] as const;
 
   /**
@@ -28,7 +28,7 @@ export class KodaCaslAbilityFactory extends BaseCaslAbilityFactory {
    * (AgentScope, AdminScope) so that agent-only routes stay gated.
    */
   private static readonly ADMIN_MANAGEABLE_RESOURCES = [
-    'Comment', 'Label', 'Ticket', 'Project', 'Agent',
+    'Comment', 'Label', 'Ticket', 'Project', 'Agent', 'ProjectContext',
   ] as const;
 
   async getPermissions(principal: KodaPrincipal): Promise<CaslPermission[]> {

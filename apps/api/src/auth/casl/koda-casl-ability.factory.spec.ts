@@ -67,7 +67,7 @@ describe('KodaCaslAbilityFactory', () => {
       const principal = makeUser({ role: 'ADMIN' });
       const perms = await factory.getPermissions(principal);
 
-      expect(perms).toHaveLength(8);
+      expect(perms).toHaveLength(9);
     });
   });
 
@@ -234,14 +234,14 @@ describe('KodaCaslAbilityFactory', () => {
       const principal = makeUser({ role: 'MEMBER' });
       const perms = await factory.getPermissions(principal);
 
-      expect(perms).toHaveLength(10);
+      expect(perms).toHaveLength(11);
     });
 
     it('agent with DEVELOPER role has base + derived permissions', async () => {
       const principal = makeAgent({ agentRoles: ['DEVELOPER'] });
       const perms = await factory.getPermissions(principal);
 
-      const baseCount = 14; // AgentScope.read + 5 resource reads + Comment CRUD.* + Label.manage + Ticket.create + Ticket.delete + CodeIntel.read + CodeIntel.import
+      const baseCount = 15; // AgentScope.read + 5 resource reads + ProjectContext.read + Comment CRUD.* + Label.manage + Ticket.create + Ticket.delete + CodeIntel.read + CodeIntel.import
       const derivedCount = 2; // TRANSITION Ticket + AstIndex.manage (both from DEVELOPER role)
       expect(perms).toHaveLength(baseCount + derivedCount);
     });

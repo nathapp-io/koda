@@ -21,4 +21,5 @@ export type KodaSubject =
   | 'AdminScope'
   | 'CodeIntel'
   | 'AstIndex'
+  | 'ProjectContext'
   | 'all';

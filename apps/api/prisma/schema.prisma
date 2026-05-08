@@ -107,6 +107,7 @@ model Project {
   symbols       Symbol[]
   entityNodes   EntityNode[]
   entityLinks   EntityLink[]
+  memoryQueryMetrics MemoryQueryMetric[]
 }
 
 model ProjectMember {
@@ -482,4 +483,27 @@ model MemoryItem {
   @@index([projectId, kind, subject, predicate])
   @@index([projectId, deletedAt])
   @@index([projectId, sourceType, sourceId])
+}
+
+// ---------------------------------------------------------------------------
+// SLO Dashboard Models
+// ---------------------------------------------------------------------------
+
+model MemoryQueryMetric {
+  id                    String   @id @default(cuid())
+  projectId             String
+  intent                String
+  latencyMs             Int
+  tokensUsed            Int?
+  hadProvenance         Boolean
+  staleHitCount         Int      @default(0)
+  resultCount           Int      @default(0)
+  docId                 String?
+  leakageIncidentCount  Int      @default(0)
+  createdAt             DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
+  @@index([createdAt])
 }

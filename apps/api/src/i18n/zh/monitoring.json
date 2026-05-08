@@ -1,0 +1,6 @@
+{
+  "slos": {
+    "latencyHigh": "延迟高于阈值",
+    "latencyOk": "延迟在SLO范围内"
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "generatedAt": "2026-05-08T09:00:52.871Z",
+  "projectId": "test-project",
+  "dataSource": "policy-gate-run",
+  "gatePassRate": 1,
+  "gatesPassed": 6,
+  "gatesFailed": 0,
+  "gateResults": [
+    {
+      "name": "IsolationGate",
+      "passed": true,
+      "details": "All 10 isolation queries returned 0 results for project-A; no project-B data leaked into project-A scope"
+    },
+    {
+      "name": "ProvenanceGate",
+      "passed": true,
+      "details": "All 20 fixture search queries have provenance.sources populated"
+    },
+    {
+      "name": "TruthConsistencyGate",
+      "passed": true,
+      "details": "All 10 sampled tickets match between canonical state and Prisma"
+    },
+    {
+      "name": "WriteGate",
+      "passed": true,
+      "details": "KodaDomainWriter writes succeed; raw Prisma writes are blocked with WRITE_GATE_VIOLATION"
+    },
+    {
+      "name": "GraphifyEnabledGate",
+      "passed": true,
+      "details": "All 10 queries returned 0 source=code results on graphifyEnabled=false project"
+    },
+    {
+      "name": "TokenBudgetGate",
+      "passed": true,
+      "details": "tokensUsed=800 within tokenBudget=1000 +5% tolerance"
+    }
+  ],
+  "sloMetrics": {
+    "retrievalLatency": {
+      "p50": 0,
+      "p95": 0,
+      "p99": 0,
+      "sampleCount": 0
+    },
+    "staleHitRate": 0,
+    "provenanceCoverage": 1,
+    "leakageIncidents": 0,
+    "memoryGrowthRate": 0
+  }
+}

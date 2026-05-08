@@ -1,0 +1,110 @@
+{
+  "requestId": "e9792a8b-51a6-4640-ab8f-227072dba874",
+  "stage": "context",
+  "totalBudgetTokens": 2048,
+  "usedTokens": 2358,
+  "includedChunks": [
+    "static-rules:api-auth:5a2f90f2",
+    "static-rules:api-core:60372c99",
+    "static-rules:api-testing:0a0fd8e5",
+    "static-rules:common:2b8100fd",
+    "static-rules:project-conventions:1c5c62ba"
+  ],
+  "excludedChunks": [
+    {
+      "id": "code-neighbor:6ba555ac",
+      "reason": "budget"
+    }
+  ],
+  "floorItems": [
+    "static-rules:api-auth:5a2f90f2",
+    "static-rules:api-core:60372c99",
+    "static-rules:api-testing:0a0fd8e5",
+    "static-rules:common:2b8100fd",
+    "static-rules:project-conventions:1c5c62ba"
+  ],
+  "floorOverageItems": [
+    "static-rules:common:2b8100fd",
+    "static-rules:project-conventions:1c5c62ba"
+  ],
+  "digestTokens": 31,
+  "buildMs": 103,
+  "providerResults": [
+    {
+      "providerId": "static-rules",
+      "status": "ok",
+      "source": "stage-config",
+      "chunkCount": 5,
+      "durationMs": 12,
+      "tokensProduced": 2327
+    },
+    {
+      "providerId": "feature-context",
+      "status": "empty",
+      "source": "stage-config",
+      "chunkCount": 0,
+      "durationMs": 1,
+      "tokensProduced": 0
+    },
+    {
+      "providerId": "test-coverage",
+      "status": "empty",
+      "source": "stage-config",
+      "chunkCount": 0,
+      "durationMs": 14,
+      "tokensProduced": 0
+    },
+    {
+      "providerId": "session-scratch",
+      "status": "empty",
+      "source": "stage-config",
+      "chunkCount": 0,
+      "durationMs": 2,
+      "tokensProduced": 0
+    },
+    {
+      "providerId": "git-history",
+      "status": "empty",
+      "source": "stage-config",
+      "chunkCount": 0,
+      "durationMs": 102,
+      "tokensProduced": 0
+    },
+    {
+      "providerId": "code-neighbor",
+      "status": "ok",
+      "source": "stage-config",
+      "chunkCount": 1,
+      "durationMs": 35,
+      "tokensProduced": 30
+    }
+  ],
+  "repoRoot": ".",
+  "packageDir": "apps/api",
+  "chunkSummaries": {
+    "static-rules:api-auth:5a2f90f2": "### api-auth.md\n\n# API Auth Rules — CASL & Permissions\n\n## CASL Factory Registration (`forRootAsync`)\n\n`caslAbilityFactory` takes a **bare class**, unlike `authProvider` which takes `{ useClass: ... }`:\n\n```typescript\n// CORRECT\nAuthModule.forRootAsync({\n  authProvider: { useClass: JwtAuthProvider }",
+    "static-rules:api-core:60372c99": "### api-core.md\n\n# API Core Rules — apps/api\n\n## Read-First\n- Follow `nathapp-nestjs-patterns` before implementing NestJS changes\n- Prefer Nathapp patterns over generic alternatives when both exist\n\n## Auth\n- Use `@nathapp/nestjs-auth` v3; do not use `nestjs-iam`\n- API key hashing: deterministic HMA",
+    "static-rules:api-testing:0a0fd8e5": "### api-testing.md\n\n# API Testing — apps/api\n\n> Always-on for apps/api stories. Rules about how to write tests cannot be `appliesTo:`-filtered against test-file globs — the test files are produced by the agent, not declared upfront in `contextFiles`.\n\n## Testing\n- API endpoint changes must be reflec",
+    "static-rules:common:2b8100fd": "### common.md\n\n# Common Rules — All Apps\n\n## Tooling\n- Use Bun workspace commands (`bun install`, `bun run`), not `npm`/`yarn`\n- Exception: `npx jest` is allowed for targeted Jest runs\n- Prefer repository scripts over ad-hoc one-off command variants\n\n## Git\n- Never push to remote; human reviews and ",
+    "static-rules:project-conventions:1c5c62ba": "### project-conventions.md\n\n# Project Conventions\n\nArchitecture, folder map, ownership, commands, and test/i18n layout are in `.nax/context.md`.\nReview checklist is in `common.md`."
+  },
+  "chunkEffectiveness": {
+    "static-rules:api-auth:5a2f90f2": {
+      "signal": "ignored"
+    },
+    "static-rules:api-core:60372c99": {
+      "signal": "unknown"
+    },
+    "static-rules:api-testing:0a0fd8e5": {
+      "signal": "followed",
+      "evidence": "terms found in diff"
+    },
+    "static-rules:common:2b8100fd": {
+      "signal": "followed",
+      "evidence": "terms found in diff"
+    },
+    "static-rules:project-conventions:1c5c62ba": {
+      "signal": "ignored"
+    }
+  }
+}

@@ -3,58 +3,31 @@
   "approved": true,
   "tests": {
     "allPassing": true,
-    "passCount": 44,
+    "passCount": 21,
     "failCount": 0
   },
   "testModifications": {
-    "detected": false,
-    "files": [],
+    "detected": true,
+    "files": [
+      "test/integration/policy/policy-gate.service.spec.ts"
+    ],
     "legitimate": true,
-    "reasoning": "All story-scoped test files were ADDED in this branch (not modified existing tests). The test files contain functional mock implementations that provide test data and verify expected behavior. No test modifications by implementer were necessary because the tests were designed as working unit tests with realistic mocks from the start."
+    "reasoning": "Implementer modified test stubs in commit a5a48ef. The original tests used `await expect(service.runAllGates(...)).rejects.toThrow()` which was always failing because `runAllGates()` never rejects — it returns a Promise<PolicyGateResult> that resolves. The implementer replaced these stub assertions with correct assertions that check the actual `GateResult` shape. This was a legitimate fix required because the service API returns a resolved result object, not a thrown error."
   },
   "acceptanceCriteria": {
     "allMet": true,
     "criteria": [
-      {
-        "criterion": "AC1: GET /projects/:slug/codeintel/impact endpoint returns ChangeImpactResult schema",
-        "met": true,
-        "coverage": "Unit tests verify endpoint definition and schema in test/unit/code-intel/codeintel.controller.spec.ts (tests: 'should define GET', 'should include all required fields in response')"
-      },
-      {
-        "criterion": "AC2: impactedSymbols contains symbols whose file matches changedFiles",
-        "met": true,
-        "coverage": "Unit tests verify symbol filtering logic in test/unit/code-intel/impact-analysis.service.spec.ts (tests: 'should filter symbols by changed files', 'should return empty symbols array when no symbols match')"
-      },
-      {
-        "criterion": "AC3: impactedServices linked to symbols through sourceFile/sourceId",
-        "met": true,
-        "coverage": "Unit tests verify service linking in test/unit/code-intel/impact-analysis.service.spec.ts (tests: 'should identify services linked to impacted symbols', 'should link services through Symbol.file')"
-      },
-      {
-        "criterion": "AC4: impactedTickets linked to impacted services",
-        "met": true,
-        "coverage": "Unit tests verify ticket collection in test/unit/code-intel/impact-analysis.service.spec.ts (tests: 'should identify tickets linked to impacted services', 'should return empty tickets array')"
-      },
-      {
-        "criterion": "AC5: impactScore 0-100 with weighted formula and zero-denominator guards",
-        "met": true,
-        "coverage": "Unit tests verify score calculation in test/unit/code-intel/impact-analysis.service.spec.ts (tests: 'should calculate impact score between 0 and 100', 'should use weighted formula', 'should guard against division by zero')"
-      },
-      {
-        "criterion": "AC6: Provenance included when ticketId provided",
-        "met": true,
-        "coverage": "Unit tests verify provenance logic in test/unit/code-intel/impact-analysis.service.spec.ts (tests: 'should include provenance when ticketId is provided', 'should not include provenance when ticketId is not provided')"
-      },
-      {
-        "criterion": "AC7: Response completes in under 5 seconds for 50 changed files",
-        "met": true,
-        "coverage": "Implementation uses efficient single query for symbols + graph traversal. Algorithm is O(n) per depth level. No performance regression expected."
-      },
-      {
-        "criterion": "AC8: Endpoint gated with @RequiredPermission([READ, 'CodeIntel']); grants access to ADMIN, all agents, and DEVELOPER project role users",
-        "met": true,
-        "coverage": "Unit tests verify permission decoration in test/unit/code-intel/codeintel.controller.spec.ts (8 tests); integration tests verify CASL factory grants correct permissions in test/integration/code-intel/codeintel-casl-permissions.integration.spec.ts (5 tests: ADMIN, agents, DEVELOPER project role)"
-      }
+      {"criterion": "AC-1: IsolationGate runs 10 queries returning 0 results for empty project", "met": true},
+      {"criterion": "AC-2: IsolationGate blocks cross-project data leaks", "met": true},
+      {"criterion": "AC-3: ProvenanceGate validates search response provenance", "met": true},
+      {"criterion": "AC-4: WriteGate allows KodaDomainWriter writes but blocks raw Prisma writes", "met": true},
+      {"criterion": "AC-5: TruthConsistencyGate compares canonical state to Prisma data", "met": true},
+      {"criterion": "AC-6: GraphifyEnabledGate hides code results when graphifyEnabled=false", "met": true},
+      {"criterion": "AC-7: TokenBudgetGate enforces 5% token budget tolerance", "met": true},
+      {"criterion": "AC-8: All gates runnable via policy:gates script", "met": true},
+      {"criterion": "AC-9: blockedReason populated when any gate fails", "met": true},
+      {"criterion": "AC-10: Gate results written to results.json artifact", "met": true},
+      {"criterion": "AC-11: Policy gates use deterministic fixture data", "met": true}
     ]
   },
   "quality": {
@@ -62,5 +35,5 @@
     "issues": []
   },
   "fixes": [],
-  "reasoning": "Story-scoped TDD integrity verified: 44 tests passing (20 unit tests for ImpactAnalysisService + 19 unit tests for CodeIntelController + 5 CASL permissions integration tests). All test files are NEW additions with no modifications by implementer. Tests use realistic mock implementations that provide valid test data for all acceptance criteria. ImpactAnalysisService is fully implemented with correct symbol filtering, service/ticket linking via entity graph, impact score calculation with zero-denominator guards, and provenance metadata. ProjectCodeIntelController properly exposes the GET /projects/:slug/codeintel/impact endpoint with correct parameter handling, project slug resolution, and @RequiredPermission([READ, 'CodeIntel']) gating. CASL factory correctly grants READ CodeIntel to ADMIN users, all agents, and users with DEVELOPER project role per AC8. No test shortcuts detected; all assertions align with acceptance criteria."
+  "reasoning": "All 21 story-scoped tests pass. The implementer made legitimate test modifications in commit a5a48ef — fixing stub assertions that were incorrectly expecting rejections from a service that always resolves with a PolicyGateResult object. The param-scope tests (4 tests) confirm the three parameter-scope bugs (IsolationGate, ProvenanceGate, GraphifyEnabledGate using hardcoded FIXTURE constants instead of the caller-provided projectId) were properly fixed in commit d6d606c. No loosening of assertions or shortcuts detected. results.json confirms all 6 gates pass."
 }
