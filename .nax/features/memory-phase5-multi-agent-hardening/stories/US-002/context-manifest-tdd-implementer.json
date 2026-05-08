@@ -1,7 +1,7 @@
 {
-  "requestId": "4499b1bc-a868-481f-bfff-a22e1cc068a2",
-  "stage": "context",
-  "totalBudgetTokens": 2048,
+  "requestId": "78917bcc-b712-4b6a-9956-c55228d92f3e",
+  "stage": "tdd-implementer",
+  "totalBudgetTokens": 8000,
   "usedTokens": 4316,
   "includedChunks": [
     "static-rules:api-auth:5a2f90f2",
@@ -12,12 +12,7 @@
     "static-rules:common:2b8100fd",
     "static-rules:project-conventions:1c5c62ba"
   ],
-  "excludedChunks": [
-    {
-      "id": "code-neighbor:488c5b81",
-      "reason": "budget"
-    }
-  ],
+  "excludedChunks": [],
   "floorItems": [
     "static-rules:api-auth:5a2f90f2",
     "static-rules:api-core:60372c99",
@@ -27,22 +22,15 @@
     "static-rules:common:2b8100fd",
     "static-rules:project-conventions:1c5c62ba"
   ],
-  "floorOverageItems": [
-    "static-rules:api-data:5494b250",
-    "static-rules:api-testing:0a0fd8e5",
-    "static-rules:api-i18n:d4901a77",
-    "static-rules:common:2b8100fd",
-    "static-rules:project-conventions:1c5c62ba"
-  ],
   "digestTokens": 42,
-  "buildMs": 530,
+  "buildMs": 395,
   "providerResults": [
     {
       "providerId": "static-rules",
       "status": "ok",
       "source": "stage-config",
       "chunkCount": 7,
-      "durationMs": 9,
+      "durationMs": 7,
       "tokensProduced": 4274
     },
     {
@@ -50,7 +38,7 @@
       "status": "empty",
       "source": "stage-config",
       "chunkCount": 0,
-      "durationMs": 2,
+      "durationMs": 1,
       "tokensProduced": 0
     },
     {
@@ -58,7 +46,7 @@
       "status": "empty",
       "source": "stage-config",
       "chunkCount": 0,
-      "durationMs": 9,
+      "durationMs": 7,
       "tokensProduced": 0
     },
     {
@@ -66,7 +54,7 @@
       "status": "empty",
       "source": "stage-config",
       "chunkCount": 0,
-      "durationMs": 2,
+      "durationMs": 1,
       "tokensProduced": 0
     },
     {
@@ -74,16 +62,16 @@
       "status": "empty",
       "source": "stage-config",
       "chunkCount": 0,
-      "durationMs": 527,
+      "durationMs": 394,
       "tokensProduced": 0
     },
     {
       "providerId": "code-neighbor",
-      "status": "ok",
+      "status": "empty",
       "source": "stage-config",
-      "chunkCount": 1,
-      "durationMs": 104,
-      "tokensProduced": 48
+      "chunkCount": 0,
+      "durationMs": 92,
+      "tokensProduced": 0
     }
   ],
   "repoRoot": ".",

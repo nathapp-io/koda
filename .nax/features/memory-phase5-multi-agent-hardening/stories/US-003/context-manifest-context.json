@@ -1,5 +1,5 @@
 {
-  "requestId": "4499b1bc-a868-481f-bfff-a22e1cc068a2",
+  "requestId": "bd63ba3e-2ae4-4def-af24-1981c549e417",
   "stage": "context",
   "totalBudgetTokens": 2048,
   "usedTokens": 4316,
@@ -12,12 +12,7 @@
     "static-rules:common:2b8100fd",
     "static-rules:project-conventions:1c5c62ba"
   ],
-  "excludedChunks": [
-    {
-      "id": "code-neighbor:488c5b81",
-      "reason": "budget"
-    }
-  ],
+  "excludedChunks": [],
   "floorItems": [
     "static-rules:api-auth:5a2f90f2",
     "static-rules:api-core:60372c99",
@@ -35,14 +30,14 @@
     "static-rules:project-conventions:1c5c62ba"
   ],
   "digestTokens": 42,
-  "buildMs": 530,
+  "buildMs": 631,
   "providerResults": [
     {
       "providerId": "static-rules",
       "status": "ok",
       "source": "stage-config",
       "chunkCount": 7,
-      "durationMs": 9,
+      "durationMs": 15,
       "tokensProduced": 4274
     },
     {
@@ -50,7 +45,7 @@
       "status": "empty",
       "source": "stage-config",
       "chunkCount": 0,
-      "durationMs": 2,
+      "durationMs": 1,
       "tokensProduced": 0
     },
     {
@@ -58,7 +53,7 @@
       "status": "empty",
       "source": "stage-config",
       "chunkCount": 0,
-      "durationMs": 9,
+      "durationMs": 15,
       "tokensProduced": 0
     },
     {
@@ -66,7 +61,7 @@
       "status": "empty",
       "source": "stage-config",
       "chunkCount": 0,
-      "durationMs": 2,
+      "durationMs": 3,
       "tokensProduced": 0
     },
     {
@@ -74,16 +69,16 @@
       "status": "empty",
       "source": "stage-config",
       "chunkCount": 0,
-      "durationMs": 527,
+      "durationMs": 629,
       "tokensProduced": 0
     },
     {
       "providerId": "code-neighbor",
-      "status": "ok",
+      "status": "empty",
       "source": "stage-config",
-      "chunkCount": 1,
-      "durationMs": 104,
-      "tokensProduced": 48
+      "chunkCount": 0,
+      "durationMs": 137,
+      "tokensProduced": 0
     }
   ],
   "repoRoot": ".",
