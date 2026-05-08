@@ -19,7 +19,7 @@ export interface AgentInfo {
 @Injectable()
 export class AgentRegistryService {
   private readonly adapters = new Map<string, AgentAdapter>();
-  private readonly knownAgentIds = new Set<string>(['claude-code', 'nax']);
+  private readonly knownAgentIds = new Set<string>(['claude-code', 'nax', 'copilot']);
 
   register(agentId: string, adapter: AgentAdapter): void {
     if (!this.knownAgentIds.has(adapter.agentId)) {

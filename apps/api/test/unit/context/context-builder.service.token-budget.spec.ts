@@ -182,4 +182,38 @@ describe('ContextBuilderService — AC-7 token budget truncation priority', () =
     expect(result.retrievedContext.graphPaths).toBeDefined();
     expect(result.retrievedContext.graphPaths).toHaveLength(1);
   });
+
+  it('fetches code intel when repoRefs are provided and includeCodeIntel is not set', async () => {
+    const query: GetProjectContextQuery = {
+      projectId: PROJECT_ID,
+      actorId: 'actor-1',
+      intent: 'answer',
+      query: 'test query',
+      tokenBudget: 10000,
+      repoRefs: [REPO_REF],
+      // includeCodeIntel intentionally omitted — repoRefs alone should trigger code intel
+    };
+
+    const result = await service.getProjectContext(query);
+
+    expect(mockImpactAnalysis.getChangeImpact).toHaveBeenCalledTimes(1);
+    expect(result.retrievedContext.codeIntel).toBeDefined();
+    expect(result.retrievedContext.codeIntel).toHaveLength(1);
+  });
+
+  it('does not fetch code intel when includeCodeIntel is explicitly false even with repoRefs', async () => {
+    const query: GetProjectContextQuery = {
+      projectId: PROJECT_ID,
+      actorId: 'actor-1',
+      intent: 'answer',
+      query: 'test query',
+      tokenBudget: 10000,
+      repoRefs: [REPO_REF],
+      includeCodeIntel: false,
+    };
+
+    await service.getProjectContext(query);
+
+    expect(mockImpactAnalysis.getChangeImpact).not.toHaveBeenCalled();
+  });
 });

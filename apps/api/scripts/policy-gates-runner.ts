@@ -12,6 +12,8 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from '../src/app.module';
 import { PolicyGateService, type PolicyGateResult, type GateResult } from '../src/policy/policy-gate.service';
 
 function parseArgs() {
@@ -126,8 +128,10 @@ async function main() {
 
   console.log(`Running policy gates for project: ${projectId}`);
 
+  const app = await NestFactory.createApplicationContext(AppModule, { logger: false });
+
   try {
-    const service = new PolicyGateService();
+    const service = app.get(PolicyGateService);
     const result = await service.runAllGates(projectId);
 
     const outputDir = path.join(process.cwd(), 'test', 'policy-gates');
@@ -153,6 +157,8 @@ async function main() {
   } catch (error) {
     console.error('Error running policy gates:', error);
     process.exit(1);
+  } finally {
+    await app.close();
   }
 }
 

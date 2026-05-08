@@ -1,6 +1,7 @@
 import { AgentRegistryService } from './agent-registry.service';
 import { ClaudeCodeAdapter } from './adapters/claude-code.adapter';
 import { NaxAdapter } from './adapters/nax.adapter';
+import { CopilotAdapter } from './adapters/copilot.adapter';
 import type {
   AgentAdapter,
   AgentCapability,
@@ -293,12 +294,13 @@ describe('AgentRegistryService', () => {
     it('should return all registered agents as AgentInfo', () => {
       registry.register('claude-code', new ClaudeCodeAdapter());
       registry.register('nax', new NaxAdapter());
+      registry.register('copilot', new CopilotAdapter());
 
       const agents: AgentInfo[] = registry.listAgents();
 
-      expect(agents).toHaveLength(2);
+      expect(agents).toHaveLength(3);
       expect(agents.map((a) => a.agentId)).toEqual(
-        expect.arrayContaining(['claude-code', 'nax']),
+        expect.arrayContaining(['claude-code', 'nax', 'copilot']),
       );
 
       const claudeInfo = agents.find((a) => a.agentId === 'claude-code');
@@ -307,6 +309,10 @@ describe('AgentRegistryService', () => {
       expect(claudeInfo.capabilities).toEqual(
         expect.arrayContaining(['ticket_ops', 'code_search', 'code_write', 'planning']),
       );
+
+      const copilotInfo = agents.find((a) => a.agentId === 'copilot');
+      expect(copilotInfo).toBeDefined();
+      expect(copilotInfo?.name).toBe('GitHub Copilot');
     });
   });
 });

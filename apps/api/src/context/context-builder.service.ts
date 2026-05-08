@@ -132,14 +132,9 @@ export class ContextBuilderService {
     }
 
     let codeIntel: ChangeImpactResult[] | undefined;
-    if (query.includeCodeIntel && query.repoRefs && query.repoRefs.length > 0) {
+    if ((query.includeCodeIntel !== false) && query.repoRefs && query.repoRefs.length > 0) {
       codeIntel = await this.fetchCodeIntel(query.projectId, query.repoRefs);
     }
-
-    const { retrievedContext, leakageIncidentCount } = this.enforceTokenBudget(
-      { documents, semanticMemory, graphPaths, codeIntel },
-      tokenBudget,
-    );
 
     const hasQuery = query.query && query.query.trim().length > 0;
 
@@ -149,9 +144,17 @@ export class ContextBuilderService {
       activeDecisions: snapshot.activeDecisions,
     };
 
-    const tokensUsed =
-      estimateTokenCount(JSON.stringify(canonicalState)) +
-      estimateTokenCount(JSON.stringify(retrievedContext));
+    const canonicalTokens = estimateTokenCount(JSON.stringify(canonicalState));
+    // canonicalState is never truncated per spec; tokensUsed may exceed tokenBudget
+    // when canonicalState alone is larger than the budget.
+    const remainingBudget = Math.max(0, tokenBudget - canonicalTokens);
+
+    const { retrievedContext, leakageIncidentCount } = this.enforceTokenBudget(
+      { documents, semanticMemory, graphPaths, codeIntel },
+      remainingBudget,
+    );
+
+    const tokensUsed = canonicalTokens + estimateTokenCount(JSON.stringify(retrievedContext));
 
     const latencyMs = Math.ceil(performance.now() - startTime);
     const staleHitCount = this.countStaleHits(documents);
