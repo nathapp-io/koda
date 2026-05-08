@@ -216,6 +216,45 @@ describe('AgentRegistryService', () => {
     });
   });
 
+  // AC1 (spec-correctness): register() must validate that the agentId parameter
+  // matches the adapter's own agentId property. Otherwise the adapter's metadata
+  // (agentId, name, capabilities) disagrees with the registry key, violating the
+  // invariant that the adapter is retrievable by its agentId.
+  describe('agentId consistency', () => {
+    it('should throw when agentId does not match adapter.agentId', () => {
+      const adapter: AgentAdapter = {
+        agentId: 'my-agent',
+        name: 'My Agent',
+        capabilities: ['ticket_ops' as AgentCapability],
+        formatContext: jest.fn(),
+      };
+
+      expect(() => registry.register('different-id', adapter)).toThrow();
+    });
+
+    it('should make adapter retrievable by adapter.agentId regardless of register key', () => {
+      const claudeAdapter = new ClaudeCodeAdapter(); // adapter.agentId = 'claude-code'
+
+      registry.register('any-other-key', claudeAdapter);
+
+      // AC1: the adapter must be retrievable by its own agentId
+      expect(() => registry.getAdapter('claude-code')).not.toThrow();
+      expect(registry.getAdapter('claude-code')).toBe(claudeAdapter);
+    });
+
+    it('should detect mismatch with real ClaudeCodeAdapter registered under wrong key', () => {
+      const claudeAdapter = new ClaudeCodeAdapter(); // agentId = 'claude-code'
+
+      expect(() => registry.register('nax', claudeAdapter)).toThrow();
+    });
+
+    it('should detect mismatch with real NaxAdapter registered under wrong key', () => {
+      const naxAdapter = new NaxAdapter(); // agentId = 'nax'
+
+      expect(() => registry.register('claude-code', naxAdapter)).toThrow();
+    });
+  });
+
   // AC7: Adapters cannot call retrieval, memory, graph, or code-intel services directly
   describe('adapter isolation', () => {
     it('should only expose formatContext and metadata, not service access', () => {
