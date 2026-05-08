@@ -79,26 +79,27 @@ interface SloSnapshot {
 }
 
 function deriveSloSnapshot(projectId: string, gateResults: PolicyGateResult): SloSnapshot {
-  const gatesPassed = gateResults.gates.filter((g) => g.passed).length;
-  const gatesFailed = gateResults.gates.filter((g) => !g.passed).length;
-  const totalGates = gateResults.gates.length;
+  const gates = Array.isArray(gateResults.gates) ? gateResults.gates : [];
+  const gatesPassed = gates.filter((g) => g.passed).length;
+  const gatesFailed = gates.filter((g) => !g.passed).length;
+  const totalGates = gates.length;
 
   // Derive provenanceCoverage: if ProvenanceGate passed, coverage is high; otherwise, 0
-  const provenanceGate = gateResults.gates.find((g) => g.name === 'ProvenanceGate');
+  const provenanceGate = gates.find((g) => g.name === 'ProvenanceGate');
   const provenanceCoverage = provenanceGate?.passed ? 1.0 : 0.0;
 
   // Derive leakageIncidents: if IsolationGate failed, we know leakages happened
-  const isolationGate = gateResults.gates.find((g) => g.name === 'IsolationGate');
+  const isolationGate = gates.find((g) => g.name === 'IsolationGate');
   const leakageIncidents = isolationGate?.passed ? 0 : 1;
 
   return {
     generatedAt: new Date().toISOString(),
     projectId,
     dataSource: 'policy-gate-run',
-    gatePassRate: gatesPassed / totalGates,
+    gatePassRate: totalGates === 0 ? 0 : gatesPassed / totalGates,
     gatesPassed,
     gatesFailed,
-    gateResults: gateResults.gates,
+    gateResults: gates,
     sloMetrics: {
       retrievalLatency: {
         p50: 0,
