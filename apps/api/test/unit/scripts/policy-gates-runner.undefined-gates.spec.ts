@@ -32,6 +32,9 @@
 // ─── module-level state shared with mock factories ───────────────────────────
 // Variables prefixed with "mock" are accessible inside jest.mock factories even
 // after hoisting.  Do NOT rename them.
+// export {} converts this file from a TS script to a module so its top-level
+// declarations do not collide with identically-named variables in sibling spec files.
+export {};
 
 let mockGateResult: { passed: boolean; blockedReason?: string; gates?: { name: string; passed: boolean }[] } = {
   passed: true,
