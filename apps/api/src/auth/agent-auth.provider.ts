@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { CacheManager } from '../cache/cache.module';
+import { CacheManager } from '@nathapp/nestjs-cache';
 import type { Agent, PrismaClient } from '@prisma/client';
 import { AgentPrincipal, KodaAgentRole, KodaAgentStatus } from './principal/koda-principal.types';
 
