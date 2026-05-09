@@ -7,7 +7,9 @@
     "isString": "Must be a string",
     "isEnum": "Invalid value",
     "isUrl": "Must be a valid URL",
-    "isBoolean": "Must be a boolean"
+    "isBoolean": "Must be a boolean",
+    "passwordComplexity": "密码必须包含大写字母、小写字母、数字和特殊字符",
+    "webhookSecretMinLength": "Webhook 密钥长度至少为 32 个字符"
   },
   "errors": {
     "notFound": "Resource not found",

@@ -55,7 +55,7 @@ describeIntegration('US-002: Empty Description Support', () => {
 
     const registerRes = await request(httpServer)
       .post('/api/auth/register')
-      .send({ email: 'test@koda.test', name: 'Test User', password: 'Test1234!' });
+      .send({ email: 'test@koda.test', name: 'Test User', password: 'TestUser1234!' });
 
     userAccessToken = body<{ accessToken: string }>(registerRes).accessToken;
 

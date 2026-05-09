@@ -71,7 +71,7 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
     it('should register admin user and get access token', async () => {
       const res = await request(httpServer)
         .post('/api/auth/register')
-        .send({ email: 'admin@koda-ast.test', name: 'AST Admin', password: 'Admin1234!' });
+        .send({ email: 'admin@koda-ast.test', name: 'AST Admin', password: 'Admin1234!Aa' });
 
       expect(res.status).toBe(201);
       const data = body<{ accessToken: string }>(res);
@@ -82,7 +82,7 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
     it('should register agent with DEVELOPER role', async () => {
       const res = await request(httpServer)
         .post('/api/auth/register')
-        .send({ email: 'dev-agent@koda-ast.test', name: 'Dev Agent', password: 'Agent1234!' });
+        .send({ email: 'dev-agent@koda-ast.test', name: 'Dev Agent', password: 'Agent1234!Aa' });
 
       expect(res.status).toBe(201);
 
@@ -278,7 +278,7 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
     it('MEMBER user should receive 403', async () => {
       const memberRes = await request(httpServer)
         .post('/api/auth/register')
-        .send({ email: 'member@koda-ast.test', name: 'Member User', password: 'Member1234!' });
+        .send({ email: 'member@koda-ast.test', name: 'Member User', password: 'Member1234!Aa' });
 
       expect(memberRes.status).toBe(201);
       const memberData = body<{ accessToken: string }>(memberRes);

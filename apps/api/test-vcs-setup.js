@@ -18,7 +18,7 @@ async function test() {
     // Register user
     const registerRes = await request(httpServer)
       .post('/api/auth/register')
-      .send({ email: `test-${Date.now()}@koda.test`, name: 'Test', password: 'Test1234!' });
+      .send({ email: `test-${Date.now()}@koda.test`, name: 'Test', password: 'TestUser1234!' });
     
     console.log('Register status:', registerRes.status);
     console.log('Register body:', registerRes.body);

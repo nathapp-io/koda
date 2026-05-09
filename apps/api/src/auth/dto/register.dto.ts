@@ -1,4 +1,4 @@
-import { IsEmail, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsString, MinLength, Matches } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class RegisterDto {
@@ -11,8 +11,11 @@ export class RegisterDto {
   @MinLength(1, { message: '$t(common.validation.minLength)' })
   declare name: string;
 
-  @ApiProperty({ example: 'password123' })
+  @ApiProperty({ example: 'StrongPass123!' })
   @IsString({ message: '$t(common.validation.isString)' })
-  @MinLength(8, { message: '$t(common.validation.minLength)' })
+  @MinLength(12, { message: '$t(common.validation.minLength)' })
+  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).+$/, {
+    message: '$t(common.validation.passwordComplexity)',
+  })
   declare password: string;
 }

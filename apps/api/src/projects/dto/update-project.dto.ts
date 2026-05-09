@@ -83,6 +83,7 @@ export class UpdateProjectDto {
   })
   @IsOptional()
   @IsString({ message: '$t(common.validation.isString)' })
+  @MinLength(32, { message: '$t(common.validation.webhookSecretMinLength)' })
   ciWebhookToken?: string;
 
   @ApiPropertyOptional({

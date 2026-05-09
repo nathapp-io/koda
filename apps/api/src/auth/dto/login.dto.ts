@@ -6,7 +6,7 @@ export class LoginDto {
   @IsEmail({}, { message: '$t(common.validation.isEmail)' })
   declare email: string;
 
-  @ApiProperty({ example: 'password123' })
+  @ApiProperty({ example: 'Password123!' })
   @IsString({ message: '$t(common.validation.isString)' })
   declare password: string;
 }

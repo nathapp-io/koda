@@ -50,7 +50,7 @@ describeIntegration('Agents API E2E', () => {
 
     const adminRegisterRes = await request(httpServer)
       .post('/api/auth/register')
-      .send({ email: 'agents-admin@koda.test', name: 'Agents Admin', password: 'Admin1234!' })
+      .send({ email: 'agents-admin@koda.test', name: 'Agents Admin', password: 'Admin1234!Aa' })
       .expect(201);
 
     const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
@@ -63,14 +63,14 @@ describeIntegration('Agents API E2E', () => {
 
     const adminLoginRes = await request(httpServer)
       .post('/api/auth/login')
-      .send({ email: 'agents-admin@koda.test', password: 'Admin1234!' })
+      .send({ email: 'agents-admin@koda.test', password: 'Admin1234!Aa' })
       .expect(200);
 
     adminAccessToken = body<{ accessToken: string }>(adminLoginRes).accessToken;
 
     const memberRegisterRes = await request(httpServer)
       .post('/api/auth/register')
-      .send({ email: 'agents-member@koda.test', name: 'Agents Member', password: 'Member1234!' })
+      .send({ email: 'agents-member@koda.test', name: 'Agents Member', password: 'Member1234!Aa' })
       .expect(201);
 
     memberAccessToken = body<{ accessToken: string }>(memberRegisterRes).accessToken;
