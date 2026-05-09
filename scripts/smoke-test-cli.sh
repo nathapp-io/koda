@@ -155,7 +155,7 @@ log "Step 4: Bootstrapping test data..."
 
 REGISTER=$(curl -sf -X POST "$API_URL/api/auth/register" \
   -H "Content-Type: application/json" \
-  -d '{"email":"smoke@koda.test","name":"Smoke Test","password":"Smoke1234!"}' 2>&1)
+  -d '{"email":"smoke@koda.test","name":"Smoke Test","password":"SmokeSecure123!"}' 2>&1)
 if echo "$REGISTER" | grep -q '"accessToken"'; then
   ok "Register user"
 else
@@ -174,7 +174,7 @@ fi
 # Re-login to get a fresh JWT with ADMIN role
 LOGIN=$(curl -sf -X POST "$API_URL/api/auth/login" \
   -H "Content-Type: application/json" \
-  -d '{"email":"smoke@koda.test","password":"Smoke1234!"}' 2>&1)
+  -d '{"email":"smoke@koda.test","password":"SmokeSecure123!"}' 2>&1)
 JWT=$(echo "$LOGIN" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',d)['accessToken'])" 2>/dev/null)
 ok "Promoted user to ADMIN"
 
