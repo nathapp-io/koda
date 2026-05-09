@@ -8,6 +8,7 @@ import {
   Body,
   HttpCode,
   HttpStatus,
+  HttpException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -186,7 +187,7 @@ export class VcsController {
 
     // Return HTTP 409 if issue is already synced
     if (result.action === 'skipped') {
-      throw new ValidationAppException({}, 'vcs');
+      throw new HttpException('Issue already synced', HttpStatus.CONFLICT);
     }
 
     const ref = result.ticketNumber ? `${project.key}-${result.ticketNumber}` : undefined;

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -64,7 +64,7 @@ export class VcsConnectionService {
     });
 
     if (existingConnection) {
-      throw new ValidationAppException({}, 'vcs');
+      throw new HttpException('VCS connection already exists for this project', HttpStatus.CONFLICT);
     }
 
     // Resolve repoOwner and repoName - either from separate fields or parsed from repoUrl
