@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
+import { Injectable, OnModuleDestroy, OnModuleInit, Logger } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { VcsConnection, Project } from '@prisma/client';
@@ -28,8 +28,9 @@ interface ExtendedPrismaClient {
  * Polling service for syncing issues on a schedule
  */
 @Injectable()
-export class VcsPollingService implements OnModuleInit {
+export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(VcsPollingService.name);
+  private readonly scheduledConnectionIds = new Set<string>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -45,6 +46,12 @@ export class VcsPollingService implements OnModuleInit {
   async onModuleInit() {
     // Initialize polling for all active connections with polling mode
     await this.initializePolling();
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    for (const connectionId of this.scheduledConnectionIds) {
+      this.unschedulePolling(connectionId);
+    }
   }
 
   /**
@@ -90,6 +97,7 @@ export class VcsPollingService implements OnModuleInit {
     }, connection.pollingIntervalMs);
 
     this.schedulerRegistry.addInterval(scheduleName, interval);
+    this.scheduledConnectionIds.add(connection.id);
     this.logger.debug(`Scheduled polling for connection ${connection.id} every ${connection.pollingIntervalMs}ms`);
   }
 
@@ -100,6 +108,7 @@ export class VcsPollingService implements OnModuleInit {
     } catch {
       // Nothing to remove.
     }
+    this.scheduledConnectionIds.delete(connectionId);
   }
 
   async refreshConnectionSchedule(connectionId: string): Promise<void> {

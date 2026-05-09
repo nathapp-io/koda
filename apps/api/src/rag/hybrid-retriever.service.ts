@@ -486,6 +486,9 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     if (cached && cached.expiresAt > Date.now()) {
       return cached.value;
     }
+    if (cached) {
+      this.graphifyEnabledCache.delete(cacheKey);
+    }
 
     const project = await this.prisma.client.project.findUnique({
       where: { id: projectId },

@@ -119,4 +119,32 @@ describe('CounterOptimizeStrategy', () => {
       expect(t2.optimize).not.toHaveBeenCalled();
     });
   });
+
+  describe('cleanup', () => {
+    it('clearProject removes project counter state', async () => {
+      const strategy = new CounterOptimizeStrategy(
+        mockConfigService({ 'rag.ftsOptimizeThreshold': 2 }),
+      );
+      const table = mockTable();
+      await strategy.onInsert('p1', table); // p1 count: 1
+      strategy.clearProject('p1');
+      await strategy.onInsert('p1', table); // count should restart at 1
+      expect(table.optimize).not.toHaveBeenCalled();
+    });
+
+    it('onDestroy clears all counters', async () => {
+      const strategy = new CounterOptimizeStrategy(
+        mockConfigService({ 'rag.ftsOptimizeThreshold': 2 }),
+      );
+      const t1 = mockTable();
+      const t2 = mockTable();
+      await strategy.onInsert('p1', t1);
+      await strategy.onInsert('p2', t2);
+      await strategy.onDestroy();
+      await strategy.onInsert('p1', t1);
+      await strategy.onInsert('p2', t2);
+      expect(t1.optimize).not.toHaveBeenCalled();
+      expect(t2.optimize).not.toHaveBeenCalled();
+    });
+  });
 });
