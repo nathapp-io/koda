@@ -383,12 +383,13 @@ describe('IncrementalGraphDiffService', () => {
       await service.diffAndApply(projectId, [], []);
 
       expect(mockGraphStore.getStoredGraph).toHaveBeenCalledWith(projectId);
-      expect(mockTxManager.run).toHaveBeenCalled();
+      expect(mockGraphStore.deleteNodes).not.toHaveBeenCalled();
+      expect(mockGraphStore.upsertNodes).not.toHaveBeenCalled();
     });
   });
 
   describe('Transaction safety', () => {
-    it('wraps Prisma writes in a transaction', async () => {
+    it('delegates batched write execution to GraphStoreService', async () => {
       const projectId = 'test-project';
 
       mockGraphStore.getStoredGraph.mockResolvedValue(storedGraphFromNodes([
@@ -403,18 +404,17 @@ describe('IncrementalGraphDiffService', () => {
 
       await service.diffAndApply(projectId, newNodes, []);
 
-      expect(mockTxManager.run).toHaveBeenCalled();
+      expect(mockGraphStore.deleteNodes).toHaveBeenCalledWith(projectId, ['node-2']);
+      expect(mockGraphStore.upsertNodes).toHaveBeenCalledWith(projectId, [{ id: 'node-3', label: 'NewService', type: 'class' }], []);
     });
 
-    it('LanceDB operations happen outside the Prisma transaction', async () => {
+    it('LanceDB operations happen after Prisma graph-store writes', async () => {
       const calls: string[] = [];
-      mockTxManager.run.mockImplementation(async (fn: () => Promise<unknown>) => {
-        calls.push('tx-start');
-        await fn();
-        calls.push('tx-end');
-      });
       mockGraphStore.deleteNodes.mockImplementation(async () => {
         calls.push('deleteNodes');
+      });
+      mockGraphStore.upsertNodes.mockImplementation(async () => {
+        calls.push('upsertNodes');
       });
       mockRagService.deleteBySource.mockImplementation(async () => {
         calls.push('deleteBySource');
@@ -429,18 +429,16 @@ describe('IncrementalGraphDiffService', () => {
 
       await service.diffAndApply('test-project', [{ id: 'new-node', label: 'New', type: 'class' }], []);
 
-      // deleteNodes should happen inside the tx, deleteBySource/indexDocument outside
-      const txStartIdx = calls.indexOf('tx-start');
-      const txEndIdx = calls.indexOf('tx-end');
       const deleteNodesIdx = calls.indexOf('deleteNodes');
+      const upsertNodesIdx = calls.indexOf('upsertNodes');
       const deleteBySourceIdx = calls.indexOf('deleteBySource');
       const indexDocumentIdx = calls.indexOf('indexDocument');
 
-      expect(txStartIdx).toBeLessThan(deleteNodesIdx);
-      expect(deleteNodesIdx).toBeLessThan(txEndIdx);
-      // LanceDB ops (deleteBySource, indexDocument) should be after tx-end
-      expect(deleteBySourceIdx).toBeGreaterThan(txEndIdx);
-      expect(indexDocumentIdx).toBeGreaterThan(txEndIdx);
+      expect(deleteNodesIdx).toBeGreaterThanOrEqual(0);
+      expect(upsertNodesIdx).toBeGreaterThan(deleteNodesIdx);
+      // LanceDB ops (deleteBySource, indexDocument) should be after graph writes
+      expect(deleteBySourceIdx).toBeGreaterThan(upsertNodesIdx);
+      expect(indexDocumentIdx).toBeGreaterThan(upsertNodesIdx);
     });
   });
 });

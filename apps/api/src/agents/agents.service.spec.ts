@@ -57,6 +57,7 @@ describe('AgentsService', () => {
 
   const mockPrismaService = {
     client: {
+      $transaction: jest.fn(),
       agent: {
         create: jest.fn(),
         update: jest.fn(),
@@ -110,6 +111,7 @@ describe('AgentsService', () => {
       }
       return null;
     });
+    mockPrismaService.client.$transaction.mockImplementation(async (ops: Array<Promise<unknown>>) => Promise.all(ops));
 
     mockPrismaService.client.agentRoleEntry.create.mockResolvedValue({
       id: 'role-1', agentId: 'agent-123', role: 'DEVELOPER',

@@ -157,6 +157,10 @@ model Ticket {
   links           TicketLink[]
 
   @@unique([projectId, number])
+  @@index([projectId, status])
+  @@index([projectId, assignedToUserId])
+  @@index([projectId, assignedToAgentId])
+  @@index([externalVcsId])
 }
 
 model Comment {
@@ -172,6 +176,9 @@ model Comment {
   ticket Ticket @relation(fields: [ticketId], references: [id])
   user   User?  @relation("CommentByUser", fields: [authorUserId], references: [id])
   agent  Agent? @relation("CommentByAgent", fields: [authorAgentId], references: [id])
+
+  @@index([ticketId])
+  @@index([authorUserId])
 }
 
 model Label {
@@ -210,6 +217,9 @@ model TicketActivity {
   createdAt    DateTime @default(now())
 
   ticket Ticket @relation(fields: [ticketId], references: [id])
+
+  @@index([ticketId])
+  @@index([ticketId, createdAt])
 }
 
 model Webhook {
@@ -239,6 +249,7 @@ model TicketLink {
   ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   @@unique([ticketId, url])
+  @@index([externalRef])
 }
 
 // ---------------------------------------------------------------------------
@@ -276,6 +287,8 @@ model VcsSyncLog {
   completedAt     DateTime?
 
   vcsConnection   VcsConnection @relation(fields: [vcsConnectionId], references: [id], onDelete: Cascade)
+
+  @@index([vcsConnectionId, startedAt])
 }
 
 // ---------------------------------------------------------------------------
