@@ -98,7 +98,7 @@ describeIntegration('API Integration Tests', () => {
     it('POST /api/auth/register — creates user and returns tokens', async () => {
       const res = await request(httpServer)
         .post('/api/auth/register')
-        .send({ email: 'admin@koda.test', name: 'Koda Admin', password: 'Admin1234!' })
+        .send({ email: 'admin@koda.test', name: 'Koda Admin', password: 'Admin1234!Aa' })
         .expect(201);
 
       const data = body<{ accessToken: string; refreshToken: string; user: { email: string; role: string } }>(res);
@@ -122,7 +122,7 @@ describeIntegration('API Integration Tests', () => {
     it('POST /api/auth/login — returns tokens (now as ADMIN)', async () => {
       const res = await request(httpServer)
         .post('/api/auth/login')
-        .send({ email: 'admin@koda.test', password: 'Admin1234!' })
+        .send({ email: 'admin@koda.test', password: 'Admin1234!Aa' })
         .expect(200);
 
       const data = body<{ accessToken: string; refreshToken: string }>(res);
@@ -134,7 +134,7 @@ describeIntegration('API Integration Tests', () => {
     it('POST /api/auth/register — creates non-admin user for 403 tests', async () => {
       const res = await request(httpServer)
         .post('/api/auth/register')
-        .send({ email: 'member@koda.test', name: 'Koda Member', password: 'Member1234!' })
+        .send({ email: 'member@koda.test', name: 'Koda Member', password: 'Member1234!Aa' })
         .expect(201);
 
       const data = body<{ accessToken: string; refreshToken: string; user: { email: string; role: string } }>(res);
@@ -142,6 +142,13 @@ describeIntegration('API Integration Tests', () => {
       expect(data.user.role).toBe('MEMBER');
 
       nonAdminUserAccessToken = data.accessToken;
+    });
+
+    it('POST /api/auth/register — 400 for weak password policy violation', async () => {
+      await request(httpServer)
+        .post('/api/auth/register')
+        .send({ email: 'weak@koda.test', name: 'Weak User', password: 'weakpassword123' })
+        .expect(400);
     });
 
     it('POST /api/auth/login — 401 with wrong password', async () => {
@@ -320,6 +327,14 @@ describeIntegration('API Integration Tests', () => {
 
       const data = body<{ description: string }>(res);
       expect(data.description).toBe('Updated description');
+    });
+
+    it('PATCH /api/projects/:slug — 400 for ciWebhookToken shorter than 32 chars', async () => {
+      await request(httpServer)
+        .patch(`/api/projects/${projectSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ ciWebhookToken: 'short-token' })
+        .expect(400);
     });
   });
 

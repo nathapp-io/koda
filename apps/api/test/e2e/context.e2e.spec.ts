@@ -75,7 +75,7 @@ describeIntegration('Context API E2E', () => {
 
     const adminRegisterRes = await request(httpServer)
       .post('/api/auth/register')
-      .send({ email: 'context-admin@koda.test', name: 'Context Admin', password: 'Admin1234!' })
+      .send({ email: 'context-admin@koda.test', name: 'Context Admin', password: 'Admin1234!Aa' })
       .expect(201);
 
     const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
@@ -88,14 +88,14 @@ describeIntegration('Context API E2E', () => {
 
     const adminLoginRes = await request(httpServer)
       .post('/api/auth/login')
-      .send({ email: 'context-admin@koda.test', password: 'Admin1234!' })
+      .send({ email: 'context-admin@koda.test', password: 'Admin1234!Aa' })
       .expect(200);
 
     adminAccessToken = body<{ accessToken: string }>(adminLoginRes).accessToken;
 
     const memberRegisterRes = await request(httpServer)
       .post('/api/auth/register')
-      .send({ email: 'context-member@koda.test', name: 'Context Member', password: 'Member1234!' })
+      .send({ email: 'context-member@koda.test', name: 'Context Member', password: 'Member1234!Aa' })
       .expect(201);
 
     memberAccessToken = body<{ accessToken: string }>(memberRegisterRes).accessToken;

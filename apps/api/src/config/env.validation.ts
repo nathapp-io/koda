@@ -12,9 +12,9 @@ const envSchema = Joi.object({
     .valid('sqlite', 'postgresql', 'mysql')
     .default('sqlite'),
   JWT_SECRET: Joi.string().required(),
-  JWT_EXPIRES_IN: Joi.string().default('7d'),
+  JWT_EXPIRES_IN: Joi.string().default('15m'),
   JWT_REFRESH_SECRET: Joi.string().required(),
-  JWT_REFRESH_EXPIRES_IN: Joi.string().default('30d'),
+  JWT_REFRESH_EXPIRES_IN: Joi.string().default('7d'),
   API_KEY_SECRET: Joi.string().required(),
   VCS_ENCRYPTION_KEY: Joi.string().hex().length(64).optional(),
   VCS_DEFAULT_POLLING_INTERVAL_MS: Joi.number().integer().min(60000).optional(),

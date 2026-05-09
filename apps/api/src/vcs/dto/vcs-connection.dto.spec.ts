@@ -231,6 +231,26 @@ describe('VCS Connection DTOs', () => {
       expect(errors[0].property).toBe('allowedAuthors');
       expect(errors[0].constraints).toHaveProperty('isArray');
     });
+
+    it('should validate webhookSecret with length >= 32', async () => {
+      const dto = plainToInstance(UpdateVcsConnectionDto, {
+        webhookSecret: '12345678901234567890123456789012',
+      });
+
+      const errors = await validate(dto);
+      expect(errors).toHaveLength(0);
+    });
+
+    it('should reject webhookSecret shorter than 32 chars', async () => {
+      const dto = plainToInstance(UpdateVcsConnectionDto, {
+        webhookSecret: 'too-short-secret',
+      });
+
+      const errors = await validate(dto);
+      expect(errors.length).toBeGreaterThan(0);
+      const webhookSecretError = errors.find((error) => error.property === 'webhookSecret');
+      expect(webhookSecretError?.constraints).toHaveProperty('minLength');
+    });
   });
 
   describe('VcsConnectionResponseDto', () => {

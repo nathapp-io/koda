@@ -1,10 +1,11 @@
-import { IsUrl, IsString, IsArray, IsBoolean, IsOptional } from 'class-validator';
+import { IsUrl, IsString, IsArray, IsBoolean, IsOptional, MinLength } from 'class-validator';
 
 export class CreateWebhookDto {
   @IsUrl()
   url: string;
 
   @IsString()
+  @MinLength(32, { message: '$t(common.validation.webhookSecretMinLength)' })
   secret: string;
 
   @IsArray()
@@ -19,6 +20,7 @@ export class UpdateWebhookDto {
 
   @IsOptional()
   @IsString()
+  @MinLength(32, { message: '$t(common.validation.webhookSecretMinLength)' })
   secret?: string;
 
   @IsOptional()

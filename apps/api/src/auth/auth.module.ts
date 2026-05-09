@@ -26,13 +26,13 @@ import { KodaCaslAbilityFactory } from './casl/koda-casl-ability.factory';
           jwtOptions: {
             secret: authConfig?.jwtSecret,
             signOption: {
-              expiresIn: authConfig?.jwtExpiresIn ?? '7d',
+              expiresIn: authConfig?.jwtExpiresIn ?? '15m',
             },
           },
           refreshJwtOptions: {
             secret: authConfig?.jwtRefreshSecret,
             signOption: {
-              expiresIn: authConfig?.jwtRefreshExpiresIn ?? '30d',
+              expiresIn: authConfig?.jwtRefreshExpiresIn ?? '7d',
             },
           },
         };

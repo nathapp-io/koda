@@ -72,7 +72,7 @@ describe('AuthService', () => {
       const registerDto = {
         email: 'newuser@example.com',
         name: 'New User',
-        password: 'password123',
+        password: 'Password123!',
       };
 
       mockPrismaService.client.user.create.mockResolvedValue(mockUser);
@@ -98,7 +98,7 @@ describe('AuthService', () => {
       const registerDto = {
         email: 'newuser@example.com',
         name: 'New User',
-        password: 'password123',
+        password: 'Password123!',
       };
 
       mockPrismaService.client.user.create.mockResolvedValue(mockUser);
@@ -116,7 +116,7 @@ describe('AuthService', () => {
 
   describe('login', () => {
     it('should return tokens for valid credentials', async () => {
-      const password = 'password123';
+      const password = 'Password123!';
       const hashedPassword = await bcrypt.hash(password, 12);
       const userWithHash = { ...mockUser, passwordHash: hashedPassword };
 
@@ -150,7 +150,7 @@ describe('AuthService', () => {
       await expect(
         service.login({
           email: 'nonexistent@example.com',
-          password: 'password123',
+          password: 'Password123!',
         }),
       ).rejects.toThrow(AppException);
     });

@@ -64,46 +64,46 @@ describeIntegration('Hybrid Retriever — KB Search E2E', () => {
 
     const adminRegisterRes = await request(httpServer)
       .post('/api/auth/register')
-      .send({ email: 'hybrid-admin@koda.test', name: 'Hybrid Admin', password: 'Admin1234!' })
+      .send({ email: 'hybrid-admin@koda.test', name: 'Hybrid Admin', password: 'Admin1234!Aa' })
       .expect(201);
     body<{ id: string }>(adminRegisterRes);
 
     const adminLoginRes = await request(httpServer)
       .post('/api/auth/login')
-      .send({ email: 'hybrid-admin@koda.test', password: 'Admin1234!' })
+      .send({ email: 'hybrid-admin@koda.test', password: 'Admin1234!Aa' })
       .expect(200);
     adminAccessToken = body<{ accessToken: string }>(adminLoginRes).accessToken;
 
     const devRegisterRes = await request(httpServer)
       .post('/api/auth/register')
-      .send({ email: 'hybrid-developer@koda.test', name: 'Hybrid Dev', password: 'Dev1234!' })
+      .send({ email: 'hybrid-developer@koda.test', name: 'Hybrid Dev', password: 'DevUser1234!' })
       .expect(201);
     developerAccessToken = body<{ accessToken: string }>(
       await request(httpServer)
         .post('/api/auth/login')
-        .send({ email: 'hybrid-developer@koda.test', password: 'Dev1234!' })
+        .send({ email: 'hybrid-developer@koda.test', password: 'DevUser1234!' })
         .expect(200),
     ).accessToken;
 
     const viewerRegisterRes = await request(httpServer)
       .post('/api/auth/register')
-      .send({ email: 'hybrid-viewer@koda.test', name: 'Hybrid Viewer', password: 'Viewer1234!' })
+      .send({ email: 'hybrid-viewer@koda.test', name: 'Hybrid Viewer', password: 'Viewer1234!Aa' })
       .expect(201);
     viewerAccessToken = body<{ accessToken: string }>(
       await request(httpServer)
         .post('/api/auth/login')
-        .send({ email: 'hybrid-viewer@koda.test', password: 'Viewer1234!' })
+        .send({ email: 'hybrid-viewer@koda.test', password: 'Viewer1234!Aa' })
         .expect(200),
     ).accessToken;
 
     const outsiderRegisterRes = await request(httpServer)
       .post('/api/auth/register')
-      .send({ email: 'hybrid-outsider@koda.test', name: 'Hybrid Outsider', password: 'Outsider1234!' })
+      .send({ email: 'hybrid-outsider@koda.test', name: 'Hybrid Outsider', password: 'Outsider1234!Aa' })
       .expect(201);
     outsiderAccessToken = body<{ accessToken: string }>(
       await request(httpServer)
         .post('/api/auth/login')
-        .send({ email: 'hybrid-outsider@koda.test', password: 'Outsider1234!' })
+        .send({ email: 'hybrid-outsider@koda.test', password: 'Outsider1234!Aa' })
         .expect(200),
     ).accessToken;
 

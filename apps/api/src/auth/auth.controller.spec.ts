@@ -50,7 +50,7 @@ describe('AuthController', () => {
       const registerDto = {
         email: 'newuser@example.com',
         name: 'New User',
-        password: 'password123',
+        password: 'Password123!',
       };
 
       mockAuthService.register.mockResolvedValue(mockTokenResponse);
@@ -66,7 +66,7 @@ describe('AuthController', () => {
       const registerDto = {
         email: 'newuser@example.com',
         name: 'New User',
-        password: 'password123',
+        password: 'Password123!',
       };
 
       const newUserResponse = {
@@ -100,7 +100,7 @@ describe('AuthController', () => {
     it('should login user and return tokens', async () => {
       const loginDto = {
         email: mockUser.email,
-        password: 'password123',
+        password: 'Password123!',
       };
 
       mockAuthService.login.mockResolvedValue(mockTokenResponse);
@@ -115,7 +115,7 @@ describe('AuthController', () => {
     it('should return user, accessToken, and refreshToken', async () => {
       const loginDto = {
         email: mockUser.email,
-        password: 'password123',
+        password: 'Password123!',
       };
 
       mockAuthService.login.mockResolvedValue(mockTokenResponse);
@@ -142,7 +142,7 @@ describe('AuthController', () => {
     it('should return 401 for non-existent user', async () => {
       const loginDto = {
         email: 'nonexistent@example.com',
-        password: 'password123',
+        password: 'Password123!',
       };
 
       mockAuthService.login.mockRejectedValue(new AuthException());
