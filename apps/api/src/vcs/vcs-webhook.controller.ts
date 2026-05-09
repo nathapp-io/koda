@@ -30,10 +30,14 @@ export class VcsWebhookController {
     const project = await this.projectsService.findBySlug(slug);
     const connection = await this.vcsConnectionService.getFullByProject(project.id);
 
+    if (!connection.webhookSecret) {
+      throw new AuthException({}, 'vcs_webhook');
+    }
+
     const isValid = this.webhookService.verifySignature(
       JSON.stringify(payload),
       signature || '',
-      connection.webhookSecret || '',
+      connection.webhookSecret,
     );
 
     if (!isValid) {

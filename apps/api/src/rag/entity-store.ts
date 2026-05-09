@@ -6,7 +6,7 @@
  */
 import { Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 
 export interface Entity {
   id: string;
@@ -151,10 +151,9 @@ export class EntityStore {
     if (this.getProjectCodeDocuments) {
       nodes = await this.getProjectCodeDocuments(projectId);
     } else {
-      const docs = await this.prisma.client.$queryRaw<Array<{ id: string; label: string; type: string; source_file?: string }>>`
-        SELECT id, label, type, source_file FROM code_document WHERE project_id = ${projectId}
-      `;
-      nodes = docs;
+      nodes = await this.prisma.client.$queryRaw<Array<{ id: string; label: string; type: string; source_file?: string }>>(
+        Prisma.sql`SELECT id, label, type, source_file FROM code_document WHERE project_id = ${projectId}`,
+      );
     }
 
     for (const node of nodes) {
