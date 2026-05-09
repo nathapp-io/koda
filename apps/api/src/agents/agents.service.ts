@@ -141,17 +141,13 @@ export class AgentsService {
       agent = await this.db.agent.update({
         where: { id: agentIdOrDto },
         data: { apiKeyHash },
-      });
-      await this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
-      // Re-fetch with relations for DTO mapping
-      const agentWithRelations = await this.db.agent.findUnique({
-        where: { id: agent.id },
         include: { roles: true, capabilities: true },
       });
+      await this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
       await this.recordAgentAction(agent.id, 'API_KEY_ROTATED', { agentId: agent.id });
       return {
         apiKey: rawKey,
-        agent: AgentResponseDto.from(agentWithRelations),
+        agent: AgentResponseDto.from(agent),
       };
     } else {
       // Separate scalar fields from relational fields
@@ -166,31 +162,26 @@ export class AgentsService {
         },
       });
       await this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
-      // Create role entries (sequential create — createMany not reliable on SQLite for junction tables)
-      const createdRoles = [];
-      if (validatedRoles.length) {
-        for (const role of validatedRoles) {
-          const entry = await this.db.agentRoleEntry.create({
-            data: { agentId: agent.id, role },
-          });
-          createdRoles.push(entry);
-        }
-      }
-      // Create capability entries
-      const createdCapabilities = [];
-      if (capabilities?.length) {
-        for (const capability of capabilities) {
-          const entry = await this.db.agentCapabilityEntry.create({
-            data: { agentId: agent.id, capability },
-          });
-          createdCapabilities.push(entry);
-        }
-      }
-      // Build agent with relations from created entries (avoid extra findUnique call)
+      await this.prisma.client.$transaction([
+        this.db.agentRoleEntry.createMany({
+          data: validatedRoles.map((role) => ({ agentId: agent.id, role })),
+        }),
+        this.db.agentCapabilityEntry.createMany({
+          data: (capabilities ?? []).map((capability) => ({ agentId: agent.id, capability })),
+        }),
+      ]);
       const agentWithRelations = {
         ...agent,
-        roles: createdRoles,
-        capabilities: createdCapabilities,
+        roles: validatedRoles.map((role, index) => ({
+          id: `generated-role-${index}`,
+          agentId: agent.id,
+          role,
+        })),
+        capabilities: (capabilities ?? []).map((capability, index) => ({
+          id: `generated-capability-${index}`,
+          agentId: agent.id,
+          capability,
+        })),
       };
       await this.recordAgentAction(agent.id, 'AGENT_CREATED', { name: agent.name, slug: agent.slug });
       // Return raw key ONCE to client (never return the hash)

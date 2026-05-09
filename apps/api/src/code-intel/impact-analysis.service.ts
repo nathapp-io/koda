@@ -162,22 +162,27 @@ export class ImpactAnalysisService {
       }
     }
 
-    for (const symbol of symbols) {
-      try {
-        const relatedEntities = await this.entityGraph.getRelatedEntities(projectId, symbol.id, 1);
+    const relatedServicesBySymbol = await Promise.all(
+      symbols.map(async (symbol) => {
+        try {
+          return await this.entityGraph.getRelatedEntities(projectId, symbol.id, 1);
+        } catch (error) {
+          this.logger.debug(`Error getting related entities for symbol ${symbol.id}:`, error);
+          return [];
+        }
+      }),
+    );
 
-        for (const path of relatedEntities) {
-          for (const entity of path.path) {
-            if (
-              entity.entityType === EntityNodeType.SERVICE ||
-              entity.entityType === EntityNodeType.CODE_MODULE
-            ) {
-              serviceSet.set(entity.entityId, entity);
-            }
+    for (const relatedEntities of relatedServicesBySymbol) {
+      for (const path of relatedEntities) {
+        for (const entity of path.path) {
+          if (
+            entity.entityType === EntityNodeType.SERVICE ||
+            entity.entityType === EntityNodeType.CODE_MODULE
+          ) {
+            serviceSet.set(entity.entityId, entity);
           }
         }
-      } catch (error) {
-        this.logger.debug(`Error getting related entities for symbol ${symbol.id}:`, error);
       }
     }
 
@@ -221,26 +226,31 @@ export class ImpactAnalysisService {
       }
     }
 
-    for (const service of services) {
-      try {
-        const relatedEntities = await this.entityGraph.getRelatedEntities(
-          projectId,
-          service.entityId,
-          2,
-        );
+    const relatedTicketsByService = await Promise.all(
+      services.map(async (service) => {
+        try {
+          return await this.entityGraph.getRelatedEntities(
+            projectId,
+            service.entityId,
+            2,
+          );
+        } catch (error) {
+          this.logger.debug(
+            `Error getting related entities for service ${service.entityId}:`,
+            error,
+          );
+          return [];
+        }
+      }),
+    );
 
-        for (const path of relatedEntities) {
-          for (const entity of path.path) {
-            if (entity.entityType === EntityNodeType.TICKET) {
-              ticketSet.set(entity.entityId, entity);
-            }
+    for (const relatedEntities of relatedTicketsByService) {
+      for (const path of relatedEntities) {
+        for (const entity of path.path) {
+          if (entity.entityType === EntityNodeType.TICKET) {
+            ticketSet.set(entity.entityId, entity);
           }
         }
-      } catch (error) {
-        this.logger.debug(
-          `Error getting related entities for service ${service.entityId}:`,
-          error,
-        );
       }
     }
 

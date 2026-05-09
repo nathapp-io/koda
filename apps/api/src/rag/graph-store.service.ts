@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import type { GraphifyNodeDto, GraphifyLinkDto } from './dto/import-graphify.dto';
 
 export interface StoredGraph {
@@ -10,6 +10,8 @@ export interface StoredGraph {
 
 @Injectable()
 export class GraphStoreService {
+  private static readonly BATCH_SIZE = 500;
+
   constructor(
     private readonly prisma: PrismaService<PrismaClient>,
   ) {}
@@ -50,9 +52,10 @@ export class GraphStoreService {
     links: GraphifyLinkDto[],
   ): Promise<void> {
     const nodeIds = nodes.map((n) => n.id);
+    const operations: Prisma.PrismaPromise<unknown>[] = [];
 
     for (const node of nodes) {
-      await this.prisma.client.graphNode.upsert({
+      operations.push(this.prisma.client.graphNode.upsert({
         where: { projectId_nodeId: { projectId, nodeId: node.id } },
         create: {
           projectId,
@@ -68,24 +71,29 @@ export class GraphStoreService {
           sourceFile: node.source_file,
           community: node.community,
         },
-      });
+      }));
     }
 
     if (nodeIds.length > 0) {
-      await this.prisma.client.graphLink.deleteMany({
+      operations.push(this.prisma.client.graphLink.deleteMany({
         where: { projectId, sourceId: { in: nodeIds } },
-      });
+      }));
     }
 
     for (const link of links) {
-      await this.prisma.client.graphLink.create({
+      operations.push(this.prisma.client.graphLink.create({
         data: {
           projectId,
           sourceId: link.source,
           targetId: link.target,
           relation: link.relation,
         },
-      });
+      }));
+    }
+
+    for (let i = 0; i < operations.length; i += GraphStoreService.BATCH_SIZE) {
+      const batch = operations.slice(i, i + GraphStoreService.BATCH_SIZE);
+      await this.prisma.client.$transaction(batch);
     }
   }
 
@@ -115,10 +123,11 @@ export class GraphStoreService {
       return { sourceId, targetId };
     });
 
-    for (const { sourceId, targetId } of conditions) {
-      await this.prisma.client.graphLink.deleteMany({
-        where: { projectId, sourceId, targetId },
-      });
-    }
+    await this.prisma.client.graphLink.deleteMany({
+      where: {
+        projectId,
+        OR: conditions,
+      },
+    });
   }
 }

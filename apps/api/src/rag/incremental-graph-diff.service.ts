@@ -64,20 +64,19 @@ export class IncrementalGraphDiffService {
     const updated = updatedNodes.length;
     const indexed = added + updated;
 
-    // Apply Prisma writes in a transaction
-    await this.txManager.run(async () => {
-      if (removedNodeIds.length > 0) {
-        await this.graphStore.deleteNodes(projectId, removedNodeIds);
-      }
+    // Apply Prisma writes. GraphStoreService batches writes with $transaction,
+    // so avoid wrapping here to prevent nested transaction conflicts.
+    if (removedNodeIds.length > 0) {
+      await this.graphStore.deleteNodes(projectId, removedNodeIds);
+    }
 
-      const nodesToUpsert = [...addedNodes, ...updatedNodes];
-      if (nodesToUpsert.length > 0) {
-        const linksForUpsert = newLinks.filter((l) =>
-          nodesToUpsert.some((n) => n.id === l.source),
-        );
-        await this.graphStore.upsertNodes(projectId, nodesToUpsert, linksForUpsert);
-      }
-    });
+    const nodesToUpsert = [...addedNodes, ...updatedNodes];
+    if (nodesToUpsert.length > 0) {
+      const linksForUpsert = newLinks.filter((l) =>
+        nodesToUpsert.some((n) => n.id === l.source),
+      );
+      await this.graphStore.upsertNodes(projectId, nodesToUpsert, linksForUpsert);
+    }
 
     // LanceDB operations (outside Prisma transaction)
     for (const nodeId of removedNodeIds) {
