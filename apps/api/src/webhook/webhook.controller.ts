@@ -12,10 +12,10 @@ import {
   ApiOperation,
   ApiResponse,
 } from '@nestjs/swagger';
-import { Public } from '@nathapp/nestjs-auth';
+import { RequiredPermission } from '@nathapp/nestjs-auth';
 import { WebhookService } from './webhook.service';
 import { CreateWebhookDto } from './webhook.dto';
-import { JsonResponse, NotFoundAppException } from '@nathapp/nestjs-common';
+import { JsonResponse } from '@nathapp/nestjs-common';
 
 @ApiTags('webhooks')
 @Controller()
@@ -24,7 +24,7 @@ export class WebhookController {
 
   @Post('projects/:slug/webhooks')
   @HttpCode(201)
-  @Public()
+  @RequiredPermission('ADMIN')
   @ApiOperation({ summary: 'Register a webhook for a project' })
   @ApiResponse({ status: 201, description: 'Webhook registered' })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
@@ -39,7 +39,7 @@ export class WebhookController {
   }
 
   @Get('projects/:slug/webhooks')
-  @Public()
+  @RequiredPermission('ADMIN')
   @ApiOperation({ summary: 'List all webhooks for a project' })
   @ApiResponse({ status: 200, description: 'List of webhooks' })
   @ApiResponse({ status: 404, description: 'Project not found' })
@@ -50,7 +50,7 @@ export class WebhookController {
 
   @Delete('api/webhooks/:id')
   @HttpCode(204)
-  @Public()
+  @RequiredPermission('ADMIN')
   @ApiOperation({ summary: 'Remove a webhook' })
   @ApiResponse({ status: 204, description: 'Webhook deleted' })
   @ApiResponse({ status: 404, description: 'Webhook not found' })

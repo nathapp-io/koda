@@ -23,6 +23,13 @@ export class WebhookService {
   async findAll(projectId: string) {
     return this.db.webhook.findMany({
       where: { projectId },
+      select: {
+        id: true,
+        projectId: true,
+        url: true,
+        events: true,
+        createdAt: true,
+      },
       orderBy: { createdAt: 'desc' },
     });
   }

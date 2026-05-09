@@ -35,7 +35,8 @@ export class CombinedAuthGuard extends JwtAuthGuard {
       const isAgent = await this.tryApiKey(context);
       this.combinedLogger.debug(`tryApiKey result: ${isAgent}`);
       if (isAgent) {
-        this.combinedLogger.debug(`API key auth succeeded, req.user=${JSON.stringify(request['user'])}`);
+        const userId = (request['user'] as { id?: string } | undefined)?.id ?? 'unknown';
+        this.combinedLogger.debug(`API key auth succeeded, userId=${userId}`);
         return true;
       }
     } catch (e: unknown) {

@@ -20,6 +20,7 @@ import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient, ProjectMember } from '@prisma/client';
 import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
+import { createHmac } from 'node:crypto';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = DATABASE_URL ? describe : describe.skip;
@@ -1766,23 +1767,37 @@ describeIntegration('API Integration Tests', () => {
   // ─────────────────────────────────────────────────────────────────
 
   describe('CI Webhooks', () => {
+    const ciWebhookSecret = 'ci-webhook-secret-for-e2e-tests-123456';
+
+    beforeAll(async () => {
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      await prisma.client.project.update({
+        where: { slug: projectSlug },
+        data: { ciWebhookToken: ciWebhookSecret },
+      });
+    });
+
     it('POST /api/projects/:slug/ci-webhook — creates ticket on pipeline failure', async () => {
+      const payload = {
+        event: 'pipeline_failed',
+        pipeline: {
+          id: '12345',
+          url: 'https://github.com/org/repo/actions/runs/12345',
+        },
+        commit: {
+          sha: 'abc123def456',
+          message: 'feat: add CI webhook support',
+        },
+        failures: [
+          { test: 'AuthService.validateToken', file: 'apps/api/src/auth/auth.service.ts', line: 87 },
+        ],
+      };
+      const signature = `sha256=${createHmac('sha256', ciWebhookSecret).update(JSON.stringify(payload)).digest('hex')}`;
+
       const res = await request(httpServer)
         .post(`/api/projects/${projectSlug}/ci-webhook`)
-        .send({
-          event: 'pipeline_failed',
-          pipeline: {
-            id: '12345',
-            url: 'https://github.com/org/repo/actions/runs/12345',
-          },
-          commit: {
-            sha: 'abc123def456',
-            message: 'feat: add CI webhook support',
-          },
-          failures: [
-            { test: 'AuthService.validateToken', file: 'apps/api/src/auth/auth.service.ts', line: 87 },
-          ],
-        })
+        .set('x-ci-signature', signature)
+        .send(payload)
         .expect(200);
 
       const data = body<{ success: boolean; ticketRef: string; message: string }>(res);

@@ -12,6 +12,22 @@ export class CiWebhookService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private get db() { return this.prisma.client; }
 
+  async getWebhookSecret(projectSlug: string): Promise<string | null> {
+    const project = await this.db.project.findUnique({
+      where: { slug: projectSlug },
+      select: {
+        ciWebhookToken: true,
+        deletedAt: true,
+      },
+    });
+
+    if (!project || project.deletedAt) {
+      throw new NotFoundAppException({}, 'projects');
+    }
+
+    return project.ciWebhookToken ?? null;
+  }
+
   async processCiWebhook(projectSlug: string, payload: CiWebhookPayloadDto) {
     // Find project by slug
     const project = await this.db.project.findUnique({
