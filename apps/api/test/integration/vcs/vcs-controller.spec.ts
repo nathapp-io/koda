@@ -22,6 +22,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { VcsController } from '../../../src/vcs/vcs.controller';
 import { VcsConnectionService } from '../../../src/vcs/vcs-connection.service';
 import { VcsSyncService } from '../../../src/vcs/vcs-sync.service';
+import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
 import { VcsWebhookService } from '../../../src/vcs/vcs-webhook.service';
 import { ProjectsService } from '../../../src/projects/projects.service';
 import { ConfigService } from '@nestjs/config';
@@ -29,7 +30,8 @@ import { CreateVcsConnectionDto, VcsProviderType } from '../../../src/vcs/dto/cr
 import { UpdateVcsConnectionDto } from '../../../src/vcs/dto/update-vcs-connection.dto';
 import { VcsConnectionResponseDto } from '../../../src/vcs/dto/vcs-connection-response.dto';
 import { TestConnectionResultDto } from '../../../src/vcs/dto/test-connection-result.dto';
-import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { HttpException, HttpStatus } from '@nestjs/common';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 
 describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
   let controller: VcsController;
@@ -86,6 +88,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
       providers: [
         { provide: VcsConnectionService, useValue: mockVcsServiceInstance },
         { provide: VcsSyncService, useValue: {} },
+        { provide: VcsPrSyncService, useValue: {} },
         { provide: VcsWebhookService, useValue: {} },
         { provide: ProjectsService, useValue: mockProjectsServiceInstance },
         { provide: ConfigService, useValue: mockConfigServiceInstance },
@@ -136,9 +139,16 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
         repoUrl: 'https://github.com/owner/repo',
       };
 
-      vcsService.create.mockRejectedValue(new ValidationAppException('Already has connection', 'vcs_conflict'));
+      vcsService.create.mockRejectedValue(new HttpException('VCS connection already exists', HttpStatus.CONFLICT));
 
-      await expect(controller.createConnection(projectSlug, createDto)).rejects.toThrow(ValidationAppException);
+      let caught: unknown;
+      try {
+        await controller.createConnection(projectSlug, createDto);
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(HttpException);
+      expect((caught as HttpException).getStatus()).toBe(HttpStatus.CONFLICT);
     });
 
     it('AC3: propagates 404 NotFoundException when project slug is not found', async () => {
@@ -261,9 +271,9 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
   describe('POST /projects/:slug/vcs/test (testConnection)', () => {
     it('AC9: returns 200 with TestConnectionResultDto when testing connection', async () => {
       const testResult: TestConnectionResultDto = {
-        success: true,
+        ok: true,
         latencyMs: 125,
-      };
+      };	
 
       vcsService.testConnection.mockResolvedValue(testResult);
 
@@ -272,15 +282,15 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
       expect(projectsService.findBySlug).toHaveBeenCalledWith(projectSlug);
       expect(vcsService.testConnection).toHaveBeenCalledWith(projectId, encryptionKey);
       expect(result).toEqual(testResult);
-      expect(result).toHaveProperty('success');
+      expect(result).toHaveProperty('ok');
       expect(result).toHaveProperty('latencyMs');
-      expect(typeof result.success).toBe('boolean');
+      expect(typeof result.ok).toBe('boolean');
       expect(typeof result.latencyMs).toBe('number');
     });
 
     it('returns 200 with success=true when connection test succeeds', async () => {
       const testResult: TestConnectionResultDto = {
-        success: true,
+        ok: true,
         latencyMs: 156,
       };
 
@@ -288,14 +298,14 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       const result = await controller.testConnection(projectSlug);
 
-      expect(result.success).toBe(true);
+      expect(result.ok).toBe(true);
       expect(result.latencyMs).toBeGreaterThanOrEqual(0);
       expect(result.error).toBeUndefined();
     });
 
     it('returns 200 with success=false and error when connection test fails', async () => {
       const testResult: TestConnectionResultDto = {
-        success: false,
+        ok: false,
         latencyMs: 89,
         error: 'Invalid token',
       };
@@ -304,7 +314,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       const result = await controller.testConnection(projectSlug);
 
-      expect(result.success).toBe(false);
+      expect(result.ok).toBe(false);
       expect(result.error).toBe('Invalid token');
     });
 
@@ -341,7 +351,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
     it('TestConnectionResultDto includes required fields', async () => {
       const testResult: TestConnectionResultDto = {
-        success: true,
+        ok: true,
         latencyMs: 200,
       };
 
@@ -349,9 +359,9 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       const result = await controller.testConnection(projectSlug);
 
-      expect(result).toHaveProperty('success');
+      expect(result).toHaveProperty('ok');
       expect(result).toHaveProperty('latencyMs');
-      expect(typeof result.success).toBe('boolean');
+      expect(typeof result.ok).toBe('boolean');
       expect(typeof result.latencyMs).toBe('number');
       expect(result.latencyMs).toBeGreaterThanOrEqual(0);
     });
@@ -374,16 +384,23 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
       await expect(controller.createConnection(projectSlug, createDto)).rejects.toThrow(NotFoundAppException);
     });
 
-    it('propagates ValidationAppException (409) from service on create', async () => {
+    it('propagates HttpException (409) from service on create', async () => {
       const createDto: CreateVcsConnectionDto = {
         provider: VcsProviderType.GITHUB,
         token: 'test',
         repoUrl: 'https://github.com/owner/repo',
       };
 
-      vcsService.create.mockRejectedValue(new ValidationAppException('Connection already exists'));
+      vcsService.create.mockRejectedValue(new HttpException('Connection already exists', HttpStatus.CONFLICT));
 
-      await expect(controller.createConnection(projectSlug, createDto)).rejects.toThrow(ValidationAppException);
+      let caught: unknown;
+      try {
+        await controller.createConnection(projectSlug, createDto);
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(HttpException);
+      expect((caught as HttpException).getStatus()).toBe(HttpStatus.CONFLICT);
     });
 
     it('propagates NotFoundAppException (404) from service on get', async () => {

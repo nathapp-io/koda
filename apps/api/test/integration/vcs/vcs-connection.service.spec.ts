@@ -7,6 +7,7 @@
  * Run: npx jest test/integration/vcs/vcs-connection.service.spec.ts --forceExit
  */
 
+import { HttpException, HttpStatus } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -147,7 +148,7 @@ describe('VcsConnectionService', () => {
       expect(decrypted).toBe(specialTokenDto.token);
     });
 
-    it('AC2: throws ValidationAppException (409) when the project already has a VCS connection', async () => {
+    it('AC2: throws HttpException (409) when the project already has a VCS connection', async () => {
       const existingConnection = {
         id: 'existing-id',
         projectId,
@@ -157,9 +158,14 @@ describe('VcsConnectionService', () => {
       mockPrismaDelegate.findUnique.mockResolvedValueOnce({ id: projectId }); // Project exists
       mockPrismaDelegate.findUnique.mockResolvedValueOnce(existingConnection); // Connection already exists
 
-      await expect(service.create(projectId, encryptionKey, createDto)).rejects.toThrow(
-        ValidationAppException,
-      );
+      let caught: unknown;
+      try {
+        await service.create(projectId, encryptionKey, createDto);
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(HttpException);
+      expect((caught as HttpException).getStatus()).toBe(HttpStatus.CONFLICT);
     });
 
     it('AC3: throws NotFoundAppException (404) when the project slug does not resolve to a project', async () => {

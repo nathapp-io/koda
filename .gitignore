@@ -51,6 +51,7 @@ Thumbs.db
 .nax/**/semantic-verdicts/
 .nax/**/verdicts/
 .nax/**/sessions/
+.nax/**/stories/
 nax.lock
 .nax-wt/
 .nax-pids

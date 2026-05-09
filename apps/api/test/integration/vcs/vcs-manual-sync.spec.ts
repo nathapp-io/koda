@@ -22,6 +22,7 @@ import { VcsSyncService, SyncIssueResult } from '../../../src/vcs/vcs-sync.servi
 import { VcsWebhookService } from '../../../src/vcs/vcs-webhook.service';
 import { ProjectsService } from '../../../src/projects/projects.service';
 import { ConfigService } from '@nestjs/config';
+import { HttpException, HttpStatus } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { VcsIssue } from '../../../src/vcs/types';
 import { Project, VcsConnection } from '@prisma/client';
@@ -222,7 +223,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
     });
 
     describe('AC2: Returns HTTP 409 when issue already synced', () => {
-      it('should throw ValidationAppException when issue is already synced', async () => {
+      it('should throw HttpException(409) when issue is already synced', async () => {
         const issueNumber = '42';
         const syncResult: SyncIssueResult = {
           action: 'skipped',
@@ -232,9 +233,14 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
         syncService.syncIssue.mockResolvedValue(syncResult);
 
-        await expect(controller.syncIssue(mockProject.slug, issueNumber)).rejects.toThrow(
-          ValidationAppException
-        );
+        let caught: unknown;
+        try {
+          await controller.syncIssue(mockProject.slug, issueNumber);
+        } catch (error) {
+          caught = error;
+        }
+        expect(caught).toBeInstanceOf(HttpException);
+        expect((caught as HttpException).getStatus()).toBe(HttpStatus.CONFLICT);
       });
 
       it('should indicate skip in response when issue is duplicate', async () => {
@@ -247,9 +253,14 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
         syncService.syncIssue.mockResolvedValue(syncResult);
 
-        await expect(controller.syncIssue(mockProject.slug, issueNumber)).rejects.toThrow(
-          ValidationAppException
-        );
+        let caught: unknown;
+        try {
+          await controller.syncIssue(mockProject.slug, issueNumber);
+        } catch (error) {
+          caught = error;
+        }
+        expect(caught).toBeInstanceOf(HttpException);
+        expect((caught as HttpException).getStatus()).toBe(HttpStatus.CONFLICT);
       });
     });
 
