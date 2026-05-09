@@ -1,0 +1,47 @@
+{
+  "project": "koda",
+  "feature": "vcs-implementation-gap",
+  "branchName": "feat/vcs-implementation-gap",
+  "createdAt": "2026-05-09T00:00:00.000Z",
+  "updatedAt": "2026-05-09T03:23:31.695Z",
+  "userStories": [
+    {
+      "id": "GAP-002",
+      "title": "Fix duplicate VCS connection and already-synced import to return HTTP 409 Conflict",
+      "description": "**Goal** — Return HTTP 409 Conflict instead of 400 Bad Request when creating a duplicate VCS connection or importing an already-synced GitHub issue.\n\n**Motivation** — Two conflict responses return the wrong HTTP status. Creating a duplicate VCS connection and importing an already-synced issue both return `400 Bad Request` instead of the `409 Conflict` their specs require. Clients cannot distinguish validation errors from conflicts.\n\n**Approach** — Neither `@nathapp/nestjs-common` nor the project defines a conflict exception class. Use `HttpException` from `@nestjs/common` directly:\n\n```typescript\nimport { HttpException, HttpStatus } from '@nestjs/common';\n\nthrow new HttpException('VCS connection already exists for this project', HttpStatus.CONFLICT);\nthrow new HttpException('Issue already synced', HttpStatus.CONFLICT);\n```\n\nTwo sites to fix:\n\n| File | Line(s) | Current | Required |\n|------|---------|---------|----------|\n| `apps/api/src/vcs/vcs-connection.service.ts` | ~67 | `ValidationAppException` → 400 | `HttpException(…, HttpStatus.CONFLICT)` → 409 |\n| `apps/api/src/vcs/vcs.controller.ts` | ~188-190 | `ValidationAppException` → 400 | `HttpException(…, HttpStatus.CONFLICT)` → 409 |\n\n**Scope** — In: Two throw sites, both changed from `ValidationAppException` (which maps to 400) to `HttpException` with explicit `HttpStatus.CONFLICT` (guaranteed 409). Out: All other validation error sites (missing fields, invalid formats) — those must remain 400. The 404 behavior for non-existent GitHub issues is preserved. No changes to swagger `@ApiResponse` decorators are needed unless they're missing a 409 entry.",
+      "acceptanceCriteria": [
+        "`POST /projects/:slug/vcs` when a `VcsConnection` already exists for that project returns HTTP `409`",
+        "`POST /projects/:slug/vcs` when a `VcsConnection` already exists returns a response body with a message indicating a conflict, not a validation error",
+        "`POST /projects/:slug/vcs/sync/:issueNumber` when a ticket with that `externalVcsId` already exists in the project returns HTTP `409`",
+        "`POST /projects/:slug/vcs/sync/:issueNumber` when the issue number does not exist on GitHub returns HTTP `404` (existing behavior preserved)",
+        "`POST /projects/:slug/vcs` with a missing required field still returns HTTP `400` (existing validation behavior preserved)"
+      ],
+      "tags": [
+        "fix",
+        "api",
+        "vcs"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "simple",
+        "testStrategy": "tdd-simple",
+        "reasoning": "validated from LLM output"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/vcs/vcs-connection.service.ts",
+        "apps/api/src/vcs/vcs.controller.ts",
+        "apps/api/src/projects/projects.controller.ts"
+      ],
+      "suggestedCriteria": [
+        "When `POST /projects/:slug/vcs` is called with a valid payload and no existing connection, returns HTTP `201` (existing success behavior preserved)",
+        "When `POST /projects/:slug/vcs/sync/:issueNumber` is called and the GitHub API returns a non-404 error, the existing error handling behavior is preserved"
+      ]
+    }
+  ],
+  "analysis": "## Architecture\n\nThe VCS integration spans `apps/api/src/vcs/` (controllers, services, providers, utilities) and `apps/web/` (board page UI).\n\n### Implementation Status\n\n- **GAP-001 (auto-PR on VERIFIED)** — Already implemented. `createPrForTicket()` exists as a private method in `apps/api/src/tickets/state-machine/ticket-transitions.service.ts` (line 124) and is wired into `executeTransition()` at lines 477–479. It calls `buildBranchName()`, `provider.createPullRequest()` with `draft: true`, creates a TicketLink with `linkType='pr'`/`prNumber`/`prState='draft'`, logs `ActivityType.VCS_PR_CREATED`, and calls `extractLinksFromPr()`. Fully implemented.\n\n- **GAP-002 (HTTP 409 status codes)** — Not implemented. Two throw sites use `ValidationAppException` (→ 400) instead of `HttpException(…, HttpStatus.CONFLICT)` (→ 409). This is the only remaining gap.\n\n- **GAP-003 (Import Issue dialog)** — Already implemented. `apps/web/components/ImportIssueDialog.vue` exists and is imported in `apps/web/pages/[project]/index.vue`. The board page conditionally shows the \"Import Issue\" button based on `vcsConnection?.isActive`, and i18n keys under `vcs.importIssue` exist in both `en.json` and `zh.json`.\n\n### GAP-002 — HTTP 409 Status Codes\n\n**Target:** Two throw sites return `ValidationAppException` which must be replaced with `HttpException` with 409.\n\n| File | Location | Current | Required |\n|------|----------|---------|----------|\n| `vcs-connection.service.ts` | ~line 67: duplicate connection check | `ValidationAppException` → 400 | `HttpException('VCS connection already exists for this project', HttpStatus.CONFLICT)` → 409 |\n| `vcs.controller.ts` | ~lines 188-190: already-synced check | `ValidationAppException` → 400 | `HttpException('Issue already synced', HttpStatus.CONFLICT)` → 409 |\n\n**Important:** `@nathapp/nestjs-common` has no `ConflictAppException`. Use `HttpException` and `HttpStatus` from `@nestjs/common` directly — this guarantees the correct HTTP status regardless of framework configuration.\n\n**Scope:** Only these two conflict sites. All other validation sites (missing fields, invalid formats) must remain HTTP 400. Existing 404 behavior for non-existent GitHub issues is preserved."
+}

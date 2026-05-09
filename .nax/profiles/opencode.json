@@ -3,7 +3,7 @@
         "opencode": {
             "fast": "minimax/MiniMax-M2.7",
             "balanced": "opencode-go/deepseek-v4-pro",
-            "powerful": "opencode-go/kimi-k2.6"
+            "powerful": "opencode-go/deepseek-v4-pro"
         }
     },
     "agent": {

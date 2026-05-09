@@ -1,0 +1,37 @@
+[
+  {
+    "acId": "AC-1",
+    "original": "POST /projects/:slug/vcs when a VcsConnection already exists for that project returns HTTP 409",
+    "refined": "POST /api/projects/:slug/vcs with a project that already has a VcsConnection returns HTTP status 409 and response body containing 'conflict' (case-insensitive)",
+    "testable": true,
+    "storyId": "GAP-002"
+  },
+  {
+    "acId": "AC-2",
+    "original": "POST /projects/:slug/vcs when a VcsConnection already exists returns a response body with a message indicating a conflict, not a validation error",
+    "refined": "POST /api/projects/:slug/vcs with a duplicate VcsConnection returns a response body where the 'message' field does not contain 'validation' and does contain 'exist' or 'conflict' (case-insensitive)",
+    "testable": true,
+    "storyId": "GAP-002"
+  },
+  {
+    "acId": "AC-3",
+    "original": "POST /projects/:slug/vcs/sync/:issueNumber when a ticket with that externalVcsId already exists in the project returns HTTP 409",
+    "refined": "POST /api/projects/:slug/vcs/sync/:issueNumber where an Issue with matching externalVcsId already exists returns HTTP status 409",
+    "testable": true,
+    "storyId": "GAP-002"
+  },
+  {
+    "acId": "AC-4",
+    "original": "POST /projects/:slug/vcs/sync/:issueNumber when the issue number does not exist on GitHub returns HTTP 404 (existing behavior preserved)",
+    "refined": "POST /api/projects/:slug/vcs/sync/:issueNumber where GitHub returns 404 for the issue number returns HTTP status 404",
+    "testable": true,
+    "storyId": "GAP-002"
+  },
+  {
+    "acId": "AC-5",
+    "original": "POST /projects/:slug/vcs with a missing required field still returns HTTP 400 (existing validation behavior preserved)",
+    "refined": "POST /api/projects/:slug/vcs with a missing required field (e.g., no body or invalid vcsType) returns HTTP status 400 and response body indicating validation failure",
+    "testable": true,
+    "storyId": "GAP-002"
+  }
+]
