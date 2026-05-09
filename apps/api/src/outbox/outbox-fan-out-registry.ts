@@ -198,8 +198,19 @@ export class OutboxFanOutRegistry implements OnModuleInit {
 
   register(eventType: string, handler: (payload: unknown) => void | Promise<void>): void {
     const existing = this.handlers.get(eventType) || [];
-    existing.push(handler);
-    this.handlers.set(eventType, existing);
+    if (!existing.includes(handler)) {
+      this.handlers.set(eventType, [...existing, handler]);
+    }
+  }
+
+  unregister(eventType: string, handler: (payload: unknown) => void | Promise<void>): void {
+    const existing = this.handlers.get(eventType) || [];
+    const filtered = existing.filter((h) => h !== handler);
+    if (filtered.length > 0) {
+      this.handlers.set(eventType, filtered);
+    } else {
+      this.handlers.delete(eventType);
+    }
   }
 
   async dispatch(input: { eventType: string; payload: unknown }): Promise<void> {

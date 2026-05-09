@@ -37,8 +37,10 @@ interface ProjectIndex {
 export class LexicalIndex {
   readonly k1 = 1.5;
   readonly b = 0.75;
+  private readonly maxIndexes = 1_000;
 
   private indexes = new Map<string, ProjectIndex>();
+  private lastAccessed = new Map<string, number>();
 
   buildIndex(projectId: string, docs: Bm25Document[]): void {
     const projectIndex = this.getOrCreateProjectIndex(projectId);
@@ -67,6 +69,7 @@ export class LexicalIndex {
     if (!projectIndex || projectIndex.docs.size === 0) {
       return [];
     }
+    this.touchProject(projectId);
 
     if (!projectIndex.warmupCompleted && projectIndex.docs.size > 0) {
       if (projectIndex.rebuildLock) {
@@ -139,6 +142,7 @@ export class LexicalIndex {
   removeDocument(projectId: string, docId: string): void {
     const projectIndex = this.indexes.get(projectId);
     if (!projectIndex) return;
+    this.touchProject(projectId);
 
     const doc = projectIndex.docs.get(docId);
     if (!doc) return;
@@ -159,7 +163,7 @@ export class LexicalIndex {
       const docLengths = Array.from(projectIndex.docs.values()).map(d => d.docLength);
       projectIndex.avgDocLength = docLengths.reduce((a, b) => a + b, 0) / docLengths.length;
     } else {
-      projectIndex.avgDocLength = 0;
+      this.clearProject(projectId);
     }
   }
 
@@ -170,6 +174,7 @@ export class LexicalIndex {
   setWarmupCompleted(projectId: string, completed: boolean): void {
     const projectIndex = this.indexes.get(projectId);
     if (projectIndex) {
+      this.touchProject(projectId);
       projectIndex.warmupCompleted = completed;
     }
   }
@@ -206,6 +211,7 @@ export class LexicalIndex {
       if (!projectIndex || projectIndex.docs.size === 0) {
         return false;
       }
+      this.touchProject(payload.projectId);
 
       while (projectIndex.rebuildLock) {
         await new Promise(resolve => setImmediate(resolve));
@@ -234,9 +240,16 @@ export class LexicalIndex {
     return false;
   }
 
+  clearProject(projectId: string): void {
+    this.indexes.delete(projectId);
+    this.lastAccessed.delete(projectId);
+  }
+
   private getOrCreateProjectIndex(projectId: string): ProjectIndex {
+    this.touchProject(projectId);
     let projectIndex = this.indexes.get(projectId);
     if (!projectIndex) {
+      this.evictIfNeeded();
       projectIndex = {
         docs: new Map(),
         termDocFreq: new Map(),
@@ -247,6 +260,27 @@ export class LexicalIndex {
       this.indexes.set(projectId, projectIndex);
     }
     return projectIndex;
+  }
+
+  private touchProject(projectId: string): void {
+    this.lastAccessed.set(projectId, Date.now());
+  }
+
+  private evictIfNeeded(): void {
+    while (this.indexes.size >= this.maxIndexes) {
+      let oldestProjectId: string | null = null;
+      let oldestTs = Number.POSITIVE_INFINITY;
+      for (const [projectId, ts] of this.lastAccessed) {
+        if (ts < oldestTs) {
+          oldestTs = ts;
+          oldestProjectId = projectId;
+        }
+      }
+      if (!oldestProjectId) {
+        break;
+      }
+      this.clearProject(oldestProjectId);
+    }
   }
 
   private indexDocument(doc: Bm25Document): IndexedDocument {

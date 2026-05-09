@@ -34,7 +34,11 @@ export class CounterOptimizeStrategy implements FtsOptimizeStrategy {
     void table.optimize();
   }
 
+  clearProject(projectId: string): void {
+    this.counters.delete(projectId);
+  }
+
   async onDestroy(): Promise<void> {
-    // no-op
+    this.counters.clear();
   }
 }

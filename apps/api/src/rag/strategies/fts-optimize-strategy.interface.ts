@@ -7,4 +7,5 @@ export interface FtsOptimizeStrategy {
   onInsert(projectId: string, table: LanceTable): Promise<void>;
   onFirstAccess(projectId: string, table: LanceTable): void;
   onDestroy(): Promise<void>;
+  clearProject?(projectId: string): void;
 }

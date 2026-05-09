@@ -8,6 +8,7 @@ import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { EmbeddingService } from './embedding.service';
 import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interface';
 import { LexicalIndex } from './lexical-index';
+import { EntityStore } from './entity-store';
 import { GraphStoreService } from './graph-store.service';
 import { IncrementalGraphDiffService } from './incremental-graph-diff.service';
 import type { GraphifyNodeDto, GraphifyLinkDto } from './dto/import-graphify.dto';
@@ -158,6 +159,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     @Optional() @Inject(FTS_OPTIMIZE_STRATEGY) private readonly optimizeStrategy?: FtsOptimizeStrategy,
     @Optional() private readonly prisma?: PrismaService<PrismaClient>,
     @Optional() private readonly lexicalIndex?: LexicalIndex,
+    @Optional() private readonly entityStore?: EntityStore,
     @Optional() @Inject(TRANSACTION_MANAGER) private readonly txManager?: ITransactionManager,
     @Optional() private readonly graphStore?: GraphStoreService,
     @Optional() @Inject(forwardRef(() => IncrementalGraphDiffService)) private readonly incrementalDiff?: IncrementalGraphDiffService,
@@ -207,6 +209,14 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     }
 
     this.db = null;
+  }
+
+  clearProjectCaches(projectId: string): void {
+    this.tableCache.delete(`project_${projectId}`);
+    this.firstAccessedProjectIds.delete(projectId);
+    this.lexicalIndex?.clearProject(projectId);
+    this.entityStore?.clear(projectId);
+    this.optimizeStrategy?.clearProject?.(projectId);
   }
 
   /**

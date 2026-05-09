@@ -66,6 +66,26 @@ describe('OutboxFanOutRegistry', () => {
 
       expect(handlers).toHaveLength(2);
     });
+
+    it('does not register duplicate handler references for the same eventType', () => {
+      const handler = jest.fn();
+      registry.register('foo', handler);
+      registry.register('foo', handler);
+
+      const handlers = registry.getHandlers('foo');
+
+      expect(handlers).toHaveLength(1);
+      expect(handlers[0]).toBe(handler);
+    });
+
+    it('unregister removes handler and deletes key when no handlers remain', () => {
+      const handler = jest.fn();
+      registry.register('foo', handler);
+
+      registry.unregister('foo', handler);
+
+      expect(registry.getHandlers('foo')).toHaveLength(0);
+    });
   });
 
   describe('AC41: DEFAULT_HANDLERS registration', () => {

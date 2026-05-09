@@ -201,13 +201,16 @@ export class ProjectsService {
     }
 
     // Soft delete by setting deletedAt
-    return ProjectResponseDto.from(
-      await this.db.project.update({
-        where: { slug },
-        data: {
-          deletedAt: new Date(),
-        },
-      })
-    );
+    const deletedProject = await this.db.project.update({
+      where: { slug },
+      data: {
+        deletedAt: new Date(),
+      },
+    });
+
+    this.ragService.clearProjectCaches(deletedProject.id);
+    this.hybridRetrieverService?.invalidateGraphifyEnabledCache(deletedProject.id);
+
+    return ProjectResponseDto.from(deletedProject);
   }
 }

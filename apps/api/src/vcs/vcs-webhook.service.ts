@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Injectable, Logger, Optional } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -105,9 +105,11 @@ interface TicketLinkData {
 }
 
 @Injectable()
-export class VcsWebhookService {
+export class VcsWebhookService implements OnModuleDestroy {
   private readonly logger = new Logger(VcsWebhookService.name);
   private readonly recentCommitHashes = new Map<string, number>();
+  private readonly dedupWindowMs = 5 * 60 * 1000;
+  private readonly cleanupInterval: ReturnType<typeof setInterval>;
   private dbDedupVerified = false;
   private dbDedupWorks = false;
 
@@ -118,12 +120,29 @@ export class VcsWebhookService {
     @Optional() private readonly vcsLinkExtractorService?: VcsLinkExtractorService,
     @Optional() private readonly configService?: ConfigService,
     @Optional() private readonly outboxService?: OutboxService,
-  ) {}
+  ) {
+    this.cleanupInterval = setInterval(() => {
+      this.cleanupStaleEntries();
+    }, this.dedupWindowMs);
+  }
 
   // PrismaClientLike from @nathapp/nestjs-prisma doesn't expose VCS models,
   // but they exist at runtime. Using double cast to allow property access.
   private get db() {
     return this.prisma.client as unknown as ExtendedPrismaClient;
+  }
+
+  onModuleDestroy(): void {
+    clearInterval(this.cleanupInterval);
+    this.recentCommitHashes.clear();
+  }
+
+  private cleanupStaleEntries(now = Date.now()): void {
+    for (const [key, timestamp] of this.recentCommitHashes) {
+      if (now - timestamp > this.dedupWindowMs) {
+        this.recentCommitHashes.delete(key);
+      }
+    }
   }
 
   /**
@@ -616,14 +635,9 @@ export class VcsWebhookService {
     }
 
     const now = Date.now();
-    const dedupWindowMs = 5 * 60 * 1000;
 
-    // Evict stale entries older than the dedup window
-    for (const [key, timestamp] of this.recentCommitHashes) {
-      if (now - timestamp > dedupWindowMs) {
-        this.recentCommitHashes.delete(key);
-      }
-    }
+    // Evict stale entries older than the dedup window.
+    this.cleanupStaleEntries(now);
 
     // DB-backed dedup check (authoritative, works across instances)
     const rawClient = this.prisma.client as unknown as Record<string, unknown>;
@@ -647,7 +661,7 @@ export class VcsWebhookService {
               eventType: 'code_commit',
               eventId: commitHash,
               status: { in: ['pending', 'processing'] },
-              createdAt: { gte: new Date(now - dedupWindowMs) },
+              createdAt: { gte: new Date(now - this.dedupWindowMs) },
             },
             select: { id: true },
             take: 1,
@@ -664,7 +678,7 @@ export class VcsWebhookService {
 
       // Fast-path: in-memory dedup within this instance (fallback when DB dedup is unavailable or unverified)
       const lastEnqueuedTime = this.recentCommitHashes.get(recentKey);
-      if ((!outboxDelegate || (this.dbDedupVerified && !this.dbDedupWorks)) && lastEnqueuedTime && (now - lastEnqueuedTime) < dedupWindowMs) {
+      if ((!outboxDelegate || (this.dbDedupVerified && !this.dbDedupWorks)) && lastEnqueuedTime && (now - lastEnqueuedTime) < this.dedupWindowMs) {
         this.logger.debug(`Skipping duplicate commit ${commitHash} within deduplication window`);
         continue;
       }
@@ -705,7 +719,7 @@ export class VcsWebhookService {
                 eventType: 'code_commit',
                 eventId: commitHash,
                 status: { in: ['pending', 'processing'] },
-                createdAt: { gte: new Date(now - dedupWindowMs) },
+                createdAt: { gte: new Date(now - this.dedupWindowMs) },
               },
               select: { id: true },
               take: 1,
