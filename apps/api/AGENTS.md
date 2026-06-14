@@ -15,7 +15,7 @@ These instructions apply to all AI coding agents in this project.
 
 **Language:** TypeScript
 
-**Key dependencies:** @fastify/static, @nathapp/nestjs-prisma, @nestjs/common, @nestjs/config, @nestjs/core, @nestjs/platform-fastify, @nestjs/schedule, @nestjs/swagger, @prisma/client, @nathapp/typescript-config
+**Key dependencies:** @fastify/static, @nathapp/nestjs-prisma, @nestjs/cache-manager, @nestjs/common, @nestjs/config, @nestjs/core, @nestjs/platform-fastify, @nestjs/schedule, @nestjs/swagger, @prisma/client
 
 ---
 # Koda API Context
@@ -173,6 +173,16 @@ Integration details:
 - integration tests live under `test/integration/`
 - e2e tests live under `test/e2e/`
 - keep API behavior covered when changing workflow, auth, persistence, or contract behavior
+
+### Module registration / DI tests must be unit-level (no DB)
+
+- module-compilation and dependency-injection wiring tests are **unit tests**, not integration tests
+- co-locate them with the module as `src/<feature>/<feature>.module.spec.ts` so they run under `bun run test`
+- they must NOT live under `test/integration/` and must NOT contain `integration` in the filename (the default `test` script excludes any path matching `integration`)
+- they must NOT require a database: compile the module with `Test.createTestingModule({ imports: [FeatureModule] }).compile()` and mock external collaborators (`PrismaService`, `TRANSACTION_MANAGER`, `ConfigService`) via provider `useValue`
+- `test/integration/` is reserved for behavior that genuinely needs a real DB: repository round-trips, constraints, soft-delete semantics, transactions
+
+Rationale: `bun run test` runs without a database, so DI/module-registration breakage must surface there. `test:integration` requires a DB (`koda-test.db`) and is not always run, so module-wiring tests hidden inside it can mask failures.
 
 Useful scripts:
 - `bun run test`

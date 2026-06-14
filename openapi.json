@@ -2335,7 +2335,7 @@
         ]
       }
     },
-    "/api/api/webhooks/{id}": {
+    "/api/webhooks/{id}": {
       "delete": {
         "operationId": "WebhookController_remove",
         "parameters": [
