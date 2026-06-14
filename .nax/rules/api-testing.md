@@ -15,6 +15,14 @@ priority: 80
 - Assert exact status codes
 - When mocking DB access in unit/integration tests, use official mock helpers as provider values
 
+## Module Registration / DI Tests
+- Module-compilation and dependency-injection wiring tests are **unit tests**, never integration tests
+- Co-locate them as `src/<feature>/<feature>.module.spec.ts` so they run under `bun run test` (which executes without a database)
+- Do NOT place them under `test/integration/` and do NOT put `integration` in the filename — the default `test` script excludes any path matching `integration`, so wiring failures hidden there are not caught until the (less frequently run, DB-dependent) integration suite
+- These tests must not require a database: `Test.createTestingModule({ imports: [FeatureModule] }).compile()` with external collaborators (`PrismaService`, `TRANSACTION_MANAGER`, `ConfigService`) mocked via provider `useValue`
+- `test/integration/` is reserved for DB-backed behavior only: repository round-trips, constraints, soft-delete semantics, transactions
+- Prefer a shared test harness that wires the common global stub providers so module specs stay short and do not drift
+
 ## Controller Coverage
 - Controller-level fallback paths (event-type detection, header absence, unknown payload routing) need integration or e2e coverage — service unit tests alone are insufficient
 
