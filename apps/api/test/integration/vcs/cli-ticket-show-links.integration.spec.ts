@@ -11,7 +11,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
-const ticketCommandPath = join(__dirname, '../../../cli/src/commands/ticket.ts');
+const ticketCommandPath = join(__dirname, '../../../../cli/src/commands/ticket.ts');
 
 describe('VCS-P4-003 AC6: ticket show displays links grouped by type', () => {
   test('TicketLink type includes linkType field', () => {

@@ -24,11 +24,11 @@ jest.mock('@lancedb/lancedb', () => ({
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import { RagService } from '../../src/rag/rag.service';
-import { EmbeddingService } from '../../src/rag/embedding.service';
+import { RagService } from '../../../src/rag/rag.service';
+import { EmbeddingService } from '../../../src/rag/embedding.service';
 import type { ITransactionManager } from '@nathapp/nestjs-data';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import type { GraphifyNodeDto, GraphifyLinkDto } from '../../src/rag/dto/import-graphify.dto';
+import type { GraphifyNodeDto, GraphifyLinkDto } from '../../../src/rag/dto/import-graphify.dto';
 
 class FakeEmbeddingService {
   readonly providerName = 'fake';

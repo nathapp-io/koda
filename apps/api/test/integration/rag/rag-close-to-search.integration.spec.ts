@@ -15,6 +15,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
+import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
@@ -64,7 +65,7 @@ describe('RAG close-to-search integration', () => {
     module = await Test.createTestingModule({
       providers: [
         {
-          provide: 'PrismaService',
+          provide: PrismaService,
           useFactory: () => {
             return new PrismaService({
               client: PrismaClient,
@@ -72,6 +73,7 @@ describe('RAG close-to-search integration', () => {
             });
           },
         },
+        { provide: TRANSACTION_MANAGER, useValue: { run: (fn: () => Promise<unknown>) => fn(), getClient: jest.fn(), isInTransaction: jest.fn(() => false) } },
         TicketTransitionsService,
         // Provide RagService with a factory so we can inject FakeEmbeddingService directly
         {
@@ -104,7 +106,7 @@ describe('RAG close-to-search integration', () => {
 
     ragService = module.get(RagService);
     transitionsService = module.get(TicketTransitionsService);
-    prisma = module.get('PrismaService');
+    prisma = module.get(PrismaService);
     await prisma.client.$connect();
 
     // Create a test project with autoIndexOnClose enabled
@@ -146,8 +148,7 @@ describe('RAG close-to-search integration', () => {
     await transitionsService.start(
       projectSlug,
       ticket.id,
-      { id: 'test-user', sub: 'test-user' },
-      'user',
+      { id: 'test-user', sub: 'test-user' } as unknown as import('../../../src/auth/principal/koda-principal.types').KodaPrincipal,
     );
 
     // Verify ticket is in IN_PROGRESS
@@ -159,8 +160,7 @@ describe('RAG close-to-search integration', () => {
     await transitionsService.close(
       projectSlug,
       ticket.id,
-      { id: 'test-user', sub: 'test-user' },
-      'user',
+      { id: 'test-user', sub: 'test-user' } as unknown as import('../../../src/auth/principal/koda-principal.types').KodaPrincipal,
     );
 
     // Verify ticket is CLOSED

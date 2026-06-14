@@ -19,6 +19,8 @@ import { SchedulerRegistry } from '@nestjs/schedule';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { VcsPollingService } from '../../../src/vcs/vcs-polling.service';
 import { VcsSyncService } from '../../../src/vcs/vcs-sync.service';
+import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
+import { VCS_REPOSITORY } from '../../../src/vcs/domain/vcs.repository';
 import { VcsIssue } from '../../../src/vcs/types';
 
 describe('VcsPollingService - Comprehensive Behavior Tests', () => {
@@ -41,6 +43,8 @@ describe('VcsPollingService - Comprehensive Behavior Tests', () => {
     gitRemoteUrl: null,
     autoIndexOnClose: true,
     autoAssign: 'OFF',
+    graphifyEnabled: false,
+    graphifyLastImportedAt: null,
     deletedAt: null,
     createdAt: new Date('2026-01-01'),
     updatedAt: new Date('2026-01-01'),
@@ -139,6 +143,22 @@ describe('VcsPollingService - Comprehensive Behavior Tests', () => {
       providers: [
         VcsPollingService,
         VcsSyncService,
+        {
+          provide: VcsPrSyncService,
+          useValue: {
+            syncPrStatus: jest.fn(),
+          },
+        },
+        {
+          provide: VCS_REPOSITORY,
+          useValue: {
+            findExistingTicketByExternalId: jest.fn(),
+            createTicketFromIssue: jest.fn(),
+            findActiveTicketLinksWithPrs: jest.fn(),
+            updateTicketLinkPrState: jest.fn(),
+            applyMergedPrTransition: jest.fn(),
+          },
+        },
         {
           provide: PrismaService,
           useValue: {

@@ -13,6 +13,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { VcsPollingService } from '../../../src/vcs/vcs-polling.service';
 import { VcsSyncService } from '../../../src/vcs/vcs-sync.service';
 import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
+import { VCS_REPOSITORY } from '../../../src/vcs/domain/vcs.repository';
 import { VcsIssue } from '../../../src/vcs/types';
 
 describe('VcsPollingService PR Sync Integration (VCS-P3-002-C AC1)', () => {
@@ -33,6 +34,8 @@ describe('VcsPollingService PR Sync Integration (VCS-P3-002-C AC1)', () => {
     gitRemoteUrl: null,
     autoIndexOnClose: true,
     autoAssign: 'OFF',
+    graphifyEnabled: false,
+    graphifyLastImportedAt: null,
     deletedAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -89,6 +92,16 @@ describe('VcsPollingService PR Sync Integration (VCS-P3-002-C AC1)', () => {
         VcsPollingService,
         VcsSyncService,
         VcsPrSyncService,
+        {
+          provide: VCS_REPOSITORY,
+          useValue: {
+            findExistingTicketByExternalId: jest.fn(),
+            createTicketFromIssue: jest.fn(),
+            findActiveTicketLinksWithPrs: jest.fn(),
+            updateTicketLinkPrState: jest.fn(),
+            applyMergedPrTransition: jest.fn(),
+          },
+        },
         {
           provide: PrismaService,
           useValue: {

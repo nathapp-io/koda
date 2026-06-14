@@ -32,6 +32,7 @@ jest.mock('../../../src/vcs/factory', () => ({
 
 // Import after mocks
 import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
+import { VCS_REPOSITORY } from '../../../src/vcs/domain/vcs.repository';
 import { PrismaVcsRepository } from '../../../src/vcs/prisma-vcs.repository';
 
 describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
@@ -134,7 +135,7 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
       providers: [
         VcsPrSyncService,
         {
-          provide: PrismaVcsRepository,
+          provide: VCS_REPOSITORY,
           useValue: {
             findExistingTicketByExternalId: jest.fn(),
             createTicketFromIssue: jest.fn(),
@@ -147,7 +148,7 @@ describe('VcsPrSyncService Auto-Transition on PR Merge (VCS-P3-002-B)', () => {
     }).compile();
 
     service = module.get<VcsPrSyncService>(VcsPrSyncService);
-    vcsRepo = module.get(PrismaVcsRepository);
+    vcsRepo = module.get(VCS_REPOSITORY);
   });
 
   afterEach(async () => {

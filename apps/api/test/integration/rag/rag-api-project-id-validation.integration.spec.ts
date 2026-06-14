@@ -3,6 +3,8 @@ import { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RagController } from '../../../src/rag/rag.controller';
 import { RagService } from '../../../src/rag/rag.service';
+import { HybridRetrieverService } from '../../../src/rag/hybrid-retriever.service';
+import { EvaluationService } from '../../../src/retrieval/evaluation.service';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 
 /**
@@ -66,6 +68,19 @@ describe('RagController — Project ID Validation at API Boundary (AC6)', () => 
           provide: ConfigService,
           useValue: {
             get: jest.fn().mockReturnValue(undefined),
+          },
+        },
+        {
+          provide: HybridRetrieverService,
+          useValue: {
+            indexDocument: jest.fn().mockResolvedValue(undefined),
+            search: jest.fn().mockResolvedValue({ results: [], scores: [], retrievedAt: new Date() }),
+          },
+        },
+        {
+          provide: EvaluationService,
+          useValue: {
+            runQueries: jest.fn().mockResolvedValue({ precision: 0, queries: [] }),
           },
         },
       ],

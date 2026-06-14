@@ -7,8 +7,8 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
-const webI18nEnPath = join(__dirname, '../../../web/i18n/locales/en.json');
-const webI18nZhPath = join(__dirname, '../../../web/i18n/locales/zh.json');
+const webI18nEnPath = join(__dirname, '../../../../web/i18n/locales/en.json');
+const webI18nZhPath = join(__dirname, '../../../../web/i18n/locales/zh.json');
 
 describe('VCS-P4-003 AC-25: i18n keys for branch/commit link display labels', () => {
   describe('Web i18n (apps/web/i18n/locales/en.json and zh.json)', () => {

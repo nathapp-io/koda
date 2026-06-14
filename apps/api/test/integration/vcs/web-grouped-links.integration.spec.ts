@@ -11,7 +11,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 
-const ticketDetailPagePath = join(__dirname, '../../../web/pages/[project]/tickets/[ref].vue');
+const ticketDetailPagePath = join(__dirname, '../../../../web/pages/[project]/tickets/[ref].vue');
 
 describe('VCS-P4-003 AC1-5: Web grouped VCS links display', () => {
   beforeAll(() => {

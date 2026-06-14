@@ -8,7 +8,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
-const vcsWebhookServicePath = join(__dirname, '../../src/vcs/vcs-webhook.service.ts');
+const vcsWebhookServicePath = join(__dirname, '../../../src/vcs/vcs-webhook.service.ts');
 
 describe('VCS-P4-003 AC-24: pull_request.synchronize webhook calls extractLinksFromPr', () => {
   test('VcsWebhookService imports VcsLinkExtractorService', () => {

@@ -28,7 +28,7 @@ describeIntegration('Code Intelligence Module Integration', () => {
         SymbolStore,
         EntityGraphService,
         GraphStoreService,
-        PrismaService,
+        { provide: PrismaService, useValue: { client: {} } },
         {
           provide: TRANSACTION_MANAGER,
           useValue: {

@@ -13,8 +13,8 @@
  * Run: bun test test/integration/vcs/auto-create-pr-on-verified.integration.spec.ts
  */
 
-import { describe, it, expect, beforeEach, jest } from '@jest/globals';
-import { TicketTransitionsService, CurrentUser } from '../../../src/tickets/state-machine/ticket-transitions.service';
+import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
+import { UserPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TicketLinksService } from '../../../src/ticket-links/ticket-links.service';
 import { VcsConnectionService } from '../../../src/vcs/vcs-connection.service';
@@ -26,11 +26,18 @@ import zhVcsMessages from '../../../src/i18n/zh/vcs.json';
 
 // Module-level reference for factory mock that can be updated
 let mockVcsProviderInstance: any;
-const mockCreateVcsProvider = jest.fn().mockImplementation(() => mockVcsProviderInstance);
 
 jest.mock('../../../src/vcs/factory', () => ({
-  createVcsProvider: mockCreateVcsProvider,
+  createVcsProvider: jest.fn(),
 }));
+
+jest.mock('../../../src/common/utils/encryption.util', () => ({
+  decryptToken: jest.fn().mockReturnValue('fake-decrypted-token'),
+  encryptToken: jest.fn().mockReturnValue('fake:encrypted:token'),
+}));
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const mockCreateVcsProvider = require('../../../src/vcs/factory').createVcsProvider as jest.Mock;
 
 describe('Auto-create PR on VERIFIED Transition', () => {
   let transitionsService: TicketTransitionsService;
@@ -62,9 +69,16 @@ describe('Auto-create PR on VERIFIED Transition', () => {
     updatedAt: new Date(),
   };
 
-  const testUser: CurrentUser = {
+  const testUser: UserPrincipal = {
     id: 'user-1',
     sub: 'user-1',
+    actorType: 'user',
+    role: 'MEMBER',
+    email: 'test@test.com',
+    name: undefined,
+    blacklisted: false,
+    revoked: false,
+    authorities: [],
   };
 
   const testVcsConnection = {
@@ -126,9 +140,11 @@ describe('Auto-create PR on VERIFIED Transition', () => {
       createPullRequest: jest.fn(),
     };
 
+    const mockTxManager = { run: (fn: () => Promise<unknown>) => fn(), getClient: jest.fn(), isInTransaction: jest.fn(() => false) };
+
     transitionsService = new TicketTransitionsService(
       mockPrismaService as any,
-      undefined,
+      mockTxManager as any,
       undefined,
     );
   });
@@ -249,7 +265,7 @@ describe('Auto-create PR on VERIFIED Transition', () => {
       const createPrSpy = jest.fn();
       jest.spyOn(mockVcsProvider, 'createPullRequest').mockImplementation(createPrSpy);
 
-      await transitionsService.verify('test-project', 'KODA-42', 'Verified', testUser, 'user');
+      await transitionsService.verify('test-project', 'KODA-42', 'Verified', testUser);
 
       expect(createPrSpy).not.toHaveBeenCalled();
     });
@@ -269,7 +285,7 @@ describe('Auto-create PR on VERIFIED Transition', () => {
       mockPrismaService.client.comment.create.mockResolvedValue({});
       mockPrismaService.client.ticketActivity.create.mockResolvedValue({});
 
-      const result = await transitionsService.verify('test-project', 'KODA-42', 'Verified', testUser, 'user');
+      const result = await transitionsService.verify('test-project', 'KODA-42', 'Verified', testUser);
 
       expect(result.ticket.status).toBe(TicketStatus.VERIFIED);
     });
@@ -350,12 +366,19 @@ describe('AC14: prNumber and prState persisted on TicketLink after successful PR
       mockVcsProviderInstance = mockVcsProvider;
       mockCreateVcsProvider.mockReturnValue(mockVcsProvider);
 
+      const mockTxManager2 = { run: (fn: () => Promise<unknown>) => fn(), getClient: jest.fn(), isInTransaction: jest.fn(() => false) };
+      const mockVcsLinkExtractorService = { extractLinksFromPr: jest.fn().mockResolvedValue(undefined) };
+      const mockConfigService = { get: jest.fn().mockImplementation((key: string) => key === 'vcs.encryptionKey' ? 'a'.repeat(64) : undefined) };
+
       transitionsService = new TicketTransitionsService(
         mockPrismaService as any,
+        mockTxManager2 as any,
         undefined,
         undefined,
         mockVcsConnectionService as any,
         mockTicketLinksService as any,
+        mockVcsLinkExtractorService as any,
+        mockConfigService as any,
       );
     });
 
@@ -391,7 +414,7 @@ describe('AC14: prNumber and prState persisted on TicketLink after successful PR
         createdAt: new Date(),
       });
 
-      await transitionsService.verify('test-project', 'KODA-42', 'Verified', testUser, 'user');
+      await transitionsService.verify('test-project', 'KODA-42', 'Verified', testUser);
 
       // Verify ticketLink.update was called with prNumber and prState (AC1, AC2, AC3)
       expect(mockPrismaService.client.ticketLink.update).toHaveBeenCalledWith(
@@ -435,7 +458,7 @@ describe('AC14: prNumber and prState persisted on TicketLink after successful PR
         createdAt: new Date(),
       });
 
-      await transitionsService.verify('test-project', 'KODA-42', 'Verified', testUser, 'user');
+      await transitionsService.verify('test-project', 'KODA-42', 'Verified', testUser);
 
       // Verify ticketLink.update was called with prState: 'draft' (AC2)
       expect(mockPrismaService.client.ticketLink.update).toHaveBeenCalledWith(
@@ -458,7 +481,7 @@ describe('AC14: prNumber and prState persisted on TicketLink after successful PR
         createdAt: new Date(),
       });
 
-      await transitionsService.verify('test-project', 'KODA-42', 'Verified', testUser, 'user');
+      await transitionsService.verify('test-project', 'KODA-42', 'Verified', testUser);
 
       // When PR creation fails, ticketLink.update should NOT be called (AC4)
       // ticketLink.create is still called (creates pending link), but update is skipped
@@ -483,7 +506,7 @@ describe('AC12: No PR creation for non-VERIFIED transitions', () => {
       const createPrSpy = jest.fn();
       jest.spyOn(mockVcsProvider, 'createPullRequest').mockImplementation(createPrSpy);
 
-      await transitionsService.start('test-project', 'KODA-42', testUser, 'user');
+      await transitionsService.start('test-project', 'KODA-42', testUser);
 
       expect(createPrSpy).not.toHaveBeenCalled();
     });
@@ -503,7 +526,7 @@ describe('AC12: No PR creation for non-VERIFIED transitions', () => {
       const createPrSpy = jest.fn();
       jest.spyOn(mockVcsProvider, 'createPullRequest').mockImplementation(createPrSpy);
 
-      await transitionsService.verifyFix('test-project', 'KODA-42', 'Approved', true, testUser, 'user');
+      await transitionsService.verifyFix('test-project', 'KODA-42', 'Approved', true, testUser);
 
       expect(createPrSpy).not.toHaveBeenCalled();
     });

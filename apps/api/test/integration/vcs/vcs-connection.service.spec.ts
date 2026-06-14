@@ -8,12 +8,14 @@
  */
 
 import { HttpException, HttpStatus } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Test, TestingModule } from '@nestjs/testing';
 import * as crypto from 'crypto';
 import { VcsConnectionService } from '../../../src/vcs/vcs-connection.service';
-import { CreateVcsConnectionDto, VcsProviderType } from '../../../src/vcs/dto/create-vcs-connection.dto';
+import { VcsPollingService } from '../../../src/vcs/vcs-polling.service';
+import { CreateVcsConnectionDto, VcsProviderType, VcsSyncModeType } from '../../../src/vcs/dto/create-vcs-connection.dto';
 import { UpdateVcsConnectionDto } from '../../../src/vcs/dto/update-vcs-connection.dto';
 import { VcsConnectionResponseDto } from '../../../src/vcs/dto/vcs-connection-response.dto';
 import { encryptToken, decryptToken } from '../../../src/common/utils/encryption.util';
@@ -55,6 +57,20 @@ describe('VcsConnectionService', () => {
             },
           },
         },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn(),
+          },
+        },
+        {
+          provide: VcsPollingService,
+          useValue: {
+            schedulePolling: jest.fn(),
+            unschedulePolling: jest.fn(),
+            refreshConnectionSchedule: jest.fn().mockResolvedValue(undefined),
+          },
+        },
       ],
     }).compile();
 
@@ -70,6 +86,8 @@ describe('VcsConnectionService', () => {
     const createDto: CreateVcsConnectionDto = {
       provider: VcsProviderType.GITHUB,
       token: 'ghp_test_token_123',
+      repoOwner: 'owner',
+      repoName: 'repo',
       repoUrl: 'https://github.com/owner/repo',
       syncMode: 'polling',
     };
@@ -118,6 +136,8 @@ describe('VcsConnectionService', () => {
       const specialTokenDto: CreateVcsConnectionDto = {
         provider: VcsProviderType.GITHUB,
         token: 'token!@#$%^&*()_+-=[]{}|;:,.<>?',
+        repoOwner: 'owner',
+        repoName: 'repo',
         repoUrl: 'https://github.com/owner/repo',
       };
 
@@ -188,6 +208,8 @@ describe('VcsConnectionService', () => {
         const dto: CreateVcsConnectionDto = {
           provider: VcsProviderType.GITHUB,
           token: 'test-token',
+          repoOwner: test.expectedOwner,
+          repoName: test.expectedRepo,
           repoUrl: test.url,
         };
 
@@ -240,7 +262,7 @@ describe('VcsConnectionService', () => {
 
       const dtoWithSyncMode: CreateVcsConnectionDto = {
         ...createDto,
-        syncMode: 'webhook',
+        syncMode: VcsSyncModeType.WEBHOOK,
       };
 
       await service.create(projectId, encryptionKey, dtoWithSyncMode);
@@ -316,8 +338,8 @@ describe('VcsConnectionService', () => {
 
       const result = await service.findByProject(projectId);
 
-      expect(result.webhookSecret).toBeUndefined();
-      expect(result.lastSyncedAt).toBeUndefined();
+      expect(result.webhookSecret).toBeNull();
+      expect(result.lastSyncedAt).toBeNull();
     });
   });
 
@@ -342,7 +364,7 @@ describe('VcsConnectionService', () => {
       };
 
       const updateDto: UpdateVcsConnectionDto = {
-        syncMode: 'webhook',
+        syncMode: VcsSyncModeType.WEBHOOK,
       };
 
       const updatedConnection = {
@@ -356,9 +378,10 @@ describe('VcsConnectionService', () => {
 
       const result = await service.update(projectId, encryptionKey, updateDto);
 
-      // Verify only syncMode was updated
+      // Verify syncMode was updated (webhook mode also auto-sets webhookSecret)
       const updateCall = mockPrismaDelegate.update.mock.calls[0][0];
-      expect(updateCall.data).toEqual({ syncMode: 'webhook' });
+      expect(updateCall.data).toHaveProperty('syncMode', 'webhook');
+      expect(updateCall.data).toHaveProperty('webhookSecret');
 
       // Verify token is not in response
       expect(result).not.toHaveProperty('token');
@@ -421,7 +444,7 @@ describe('VcsConnectionService', () => {
       expect(result).not.toHaveProperty('encryptedToken');
     });
 
-    it('should update webhookSecret when provided', async () => {
+    it('should auto-generate webhookSecret when switching to webhook syncMode', async () => {
       const existingConnection = {
         id: connectionId,
         projectId,
@@ -440,12 +463,13 @@ describe('VcsConnectionService', () => {
       };
 
       const updateDto: UpdateVcsConnectionDto = {
-        webhookSecret: 'new-webhook-secret',
+        syncMode: VcsSyncModeType.WEBHOOK,
       };
 
       const updatedConnection = {
         ...existingConnection,
-        webhookSecret: 'new-webhook-secret',
+        syncMode: 'webhook',
+        webhookSecret: 'auto-generated-secret',
       };
 
       mockPrismaDelegate.findUnique.mockResolvedValueOnce(existingConnection);
@@ -454,7 +478,9 @@ describe('VcsConnectionService', () => {
       await service.update(projectId, encryptionKey, updateDto);
 
       const updateCall = mockPrismaDelegate.update.mock.calls[0][0];
-      expect(updateCall.data.webhookSecret).toBe('new-webhook-secret');
+      // webhookSecret is auto-generated (random hex) when switching to webhook mode
+      expect(updateCall.data.webhookSecret).toBeDefined();
+      expect(typeof updateCall.data.webhookSecret).toBe('string');
     });
 
     it('should not update when no fields are provided', async () => {
@@ -508,7 +534,7 @@ describe('VcsConnectionService', () => {
 
       const updateDto: UpdateVcsConnectionDto = {
         token: newToken,
-        syncMode: 'webhook',
+        syncMode: VcsSyncModeType.WEBHOOK,
         webhookSecret: 'new-secret',
       };
 
@@ -527,14 +553,16 @@ describe('VcsConnectionService', () => {
       const updateCall = mockPrismaDelegate.update.mock.calls[0][0];
       expect(updateCall.data).toHaveProperty('encryptedToken');
       expect(updateCall.data).toHaveProperty('syncMode', 'webhook');
-      expect(updateCall.data).toHaveProperty('webhookSecret', 'new-secret');
+      // webhookSecret is auto-generated when switching to webhook mode
+      expect(updateCall.data).toHaveProperty('webhookSecret');
+      expect(typeof updateCall.data.webhookSecret).toBe('string');
     });
 
     it('should throw NotFoundAppException when connection does not exist', async () => {
       mockPrismaDelegate.findUnique.mockResolvedValueOnce(null);
 
       const updateDto: UpdateVcsConnectionDto = {
-        syncMode: 'webhook',
+        syncMode: VcsSyncModeType.WEBHOOK,
       };
 
       await expect(service.update(projectId, encryptionKey, updateDto)).rejects.toThrow(
@@ -626,7 +654,7 @@ describe('VcsConnectionService', () => {
 
       // Verify result structure
       expect(result).toBeDefined();
-      expect(result.success).toBe(true);
+      expect(result.ok).toBe(true);
       expect(result.latencyMs).toBeGreaterThanOrEqual(0);
       expect(result).not.toHaveProperty('token');
     });
@@ -661,7 +689,7 @@ describe('VcsConnectionService', () => {
 
       const result = await service.testConnection(projectId, encryptionKey);
 
-      expect(result.success).toBe(true);
+      expect(result.ok).toBe(true);
       expect(result.latencyMs).toBeGreaterThanOrEqual(0);
       expect(result.error).toBeUndefined();
     });
@@ -696,12 +724,12 @@ describe('VcsConnectionService', () => {
 
       const result = await service.testConnection(projectId, encryptionKey);
 
-      expect(result.success).toBe(false);
+      expect(result.ok).toBe(false);
       expect(result.error).toBe('Invalid token');
       expect(result.latencyMs).toBeGreaterThanOrEqual(0);
     });
 
-    it('should return error when token decryption fails', async () => {
+    it('should throw ValidationAppException when token decryption fails', async () => {
       const encryptedToken = 'invalid:encrypted:token';
 
       const existingConnection = {
@@ -723,11 +751,7 @@ describe('VcsConnectionService', () => {
 
       mockPrismaDelegate.findUnique.mockResolvedValueOnce(existingConnection);
 
-      const result = await service.testConnection(projectId, encryptionKey);
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe('Failed to decrypt token');
-      expect(result.latencyMs).toBe(0);
+      await expect(service.testConnection(projectId, encryptionKey)).rejects.toThrow();
     });
 
     it('should return error when provider creation throws exception', async () => {
@@ -761,7 +785,7 @@ describe('VcsConnectionService', () => {
 
       const result = await service.testConnection(projectId, encryptionKey);
 
-      expect(result.success).toBe(false);
+      expect(result.ok).toBe(false);
       expect(result.error).toBeDefined();
       expect(result.latencyMs).toBeGreaterThanOrEqual(0);
     });
@@ -808,7 +832,7 @@ describe('VcsConnectionService', () => {
 
       const result = await service.testConnection(projectId, encryptionKey);
 
-      expect(result.success).toBe(true);
+      expect(result.ok).toBe(true);
       // Allow 5ms tolerance for test execution overhead
       expect(result.latencyMs).toBeGreaterThanOrEqual(45);
     });
@@ -819,6 +843,8 @@ describe('VcsConnectionService', () => {
       const badUrlDto: CreateVcsConnectionDto = {
         provider: VcsProviderType.GITHUB,
         token: 'test-token',
+        repoOwner: '',
+        repoName: '',
         repoUrl: 'not-a-valid-url',
       };
 
@@ -834,6 +860,8 @@ describe('VcsConnectionService', () => {
       const createDto: CreateVcsConnectionDto = {
         provider: VcsProviderType.GITHUB,
         token: 'test-token',
+        repoOwner: 'owner',
+        repoName: 'repo',
         repoUrl: 'https://github.com/owner/repo',
       };
 

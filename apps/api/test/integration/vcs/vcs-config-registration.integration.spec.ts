@@ -118,19 +118,19 @@ describe('VCS Config Registration (Integration)', () => {
       }
     });
 
-    it('should use default value (3600000ms/1 hour) when env var not set', () => {
+    it('should use default value (600000ms/10 min) when env var not set', () => {
       delete process.env['VCS_DEFAULT_POLLING_INTERVAL_MS'];
       const vcsConfig = configService.get('vcs');
 
       expect(typeof vcsConfig.defaultPollingIntervalMs).toBe('number');
-      expect(vcsConfig.defaultPollingIntervalMs).toBe(3600000);
+      expect(vcsConfig.defaultPollingIntervalMs).toBe(600000);
     });
   });
 
   describe('vcsConfig.githubApiUrl injection', () => {
-    it('should read VCS_GITHUB_API_URL from environment', async () => {
+    it('should read GITHUB_API_URL from environment', async () => {
       const testUrl = 'https://github.enterprise.com/api/v3';
-      process.env['VCS_GITHUB_API_URL'] = testUrl;
+      process.env['GITHUB_API_URL'] = testUrl;
 
       try {
         const module = await Test.createTestingModule({
@@ -148,7 +148,7 @@ describe('VCS Config Registration (Integration)', () => {
 
         await module.close();
       } finally {
-        delete process.env['VCS_GITHUB_API_URL'];
+        delete process.env['GITHUB_API_URL'];
       }
     });
 

@@ -14,6 +14,7 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { VcsSyncService, SyncIssueResult } from '../../../src/vcs/vcs-sync.service';
+import { VCS_REPOSITORY } from '../../../src/vcs/domain/vcs.repository';
 import { PrismaVcsRepository } from '../../../src/vcs/prisma-vcs.repository';
 import { VcsIssue } from '../../../src/vcs/types';
 
@@ -56,7 +57,7 @@ describe('VcsSyncService.syncIssue', () => {
       providers: [
         VcsSyncService,
         {
-          provide: PrismaVcsRepository,
+          provide: VCS_REPOSITORY,
           useValue: {
             findExistingTicketByExternalId: jest.fn(),
             createTicketFromIssue: jest.fn(),
@@ -69,7 +70,7 @@ describe('VcsSyncService.syncIssue', () => {
     }).compile();
 
     service = module.get<VcsSyncService>(VcsSyncService);
-    vcsRepo = module.get(PrismaVcsRepository);
+    vcsRepo = module.get(VCS_REPOSITORY);
   });
 
   afterEach(async () => {

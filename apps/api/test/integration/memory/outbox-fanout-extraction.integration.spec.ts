@@ -3,6 +3,7 @@ import { OutboxFanOutRegistry } from '../../../src/outbox/outbox-fan-out-registr
 import { ExtractionService } from '../../../src/memory/extraction.service';
 import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-item.repository';
 import { PrismaService } from '@nathapp/nestjs-prisma';
+import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { MemoryKind } from '../../../src/common/enums';
 
 describe('AC8: OutboxFanOutRegistry dispatches to ExtractionService', () => {
@@ -34,6 +35,7 @@ describe('AC8: OutboxFanOutRegistry dispatches to ExtractionService', () => {
         ExtractionService,
         PrismaMemoryItemRepository,
         { provide: PrismaService, useValue: mockPrismaService },
+        { provide: TRANSACTION_MANAGER, useValue: { transaction: jest.fn() } },
       ],
     }).compile();
 
