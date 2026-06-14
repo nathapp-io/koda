@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { OutboxService } from './outbox.service';
 import { OutboxFanOutRegistry } from './outbox-fan-out-registry';
@@ -12,7 +12,10 @@ import { PrismaOutboxRepository } from './prisma-outbox.repository';
 import { OUTBOX_REPOSITORY } from './domain/outbox-event.domain';
 
 @Module({
-  imports: [PrismaModule, ScheduleModule, MemoryModule, EntityGraphModule, CodeIntelModule],
+  // CodeIntelModule participates in a module cycle
+  // (OutboxModule -> CodeIntelModule -> RagModule -> OutboxModule); use forwardRef so
+  // the reference resolves lazily instead of landing in the ESM temporal dead zone.
+  imports: [PrismaModule, ScheduleModule, MemoryModule, EntityGraphModule, forwardRef(() => CodeIntelModule)],
   controllers: [AdminController],
   providers: [
     PrismaOutboxRepository,

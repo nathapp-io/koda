@@ -125,7 +125,9 @@ class EntityStoreWarmup implements OnModuleInit {
 }
 
 @Module({
-  imports: [ScheduleModule.forRoot(), OutboxModule, PrismaModule, forwardRef(() => RetrievalModule)],
+  // OutboxModule closes the cycle OutboxModule -> CodeIntelModule -> RagModule -> OutboxModule;
+  // use forwardRef so the reference resolves lazily instead of hitting the ESM temporal dead zone.
+  imports: [ScheduleModule.forRoot(), forwardRef(() => OutboxModule), PrismaModule, forwardRef(() => RetrievalModule)],
   controllers: [RagController],
   providers: [
     RagService,

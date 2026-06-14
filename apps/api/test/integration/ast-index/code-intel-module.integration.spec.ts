@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import { Module, Global } from '@nestjs/common';
 import { CodeIntelModule } from '../../../src/code-intel/code-intel.module';
 import { SymbolStore } from '../../../src/code-intel/symbol-store';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 
@@ -11,13 +12,17 @@ const mockTxManager = {
   isInTransaction: jest.fn(() => false),
 };
 
+// Stubs the globally-provided collaborators the real app exposes (PrismaService,
+// TRANSACTION_MANAGER, ConfigService) so CodeIntelModule — which pulls in RagModule
+// through the module cycle — can compile in isolation.
 @Global()
 @Module({
   providers: [
     { provide: PrismaService, useValue: { client: {} } },
     { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
+    { provide: ConfigService, useValue: { get: (): undefined => undefined } },
   ],
-  exports: [PrismaService, TRANSACTION_MANAGER],
+  exports: [PrismaService, TRANSACTION_MANAGER, ConfigService],
 })
 class StubPrismaModule {}
 
