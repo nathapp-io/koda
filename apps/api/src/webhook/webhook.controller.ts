@@ -48,7 +48,7 @@ export class WebhookController {
     return JsonResponse.Ok(data);
   }
 
-  @Delete('api/webhooks/:id')
+  @Delete('webhooks/:id')
   @HttpCode(204)
   @RequiredPermission('ADMIN')
   @ApiOperation({ summary: 'Remove a webhook' })
