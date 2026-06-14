@@ -16,22 +16,19 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { createHmac, timingSafeEqual, randomBytes } from 'crypto';
-import { VcsController } from '../../../src/vcs/vcs.controller';
+import { VcsWebhookController } from '../../../src/vcs/vcs-webhook.controller';
 import { VcsConnectionService } from '../../../src/vcs/vcs-connection.service';
 import { VcsSyncService } from '../../../src/vcs/vcs-sync.service';
-import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
 import { VcsWebhookService, GitHubWebhookPayload } from '../../../src/vcs/vcs-webhook.service';
 import { ProjectsService } from '../../../src/projects/projects.service';
-import { ConfigService } from '@nestjs/config';
 import { AuthException, NotFoundAppException } from '@nathapp/nestjs-common';
 
 describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
-  let controller: VcsController;
+  let controller: VcsWebhookController;
   let webhookService: jest.Mocked<VcsWebhookService>;
   let connectionService: jest.Mocked<VcsConnectionService>;
   let syncService: jest.Mocked<VcsSyncService>;
   let projectsService: jest.Mocked<ProjectsService>;
-  let configService: jest.Mocked<ConfigService>;
   let module: TestingModule;
 
   // Helper to update default mocks after each test
@@ -45,8 +42,8 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
     syncService?.syncIssue.mockClear();
     // Reset to default behaviors
     projectsService.findBySlug.mockResolvedValue(mockProject);
-    connectionService.findByProject.mockResolvedValue(mockVcsConnection);
-    connectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
+    connectionService.findByProject.mockResolvedValue(mockVcsConnection as any);
+    connectionService.getFullByProject.mockResolvedValue(mockVcsConnection as any);
   }
 
   const mockProject = {
@@ -57,6 +54,13 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
     autoIndexOnClose: true,
     createdAt: new Date(),
     updatedAt: new Date(),
+    description: null,
+    gitRemoteUrl: null,
+    deletedAt: null,
+    ciWebhookToken: null,
+    autoAssign: null,
+    graphifyEnabled: false,
+    graphifyLastImportedAt: null,
   };
 
   const mockVcsConnection = {
@@ -127,11 +131,6 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
       filterByAllowedAuthors: jest.fn((issues) => issues),
     };
 
-    const mockPrSyncServiceInstance = {
-      syncPrStatus: jest.fn(),
-      handleMergedPrAutoTransition: jest.fn(),
-    };
-
     const mockWebhookServiceInstance = {
       verifySignature: jest.fn(),
       handleWebhook: jest.fn(),
@@ -141,31 +140,21 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
       findBySlug: jest.fn().mockResolvedValue(mockProject),
     };
 
-    const mockConfigServiceInstance = {
-      get: jest.fn((key: string) => {
-        if (key === 'vcs.encryptionKey') return 'test-encryption-key';
-        return undefined;
-      }),
-    };
-
     module = await Test.createTestingModule({
-      controllers: [VcsController],
+      controllers: [VcsWebhookController],
       providers: [
         { provide: VcsConnectionService, useValue: mockVcsServiceInstance },
         { provide: VcsSyncService, useValue: mockSyncServiceInstance },
-        { provide: VcsPrSyncService, useValue: mockPrSyncServiceInstance },
         { provide: VcsWebhookService, useValue: mockWebhookServiceInstance },
         { provide: ProjectsService, useValue: mockProjectsServiceInstance },
-        { provide: ConfigService, useValue: mockConfigServiceInstance },
       ],
     }).compile();
 
-    controller = module.get<VcsController>(VcsController);
+    controller = module.get<VcsWebhookController>(VcsWebhookController);
     connectionService = module.get(VcsConnectionService) as jest.Mocked<VcsConnectionService>;
     syncService = module.get(VcsSyncService) as jest.Mocked<VcsSyncService>;
     webhookService = module.get(VcsWebhookService) as jest.Mocked<VcsWebhookService>;
     projectsService = module.get(ProjectsService) as jest.Mocked<ProjectsService>;
-    configService = module.get(ConfigService) as jest.Mocked<ConfigService>;
   });
 
   // Reset all mocks before each test
@@ -534,7 +523,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
         allowedAuthors: JSON.stringify([]),
       };
 
-      connectionService.findByProject.mockResolvedValue(connectionWithNoAuthors);
+      connectionService.findByProject.mockResolvedValue(connectionWithNoAuthors as any);
 
       const payload = createGitHubPayload({ action: 'opened' });
       const payloadString = JSON.stringify(payload);
@@ -693,9 +682,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
       const payload = createGitHubPayload({ action: 'opened' });
       const validSignature = calculateSignature(JSON.stringify(payload));
 
-      connectionService.findByProject.mockRejectedValue(new NotFoundAppException('No VCS connection'));
-
-      webhookService.verifySignature.mockReturnValue(true);
+      connectionService.getFullByProject.mockRejectedValue(new NotFoundAppException('No VCS connection'));
 
       await expect(controller.handleWebhook(mockProject.slug, validSignature, payload)).rejects.toThrow(
         NotFoundAppException,
@@ -891,7 +878,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
 
       // Verify complete flow was executed
       expect(projectsService.findBySlug).toHaveBeenCalledWith(mockProject.slug);
-      expect(connectionService.findByProject).toHaveBeenCalledWith(mockProject.id);
+      expect(connectionService.getFullByProject).toHaveBeenCalledWith(mockProject.id);
       expect(webhookService.verifySignature).toHaveBeenCalledWith(
         payloadString,
         validSignature,

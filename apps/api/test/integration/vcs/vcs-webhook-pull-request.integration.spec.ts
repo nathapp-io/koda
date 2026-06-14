@@ -15,7 +15,7 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { createHmac, randomBytes } from 'crypto';
-import { VcsController } from '../../../src/vcs/vcs.controller';
+import { VcsWebhookController } from '../../../src/vcs/vcs-webhook.controller';
 import { VcsConnectionService } from '../../../src/vcs/vcs-connection.service';
 import { VcsSyncService } from '../../../src/vcs/vcs-sync.service';
 import { VcsWebhookService } from '../../../src/vcs/vcs-webhook.service';
@@ -25,7 +25,7 @@ import { ConfigService } from '@nestjs/config';
 import { AuthException } from '@nathapp/nestjs-common';
 
 describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', () => {
-  let controller: VcsController;
+  let controller: VcsWebhookController;
   let webhookService: VcsWebhookService;
   let connectionService: VcsConnectionService;
   let syncService: VcsSyncService;
@@ -121,7 +121,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
     mockFindByProject = jest.fn().mockResolvedValue(mockVcsConnection);
 
     module = await Test.createTestingModule({
-      controllers: [VcsController],
+      controllers: [VcsWebhookController],
       providers: [
         {
           provide: VcsConnectionService,
@@ -168,7 +168,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
       ],
     }).compile();
 
-    controller = module.get<VcsController>(VcsController);
+    controller = module.get<VcsWebhookController>(VcsWebhookController);
     webhookService = module.get<VcsWebhookService>(VcsWebhookService);
     connectionService = module.get<VcsConnectionService>(VcsConnectionService);
     syncService = module.get<VcsSyncService>(VcsSyncService);

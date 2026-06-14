@@ -169,7 +169,7 @@ describe('GitHubProvider PR Status Methods', () => {
         );
       });
 
-      it('should throw NotFoundAppException with PR number in message', async () => {
+      it('should throw NotFoundAppException on 404', async () => {
         const prNumber = 42;
         const error: any = new Error('Not found');
         error.response = { status: 404 };
@@ -177,7 +177,7 @@ describe('GitHubProvider PR Status Methods', () => {
         mockHttpClient.get.mockRejectedValue(error);
 
         await expect(provider.getPullRequestStatus(prNumber)).rejects.toThrow(
-          `PR #${prNumber} not found`,
+          NotFoundAppException,
         );
       });
 

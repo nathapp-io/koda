@@ -3,6 +3,7 @@ import { ProjectsController } from '../../../src/projects/projects.controller';
 import { ProjectsService } from '../../../src/projects/projects.service';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-item.repository';
+import { ImpactAnalysisService } from '../../../src/code-intel/impact-analysis.service';
 import { ContextBuilderService } from '../../../src/memory/context-builder.service';
 import { TimelineService } from '../../../src/memory/timeline.service';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
@@ -51,6 +52,7 @@ describe('ProjectMemoryController', () => {
         { provide: ProjectsService, useValue: mockProjectsService },
         { provide: PrismaMemoryItemRepository, useValue: mockMemoryItemRepository },
         { provide: PrismaService, useValue: mockPrismaService },
+        { provide: ImpactAnalysisService, useValue: { getChangeImpact: jest.fn() } },
       ],
     }).compile();
 
@@ -62,7 +64,17 @@ describe('ProjectMemoryController', () => {
   });
 
   describe('getProjectMemory', () => {
-    const mockCurrentUser = { extra: { sub: 'user-123', role: 'ADMIN' } };
+    const mockCurrentUser: import('../../../src/auth/principal/koda-principal.types').UserPrincipal = {
+    actorType: 'user',
+    id: 'user-123',
+    sub: 'user-123',
+    role: 'ADMIN',
+    email: 'test@example.com',
+    name: undefined,
+    blacklisted: false,
+    revoked: false,
+    authorities: [],
+  };
 
     beforeEach(() => {
       mockProjectsService.findBySlug.mockResolvedValue({ id: 'project-123', slug: 'koda-test', key: 'KT', name: 'Koda Test', deletedAt: null });
@@ -104,7 +116,7 @@ describe('ProjectMemoryController', () => {
         total: 2,
       });
 
-      const result = await controller.getProjectMemory('koda-test', {}, mockCurrentUser, {});
+      const result = await controller.getProjectMemory('koda-test', {}, mockCurrentUser);
 
       expect(mockMemoryItemRepository.findByProjectMemory).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -140,7 +152,7 @@ describe('ProjectMemoryController', () => {
         total: 1,
       });
 
-      const result = await controller.getProjectMemory('koda-test', { kind: MemoryKind.FACT }, mockCurrentUser, {});
+      const result = await controller.getProjectMemory('koda-test', { kind: MemoryKind.FACT }, mockCurrentUser);
 
       expect(mockMemoryItemRepository.findByProjectMemory).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -178,7 +190,7 @@ describe('ProjectMemoryController', () => {
         total: 1,
       });
 
-      const result = await controller.getProjectMemory('koda-test', { subjects: 'ticket:123' }, mockCurrentUser, {});
+      const result = await controller.getProjectMemory('koda-test', { subjects: 'ticket:123' }, mockCurrentUser);
 
       expect(mockMemoryItemRepository.findByProjectMemory).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -230,7 +242,7 @@ describe('ProjectMemoryController', () => {
         total: 2,
       });
 
-      const result = await controller.getProjectMemory('koda-test', { status: 'superseded' }, mockCurrentUser, {});
+      const result = await controller.getProjectMemory('koda-test', { status: 'superseded' }, mockCurrentUser);
 
       const data = result.data as { items: { supersededBy?: string }[] };
       expect(data).toHaveProperty('items');
@@ -245,7 +257,7 @@ describe('ProjectMemoryController', () => {
         total: 0,
       });
 
-      await controller.getProjectMemory('other-project', {}, mockCurrentUser, {});
+      await controller.getProjectMemory('other-project', {}, mockCurrentUser);
 
       expect(mockMemoryItemRepository.findByProjectMemory).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -262,7 +274,7 @@ describe('ProjectMemoryController', () => {
     it('returns 404 when project does not exist', async () => {
       mockProjectsService.findBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
 
-      await expect(controller.getProjectMemory('nonexistent', {}, mockCurrentUser, {})).rejects.toThrow(NotFoundAppException);
+      await expect(controller.getProjectMemory('nonexistent', {}, mockCurrentUser)).rejects.toThrow(NotFoundAppException);
     });
   });
 
@@ -320,19 +332,9 @@ describe('ProjectMemoryController', () => {
     });
 
     it('AC7: Results ordered by confidence DESC, updatedAt DESC, createdAt DESC', async () => {
+      // Mock returns items pre-sorted as the real PrismaMemoryItemRepository would via DB orderBy
+      // Order: confidence DESC, updatedAt DESC → ticket:003 (0.9, Jan 8) > ticket:002 (0.9, Jan 5) > ticket:001 (0.5)
       const mockMemories = [
-        {
-          id: 'mem-1',
-          projectId: 'project-123',
-          kind: 'FACT',
-          subject: 'ticket:001',
-          predicate: 'status',
-          object: 'CLOSED',
-          status: 'active',
-          confidence: 0.5,
-          createdAt: new Date('2024-01-01'),
-          updatedAt: new Date('2024-01-10'),
-        },
         {
           id: 'mem-3',
           projectId: 'project-123',
@@ -356,6 +358,18 @@ describe('ProjectMemoryController', () => {
           confidence: 0.9,
           createdAt: new Date('2024-01-02'),
           updatedAt: new Date('2024-01-05'),
+        },
+        {
+          id: 'mem-1',
+          projectId: 'project-123',
+          kind: 'FACT',
+          subject: 'ticket:001',
+          predicate: 'status',
+          object: 'CLOSED',
+          status: 'active',
+          confidence: 0.5,
+          createdAt: new Date('2024-01-01'),
+          updatedAt: new Date('2024-01-10'),
         },
       ];
 

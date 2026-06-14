@@ -172,7 +172,7 @@ describe('ExtractionService', () => {
 
   describe('AC5: extractFromEvent with incomplete payload', () => {
     it('AC5: returns empty array and logs warning when ticketId is missing', () => {
-      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const loggerSpy = jest.spyOn(service['logger' as any], 'warn').mockImplementation(() => {});
       const event: TicketEvent = {
         type: 'ticket_event',
         id: 'event-incomplete',
@@ -187,8 +187,8 @@ describe('ExtractionService', () => {
       const result = service.extractFromEvent(event as unknown as TicketEvent | AgentEvent | DecisionEvent);
 
       expect(result).toHaveLength(0);
-      expect(consoleSpy).toHaveBeenCalled();
-      consoleSpy.mockRestore();
+      expect(loggerSpy).toHaveBeenCalled();
+      loggerSpy.mockRestore();
     });
 
     it('AC5: returns empty array when projectId is missing from agent_event with decision_made', () => {
@@ -275,8 +275,7 @@ describe('ExtractionService', () => {
       };
 
       const result = await service.recordDecision(
-        { projectId: 'project-123', agentId: 'agent-456', decision: 'use_cache_first' },
-        { id: 'decision-event-789' },
+        { projectId: 'project-123', actorId: 'agent-456', topic: 'decision', decision: 'use_cache_first' },
         mockRepository as any,
       );
 
@@ -284,7 +283,7 @@ describe('ExtractionService', () => {
       expect(result).toHaveProperty('memoryId');
       expect(result.canonicalId).toBeDefined();
       expect(result.memoryId).toBeDefined();
-      expect(mockRepository.upsert).toHaveBeenCalledTimes(2);
+      expect(mockRepository.upsert).toHaveBeenCalledTimes(1);
     });
 
     it('AC6: recordDecision upsert includes projectId, kind=DECISION, subject, predicate, object', async () => {
@@ -294,8 +293,7 @@ describe('ExtractionService', () => {
       };
 
       await service.recordDecision(
-        { projectId: 'project-123', agentId: 'agent-456', decision: 'use_cache_first' },
-        { id: 'decision-event-789' },
+        { projectId: 'project-123', actorId: 'agent-456', topic: 'decision', decision: 'use_cache_first' },
         mockRepository as any,
       );
 
@@ -306,36 +304,33 @@ describe('ExtractionService', () => {
           subject: 'agent:agent-456',
           predicate: 'decision',
           object: 'use_cache_first',
-          status: 'active',
+          ownerId: 'agent-456',
+          confidence: 1.0,
         }),
       );
     });
   });
 
   describe('AC7: recordDecision with existing active decision', () => {
-    it('AC7: marks old decision as superseded with supersededBy and status=superseded', async () => {
+    it('AC7: marks old decision as superseded via updateDirect when one exists', async () => {
       const mockRepository = {
         upsert: jest.fn().mockResolvedValue({ id: 'new-memory-123' }),
-        findActive: jest.fn().mockResolvedValue(null),
+        updateDirect: jest.fn().mockResolvedValue(undefined),
+        findActive: jest.fn().mockResolvedValue({ id: 'old-decision-456' }),
       };
-      const existingDecision = { id: 'old-decision-456', status: 'active' };
-
       await service.recordDecision(
-        { projectId: 'project-123', agentId: 'agent-456', decision: 'new_decision' },
-        { id: 'new-decision-event-789' },
+        { projectId: 'project-123', actorId: 'agent-456', topic: 'decision', decision: 'new_decision' },
         mockRepository as any,
-        existingDecision,
       );
 
-      expect(mockRepository.upsert).toHaveBeenCalledTimes(3);
-      expect(mockRepository.upsert).toHaveBeenNthCalledWith(
-        1,
+      expect(mockRepository.updateDirect).toHaveBeenCalledTimes(1);
+      expect(mockRepository.updateDirect).toHaveBeenCalledWith(
+        'old-decision-456',
         expect.objectContaining({
-          id: 'old-decision-456',
           status: 'superseded',
-          supersededBy: expect.any(String),
         }),
       );
+      expect(mockRepository.upsert).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -347,8 +342,7 @@ describe('ExtractionService', () => {
       };
 
       await service.recordDecision(
-        { projectId: 'project-123', agentId: 'agent-456', decision: 'use_cache_first' },
-        { id: 'decision-event-789' },
+        { projectId: 'project-123', actorId: 'agent-456', topic: 'decision', decision: 'use_cache_first' },
         mockRepository as any,
       );
 

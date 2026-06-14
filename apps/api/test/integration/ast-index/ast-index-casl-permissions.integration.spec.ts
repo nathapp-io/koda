@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { KodaCaslAbilityFactory } from '../../src/auth/casl/koda-casl-ability.factory';
-import type { KodaPrincipal, UserPrincipal, AgentPrincipal } from '../../src/auth/principal/koda-principal.types';
+import { KodaCaslAbilityFactory } from '../../../src/auth/casl/koda-casl-ability.factory';
+import type { KodaPrincipal, UserPrincipal, AgentPrincipal } from '../../../src/auth/principal/koda-principal.types';
 
 describe('KodaCaslAbilityFactory - AstIndex permissions', () => {
   let factory: KodaCaslAbilityFactory;

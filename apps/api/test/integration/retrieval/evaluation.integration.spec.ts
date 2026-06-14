@@ -113,14 +113,8 @@ describe('EvaluationService integration with real HybridRetrieverService', () =>
     evaluationService = module.get<EvaluationService>(EvaluationService);
 
     (hybridService as unknown as { embeddingService: FakeEmbeddingService }).embeddingService = fakeEmbeddingService;
-  });
 
-  afterAll(async () => {
-    if (module) await module.close();
-    if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  beforeEach(async () => {
+    // Seed documents once after module setup
     await hybridService.indexDocument(projectId, {
       source: 'ticket',
       sourceId: 'ticket-001',
@@ -155,6 +149,11 @@ describe('EvaluationService integration with real HybridRetrieverService', () =>
       content: 'Deployment guide: Kubernetes configuration and best practices',
       metadata: { title: 'Deployment Guide' },
     });
+  });
+
+  afterAll(async () => {
+    if (module) await module.close();
+    if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   describe('AC1 & AC3: runQueries calls HybridRetrieverService and returns per-query results', () => {

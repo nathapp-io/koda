@@ -31,6 +31,7 @@ jest.mock('../../../src/vcs/factory', () => ({
 
 // Import the service - will fail to compile if service doesn't exist yet
 import { VcsPrSyncService, SyncPrStatusResult } from '../../../src/vcs/vcs-pr-sync.service';
+import { VCS_REPOSITORY } from '../../../src/vcs/domain/vcs.repository';
 import { PrismaVcsRepository } from '../../../src/vcs/prisma-vcs.repository';
 
 describe('VcsPrSyncService.syncPrStatus', () => {
@@ -131,7 +132,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
       providers: [
         VcsPrSyncService,
         {
-          provide: PrismaVcsRepository,
+          provide: VCS_REPOSITORY,
           useValue: {
             findExistingTicketByExternalId: jest.fn(),
             createTicketFromIssue: jest.fn(),
@@ -144,7 +145,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
     }).compile();
 
     service = module.get<VcsPrSyncService>(VcsPrSyncService);
-    vcsRepo = module.get(PrismaVcsRepository);
+    vcsRepo = module.get(VCS_REPOSITORY);
   });
 
   afterEach(async () => {

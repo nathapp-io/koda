@@ -9,6 +9,8 @@ import { UpdateProjectDto } from '../../../src/projects/dto/update-project.dto';
 import type { IndexDocumentInput } from '../../../src/rag/rag.service';
 import { RagController } from '../../../src/rag/rag.controller';
 import { RagService } from '../../../src/rag/rag.service';
+import { HybridRetrieverService } from '../../../src/rag/hybrid-retriever.service';
+import { EvaluationService } from '../../../src/retrieval/evaluation.service';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { ImportGraphifyDto, GraphifyNodeDto, GraphifyLinkDto } from '../../../src/rag/dto/import-graphify.dto';
@@ -498,7 +500,17 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
       { source: 'n1', target: 'n2', relation: 'depends_on' },
     ];
 
-    const adminUser = { extra: { role: 'ADMIN' } };
+    const adminUser: import('../../../src/auth/principal/koda-principal.types').UserPrincipal = {
+      actorType: 'user',
+      id: 'user-admin-001',
+      sub: 'user-admin-001',
+      role: 'ADMIN',
+      email: 'admin@test.com',
+      name: undefined,
+      blacklisted: false,
+      revoked: false,
+      authorities: [],
+    };
 
     beforeEach(async () => {
       mockTxClient = {
@@ -533,6 +545,8 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
         providers: [
           { provide: RagService, useValue: mockRagService },
           { provide: PrismaService, useValue: mockPrismaService },
+          { provide: HybridRetrieverService, useValue: { search: jest.fn(), indexDocument: jest.fn() } },
+          { provide: EvaluationService, useValue: { evaluate: jest.fn() } },
         ],
       }).compile();
 
@@ -637,7 +651,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
       const dto: ImportGraphifyDto = { nodes: sampleNodes };
 
       await expect(
-        controller.importGraphify('test-project', dto, { extra: { role: 'MEMBER' } }),
+        controller.importGraphify('test-project', dto, { extra: { role: 'MEMBER' } } as unknown as import('../../../src/auth/principal/koda-principal.types').KodaPrincipal),
       ).rejects.toThrow();
     });
 
@@ -645,7 +659,7 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
       const dto: ImportGraphifyDto = { nodes: sampleNodes };
 
       await expect(
-        controller.importGraphify('test-project', dto, null),
+        controller.importGraphify('test-project', dto, null as unknown as import('../../../src/auth/principal/koda-principal.types').KodaPrincipal),
       ).rejects.toThrow();
     });
 

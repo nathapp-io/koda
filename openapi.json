@@ -2402,6 +2402,7 @@
             "bearer": []
           }
         ],
+        "summary": "Create a VCS connection for a project",
         "tags": [
           "vcs"
         ]
@@ -2435,6 +2436,7 @@
             "bearer": []
           }
         ],
+        "summary": "Get VCS connection for a project",
         "tags": [
           "vcs"
         ]
@@ -2478,6 +2480,7 @@
             "bearer": []
           }
         ],
+        "summary": "Update VCS connection for a project",
         "tags": [
           "vcs"
         ]
@@ -2504,6 +2507,7 @@
             "bearer": []
           }
         ],
+        "summary": "Delete VCS connection for a project",
         "tags": [
           "vcs"
         ]
@@ -2539,6 +2543,7 @@
             "bearer": []
           }
         ],
+        "summary": "Test the VCS connection for a project",
         "tags": [
           "vcs"
         ]
@@ -3375,6 +3380,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "x-ci-signature",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -3444,8 +3457,9 @@
           },
           "password": {
             "type": "string",
-            "minLength": 8,
-            "example": "password123"
+            "minLength": 12,
+            "pattern": "/^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z\\d]).+$/",
+            "example": "StrongPass123!"
           }
         },
         "required": [
@@ -3516,7 +3530,7 @@
           },
           "password": {
             "type": "string",
-            "example": "password123"
+            "example": "Password123!"
           }
         },
         "required": [
@@ -3899,6 +3913,7 @@
           },
           "ciWebhookToken": {
             "type": "string",
+            "minLength": 32,
             "description": "CI webhook token for authentication",
             "example": "ci_webhook_token_123"
           },
@@ -4323,7 +4338,8 @@
             "format": "uri"
           },
           "secret": {
-            "type": "string"
+            "type": "string",
+            "minLength": 32
           },
           "events": {
             "type": "array",
@@ -4469,7 +4485,8 @@
             "minimum": 60000
           },
           "webhookSecret": {
-            "type": "string"
+            "type": "string",
+            "minLength": 32
           }
         }
       },

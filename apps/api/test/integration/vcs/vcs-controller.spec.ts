@@ -28,6 +28,7 @@ import { ProjectsService } from '../../../src/projects/projects.service';
 import { ConfigService } from '@nestjs/config';
 import { CreateVcsConnectionDto, VcsProviderType } from '../../../src/vcs/dto/create-vcs-connection.dto';
 import { UpdateVcsConnectionDto } from '../../../src/vcs/dto/update-vcs-connection.dto';
+import { VcsSyncModeType } from '../../../src/vcs/dto/create-vcs-connection.dto';
 import { VcsConnectionResponseDto } from '../../../src/vcs/dto/vcs-connection-response.dto';
 import { TestConnectionResultDto } from '../../../src/vcs/dto/test-connection-result.dto';
 import { HttpException, HttpStatus } from '@nestjs/common';
@@ -52,13 +53,13 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
     repoOwner: 'owner',
     repoName: 'repo',
     syncMode: 'polling',
-    allowedAuthors: '[]',
+    allowedAuthors: [],
     pollingIntervalMs: 3600000,
-    webhookSecret: undefined,
-    lastSyncedAt: undefined,
+    webhookSecret: null,
+    lastSyncedAt: null,
     isActive: true,
-    createdAt: new Date(),
-    updatedAt: new Date(),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
 
   beforeEach(async () => {
@@ -114,7 +115,8 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
       const createDto: CreateVcsConnectionDto = {
         provider: VcsProviderType.GITHUB,
         token: 'ghp_test_token_123456',
-        repoUrl: 'https://github.com/owner/repo',
+        repoOwner: 'owner',
+        repoName: 'repo',
         syncMode: 'polling',
       };
 
@@ -136,7 +138,8 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
       const createDto: CreateVcsConnectionDto = {
         provider: VcsProviderType.GITHUB,
         token: 'ghp_test_token',
-        repoUrl: 'https://github.com/owner/repo',
+        repoOwner: 'owner',
+        repoName: 'repo',
       };
 
       vcsService.create.mockRejectedValue(new HttpException('VCS connection already exists', HttpStatus.CONFLICT));
@@ -155,7 +158,8 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
       const createDto: CreateVcsConnectionDto = {
         provider: VcsProviderType.GITHUB,
         token: 'ghp_test_token',
-        repoUrl: 'https://github.com/owner/repo',
+        repoOwner: 'owner',
+        repoName: 'repo',
       };
 
       projectsService.findBySlug.mockRejectedValue(new NotFoundAppException('Project not found', 'project_not_found'));
@@ -195,7 +199,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
   describe('PATCH /projects/:slug/vcs (updateConnection)', () => {
     it('AC6: returns 200 with updated VcsConnectionResponseDto when updating syncMode', async () => {
-      const updateDto: UpdateVcsConnectionDto = { syncMode: 'webhook' };
+      const updateDto: UpdateVcsConnectionDto = { syncMode: VcsSyncModeType.WEBHOOK };
       const updatedConnection = { ...mockVcsConnection, syncMode: 'webhook' };
 
       vcsService.update.mockResolvedValue(updatedConnection);
@@ -233,7 +237,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
     });
 
     it('returns 404 when no connection exists', async () => {
-      const updateDto: UpdateVcsConnectionDto = { syncMode: 'webhook' };
+      const updateDto: UpdateVcsConnectionDto = { syncMode: VcsSyncModeType.WEBHOOK };
 
       vcsService.update.mockRejectedValue(new NotFoundAppException('No connection', 'vcs_not_found'));
 
@@ -376,7 +380,8 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
       const createDto: CreateVcsConnectionDto = {
         provider: VcsProviderType.GITHUB,
         token: 'test',
-        repoUrl: 'https://github.com/owner/repo',
+        repoOwner: 'owner',
+        repoName: 'repo',
       };
 
       projectsService.findBySlug.mockRejectedValue(new NotFoundAppException('Project not found'));
@@ -388,7 +393,8 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
       const createDto: CreateVcsConnectionDto = {
         provider: VcsProviderType.GITHUB,
         token: 'test',
-        repoUrl: 'https://github.com/owner/repo',
+        repoOwner: 'owner',
+        repoName: 'repo',
       };
 
       vcsService.create.mockRejectedValue(new HttpException('Connection already exists', HttpStatus.CONFLICT));
@@ -425,7 +431,8 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
       const createDto: CreateVcsConnectionDto = {
         provider: VcsProviderType.GITHUB,
         token: 'test',
-        repoUrl: 'https://github.com/owner/repo',
+        repoOwner: 'owner',
+        repoName: 'repo',
       };
 
       vcsService.create.mockResolvedValue(mockVcsConnection);
@@ -442,7 +449,8 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
       const createDto: CreateVcsConnectionDto = {
         provider: VcsProviderType.GITHUB,
         token: 'test',
-        repoUrl: 'https://github.com/owner/repo',
+        repoOwner: 'owner',
+        repoName: 'repo',
       };
 
       await controller.createConnection(projectSlug, createDto);
@@ -455,9 +463,9 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
       const createDto: CreateVcsConnectionDto = {
         provider: VcsProviderType.GITHUB,
         token: 'ghp_abc123',
-        repoUrl: 'https://github.com/test/repo',
+        repoOwner: 'test',
+        repoName: 'repo',
         syncMode: 'webhook',
-        webhookSecret: 'secret-value',
       };
 
       vcsService.create.mockResolvedValue(mockVcsConnection);
@@ -470,7 +478,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
     it('passes correct DTO to service on update', async () => {
       const updateDto: UpdateVcsConnectionDto = {
         token: 'new-token',
-        syncMode: 'webhook',
+        syncMode: VcsSyncModeType.WEBHOOK,
       };
 
       vcsService.update.mockResolvedValue(mockVcsConnection);

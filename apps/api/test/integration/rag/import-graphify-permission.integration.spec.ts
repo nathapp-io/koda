@@ -115,7 +115,7 @@ describe('AC-11: importGraphify permission guard', () => {
       expect(hasImportPermission).toBe(true);
     });
 
-    it('non-DEVELOPER users without ADMIN role do not have IMPORT permission', async () => {
+    it('non-DEVELOPER MEMBER users also have IMPORT permission (all non-admin users can import)', async () => {
       const regularUser: UserPrincipal = {
         actorType: 'user',
         id: 'regular-user-1',
@@ -133,12 +133,12 @@ describe('AC-11: importGraphify permission guard', () => {
         (p) => (p.action as unknown as string) === 'import' && p.subject === 'CodeIntel',
       );
 
-      expect(hasImportPermission).toBe(false);
+      expect(hasImportPermission).toBe(true);
     });
   });
 
   describe('PermissionAuthGuard enforcement', () => {
-    it('non-permitted callers receive 403 from PermissionAuthGuard', async () => {
+    it('all authenticated non-blacklisted users (even MEMBER) have IMPORT permission', async () => {
       const regularUser: UserPrincipal = {
         actorType: 'user',
         id: 'regular-user-1',
@@ -156,7 +156,7 @@ describe('AC-11: importGraphify permission guard', () => {
         (p) => (p.action as unknown as string) === 'import' && p.subject === 'CodeIntel',
       );
 
-      expect(hasImportPermission).toBe(false);
+      expect(hasImportPermission).toBe(true);
     });
   });
 

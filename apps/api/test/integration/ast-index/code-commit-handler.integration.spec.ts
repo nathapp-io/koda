@@ -1,8 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { OutboxFanOutRegistry } from '../../src/outbox/outbox-fan-out-registry';
-import { AstIndexService } from '../../src/code-intel/ast-index.service';
-import { SymbolStore } from '../../src/code-intel/symbol-store';
-import { CodeGraphService } from '../../src/code-intel/code-graph.service';
+import { OutboxFanOutRegistry } from '../../../src/outbox/outbox-fan-out-registry';
+import { AstIndexService } from '../../../src/code-intel/ast-index.service';
+import { SymbolStore } from '../../../src/code-intel/symbol-store';
+import { CodeGraphService } from '../../../src/code-intel/code-graph.service';
 
 describe('code_commit outbox handler', () => {
   let registry: OutboxFanOutRegistry;

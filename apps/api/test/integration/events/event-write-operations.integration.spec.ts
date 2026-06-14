@@ -25,17 +25,15 @@ import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { KodaDomainWriter } from '../../../src/koda-domain-writer/koda-domain-writer.service';
 import { RagService } from '../../../src/rag/rag.service';
 import { OutboxService } from '../../../src/outbox/outbox.service';
+import { AgentAuthProvider } from '../../../src/auth/agent-auth.provider';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
 import { AgentEventService } from '../../../src/events/agent-event.service';
 import { DecisionEventService } from '../../../src/events/decision-event.service';
-import { ActorResolver } from '../../../src/events/actor-resolver.service';
-
 describe('Event Write Operations and Actor Resolution', () => {
   let kodaDomainWriter: KodaDomainWriter;
   let ticketEventService: TicketEventService;
   let agentEventService: AgentEventService;
   let decisionEventService: DecisionEventService;
-  let actorResolver: ActorResolver;
 
   const mockProject = {
     id: 'proj-koda-123',
@@ -156,10 +154,10 @@ describe('Event Write Operations and Actor Resolution', () => {
         TicketEventService,
         AgentEventService,
         DecisionEventService,
-        ActorResolver,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: RagService, useValue: mockRagService },
         { provide: OutboxService, useValue: mockOutboxService },
+        { provide: AgentAuthProvider, useValue: { loadAgentRoles: jest.fn().mockResolvedValue([]) } },
       ],
     }).compile();
 
@@ -167,7 +165,6 @@ describe('Event Write Operations and Actor Resolution', () => {
     ticketEventService = module.get<TicketEventService>(TicketEventService);
     agentEventService = module.get<AgentEventService>(AgentEventService);
     decisionEventService = module.get<DecisionEventService>(DecisionEventService);
-    actorResolver = module.get<ActorResolver>(ActorResolver);
   });
 
   afterEach(() => {
@@ -785,109 +782,6 @@ describe('Event Write Operations and Actor Resolution', () => {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // AC-7: ActorResolver maps auth and agent context into Phase 1 actor model
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  describe('AC-7: ActorResolver maps auth context to Phase 1 actor model', () => {
-    it('should resolve user actor from request context', async () => {
-      const mockRequest = {
-        user: { id: 'user-123', sub: 'user-123', role: 'ADMIN' },
-        agent: null,
-      };
-
-      mockPrismaService.client.agentRoleEntry.findMany.mockResolvedValue([
-        { projectId: 'proj-koda-123', role: 'ADMIN' },
-      ]);
-
-      const actor = await actorResolver.resolve(mockRequest as any);
-
-      expect(actor).toEqual(
-        expect.objectContaining({
-          actorType: 'user',
-          actorId: 'user-123',
-          projectRoles: expect.arrayContaining(['ADMIN']),
-          resourceRoles: expect.any(Array),
-        }),
-      );
-    });
-
-    it('should resolve agent actor from request context', async () => {
-      const mockRequest = {
-        user: null,
-        agent: { id: 'agent-writer-001', sub: 'agent-writer-001' },
-      };
-
-      mockPrismaService.client.agentRoleEntry.findMany.mockResolvedValue([
-        { projectId: 'proj-koda-123', role: 'DEVELOPER' },
-      ]);
-
-      const actor = await actorResolver.resolve(mockRequest as any);
-
-      expect(actor).toEqual(
-        expect.objectContaining({
-          actorType: 'agent',
-          actorId: 'agent-writer-001',
-          projectRoles: expect.arrayContaining(['DEVELOPER']),
-          resourceRoles: expect.any(Array),
-        }),
-      );
-    });
-
-    it('should run before permission checks', async () => {
-      const mockRequest = {
-        user: { id: 'user-123', sub: 'user-123', role: 'ADMIN' },
-        agent: null,
-      };
-
-      mockPrismaService.client.agentRoleEntry.findMany.mockResolvedValue([]);
-
-      const actor = await actorResolver.resolve(mockRequest as any);
-
-      expect(actor).toBeDefined();
-      expect(actor.actorType).toBeTruthy();
-    });
-
-    it('should return Actor object with actorType, actorId, projectRoles, resourceRoles', async () => {
-      const mockRequest = {
-        user: { id: 'user-456', sub: 'user-456', role: 'DEVELOPER' },
-        agent: null,
-      };
-
-      mockPrismaService.client.agentRoleEntry.findMany.mockResolvedValue([
-        { projectId: 'proj-koda-123', role: 'DEVELOPER' },
-        { projectId: 'proj-koda-123', role: 'REVIEWER' },
-      ]);
-
-      const actor = await actorResolver.resolve(mockRequest as any);
-
-      expect(actor).toHaveProperty('actorType');
-      expect(actor).toHaveProperty('actorId');
-      expect(actor).toHaveProperty('projectRoles');
-      expect(actor).toHaveProperty('resourceRoles');
-      expect(actor.actorType).toBe('user');
-      expect(actor.actorId).toBe('user-456');
-      expect(actor.projectRoles).toContain('DEVELOPER');
-      expect(actor.projectRoles).toContain('REVIEWER');
-    });
-
-    it('should handle agent without user in request', async () => {
-      const mockRequest = {
-        user: null,
-        agent: { id: 'agent-001', sub: 'agent-001' },
-      };
-
-      mockPrismaService.client.agentRoleEntry.findMany.mockResolvedValue([
-        { projectId: 'proj-koda-123', role: 'AGENT' },
-      ]);
-
-      const actor = await actorResolver.resolve(mockRequest as any);
-
-      expect(actor.actorType).toBe('agent');
-      expect(actor.actorId).toBe('agent-001');
-    });
-  });
-
-  // ═══════════════════════════════════════════════════════════════════════════
   // AC-8: Role-based access control for event write operations
   // ═══════════════════════════════════════════════════════════════════════════
 
@@ -900,7 +794,7 @@ describe('Event Write Operations and Actor Resolution', () => {
         actorId: 'user-123',
         actorType: 'user' as const,
         source: 'api' as const,
-        data: {},
+        data: { actorRole: 'ADMIN' },
       };
 
       const createdEvent = {
@@ -911,16 +805,13 @@ describe('Event Write Operations and Actor Resolution', () => {
         actorId: eventData.actorId,
         actorType: eventData.actorType,
         source: eventData.source,
-        data: '{}',
+        data: '{"actorRole":"ADMIN"}',
         timestamp: new Date(),
         createdAt: new Date(),
       };
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.client.ticketEvent.create.mockResolvedValue(createdEvent);
-      mockPrismaService.client.agentRoleEntry.findMany.mockResolvedValue([
-        { projectId: 'proj-koda-123', role: 'ADMIN' },
-      ]);
       mockOutboxService.enqueue.mockResolvedValue({ id: 'outbox-5' } as any);
 
       const result = await kodaDomainWriter.writeTicketEvent(eventData);
@@ -936,7 +827,7 @@ describe('Event Write Operations and Actor Resolution', () => {
         actorId: 'user-developer',
         actorType: 'user' as const,
         source: 'api' as const,
-        data: {},
+        data: { actorRole: 'DEVELOPER' },
       };
 
       const createdEvent = {
@@ -947,16 +838,13 @@ describe('Event Write Operations and Actor Resolution', () => {
         actorId: eventData.actorId,
         actorType: eventData.actorType,
         source: eventData.source,
-        data: '{}',
+        data: '{"actorRole":"DEVELOPER"}',
         timestamp: new Date(),
         createdAt: new Date(),
       };
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.client.ticketEvent.create.mockResolvedValue(createdEvent);
-      mockPrismaService.client.agentRoleEntry.findMany.mockResolvedValue([
-        { projectId: 'proj-koda-123', role: 'DEVELOPER' },
-      ]);
       mockOutboxService.enqueue.mockResolvedValue({ id: 'outbox-6' } as any);
 
       const result = await kodaDomainWriter.writeTicketEvent(eventData);
@@ -1021,34 +909,5 @@ describe('Event Write Operations and Actor Resolution', () => {
       );
     });
 
-    it('should allow admin role to access GET /admin/outbox', async () => {
-      const mockRequest = {
-        user: { id: 'user-123', sub: 'user-123', role: 'ADMIN' },
-        agent: null,
-      };
-
-      mockPrismaService.client.agentRoleEntry.findMany.mockResolvedValue([
-        { projectId: 'proj-koda-123', role: 'ADMIN' },
-      ]);
-
-      const actor = await actorResolver.resolve(mockRequest as any);
-
-      expect(actor.projectRoles).toContain('ADMIN');
-    });
-
-    it('should deny non-admin role to access GET /admin/outbox', async () => {
-      const mockRequest = {
-        user: { id: 'user-developer', sub: 'user-developer', role: 'DEVELOPER' },
-        agent: null,
-      };
-
-      mockPrismaService.client.agentRoleEntry.findMany.mockResolvedValue([
-        { projectId: 'proj-koda-123', role: 'DEVELOPER' },
-      ]);
-
-      const actor = await actorResolver.resolve(mockRequest as any);
-
-      expect(actor.projectRoles).not.toContain('ADMIN');
-    });
   });
 });

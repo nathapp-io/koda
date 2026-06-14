@@ -20,6 +20,7 @@ import { VcsController } from '../../../src/vcs/vcs.controller';
 import { VcsConnectionService } from '../../../src/vcs/vcs-connection.service';
 import { VcsSyncService, SyncIssueResult } from '../../../src/vcs/vcs-sync.service';
 import { VcsWebhookService } from '../../../src/vcs/vcs-webhook.service';
+import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
 import { ProjectsService } from '../../../src/projects/projects.service';
 import { ConfigService } from '@nestjs/config';
 import { HttpException, HttpStatus } from '@nestjs/common';
@@ -57,6 +58,8 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
     gitRemoteUrl: null,
     autoIndexOnClose: true,
     autoAssign: 'OFF',
+    graphifyEnabled: false,
+    graphifyLastImportedAt: null,
     deletedAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -73,8 +76,8 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
     syncMode: 'polling',
     allowedAuthors: '["octocat"]',
     pollingIntervalMs: 3600000,
-    webhookSecret: undefined,
-    lastSyncedAt: undefined,
+    webhookSecret: null,
+    lastSyncedAt: null,
     isActive: true,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -129,6 +132,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
       providers: [
         { provide: VcsSyncService, useValue: mockSyncServiceInstance },
         { provide: VcsConnectionService, useValue: mockVcsConnectionServiceInstance },
+        { provide: VcsPrSyncService, useValue: {} },
         { provide: VcsWebhookService, useValue: {} },
         { provide: ProjectsService, useValue: mockProjectsServiceInstance },
         { provide: ConfigService, useValue: mockConfigServiceInstance },
@@ -169,8 +173,8 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         expect(result).toBeDefined();
         expect(result.issuesSynced).toBe(1);
         expect(result.issuesSkipped).toBe(0);
-        expect(result.createdTickets).toHaveLength(1);
-        expect(result.createdTickets[0].id).toBe('ticket-123');
+        expect(result.tickets).toHaveLength(1);
+        expect(result.tickets[0].ref).toBe(`${mockProject.key}-1`);
       });
 
       it('should bypass allowedAuthors filter and sync any issue', async () => {
@@ -278,8 +282,8 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
 
         const result = await controller.syncIssue(mockProject.slug, issueNumber);
 
-        expect(result.createdTickets).toHaveLength(1);
-        expect(result.createdTickets[0].id).toBe('ticket-abc-123');
+        expect(result.tickets).toHaveLength(1);
+        expect(result.tickets[0].ref).toBe(`${mockProject.key}-5`);
       });
 
       it('should include projectKey in ticket reference', async () => {
@@ -295,7 +299,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
 
         const result = await controller.syncIssue(mockProject.slug, issueNumber);
 
-        expect(result.createdTickets[0].projectKey).toBe(mockProject.key);
+        expect(result.tickets[0].ref).toMatch(new RegExp(`^${mockProject.key}-`));
       });
 
       it('should include ticket number in reference', async () => {
@@ -311,7 +315,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
 
         const result = await controller.syncIssue(mockProject.slug, issueNumber);
 
-        expect(result.createdTickets[0].number).toBe(7);
+        expect(result.tickets[0].ref).toBe(`${mockProject.key}-7`);
       });
 
       it('should return complete SyncResultDto structure', async () => {
@@ -329,10 +333,10 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
 
         expect(result).toHaveProperty('issuesSynced');
         expect(result).toHaveProperty('issuesSkipped');
-        expect(result).toHaveProperty('createdTickets');
+        expect(result).toHaveProperty('tickets');
         expect(typeof result.issuesSynced).toBe('number');
         expect(typeof result.issuesSkipped).toBe('number');
-        expect(Array.isArray(result.createdTickets)).toBe(true);
+        expect(Array.isArray(result.tickets)).toBe(true);
       });
 
       it('should have issuesSynced=1 when ticket is created successfully', async () => {
@@ -402,9 +406,9 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
           issuesSynced: 3,
           issuesSkipped: 2,
           createdTickets: [
-            { id: 'ticket-1', number: 1 },
-            { id: 'ticket-2', number: 2 },
-            { id: 'ticket-3', number: 3 },
+            { id: 'ticket-1', number: 1, title: 'mock title' },
+            { id: 'ticket-2', number: 2, title: 'mock title' },
+            { id: 'ticket-3', number: 3, title: 'mock title' },
           ],
           errors: [],
         };
@@ -428,8 +432,8 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
           issuesSynced: 2,
           issuesSkipped: 1,
           createdTickets: [
-            { id: 'ticket-1', number: 1 },
-            { id: 'ticket-2', number: 2 },
+            { id: 'ticket-1', number: 1, title: 'mock title' },
+            { id: 'ticket-2', number: 2, title: 'mock title' },
           ],
           errors: [],
         };
@@ -453,7 +457,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
           issuesSkipped: 0,
           createdTickets: Array(5)
             .fill(null)
-            .map((_, i) => ({ id: `ticket-${i}`, number: i + 1 })),
+            .map((_, i) => ({ id: `ticket-${i}`, number: i + 1, title: 'mock title' })),
           errors: [],
         };
 
@@ -471,8 +475,8 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
           issuesSynced: 2,
           issuesSkipped: 3,
           createdTickets: [
-            { id: 'ticket-1', number: 1 },
-            { id: 'ticket-2', number: 2 },
+            { id: 'ticket-1', number: 1, title: 'mock title' },
+            { id: 'ticket-2', number: 2, title: 'mock title' },
           ],
           errors: [],
         };
@@ -493,9 +497,9 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
           issuesSynced: 3,
           issuesSkipped: 0,
           createdTickets: [
-            { id: 'ticket-abc', number: 1 },
-            { id: 'ticket-def', number: 2 },
-            { id: 'ticket-ghi', number: 3 },
+            { id: 'ticket-abc', number: 1, title: 'mock title 1' },
+            { id: 'ticket-def', number: 2, title: 'mock title 2' },
+            { id: 'ticket-ghi', number: 3, title: 'mock title 3' },
           ],
           errors: [],
         };
@@ -505,10 +509,10 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
 
         const result = await controller.syncAll(mockProject.slug);
 
-        expect(result.createdTickets).toHaveLength(3);
-        expect(result.createdTickets[0].id).toBe('ticket-abc');
-        expect(result.createdTickets[1].id).toBe('ticket-def');
-        expect(result.createdTickets[2].id).toBe('ticket-ghi');
+        expect(result.tickets).toHaveLength(3);
+        expect(result.tickets[0].ref).toBe(`${mockProject.key}-1`);
+        expect(result.tickets[1].ref).toBe(`${mockProject.key}-2`);
+        expect(result.tickets[2].ref).toBe(`${mockProject.key}-3`);
       });
 
       it('should include projectKey for each ticket', async () => {
@@ -516,8 +520,8 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
           issuesSynced: 2,
           issuesSkipped: 0,
           createdTickets: [
-            { id: 'ticket-1', number: 1 },
-            { id: 'ticket-2', number: 2 },
+            { id: 'ticket-1', number: 1, title: 'mock title' },
+            { id: 'ticket-2', number: 2, title: 'mock title' },
           ],
           errors: [],
         };
@@ -527,7 +531,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
 
         const result = await controller.syncAll(mockProject.slug);
 
-        expect(result.createdTickets.every((t) => t.projectKey === mockProject.key)).toBe(true);
+        expect(result.tickets.every((t) => t.ref.startsWith(`${mockProject.key}-`))).toBe(true);
       });
 
       it('should include ticket number for each created ticket', async () => {
@@ -535,9 +539,9 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
           issuesSynced: 3,
           issuesSkipped: 0,
           createdTickets: [
-            { id: 'ticket-1', number: 10 },
-            { id: 'ticket-2', number: 11 },
-            { id: 'ticket-3', number: 12 },
+            { id: 'ticket-1', number: 10, title: 'mock title' },
+            { id: 'ticket-2', number: 11, title: 'mock title' },
+            { id: 'ticket-3', number: 12, title: 'mock title' },
           ],
           errors: [],
         };
@@ -547,9 +551,9 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
 
         const result = await controller.syncAll(mockProject.slug);
 
-        expect(result.createdTickets[0].number).toBe(10);
-        expect(result.createdTickets[1].number).toBe(11);
-        expect(result.createdTickets[2].number).toBe(12);
+        expect(result.tickets[0].ref).toBe(`${mockProject.key}-10`);
+        expect(result.tickets[1].ref).toBe(`${mockProject.key}-11`);
+        expect(result.tickets[2].ref).toBe(`${mockProject.key}-12`);
       });
 
       it('should return empty array when no tickets created', async () => {
@@ -565,8 +569,8 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
 
         const result = await controller.syncAll(mockProject.slug);
 
-        expect(result.createdTickets).toHaveLength(0);
-        expect(Array.isArray(result.createdTickets)).toBe(true);
+        expect(result.tickets).toHaveLength(0);
+        expect(Array.isArray(result.tickets)).toBe(true);
       });
     });
 
@@ -576,8 +580,8 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
           issuesSynced: 2,
           issuesSkipped: 1,
           createdTickets: [
-            { id: 'ticket-1', number: 1 },
-            { id: 'ticket-2', number: 2 },
+            { id: 'ticket-1', number: 1, title: 'mock title' },
+            { id: 'ticket-2', number: 2, title: 'mock title' },
           ],
           errors: [],
         };
@@ -589,14 +593,14 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
 
         expect(result).toHaveProperty('issuesSynced');
         expect(result).toHaveProperty('issuesSkipped');
-        expect(result).toHaveProperty('createdTickets');
+        expect(result).toHaveProperty('tickets');
       });
 
-      it('should include errors array when errors occur', async () => {
+      it('should return standard response structure even when sync errors occur', async () => {
         const fullSyncResult = {
           issuesSynced: 1,
           issuesSkipped: 2,
-          createdTickets: [{ id: 'ticket-1', number: 1 }],
+          createdTickets: [{ id: 'ticket-1', number: 1, title: 'mock title' }],
           errors: ['Issue 100: Network timeout', 'Issue 101: Invalid author'],
         };
 
@@ -605,8 +609,9 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
 
         const result = await controller.syncAll(mockProject.slug);
 
-        expect(result.errors).toBeDefined();
-        expect(result.errors).toHaveLength(2);
+        expect(result).toHaveProperty('issuesSynced', 1);
+        expect(result).toHaveProperty('issuesSkipped', 2);
+        expect(result).toHaveProperty('tickets');
       });
 
       it('should omit errors field when no errors', async () => {
@@ -614,8 +619,8 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
           issuesSynced: 2,
           issuesSkipped: 0,
           createdTickets: [
-            { id: 'ticket-1', number: 1 },
-            { id: 'ticket-2', number: 2 },
+            { id: 'ticket-1', number: 1, title: 'mock title' },
+            { id: 'ticket-2', number: 2, title: 'mock title' },
           ],
           errors: [],
         };
@@ -626,7 +631,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         const result = await controller.syncAll(mockProject.slug);
 
         // errors field should be undefined when empty
-        expect(result.errors).toBeUndefined();
+        expect((result as unknown as { errors?: string[] }).errors).toBeUndefined();
       });
     });
 
@@ -689,8 +694,8 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
       const result1 = await controller.syncIssue(mockProject.slug, issueNumber1);
       const result2 = await controller.syncIssue(mockProject.slug, issueNumber2);
 
-      expect(result1.createdTickets[0].number).toBe(1);
-      expect(result2.createdTickets[0].number).toBe(2);
+      expect(result1.tickets[0].ref).toBe(`${mockProject.key}-1`);
+      expect(result2.tickets[0].ref).toBe(`${mockProject.key}-2`);
     });
 
     it('fullSync should handle mix of successful and skipped issues', async () => {
@@ -698,8 +703,8 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         issuesSynced: 2,
         issuesSkipped: 1,
         createdTickets: [
-          { id: 'ticket-1', number: 1 },
-          { id: 'ticket-2', number: 2 },
+          { id: 'ticket-1', number: 1, title: 'mock title' },
+          { id: 'ticket-2', number: 2, title: 'mock title' },
         ],
         errors: [],
       };
@@ -710,7 +715,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
       const result = await controller.syncAll(mockProject.slug);
 
       expect(result.issuesSynced + result.issuesSkipped).toBe(3);
-      expect(result.createdTickets.length).toBe(result.issuesSynced);
+      expect(result.tickets.length).toBe(result.issuesSynced);
     });
 
     it('should decrypt token from connection for provider creation', async () => {

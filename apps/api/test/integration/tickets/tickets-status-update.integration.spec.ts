@@ -10,9 +10,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TicketsService } from '../../../src/tickets/tickets.service';
 import { PrismaService } from '@nathapp/nestjs-prisma';
+import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { UpdateTicketDto } from '../../../src/tickets/dto/update-ticket.dto';
 import { TicketStatus } from '../../../src/common/enums';
 import * as ticketTransitions from '../../../src/tickets/state-machine/ticket-transitions';
+import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 
 describe('US-003: TicketsService.update() — status field', () => {
   let service: TicketsService;
@@ -71,6 +73,7 @@ describe('US-003: TicketsService.update() — status field', () => {
       providers: [
         TicketsService,
         { provide: PrismaService, useValue: mockPrismaService },
+        { provide: TRANSACTION_MANAGER, useValue: { transaction: jest.fn() } },
       ],
     }).compile();
 
@@ -100,8 +103,7 @@ describe('US-003: TicketsService.update() — status field', () => {
         'koda',
         'KODA-1',
         updateDto,
-        { id: 'user-123', sub: 'user-123' },
-        'user',
+        { id: 'user-123', sub: 'user-123' } as unknown as KodaPrincipal,
       );
 
       expect(validateSpy).toHaveBeenCalledWith(TicketStatus.CREATED, TicketStatus.IN_PROGRESS);
@@ -126,8 +128,7 @@ describe('US-003: TicketsService.update() — status field', () => {
         'koda',
         'KODA-1',
         updateDto,
-        { id: 'user-123', sub: 'user-123' },
-        'user',
+        { id: 'user-123', sub: 'user-123' } as unknown as KodaPrincipal,
       );
 
       expect(mockPrismaService.client.ticket.update).toHaveBeenCalledWith(
@@ -148,7 +149,7 @@ describe('US-003: TicketsService.update() — status field', () => {
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockCreatedTicket);
 
       await expect(
-        service.update('koda', 'KODA-1', updateDto, { id: 'user-123', sub: 'user-123' }, 'user'),
+        service.update('koda', 'KODA-1', updateDto, { id: 'user-123', sub: 'user-123' } as unknown as KodaPrincipal),
       ).rejects.toThrow();
 
       expect(mockPrismaService.client.ticket.update).not.toHaveBeenCalled();
@@ -172,8 +173,7 @@ describe('US-003: TicketsService.update() — status field', () => {
         'koda',
         'KODA-1',
         updateDto,
-        { id: 'user-123', sub: 'user-123' },
-        'user',
+        { id: 'user-123', sub: 'user-123' } as unknown as KodaPrincipal,
       );
 
       const updateCall = mockPrismaService.client.ticket.update.mock.calls[0][0];

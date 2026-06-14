@@ -8,6 +8,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TicketsService } from '../../../src/tickets/tickets.service';
 import { PrismaService } from '@nathapp/nestjs-prisma';
+import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 
 describe('TicketsService — agent permissions', () => {
   let service: TicketsService;
@@ -67,6 +69,7 @@ describe('TicketsService — agent permissions', () => {
       providers: [
         TicketsService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: TRANSACTION_MANAGER, useValue: { transaction: jest.fn() } },
       ],
     }).compile();
 
@@ -83,7 +86,7 @@ describe('TicketsService — agent permissions', () => {
     it('resolves without throwing when actorType is agent', async () => {
       // BUG #19: tickets.service.ts lines 293-295 explicitly throw ForbiddenAppException
       // for agents — this test will FAIL until the bug is fixed (RED phase).
-      const agentPrincipal = { id: 'agent-001', sub: 'agent-001' };
+      const agentPrincipal: KodaPrincipal = { actorType: 'agent', id: 'agent-001', sub: 'agent-001', slug: 'agent-001', status: 'ACTIVE', agentRoles: [], capabilities: [], name: undefined, blacklisted: false, revoked: false, authorities: [] };
       const deletedTicket = { ...mockTicket, labels: undefined, links: undefined, deletedAt: new Date() };
 
       mockPrisma.client.project.findUnique.mockResolvedValue(mockProject);
@@ -91,13 +94,13 @@ describe('TicketsService — agent permissions', () => {
       mockPrisma.client.ticket.update.mockResolvedValue(deletedTicket);
 
       await expect(
-        service.softDelete('koda', 'KODA-1', agentPrincipal, 'agent'),
+        service.softDelete('koda', 'KODA-1', agentPrincipal),
       ).resolves.toBeDefined();
     });
 
     it('sets deletedAt on the ticket when called by agent', async () => {
       // BUG #19: will FAIL until fixed.
-      const agentPrincipal = { id: 'agent-001', sub: 'agent-001' };
+      const agentPrincipal: KodaPrincipal = { actorType: 'agent', id: 'agent-001', sub: 'agent-001', slug: 'agent-001', status: 'ACTIVE', agentRoles: [], capabilities: [], name: undefined, blacklisted: false, revoked: false, authorities: [] };
       const now = new Date();
       const deletedTicket = { ...mockTicket, labels: undefined, links: undefined, deletedAt: now };
 
@@ -105,68 +108,51 @@ describe('TicketsService — agent permissions', () => {
       mockPrisma.client.ticket.findUnique.mockResolvedValue(mockTicket);
       mockPrisma.client.ticket.update.mockResolvedValue(deletedTicket);
 
-      const result = await service.softDelete('koda', 'KODA-1', agentPrincipal, 'agent');
+      const result = await service.softDelete('koda', 'KODA-1', agentPrincipal);
 
       expect(result.deletedAt).not.toBeNull();
     });
 
     it('calls ticket.update with deletedAt data when actor is agent', async () => {
       // BUG #19: will FAIL until fixed.
-      const agentPrincipal = { id: 'agent-001', sub: 'agent-001' };
+      const agentPrincipal: KodaPrincipal = { actorType: 'agent', id: 'agent-001', sub: 'agent-001', slug: 'agent-001', status: 'ACTIVE', agentRoles: [], capabilities: [], name: undefined, blacklisted: false, revoked: false, authorities: [] };
       const deletedTicket = { ...mockTicket, labels: undefined, links: undefined, deletedAt: new Date() };
 
       mockPrisma.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrisma.client.ticket.findUnique.mockResolvedValue(mockTicket);
       mockPrisma.client.ticket.update.mockResolvedValue(deletedTicket);
 
-      await service.softDelete('koda', 'KODA-1', agentPrincipal, 'agent');
+      await service.softDelete('koda', 'KODA-1', agentPrincipal);
 
-      expect(mockPrisma.client.ticket.update).toHaveBeenCalledWith({
+      expect(mockPrisma.client.ticket.update).toHaveBeenCalledWith(expect.objectContaining({
         where: { id: mockTicket.id },
         data: { deletedAt: expect.any(Date) },
-      });
+      }));
     });
 
     it('does not perform a hard delete when actor is agent', async () => {
       // BUG #19: will FAIL until fixed.
-      const agentPrincipal = { id: 'agent-001', sub: 'agent-001' };
+      const agentPrincipal: KodaPrincipal = { actorType: 'agent', id: 'agent-001', sub: 'agent-001', slug: 'agent-001', status: 'ACTIVE', agentRoles: [], capabilities: [], name: undefined, blacklisted: false, revoked: false, authorities: [] };
       const deletedTicket = { ...mockTicket, labels: undefined, links: undefined, deletedAt: new Date() };
 
       mockPrisma.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrisma.client.ticket.findUnique.mockResolvedValue(mockTicket);
       mockPrisma.client.ticket.update.mockResolvedValue(deletedTicket);
 
-      const result = await service.softDelete('koda', 'KODA-1', agentPrincipal, 'agent');
+      const result = await service.softDelete('koda', 'KODA-1', agentPrincipal);
 
       // Record still exists — only deletedAt is set, not a DELETE query
       expect(result.id).toBe(mockTicket.id);
     });
   });
 
-  // ── AC-4: MEMBER user is blocked ────────────────────────────────
+  // ── AC-4: MEMBER user is blocked (enforced by CASL guard at controller level) ──
+  // MEMBER permission blocking moved from service to KodaCaslAbilityFactory in 76cb858.
+  // Service-level tests verify ADMIN can proceed; controller-level CASL tests cover MEMBER denial.
 
   describe('softDelete — AC-4: MEMBER user blocked', () => {
-    it('throws when actorType is user with role MEMBER', async () => {
-      const memberUser = { id: 'user-456', sub: 'user-456', role: 'MEMBER' };
-
-      await expect(
-        service.softDelete('koda', 'KODA-1', memberUser, 'user'),
-      ).rejects.toThrow();
-    });
-
-    it('throws before reaching the database for MEMBER user', async () => {
-      const memberUser = { id: 'user-456', sub: 'user-456', role: 'MEMBER' };
-
-      await expect(
-        service.softDelete('koda', 'KODA-1', memberUser, 'user'),
-      ).rejects.toThrow();
-
-      expect(mockPrisma.client.project.findUnique).not.toHaveBeenCalled();
-      expect(mockPrisma.client.ticket.findUnique).not.toHaveBeenCalled();
-    });
-
     it('does not throw for ADMIN user', async () => {
-      const adminUser = { id: 'user-123', sub: 'user-123', role: 'ADMIN' };
+      const adminUser: KodaPrincipal = { actorType: 'user', id: 'user-123', sub: 'user-123', role: 'ADMIN', email: 'test@test.com', name: undefined, blacklisted: false, revoked: false, authorities: [] };
       const deletedTicket = { ...mockTicket, labels: undefined, links: undefined, deletedAt: new Date() };
 
       mockPrisma.client.project.findUnique.mockResolvedValue(mockProject);
@@ -174,7 +160,7 @@ describe('TicketsService — agent permissions', () => {
       mockPrisma.client.ticket.update.mockResolvedValue(deletedTicket);
 
       await expect(
-        service.softDelete('koda', 'KODA-1', adminUser, 'user'),
+        service.softDelete('koda', 'KODA-1', adminUser),
       ).resolves.toBeDefined();
     });
   });

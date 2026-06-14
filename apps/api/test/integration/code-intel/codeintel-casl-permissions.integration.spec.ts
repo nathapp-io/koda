@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { CaslPermissionAction } from '@nathapp/nestjs-auth';
-import { KodaCaslAbilityFactory } from '../../src/auth/casl/koda-casl-ability.factory';
-import type { UserPrincipal, AgentPrincipal } from '../../src/auth/principal/koda-principal.types';
+import { KodaCaslAbilityFactory } from '../../../src/auth/casl/koda-casl-ability.factory';
+import type { UserPrincipal, AgentPrincipal } from '../../../src/auth/principal/koda-principal.types';
 
 describe('KodaCaslAbilityFactory - CodeIntel READ permissions (AC8)', () => {
   let factory: KodaCaslAbilityFactory;

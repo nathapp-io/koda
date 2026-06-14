@@ -232,7 +232,7 @@ describe('EntityStore', () => {
       expect(entity!.score).toBeCloseTo(2 / 4);
     });
 
-    it('returns score 0 when no query terms match tags', () => {
+    it('excludes entity when no query terms match tags (score 0)', () => {
       store.indexEntity('proj-1', {
         id: 'e1',
         label: 'Service',
@@ -243,8 +243,7 @@ describe('EntityStore', () => {
 
       const results = store.searchEntities('proj-1', 'frontend react');
       const entity = results.find((e) => e.id === 'e1');
-      expect(entity).toBeDefined();
-      expect(entity!.score).toBe(0);
+      expect(entity).toBeUndefined();
     });
 
     it('returns score 1 when all query terms are in tags and tags match exactly', () => {

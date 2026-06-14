@@ -53,6 +53,7 @@ export class VcsController {
    * Create a new VCS connection for a project
    */
   @Post()
+  @ApiOperation({ summary: 'Create a VCS connection for a project' })
   @HttpCode(HttpStatus.CREATED)
   async createConnection(
     @Param('slug') slug: string,
@@ -76,6 +77,7 @@ export class VcsController {
    * Get VCS connection for a project
    */
   @Get()
+  @ApiOperation({ summary: 'Get VCS connection for a project' })
   async getConnection(
     @Param('slug') slug: string,
     @Principal('userId') userId?: string,
@@ -91,6 +93,7 @@ export class VcsController {
    * Update VCS connection for a project
    */
   @Patch()
+  @ApiOperation({ summary: 'Update VCS connection for a project' })
   async updateConnection(
     @Param('slug') slug: string,
     @Body() dto: UpdateVcsConnectionDto,
@@ -113,6 +116,7 @@ export class VcsController {
    * Delete VCS connection for a project
    */
   @Delete()
+  @ApiOperation({ summary: 'Delete VCS connection for a project' })
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteConnection(
     @Param('slug') slug: string,
@@ -129,6 +133,7 @@ export class VcsController {
    * Test the VCS connection
    */
   @Post('/test')
+  @ApiOperation({ summary: 'Test the VCS connection for a project' })
   async testConnection(
     @Param('slug') slug: string,
     @Principal('userId') userId?: string,
