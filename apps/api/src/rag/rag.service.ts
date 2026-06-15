@@ -222,8 +222,10 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
 
   private evictTableCacheIfNeeded(): void {
     if (this.tableCache.size > this.TABLE_CACHE_MAX_SIZE) {
-      const firstKey = this.tableCache.keys().next().value!;
-      this.tableCache.delete(firstKey);
+      const firstKey = this.tableCache.keys().next().value;
+      if (firstKey !== undefined) {
+        this.tableCache.delete(firstKey);
+      }
     }
   }
 
