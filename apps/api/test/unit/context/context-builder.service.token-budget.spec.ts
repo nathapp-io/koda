@@ -22,8 +22,8 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ContextBuilderService, GetProjectContextQuery } from '../../../src/context/context-builder.service';
+import { CONTEXT_REPOSITORY } from '../../../src/context/domain/context.domain';
 import { CanonicalStateService } from '../../../src/memory/canonical-state.service';
 import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-item.repository';
 import { HybridRetrieverService } from '../../../src/rag/hybrid-retriever.service';
@@ -42,7 +42,7 @@ describe('ContextBuilderService — AC-7 token budget truncation priority', () =
   const mockHybridRetriever = { search: jest.fn() };
   const mockEntityGraph = { getRelatedEntities: jest.fn() };
   const mockImpactAnalysis = { getChangeImpact: jest.fn() };
-  const mockPrisma = { client: { project: { findUnique: jest.fn() } } };
+  const mockContextRepo = { projectExistsAndNotDeleted: jest.fn() };
 
   const PROJECT_ID = 'p1';
   const TICKET_ID = 't1';
@@ -125,13 +125,13 @@ describe('ContextBuilderService — AC-7 token budget truncation priority', () =
         { provide: HybridRetrieverService, useValue: mockHybridRetriever },
         { provide: EntityGraphService, useValue: mockEntityGraph },
         { provide: ImpactAnalysisService, useValue: mockImpactAnalysis },
-        { provide: PrismaService, useValue: mockPrisma },
+        { provide: CONTEXT_REPOSITORY, useValue: mockContextRepo },
       ],
     }).compile();
 
     service = module.get(ContextBuilderService);
 
-    mockPrisma.client.project.findUnique.mockResolvedValue({ id: PROJECT_ID, deletedAt: null });
+    mockContextRepo.projectExistsAndNotDeleted.mockResolvedValue(true);
     mockCanonicalStateService.getSnapshot.mockResolvedValue({
       tickets: [],
       recentEvents: [],

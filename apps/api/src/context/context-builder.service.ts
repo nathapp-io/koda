@@ -1,8 +1,6 @@
 import { performance } from 'perf_hooks';
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { AppException, NotFoundAppException, InternalAppException } from '@nathapp/nestjs-common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient } from '@prisma/client';
 import { CanonicalStateService, CanonicalTicket, CanonicalEvent, CanonicalDecision } from '../memory/canonical-state.service';
 import { PrismaMemoryItemRepository } from '../memory/prisma-memory-item.repository';
 import { MemoryItem } from '../memory/memory-item-repository';
@@ -13,6 +11,7 @@ import { EntityPath } from '../entity-graph/dto/entity-graph.types';
 import { ImpactAnalysisService, ChangeImpactResult } from '../code-intel/impact-analysis.service';
 import { estimateTokenCount } from './token-estimator';
 import { SloDashboardService } from '../monitoring/slo-dashboard.service';
+import { CONTEXT_REPOSITORY, IContextRepository } from './domain/context.domain';
 
 export class ProjectNotFoundError extends NotFoundAppException {
   constructor() {
@@ -84,7 +83,7 @@ export class ContextBuilderService {
     private readonly hybridRetrieverService: HybridRetrieverService,
     private readonly entityGraphService: EntityGraphService,
     private readonly impactAnalysisService: ImpactAnalysisService,
-    private readonly prisma: PrismaService<PrismaClient>,
+    @Inject(CONTEXT_REPOSITORY) private readonly contextRepository: IContextRepository,
     @Optional() private readonly sloDashboardService?: SloDashboardService,
   ) {}
 
@@ -193,11 +192,8 @@ export class ContextBuilderService {
   }
 
   private async verifyProjectExists(projectId: string): Promise<void> {
-    const project = await this.prisma.client.project.findUnique({
-      where: { id: projectId },
-      select: { id: true, deletedAt: true },
-    });
-    if (!project || project.deletedAt) {
+    const exists = await this.contextRepository.projectExistsAndNotDeleted(projectId);
+    if (!exists) {
       throw new ProjectNotFoundError();
     }
   }

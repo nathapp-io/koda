@@ -7,11 +7,17 @@ import { RagModule } from '../rag/rag.module';
 import { EntityGraphModule } from '../entity-graph/entity-graph.module';
 import { CodeIntelModule } from '../code-intel/code-intel.module';
 import { MonitoringModule } from '../monitoring/monitoring.module';
+import { PrismaContextRepository } from './prisma-context.repository';
+import { CONTEXT_REPOSITORY } from './domain/context.domain';
 
 @Module({
   imports: [PrismaModule, MemoryModule, RagModule, EntityGraphModule, CodeIntelModule, MonitoringModule],
   controllers: [ContextController],
-  providers: [ContextBuilderService],
+  providers: [
+    PrismaContextRepository,
+    { provide: CONTEXT_REPOSITORY, useExisting: PrismaContextRepository },
+    ContextBuilderService,
+  ],
   exports: [ContextBuilderService],
 })
 export class ContextModule {}

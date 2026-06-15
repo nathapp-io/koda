@@ -57,4 +57,25 @@ export class PrismaCommentRepository extends AbstractPrismaRepository<CommentDom
     });
     return models.map((m) => this.toDomain(m as Comment));
   }
+
+  async findProjectBySlug(slug: string): Promise<{ id: string; deletedAt: Date | null } | null> {
+    return this.prisma.client.project.findUnique({
+      where: { slug },
+      select: { id: true, deletedAt: true },
+    });
+  }
+
+  async findTicketByNumber(projectId: string, number: number): Promise<{ id: string; deletedAt: Date | null } | null> {
+    return this.prisma.client.ticket.findUnique({
+      where: { projectId_number: { projectId, number } },
+      select: { id: true, deletedAt: true },
+    });
+  }
+
+  async findTicketById(id: string): Promise<{ id: string; deletedAt: Date | null } | null> {
+    return this.prisma.client.ticket.findUnique({
+      where: { id },
+      select: { id: true, deletedAt: true },
+    });
+  }
 }

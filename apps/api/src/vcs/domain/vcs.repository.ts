@@ -1,3 +1,5 @@
+import { VcsConnection, VcsSyncLog, Project } from '@prisma/client';
+
 export const VCS_REPOSITORY = Symbol('VCS_REPOSITORY');
 
 export interface MergedPrTransitionInput {
@@ -30,10 +32,76 @@ export interface TicketLinkData {
   };
 }
 
+export interface CreateVcsConnectionData {
+  projectId: string;
+  provider: string;
+  repoOwner: string;
+  repoName: string;
+  encryptedToken: string;
+  syncMode: string;
+  allowedAuthors: string;
+  pollingIntervalMs: number;
+  webhookSecret: string | null;
+  isActive: boolean;
+}
+
+export interface UpdateVcsConnectionData {
+  encryptedToken?: string;
+  syncMode?: string;
+  allowedAuthors?: string;
+  pollingIntervalMs?: number;
+  webhookSecret?: string | null;
+  lastSyncedAt?: Date;
+}
+
+export interface CreateVcsSyncLogData {
+  vcsConnectionId: string;
+  syncType: string;
+  issuesSynced: number;
+  issuesSkipped: number;
+  errorMessage?: string;
+  startedAt: Date;
+  completedAt: Date;
+}
+
+export interface OutboxDedupQuery {
+  projectId: string;
+  eventType: string;
+  eventId: string;
+  statuses: string[];
+  since: Date;
+}
+
 export interface IVcsRepository {
+  // Ticket + Issue operations
   findExistingTicketByExternalId(projectId: string, externalVcsId: string): Promise<unknown | null>;
   createTicketFromIssue(project: { id: string }, issue: { number: number; title: string; body: string | null }): Promise<CreateTicketFromIssueResult>;
+
+  // TicketLink operations
   findActiveTicketLinksWithPrs(projectId: string): Promise<TicketLinkData[]>;
+  findTicketLinkByPrNumber(projectId: string, prNumber: number): Promise<TicketLinkData | null>;
   updateTicketLinkPrState(id: string, prState: string): Promise<void>;
+  updateTicketLinkWithPrState(id: string, prState: string): Promise<void>;
+
+  // Merged PR auto-transition
   applyMergedPrTransition(input: MergedPrTransitionInput): Promise<void>;
+
+  // Ticket lookup (for webhook synchronize handler)
+  findTicketWithProject(ticketId: string): Promise<{ id: string; externalVcsId: string | null; project: { id: string; key: string } } | null>;
+
+  // VcsConnection operations
+  findProjectById(projectId: string): Promise<{ id: string } | null>;
+  findVcsConnectionByProjectId(projectId: string): Promise<VcsConnection | null>;
+  findVcsConnectionById(connectionId: string): Promise<(VcsConnection & { project: Project }) | null>;
+  findPollingConnections(): Promise<Array<VcsConnection & { project: Project }>>;
+  createVcsConnection(data: CreateVcsConnectionData): Promise<VcsConnection>;
+  updateVcsConnection(projectId: string, data: UpdateVcsConnectionData): Promise<VcsConnection>;
+  updateVcsConnectionLastSynced(connectionId: string): Promise<void>;
+  deleteVcsConnection(projectId: string): Promise<void>;
+
+  // VcsSyncLog operations
+  createVcsSyncLog(data: CreateVcsSyncLogData): Promise<VcsSyncLog>;
+
+  // Outbox dedup (cross-instance push deduplication)
+  findPendingOutboxEvents(query: OutboxDedupQuery): Promise<{ id: string }[]>;
 }

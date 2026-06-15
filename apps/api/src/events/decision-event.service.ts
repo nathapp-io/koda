@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
-import type { PrismaClient } from '@prisma/client';
+import type { DecisionEventDomain } from './domain/events.domain';
+import { PrismaEventsRepository } from './prisma-events.repository';
 
 export interface CreateDecisionEventInput {
   projectId: string;
@@ -15,30 +15,15 @@ export interface CreateDecisionEventInput {
 
 @Injectable()
 export class DecisionEventService {
-  constructor(private readonly prisma: PrismaService<PrismaClient>) {}
+  constructor(private readonly eventsRepo: PrismaEventsRepository) {}
 
-  async create(data: CreateDecisionEventInput) {
-    const project = await this.prisma.client.project.findUnique({
-      where: { id: data.projectId },
-    });
+  async create(data: CreateDecisionEventInput): Promise<DecisionEventDomain> {
+    const project = await this.eventsRepo.findProject(data.projectId);
 
     if (!project) {
       throw new ForbiddenAppException({ code: 'PROJECT_NOT_FOUND' }, 'koda-domain-writer');
     }
 
-    const event = await this.prisma.client.decisionEvent.create({
-      data: {
-        projectId: data.projectId,
-        agentId: data.agentId,
-        action: data.action,
-        decision: data.decision,
-        rationale: data.rationale,
-        source: data.source,
-        data: JSON.stringify(data.data),
-        timestamp: new Date(),
-      },
-    });
-
-    return event;
+    return this.eventsRepo.createDecisionEvent(data);
   }
 }

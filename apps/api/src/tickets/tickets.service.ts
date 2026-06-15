@@ -1,16 +1,15 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TicketResponseDto } from './dto/ticket-response.dto';
-import { PrismaClient } from '@prisma/client';
 import { TicketType, TicketStatus, Priority } from '../common/enums';
 import { validateTransition } from './state-machine/ticket-transitions';
 import { buildGitUrl } from '../common/utils/git-url.util';
 import { actorForeignKeys } from '../auth/principal/actor-foreign-keys';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
+import { TICKET_REPOSITORY, ITicketRepository } from './domain/ticket.domain';
 
 interface FindAllFilters {
   status?: TicketStatus;
@@ -30,11 +29,9 @@ interface AssignInput {
 @Injectable()
 export class TicketsService {
   constructor(
-    private prisma: PrismaService<PrismaClient>,
+    @Inject(TICKET_REPOSITORY) private readonly ticketRepo: ITicketRepository,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private get db() { return this.prisma.client; }
 
   private computeGitRefUrl(
     gitRemoteUrl: string | null | undefined,
@@ -46,22 +43,17 @@ export class TicketsService {
     return buildGitUrl(gitRemoteUrl, gitRefVersion ?? 'main', gitRefFile, gitRefLine ?? undefined);
   }
 
-
   async create(
     projectSlug: string,
     createTicketDto: CreateTicketDto,
     principal: KodaPrincipal,
   ) {
-    // Find project by slug
-    const project = await this.db.project.findUnique({
-      where: { slug: projectSlug },
-    });
+    const project = await this.ticketRepo.findProjectBySlug(projectSlug);
 
     if (!project || project.deletedAt) {
       throw new NotFoundAppException({}, 'tickets');
     }
 
-    // Validate required fields
     if (createTicketDto.type === undefined) {
       throw new ValidationAppException({}, 'tickets');
     }
@@ -74,26 +66,20 @@ export class TicketsService {
 
     /** @design @@unique([projectId, number]) in schema is the safety net against concurrent duplicate numbers; txManager.run() serializes on SQLite and the constraint errors on PostgreSQL so callers retry. */
     const ticket = await this.txManager.run(async () => {
-      // Find the highest number for this project (include soft-deleted to avoid number reuse)
-      const lastTicket = await this.prisma.client.ticket.findFirst({
-        where: { projectId: project.id },
-        orderBy: { number: 'desc' },
-      });
-
+      const lastTicket = await this.ticketRepo.findLastTicketInProject(project.id);
       const nextNumber = (lastTicket?.number ?? 0) + 1;
 
-      // Create the ticket with the next number
-      return this.prisma.client.ticket.create({
-        data: {
-          projectId: project.id,
-          number: nextNumber,
-          type: createTicketDto.type,
-          title: createTicketDto.title,
-          description: createTicketDto.description || null,
-          status: TicketStatus.CREATED,
-          priority: createTicketDto.priority || Priority.MEDIUM,
-          ...actorForeignKeys(principal, 'createdBy'),
-        },
+      const creatorKeys = actorForeignKeys(principal, 'createdBy');
+      return this.ticketRepo.createTicket({
+        projectId: project.id,
+        number: nextNumber,
+        type: createTicketDto.type,
+        title: createTicketDto.title,
+        description: createTicketDto.description || null,
+        status: TicketStatus.CREATED,
+        priority: createTicketDto.priority || Priority.MEDIUM,
+        createdByUserId: creatorKeys.createdByUserId,
+        createdByAgentId: creatorKeys.createdByAgentId,
       });
     });
 
@@ -101,66 +87,33 @@ export class TicketsService {
   }
 
   async findAll(projectSlug: string, filters: FindAllFilters) {
-    // Find project by slug
-    const project = await this.db.project.findUnique({
-      where: { slug: projectSlug },
-    });
+    const project = await this.ticketRepo.findProjectBySlug(projectSlug);
 
     if (!project || project.deletedAt) {
       throw new NotFoundAppException({}, 'tickets');
     }
 
-    // Build where clause
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const whereConditions: Record<string, any> = {
-      projectId: project.id,
-      deletedAt: null,
-    };
-
-    if (filters.status) {
-      whereConditions.status = filters.status;
-    }
-
-    if (filters.type) {
-      whereConditions.type = filters.type;
-    }
-
-    if (filters.priority) {
-      whereConditions.priority = filters.priority;
-    }
-
-    if (filters.unassigned) {
-      whereConditions.AND = [
-        { assignedToUserId: null },
-        { assignedToAgentId: null },
-      ];
-    } else if (filters.assignedTo) {
-      whereConditions.assignedToUserId = filters.assignedTo;
-    }
-
-    // Pagination
     const limit = filters.limit || 20;
     const page = filters.page || 1;
-    const skip = (page - 1) * limit;
 
-    // Fetch tickets and total count
+    const repoFilters = {
+      projectId: project.id,
+      status: filters.status,
+      type: filters.type,
+      priority: filters.priority,
+      assignedToUserId: filters.assignedTo,
+      unassigned: filters.unassigned,
+      limit,
+      page,
+    };
+
     const [tickets, total] = await Promise.all([
-      this.db.ticket.findMany({
-        where: whereConditions,
-        take: limit,
-        skip,
-        orderBy: { number: 'asc' },
-        include: {
-          labels: { include: { label: true } },
-          links: true,
-        },
-      }),
-      this.db.ticket.count({ where: whereConditions }),
+      this.ticketRepo.findTicketsByProject(repoFilters),
+      this.ticketRepo.countTicketsByProject(repoFilters),
     ]);
 
     return {
       items: TicketResponseDto.fromMany(tickets, project.key).map((t, i) => {
-        // Attach gitRefUrl (computed from project context, not stored on ticket)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const raw = tickets[i] as any;
         return {
@@ -180,54 +133,28 @@ export class TicketsService {
   }
 
   async findByRef(projectSlug: string, ref: string) {
-    // Find project by slug
-    const project = await this.db.project.findUnique({
-      where: { slug: projectSlug },
-    });
+    const project = await this.ticketRepo.findProjectBySlug(projectSlug);
 
     if (!project || project.deletedAt) {
       throw new NotFoundAppException({}, 'tickets');
     }
 
-    // Check if ref matches KODA-42 format (projectKey-number)
     const refPattern = /^([A-Z]+)-(\d+)$/;
     const match = ref.match(refPattern);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let ticket: any = null;
+    let ticket;
 
     if (match) {
-      // Resolve by composite unique key (projectId, number)
       const number = parseInt(match[2], 10);
-      ticket = await this.db.ticket.findUnique({
-        where: {
-          projectId_number: {
-            projectId: project.id,
-            number,
-          },
-        },
-        include: {
-          labels: { include: { label: true } },
-          links: true,
-        },
-      });
+      ticket = await this.ticketRepo.findTicketByProjectAndNumber(project.id, number);
     } else {
-      // Treat as CUID
-      ticket = await this.db.ticket.findUnique({
-        where: { id: ref },
-        include: {
-          labels: { include: { label: true } },
-          links: true,
-        },
-      });
+      ticket = await this.ticketRepo.findTicketById(ref);
     }
 
-    // Don't return soft-deleted tickets
     if (!ticket || ticket.deletedAt) {
       throw new NotFoundAppException({}, 'tickets');
     }
 
-    // Compute ref and gitRefUrl
     const gitRefUrl = this.computeGitRefUrl(
       project.gitRemoteUrl,
       ticket.gitRefVersion,
@@ -243,15 +170,12 @@ export class TicketsService {
     updateTicketDto: UpdateTicketDto,
     _principal: KodaPrincipal,
   ) {
-    // Find ticket by ref (returns TicketResponseDto)
     const ticket = await this.findByRef(projectSlug, ref);
     if (!ticket) {
       throw new NotFoundAppException({}, 'tickets');
     }
 
-    // Build update data - only allow updating mutable fields
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updateData: Record<string, any> = {};
+    const updateData: UpdateTicketDto & { status?: string } = {};
 
     if (updateTicketDto.title !== undefined) {
       updateData.title = updateTicketDto.title;
@@ -268,18 +192,9 @@ export class TicketsService {
       updateData.status = updateTicketDto.status;
     }
 
-    // Update the ticket and re-fetch with relations
-    const updated = await this.db.ticket.update({
-      where: { id: ticket.id },
-      data: updateData,
-      include: {
-        labels: { include: { label: true } },
-        links: true,
-      },
-    });
+    const updated = await this.ticketRepo.updateTicket(ticket.id, updateData);
 
-    // Get project for gitRefUrl
-    const project = await this.db.project.findUnique({ where: { slug: projectSlug } });
+    const project = await this.ticketRepo.findProjectBySlug(projectSlug);
     const gitRefUrl = this.computeGitRefUrl(
       project?.gitRemoteUrl,
       updated.gitRefVersion,
@@ -294,26 +209,14 @@ export class TicketsService {
     ref: string,
     principal: KodaPrincipal,
   ) {
-    // Find ticket by ref
     const ticket = await this.findByRef(projectSlug, ref);
     if (!ticket) {
       throw new NotFoundAppException({}, 'tickets');
     }
 
-    // Soft delete by setting deletedAt
-    const updated = await this.db.ticket.update({
-      where: { id: ticket.id },
-      data: {
-        deletedAt: new Date(),
-      },
-      include: {
-        labels: { include: { label: true } },
-        links: true,
-      },
-    });
+    const updated = await this.ticketRepo.softDeleteTicket(ticket.id);
 
-    // Get project for gitRefUrl
-    const project = await this.db.project.findUnique({ where: { slug: projectSlug } });
+    const project = await this.ticketRepo.findProjectBySlug(projectSlug);
     const gitRefUrl = this.computeGitRefUrl(
       project?.gitRemoteUrl,
       updated.gitRefVersion,
@@ -324,57 +227,40 @@ export class TicketsService {
   }
 
   async assign(projectSlug: string, ref: string, assignInput: AssignInput) {
-    // Validate that we don't have both userId and agentId
     if (assignInput.userId && assignInput.agentId) {
       throw new ValidationAppException({}, 'tickets');
     }
 
-    // Find project
-    const project = await this.db.project.findUnique({
-      where: { slug: projectSlug },
-    });
+    const project = await this.ticketRepo.findProjectBySlug(projectSlug);
 
     if (!project || project.deletedAt) {
       throw new NotFoundAppException({}, 'tickets');
     }
 
-    // Find ticket by ref
     const ticket = await this.findByRef(projectSlug, ref);
     if (!ticket) {
       throw new NotFoundAppException({}, 'tickets');
     }
 
-    // Update assignment
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updateData: Record<string, any> = {};
+    const assignData = {
+      assignedToUserId: null as string | null,
+      assignedToAgentId: null as string | null,
+    };
 
     if (assignInput.userId) {
-      updateData.assignedToUserId = assignInput.userId;
-      updateData.assignedToAgentId = null;
+      assignData.assignedToUserId = assignInput.userId;
     } else if (assignInput.agentId) {
-      updateData.assignedToAgentId = assignInput.agentId;
-      updateData.assignedToUserId = null;
-    } else {
-      // Unassign
-      updateData.assignedToUserId = null;
-      updateData.assignedToAgentId = null;
+      assignData.assignedToAgentId = assignInput.agentId;
     }
 
-    const updated = await this.db.ticket.update({
-      where: { id: ticket.id },
-      data: updateData,
-      include: {
-        labels: { include: { label: true } },
-        links: true,
-      },
-    });
+    const updated = await this.ticketRepo.assignTicket(ticket.id, assignData);
 
     const gitRefUrl = this.computeGitRefUrl(
-      project?.gitRemoteUrl,
+      project.gitRemoteUrl,
       updated.gitRefVersion,
       updated.gitRefFile,
       updated.gitRefLine,
     );
-    return TicketResponseDto.from(updated, project?.key, gitRefUrl);
+    return TicketResponseDto.from(updated, project.key, gitRefUrl);
   }
 }

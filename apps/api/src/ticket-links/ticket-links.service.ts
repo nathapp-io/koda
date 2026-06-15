@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { CreateTicketLinkDto } from './dto/create-ticket-link.dto';
 import { TicketLinkResponseDto } from './dto/ticket-link-response.dto';
 import { detectProvider } from '../common/utils/detect-provider.util';
+import { PrismaTicketLinkRepository } from './prisma-ticket-link.repository';
+import { TicketLinkDomain } from './domain/ticket-link.domain';
 
 export interface CreateTicketLinkResult {
   status: 200 | 201;
@@ -13,33 +13,26 @@ export interface CreateTicketLinkResult {
 
 @Injectable()
 export class TicketLinksService {
-  constructor(private readonly prisma: PrismaService<PrismaClient>) {}
+  constructor(private readonly repo: PrismaTicketLinkRepository) {}
 
-  private get db() {
-    return this.prisma.client;
-  }
-
-  private async resolveTicket(slug: string, ref: string) {
-    const project = await this.db.project.findFirst({
-      where: { slug, deletedAt: null },
-    });
+  private async resolveTicket(
+    slug: string,
+    ref: string,
+  ): Promise<{ id: string }> {
+    const project = await this.repo.findProjectBySlug(slug);
 
     if (!project) {
       throw new NotFoundAppException({}, 'ticket-links');
     }
 
     const refMatch = ref.match(/^([A-Z]+)-(\d+)$/);
-    let ticket: Awaited<ReturnType<typeof this.db.ticket.findFirst>>;
+    let ticket: { id: string } | null;
 
     if (refMatch) {
       const number = parseInt(refMatch[2], 10);
-      ticket = await this.db.ticket.findFirst({
-        where: { projectId: project.id, number, deletedAt: null },
-      });
+      ticket = await this.repo.findTicketByNumber(project.id, number);
     } else {
-      ticket = await this.db.ticket.findFirst({
-        where: { id: ref, projectId: project.id, deletedAt: null },
-      });
+      ticket = await this.repo.findTicketById(ref, project.id);
     }
 
     if (!ticket) {
@@ -54,7 +47,11 @@ export class TicketLinksService {
       return explicitLinkType;
     }
 
-    if (/\/pull\/\d+/.test(url) || /\/merge_requests\/\d+/.test(url) || /\/pull-requests\/\d+/.test(url)) {
+    if (
+      /\/pull\/\d+/.test(url) ||
+      /\/merge_requests\/\d+/.test(url) ||
+      /\/pull-requests\/\d+/.test(url)
+    ) {
       return 'pr';
     }
 
@@ -68,9 +65,7 @@ export class TicketLinksService {
   ): Promise<CreateTicketLinkResult> {
     const ticket = await this.resolveTicket(slug, ref);
 
-    const existing = await this.db.ticketLink.findFirst({
-      where: { ticketId: ticket.id, url: dto.url },
-    });
+    const existing = await this.repo.findLinkByUrl(ticket.id, dto.url);
 
     if (existing) {
       return { status: 200, link: TicketLinkResponseDto.from(existing) };
@@ -78,26 +73,24 @@ export class TicketLinksService {
 
     const { provider, externalRef } = detectProvider(dto.url);
 
-    const link = await this.db.ticketLink.create({
-      data: {
-        ticketId: ticket.id,
-        url: dto.url,
-        provider,
-        externalRef,
-        linkType: this.inferLinkType(dto.url, dto.linkType),
-      },
+    const link = await this.repo.createLink({
+      ticketId: ticket.id,
+      url: dto.url,
+      provider,
+      externalRef,
+      linkType: this.inferLinkType(dto.url, dto.linkType),
     });
 
     return { status: 201, link: TicketLinkResponseDto.from(link) };
   }
 
-  async findByTicket(slug: string, ref: string): Promise<TicketLinkResponseDto[]> {
+  async findByTicket(
+    slug: string,
+    ref: string,
+  ): Promise<TicketLinkResponseDto[]> {
     const ticket = await this.resolveTicket(slug, ref);
 
-    const links = await this.db.ticketLink.findMany({
-      where: { ticketId: ticket.id },
-      orderBy: { createdAt: 'asc' },
-    });
+    const links = await this.repo.findLinksByTicket(ticket.id);
 
     return TicketLinkResponseDto.fromMany(links);
   }
@@ -110,23 +103,18 @@ export class TicketLinksService {
     linkId: string,
     state: string,
   ): Promise<void> {
-    await this.db.ticketLink.update({
-      where: { id: linkId },
-      data: { prState: state, prUpdatedAt: new Date() },
-    });
+    await this.repo.updateLink(linkId, { prState: state, prUpdatedAt: new Date() });
   }
 
   /**
    * Find a TicketLink by PR number and project ID.
    * Used by VcsWebhookService to match pull_request webhook events to TicketLinks.
    */
-  async findByPrNumber(prNumber: number, projectId: string) {
-    return this.db.ticketLink.findFirst({
-      where: {
-        prNumber,
-        ticket: { projectId },
-      },
-    });
+  async findByPrNumber(
+    prNumber: number,
+    projectId: string,
+  ): Promise<TicketLinkDomain | null> {
+    return this.repo.findByPrNumber(prNumber, projectId);
   }
 
   /**
@@ -143,14 +131,12 @@ export class TicketLinksService {
   async remove(slug: string, ref: string, linkId: string): Promise<void> {
     const ticket = await this.resolveTicket(slug, ref);
 
-    const link = await this.db.ticketLink.findFirst({
-      where: { id: linkId, ticketId: ticket.id },
-    });
+    const link = await this.repo.findLinkByIdAndTicket(linkId, ticket.id);
 
     if (!link) {
       throw new NotFoundAppException({}, 'ticket-links');
     }
 
-    await this.db.ticketLink.delete({ where: { id: linkId } });
+    await this.repo.deleteLink(linkId);
   }
 }

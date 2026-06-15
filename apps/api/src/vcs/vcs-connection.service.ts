@@ -1,7 +1,6 @@
-import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
+import { HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { VcsConnection } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { encryptToken, decryptToken } from '../common/utils/encryption.util';
@@ -11,35 +10,15 @@ import { VcsConnectionResponseDto } from './dto/vcs-connection-response.dto';
 import { TestConnectionResultDto } from './dto/test-connection-result.dto';
 import { createVcsProvider } from './factory';
 import { VcsPollingService } from './vcs-polling.service';
-
-// PrismaClientLike from @nathapp/nestjs-prisma doesn't expose VCS models,
-// but they exist at runtime. Define a delegate interface for proper typing.
-interface PrismaDelegate {
-  findUnique(options: { where: Record<string, unknown>; select?: unknown; include?: unknown }): Promise<unknown>
-  findMany(options?: unknown): Promise<unknown[]>
-  findFirst(options?: unknown): Promise<unknown>
-  create(options: { data: unknown; select?: unknown; include?: unknown }): Promise<unknown>
-  update(options: { where: Record<string, unknown>; data: unknown; select?: unknown; include?: unknown }): Promise<unknown>
-  delete(options: { where: Record<string, unknown>; select?: unknown; include?: unknown }): Promise<unknown>
-}
-
-interface ExtendedPrismaClient {
-  project: PrismaDelegate
-  vcsConnection: PrismaDelegate
-  [key: string]: unknown
-}
+import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 
 @Injectable()
 export class VcsConnectionService {
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(VCS_REPOSITORY) private readonly vcsRepo: IVcsRepository,
     private readonly configService: ConfigService,
     private readonly vcsPollingService: VcsPollingService,
   ) {}
-
-  private get db() {
-    return this.prisma.client as unknown as ExtendedPrismaClient;
-  }
 
   /**
    * Create a new VCS connection for a project
@@ -50,18 +29,14 @@ export class VcsConnectionService {
     dto: CreateVcsConnectionDto,
   ): Promise<VcsConnectionResponseDto> {
     // Verify project exists
-    const project = await this.db.project.findUnique({
-      where: { id: projectId },
-    });
+    const project = await this.vcsRepo.findProjectById(projectId);
 
     if (!project) {
       throw new NotFoundAppException({}, 'projects');
     }
 
     // Check if connection already exists
-    const existingConnection = await this.db.vcsConnection.findUnique({
-      where: { projectId },
-    });
+    const existingConnection = await this.vcsRepo.findVcsConnectionByProjectId(projectId);
 
     if (existingConnection) {
       throw new HttpException('VCS connection already exists for this project', HttpStatus.CONFLICT);
@@ -93,21 +68,18 @@ export class VcsConnectionService {
       ?? this.configService.get<number>('vcs.defaultPollingIntervalMs')
       ?? 600000;
 
-    // Create connection
-    const connection = (await this.db.vcsConnection.create({
-      data: {
-        projectId,
-        provider: dto.provider.toLowerCase(),
-        repoOwner,
-        repoName,
-        encryptedToken,
-        syncMode,
-        allowedAuthors: JSON.stringify(dto.allowedAuthors ?? []),
-        pollingIntervalMs,
-        webhookSecret: syncMode === 'webhook' ? randomBytes(16).toString('hex') : null,
-        isActive: true,
-      },
-    })) as VcsConnection;
+    const connection = await this.vcsRepo.createVcsConnection({
+      projectId,
+      provider: dto.provider.toLowerCase(),
+      repoOwner,
+      repoName,
+      encryptedToken,
+      syncMode,
+      allowedAuthors: JSON.stringify(dto.allowedAuthors ?? []),
+      pollingIntervalMs,
+      webhookSecret: syncMode === 'webhook' ? randomBytes(16).toString('hex') : null,
+      isActive: true,
+    });
 
     await this.vcsPollingService.refreshConnectionSchedule(connection.id);
 
@@ -118,9 +90,7 @@ export class VcsConnectionService {
    * Get VCS connection for a project
    */
   async findByProject(projectId: string): Promise<VcsConnectionResponseDto> {
-    const connection = (await this.db.vcsConnection.findUnique({
-      where: { projectId },
-    })) as VcsConnection | null;
+    const connection = await this.vcsRepo.findVcsConnectionByProjectId(projectId);
 
     if (!connection) {
       throw new NotFoundAppException({}, 'vcs');
@@ -138,15 +108,19 @@ export class VcsConnectionService {
     dto: UpdateVcsConnectionDto,
   ): Promise<VcsConnectionResponseDto> {
     // Verify connection exists
-    const connection = (await this.db.vcsConnection.findUnique({
-      where: { projectId },
-    })) as VcsConnection | null;
+    const connection = await this.vcsRepo.findVcsConnectionByProjectId(projectId);
 
     if (!connection) {
       throw new NotFoundAppException({}, 'vcs');
     }
 
-    const updateData: Record<string, unknown> = {};
+    const updateData: {
+      encryptedToken?: string;
+      syncMode?: string;
+      allowedAuthors?: string;
+      pollingIntervalMs?: number;
+      webhookSecret?: string | null;
+    } = {};
 
     // If token is provided, encrypt it
     if (dto.token) {
@@ -179,10 +153,7 @@ export class VcsConnectionService {
       return this.mapToResponseDto(connection);
     }
 
-    const updated = (await this.db.vcsConnection.update({
-      where: { projectId },
-      data: updateData,
-    })) as VcsConnection;
+    const updated = await this.vcsRepo.updateVcsConnection(projectId, updateData);
 
     await this.vcsPollingService.refreshConnectionSchedule(updated.id);
 
@@ -193,17 +164,13 @@ export class VcsConnectionService {
    * Delete VCS connection
    */
   async delete(projectId: string): Promise<void> {
-    const connection = (await this.db.vcsConnection.findUnique({
-      where: { projectId },
-    })) as VcsConnection | null;
+    const connection = await this.vcsRepo.findVcsConnectionByProjectId(projectId);
 
     if (!connection) {
       throw new NotFoundAppException({}, 'vcs');
     }
 
-    await this.db.vcsConnection.delete({
-      where: { projectId },
-    });
+    await this.vcsRepo.deleteVcsConnection(projectId);
 
     this.vcsPollingService.unschedulePolling(connection.id);
   }
@@ -215,9 +182,7 @@ export class VcsConnectionService {
     projectId: string,
     encryptionKey: string,
   ): Promise<TestConnectionResultDto> {
-    const connection = (await this.db.vcsConnection.findUnique({
-      where: { projectId },
-    })) as VcsConnection | null;
+    const connection = await this.vcsRepo.findVcsConnectionByProjectId(projectId);
 
     if (!connection) {
       throw new NotFoundAppException({}, 'vcs');
@@ -229,7 +194,7 @@ export class VcsConnectionService {
     let decryptedToken: string;
     try {
       decryptedToken = decryptToken(connection.encryptedToken, encryptionKey);
-    } catch (error) {
+    } catch {
       throw new ValidationAppException({}, 'vcs');
     }
 
@@ -261,9 +226,7 @@ export class VcsConnectionService {
    * Get full connection for internal use (includes encryptedToken)
    */
   async getFullByProject(projectId: string): Promise<VcsConnection> {
-    const connection = (await this.db.vcsConnection.findUnique({
-      where: { projectId },
-    })) as VcsConnection | null;
+    const connection = await this.vcsRepo.findVcsConnectionByProjectId(projectId);
 
     if (!connection) {
       throw new NotFoundAppException({}, 'vcs');

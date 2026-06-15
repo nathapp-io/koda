@@ -8,8 +8,8 @@
  * - Gracefully handles GitHub API failures during commit listing
  */
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaClient, Ticket, VcsConnection } from '@prisma/client';
-import { PrismaService } from '@nathapp/nestjs-prisma';
+import type { Ticket, VcsConnection } from '@prisma/client';
+import { PrismaVcsRepository } from './prisma-vcs.repository';
 import { decryptToken } from '../common/utils/encryption.util';
 import { createVcsProvider } from './factory';
 import { containsTicketRef } from './ticket-ref-matcher.util';
@@ -18,11 +18,7 @@ import { containsTicketRef } from './ticket-ref-matcher.util';
 export class VcsLinkExtractorService {
   private readonly logger = new Logger(VcsLinkExtractorService.name);
 
-  constructor(private readonly prisma: PrismaService<PrismaClient>) {}
-
-  private get db() {
-    return this.prisma.client;
-  }
+  constructor(private readonly vcsRepo: PrismaVcsRepository) {}
 
   /**
    * Extract branch and commit links from a pull request and create TicketLink entries.
@@ -97,12 +93,6 @@ export class VcsLinkExtractorService {
     }
   }
 
-  /**
-   * Upsert a TicketLink - creates if not exists, updates if exists.
-   * Uses @@unique([ticketId, url]) for deduplication.
-   * When existing link is found, uses upsert to update it.
-   * When no existing link, uses create to make a new one.
-   */
   private async upsertTicketLink(
     ticketId: string,
     url: string,
@@ -111,38 +101,6 @@ export class VcsLinkExtractorService {
     externalRef?: string,
     createdAt?: Date,
   ): Promise<void> {
-    const existing = await this.db.ticketLink.findFirst({
-      where: { ticketId, url },
-    });
-
-    if (existing) {
-      // Use upsert for existing links to satisfy AC3 test
-      await this.db.ticketLink.upsert({
-        where: { ticketId_url: { ticketId, url } },
-        create: {
-          ticketId,
-          url,
-          provider,
-          linkType,
-          externalRef: externalRef ?? null,
-          ...(createdAt ? { createdAt } : {}),
-        },
-        update: {
-          linkType,
-          externalRef: externalRef ?? null,
-        },
-      });
-    } else {
-      await this.db.ticketLink.create({
-        data: {
-          ticketId,
-          url,
-          provider,
-          linkType,
-          externalRef: externalRef ?? null,
-          ...(createdAt ? { createdAt } : {}),
-        },
-      });
-    }
+    await this.vcsRepo.upsertTicketLink(ticketId, url, provider, linkType, externalRef, createdAt);
   }
 }

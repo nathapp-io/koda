@@ -1,16 +1,8 @@
-/**
- * KodaDomainWriter Unit Tests
- *
- * Tests the KodaDomainWriter service in isolation with mocked dependencies.
- * These tests focus on the service's public interface and error handling.
- */
-
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 
 import { KodaDomainWriter } from './koda-domain-writer.service';
+import { PrismaKodaDomainWriterRepository } from './prisma-koda-domain-writer.repository';
 import { RagService } from '../rag/rag.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { AgentAuthProvider } from '../auth/agent-auth.provider';
@@ -20,25 +12,9 @@ import { DecisionEventService } from '../events/decision-event.service';
 
 describe('KodaDomainWriter Unit Tests', () => {
   let service: KodaDomainWriter;
-  let prismaService: PrismaService<PrismaClient>;
-  let ragService: RagService;
-  let outboxService: OutboxService;
 
-  const mockPrismaService = {
-    client: {
-      project: {
-        findUnique: jest.fn(),
-      },
-      ticketEvent: {
-        create: jest.fn(),
-      },
-      agentEvent: {
-        create: jest.fn(),
-      },
-      agentRoleEntry: {
-        findMany: jest.fn().mockResolvedValue([]),
-      },
-    },
+  const mockWriterRepo = {
+    findProjectById: jest.fn(),
   };
 
   const mockRagService = {
@@ -56,22 +32,33 @@ describe('KodaDomainWriter Unit Tests', () => {
     invalidateByTag: jest.fn(),
   };
 
+  const mockTicketEventService = {
+    create: jest.fn(),
+  };
+
+  const mockAgentEventService = {
+    create: jest.fn(),
+  };
+
+  const mockDecisionEventService = {
+    create: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         KodaDomainWriter,
-        { provide: PrismaService, useValue: mockPrismaService },
+        { provide: PrismaKodaDomainWriterRepository, useValue: mockWriterRepo },
         { provide: RagService, useValue: mockRagService },
         { provide: OutboxService, useValue: mockOutboxService },
         { provide: AgentAuthProvider, useValue: mockAgentAuthProvider },
-        TicketEventService,
-        AgentEventService,
-        DecisionEventService,
+        { provide: TicketEventService, useValue: mockTicketEventService },
+        { provide: AgentEventService, useValue: mockAgentEventService },
+        { provide: DecisionEventService, useValue: mockDecisionEventService },
       ],
     }).compile();
 
     service = module.get<KodaDomainWriter>(KodaDomainWriter);
-    outboxService = module.get<OutboxService>(OutboxService);
   });
 
   afterEach(() => {
@@ -87,7 +74,7 @@ describe('KodaDomainWriter Unit Tests', () => {
     it('should require projectId parameter', async () => {
       const invalidData = {
         ticketId: 'ticket-001',
-        projectId: '', // empty
+        projectId: '',
         action: 'CREATED',
         actorId: 'agent-001',
         actorType: 'agent' as const,
@@ -109,14 +96,14 @@ describe('KodaDomainWriter Unit Tests', () => {
         data: {},
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(null);
+      mockTicketEventService.create.mockRejectedValue(new ForbiddenAppException({}, 'events'));
 
       await expect(service.writeTicketEvent(data)).rejects.toThrow(ForbiddenAppException);
     });
 
     it('should throw if ticketId is missing', async () => {
       const data = {
-        ticketId: '', // empty
+        ticketId: '',
         projectId: 'proj-123',
         action: 'CREATED',
         actorId: 'agent-001',
@@ -125,8 +112,6 @@ describe('KodaDomainWriter Unit Tests', () => {
         data: {},
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue({ id: 'proj-123' });
-
       await expect(service.writeTicketEvent(data)).rejects.toThrow();
     });
 
@@ -134,14 +119,12 @@ describe('KodaDomainWriter Unit Tests', () => {
       const data = {
         ticketId: 'ticket-001',
         projectId: 'proj-123',
-        action: '', // empty
+        action: '',
         actorId: 'agent-001',
         actorType: 'agent' as const,
         source: 'api' as const,
         data: {},
       };
-
-      mockPrismaService.client.project.findUnique.mockResolvedValue({ id: 'proj-123' });
 
       await expect(service.writeTicketEvent(data)).rejects.toThrow();
     });
@@ -151,13 +134,11 @@ describe('KodaDomainWriter Unit Tests', () => {
         ticketId: 'ticket-001',
         projectId: 'proj-123',
         action: 'CREATED',
-        actorId: '', // empty
+        actorId: '',
         actorType: 'agent' as const,
         source: 'api' as const,
         data: {},
       };
-
-      mockPrismaService.client.project.findUnique.mockResolvedValue({ id: 'proj-123' });
 
       await expect(service.writeTicketEvent(data)).rejects.toThrow();
     });
@@ -172,7 +153,7 @@ describe('KodaDomainWriter Unit Tests', () => {
     it('should require projectId parameter', async () => {
       const invalidData = {
         agentId: 'agent-001',
-        projectId: '', // empty
+        projectId: '',
         action: 'ASSIGNED_TICKET',
         actorId: 'agent-001',
         source: 'internal' as const,
@@ -192,22 +173,20 @@ describe('KodaDomainWriter Unit Tests', () => {
         data: {},
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(null);
+      mockAgentEventService.create.mockRejectedValue(new ForbiddenAppException({}, 'events'));
 
       await expect(service.writeAgentAction(data)).rejects.toThrow(ForbiddenAppException);
     });
 
     it('should throw if agentId is missing', async () => {
       const data = {
-        agentId: '', // empty
+        agentId: '',
         projectId: 'proj-123',
         action: 'ASSIGNED_TICKET',
         actorId: 'agent-001',
         source: 'internal' as const,
         data: {},
       };
-
-      mockPrismaService.client.project.findUnique.mockResolvedValue({ id: 'proj-123' });
 
       await expect(service.writeAgentAction(data)).rejects.toThrow();
     });
@@ -221,7 +200,7 @@ describe('KodaDomainWriter Unit Tests', () => {
 
     it('should require projectId parameter', async () => {
       const invalidData = {
-        projectId: '', // empty
+        projectId: '',
         source: 'ticket' as const,
         sourceId: 'ticket-001',
         content: 'Test',
@@ -244,7 +223,7 @@ describe('KodaDomainWriter Unit Tests', () => {
         timestamp: new Date(),
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(null);
+      mockTicketEventService.create.mockRejectedValue(new ForbiddenAppException({}, 'events'));
 
       await expect(service.indexDocument(data)).rejects.toThrow(ForbiddenAppException);
     });
@@ -253,14 +232,12 @@ describe('KodaDomainWriter Unit Tests', () => {
       const data = {
         projectId: 'proj-123',
         source: 'ticket' as const,
-        sourceId: '', // empty
+        sourceId: '',
         content: 'Test',
         metadata: {},
         actorId: 'agent-001',
         timestamp: new Date(),
       };
-
-      mockPrismaService.client.project.findUnique.mockResolvedValue({ id: 'proj-123' });
 
       await expect(service.indexDocument(data)).rejects.toThrow();
     });
@@ -270,13 +247,11 @@ describe('KodaDomainWriter Unit Tests', () => {
         projectId: 'proj-123',
         source: 'ticket' as const,
         sourceId: 'ticket-001',
-        content: '', // empty
+        content: '',
         metadata: {},
         actorId: 'agent-001',
         timestamp: new Date(),
       };
-
-      mockPrismaService.client.project.findUnique.mockResolvedValue({ id: 'proj-123' });
 
       await expect(service.indexDocument(data)).rejects.toThrow();
     });
@@ -304,7 +279,7 @@ describe('KodaDomainWriter Unit Tests', () => {
 
     it('should require projectId parameter', async () => {
       const invalidData = {
-        projectId: '', // empty
+        projectId: '',
         nodes: [],
         links: [],
         actorId: 'agent-001',
@@ -323,7 +298,7 @@ describe('KodaDomainWriter Unit Tests', () => {
         timestamp: new Date(),
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(null);
+      mockWriterRepo.findProjectById.mockResolvedValue(null);
 
       await expect(service.importGraphify(data)).rejects.toThrow(ForbiddenAppException);
     });
@@ -331,16 +306,15 @@ describe('KodaDomainWriter Unit Tests', () => {
     it('should accept empty nodes array', async () => {
       const data = {
         projectId: 'proj-123',
-        nodes: [], // empty is ok
+        nodes: [],
         links: [],
         actorId: 'agent-001',
         timestamp: new Date(),
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue({ id: 'proj-123' });
+      mockWriterRepo.findProjectById.mockResolvedValue({ id: 'proj-123' });
       mockRagService.importGraphify.mockResolvedValue({ imported: 0, cleared: 0 });
 
-      // Should not throw
       await expect(service.importGraphify(data)).resolves.toBeDefined();
     });
   });
@@ -357,8 +331,7 @@ describe('KodaDomainWriter Unit Tests', () => {
         data: {},
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue({ id: 'proj-123' });
-      mockPrismaService.client.ticketEvent.create.mockResolvedValue({
+      mockTicketEventService.create.mockResolvedValue({
         id: 'event-123',
         ticketId: data.ticketId,
         projectId: data.projectId,
@@ -399,8 +372,7 @@ describe('KodaDomainWriter Unit Tests', () => {
         data: {},
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue({ id: 'proj-123' });
-      mockPrismaService.client.agentEvent.create.mockResolvedValue({
+      mockAgentEventService.create.mockResolvedValue({
         id: 'event-123',
         agentId: data.agentId,
         projectId: data.projectId,
@@ -441,8 +413,7 @@ describe('KodaDomainWriter Unit Tests', () => {
         timestamp: new Date(),
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue({ id: 'proj-123' });
-      mockPrismaService.client.ticketEvent.create.mockResolvedValue({
+      mockTicketEventService.create.mockResolvedValue({
         id: 'event-index-001',
         ticketId: 'ticket-001',
         projectId: 'proj-123',
@@ -480,7 +451,7 @@ describe('KodaDomainWriter Unit Tests', () => {
         timestamp: new Date(),
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue({ id: 'proj-123' });
+      mockWriterRepo.findProjectById.mockResolvedValue({ id: 'proj-123' });
       mockRagService.importGraphify.mockResolvedValue({ imported: 1, cleared: 0 });
 
       const result = await service.importGraphify(data);
@@ -504,9 +475,8 @@ describe('KodaDomainWriter Unit Tests', () => {
         data: {},
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue({ id: 'proj-123' });
       const dbError = new Error('Database connection failed');
-      mockPrismaService.client.ticketEvent.create.mockRejectedValue(dbError);
+      mockTicketEventService.create.mockRejectedValue(dbError);
 
       await expect(service.writeTicketEvent(data)).rejects.toThrow('Database connection failed');
     });
@@ -522,8 +492,7 @@ describe('KodaDomainWriter Unit Tests', () => {
         timestamp: new Date(),
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue({ id: 'proj-123' });
-      mockPrismaService.client.ticketEvent.create.mockResolvedValue({
+      mockTicketEventService.create.mockResolvedValue({
         id: 'event-index-001',
         ticketId: 'ticket-001',
         projectId: 'proj-123',
@@ -537,7 +506,6 @@ describe('KodaDomainWriter Unit Tests', () => {
       });
       mockRagService.indexDocument.mockRejectedValue(new Error('RAG error'));
 
-      // Should not throw, but return error in result
       const indexPromise = service.indexDocument(data);
       await expect(indexPromise).resolves.toBeDefined();
       const result = await indexPromise;
@@ -556,8 +524,7 @@ describe('KodaDomainWriter Unit Tests', () => {
         timestamp: new Date(),
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue({ id: 'proj-123' });
-      mockPrismaService.client.ticketEvent.create.mockRejectedValue(new Error('Canonical write failed'));
+      mockTicketEventService.create.mockRejectedValue(new Error('Canonical write failed'));
 
       await expect(service.indexDocument(data)).rejects.toThrow('Canonical write failed');
     });

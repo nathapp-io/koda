@@ -1,10 +1,9 @@
 import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
 import { ValidationAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { ProjectResponseDto } from './dto/project-response.dto';
+import { PrismaProjectRepository } from './prisma-project.repository';
 import { RagService } from '../rag/rag.service';
 import { HybridRetrieverService } from '../rag/hybrid-retriever.service';
 
@@ -13,15 +12,11 @@ export class ProjectsService {
   private readonly logger = new Logger(ProjectsService.name);
 
   constructor(
-    private prisma: PrismaService<PrismaClient>,
+    private projectRepo: PrismaProjectRepository,
     private ragService: RagService,
     @Inject(forwardRef(() => HybridRetrieverService))
     private hybridRetrieverService?: HybridRetrieverService,
   ) {}
-
-  private get db() {
-    return this.prisma.client;
-  }
 
   async create(createProjectDto: CreateProjectDto) {
     // Validate name
@@ -42,51 +37,37 @@ export class ProjectsService {
     }
 
     // Check slug uniqueness
-    const existingSlug = await this.db.project.findUnique({
-      where: { slug: createProjectDto.slug },
-    });
+    const existingSlug = await this.projectRepo.findBySlug(createProjectDto.slug);
     if (existingSlug) {
       throw new ValidationAppException({}, 'projects');
     }
 
     // Check key uniqueness
-    const existingKey = await this.db.project.findUnique({
-      where: { key: createProjectDto.key },
-    });
+    const existingKey = await this.projectRepo.findByKey(createProjectDto.key);
     if (existingKey) {
       throw new ValidationAppException({}, 'projects');
     }
 
     // Create project
     return ProjectResponseDto.from(
-      await this.db.project.create({
-        data: {
-          name: createProjectDto.name,
-          slug: createProjectDto.slug,
-          key: createProjectDto.key,
-          description: createProjectDto.description,
-          gitRemoteUrl: createProjectDto.gitRemoteUrl,
-          autoIndexOnClose: createProjectDto.autoIndexOnClose ?? true,
-          autoAssign: createProjectDto.autoAssign ?? 'OFF',
-        },
+      await this.projectRepo.createProject({
+        name: createProjectDto.name,
+        slug: createProjectDto.slug,
+        key: createProjectDto.key,
+        description: createProjectDto.description,
+        gitRemoteUrl: createProjectDto.gitRemoteUrl,
+        autoIndexOnClose: createProjectDto.autoIndexOnClose ?? true,
+        autoAssign: createProjectDto.autoAssign ?? 'OFF',
       })
     );
   }
 
   async findAll() {
-    return ProjectResponseDto.fromMany(
-      await this.db.project.findMany({
-        where: {
-          deletedAt: null,
-        },
-      })
-    );
+    return ProjectResponseDto.fromMany(await this.projectRepo.findAll());
   }
 
   async findBySlug(slug: string) {
-    const project = await this.db.project.findUnique({
-      where: { slug },
-    });
+    const project = await this.projectRepo.findBySlug(slug);
 
     // Filter out soft-deleted projects
     if (!project || project.deletedAt) {
@@ -98,9 +79,7 @@ export class ProjectsService {
 
   async update(slug: string, updateProjectDto: UpdateProjectDto) {
     // Find the current project
-    const currentProject = await this.db.project.findUnique({
-      where: { slug },
-    });
+    const currentProject = await this.projectRepo.findBySlug(slug);
 
     if (!currentProject) {
       throw new NotFoundAppException({}, 'projects');
@@ -123,9 +102,7 @@ export class ProjectsService {
 
       // Check slug uniqueness (unless it's the same as current)
       if (updateProjectDto.slug !== currentProject.slug) {
-        const existingSlug = await this.db.project.findUnique({
-          where: { slug: updateProjectDto.slug },
-        });
+        const existingSlug = await this.projectRepo.findBySlug(updateProjectDto.slug);
         if (existingSlug && existingSlug.id !== currentProject.id) {
           throw new ValidationAppException({}, 'projects');
         }
@@ -141,9 +118,7 @@ export class ProjectsService {
 
       // Check key uniqueness (unless it's the same as current)
       if (updateProjectDto.key !== currentProject.key) {
-        const existingKey = await this.db.project.findUnique({
-          where: { key: updateProjectDto.key },
-        });
+        const existingKey = await this.projectRepo.findByKey(updateProjectDto.key);
         if (existingKey && existingKey.id !== currentProject.id) {
           throw new ValidationAppException({}, 'projects');
         }
@@ -151,19 +126,16 @@ export class ProjectsService {
     }
 
     // Update project
-    const updatedProject = await this.db.project.update({
-      where: { slug },
-      data: {
-        name: updateProjectDto.name,
-        slug: updateProjectDto.slug,
-        key: updateProjectDto.key,
-        description: updateProjectDto.description,
-        gitRemoteUrl: updateProjectDto.gitRemoteUrl,
-        autoIndexOnClose: updateProjectDto.autoIndexOnClose,
-        autoAssign: updateProjectDto.autoAssign,
-        ciWebhookToken: updateProjectDto.ciWebhookToken,
-        graphifyEnabled: updateProjectDto.graphifyEnabled,
-      },
+    const updatedProject = await this.projectRepo.updateBySlug(slug, {
+      name: updateProjectDto.name,
+      slug: updateProjectDto.slug,
+      key: updateProjectDto.key,
+      description: updateProjectDto.description,
+      gitRemoteUrl: updateProjectDto.gitRemoteUrl,
+      autoIndexOnClose: updateProjectDto.autoIndexOnClose,
+      autoAssign: updateProjectDto.autoAssign,
+      ciWebhookToken: updateProjectDto.ciWebhookToken,
+      graphifyEnabled: updateProjectDto.graphifyEnabled,
     });
 
     // Handle graphifyEnabled transition from true to false
@@ -192,20 +164,15 @@ export class ProjectsService {
 
   async softDelete(slug: string) {
     // Find the project
-    const project = await this.db.project.findUnique({
-      where: { slug },
-    });
+    const project = await this.projectRepo.findBySlug(slug);
 
     if (!project) {
       throw new NotFoundAppException({}, 'projects');
     }
 
     // Soft delete by setting deletedAt
-    const deletedProject = await this.db.project.update({
-      where: { slug },
-      data: {
-        deletedAt: new Date(),
-      },
+    const deletedProject = await this.projectRepo.updateBySlug(slug, {
+      deletedAt: new Date(),
     });
 
     this.ragService.clearProjectCaches(deletedProject.id);

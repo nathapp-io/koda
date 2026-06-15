@@ -5,25 +5,22 @@ import { NotFoundAppException } from '@nathapp/nestjs-common';
 describe('ProjectsService', () => {
   let service: ProjectsService;
   let ragService: jest.Mocked<RagService>;
-  let mockPrismaService: any;
+  let mockProjectRepo: any;
 
   beforeEach(() => {
-    mockPrismaService = {
-      client: {
-        project: {
-          findUnique: jest.fn(),
-          findMany: jest.fn(),
-          create: jest.fn(),
-          update: jest.fn(),
-        },
-      },
+    mockProjectRepo = {
+      findBySlug: jest.fn(),
+      findByKey: jest.fn(),
+      findAll: jest.fn(),
+      createProject: jest.fn(),
+      updateBySlug: jest.fn(),
     };
 
     ragService = {
       deleteAllBySourceType: jest.fn(),
     } as any;
 
-    service = new ProjectsService(mockPrismaService as any, ragService);
+    service = new ProjectsService(mockProjectRepo as any, ragService);
   });
 
   afterEach(() => {
@@ -49,10 +46,8 @@ describe('ProjectsService', () => {
     };
 
     it('should call deleteAllBySourceType when graphifyEnabled changes from true to false', async () => {
-      mockPrismaService.client.project.findUnique.mockResolvedValueOnce(
-        mockProject
-      );
-      mockPrismaService.client.project.update.mockResolvedValueOnce({
+      mockProjectRepo.findBySlug.mockResolvedValueOnce(mockProject);
+      mockProjectRepo.updateBySlug.mockResolvedValueOnce({
         ...mockProject,
         graphifyEnabled: false,
       });
@@ -66,10 +61,8 @@ describe('ProjectsService', () => {
     });
 
     it('should not call deleteAllBySourceType when graphifyEnabled is not present in update payload', async () => {
-      mockPrismaService.client.project.findUnique.mockResolvedValueOnce(
-        mockProject
-      );
-      mockPrismaService.client.project.update.mockResolvedValueOnce(mockProject);
+      mockProjectRepo.findBySlug.mockResolvedValueOnce(mockProject);
+      mockProjectRepo.updateBySlug.mockResolvedValueOnce(mockProject);
 
       await service.update('test-project', { name: 'Updated Name' });
 
@@ -81,10 +74,8 @@ describe('ProjectsService', () => {
         ...mockProject,
         graphifyEnabled: false,
       };
-      mockPrismaService.client.project.findUnique.mockResolvedValueOnce(
-        projectWithGraphifyDisabled
-      );
-      mockPrismaService.client.project.update.mockResolvedValueOnce(mockProject);
+      mockProjectRepo.findBySlug.mockResolvedValueOnce(projectWithGraphifyDisabled);
+      mockProjectRepo.updateBySlug.mockResolvedValueOnce(mockProject);
 
       await service.update('test-project', { graphifyEnabled: true });
 
@@ -92,10 +83,8 @@ describe('ProjectsService', () => {
     });
 
     it('should not call deleteAllBySourceType when graphifyEnabled is true in both current and update payload', async () => {
-      mockPrismaService.client.project.findUnique.mockResolvedValueOnce(
-        mockProject
-      );
-      mockPrismaService.client.project.update.mockResolvedValueOnce(mockProject);
+      mockProjectRepo.findBySlug.mockResolvedValueOnce(mockProject);
+      mockProjectRepo.updateBySlug.mockResolvedValueOnce(mockProject);
 
       await service.update('test-project', { graphifyEnabled: true });
 
@@ -103,10 +92,8 @@ describe('ProjectsService', () => {
     });
 
     it('should log at warn level when deleteAllBySourceType throws, and not re-throw', async () => {
-      mockPrismaService.client.project.findUnique.mockResolvedValueOnce(
-        mockProject
-      );
-      mockPrismaService.client.project.update.mockResolvedValueOnce({
+      mockProjectRepo.findBySlug.mockResolvedValueOnce(mockProject);
+      mockProjectRepo.updateBySlug.mockResolvedValueOnce({
         ...mockProject,
         graphifyEnabled: false,
       });
@@ -131,7 +118,7 @@ describe('ProjectsService', () => {
     });
 
     it('should throw NotFoundAppException when project is not found', async () => {
-      mockPrismaService.client.project.findUnique.mockResolvedValueOnce(null);
+      mockProjectRepo.findBySlug.mockResolvedValueOnce(null);
 
       await expect(
         service.update('non-existent', { name: 'Updated' })

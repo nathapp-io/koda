@@ -63,7 +63,6 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ContextBuilderService, GetProjectContextQuery } from '../../../src/context/context-builder.service';
 import { CanonicalStateService } from '../../../src/memory/canonical-state.service';
 import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-item.repository';
@@ -71,13 +70,14 @@ import { HybridRetrieverService } from '../../../src/rag/hybrid-retriever.servic
 import { EntityGraphService } from '../../../src/entity-graph/entity-graph.service';
 import { ImpactAnalysisService } from '../../../src/code-intel/impact-analysis.service';
 import { estimateTokenCount } from '../../../src/context/token-estimator';
+import { CONTEXT_REPOSITORY } from '../../../src/context/domain/context.domain';
 
 // ─── shared helpers ───────────────────────────────────────────────────────────
 
 const PROJECT_ID = 'p-adversarial-1';
 
 interface ModuleOverrides {
-  prisma?: { client: { project: { findUnique: jest.Mock } } };
+  contextRepo?: { projectExistsAndNotDeleted: jest.Mock };
   canonical?: { getSnapshot: jest.Mock };
   memoryRepo?: { findByProjectMemory: jest.Mock };
   hybridRetriever?: { search: jest.Mock };
@@ -86,12 +86,8 @@ interface ModuleOverrides {
 }
 
 function makeModule(overrides: ModuleOverrides = {}) {
-  const mockPrisma = overrides.prisma ?? {
-    client: {
-      project: {
-        findUnique: jest.fn().mockResolvedValue({ id: PROJECT_ID, deletedAt: null }),
-      },
-    },
+  const mockContextRepo = overrides.contextRepo ?? {
+    projectExistsAndNotDeleted: jest.fn().mockResolvedValue(true),
   };
 
   const mockCanonical = overrides.canonical ?? {
@@ -131,7 +127,7 @@ function makeModule(overrides: ModuleOverrides = {}) {
       { provide: HybridRetrieverService, useValue: mockHybridRetriever },
       { provide: EntityGraphService, useValue: mockEntityGraph },
       { provide: ImpactAnalysisService, useValue: mockImpactAnalysis },
-      { provide: PrismaService, useValue: mockPrisma },
+      { provide: CONTEXT_REPOSITORY, useValue: mockContextRepo },
     ],
   }).compile();
 }
@@ -232,13 +228,9 @@ describe('ContextBuilderService — AC-9 adversarial: ProjectNotFoundError has c
 
   beforeEach(async () => {
     const module: TestingModule = await makeModule({
-      prisma: {
-        client: {
-          project: {
-            // Simulate a non-existent project (findUnique returns null)
-            findUnique: jest.fn().mockResolvedValue(null),
-          },
-        },
+      contextRepo: {
+        // Simulate a non-existent project
+        projectExistsAndNotDeleted: jest.fn().mockResolvedValue(false),
       },
     });
     service = module.get(ContextBuilderService);

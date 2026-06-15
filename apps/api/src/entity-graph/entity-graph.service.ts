@@ -11,8 +11,7 @@ import {
   EntityLinkRelation,
 } from './dto/entity-graph.types';
 import { ENTITY_GRAPH_STORE } from './entity-graph.tokens';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { ENTITY_GRAPH_REPOSITORY, IEntityGraphRepository } from './domain/entity-graph.domain';
 
 @Injectable()
 export class EntityGraphService {
@@ -20,21 +19,18 @@ export class EntityGraphService {
 
   constructor(
     @Inject(ENTITY_GRAPH_STORE) private readonly entityStore: IEntityStore,
-    @Optional() private readonly prisma?: PrismaService<PrismaClient>,
+    @Optional() @Inject(ENTITY_GRAPH_REPOSITORY) private readonly entityGraphRepo?: IEntityGraphRepository,
   ) {}
 
   async rebuildGraph(projectId: string): Promise<void> {
     this.logger.debug(`rebuildGraph called with projectId=${projectId}`);
 
-    if (!this.prisma) {
+    if (!this.entityGraphRepo) {
       this.logger.warn('rebuildGraph requires PrismaService; skipping');
       return;
     }
 
-    const tickets = await this.prisma.client.ticket.findMany({
-      where: { projectId, deletedAt: null },
-      include: { labels: { include: { label: true } }, links: true },
-    });
+    const tickets = await this.entityGraphRepo.findTicketsWithLabelsAndLinks(projectId);
 
     for (const ticket of tickets) {
       const labelNames = ticket.labels.map((tl) => tl.label.name);
@@ -93,9 +89,7 @@ export class EntityGraphService {
       }
     }
 
-    const graphNodes = await this.prisma.client.graphNode.findMany({
-      where: { projectId, type: 'code_module' },
-    });
+    const graphNodes = await this.entityGraphRepo.findGraphNodesByType(projectId, 'code_module');
 
     for (const gn of graphNodes) {
       const entityId = `service:${gn.nodeId}`;
@@ -115,9 +109,7 @@ export class EntityGraphService {
       );
     }
 
-    const graphLinks = await this.prisma.client.graphLink.findMany({
-      where: { projectId, relation: 'depends_on' },
-    });
+    const graphLinks = await this.entityGraphRepo.findGraphLinksByRelation(projectId, 'depends_on');
 
     for (const gl of graphLinks) {
       const sourceEntityId = `service:${gl.sourceId}`;
@@ -377,11 +369,9 @@ export class EntityGraphService {
   }
 
   private async inferServiceLinksFromDb(projectId: string): Promise<void> {
-    if (!this.prisma) return;
+    if (!this.entityGraphRepo) return;
 
-    const graphLinks = await this.prisma.client.graphLink.findMany({
-      where: { projectId, relation: 'depends_on' },
-    });
+    const graphLinks = await this.entityGraphRepo.findGraphLinksByRelation(projectId, 'depends_on');
 
     for (const gl of graphLinks) {
       const sourceEntityId = `service:${gl.sourceId}`;

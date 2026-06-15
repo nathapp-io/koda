@@ -1,44 +1,34 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TimelineService, TimelineQuery } from './timeline.service';
-import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaTimelineRepository } from './prisma-timeline.repository';
 
 describe('TimelineService', () => {
   let service: TimelineService;
-  let prismaService: PrismaService<any>;
 
-  const mockPrismaClient = {
-    ticketEvent: {
-      findMany: jest.fn(),
-    },
-    agentEvent: {
-      findMany: jest.fn(),
-    },
-    decisionEvent: {
-      findMany: jest.fn(),
-    },
-  };
-
-  const mockPrismaService = {
-    client: mockPrismaClient,
+  const mockTimelineRepo = {
+    findTicketEvents: jest.fn(),
+    findAgentEvents: jest.fn(),
+    findDecisionEvents: jest.fn(),
   };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TimelineService,
-        { provide: PrismaService, useValue: mockPrismaService },
+        { provide: PrismaTimelineRepository, useValue: mockTimelineRepo },
       ],
     }).compile();
 
     service = module.get<TimelineService>(TimelineService);
-    prismaService = module.get<PrismaService<any>>(PrismaService);
 
     jest.clearAllMocks();
   });
 
   describe('getProjectTimeline', () => {
     test('AC-36: getProjectTimeline is called when getProjectContext({intent: diagnose}) is invoked', async () => {
-      mockPrismaClient.ticketEvent.findMany.mockResolvedValue([]);
+      mockTimelineRepo.findTicketEvents.mockResolvedValue([]);
+      mockTimelineRepo.findAgentEvents.mockResolvedValue([]);
+      mockTimelineRepo.findDecisionEvents.mockResolvedValue([]);
 
       const query: TimelineQuery = {
         projectId: 'project-123',
@@ -46,7 +36,7 @@ describe('TimelineService', () => {
 
       await service.getProjectTimeline(query);
 
-      expect(mockPrismaClient.ticketEvent.findMany).toHaveBeenCalled();
+      expect(mockTimelineRepo.findTicketEvents).toHaveBeenCalled();
     });
 
     test('returns events ordered by createdAt DESC', async () => {
@@ -55,7 +45,9 @@ describe('TimelineService', () => {
         { id: '1', actorId: 'actor-1', action: 'CREATED', createdAt: now },
         { id: '2', actorId: 'actor-2', action: 'UPDATED', createdAt: new Date(now.getTime() - 1000) },
       ];
-      mockPrismaClient.ticketEvent.findMany.mockResolvedValue(events);
+      mockTimelineRepo.findTicketEvents.mockResolvedValue(events);
+      mockTimelineRepo.findAgentEvents.mockResolvedValue([]);
+      mockTimelineRepo.findDecisionEvents.mockResolvedValue([]);
 
       const result = await service.getProjectTimeline({ projectId: 'project-123' });
 
@@ -69,7 +61,9 @@ describe('TimelineService', () => {
         action: 'TEST',
         createdAt: new Date(),
       }));
-      mockPrismaClient.ticketEvent.findMany.mockResolvedValue(events);
+      mockTimelineRepo.findTicketEvents.mockResolvedValue(events);
+      mockTimelineRepo.findAgentEvents.mockResolvedValue([]);
+      mockTimelineRepo.findDecisionEvents.mockResolvedValue([]);
 
       const result = await service.getProjectTimeline({ projectId: 'project-123' });
 
@@ -77,26 +71,24 @@ describe('TimelineService', () => {
     });
 
     test('filters by actorId when provided', async () => {
-      mockPrismaClient.ticketEvent.findMany.mockResolvedValue([]);
+      mockTimelineRepo.findTicketEvents.mockResolvedValue([]);
+      mockTimelineRepo.findAgentEvents.mockResolvedValue([]);
+      mockTimelineRepo.findDecisionEvents.mockResolvedValue([]);
 
       await service.getProjectTimeline({ projectId: 'project-123', actorId: 'actor-456' });
 
-      expect(mockPrismaClient.ticketEvent.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ actorId: 'actor-456' }),
-        })
+      expect(mockTimelineRepo.findTicketEvents).toHaveBeenCalledWith(
+        expect.objectContaining({ actorId: 'actor-456' })
       );
     });
 
     test('filters by ticketId when provided', async () => {
-      mockPrismaClient.ticketEvent.findMany.mockResolvedValue([]);
+      mockTimelineRepo.findTicketEvents.mockResolvedValue([]);
 
       await service.getProjectTimeline({ projectId: 'project-123', ticketId: 'ticket-789' });
 
-      expect(mockPrismaClient.ticketEvent.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ ticketId: 'ticket-789' }),
-        })
+      expect(mockTimelineRepo.findTicketEvents).toHaveBeenCalledWith(
+        expect.objectContaining({ ticketId: 'ticket-789' })
       );
     });
   });
@@ -106,7 +98,7 @@ describe('TimelineService', () => {
       const ticketEvents = [
         { id: '1', ticketId: 'ticket-123', actorId: 'actor-1', action: 'STATUS_CHANGE', createdAt: new Date() },
       ];
-      mockPrismaClient.ticketEvent.findMany.mockResolvedValue(ticketEvents);
+      mockTimelineRepo.findTicketEvents.mockResolvedValue(ticketEvents);
 
       const result = await service.getTicketHistory('ticket-123');
 
@@ -115,14 +107,12 @@ describe('TimelineService', () => {
     });
 
     test('filters by ticketId', async () => {
-      mockPrismaClient.ticketEvent.findMany.mockResolvedValue([]);
+      mockTimelineRepo.findTicketEvents.mockResolvedValue([]);
 
       await service.getTicketHistory('ticket-123');
 
-      expect(mockPrismaClient.ticketEvent.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ ticketId: 'ticket-123' }),
-        })
+      expect(mockTimelineRepo.findTicketEvents).toHaveBeenCalledWith(
+        expect.objectContaining({ ticketId: 'ticket-123' })
       );
     });
   });

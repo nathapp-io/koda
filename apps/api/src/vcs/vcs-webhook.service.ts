@@ -1,13 +1,13 @@
-import { HttpException, HttpStatus, Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
+import { HttpException, HttpStatus, Inject, Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { VcsConnection, Project } from '@prisma/client';
 import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { VcsLinkExtractorService } from './vcs-link-extractor.service';
 import { VcsIssue } from './types';
 import { OutboxService } from '../outbox/outbox.service';
+import { IVcsRepository, TicketLinkData, VCS_REPOSITORY } from './domain/vcs.repository';
 
 /**
  * GitHub webhook event payload (issues)
@@ -72,38 +72,6 @@ export interface WebhookHandleResult {
   reason?: string;
 }
 
-interface TicketLinkDelegate {
-  findFirst(options: { where: Record<string, unknown>; select?: unknown; include?: unknown }): Promise<unknown>
-  findUnique(options: { where: Record<string, unknown>; select?: unknown; include?: unknown }): Promise<unknown>
-  update(options: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<unknown>
-}
-
-interface TicketDelegate {
-  findUnique(options: { where: Record<string, unknown>; include?: unknown }): Promise<unknown>
-}
-
-interface ExtendedPrismaClient {
-  ticketLink: TicketLinkDelegate
-  ticket: TicketDelegate
-  [key: string]: unknown
-}
-
-interface TicketLinkData {
-  id: string
-  ticketId: string
-  prNumber: number | null
-  prState: string | null
-  url: string
-  externalRef: string | null
-  ticket?: {
-    id: string
-    status: string
-    projectId: string
-    number: number
-    externalVcsId: string | null
-  }
-}
-
 @Injectable()
 export class VcsWebhookService implements OnModuleDestroy {
   private readonly logger = new Logger(VcsWebhookService.name);
@@ -114,7 +82,7 @@ export class VcsWebhookService implements OnModuleDestroy {
   private dbDedupWorks = false;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(VCS_REPOSITORY) private readonly vcsRepo: IVcsRepository,
     private readonly syncService: VcsSyncService,
     private readonly prSyncService: VcsPrSyncService,
     @Optional() private readonly vcsLinkExtractorService?: VcsLinkExtractorService,
@@ -124,12 +92,6 @@ export class VcsWebhookService implements OnModuleDestroy {
     this.cleanupInterval = setInterval(() => {
       this.cleanupStaleEntries();
     }, this.dedupWindowMs);
-  }
-
-  // PrismaClientLike from @nathapp/nestjs-prisma doesn't expose VCS models,
-  // but they exist at runtime. Using double cast to allow property access.
-  private get db() {
-    return this.prisma.client as unknown as ExtendedPrismaClient;
   }
 
   onModuleDestroy(): void {
@@ -309,7 +271,7 @@ export class VcsWebhookService implements OnModuleDestroy {
     const prNumber = pr.number;
 
     // Find TicketLink by prNumber
-    const ticketLink = await this.findTicketLinkByPrNumber(connection.project.id, prNumber);
+    const ticketLink = await this.vcsRepo.findTicketLinkByPrNumber(connection.project.id, prNumber);
 
     if (!ticketLink) {
       // AC7: If no TicketLink matches prNumber, silently ignore
@@ -322,13 +284,7 @@ export class VcsWebhookService implements OnModuleDestroy {
 
     const newPrState = pr.draft ? 'draft' : 'open';
 
-    await this.db.ticketLink.update({
-      where: { id: ticketLink.id },
-      data: {
-        prState: newPrState,
-        prUpdatedAt: new Date(),
-      },
-    });
+    await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, newPrState);
 
     this.logger.debug(`Updated TicketLink ${ticketLink.id} prState to '${newPrState}' for PR #${prNumber}`);
 
@@ -349,7 +305,7 @@ export class VcsWebhookService implements OnModuleDestroy {
     const prNumber = pr.number;
 
     // Find TicketLink by prNumber
-    const ticketLink = await this.findTicketLinkByPrNumber(connection.project.id, prNumber);
+    const ticketLink = await this.vcsRepo.findTicketLinkByPrNumber(connection.project.id, prNumber);
 
     if (!ticketLink) {
       // AC7: If no TicketLink matches prNumber, silently ignore
@@ -377,13 +333,7 @@ export class VcsWebhookService implements OnModuleDestroy {
     );
 
     // Update prState to merged
-    await this.db.ticketLink.update({
-      where: { id: ticketLink.id },
-      data: {
-        prState: 'merged',
-        prUpdatedAt: new Date(),
-      },
-    });
+    await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'merged');
 
     this.logger.debug(`Updated TicketLink ${ticketLink.id} prState to 'merged' for merged PR #${prNumber}`);
 
@@ -404,7 +354,7 @@ export class VcsWebhookService implements OnModuleDestroy {
     const prNumber = pr.number;
 
     // Find TicketLink by prNumber
-    const ticketLink = await this.findTicketLinkByPrNumber(connection.project.id, prNumber);
+    const ticketLink = await this.vcsRepo.findTicketLinkByPrNumber(connection.project.id, prNumber);
 
     if (!ticketLink) {
       // AC7: If no TicketLink matches prNumber, silently ignore
@@ -415,13 +365,7 @@ export class VcsWebhookService implements OnModuleDestroy {
       };
     }
 
-    await this.db.ticketLink.update({
-      where: { id: ticketLink.id },
-      data: {
-        prState: 'closed',
-        prUpdatedAt: new Date(),
-      },
-    });
+    await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'closed');
 
     this.logger.debug(`Updated TicketLink ${ticketLink.id} prState to 'closed' for PR #${prNumber}`);
 
@@ -442,7 +386,7 @@ export class VcsWebhookService implements OnModuleDestroy {
     const prNumber = pr.number;
 
     // Find TicketLink by prNumber
-    const ticketLink = await this.findTicketLinkByPrNumber(connection.project.id, prNumber);
+    const ticketLink = await this.vcsRepo.findTicketLinkByPrNumber(connection.project.id, prNumber);
 
     if (!ticketLink) {
       // AC7: If no TicketLink matches prNumber, silently ignore
@@ -453,13 +397,7 @@ export class VcsWebhookService implements OnModuleDestroy {
       };
     }
 
-    await this.db.ticketLink.update({
-      where: { id: ticketLink.id },
-      data: {
-        prState: 'open',
-        prUpdatedAt: new Date(),
-      },
-    });
+    await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'open');
 
     this.logger.debug(`Updated TicketLink ${ticketLink.id} prState to 'open' for PR #${prNumber}`);
 
@@ -478,7 +416,7 @@ export class VcsWebhookService implements OnModuleDestroy {
     pr: NonNullable<GitHubWebhookPayload['pull_request']>,
   ): Promise<WebhookHandleResult> {
     const prNumber = pr.number;
-    const ticketLink = await this.findTicketLinkByPrNumber(connection.project.id, prNumber);
+    const ticketLink = await this.vcsRepo.findTicketLinkByPrNumber(connection.project.id, prNumber);
 
     if (!ticketLink) {
       return {
@@ -488,13 +426,7 @@ export class VcsWebhookService implements OnModuleDestroy {
       };
     }
 
-    await this.db.ticketLink.update({
-      where: { id: ticketLink.id },
-      data: {
-        prState: 'open',
-        prUpdatedAt: new Date(),
-      },
-    });
+    await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'open');
 
     return {
       success: true,
@@ -510,7 +442,7 @@ export class VcsWebhookService implements OnModuleDestroy {
     pr: NonNullable<GitHubWebhookPayload['pull_request']>,
   ): Promise<WebhookHandleResult> {
     const prNumber = pr.number;
-    const ticketLink = await this.findTicketLinkByPrNumber(connection.project.id, prNumber);
+    const ticketLink = await this.vcsRepo.findTicketLinkByPrNumber(connection.project.id, prNumber);
 
     if (!ticketLink) {
       return {
@@ -520,13 +452,7 @@ export class VcsWebhookService implements OnModuleDestroy {
       };
     }
 
-    await this.db.ticketLink.update({
-      where: { id: ticketLink.id },
-      data: {
-        prState: 'draft',
-        prUpdatedAt: new Date(),
-      },
-    });
+    await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'draft');
 
     return {
       success: true,
@@ -545,7 +471,7 @@ export class VcsWebhookService implements OnModuleDestroy {
     const prNumber = pr.number;
 
     // Find TicketLink by prNumber to get the associated ticket
-    const ticketLink = await this.findTicketLinkByPrNumber(connection.project.id, prNumber);
+    const ticketLink = await this.vcsRepo.findTicketLinkByPrNumber(connection.project.id, prNumber);
 
     if (!ticketLink) {
       return {
@@ -556,11 +482,7 @@ export class VcsWebhookService implements OnModuleDestroy {
     }
 
     // Get the full ticket data including project
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const fullTicket = (await this.db.ticket.findUnique({
-      where: { id: ticketLink.ticketId },
-      include: { project: true },
-    })) as { id: string; externalVcsId: string | null; project: { id: string; key: string } } | null;
+    const fullTicket = await this.vcsRepo.findTicketWithProject(ticketLink.ticketId);
 
     if (!fullTicket) {
       return {
@@ -639,10 +561,6 @@ export class VcsWebhookService implements OnModuleDestroy {
     // Evict stale entries older than the dedup window.
     this.cleanupStaleEntries(now);
 
-    // DB-backed dedup check (authoritative, works across instances)
-    const rawClient = this.prisma.client as unknown as Record<string, unknown>;
-    const outboxDelegate = rawClient.outboxEvent as { findMany: (args: unknown) => Promise<unknown[]> } | undefined;
-
     let enqueuedCount = 0;
     for (const commit of commits) {
       const commitHash = commit.id;
@@ -653,19 +571,15 @@ export class VcsWebhookService implements OnModuleDestroy {
       // Cross-instance dedup: check for existing recent outbox events in the DB
       // We only trust the DB check once we've verified it actually tracks events;
       // otherwise we fall back to the in-memory fast-path.
-      if (outboxDelegate && (!this.dbDedupVerified || this.dbDedupWorks)) {
+      if (!this.dbDedupVerified || this.dbDedupWorks) {
         try {
-          const existingEvents = (await outboxDelegate.findMany({
-            where: {
-              projectId: connection.projectId,
-              eventType: 'code_commit',
-              eventId: commitHash,
-              status: { in: ['pending', 'processing'] },
-              createdAt: { gte: new Date(now - this.dedupWindowMs) },
-            },
-            select: { id: true },
-            take: 1,
-          })) as { id: string }[];
+          const existingEvents = await this.vcsRepo.findPendingOutboxEvents({
+            projectId: connection.projectId,
+            eventType: 'code_commit',
+            eventId: commitHash,
+            statuses: ['pending', 'processing'],
+            since: new Date(now - this.dedupWindowMs),
+          });
           if (existingEvents.length > 0) {
             this.logger.debug(`Skipping duplicate commit ${commitHash} (already enqueued in DB)`);
             continue;
@@ -678,7 +592,7 @@ export class VcsWebhookService implements OnModuleDestroy {
 
       // Fast-path: in-memory dedup within this instance (fallback when DB dedup is unavailable or unverified)
       const lastEnqueuedTime = this.recentCommitHashes.get(recentKey);
-      if ((!outboxDelegate || (this.dbDedupVerified && !this.dbDedupWorks)) && lastEnqueuedTime && (now - lastEnqueuedTime) < this.dedupWindowMs) {
+      if ((this.dbDedupVerified && !this.dbDedupWorks) && lastEnqueuedTime && (now - lastEnqueuedTime) < this.dedupWindowMs) {
         this.logger.debug(`Skipping duplicate commit ${commitHash} within deduplication window`);
         continue;
       }
@@ -711,19 +625,15 @@ export class VcsWebhookService implements OnModuleDestroy {
         // Verify that the DB delegate actually tracks enqueued events.
         // If it does not (e.g. test mocks without shared state), we fall back
         // to in-memory dedup for subsequent pushes in this instance.
-        if (outboxDelegate && !this.dbDedupVerified) {
+        if (!this.dbDedupVerified) {
           try {
-            const verifyEvents = (await outboxDelegate.findMany({
-              where: {
-                projectId: connection.projectId,
-                eventType: 'code_commit',
-                eventId: commitHash,
-                status: { in: ['pending', 'processing'] },
-                createdAt: { gte: new Date(now - this.dedupWindowMs) },
-              },
-              select: { id: true },
-              take: 1,
-            })) as { id: string }[];
+            const verifyEvents = await this.vcsRepo.findPendingOutboxEvents({
+              projectId: connection.projectId,
+              eventType: 'code_commit',
+              eventId: commitHash,
+              statuses: ['pending', 'processing'],
+              since: new Date(now - this.dedupWindowMs),
+            });
             this.dbDedupWorks = verifyEvents.length > 0;
           } catch {
             this.dbDedupWorks = false;
@@ -739,36 +649,5 @@ export class VcsWebhookService implements OnModuleDestroy {
     this.logger.debug(`Push handler enqueued ${enqueuedCount} code_commit events for project ${connection.projectId}`);
 
     return { success: true, ignored: enqueuedCount === 0 };
-  }
-
-  /**
-   * Find TicketLink by project ID and PR number
-   * AC6: Webhook handlers look up TicketLink using prNumber field from webhook payload
-   */
-  private async findTicketLinkByPrNumber(
-    projectId: string,
-    prNumber: number,
-  ): Promise<TicketLinkData | null> {
-    const ticketLink = (await this.db.ticketLink.findFirst({
-      where: {
-        prNumber: prNumber,
-        ticket: {
-          projectId: projectId,
-        },
-      },
-      include: {
-        ticket: {
-          select: {
-            id: true,
-            status: true,
-            projectId: true,
-            number: true,
-            externalVcsId: true,
-          },
-        },
-      },
-    })) as TicketLinkData | null;
-
-    return ticketLink;
   }
 }

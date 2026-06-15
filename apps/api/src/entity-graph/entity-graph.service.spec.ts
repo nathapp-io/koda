@@ -151,43 +151,36 @@ describe('EntityGraphService', () => {
     });
 
     it('AC5: Service linkage works from gitRefFile field via rebuildGraph', async () => {
-      const mockPrisma = {
-        client: {
-          ticket: {
-            findMany: jest.fn().mockResolvedValue([
-              {
-                id: 'ticket-1',
-                title: 'Bug: Auth fails',
-                status: 'OPEN',
-                priority: 'MEDIUM',
-                type: 'BUG',
-                number: 1,
-                gitRefFile: 'apps/api/src/auth.ts',
-                gitRefVersion: null,
-                gitRefLine: null,
-                labels: [],
-                assignedToUserId: null,
-                assignedToAgentId: null,
-              },
-            ]),
+      const mockRepo = {
+        findTicketsWithLabelsAndLinks: jest.fn().mockResolvedValue([
+          {
+            id: 'ticket-1',
+            title: 'Bug: Auth fails',
+            status: 'OPEN',
+            priority: 'MEDIUM',
+            type: 'BUG',
+            number: 1,
+            gitRefFile: 'apps/api/src/auth.ts',
+            gitRefVersion: null,
+            gitRefLine: null,
+            labels: [],
+            links: [],
+            assignedToUserId: null,
+            assignedToAgentId: null,
           },
-          graphNode: {
-            findMany: jest.fn().mockResolvedValue([
-              {
-                nodeId: 'auth-module',
-                label: 'AuthService',
-                type: 'code_module',
-                sourceFile: 'apps/api/src/auth.ts',
-                community: null,
-              },
-            ]),
+        ]),
+        findGraphNodesByType: jest.fn().mockResolvedValue([
+          {
+            nodeId: 'auth-module',
+            label: 'AuthService',
+            type: 'code_module',
+            sourceFile: 'apps/api/src/auth.ts',
+            community: null,
           },
-          graphLink: {
-            findMany: jest.fn().mockResolvedValue([]),
-          },
-        },
+        ]),
+        findGraphLinksByRelation: jest.fn().mockResolvedValue([]),
       };
-      const serviceWithPrisma = new EntityGraphService(entityStore, mockPrisma as any);
+      const serviceWithPrisma = new EntityGraphService(entityStore, mockRepo as any);
 
       await serviceWithPrisma.rebuildGraph('project-123');
 

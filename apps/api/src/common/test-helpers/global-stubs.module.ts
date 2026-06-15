@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { PrismaProjectRepository } from '../../projects/prisma-project.repository';
 
 export const mockPrismaService = {
   client: {},
@@ -23,7 +24,8 @@ export const mockConfigService = {
     { provide: PrismaService, useValue: mockPrismaService },
     { provide: TRANSACTION_MANAGER, useValue: mockTransactionManager },
     { provide: ConfigService, useValue: mockConfigService },
+    PrismaProjectRepository,
   ],
-  exports: [PrismaService, TRANSACTION_MANAGER, ConfigService],
+  exports: [PrismaService, TRANSACTION_MANAGER, ConfigService, PrismaProjectRepository],
 })
 export class GlobalStubsModule {}

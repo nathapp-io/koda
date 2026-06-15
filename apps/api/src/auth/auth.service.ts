@@ -1,6 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
 import { JwtStrategyProvider, JwtRefreshStrategyProvider } from '@nathapp/nestjs-auth';
 import { AuthException } from '@nathapp/nestjs-common';
 import * as bcrypt from 'bcrypt';
@@ -8,6 +6,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import type { IPrincipal } from './types';
 import { UserResponseDto } from './dto/auth-response.dto';
+import { PrismaAuthRepository } from './prisma-auth.repository';
 
 export interface JwtPayload {
   sub: string;
@@ -18,28 +17,24 @@ export interface JwtPayload {
 @Injectable()
 export class AuthService {
   constructor(
-    private prisma: PrismaService<PrismaClient>,
+    private authRepo: PrismaAuthRepository,
     private jwtStrategyProvider: JwtStrategyProvider,
     private jwtRefreshStrategyProvider: JwtRefreshStrategyProvider,
   ) {}
-
-  private get db() { return this.prisma.client; }
 
   async register(registerDto: RegisterDto) {
     const { email, name, password } = registerDto;
 
     const passwordHash = await bcrypt.hash(password, 12);
 
-    const existingUsers = await this.db.user.findMany({ take: 1 });
-    const role = existingUsers.length === 0 ? 'ADMIN' : undefined;
+    const anyUser = await this.authRepo.findAnyUser();
+    const role = anyUser === null ? 'ADMIN' : undefined;
 
-    const user = await this.db.user.create({
-      data: {
-        email,
-        name,
-        passwordHash,
-        ...(role ? { role } : {}),
-      },
+    const user = await this.authRepo.createUser({
+      email,
+      name,
+      passwordHash,
+      ...(role ? { role } : {}),
     });
 
     const accessToken = this.generateAccessToken(user.id, user.email, user.role);
@@ -55,9 +50,7 @@ export class AuthService {
   async login(loginDto: LoginDto) {
     const { email, password } = loginDto;
 
-    const user = await this.db.user.findUnique({
-      where: { email },
-    });
+    const user = await this.authRepo.findUserByEmail(email);
 
     if (!user) {
       throw new AuthException({}, 'auth');
@@ -80,9 +73,7 @@ export class AuthService {
 
   async refresh(principal: IPrincipal) {
     // JwtRefreshStrategy returns IPrincipal (with .id), not JwtPayload (with .sub)
-    const user = await this.db.user.findUnique({
-      where: { id: principal.id },
-    });
+    const user = await this.authRepo.findUserById(principal.id);
 
     if (!user) {
       throw new AuthException({}, 'auth');
@@ -99,10 +90,8 @@ export class AuthService {
   }
 
   async validateUser(payload: JwtPayload) {
-    const user = await this.db.user.findUnique({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      where: { id: payload.sub ?? (payload as any).id },
-    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const user = await this.authRepo.findUserById(payload.sub ?? (payload as any).id);
 
     return user || null;
   }

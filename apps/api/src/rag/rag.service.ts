@@ -2,9 +2,8 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional, Inject, fo
 import { mkdirSync } from 'node:fs';
 import { ConfigService } from '@nestjs/config';
 import { ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { PrismaRagRepository } from './prisma-rag.repository';
 import { EmbeddingService } from './embedding.service';
 import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interface';
 import { LexicalIndex } from './lexical-index';
@@ -158,7 +157,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     private readonly configService: ConfigService,
     @Optional() private readonly embeddingService?: EmbeddingService,
     @Optional() @Inject(FTS_OPTIMIZE_STRATEGY) private readonly optimizeStrategy?: FtsOptimizeStrategy,
-    @Optional() private readonly prisma?: PrismaService<PrismaClient>,
+    @Optional() private readonly ragRepository?: PrismaRagRepository,
     @Optional() private readonly lexicalIndex?: LexicalIndex,
     @Optional() private readonly entityStore?: EntityStore,
     @Optional() @Inject(TRANSACTION_MANAGER) private readonly txManager?: ITransactionManager,
@@ -241,9 +240,9 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       throw exception;
     }
 
-    // Only perform format and existence validation when Prisma is available
-    // This ensures that the RAG service can still be used in tests or contexts without the database
-    if (!this.prisma?.client) {
+    // Only perform format and existence validation when the repository is available.
+    // This ensures the RAG service can still be used in tests or contexts without the database.
+    if (!this.ragRepository) {
       return;
     }
 
@@ -256,10 +255,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     }
 
     // Verify project exists in the database
-    const project = await this.prisma.client.project.findUnique({
-      where: { id: projectId },
-      select: { id: true, deletedAt: true },
-    });
+    const project = await this.ragRepository!.findProjectById(projectId);
 
     if (!project || project.deletedAt !== null) {
       const exception = new ForbiddenAppException({}, 'rag');

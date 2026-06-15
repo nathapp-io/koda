@@ -1,10 +1,9 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { SymbolStore, SymbolData } from './symbol-store';
 import { EntityGraphService } from '../entity-graph/entity-graph.service';
 import { GraphStoreService } from '../rag/graph-store.service';
 import { EntityRecord, EntityNodeType } from '../entity-graph/dto/entity-graph.types';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient } from '@prisma/client';
+import { CODE_INTEL_REPOSITORY, ICodeIntelRepository } from './domain/code-intel.domain';
 
 export interface ChangeImpactQuery {
   projectId: string;
@@ -37,7 +36,7 @@ export class ImpactAnalysisService {
     private readonly symbolStore: SymbolStore,
     private readonly entityGraph: EntityGraphService,
     private readonly graphStore: GraphStoreService,
-    @Optional() private readonly prisma?: PrismaService<PrismaClient>,
+    @Optional() @Inject(CODE_INTEL_REPOSITORY) private readonly codeIntelRepository?: ICodeIntelRepository,
   ) {}
 
   async getChangeImpact(query: ChangeImpactQuery): Promise<ChangeImpactResult> {
@@ -78,14 +77,9 @@ export class ImpactAnalysisService {
   }
 
   private async getImpactedSymbols(projectId: string, changedFiles: string[]): Promise<SymbolData[]> {
-    if (!this.prisma) return [];
+    if (!this.codeIntelRepository) return [];
 
-    const symbols = await this.prisma.client.symbol.findMany({
-      where: {
-        projectId,
-        file: { in: changedFiles },
-      },
-    });
+    const symbols = await this.codeIntelRepository.findSymbolsByFiles(projectId, changedFiles);
 
     return symbols.map((s) => ({
       id: s.id,
@@ -110,33 +104,23 @@ export class ImpactAnalysisService {
     symbols: SymbolData[],
   ): Promise<EntityRecord[]> {
     if (symbols.length === 0) return [];
-    if (!this.prisma) return [];
+    if (!this.codeIntelRepository) return [];
 
     const serviceSet = new Map<string, EntityRecord>();
     const changedFiles = [...new Set(symbols.map((s) => s.file))];
 
-    const graphNodes = await this.prisma.client.graphNode.findMany({
-      where: {
-        projectId,
-        type: 'code_module',
-      },
-    });
+    const graphNodes = await this.codeIntelRepository.findGraphNodesByType(projectId, 'code_module');
 
     const matchedGraphNodes = graphNodes.filter((node) => {
       if (!node.sourceFile) return false;
       return changedFiles.some(
-        (file) => file === node.sourceFile || file.includes(node.sourceFile) || node.sourceFile?.includes(file),
+        (file) => file === node.sourceFile || file.includes(node.sourceFile!) || node.sourceFile!.includes(file),
       );
     });
 
     if (matchedGraphNodes.length > 0) {
       const serviceIds = matchedGraphNodes.map((node) => `service:${node.nodeId}`);
-      const serviceRows = await this.prisma.client.entityNode.findMany({
-        where: {
-          projectId,
-          entityId: { in: serviceIds },
-        },
-      });
+      const serviceRows = await this.codeIntelRepository.findEntityNodesByIds(projectId, serviceIds);
       const serviceRowsById = new Map(serviceRows.map((row) => [row.entityId, row]));
 
       for (const node of matchedGraphNodes) {
@@ -194,28 +178,24 @@ export class ImpactAnalysisService {
     services: EntityRecord[],
   ): Promise<EntityRecord[]> {
     if (services.length === 0) return [];
-    if (!this.prisma) return [];
+    if (!this.codeIntelRepository) return [];
 
     const ticketSet = new Map<string, EntityRecord>();
     const serviceIds = services.map((service) => service.entityId);
 
-    const ticketLinks = await this.prisma.client.entityLink.findMany({
-      where: {
-        projectId,
-        targetId: { in: serviceIds },
-        relation: 'ticket_to_service',
-      },
-    });
+    const ticketLinks = await this.codeIntelRepository.findEntityLinksByTargetIds(
+      projectId,
+      serviceIds,
+      'ticket_to_service',
+    );
 
     if (ticketLinks.length > 0) {
       const ticketIds = [...new Set(ticketLinks.map((link) => link.sourceId))];
-      const ticketRows = await this.prisma.client.entityNode.findMany({
-        where: {
-          projectId,
-          entityId: { in: ticketIds },
-          entityType: EntityNodeType.TICKET,
-        },
-      });
+      const ticketRows = await this.codeIntelRepository.findEntityNodesByIdsAndType(
+        projectId,
+        ticketIds,
+        EntityNodeType.TICKET,
+      );
       for (const row of ticketRows) {
         ticketSet.set(row.entityId, {
           entityId: row.entityId,
@@ -271,22 +251,14 @@ export class ImpactAnalysisService {
     let totalServices = 1;
     let totalTickets = 1;
 
-    // Query actual project totals from database
-    if (this.prisma) {
+    if (this.codeIntelRepository) {
       const [symbolCount, serviceCount, ticketCount] = await Promise.all([
-        this.prisma.client.symbol.count({ where: { projectId } }),
-        this.prisma.client.entityNode.count({
-          where: {
-            projectId,
-            entityType: { in: [EntityNodeType.SERVICE, EntityNodeType.CODE_MODULE] },
-          },
-        }),
-        this.prisma.client.entityNode.count({
-          where: {
-            projectId,
-            entityType: EntityNodeType.TICKET,
-          },
-        }),
+        this.codeIntelRepository.countSymbols(projectId),
+        this.codeIntelRepository.countEntityNodesByTypes(projectId, [
+          EntityNodeType.SERVICE,
+          EntityNodeType.CODE_MODULE,
+        ]),
+        this.codeIntelRepository.countEntityNodesByType(projectId, EntityNodeType.TICKET),
       ]);
       totalSymbols = Math.max(1, symbolCount);
       totalServices = Math.max(1, serviceCount);

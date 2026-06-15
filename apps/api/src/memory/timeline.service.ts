@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ValidationAppException } from '@nathapp/nestjs-common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient } from '@prisma/client';
+import { PrismaTimelineRepository } from './prisma-timeline.repository';
 
 export interface TimelineQuery {
   projectId: string;
@@ -36,11 +35,7 @@ export interface TicketHistoryResponse {
 
 @Injectable()
 export class TimelineService {
-  constructor(private readonly prisma: PrismaService<PrismaClient>) {}
-
-  private get db() {
-    return this.prisma.client;
-  }
+  constructor(private readonly timelineRepo: PrismaTimelineRepository) {}
 
   async getProjectTimeline(query: TimelineQuery): Promise<TimelineResponse> {
     const limit = Math.min(Math.max(Math.floor(query.limit ?? 50), 1), 200);
@@ -75,25 +70,19 @@ export class TimelineService {
     const results: TimelineEvent[] = [];
 
     if (eventTypes.includes('ticket_event')) {
-      const ticketEvents = (await this.db.ticketEvent.findMany({
-        where: ticketWhere,
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      })) ?? [];
+      const ticketEvents = (await this.timelineRepo.findTicketEvents(ticketWhere)) ?? [];
       results.push(...ticketEvents.map((e) => ({
         id: e.id,
         eventType: 'ticket_event',
         actorId: e.actorId,
         action: e.action,
-        ticketId: e.ticketId,
+        ticketId: e.ticketId ?? undefined,
         createdAt: e.createdAt,
       })));
     }
 
     if (!query.ticketId && eventTypes.includes('agent_event')) {
-      const agentEvents = (await this.db.agentEvent.findMany({
-        where: actorWhere,
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      })) ?? [];
+      const agentEvents = (await this.timelineRepo.findAgentEvents(actorWhere)) ?? [];
       results.push(...agentEvents.map((e) => ({
         id: e.id,
         eventType: 'agent_event',
@@ -104,10 +93,7 @@ export class TimelineService {
     }
 
     if (!query.ticketId && eventTypes.includes('decision_event')) {
-      const decisionEvents = (await this.db.decisionEvent.findMany({
-        where: decisionWhere,
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      })) ?? [];
+      const decisionEvents = (await this.timelineRepo.findDecisionEvents(decisionWhere)) ?? [];
       results.push(...decisionEvents.map((e) => ({
         id: e.id,
         eventType: 'decision_event',
@@ -144,10 +130,7 @@ export class TimelineService {
   }
 
   async getTicketHistory(ticketId: string): Promise<TicketHistoryResponse> {
-    const events = (await this.db.ticketEvent.findMany({
-      where: { ticketId },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    })) ?? [];
+    const events = (await this.timelineRepo.findTicketEvents({ ticketId })) ?? [];
 
     return {
       events: events.map((e) => ({
@@ -155,7 +138,7 @@ export class TimelineService {
         eventType: 'ticket_event',
         actorId: e.actorId,
         action: e.action,
-        ticketId: e.ticketId,
+        ticketId: e.ticketId ?? undefined,
         createdAt: e.createdAt,
       })),
       ticketId,

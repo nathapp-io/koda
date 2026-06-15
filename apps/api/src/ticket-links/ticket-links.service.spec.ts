@@ -1,45 +1,11 @@
 import { TicketLinksService } from './ticket-links.service';
 import { CreateTicketLinkDto } from './dto/create-ticket-link.dto';
+import { TicketLinkDomain } from './domain/ticket-link.domain';
 
 describe('TicketLinksService', () => {
   let service: TicketLinksService;
 
-  const mockProject = {
-    id: 'proj-123',
-    name: 'Koda',
-    slug: 'koda',
-    key: 'KODA',
-    description: 'Dev ticket tracker',
-    gitRemoteUrl: null,
-    autoIndexOnClose: false,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    deletedAt: null,
-  };
-
-  const mockTicket = {
-    id: 'ticket-123',
-    projectId: 'proj-123',
-    number: 1,
-    type: 'BUG',
-    title: 'Fix login bug',
-    description: null,
-    status: 'CREATED',
-    priority: 'HIGH',
-    assignedToUserId: null,
-    assignedToAgentId: null,
-    createdByUserId: 'user-123',
-    createdByAgentId: null,
-    gitRefVersion: null,
-    gitRefFile: null,
-    gitRefLine: null,
-    gitRefUrl: null,
-    deletedAt: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  };
-
-  const mockLink = {
+  const mockLink: TicketLinkDomain = {
     id: 'link-123',
     ticketId: 'ticket-123',
     url: 'https://github.com/owner/repo/pull/1',
@@ -52,27 +18,21 @@ describe('TicketLinksService', () => {
     createdAt: new Date(),
   };
 
-  const mockPrismaService = {
-    client: {
-      project: {
-        findFirst: jest.fn(),
-        findUnique: jest.fn(),
-      },
-      ticket: {
-        findFirst: jest.fn(),
-        findUnique: jest.fn(),
-      },
-      ticketLink: {
-        create: jest.fn(),
-        findFirst: jest.fn(),
-        findMany: jest.fn(),
-        delete: jest.fn(),
-      },
-    },
+  const mockTicketLinkRepo = {
+    findProjectBySlug: jest.fn(),
+    findTicketByNumber: jest.fn(),
+    findTicketById: jest.fn(),
+    findLinkByUrl: jest.fn(),
+    createLink: jest.fn(),
+    findLinksByTicket: jest.fn(),
+    updateLink: jest.fn(),
+    findLinkByIdAndTicket: jest.fn(),
+    deleteLink: jest.fn(),
+    findByPrNumber: jest.fn(),
   };
 
   beforeEach(() => {
-    service = new TicketLinksService(mockPrismaService as never);
+    service = new TicketLinksService(mockTicketLinkRepo as any);
   });
 
   afterEach(() => {
@@ -85,10 +45,10 @@ describe('TicketLinksService', () => {
         url: 'https://github.com/owner/repo/pull/1',
       };
 
-      mockPrismaService.client.project.findFirst.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findFirst.mockResolvedValue(mockTicket);
-      mockPrismaService.client.ticketLink.findFirst.mockResolvedValue(null);
-      mockPrismaService.client.ticketLink.create.mockResolvedValue(mockLink);
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
+      mockTicketLinkRepo.findLinkByUrl.mockResolvedValue(null);
+      mockTicketLinkRepo.createLink.mockResolvedValue(mockLink);
 
       const result = await service.create('koda', 'KODA-1', dto);
 
@@ -103,21 +63,19 @@ describe('TicketLinksService', () => {
         url: 'https://github.com/owner/repo/pull/1',
       };
 
-      mockPrismaService.client.project.findFirst.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findFirst.mockResolvedValue(mockTicket);
-      mockPrismaService.client.ticketLink.findFirst.mockResolvedValue(null);
-      mockPrismaService.client.ticketLink.create.mockResolvedValue(mockLink);
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
+      mockTicketLinkRepo.findLinkByUrl.mockResolvedValue(null);
+      mockTicketLinkRepo.createLink.mockResolvedValue(mockLink);
 
       const result = await service.create('koda', 'KODA-1', dto);
 
-      expect(mockPrismaService.client.ticketLink.create).toHaveBeenCalledWith(
+      expect(mockTicketLinkRepo.createLink).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
-            url: dto.url,
-            provider: 'github',
-            externalRef: 'owner/repo#1',
-            ticketId: mockTicket.id,
-          }),
+          url: dto.url,
+          provider: 'github',
+          externalRef: 'owner/repo#1',
+          ticketId: 'ticket-123',
         }),
       );
       expect(result.status).toBe(201);
@@ -128,9 +86,9 @@ describe('TicketLinksService', () => {
         url: 'https://github.com/owner/repo/pull/1',
       };
 
-      mockPrismaService.client.project.findFirst.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findFirst.mockResolvedValue(mockTicket);
-      mockPrismaService.client.ticketLink.findFirst.mockResolvedValue(mockLink);
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
+      mockTicketLinkRepo.findLinkByUrl.mockResolvedValue(mockLink);
 
       const result = await service.create('koda', 'KODA-1', dto);
 
@@ -139,7 +97,7 @@ describe('TicketLinksService', () => {
         ...mockLink,
         title: null,
       });
-      expect(mockPrismaService.client.ticketLink.create).not.toHaveBeenCalled();
+      expect(mockTicketLinkRepo.createLink).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundException when ticket ref does not exist', async () => {
@@ -147,8 +105,8 @@ describe('TicketLinksService', () => {
         url: 'https://github.com/owner/repo/pull/1',
       };
 
-      mockPrismaService.client.project.findFirst.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findFirst.mockResolvedValue(null);
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findTicketByNumber.mockResolvedValue(null);
 
       await expect(service.create('koda', 'KODA-999', dto)).rejects.toThrow();
     });
@@ -158,7 +116,7 @@ describe('TicketLinksService', () => {
         url: 'https://github.com/owner/repo/pull/1',
       };
 
-      mockPrismaService.client.project.findFirst.mockResolvedValue(null);
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue(null);
 
       await expect(
         service.create('nonexistent', 'KODA-1', dto),
@@ -170,26 +128,24 @@ describe('TicketLinksService', () => {
         url: 'https://example.com/some/page',
       };
 
-      const unknownLink = {
+      const unknownLink: TicketLinkDomain = {
         ...mockLink,
         url: dto.url,
         provider: 'other',
         externalRef: null,
       };
 
-      mockPrismaService.client.project.findFirst.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findFirst.mockResolvedValue(mockTicket);
-      mockPrismaService.client.ticketLink.findFirst.mockResolvedValue(null);
-      mockPrismaService.client.ticketLink.create.mockResolvedValue(unknownLink);
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
+      mockTicketLinkRepo.findLinkByUrl.mockResolvedValue(null);
+      mockTicketLinkRepo.createLink.mockResolvedValue(unknownLink);
 
       const result = await service.create('koda', 'KODA-1', dto);
 
-      expect(mockPrismaService.client.ticketLink.create).toHaveBeenCalledWith(
+      expect(mockTicketLinkRepo.createLink).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
-            provider: 'other',
-            externalRef: null,
-          }),
+          provider: 'other',
+          externalRef: null,
         }),
       );
       expect(result.status).toBe(201);
@@ -198,7 +154,7 @@ describe('TicketLinksService', () => {
 
   describe('findByTicket', () => {
     it('returns an array of links for a ticket with two links', async () => {
-      const secondLink = {
+      const secondLink: TicketLinkDomain = {
         ...mockLink,
         id: 'link-456',
         url: 'https://gitlab.com/owner/repo/-/merge_requests/7',
@@ -206,12 +162,9 @@ describe('TicketLinksService', () => {
         externalRef: 'owner/repo#7',
       };
 
-      mockPrismaService.client.project.findFirst.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findFirst.mockResolvedValue(mockTicket);
-      mockPrismaService.client.ticketLink.findMany.mockResolvedValue([
-        mockLink,
-        secondLink,
-      ]);
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
+      mockTicketLinkRepo.findLinksByTicket.mockResolvedValue([mockLink, secondLink]);
 
       const result = await service.findByTicket('koda', 'KODA-1');
 
@@ -227,9 +180,9 @@ describe('TicketLinksService', () => {
     });
 
     it('returns an empty array when ticket has no links', async () => {
-      mockPrismaService.client.project.findFirst.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findFirst.mockResolvedValue(mockTicket);
-      mockPrismaService.client.ticketLink.findMany.mockResolvedValue([]);
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
+      mockTicketLinkRepo.findLinksByTicket.mockResolvedValue([]);
 
       const result = await service.findByTicket('koda', 'KODA-1');
 
@@ -237,8 +190,8 @@ describe('TicketLinksService', () => {
     });
 
     it('throws NotFoundException when ticket ref does not exist', async () => {
-      mockPrismaService.client.project.findFirst.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findFirst.mockResolvedValue(null);
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findTicketByNumber.mockResolvedValue(null);
 
       await expect(
         service.findByTicket('koda', 'KODA-999'),
@@ -246,7 +199,7 @@ describe('TicketLinksService', () => {
     });
 
     it('throws NotFoundException when project slug does not exist', async () => {
-      mockPrismaService.client.project.findFirst.mockResolvedValue(null);
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue(null);
 
       await expect(
         service.findByTicket('nonexistent', 'KODA-1'),
@@ -254,38 +207,32 @@ describe('TicketLinksService', () => {
     });
 
     it('queries links scoped to the resolved ticket', async () => {
-      mockPrismaService.client.project.findFirst.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findFirst.mockResolvedValue(mockTicket);
-      mockPrismaService.client.ticketLink.findMany.mockResolvedValue([mockLink]);
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
+      mockTicketLinkRepo.findLinksByTicket.mockResolvedValue([mockLink]);
 
       await service.findByTicket('koda', 'KODA-1');
 
-      expect(mockPrismaService.client.ticketLink.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ ticketId: mockTicket.id }),
-        }),
-      );
+      expect(mockTicketLinkRepo.findLinksByTicket).toHaveBeenCalledWith('ticket-123');
     });
   });
 
   describe('remove', () => {
     it('deletes a link by id when it belongs to the ticket', async () => {
-      mockPrismaService.client.project.findFirst.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findFirst.mockResolvedValue(mockTicket);
-      mockPrismaService.client.ticketLink.findFirst.mockResolvedValue(mockLink);
-      mockPrismaService.client.ticketLink.delete.mockResolvedValue(mockLink);
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
+      mockTicketLinkRepo.findLinkByIdAndTicket.mockResolvedValue(mockLink);
+      mockTicketLinkRepo.deleteLink.mockResolvedValue(undefined);
 
       await service.remove('koda', 'KODA-1', 'link-123');
 
-      expect(mockPrismaService.client.ticketLink.delete).toHaveBeenCalledWith({
-        where: { id: 'link-123' },
-      });
+      expect(mockTicketLinkRepo.deleteLink).toHaveBeenCalledWith('link-123');
     });
 
     it('throws NotFoundException when linkId does not exist on that ticket', async () => {
-      mockPrismaService.client.project.findFirst.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findFirst.mockResolvedValue(mockTicket);
-      mockPrismaService.client.ticketLink.findFirst.mockResolvedValue(null);
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
+      mockTicketLinkRepo.findLinkByIdAndTicket.mockResolvedValue(null);
 
       await expect(
         service.remove('koda', 'KODA-1', 'nonexistent-link'),
@@ -293,20 +240,20 @@ describe('TicketLinksService', () => {
     });
 
     it('does not delete when link belongs to a different ticket', async () => {
-      mockPrismaService.client.project.findFirst.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findFirst.mockResolvedValue(mockTicket);
-      // findFirst scoped to ticketId returns null (link exists but for another ticket)
-      mockPrismaService.client.ticketLink.findFirst.mockResolvedValue(null);
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
+      // findLinkByIdAndTicket scoped to ticketId returns null (link exists but for another ticket)
+      mockTicketLinkRepo.findLinkByIdAndTicket.mockResolvedValue(null);
 
       await expect(
         service.remove('koda', 'KODA-1', 'link-other-ticket'),
       ).rejects.toThrow();
 
-      expect(mockPrismaService.client.ticketLink.delete).not.toHaveBeenCalled();
+      expect(mockTicketLinkRepo.deleteLink).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundException when project slug does not exist', async () => {
-      mockPrismaService.client.project.findFirst.mockResolvedValue(null);
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue(null);
 
       await expect(
         service.remove('nonexistent', 'KODA-1', 'link-123'),
@@ -314,8 +261,8 @@ describe('TicketLinksService', () => {
     });
 
     it('throws NotFoundException when ticket ref does not exist', async () => {
-      mockPrismaService.client.project.findFirst.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findFirst.mockResolvedValue(null);
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findTicketByNumber.mockResolvedValue(null);
 
       await expect(
         service.remove('koda', 'KODA-999', 'link-123'),
