@@ -10,6 +10,7 @@ export interface ProjectDomain {
   autoIndexOnClose: boolean;
   autoAssign: string;
   graphifyEnabled: boolean;
+  graphifyLastImportedAt: Date | null;
   ciWebhookToken: string | null;
   deletedAt: Date | null;
   createdAt: Date;

@@ -18,6 +18,7 @@ export class PrismaProjectRepository {
       autoIndexOnClose: m.autoIndexOnClose,
       autoAssign: m.autoAssign,
       graphifyEnabled: m.graphifyEnabled,
+      graphifyLastImportedAt: m.graphifyLastImportedAt,
       ciWebhookToken: m.ciWebhookToken,
       deletedAt: m.deletedAt,
       createdAt: m.createdAt,
