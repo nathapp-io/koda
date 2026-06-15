@@ -19,7 +19,7 @@ import { Throttle } from '@nathapp/nestjs-throttler';
 import { AuthException, JsonResponse } from '@nathapp/nestjs-common';
 
 @ApiTags('auth')
-@Throttle({ default: { limit: 10, ttl: 60000 } })
+@Throttle({ default: { limit: 5, ttl: 60000 } })
 @Controller('auth')
 export class AuthController {
   constructor(private authService: AuthService) {}
@@ -46,6 +46,7 @@ export class AuthController {
     return JsonResponse.Ok(data);
   }
 
+  /** @design @Public() opts out of the global CombinedAuthGuard (access-token path); JwtRefreshGuard validates the refresh token independently. */
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()

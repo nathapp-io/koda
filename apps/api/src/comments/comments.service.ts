@@ -23,6 +23,26 @@ export class CommentsService {
 
   private get db() { return this.prisma.client; }
 
+  private async resolveTicketByRef(projectSlug: string, ticketRef: string) {
+    const project = await this.db.project.findUnique({ where: { slug: projectSlug } });
+
+    if (!project || project.deletedAt) {
+      throw new NotFoundAppException({}, 'comments');
+    }
+
+    const match = ticketRef.match(/^([A-Z]+)-(\d+)$/);
+    const ticket = match
+      ? await this.db.ticket.findUnique({
+          where: { projectId_number: { projectId: project.id, number: parseInt(match[2], 10) } },
+        })
+      : await this.db.ticket.findUnique({ where: { id: ticketRef } });
+
+    if (!ticket || ticket.deletedAt) {
+      throw new NotFoundAppException({}, 'comments');
+    }
+
+    return { project, ticket };
+  }
 
   async create(
     projectSlug: string,
@@ -30,7 +50,6 @@ export class CommentsService {
     createCommentDto: CreateCommentDto,
     principal: KodaPrincipal,
   ) {
-    // Validate required fields
     if (!createCommentDto.body) {
       throw new ValidationAppException({}, 'comments');
     }
@@ -41,44 +60,8 @@ export class CommentsService {
       throw new ValidationAppException({}, 'comments');
     }
 
-    // Find project by slug
-    const project = await this.db.project.findUnique({
-      where: { slug: projectSlug },
-    });
+    const { ticket } = await this.resolveTicketByRef(projectSlug, ticketRef);
 
-    if (!project || project.deletedAt) {
-      throw new NotFoundAppException({}, 'comments');
-    }
-
-    // Find ticket by ref (KODA-1 or CUID)
-    const refPattern = /^([A-Z]+)-(\d+)$/;
-    const match = ticketRef.match(refPattern);
-
-    let ticket;
-
-    if (match) {
-      // Resolve by composite unique key (projectId, number)
-      const number = parseInt(match[2], 10);
-      ticket = await this.db.ticket.findUnique({
-        where: {
-          projectId_number: {
-            projectId: project.id,
-            number,
-          },
-        },
-      });
-    } else {
-      // Treat as CUID
-      ticket = await this.db.ticket.findUnique({
-        where: { id: ticketRef },
-      });
-    }
-
-    if (!ticket || ticket.deletedAt) {
-      throw new NotFoundAppException({}, 'comments');
-    }
-
-    // Create the comment via repository.
     // id/createdAt/updatedAt are DB-generated; toPersistenceCreate strips them.
     const comment = await this.commentRepo.create({
       id: '',
@@ -95,46 +78,8 @@ export class CommentsService {
   }
 
   async findByTicket(projectSlug: string, ticketRef: string) {
-    // Find project by slug
-    const project = await this.db.project.findUnique({
-      where: { slug: projectSlug },
-    });
-
-    if (!project || project.deletedAt) {
-      throw new NotFoundAppException({}, 'comments');
-    }
-
-    // Find ticket by ref (KODA-1 or CUID)
-    const refPattern = /^([A-Z]+)-(\d+)$/;
-    const match = ticketRef.match(refPattern);
-
-    let ticket;
-
-    if (match) {
-      // Resolve by composite unique key (projectId, number)
-      const number = parseInt(match[2], 10);
-      ticket = await this.db.ticket.findUnique({
-        where: {
-          projectId_number: {
-            projectId: project.id,
-            number,
-          },
-        },
-      });
-    } else {
-      // Treat as CUID
-      ticket = await this.db.ticket.findUnique({
-        where: { id: ticketRef },
-      });
-    }
-
-    if (!ticket || ticket.deletedAt) {
-      throw new NotFoundAppException({}, 'comments');
-    }
-
-    // Find all comments for this ticket via repository
+    const { ticket } = await this.resolveTicketByRef(projectSlug, ticketRef);
     const comments = await this.commentRepo.findByTicketId(ticket.id);
-
     return CommentResponseDto.fromMany(comments);
   }
 

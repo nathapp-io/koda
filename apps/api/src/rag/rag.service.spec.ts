@@ -864,15 +864,7 @@ describe('RagService.deleteAllBySourceType (US-002)', () => {
   it('AC1: deletes all records where source = sourceType and returns count', async () => {
     const ragService = new RagService(mockConfigService as never);
     const mockTable = {
-      countRows: jest.fn().mockResolvedValue(3),
-      query: jest.fn().mockReturnValue({
-        limit: jest.fn().mockReturnThis(),
-        toArray: jest.fn().mockResolvedValue([
-          { id: '1', source: 'code', source_id: 'file1', content: 'content1', metadata: '{}', created_at: new Date().toISOString() },
-          { id: '2', source: 'code', source_id: 'file2', content: 'content2', metadata: '{}', created_at: new Date().toISOString() },
-          { id: '3', source: 'code', source_id: 'file3', content: 'content3', metadata: '{}', created_at: new Date().toISOString() },
-        ]),
-      }),
+      countRows: jest.fn().mockResolvedValueOnce(3).mockResolvedValueOnce(0),
       delete: jest.fn().mockResolvedValue(undefined),
     };
 
