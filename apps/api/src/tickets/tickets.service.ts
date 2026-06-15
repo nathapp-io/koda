@@ -72,7 +72,7 @@ export class TicketsService {
       throw new ValidationAppException({}, 'tickets');
     }
 
-    // Use transaction to safely auto-increment ticket number
+    /** @design @@unique([projectId, number]) in schema is the safety net against concurrent duplicate numbers; txManager.run() serializes on SQLite and the constraint errors on PostgreSQL so callers retry. */
     const ticket = await this.txManager.run(async () => {
       // Find the highest number for this project (include soft-deleted to avoid number reuse)
       const lastTicket = await this.prisma.client.ticket.findFirst({

@@ -85,10 +85,14 @@ export function useAuth() {
       const data = response.data ?? (response as unknown as AuthUser)
       user.value = data
       return true
-    } catch {
-      // Token expired or invalid — clear auth state
-      token.value = null
-      user.value = null
+    } catch (e) {
+      // Only clear auth state for explicit rejection (401/403).
+      // Network errors or server failures should not log the user out.
+      const status = (e as { statusCode?: number })?.statusCode
+      if (status === 401 || status === 403) {
+        token.value = null
+        user.value = null
+      }
       return false
     }
   }

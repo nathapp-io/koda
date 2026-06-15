@@ -144,6 +144,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RagService.name);
   private db: LanceConnection = null;
   private readonly tableCache = new Map<string, LanceTable>();
+  private readonly TABLE_CACHE_MAX_SIZE = 50;
   private lanceAvailable = true;
   private readonly lancedbPath: string;
   private readonly similarityHigh: number;
@@ -217,6 +218,13 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     this.lexicalIndex?.clearProject(projectId);
     this.entityStore?.clear(projectId);
     this.optimizeStrategy?.clearProject?.(projectId);
+  }
+
+  private evictTableCacheIfNeeded(): void {
+    if (this.tableCache.size > this.TABLE_CACHE_MAX_SIZE) {
+      const firstKey = this.tableCache.keys().next().value!;
+      this.tableCache.delete(firstKey);
+    }
   }
 
   /**
@@ -297,6 +305,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     if (!this.lanceAvailable || !db) {
       const memTable = new InMemoryTable();
       this.tableCache.set(tableName, memTable);
+      this.evictTableCacheIfNeeded();
       return memTable;
     }
     const tableNames: string[] = await db.tableNames();
@@ -339,6 +348,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     }
 
     this.tableCache.set(tableName, table);
+    this.evictTableCacheIfNeeded();
 
     if (this.lanceAvailable && this.optimizeStrategy && !this.firstAccessedProjectIds.has(projectId)) {
       this.firstAccessedProjectIds.add(projectId);
@@ -718,15 +728,13 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     }
 
     const table = await this.getOrCreateTable(projectId);
-    const rows: LanceRecord[] = await table.query().limit(Number.MAX_SAFE_INTEGER).toArray();
-    const recordsToDelete = rows.filter((r) => r.source === sourceType);
-    const count = recordsToDelete.length;
+    const countBefore = await table.countRows();
+    if (countBefore === 0) return 0;
 
-    if (count > 0) {
-      await table.delete(`source = '${sourceType}'`);
-    }
+    await table.delete(`source = '${sourceType}'`);
 
-    return count;
+    const countAfter = await table.countRows();
+    return countBefore - countAfter;
   }
 
   /**

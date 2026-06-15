@@ -324,7 +324,8 @@ describe('AC7: fetchUser validates token', () => {
     const { tokenRef, userRef } = env
 
     tokenRef.value = 'expired-jwt'
-    env.fetchMock.mockRejectedValueOnce(new Error('Unauthorized'))
+    const authError = Object.assign(new Error('Unauthorized'), { statusCode: 401 })
+    env.fetchMock.mockRejectedValueOnce(authError)
 
     applyNuxtGlobals(env)
 
