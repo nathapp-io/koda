@@ -214,6 +214,7 @@ Valid path: `CREATED → VERIFIED → IN_PROGRESS → VERIFY_FIX → CLOSED`.
 
 ### 3.13 Memory & timeline  (e2e: NOT covered — manual focus)
 - [ ] Create memory → `POST /memory -d '{"projectId":"<id>","kind":"FACT","subject":"x","predicate":"is"}'`.
+- [ ] Extract memory from event → `POST /memory/extract -d '{...canonical event...}'` → derives memory items (route marked "internal" but is live). Expected: 200/201 with extracted items, or clear validation error on malformed event.
 - [ ] Record decision → `POST /memory/decisions -d '{...}'`.
 - [ ] Project memory read → `GET /projects/:slug/memory?kind=FACT`.
 - [ ] Timeline → `GET /projects/:slug/timeline` → ordered events; filter `?eventTypes=...&limit=...&cursor=...`.
@@ -230,7 +231,16 @@ Valid path: `CREATED → VERIFIED → IN_PROGRESS → VERIFY_FIX → CLOSED`.
 - [ ] CI webhook → `POST /projects/:slug/ci-webhook` with `x-ci-signature` HMAC → auto-creates ticket; bad signature → rejected.
 - [ ] VCS webhook → `POST /projects/:slug/vcs-webhook` with `x-hub-signature-256` + `x-github-event` → processed; bad signature → rejected.
 
-### 3.16 Teardown
+### 3.16 Project context (agent-facing)  (e2e: context covered — but no API happy-path here)
+> Agent's primary read surface. Needs `projectId` (the UUID, not slug): `export PID=$(auth $BASE/projects/$SLUG | jq -r '.data.id')`.
+> As ADMIN this bypasses membership; the 403 path for non-members is in §7.3.
+- [ ] Get context → `auth "$BASE/context/$PID?intent=answer"` → Expected: 200, context payload for the project.
+- [ ] Get context, other intents → repeat with `intent=diagnose|plan|update|search` → each returns a shaped payload.
+- [ ] Get context with no `intent` → server defaults to `answer` (`dto.intent ?? 'answer'`) → Expected: 200, same shape as `answer`. (Note: the DTO has no enum validation, so a bogus `intent` likely passes through rather than 400 — **record actual**.)
+- [ ] Query context (body) → `auth -X POST "$BASE/context/$PID/query" -d '{"intent":"answer","query":"how do tickets move to CLOSED?"}'` → Expected: 200, relevant context for the query. (Body accepts `intent`, `query`, `ticketIds`, `repoRefs`, `includeCodeIntel`, `includeGraph`, `tokenBudget`.)
+- [ ] Nonexistent projectId → `auth "$BASE/context/00000000-0000-0000-0000-000000000000?intent=answer"` → Expected: 404/403 per contract.
+
+### 3.17 Teardown
 - [ ] Delete throwaway project → `DELETE /projects/$SLUG` → 204.
 - [ ] Soft-delete visibility: deleted project hidden from `GET /projects`; deleted ticket/label/agent likewise.
 
@@ -320,6 +330,8 @@ Areas with **no automated e2e** — prioritize these manually:
 | Monitoring / SLO / outbox | No | No | Medium |
 | Outbound webhooks / CI / VCS webhook | No | No | Medium |
 | i18n / hydration / a11y | n/a | No | Medium |
+
+Internal services with **no HTTP controller** (`entity-graph`, `koda-domain-writer`, `retrieval/evaluation.service`) are exercised only indirectly through RAG (§3.10), memory (§3.13), context (§3.16), and `koda evaluate` (§8.6) — a failure there surfaces as a second-order symptom in those flows, not a dedicated probe.
 
 API e2e present: agents, projects, tickets, ast-index, context, hybrid-retriever, generic endpoint.
 Web e2e present: auth, projects, agents, kb, kb-admin, labels-inline, ticket-detail-operations, ticket-lifecycle, settings VCS sync-pr, vcs-integration-settings, git-ref-link.
@@ -456,6 +468,10 @@ $KODA ticket verify-fix $REF --comment "looks good" --pass
 - [ ] `--project` flag overrides local config; omitting it falls back to `.koda/config.json`.
 - [ ] `ticket verify-fix` without `--pass`/`--fail` → Expected: validation error.
 - [ ] `ticket mine` lists tickets assigned to the agent.
+- [ ] Remaining transitions on a fresh ticket: `ticket reject <ref> --comment "..."`, `ticket close <ref>` → status reflects the action; invalid transition → clear error.
+- [ ] `ticket update <ref>` editable fields (`--title`, `--desc`, `--priority LOW`) → persisted.
+- [ ] `ticket label add <ref> --label <labelId>` then `ticket label remove <ref> --label <labelId>` → label applied/removed (`--label` takes the **label ID** from `label list`, not the name).
+- [ ] `ticket delete <ref> --force` → soft-deleted, hidden from `ticket list`.
 
 ### 8.4 Other surfaces (smoke)
 - [ ] `comment add $REF --body "hi" --type GENERAL` then `comment list $REF`.
@@ -464,12 +480,25 @@ $KODA ticket verify-fix $REF --comment "looks good" --pass
 - [ ] `agent me` / `agent pickup --project $SLUG`.
 - [ ] `kb search --query "tickets"` / `kb list`.
 - [ ] `vcs status` (no connection → graceful message).
+- [ ] `vcs connect --provider github --owner o --repo r --token ghp_xxx` → connection created (needs `VCS_ENCRYPTION_KEY` in API env; agent key must have permission).
+- [ ] `vcs test` → connection test result surfaced.
+- [ ] `vcs update --sync-mode polling --authors a,b --polling-interval-ms 60000` → updated (note: `update` has no `--token`; rotate token via `connect`).
+- [ ] `vcs sync` → summary counts; `vcs sync-pr` → updated count.
+- [ ] `vcs import <issueNumber>` → creates ticket; re-import same → conflict surfaced clearly.
+- [ ] `vcs disconnect` → connection removed; subsequent `vcs status` → no connection.
 - [ ] `--json` flag returns machine-readable output on the commands that support it.
 
 ### 8.5 CLI auth/context edge cases
 - [ ] No auth configured (clear `~/.koda` + unset `KODA_API_KEY`) → command → Expected: helpful "not logged in" error.
 - [ ] `KODA_API_URL` env override respected when no flag/config.
 - [ ] Agent key lacks ADMIN → `project create` / `project delete` via CLI → Expected: **403** surfaced clearly.
+
+### 8.6 Retrieval evaluation (`koda evaluate`)
+> Runs the retrieval evaluation harness against a project. Needs a configured project (`init`) and KB documents (§3.10) for meaningful scores. Requires the generated client to be present in `dist/`.
+- [ ] `$KODA evaluate` (project slug comes from `.koda/config.json` — run `init --project $SLUG` first; there is **no `--project` flag**) → prints `=== Retrieval Evaluation Results ===` with aggregate metrics + `total_queries`.
+- [ ] `$KODA evaluate --json` → machine-readable summary object.
+- [ ] No auth / no api-url / no project slug in config → Expected: clear `Error: ... is required` messages (each guard).
+- [ ] Generated client missing from build → Expected: `Error: generated client not available` (graceful, not a stack trace).
 
 ---
 
