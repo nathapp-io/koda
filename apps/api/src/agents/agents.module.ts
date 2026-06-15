@@ -1,4 +1,5 @@
 import { Module, OnModuleInit } from '@nestjs/common';
+import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
 import { AgentRegistryService } from './agent-registry.service';
@@ -9,11 +10,15 @@ import { CopilotAdapter } from './adapters/copilot.adapter';
 import { KodaDomainWriterModule } from '../koda-domain-writer/koda-domain-writer.module';
 import { AuthModule } from '../auth/auth.module';
 import { ContextModule } from '../context/context.module';
+import { PrismaAgentRepository } from './prisma-agent.repository';
+import { AGENT_REPOSITORY } from './domain/agent.domain';
 
 @Module({
-  imports: [KodaDomainWriterModule, AuthModule, ContextModule],
+  imports: [PrismaModule, KodaDomainWriterModule, AuthModule, ContextModule],
   controllers: [AgentsController],
   providers: [
+    PrismaAgentRepository,
+    { provide: AGENT_REPOSITORY, useExisting: PrismaAgentRepository },
     AgentsService,
     AgentRegistryService,
     KodaAgentAdapter,

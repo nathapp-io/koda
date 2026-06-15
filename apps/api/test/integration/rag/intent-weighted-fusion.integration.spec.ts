@@ -21,6 +21,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { EmbeddingService } from '../../../src/rag/embedding.service';
 import { EntityStore } from '../../../src/rag/entity-store';
+import { PrismaRagRepository } from '../../../src/rag/prisma-rag.repository';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -114,6 +115,7 @@ describe('Intent-Weighted Fusion and Reranking', () => {
           provide: PrismaService,
           useValue: { client: fakePrismaClient },
         },
+        PrismaRagRepository,
       ],
     }).compile();
 

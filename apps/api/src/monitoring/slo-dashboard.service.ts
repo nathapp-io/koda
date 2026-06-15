@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient } from '@prisma/client';
+import { PrismaMonitoringRepository } from './prisma-monitoring.repository';
 
 export interface MemoryQueryMetricInput {
   projectId: string;
@@ -32,52 +31,37 @@ const STALE_HIT_THRESHOLD_DAYS = 7;
 export class SloDashboardService {
   private readonly logger = new Logger(SloDashboardService.name);
 
-  constructor(private readonly prisma: PrismaService<PrismaClient>) {}
+  constructor(private readonly monitoringRepo: PrismaMonitoringRepository) {}
 
   async recordQueryMetric(metric: MemoryQueryMetricInput): Promise<void> {
-    await this.prisma.client.memoryQueryMetric.create({
-      data: {
-        projectId: metric.projectId,
-        intent: metric.intent,
-        latencyMs: metric.latencyMs,
-        tokensUsed: metric.tokensUsed ?? null,
-        hadProvenance: metric.hadProvenance,
-        staleHitCount: metric.staleHitCount ?? 0,
-        resultCount: metric.resultCount ?? 0,
-        leakageIncidentCount: metric.leakageIncidentCount ?? 0,
-      },
+    await this.monitoringRepo.createQueryMetric({
+      projectId: metric.projectId,
+      intent: metric.intent,
+      latencyMs: metric.latencyMs,
+      tokensUsed: metric.tokensUsed ?? null,
+      hadProvenance: metric.hadProvenance,
+      staleHitCount: metric.staleHitCount ?? 0,
+      resultCount: metric.resultCount ?? 0,
+      leakageIncidentCount: metric.leakageIncidentCount ?? 0,
     });
   }
 
   async recordStaleHit(projectId: string, docId: string): Promise<void> {
-    await this.prisma.client.memoryQueryMetric.create({
-      data: {
-        projectId,
-        intent: 'search',
-        latencyMs: 0,
-        tokensUsed: null,
-        hadProvenance: true,
-        staleHitCount: 1,
-        resultCount: 1,
-        docId,
-        leakageIncidentCount: 0,
-      },
+    await this.monitoringRepo.createQueryMetric({
+      projectId,
+      intent: 'search',
+      latencyMs: 0,
+      tokensUsed: null,
+      hadProvenance: true,
+      staleHitCount: 1,
+      resultCount: 1,
+      docId,
+      leakageIncidentCount: 0,
     });
   }
 
   async getSloMetrics(timeWindow: { from: Date; to: Date }): Promise<SloMetrics> {
-    const records = await this.prisma.client.memoryQueryMetric.findMany({
-      where: {
-        createdAt: { gte: timeWindow.from, lte: timeWindow.to },
-      },
-      select: {
-        latencyMs: true,
-        staleHitCount: true,
-        resultCount: true,
-        hadProvenance: true,
-        leakageIncidentCount: true,
-      },
-    });
+    const records = await this.monitoringRepo.findQueryMetrics(timeWindow);
 
     return {
       retrievalLatency: this.computeLatencyPercentiles(records),
@@ -139,11 +123,7 @@ export class SloDashboardService {
   ): Promise<number> {
     const sevenDaysAgo = new Date(timeWindow.to.getTime() - 7 * 24 * 60 * 60 * 1000);
     const from = sevenDaysAgo > timeWindow.from ? sevenDaysAgo : timeWindow.from;
-    const count = await this.prisma.client.memoryItem.count({
-      where: {
-        createdAt: { gte: from, lte: timeWindow.to },
-      },
-    });
+    const count = await this.monitoringRepo.countMemoryItems({ from, to: timeWindow.to });
     const daysInWindow = Math.max(
       (timeWindow.to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24),
       1,

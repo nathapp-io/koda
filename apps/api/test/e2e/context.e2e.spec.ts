@@ -19,8 +19,8 @@
 
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { execSync } from 'child_process';
 import { AppModule } from '../../src/app.module';
+import { resetDb } from '../helpers/reset-db';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
@@ -56,10 +56,7 @@ describeIntegration('Context API E2E', () => {
   beforeAll(async () => {
     if (!DATABASE_URL) return;
 
-    execSync('bunx prisma db push --force-reset --skip-generate', {
-      stdio: 'inherit',
-      env: { ...process.env, DATABASE_URL },
-    });
+    await resetDb();
 
     app = await AppFactory.create(AppModule);
     const combinedGuard = app.get(CombinedAuthGuard);

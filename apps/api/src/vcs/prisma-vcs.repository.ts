@@ -1,15 +1,18 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, VcsConnection, VcsSyncLog, Project, Ticket } from '@prisma/client';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { Ticket } from '@prisma/client';
-import { Project } from '@prisma/client';
 import { VcsIssue } from './types';
 import { TicketStatus, CommentType, ActivityType } from '../common/enums';
 import {
   CreateTicketFromIssueResult,
+  CreateVcsConnectionData,
+  CreateVcsSyncLogData,
   IVcsRepository,
   MergedPrTransitionInput,
+  OutboxDedupQuery,
+  TicketLinkData,
+  UpdateVcsConnectionData,
 } from './domain/vcs.repository';
 
 @Injectable()
@@ -23,17 +26,82 @@ export class PrismaVcsRepository implements IVcsRepository {
     return this.prisma.client;
   }
 
+  // ---------------------------------------------------------------------------
+  // Project
+  // ---------------------------------------------------------------------------
+
+  async findProjectById(projectId: string): Promise<{ id: string } | null> {
+    return this.db.project.findUnique({ where: { id: projectId }, select: { id: true } });
+  }
+
+  // ---------------------------------------------------------------------------
+  // VcsConnection
+  // ---------------------------------------------------------------------------
+
+  async findVcsConnectionByProjectId(projectId: string): Promise<VcsConnection | null> {
+    return this.db.vcsConnection.findUnique({ where: { projectId } });
+  }
+
+  async findVcsConnectionById(
+    connectionId: string,
+  ): Promise<(VcsConnection & { project: Project }) | null> {
+    return this.db.vcsConnection.findUnique({
+      where: { id: connectionId },
+      include: { project: true },
+    });
+  }
+
+  async findPollingConnections(): Promise<Array<VcsConnection & { project: Project }>> {
+    return this.db.vcsConnection.findMany({
+      where: { syncMode: 'polling', isActive: true },
+      include: { project: true },
+    });
+  }
+
+  async createVcsConnection(data: CreateVcsConnectionData): Promise<VcsConnection> {
+    return this.db.vcsConnection.create({ data });
+  }
+
+  async updateVcsConnection(
+    projectId: string,
+    data: UpdateVcsConnectionData,
+  ): Promise<VcsConnection> {
+    return this.db.vcsConnection.update({ where: { projectId }, data });
+  }
+
+  async updateVcsConnectionLastSynced(connectionId: string): Promise<void> {
+    await this.db.vcsConnection.update({
+      where: { id: connectionId },
+      data: { lastSyncedAt: new Date() },
+    });
+  }
+
+  async deleteVcsConnection(projectId: string): Promise<void> {
+    await this.db.vcsConnection.delete({ where: { projectId } });
+  }
+
+  // ---------------------------------------------------------------------------
+  // VcsSyncLog
+  // ---------------------------------------------------------------------------
+
+  async createVcsSyncLog(data: CreateVcsSyncLogData): Promise<VcsSyncLog> {
+    return this.db.vcsSyncLog.create({ data });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Ticket + Issue
+  // ---------------------------------------------------------------------------
+
   /**
    * Check whether a ticket with the given externalVcsId already exists in the project.
    * Includes soft-deleted tickets to prevent duplicate number allocation.
    */
-  async findExistingTicketByExternalId(projectId: string, externalVcsId: string): Promise<Ticket | null> {
+  async findExistingTicketByExternalId(
+    projectId: string,
+    externalVcsId: string,
+  ): Promise<Ticket | null> {
     return this.db.ticket.findFirst({
-      where: {
-        projectId,
-        externalVcsId,
-        deletedAt: null,
-      },
+      where: { projectId, externalVcsId, deletedAt: null },
     });
   }
 
@@ -41,7 +109,10 @@ export class PrismaVcsRepository implements IVcsRepository {
    * Create a ticket from a VCS issue inside a transaction.
    * Allocates ticket number as MAX(number)+1 scoped to the project.
    */
-  async createTicketFromIssue(project: Project, issue: VcsIssue): Promise<CreateTicketFromIssueResult> {
+  async createTicketFromIssue(
+    project: { id: string },
+    issue: VcsIssue,
+  ): Promise<CreateTicketFromIssueResult> {
     return this.txManager.run(async () => {
       const lastTicket = await this.db.ticket.findFirst({
         where: { projectId: project.id },
@@ -73,10 +144,27 @@ export class PrismaVcsRepository implements IVcsRepository {
     });
   }
 
+  async findTicketWithProject(
+    ticketId: string,
+  ): Promise<{ id: string; externalVcsId: string | null; project: { id: string; key: string } } | null> {
+    return this.db.ticket.findUnique({
+      where: { id: ticketId },
+      select: {
+        id: true,
+        externalVcsId: true,
+        project: { select: { id: true, key: true } },
+      },
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // TicketLink
+  // ---------------------------------------------------------------------------
+
   /**
    * Query TicketLink entries with active PRs for a project.
    */
-  async findActiveTicketLinksWithPrs(projectId: string) {
+  async findActiveTicketLinksWithPrs(projectId: string): Promise<TicketLinkData[]> {
     return this.db.ticketLink.findMany({
       include: {
         ticket: {
@@ -92,12 +180,36 @@ export class PrismaVcsRepository implements IVcsRepository {
       where: {
         prNumber: { not: null },
         prState: { notIn: ['merged', 'closed'] },
+        ticket: { projectId, deletedAt: null },
+      },
+    }) as Promise<TicketLinkData[]>;
+  }
+
+  /**
+   * Find a TicketLink by project ID and PR number.
+   * Used by webhook handlers.
+   */
+  async findTicketLinkByPrNumber(
+    projectId: string,
+    prNumber: number,
+  ): Promise<TicketLinkData | null> {
+    return this.db.ticketLink.findFirst({
+      where: {
+        prNumber,
+        ticket: { projectId },
+      },
+      include: {
         ticket: {
-          projectId,
-          deletedAt: null,
+          select: {
+            id: true,
+            status: true,
+            projectId: true,
+            number: true,
+            externalVcsId: true,
+          },
         },
       },
-    });
+    }) as Promise<TicketLinkData | null>;
   }
 
   /**
@@ -106,11 +218,15 @@ export class PrismaVcsRepository implements IVcsRepository {
   async updateTicketLinkPrState(id: string, prState: string): Promise<void> {
     await this.db.ticketLink.update({
       where: { id },
-      data: {
-        prState,
-        prUpdatedAt: new Date(),
-      },
+      data: { prState, prUpdatedAt: new Date() },
     });
+  }
+
+  /**
+   * Update a TicketLink's prState and prUpdatedAt (alias for webhook service).
+   */
+  async updateTicketLinkWithPrState(id: string, prState: string): Promise<void> {
+    await this.updateTicketLinkPrState(id, prState);
   }
 
   /**
@@ -152,6 +268,68 @@ export class PrismaVcsRepository implements IVcsRepository {
           newValue: prInfo,
         },
       });
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // TicketLink upsert (used by VcsLinkExtractorService)
+  // ---------------------------------------------------------------------------
+
+  async upsertTicketLink(
+    ticketId: string,
+    url: string,
+    provider: string,
+    linkType: string,
+    externalRef?: string,
+    createdAt?: Date,
+  ): Promise<void> {
+    const existing = await this.db.ticketLink.findFirst({ where: { ticketId, url } });
+
+    if (existing) {
+      await this.db.ticketLink.upsert({
+        where: { ticketId_url: { ticketId, url } },
+        create: {
+          ticketId,
+          url,
+          provider,
+          linkType,
+          externalRef: externalRef ?? null,
+          ...(createdAt ? { createdAt } : {}),
+        },
+        update: {
+          linkType,
+          externalRef: externalRef ?? null,
+        },
+      });
+    } else {
+      await this.db.ticketLink.create({
+        data: {
+          ticketId,
+          url,
+          provider,
+          linkType,
+          externalRef: externalRef ?? null,
+          ...(createdAt ? { createdAt } : {}),
+        },
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Outbox dedup (cross-instance push deduplication)
+  // ---------------------------------------------------------------------------
+
+  async findPendingOutboxEvents(query: OutboxDedupQuery): Promise<{ id: string }[]> {
+    return this.db.outboxEvent.findMany({
+      where: {
+        projectId: query.projectId,
+        eventType: query.eventType,
+        eventId: query.eventId,
+        status: { in: query.statuses },
+        createdAt: { gte: query.since },
+      },
+      select: { id: true },
+      take: 1,
     });
   }
 }

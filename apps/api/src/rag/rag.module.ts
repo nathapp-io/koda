@@ -1,8 +1,7 @@
 import { Injectable, Logger, Module, OnModuleInit, Optional, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ScheduleModule, SchedulerRegistry } from '@nestjs/schedule';
-import { PrismaModule, PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { RagController } from './rag.controller';
 import { RagService } from './rag.service';
 import { EmbeddingService } from './embedding.service';
@@ -11,6 +10,8 @@ import { LexicalIndex } from './lexical-index';
 import { EntityStore } from './entity-store';
 import { GraphStoreService } from './graph-store.service';
 import { IncrementalGraphDiffService } from './incremental-graph-diff.service';
+import { PrismaRagRepository } from './prisma-rag.repository';
+import { RAG_REPOSITORY } from './domain/rag.domain';
 import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interface';
 import { CounterOptimizeStrategy } from './strategies/counter-optimize.strategy';
 import { CronOptimizeStrategy } from './strategies/cron-optimize.strategy';
@@ -27,7 +28,7 @@ class LexicalIndexWarmup implements OnModuleInit {
     private readonly lexicalIndex: LexicalIndex,
     private readonly ragService: RagService,
     private readonly outboxFanOutRegistry: OutboxFanOutRegistry,
-    @Optional() private readonly prisma?: PrismaService<PrismaClient>,
+    @Optional() private readonly ragRepository?: PrismaRagRepository,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -44,15 +45,12 @@ class LexicalIndexWarmup implements OnModuleInit {
     });
     this.logger.debug('LexicalIndex outbox handler registered');
 
-    if (this.prisma?.client) {
-      const prisma = this.prisma;
+    if (this.ragRepository) {
+      const ragRepository = this.ragRepository;
       // Begin warmup in background — does not block API startup
       Promise.resolve().then(async () => {
         try {
-          const projects = await prisma.client.project.findMany({
-            where: { deletedAt: null },
-            select: { id: true },
-          });
+          const projects = await ragRepository.findAllActiveProjectIds();
           let warmedUp = 0;
           for (const { id: projectId } of projects) {
             try {
@@ -82,7 +80,7 @@ class EntityStoreWarmup implements OnModuleInit {
   constructor(
     private readonly entityStore: EntityStore,
     private readonly outboxFanOutRegistry: OutboxFanOutRegistry,
-    @Optional() private readonly prisma?: PrismaService<PrismaClient>,
+    @Optional() private readonly ragRepository?: PrismaRagRepository,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -104,12 +102,9 @@ class EntityStoreWarmup implements OnModuleInit {
 
     this.logger.debug('EntityStore outbox handlers registered');
 
-    if (this.prisma?.client) {
+    if (this.ragRepository) {
       try {
-        const projects = await this.prisma.client.project.findMany({
-          where: { deletedAt: null },
-          select: { id: true },
-        });
+        const projects = await this.ragRepository.findAllActiveProjectIds();
         const projectIds = projects.map(p => p.id);
         if (projectIds.length > 0) {
           for (const projectId of projectIds) {
@@ -130,6 +125,8 @@ class EntityStoreWarmup implements OnModuleInit {
   imports: [ScheduleModule.forRoot(), forwardRef(() => OutboxModule), PrismaModule, forwardRef(() => RetrievalModule)],
   controllers: [RagController],
   providers: [
+    PrismaRagRepository,
+    { provide: RAG_REPOSITORY, useExisting: PrismaRagRepository },
     RagService,
     EmbeddingService,
     HybridRetrieverService,

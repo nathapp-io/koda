@@ -1,29 +1,23 @@
-import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
-import { Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'crypto';
+import { PrismaWebhookRepository } from './prisma-webhook.repository';
 
 @Injectable()
 export class WebhookDispatcherService {
   private readonly logger = new Logger(WebhookDispatcherService.name);
 
-  constructor(private prisma: PrismaService<PrismaClient>) {}
+  constructor(private readonly webhookRepo: PrismaWebhookRepository) {}
 
   async dispatch(projectId: string, event: string, payload: object): Promise<void> {
-    const webhooks = await this.prisma.client.webhook.findMany({
-      where: { projectId, active: true },
-    });
+    const webhooks = await this.webhookRepo.findActiveByProject(projectId);
 
-    // Filter webhooks that have the event in their events array
-    const matchingWebhooks = webhooks.filter((webhook: { events: string }) => {
+    const matchingWebhooks = webhooks.filter((webhook) => {
       const events = JSON.parse(webhook.events) as string[];
       return events.includes(event);
     });
 
     for (const webhook of matchingWebhooks) {
       this.dispatchToWebhook(webhook.url, webhook.secret, event, payload).catch((err) => {
-        // fire-and-forget — log but don't throw
         this.logger.warn(`Webhook dispatch failed for ${webhook.url}: ${err}`);
       });
     }

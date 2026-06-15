@@ -1,13 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
-import type { PrismaClient } from '@prisma/client';
 import { RagService } from '../rag/rag.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { AgentAuthProvider } from '../auth/agent-auth.provider';
 import { TicketEventService } from '../events/ticket-event.service';
 import { AgentEventService } from '../events/agent-event.service';
 import { DecisionEventService } from '../events/decision-event.service';
+import { PrismaKodaDomainWriterRepository } from './prisma-koda-domain-writer.repository';
 import type {
   WriteResult,
   WriteTicketEventInput,
@@ -21,7 +20,7 @@ import type {
 @Injectable()
 export class KodaDomainWriter {
   constructor(
-    private readonly prisma: PrismaService<PrismaClient>,
+    private readonly writerRepo: PrismaKodaDomainWriterRepository,
     private readonly ragService: RagService,
     private readonly outboxService: OutboxService,
     private readonly agentAuthProvider: AgentAuthProvider,
@@ -37,7 +36,7 @@ export class KodaDomainWriter {
   }
 
   private async assertProjectExists(projectId: string): Promise<void> {
-    const project = await this.prisma.client.project.findUnique({ where: { id: projectId } });
+    const project = await this.writerRepo.findProjectById(projectId);
     if (project === null) {
       throw new ForbiddenAppException({}, 'koda-domain-writer');
     }

@@ -9,13 +9,13 @@ import { VcsPollingService } from './vcs-polling.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { VcsLinkExtractorService } from './vcs-link-extractor.service';
 import { PrismaVcsRepository } from './prisma-vcs.repository';
-import { ProjectsService } from '../projects/projects.service';
+import { ProjectsModule } from '../projects/projects.module';
 import { RagModule } from '../rag/rag.module';
 import { VCS_REPOSITORY } from './domain/vcs.repository';
 import { OutboxModule } from '../outbox/outbox.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), RagModule, OutboxModule],
+  imports: [ScheduleModule.forRoot(), RagModule, OutboxModule, ProjectsModule],
   controllers: [VcsController, VcsWebhookController],
   providers: [
     PrismaVcsRepository,
@@ -26,7 +26,6 @@ import { OutboxModule } from '../outbox/outbox.module';
     VcsPollingService,
     VcsPrSyncService,
     VcsLinkExtractorService,
-    ProjectsService,
   ],
   exports: [VCS_REPOSITORY, VcsConnectionService, VcsSyncService, VcsWebhookService, VcsPollingService, VcsPrSyncService, VcsLinkExtractorService],
 })

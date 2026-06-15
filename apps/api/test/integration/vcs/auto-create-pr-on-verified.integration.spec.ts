@@ -14,6 +14,7 @@
  */
 
 import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
+import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.repository';
 import { UserPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TicketLinksService } from '../../../src/ticket-links/ticket-links.service';
@@ -143,7 +144,7 @@ describe('Auto-create PR on VERIFIED Transition', () => {
     const mockTxManager = { run: (fn: () => Promise<unknown>) => fn(), getClient: jest.fn(), isInTransaction: jest.fn(() => false) };
 
     transitionsService = new TicketTransitionsService(
-      mockPrismaService as any,
+      new PrismaTicketsRepository(mockPrismaService as any),
       mockTxManager as any,
       undefined,
     );
@@ -371,7 +372,7 @@ describe('AC14: prNumber and prState persisted on TicketLink after successful PR
       const mockConfigService = { get: jest.fn().mockImplementation((key: string) => key === 'vcs.encryptionKey' ? 'a'.repeat(64) : undefined) };
 
       transitionsService = new TicketTransitionsService(
-        mockPrismaService as any,
+        new PrismaTicketsRepository(mockPrismaService as any),
         mockTxManager2 as any,
         undefined,
         undefined,

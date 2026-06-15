@@ -16,6 +16,7 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { SchedulerRegistry } from '@nestjs/schedule';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { VcsPollingService } from '../../../src/vcs/vcs-polling.service';
 import { VcsSyncService, SyncIssueResult } from '../../../src/vcs/vcs-sync.service';
@@ -122,6 +123,19 @@ describe('VcsPollingService', () => {
     vcsSyncLog: { ...mockVcsSyncLogDelegate },
   } as any;
 
+  // Mock VCS repository (repo-level methods used by VcsPollingService)
+  const mockVcsRepository = {
+    findPollingConnections: jest.fn(),
+    findVcsConnectionById: jest.fn(),
+    updateVcsConnectionLastSynced: jest.fn(),
+    createVcsSyncLog: jest.fn(),
+    findExistingTicketByExternalId: jest.fn(),
+    createTicketFromIssue: jest.fn(),
+    findActiveTicketLinksWithPrs: jest.fn(),
+    updateTicketLinkPrState: jest.fn(),
+    applyMergedPrTransition: jest.fn(),
+  };
+
   // schedulePolling() creates real Node setInterval timers. The mocked
   // SchedulerRegistry never clears them (unlike the real one), so we track and
   // clear them in afterEach to stop leaked timers from firing poll() across tests.
@@ -143,13 +157,7 @@ describe('VcsPollingService', () => {
         },
         {
           provide: VCS_REPOSITORY,
-          useValue: {
-            findExistingTicketByExternalId: jest.fn(),
-            createTicketFromIssue: jest.fn(),
-            findActiveTicketLinksWithPrs: jest.fn(),
-            updateTicketLinkPrState: jest.fn(),
-            applyMergedPrTransition: jest.fn(),
-          },
+          useValue: mockVcsRepository,
         },
         {
           provide: PrismaService,
@@ -167,6 +175,10 @@ describe('VcsPollingService', () => {
             getInterval: jest.fn(),
             getIntervals: jest.fn(() => []),
           },
+        },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue('test-encryption-key') },
         },
       ],
     }).compile();
@@ -187,20 +199,12 @@ describe('VcsPollingService', () => {
   });
 
   describe('AC1: Module initialization registers polling intervals', () => {
-    it('should call findMany with syncMode=polling and isActive=true on module init', async () => {
-      mockVcsConnectionDelegate.findMany.mockResolvedValueOnce([]);
+    it('should call findPollingConnections on module init', async () => {
+      mockVcsRepository.findPollingConnections.mockResolvedValueOnce([]);
 
       await service.onModuleInit();
 
-      expect(mockVcsConnectionDelegate.findMany).toHaveBeenCalledWith({
-        where: {
-          syncMode: 'polling',
-          isActive: true,
-        },
-        include: {
-          project: true,
-        },
-      });
+      expect(mockVcsRepository.findPollingConnections).toHaveBeenCalled();
     });
 
     it('should register one interval per polling connection on module init', async () => {
@@ -209,7 +213,7 @@ describe('VcsPollingService', () => {
         project: mockProject,
       };
 
-      mockVcsConnectionDelegate.findMany.mockResolvedValueOnce([mockConnectionWithProject]);
+      mockVcsRepository.findPollingConnections.mockResolvedValueOnce([mockConnectionWithProject]);
 
       await service.onModuleInit();
 
@@ -223,7 +227,7 @@ describe('VcsPollingService', () => {
       const conn1 = { ...mockVcsConnection, id: 'conn-1', project: mockProject };
       const conn2 = { ...mockVcsConnection, id: 'conn-2', project: mockProject };
 
-      mockVcsConnectionDelegate.findMany.mockResolvedValueOnce([conn1, conn2]);
+      mockVcsRepository.findPollingConnections.mockResolvedValueOnce([conn1, conn2]);
 
       await service.onModuleInit();
 
@@ -234,7 +238,7 @@ describe('VcsPollingService', () => {
       const activeConn = { ...mockVcsConnection, isActive: true, project: mockProject };
       const inactiveConn = { ...mockVcsConnection, id: 'conn-inactive', isActive: false, project: mockProject };
 
-      mockVcsConnectionDelegate.findMany.mockResolvedValueOnce([activeConn, inactiveConn]);
+      mockVcsRepository.findPollingConnections.mockResolvedValueOnce([activeConn, inactiveConn]);
 
       await service.onModuleInit();
 
@@ -248,7 +252,7 @@ describe('VcsPollingService', () => {
       const pollingConn = { ...mockVcsConnection, syncMode: 'polling', project: mockProject };
       const manualConn = { ...mockVcsConnection, id: 'conn-manual', syncMode: 'manual', project: mockProject };
 
-      mockVcsConnectionDelegate.findMany.mockResolvedValueOnce([pollingConn, manualConn]);
+      mockVcsRepository.findPollingConnections.mockResolvedValueOnce([pollingConn, manualConn]);
 
       await service.onModuleInit();
 

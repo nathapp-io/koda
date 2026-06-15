@@ -1,7 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { CommentsService } from './comments.service';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
 import { CreateCommentDto, CommentTypeEnum } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { PrismaCommentRepository } from './prisma-comment.repository';
@@ -143,18 +141,6 @@ describe('CommentsService', () => {
     name: 'Admin User',
   };
 
-  // PrismaService mock is only needed for project/ticket lookups
-  const mockPrismaService = {
-    client: {
-      project: {
-        findUnique: jest.fn(),
-      },
-      ticket: {
-        findUnique: jest.fn(),
-      },
-    },
-  };
-
   // Comment repository mock
   const mockCommentRepo = {
     create: jest.fn(),
@@ -162,6 +148,9 @@ describe('CommentsService', () => {
     findByTicketId: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),
+    findProjectBySlug: jest.fn(),
+    findTicketByNumber: jest.fn(),
+    findTicketById: jest.fn(),
   };
 
   let mockCaslCan: jest.Mock;
@@ -172,7 +161,6 @@ describe('CommentsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CommentsService,
-        { provide: PrismaService, useValue: mockPrismaService },
         { provide: COMMENT_REPOSITORY, useValue: mockCommentRepo },
         { provide: KodaCaslAbilityFactory, useValue: { createForUser: jest.fn().mockResolvedValue({ can: mockCaslCan }) } },
       ],
@@ -192,8 +180,8 @@ describe('CommentsService', () => {
         type: 'GENERAL',
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockCommentRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockCommentRepo.findTicketByNumber.mockResolvedValue(mockTicket);
       const createdComment = { ...mockComment, body: 'This is a test comment' };
       mockCommentRepo.create.mockResolvedValue(createdComment);
 
@@ -216,8 +204,8 @@ describe('CommentsService', () => {
         type: 'VERIFICATION',
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockCommentRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockCommentRepo.findTicketByNumber.mockResolvedValue(mockTicket);
       const commentWithType = { ...mockComment, type: 'VERIFICATION' };
       mockCommentRepo.create.mockResolvedValue(commentWithType);
 
@@ -230,8 +218,8 @@ describe('CommentsService', () => {
       const types = ['FIX_REPORT', 'REVIEW', 'STATUS_CHANGE'];
 
       for (const commentType of types) {
-        mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-        mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
+        mockCommentRepo.findProjectBySlug.mockResolvedValue(mockProject);
+        mockCommentRepo.findTicketByNumber.mockResolvedValue(mockTicket);
         const commentWithType = { ...mockComment, type: commentType };
         mockCommentRepo.create.mockResolvedValue(commentWithType);
 
@@ -252,8 +240,8 @@ describe('CommentsService', () => {
         type: 'GENERAL',
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockCommentRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockCommentRepo.findTicketByNumber.mockResolvedValue(mockTicket);
       mockCommentRepo.create.mockResolvedValue({
         ...mockComment,
         authorUserId: 'user-456',
@@ -271,8 +259,8 @@ describe('CommentsService', () => {
         type: 'GENERAL',
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockCommentRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockCommentRepo.findTicketByNumber.mockResolvedValue(mockTicket);
       mockCommentRepo.create.mockResolvedValue({
         ...mockComment,
         authorUserId: null,
@@ -291,7 +279,7 @@ describe('CommentsService', () => {
         type: 'GENERAL',
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(null);
+      mockCommentRepo.findProjectBySlug.mockResolvedValue(null);
 
       await expect(
         service.create('nonexistent', 'KODA-1', createDto, mockUserPrincipal)
@@ -304,8 +292,8 @@ describe('CommentsService', () => {
         type: 'GENERAL',
       };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(null);
+      mockCommentRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockCommentRepo.findTicketByNumber.mockResolvedValue(null);
 
       await expect(
         service.create('koda', 'KODA-999', createDto, mockUserPrincipal)
@@ -320,8 +308,8 @@ describe('CommentsService', () => {
       ];
 
       for (const invalidDto of invalidDtos) {
-        mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-        mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
+        mockCommentRepo.findProjectBySlug.mockResolvedValue(mockProject);
+        mockCommentRepo.findTicketByNumber.mockResolvedValue(mockTicket);
 
         await expect(
           service.create('koda', 'KODA-1', invalidDto as CreateCommentDto, mockUserPrincipal)
@@ -337,8 +325,8 @@ describe('CommentsService', () => {
         { ...mockComment, id: 'comment-124', body: 'Second comment' },
       ];
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockCommentRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockCommentRepo.findTicketByNumber.mockResolvedValue(mockTicket);
       mockCommentRepo.findByTicketId.mockResolvedValue(comments);
 
       const result = await service.findByTicket('koda', 'KODA-1');
@@ -349,8 +337,8 @@ describe('CommentsService', () => {
     });
 
     it('should return empty array when no comments found', async () => {
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket);
+      mockCommentRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockCommentRepo.findTicketByNumber.mockResolvedValue(mockTicket);
       mockCommentRepo.findByTicketId.mockResolvedValue([]);
 
       const result = await service.findByTicket('koda', 'KODA-1');
@@ -359,14 +347,14 @@ describe('CommentsService', () => {
     });
 
     it('should return 404 if project not found', async () => {
-      mockPrismaService.client.project.findUnique.mockResolvedValue(null);
+      mockCommentRepo.findProjectBySlug.mockResolvedValue(null);
 
       await expect(service.findByTicket('nonexistent', 'KODA-1')).rejects.toThrow();
     });
 
     it('should return 404 if ticket not found', async () => {
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(null);
+      mockCommentRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockCommentRepo.findTicketByNumber.mockResolvedValue(null);
 
       await expect(service.findByTicket('koda', 'KODA-999')).rejects.toThrow();
     });

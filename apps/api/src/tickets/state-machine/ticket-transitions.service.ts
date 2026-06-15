@@ -1,13 +1,11 @@
 import { Injectable, Optional, Logger, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
-import {
+import type {
   Ticket,
   Comment,
   TicketActivity,
-  PrismaClient,
 } from '@prisma/client';
 import { TicketStatus, CommentType, ActivityType } from '../../common/enums';
 import { validateTransition } from './ticket-transitions';
@@ -15,13 +13,15 @@ import { RagService } from '../../rag/rag.service';
 import { WebhookDispatcherService } from '../../webhook/webhook-dispatcher.service';
 import { VcsConnectionService } from '../../vcs/vcs-connection.service';
 import { buildBranchName } from '../../vcs/branch-name.util';
-import { createVcsProvider, VcsProviderConfig } from '../../vcs/factory';
+import { createVcsProvider } from '../../vcs/factory';
 import { VcsLinkExtractorService } from '../../vcs/vcs-link-extractor.service';
 import { decryptToken } from '../../common/utils/encryption.util';
 import { TicketLinksService } from '../../ticket-links/ticket-links.service';
 import { IVcsProvider, VcsPullRequest } from '../../vcs';
 import { actorForeignKeys } from '../../auth/principal/actor-foreign-keys';
 import { KodaPrincipal } from '../../auth/principal/koda-principal.types';
+import { TICKET_REPOSITORY, ITicketRepository } from '../domain/ticket.domain';
+import type { TicketDomain } from '../domain/ticket.domain';
 
 export interface TransitionResultWithComment {
   ticket: Ticket;
@@ -41,7 +41,7 @@ export class TicketTransitionsService {
   private readonly logger = new Logger(TicketTransitionsService.name);
 
   constructor(
-    private readonly prisma: PrismaService<PrismaClient>,
+    @Inject(TICKET_REPOSITORY) private readonly ticketRepo: ITicketRepository,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Optional() private readonly ragService?: RagService,
     @Optional() private readonly webhookDispatcher?: WebhookDispatcherService,
@@ -50,15 +50,13 @@ export class TicketTransitionsService {
     @Optional() private readonly vcsLinkExtractorService?: VcsLinkExtractorService,
     @Optional() private readonly configService?: ConfigService,
   ) {}
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private get db() { return this.prisma.client; }
 
   /**
    * Fire-and-forget: dispatch STATUS_CHANGE webhook for a ticket.
    */
   private dispatchStatusChangeWebhook(
     projectId: string,
-    ticket: Ticket,
+    ticket: TicketDomain,
     fromStatus: string,
     toStatus: string,
   ): void {
@@ -84,15 +82,15 @@ export class TicketTransitionsService {
    */
   private autoIndexTicket(
     project: { id: string; key: string; autoIndexOnClose: boolean },
-    ticket: Ticket,
+    ticket: TicketDomain,
   ): void {
     if (!this.ragService || !project.autoIndexOnClose) return;
 
     const ragService = this.ragService;
     const projectId = project.id;
 
-    this.db.ticket
-      .findUnique({ where: { id: ticket.id }, include: { comments: true } })
+    (this.ticketRepo as import('../prisma-tickets.repository').PrismaTicketsRepository)
+      .findTicketWithComments(ticket.id)
       .then((ticketFull) => {
         if (!ticketFull) return;
         const content = [
@@ -123,7 +121,7 @@ export class TicketTransitionsService {
    */
   private createPrForTicket(
     project: { id: string; key: string },
-    ticket: Ticket,
+    ticket: TicketDomain,
   ): Promise<void> {
     if (!this.vcsConnectionService || !this.ticketLinksService || !this.vcsLinkExtractorService || !this.configService) return Promise.resolve();
 
@@ -135,6 +133,7 @@ export class TicketTransitionsService {
     const projectId = project.id;
     const ticketId = ticket.id;
     const projectKey = project.key;
+    const repo = this.ticketRepo as import('../prisma-tickets.repository').PrismaTicketsRepository;
 
     return vcsService.getFullByProject(projectId)
       .then((connection): Promise<void> => {
@@ -153,14 +152,12 @@ export class TicketTransitionsService {
           const prTitle = `${projectKey}-${ticket.number}: ${ticket.title}`;
           const prBody = ticket.description ?? '';
 
-          return this.db.ticketLink.create({
-            data: {
-              ticketId,
-              url: `https://github.com/${connection.repoOwner}/${connection.repoName}/pulls/pending`,
-              provider: 'github',
-              externalRef: `${connection.repoOwner}/${connection.repoName}#pending`,
-              linkType: 'pr',
-            },
+          return repo.createTicketLink({
+            ticketId,
+            url: `https://github.com/${connection.repoOwner}/${connection.repoName}/pulls/pending`,
+            provider: 'github',
+            externalRef: `${connection.repoOwner}/${connection.repoName}#pending`,
+            linkType: 'pr',
           }).then((link): Promise<void> => {
             return provider.createPullRequest({
               title: prTitle,
@@ -169,30 +166,25 @@ export class TicketTransitionsService {
               baseBranch,
               draft: true,
             }).then((pr): Promise<void> => {
-              return this.db.ticketLink.update({
-                where: { id: link.id },
-                data: {
-                  url: pr.url,
-                  externalRef: `${connection.repoOwner}/${connection.repoName}#${pr.number}`,
-                  prNumber: pr.number,
-                  prState: 'draft',
-                  prUpdatedAt: new Date(),
-                  linkType: 'pr',
-                },
+              return repo.updateTicketLink(link.id, {
+                url: pr.url,
+                externalRef: `${connection.repoOwner}/${connection.repoName}#${pr.number}`,
+                prNumber: pr.number,
+                prState: 'draft',
+                prUpdatedAt: new Date(),
+                linkType: 'pr',
               }) as unknown as Promise<void>;
             });
           }).then((): Promise<void> => {
-            return this.db.ticketActivity.create({
-              data: {
-                ticketId,
-                action: ActivityType.VCS_PR_CREATED,
-              },
+            return repo.createTicketActivity({
+              ticketId,
+              action: ActivityType.VCS_PR_CREATED,
             }) as unknown as Promise<void>;
           }).then((): Promise<void> => {
             // AC5: After createPrForTicket() completes, extractLinksFromPr() is called
             return vcsLinkExtractor.extractLinksFromPr(
               project,
-              ticket,
+              ticket as unknown as Ticket,
               connection,
               encryptionKey,
               branchName,
@@ -289,7 +281,6 @@ export class TicketTransitionsService {
     approve: boolean,
     principal: KodaPrincipal,
   ): Promise<TransitionResultWithComment> {
-    // verify-fix is only valid when ticket is in VERIFY_FIX status
     const ticket = await this.findTicketByRef(projectSlug, ticketRef);
     if (!ticket) throw new NotFoundAppException();
     if (ticket.status !== TicketStatus.VERIFY_FIX) {
@@ -315,9 +306,7 @@ export class TicketTransitionsService {
     ticketRef: string,
     principal: KodaPrincipal,
   ): Promise<TransitionResultWithoutComment> {
-    const project = await this.db.project.findUnique({
-      where: { slug: projectSlug },
-    });
+    const project = await this.ticketRepo.findProjectBySlug(projectSlug);
     if (!project || project.deletedAt) {
       throw new NotFoundAppException({}, 'tickets');
     }
@@ -327,44 +316,37 @@ export class TicketTransitionsService {
       throw new NotFoundAppException({}, 'tickets');
     }
 
-    // Validate that CLOSED is reachable from current status
     if (
       ticket.status === TicketStatus.CLOSED ||
       ticket.status === TicketStatus.CREATED ||
       ticket.status === TicketStatus.REJECTED
     ) {
-      throw new ValidationAppException({}, 'tickets');  // i18n key for invalid ticket transition
+      throw new ValidationAppException({}, 'tickets');
     }
 
-    // Execute transition without comment requirement
+    const repo = this.ticketRepo as import('../prisma-tickets.repository').PrismaTicketsRepository;
+
     const transaction = await this.txManager.run(async () => {
       const actorFields = actorForeignKeys(principal, 'actor');
 
-      // Update ticket status
-      const updatedTicket = await this.prisma.client.ticket.update({
-        where: { id: ticket.id },
-        data: { status: TicketStatus.CLOSED },
-      });
+      const updatedTicket = await repo.updateTicketStatus(ticket.id, TicketStatus.CLOSED);
 
-      // Create activity record
-      const activity = await this.prisma.client.ticketActivity.create({
-        data: {
-          ticketId: ticket.id,
-          action: ActivityType.STATUS_CHANGE,
-          fromStatus: ticket.status,
-          toStatus: TicketStatus.CLOSED,
-          ...actorFields,
-        },
+      const activity = await repo.createTicketActivity({
+        ticketId: ticket.id,
+        action: ActivityType.STATUS_CHANGE,
+        fromStatus: ticket.status,
+        toStatus: TicketStatus.CLOSED,
+        ...actorFields,
       });
 
       return {
-        ticket: updatedTicket,
-        activity,
+        ticket: updatedTicket as unknown as Ticket,
+        activity: activity as unknown as TicketActivity,
       };
     });
 
-    this.autoIndexTicket(project, transaction.ticket);
-    this.dispatchStatusChangeWebhook(project.id, transaction.ticket, ticket.status, TicketStatus.CLOSED);
+    this.autoIndexTicket(project, transaction.ticket as unknown as TicketDomain);
+    this.dispatchStatusChangeWebhook(project.id, transaction.ticket as unknown as TicketDomain, ticket.status, TicketStatus.CLOSED);
 
     return transaction;
   }
@@ -399,84 +381,67 @@ export class TicketTransitionsService {
     commentBody: string | undefined,
     principal: KodaPrincipal,
   ): Promise<TransitionResult> {
-    // Find project
-    const project = await this.db.project.findUnique({
-      where: { slug: projectSlug },
-    });
+    const project = await this.ticketRepo.findProjectBySlug(projectSlug);
     if (!project || project.deletedAt) {
       throw new NotFoundAppException({}, 'tickets');
     }
 
-    // Find ticket
     const ticket = await this.findTicketByRef(projectSlug, ticketRef);
     if (!ticket) {
       throw new NotFoundAppException({}, 'tickets');
     }
 
-    // Validate transition (ticket.status is String in SQLite schema, cast to local enum type)
     validateTransition(ticket.status as TicketStatus, toStatus, commentType);
 
-    // Execute transition in transaction
+    const repo = this.ticketRepo as import('../prisma-tickets.repository').PrismaTicketsRepository;
+
     const result = await this.txManager.run(async () => {
       const actorFields = actorForeignKeys(principal, 'actor');
 
-      // Create comment if needed
       let comment = null;
       if (commentType && commentBody) {
         const authorFields = actorForeignKeys(principal, 'authoredBy');
-        comment = await this.prisma.client.comment.create({
-          data: {
-            ticketId: ticket.id,
-            body: commentBody,
-            type: commentType,
-            ...authorFields,
-          },
+        comment = await repo.createComment({
+          ticketId: ticket.id,
+          body: commentBody,
+          type: commentType,
+          authorUserId: authorFields.authorUserId,
+          authorAgentId: authorFields.authorAgentId,
         });
       }
 
-      // Update ticket status
-      const updatedTicket = await this.prisma.client.ticket.update({
-        where: { id: ticket.id },
-        data: { status: toStatus },
-      });
+      const updatedTicket = await repo.updateTicketStatus(ticket.id, toStatus);
 
-      // Create activity record
-      const activity = await this.prisma.client.ticketActivity.create({
-        data: {
-          ticketId: ticket.id,
-          action: ActivityType.STATUS_CHANGE,
-          fromStatus: ticket.status,
-          toStatus,
-          ...actorFields,
-        },
+      const activity = await repo.createTicketActivity({
+        ticketId: ticket.id,
+        action: ActivityType.STATUS_CHANGE,
+        fromStatus: ticket.status,
+        toStatus,
+        ...actorFields,
       });
 
       if (comment) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return {
-          ticket: updatedTicket,
-          comment,
-          activity,
+          ticket: updatedTicket as unknown as Ticket,
+          comment: comment as unknown as Comment,
+          activity: activity as unknown as TicketActivity,
         } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return {
-        ticket: updatedTicket,
-        activity,
+        ticket: updatedTicket as unknown as Ticket,
+        activity: activity as unknown as TicketActivity,
       } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
     });
 
-    // Post-transaction side effects (outside the transaction boundary)
-    // Auto-index when a ticket transitions to CLOSED via normal state machine
     if (toStatus === TicketStatus.CLOSED) {
-      this.autoIndexTicket(project, result.ticket);
+      this.autoIndexTicket(project, result.ticket as unknown as TicketDomain);
     }
-    // Dispatch webhook for status change
-    this.dispatchStatusChangeWebhook(project.id, result.ticket, ticket.status, toStatus);
-    // Auto-create PR when ticket transitions to VERIFIED
+    this.dispatchStatusChangeWebhook(project.id, result.ticket as unknown as TicketDomain, ticket.status, toStatus);
     if (toStatus === TicketStatus.VERIFIED) {
-      await this.createPrForTicket(project, result.ticket);
+      await this.createPrForTicket(project, result.ticket as unknown as TicketDomain);
     }
     return result;
   }
@@ -484,34 +449,7 @@ export class TicketTransitionsService {
   /**
    * Helper to find ticket by ref (supports both KODA-1 format and CUID)
    */
-  private async findTicketByRef(projectSlug: string, ref: string) {
-    const project = await this.db.project.findUnique({
-      where: { slug: projectSlug },
-    });
-
-    if (!project) {
-      return null;
-    }
-
-    // Try KODA-42 format first
-    const refPattern = /^([A-Z]+)-(\d+)$/;
-    const match = ref.match(refPattern);
-
-    if (match) {
-      const number = parseInt(match[2], 10);
-      return this.db.ticket.findUnique({
-        where: {
-          projectId_number: {
-            projectId: project.id,
-            number,
-          },
-        },
-      });
-    }
-
-    // Try as CUID
-    return this.db.ticket.findUnique({
-      where: { id: ref },
-    });
+  private async findTicketByRef(projectSlug: string, ref: string): Promise<TicketDomain | null> {
+    return this.ticketRepo.findTicketByRefRaw(projectSlug, ref);
   }
 }

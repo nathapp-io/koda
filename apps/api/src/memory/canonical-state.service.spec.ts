@@ -1,64 +1,52 @@
 import {
   CanonicalStateService,
+  CanonicalSnapshotQuery,
+  CanonicalTicket,
+  CanonicalEvent,
+  CanonicalDecision,
 } from './canonical-state.service';
+import type { ICanonicalStateRepository } from './domain/canonical-state.domain';
+import { CANONICAL_STATE_REPOSITORY } from './domain/canonical-state.domain';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
+import { Test } from '@nestjs/testing';
+import { createMock } from '@golevelup/ts-jest';
 
 describe('CanonicalStateService', () => {
   let service: CanonicalStateService;
+  let repo: jest.Mocked<ICanonicalStateRepository>;
 
-  const mockPrismaClient = {
-    project: {
-      findUnique: jest.fn(),
-    },
-    ticket: {
-      findMany: jest.fn(),
-    },
-    ticketEvent: {
-      findMany: jest.fn(),
-    },
-    agentEvent: {
-      findMany: jest.fn(),
-    },
-    decisionEvent: {
-      findMany: jest.fn(),
-    },
-    memoryItem: {
-      findMany: jest.fn(),
-    },
-  };
+  beforeEach(async () => {
+    repo = createMock<ICanonicalStateRepository>();
 
-  const mockPrismaService = {
-    client: mockPrismaClient,
-  };
+    const module = await Test.createTestingModule({
+      providers: [
+        CanonicalStateService,
+        { provide: CANONICAL_STATE_REPOSITORY, useValue: repo },
+      ],
+    }).compile();
 
-  beforeEach(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    service = new CanonicalStateService(mockPrismaService as any);
+    service = module.get(CanonicalStateService);
 
     jest.clearAllMocks();
   });
 
   const setupValidProject = () => {
-    mockPrismaClient.project.findUnique.mockResolvedValue({
-      id: 'project-123',
-      slug: 'test-project',
-      deletedAt: null,
-    });
+    repo.findProject.mockResolvedValue({ id: 'project-123', deletedAt: null });
+    repo.findTickets.mockResolvedValue([]);
+    repo.findEvents.mockResolvedValue([]);
+    repo.findActiveDecisions.mockResolvedValue([]);
   };
 
   describe('AC-1: retrievedAt timestamp', () => {
     test('returns retrievedAt set to the server timestamp at snapshot creation', async () => {
       setupValidProject();
-      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
 
       const before = new Date();
       const result = await service.getSnapshot({ projectId: 'project-123' });
       const after = new Date();
 
       expect(result.retrievedAt).toBeInstanceOf(Date);
-      expect(result.retrievedAt.getTime()).toBeGreaterThanOrEqual(
-        before.getTime(),
-      );
+      expect(result.retrievedAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
       expect(result.retrievedAt.getTime()).toBeLessThanOrEqual(after.getTime());
     });
   });
@@ -66,9 +54,8 @@ describe('CanonicalStateService', () => {
   describe('AC-2: tickets filtered by ticketIds', () => {
     test('returns only tickets belonging to the project and matching given IDs', async () => {
       setupValidProject();
-      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
 
-      const matchingTickets = [
+      const matchingTickets: CanonicalTicket[] = [
         {
           id: 'ticket-1',
           title: 'Fix bug',
@@ -91,57 +78,35 @@ describe('CanonicalStateService', () => {
         },
       ];
 
-      mockPrismaClient.ticket.findMany.mockResolvedValue(matchingTickets);
+      repo.findTickets.mockResolvedValue(matchingTickets);
 
-      const result = await service.getSnapshot({
+      const query: CanonicalSnapshotQuery = {
         projectId: 'project-123',
         ticketIds: ['ticket-1', 'ticket-3'],
-      });
+      };
+      const result = await service.getSnapshot(query);
 
-      expect(mockPrismaClient.ticket.findMany).toHaveBeenCalledWith({
-        where: {
-          projectId: 'project-123',
-          id: { in: ['ticket-1', 'ticket-3'] },
-          deletedAt: null,
-        },
-        select: {
-          id: true,
-          title: true,
-          status: true,
-          priority: true,
-          assignedToUserId: true,
-          assignedToAgentId: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-      });
+      expect(repo.findTickets).toHaveBeenCalledWith(query);
       expect(result.tickets).toEqual(matchingTickets);
     });
 
-    test('excludes soft-deleted tickets', async () => {
+    test('delegates soft-delete filtering to the repository', async () => {
       setupValidProject();
-      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
-      mockPrismaClient.ticket.findMany.mockResolvedValue([]);
 
-      await service.getSnapshot({
+      const query: CanonicalSnapshotQuery = {
         projectId: 'project-123',
         ticketIds: ['ticket-1'],
-      });
+      };
+      await service.getSnapshot(query);
 
-      expect(mockPrismaClient.ticket.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            deletedAt: null,
-          }),
-        }),
-      );
+      expect(repo.findTickets).toHaveBeenCalledWith(query);
     });
   });
 
   describe('AC-3: empty or undefined ticketIds', () => {
     test('returns empty tickets array when ticketIds is empty array', async () => {
       setupValidProject();
-      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+      repo.findTickets.mockResolvedValue([]);
 
       const result = await service.getSnapshot({
         projectId: 'project-123',
@@ -149,188 +114,109 @@ describe('CanonicalStateService', () => {
       });
 
       expect(result.tickets).toEqual([]);
-      expect(mockPrismaClient.ticket.findMany).not.toHaveBeenCalled();
     });
 
     test('returns empty tickets array when ticketIds is undefined', async () => {
       setupValidProject();
-      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+      repo.findTickets.mockResolvedValue([]);
 
       const result = await service.getSnapshot({
         projectId: 'project-123',
       });
 
       expect(result.tickets).toEqual([]);
-      expect(mockPrismaClient.ticket.findMany).not.toHaveBeenCalled();
     });
   });
 
   describe('AC-4: timeWindow filters recentEvents', () => {
     test('returns only events within the time window, ordered by createdAt DESC', async () => {
       setupValidProject();
-      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
 
       const jan1 = new Date('2025-01-01T00:00:00Z');
       const jan2 = new Date('2025-01-02T00:00:00Z');
       const jan3 = new Date('2025-01-03T00:00:00Z');
 
-      const ticketEvents = [
-        {
-          id: 'te-1',
-          projectId: 'project-123',
-          actorId: 'actor-1',
-          action: 'CREATED',
-          data: '{"status":"CREATED"}',
-          createdAt: jan2,
-        },
-      ];
-
-      const agentEvents = [
+      const events: CanonicalEvent[] = [
         {
           id: 'ae-1',
-          projectId: 'project-123',
+          eventType: 'agent_event',
           actorId: 'actor-2',
           action: 'decision_made',
-          data: '{"decision":"approved"}',
+          payload: { decision: 'approved' },
+          rationale: null,
           createdAt: jan3,
         },
-      ];
-
-      const decisionEvents = [
+        {
+          id: 'te-1',
+          eventType: 'ticket_event',
+          actorId: 'actor-1',
+          action: 'CREATED',
+          payload: { status: 'CREATED' },
+          rationale: null,
+          createdAt: jan2,
+        },
         {
           id: 'de-1',
-          projectId: 'project-123',
-          agentId: 'agent-1',
+          eventType: 'decision_event',
+          actorId: 'agent-1',
           action: 'decided',
-          data: '{"reason":"test"}',
+          payload: { reason: 'test' },
+          rationale: null,
           createdAt: jan1,
         },
       ];
 
-      mockPrismaClient.ticketEvent.findMany.mockResolvedValue(ticketEvents);
-      mockPrismaClient.agentEvent.findMany.mockResolvedValue(agentEvents);
-      mockPrismaClient.decisionEvent.findMany.mockResolvedValue(decisionEvents);
+      repo.findEvents.mockResolvedValue(events);
 
-      const result = await service.getSnapshot({
+      const query: CanonicalSnapshotQuery = {
         projectId: 'project-123',
         timeWindow: { from: jan1, to: jan3 },
-      });
-
-      // Should pass correct where clause with time window
-      const expectedWhere = {
-        projectId: 'project-123',
-        createdAt: { gte: jan1, lte: jan3 },
       };
+      const result = await service.getSnapshot(query);
 
-      expect(mockPrismaClient.ticketEvent.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: expectedWhere }),
-      );
-      expect(mockPrismaClient.agentEvent.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: expectedWhere }),
-      );
-      expect(mockPrismaClient.decisionEvent.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: expectedWhere }),
-      );
-
-      // Should have all three events
+      expect(repo.findEvents).toHaveBeenCalledWith(query);
       expect(result.recentEvents).toHaveLength(3);
 
-      // Should be ordered by createdAt DESC (jan3, jan2, jan1)
-      const events = result.recentEvents;
-      expect(events[0].createdAt).toEqual(jan3);
-      expect(events[1].createdAt).toEqual(jan2);
-      expect(events[2].createdAt).toEqual(jan1);
+      // Should be ordered by createdAt DESC (jan3, jan2, jan1) as returned by repo
+      expect(result.recentEvents[0].createdAt).toEqual(jan3);
+      expect(result.recentEvents[1].createdAt).toEqual(jan2);
+      expect(result.recentEvents[2].createdAt).toEqual(jan1);
     });
 
-    test('parses JSON data payload for events', async () => {
+    test('returns empty recentEvents when no timeWindow and no actorId provided', async () => {
       setupValidProject();
-      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
-      mockPrismaClient.ticketEvent.findMany.mockResolvedValue([
-        {
-          id: 'te-1',
-          projectId: 'project-123',
-          actorId: 'actor-1',
-          action: 'CREATED',
-          data: '{"status":"CREATED","by":"user-1"}',
-          createdAt: new Date(),
-        },
-      ]);
-      mockPrismaClient.agentEvent.findMany.mockResolvedValue([]);
-      mockPrismaClient.decisionEvent.findMany.mockResolvedValue([]);
-
-      const result = await service.getSnapshot({
-        projectId: 'project-123',
-        timeWindow: { from: new Date('2025-01-01') },
-      });
-
-      const parsedEvents = result.recentEvents;
-      expect(parsedEvents[0].payload).toEqual({
-        status: 'CREATED',
-        by: 'user-1',
-      });
-    });
-
-    test('handles unparseable JSON data gracefully', async () => {
-      setupValidProject();
-      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
-      mockPrismaClient.ticketEvent.findMany.mockResolvedValue([
-        {
-          id: 'te-1',
-          projectId: 'project-123',
-          actorId: 'actor-1',
-          action: 'CREATED',
-          data: 'not valid json',
-          createdAt: new Date(),
-        },
-      ]);
-      mockPrismaClient.agentEvent.findMany.mockResolvedValue([]);
-      mockPrismaClient.decisionEvent.findMany.mockResolvedValue([]);
-
-      const result = await service.getSnapshot({
-        projectId: 'project-123',
-        timeWindow: { from: new Date('2025-01-01') },
-      });
-
-      const unparseableEvents = result.recentEvents;
-      expect(unparseableEvents[0].payload).toEqual({});
-    });
-
-    test('returns empty recentEvents when no timeWindow provided', async () => {
-      setupValidProject();
-      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+      repo.findEvents.mockResolvedValue([]);
 
       const result = await service.getSnapshot({
         projectId: 'project-123',
       });
 
       expect(result.recentEvents).toEqual([]);
-      expect(mockPrismaClient.ticketEvent.findMany).not.toHaveBeenCalled();
     });
 
     test('maps decision event agentId to actorId', async () => {
       setupValidProject();
-      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
-      mockPrismaClient.ticketEvent.findMany.mockResolvedValue([]);
-      mockPrismaClient.agentEvent.findMany.mockResolvedValue([]);
-      mockPrismaClient.decisionEvent.findMany.mockResolvedValue([
+
+      const events: CanonicalEvent[] = [
         {
           id: 'de-1',
-          projectId: 'project-123',
-          agentId: 'agent-42',
+          eventType: 'decision_event',
+          actorId: 'agent-42',
           action: 'decided',
-          data: '{}',
+          payload: {},
+          rationale: null,
           createdAt: new Date(),
         },
-      ]);
+      ];
+      repo.findEvents.mockResolvedValue(events);
 
       const result = await service.getSnapshot({
         projectId: 'project-123',
         timeWindow: { from: new Date('2025-01-01') },
       });
 
-      const decisionMappedEvents = result.recentEvents;
-      expect(decisionMappedEvents[0].actorId).toBe('agent-42');
-      expect(decisionMappedEvents[0].eventType).toBe('decision_event');
+      expect(result.recentEvents[0].actorId).toBe('agent-42');
+      expect(result.recentEvents[0].eventType).toBe('decision_event');
     });
   });
 
@@ -338,63 +224,38 @@ describe('CanonicalStateService', () => {
     test('populates activeDecisions from active MemoryItem rows with kind=DECISION and status=active', async () => {
       setupValidProject();
 
-      const memoryRows = [
+      const decisions: CanonicalDecision[] = [
         {
           id: 'mem-1',
-          predicate: 'architecture-choice',
-          object: 'Use microservices',
+          topic: 'architecture-choice',
+          decision: 'Use microservices',
+          rationale: null,
           createdAt: new Date('2025-01-01'),
         },
         {
           id: 'mem-2',
-          predicate: 'api-design',
-          object: 'REST over GraphQL',
+          topic: 'api-design',
+          decision: 'REST over GraphQL',
+          rationale: null,
           createdAt: new Date('2025-01-02'),
         },
       ];
 
-      mockPrismaClient.memoryItem.findMany.mockResolvedValue(memoryRows);
+      repo.findActiveDecisions.mockResolvedValue(decisions);
 
       const result = await service.getSnapshot({
         projectId: 'project-123',
       });
 
-      expect(mockPrismaClient.memoryItem.findMany).toHaveBeenCalledWith({
-        where: {
-          projectId: 'project-123',
-          kind: 'DECISION',
-          status: 'active',
-          deletedAt: null,
-        },
-        select: {
-          id: true,
-          predicate: true,
-          object: true,
-          createdAt: true,
-        },
-      });
-
+      expect(repo.findActiveDecisions).toHaveBeenCalledWith('project-123');
       expect(result.activeDecisions).toHaveLength(2);
-      const decisions = result.activeDecisions;
-      expect(decisions[0]).toEqual({
-        id: 'mem-1',
-        topic: 'architecture-choice',
-        decision: 'Use microservices',
-        rationale: null,
-        createdAt: new Date('2025-01-01'),
-      });
-      expect(decisions[1]).toEqual({
-        id: 'mem-2',
-        topic: 'api-design',
-        decision: 'REST over GraphQL',
-        rationale: null,
-        createdAt: new Date('2025-01-02'),
-      });
+      expect(result.activeDecisions[0]).toEqual(decisions[0]);
+      expect(result.activeDecisions[1]).toEqual(decisions[1]);
     });
 
     test('returns empty array when no active decisions exist', async () => {
       setupValidProject();
-      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
+      repo.findActiveDecisions.mockResolvedValue([]);
 
       const result = await service.getSnapshot({
         projectId: 'project-123',
@@ -402,28 +263,11 @@ describe('CanonicalStateService', () => {
 
       expect(result.activeDecisions).toEqual([]);
     });
-
-    test('excludes soft-deleted memory items', async () => {
-      setupValidProject();
-      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
-
-      await service.getSnapshot({
-        projectId: 'project-123',
-      });
-
-      expect(mockPrismaClient.memoryItem.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            deletedAt: null,
-          }),
-        }),
-      );
-    });
   });
 
   describe('AC-6: non-existent projectId', () => {
     test('throws NotFoundAppException when project does not exist', async () => {
-      mockPrismaClient.project.findUnique.mockResolvedValue(null);
+      repo.findProject.mockResolvedValue(null);
 
       await expect(
         service.getSnapshot({ projectId: 'nonexistent' }),
@@ -431,9 +275,8 @@ describe('CanonicalStateService', () => {
     });
 
     test('throws NotFoundAppException when project is soft-deleted', async () => {
-      mockPrismaClient.project.findUnique.mockResolvedValue({
+      repo.findProject.mockResolvedValue({
         id: 'project-deleted',
-        slug: 'deleted-project',
         deletedAt: new Date(),
       });
 
@@ -444,132 +287,50 @@ describe('CanonicalStateService', () => {
   });
 
   describe('Bug: actorId filtering on events', () => {
-    test('filters ticket and agent events by actorId when provided', async () => {
+    test('passes actorId to repo.findEvents for filtering', async () => {
       setupValidProject();
-      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
-      mockPrismaClient.ticketEvent.findMany.mockResolvedValue([]);
-      mockPrismaClient.agentEvent.findMany.mockResolvedValue([]);
-      mockPrismaClient.decisionEvent.findMany.mockResolvedValue([]);
+      repo.findEvents.mockResolvedValue([]);
 
-      await service.getSnapshot({
+      const query: CanonicalSnapshotQuery = {
         projectId: 'project-123',
         actorId: 'actor-42',
         timeWindow: { from: new Date('2025-01-01') },
-      });
+      };
+      await service.getSnapshot(query);
 
-      // ticketEvent should include actorId in where
-      expect(mockPrismaClient.ticketEvent.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ actorId: 'actor-42' }),
-        }),
-      );
-      // agentEvent should include actorId in where
-      expect(mockPrismaClient.agentEvent.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ actorId: 'actor-42' }),
-        }),
-      );
+      expect(repo.findEvents).toHaveBeenCalledWith(query);
     });
 
-    test('filters decision events by agentId when actorId provided', async () => {
+    test('passes actorId to repo.findEvents even when timeWindow is absent', async () => {
       setupValidProject();
-      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
-      mockPrismaClient.ticketEvent.findMany.mockResolvedValue([]);
-      mockPrismaClient.agentEvent.findMany.mockResolvedValue([]);
-      mockPrismaClient.decisionEvent.findMany.mockResolvedValue([]);
+      repo.findEvents.mockResolvedValue([]);
 
-      await service.getSnapshot({
-        projectId: 'project-123',
-        actorId: 'agent-99',
-        timeWindow: { from: new Date('2025-01-01') },
-      });
-
-      // decisionEvent uses agentId column (not actorId) for filtering
-      expect(mockPrismaClient.decisionEvent.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ agentId: 'agent-99' }),
-        }),
-      );
-    });
-
-    test('does not filter by actorId when actorId is undefined', async () => {
-      setupValidProject();
-      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
-      mockPrismaClient.ticketEvent.findMany.mockResolvedValue([]);
-      mockPrismaClient.agentEvent.findMany.mockResolvedValue([]);
-      mockPrismaClient.decisionEvent.findMany.mockResolvedValue([]);
-
-      await service.getSnapshot({
-        projectId: 'project-123',
-        timeWindow: { from: new Date('2025-01-01') },
-      });
-
-      // ticketEvent where should NOT contain actorId
-      const ticketCall = mockPrismaClient.ticketEvent.findMany.mock.calls[0][0];
-      expect(ticketCall.where).not.toHaveProperty('actorId');
-
-      // agentEvent where should NOT contain actorId
-      const agentCall = mockPrismaClient.agentEvent.findMany.mock.calls[0][0];
-      expect(agentCall.where).not.toHaveProperty('agentId');
-
-      // decisionEvent where should NOT contain agentId
-      const decisionCall = mockPrismaClient.decisionEvent.findMany.mock.calls[0][0];
-      expect(decisionCall.where).not.toHaveProperty('agentId');
-    });
-
-    test('filters events by actorId even when timeWindow is absent', async () => {
-      setupValidProject();
-      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
-      mockPrismaClient.ticketEvent.findMany.mockResolvedValue([]);
-      mockPrismaClient.agentEvent.findMany.mockResolvedValue([]);
-      mockPrismaClient.decisionEvent.findMany.mockResolvedValue([]);
-
-      await service.getSnapshot({
+      const query: CanonicalSnapshotQuery = {
         projectId: 'project-123',
         actorId: 'actor-42',
-      });
+      };
+      await service.getSnapshot(query);
 
-      // ticketEvent should be queried with actorId filter even without timeWindow
-      expect(mockPrismaClient.ticketEvent.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ actorId: 'actor-42' }),
-        }),
-      );
-      // agentEvent should be queried with actorId filter even without timeWindow
-      expect(mockPrismaClient.agentEvent.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ actorId: 'actor-42' }),
-        }),
-      );
-      // decisionEvent should be queried with agentId filter even without timeWindow
-      expect(mockPrismaClient.decisionEvent.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ agentId: 'actor-42' }),
-        }),
-      );
+      expect(repo.findEvents).toHaveBeenCalledWith(query);
     });
   });
 
   describe('Bug: rationale field ignored in decision events', () => {
     test('includes rationale from DecisionEvent in CanonicalEvent output', async () => {
       setupValidProject();
-      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
-      mockPrismaClient.ticketEvent.findMany.mockResolvedValue([]);
-      mockPrismaClient.agentEvent.findMany.mockResolvedValue([]);
-      mockPrismaClient.decisionEvent.findMany.mockResolvedValue([
+
+      const events: CanonicalEvent[] = [
         {
           id: 'de-1',
-          projectId: 'project-123',
-          agentId: 'agent-42',
+          eventType: 'decision_event',
+          actorId: 'agent-42',
           action: 'decided',
-          decision: 'approved',
+          payload: { reason: 'test' },
           rationale: 'The approach aligns with architecture principles',
-          source: 'api',
-          data: '{"reason":"test"}',
-          timestamp: new Date('2025-01-01'),
           createdAt: new Date('2025-01-01'),
         },
-      ]);
+      ];
+      repo.findEvents.mockResolvedValue(events);
 
       const result = await service.getSnapshot({
         projectId: 'project-123',
@@ -577,40 +338,27 @@ describe('CanonicalStateService', () => {
       });
 
       expect(result.recentEvents).toHaveLength(1);
-      const event = result.recentEvents[0];
-      expect(event.eventType).toBe('decision_event');
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      expect((event as any).rationale).toBe(
+      expect(result.recentEvents[0].rationale).toBe(
         'The approach aligns with architecture principles',
       );
     });
   });
 
-  describe('AC-7: canonical Prisma reads only', () => {
-    test('queries only Prisma models, no external stores', async () => {
+  describe('AC-7: canonical reads only', () => {
+    test('calls all repo methods for a full snapshot query', async () => {
       setupValidProject();
-      mockPrismaClient.ticket.findMany.mockResolvedValue([]);
-      mockPrismaClient.ticketEvent.findMany.mockResolvedValue([]);
-      mockPrismaClient.agentEvent.findMany.mockResolvedValue([]);
-      mockPrismaClient.decisionEvent.findMany.mockResolvedValue([]);
-      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
 
-      await service.getSnapshot({
+      const query: CanonicalSnapshotQuery = {
         projectId: 'project-123',
         ticketIds: ['ticket-1'],
         timeWindow: { from: new Date('2025-01-01') },
-      });
+      };
+      await service.getSnapshot(query);
 
-      // Verify only Prisma reads were performed
-      expect(mockPrismaClient.project.findUnique).toHaveBeenCalled();
-      expect(mockPrismaClient.ticket.findMany).toHaveBeenCalled();
-      expect(mockPrismaClient.ticketEvent.findMany).toHaveBeenCalled();
-      expect(mockPrismaClient.agentEvent.findMany).toHaveBeenCalled();
-      expect(mockPrismaClient.decisionEvent.findMany).toHaveBeenCalled();
-      expect(mockPrismaClient.memoryItem.findMany).toHaveBeenCalled();
-
-      // Verify no LanceDB, BM25, or entity graph queries exist in the service
-      // (This is trivially satisfied since the service only injects PrismaService)
+      expect(repo.findProject).toHaveBeenCalledWith('project-123');
+      expect(repo.findTickets).toHaveBeenCalledWith(query);
+      expect(repo.findEvents).toHaveBeenCalledWith(query);
+      expect(repo.findActiveDecisions).toHaveBeenCalledWith('project-123');
     });
   });
 });

@@ -58,8 +58,8 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ContextBuilderService, GetProjectContextQuery } from '../../../src/context/context-builder.service';
+import { CONTEXT_REPOSITORY } from '../../../src/context/domain/context.domain';
 import { CanonicalStateService } from '../../../src/memory/canonical-state.service';
 import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-item.repository';
 import { HybridRetrieverService } from '../../../src/rag/hybrid-retriever.service';
@@ -72,7 +72,7 @@ import { SloDashboardService } from '../../../src/monitoring/slo-dashboard.servi
 const PROJECT_ID = 'p-slo-adversarial-1';
 
 interface ModuleOverrides {
-  prisma?: { client: { project: { findUnique: jest.Mock } } };
+  contextRepo?: { projectExistsAndNotDeleted: jest.Mock };
   canonical?: { getSnapshot: jest.Mock };
   memoryRepo?: { findByProjectMemory: jest.Mock };
   hybridRetriever?: { search: jest.Mock };
@@ -92,12 +92,8 @@ function makeSloDashboardMock(overrides: Partial<jest.Mocked<SloDashboardService
 }
 
 async function makeModule(overrides: ModuleOverrides = {}) {
-  const mockPrisma = overrides.prisma ?? {
-    client: {
-      project: {
-        findUnique: jest.fn().mockResolvedValue({ id: PROJECT_ID, deletedAt: null }),
-      },
-    },
+  const mockContextRepo = overrides.contextRepo ?? {
+    projectExistsAndNotDeleted: jest.fn().mockResolvedValue(true),
   };
 
   const mockCanonical = overrides.canonical ?? {
@@ -139,7 +135,7 @@ async function makeModule(overrides: ModuleOverrides = {}) {
       { provide: HybridRetrieverService, useValue: mockHybridRetriever },
       { provide: EntityGraphService, useValue: mockEntityGraph },
       { provide: ImpactAnalysisService, useValue: mockImpactAnalysis },
-      { provide: PrismaService, useValue: mockPrisma },
+      { provide: CONTEXT_REPOSITORY, useValue: mockContextRepo },
       { provide: SloDashboardService, useValue: mockSloDashboard },
     ],
   }).compile();
@@ -149,7 +145,7 @@ async function makeModule(overrides: ModuleOverrides = {}) {
   return {
     service,
     mocks: {
-      prisma: mockPrisma,
+      contextRepo: mockContextRepo,
       canonical: mockCanonical,
       memoryRepo: mockMemoryRepo,
       hybridRetriever: mockHybridRetriever,

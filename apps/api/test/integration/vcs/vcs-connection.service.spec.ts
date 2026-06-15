@@ -15,6 +15,9 @@ import { Test, TestingModule } from '@nestjs/testing';
 import * as crypto from 'crypto';
 import { VcsConnectionService } from '../../../src/vcs/vcs-connection.service';
 import { VcsPollingService } from '../../../src/vcs/vcs-polling.service';
+import { PrismaVcsRepository } from '../../../src/vcs/prisma-vcs.repository';
+import { VCS_REPOSITORY } from '../../../src/vcs/domain/vcs.repository';
+import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { CreateVcsConnectionDto, VcsProviderType, VcsSyncModeType } from '../../../src/vcs/dto/create-vcs-connection.dto';
 import { UpdateVcsConnectionDto } from '../../../src/vcs/dto/update-vcs-connection.dto';
 import { VcsConnectionResponseDto } from '../../../src/vcs/dto/vcs-connection-response.dto';
@@ -48,6 +51,16 @@ describe('VcsConnectionService', () => {
     module = await Test.createTestingModule({
       providers: [
         VcsConnectionService,
+        PrismaVcsRepository,
+        { provide: VCS_REPOSITORY, useExisting: PrismaVcsRepository },
+        {
+          provide: TRANSACTION_MANAGER,
+          useValue: {
+            run: jest.fn((fn: () => Promise<unknown>) => fn()),
+            getClient: jest.fn(),
+            isInTransaction: jest.fn(() => false),
+          },
+        },
         {
           provide: PrismaService,
           useValue: {

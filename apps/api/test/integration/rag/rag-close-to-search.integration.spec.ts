@@ -21,6 +21,8 @@ import { join } from 'node:path';
 import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
 import { RagService } from '../../../src/rag/rag.service';
 import { TicketStatus } from '../../../src/common/enums';
+import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.repository';
+import { TICKET_REPOSITORY } from '../../../src/tickets/domain/ticket.domain';
 
 jest.setTimeout(30000);
 
@@ -74,6 +76,8 @@ describe('RAG close-to-search integration', () => {
           },
         },
         { provide: TRANSACTION_MANAGER, useValue: { run: (fn: () => Promise<unknown>) => fn(), getClient: jest.fn(), isInTransaction: jest.fn(() => false) } },
+        PrismaTicketsRepository,
+        { provide: TICKET_REPOSITORY, useExisting: PrismaTicketsRepository },
         TicketTransitionsService,
         // Provide RagService with a factory so we can inject FakeEmbeddingService directly
         {

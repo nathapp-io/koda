@@ -1,25 +1,16 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
-import { PrismaClient } from '@prisma/client';
 import { TicketType, Priority } from '../common/enums';
 import { buildGitUrl } from '../common/utils/git-url.util';
 import { CiWebhookPayloadDto, CiFailureDto } from './ci-webhook.dto';
+import { PrismaCiWebhookRepository } from './prisma-ci-webhook.repository';
 
 @Injectable()
 export class CiWebhookService {
-  constructor(private prisma: PrismaService<PrismaClient>) {}
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private get db() { return this.prisma.client; }
+  constructor(private readonly repo: PrismaCiWebhookRepository) {}
 
   async getWebhookSecret(projectSlug: string): Promise<string | null> {
-    const project = await this.db.project.findUnique({
-      where: { slug: projectSlug },
-      select: {
-        ciWebhookToken: true,
-        deletedAt: true,
-      },
-    });
+    const project = await this.repo.findProjectBySlug(projectSlug);
 
     if (!project || project.deletedAt) {
       throw new NotFoundAppException({}, 'projects');
@@ -29,17 +20,11 @@ export class CiWebhookService {
   }
 
   async processCiWebhook(projectSlug: string, payload: CiWebhookPayloadDto) {
-    // Find project by slug
-    const project = await this.db.project.findUnique({
-      where: { slug: projectSlug },
-    });
+    const project = await this.repo.findProjectBySlug(projectSlug);
 
     if (!project || project.deletedAt) {
       throw new NotFoundAppException({}, 'projects');
     }
-
-    // Validate token if set on project
-    // Note: Token validation can be added here if needed
 
     // Only process pipeline_failed events
     if (payload.event !== 'pipeline_failed') {
@@ -57,7 +42,7 @@ export class CiWebhookService {
     const primaryFailure = payload.failures[0];
 
     // Auto-create ticket with BUG type and HIGH priority
-    const ticket = await this.createTicket(project.id, primaryFailure, payload);
+    const ticket = await this.createTicket(project, primaryFailure, payload);
 
     return {
       success: true,
@@ -67,41 +52,25 @@ export class CiWebhookService {
   }
 
   private async createTicket(
-    projectId: string,
+    project: { id: string },
     failure: CiFailureDto,
     payload: CiWebhookPayloadDto,
   ) {
-    // Use transaction to safely auto-increment ticket number
-    return this.db.$transaction(async (tx) => {
-      // Find the highest number for this project (include soft-deleted to avoid number reuse)
-      const lastTicket = await tx.ticket.findFirst({
-        where: { projectId },
-        orderBy: { number: 'desc' },
-      });
+    // Build title: "CI failure: TestName (pipeline #id)"
+    const title = `CI failure: ${failure.test} (pipeline #${payload.pipeline.id})`;
 
-      const nextNumber = (lastTicket?.number ?? 0) + 1;
+    // Build description with details
+    const description = this.buildDescription(failure, payload);
 
-      // Build title: "CI failure: TestName (pipeline #id)"
-      const title = `CI failure: ${failure.test} (pipeline #${payload.pipeline.id})`;
-
-      // Build description with details
-      const description = this.buildDescription(failure, payload);
-
-      // Create the ticket
-      return tx.ticket.create({
-        data: {
-          projectId,
-          number: nextNumber,
-          type: TicketType.BUG,
-          title,
-          description,
-          status: 'CREATED',
-          priority: Priority.HIGH,
-          gitRefVersion: payload.commit.sha,
-          gitRefFile: failure.file || null,
-          gitRefLine: failure.line || null,
-        },
-      });
+    return this.repo.createTicket(project.id, {
+      type: TicketType.BUG,
+      title,
+      description,
+      status: 'CREATED',
+      priority: Priority.HIGH,
+      gitRefVersion: payload.commit.sha,
+      gitRefFile: failure.file || null,
+      gitRefLine: failure.line || null,
     });
   }
 

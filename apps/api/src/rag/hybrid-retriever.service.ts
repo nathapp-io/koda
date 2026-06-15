@@ -1,8 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { mkdirSync } from 'node:fs';
 import { ConfigService } from '@nestjs/config';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { PrismaRagRepository } from './prisma-rag.repository';
 import { EmbeddingService } from './embedding.service';
 import { EntityStore } from './entity-store';
 import {
@@ -86,7 +85,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     private readonly configService: ConfigService,
     private readonly embeddingService: EmbeddingService,
     private readonly entityStore: EntityStore,
-    private readonly prisma: PrismaService<PrismaClient>,
+    private readonly ragRepository: PrismaRagRepository,
   ) {
     this.lancedbPath = configService.get<string>('rag.lancedbPath') ?? './lancedb';
     this.similarityHigh = configService.get<number>('rag.similarityHigh') ?? 0.85;
@@ -493,10 +492,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
       this.graphifyEnabledCache.delete(cacheKey);
     }
 
-    const project = await this.prisma.client.project.findUnique({
-      where: { id: projectId },
-      select: { graphifyEnabled: true },
-    });
+    const project = await this.ragRepository.findProjectGraphifyEnabled(projectId);
 
     const enabled = project?.graphifyEnabled ?? false;
 

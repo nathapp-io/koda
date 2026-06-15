@@ -2,15 +2,14 @@ import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IsString, IsOptional, IsNumber, IsArray, IsIn, MinLength, ArrayMinSize } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { createHmac, randomBytes } from 'crypto';
-import type { PrismaClient } from '@prisma/client';
 import { AGENT_ROLES, type AgentRoleNames } from '../common/enums';
 import { AgentResponseDto } from './dto/agent-response.dto';
 import { TicketResponseDto } from '../tickets/dto/ticket-response.dto';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
 import { AgentAuthProvider } from '../auth/agent-auth.provider';
+import { PrismaAgentRepository } from './prisma-agent.repository';
 
 export class CreateAgentDto {
   @ApiProperty({ example: 'Subrina Coder' })
@@ -78,12 +77,11 @@ export class UpdateCapabilitiesDto {
 @Injectable()
 export class AgentsService {
   constructor(
-    private prisma: PrismaService<PrismaClient>,
+    private readonly agentRepo: PrismaAgentRepository,
     private configService: ConfigService,
     @Optional() private readonly kodaDomainWriter?: KodaDomainWriter,
     @Optional() private readonly agentAuthProvider?: AgentAuthProvider,
   ) {}
-  private get db() { return this.prisma.client; }
 
   private static assertAgentRole(role: string): AgentRoleNames {
     if (!(AGENT_ROLES as readonly string[]).includes(role)) {
@@ -134,15 +132,9 @@ export class AgentsService {
 
     const apiKeyHash = createHmac('sha256', apiKeySecret).update(rawKey).digest('hex');
 
-    // Determine if this is an update (string) or create (object)
-    let agent: Awaited<ReturnType<typeof this.db.agent.update>>;
     if (typeof agentIdOrDto === 'string') {
       // Update existing agent
-      agent = await this.db.agent.update({
-        where: { id: agentIdOrDto },
-        data: { apiKeyHash },
-        include: { roles: true, capabilities: true },
-      });
+      const agent = await this.agentRepo.updateApiKeyHash(agentIdOrDto, apiKeyHash);
       await this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
       await this.recordAgentAction(agent.id, 'API_KEY_ROTATED', { agentId: agent.id });
       return {
@@ -154,22 +146,13 @@ export class AgentsService {
       const { roles, capabilities, ...scalarFields } = agentIdOrDto;
       const validatedRoles = AgentsService.validateAgentRoles(roles);
       const slug = scalarFields.slug || scalarFields.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-      agent = await this.db.agent.create({
-        data: {
-          ...scalarFields,
-          slug,
-          apiKeyHash,
-        },
+      const agent = await this.agentRepo.create({
+        ...scalarFields,
+        slug,
+        apiKeyHash,
       });
       await this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
-      await this.prisma.client.$transaction([
-        this.db.agentRoleEntry.createMany({
-          data: validatedRoles.map((role) => ({ agentId: agent.id, role })),
-        }),
-        this.db.agentCapabilityEntry.createMany({
-          data: (capabilities ?? []).map((capability) => ({ agentId: agent.id, capability })),
-        }),
-      ]);
+      await this.agentRepo.createRolesAndCapabilities(agent.id, validatedRoles, capabilities ?? []);
       const agentWithRelations = {
         ...agent,
         roles: validatedRoles.map((role, index) => ({
@@ -193,22 +176,11 @@ export class AgentsService {
   }
 
   async findAll(): Promise<AgentResponseDto[]> {
-    return AgentResponseDto.fromMany(await this.db.agent.findMany({
-      include: {
-        roles: true,
-        capabilities: true,
-      },
-    }));
+    return AgentResponseDto.fromMany(await this.agentRepo.findAll());
   }
 
   async findBySlug(slug: string): Promise<AgentResponseDto> {
-    const agent = await this.db.agent.findUnique({
-      where: { slug },
-      include: {
-        roles: true,
-        capabilities: true,
-      },
-    });
+    const agent = await this.agentRepo.findBySlug(slug);
 
     if (!agent) {
       throw new NotFoundAppException({}, 'agents');
@@ -218,13 +190,7 @@ export class AgentsService {
   }
 
   async findMe(agentId: string): Promise<AgentResponseDto> {
-    const agent = await this.db.agent.findUnique({
-      where: { id: agentId },
-      include: {
-        roles: true,
-        capabilities: true,
-      },
-    });
+    const agent = await this.agentRepo.findById(agentId);
 
     if (!agent) {
       throw new NotFoundAppException({}, 'agents');
@@ -234,19 +200,15 @@ export class AgentsService {
   }
 
   async update(slug: string, updateData: UpdateAgentDto): Promise<AgentResponseDto> {
-    const agent = await this.db.agent.findUnique({ where: { slug } });
-    if (!agent) throw new NotFoundAppException({}, 'agents');
+    const existing = await this.agentRepo.findBySlugScalar(slug);
+    if (!existing) throw new NotFoundAppException({}, 'agents');
 
     const data: Partial<{ name: string; status: string; maxConcurrentTickets: number }> = {};
     if (updateData.name !== undefined) data.name = updateData.name;
     if (updateData.maxConcurrentTickets !== undefined) data.maxConcurrentTickets = updateData.maxConcurrentTickets;
     if (updateData.status !== undefined) data.status = updateData.status;
 
-    const updated = await this.db.agent.update({
-      where: { slug },
-      data,
-      include: { roles: true, capabilities: true },
-    });
+    const updated = await this.agentRepo.update(slug, data);
     await this.agentAuthProvider?.invalidateByTag(`AGENT:${updated.id}`);
     return AgentResponseDto.from(updated);
   }
@@ -254,71 +216,30 @@ export class AgentsService {
   async updateRoles(agentId: string, updateData: UpdateRolesDto): Promise<AgentResponseDto> {
     const validatedRoles = AgentsService.validateAgentRoles(updateData.roles);
 
-    // Delete all existing roles
-    await this.db.agentRoleEntry.deleteMany({
-      where: { agentId },
-    });
-
-    // Create new roles if provided
-    if (validatedRoles.length > 0) {
-      await this.db.agentRoleEntry.createMany({
-        data: validatedRoles.map((role) => ({
-          agentId,
-          role,
-        })),
-      });
-    }
+    await this.agentRepo.replaceRoles(agentId, validatedRoles);
 
     // Return updated agent with roles
-    const updated = await this.db.agent.findUnique({
-      where: { id: agentId },
-      include: {
-        roles: true,
-        capabilities: true,
-      },
-    });
+    const updated = await this.agentRepo.findById(agentId);
     await this.agentAuthProvider?.invalidateByTag(`AGENT:${agentId}`);
     return AgentResponseDto.from(updated);
   }
 
   async updateCapabilities(agentId: string, updateData: UpdateCapabilitiesDto): Promise<AgentResponseDto> {
-    // Delete all existing capabilities
-    await this.db.agentCapabilityEntry.deleteMany({
-      where: { agentId },
-    });
-
-    // Create new capabilities if provided
-    if (updateData.capabilities && updateData.capabilities.length > 0) {
-      // Filter out duplicates
-      const uniqueCapabilities = [...new Set(updateData.capabilities)];
-      await this.db.agentCapabilityEntry.createMany({
-        data: uniqueCapabilities.map((capability) => ({
-          agentId,
-          capability,
-        })),
-      });
-    }
+    // Filter out duplicates
+    const uniqueCapabilities = [...new Set(updateData.capabilities)];
+    await this.agentRepo.replaceCapabilities(agentId, uniqueCapabilities);
 
     // Return updated agent with capabilities
-    const updated = await this.db.agent.findUnique({
-      where: { id: agentId },
-      include: {
-        roles: true,
-        capabilities: true,
-      },
-    });
+    const updated = await this.agentRepo.findById(agentId);
     await this.agentAuthProvider?.invalidateByTag(`AGENT:${agentId}`);
     return AgentResponseDto.from(updated);
   }
 
   async remove(slug: string): Promise<AgentResponseDto> {
-    const agent = await this.db.agent.findUnique({
-      where: { slug },
-      include: { roles: true, capabilities: true },
-    });
+    const agent = await this.agentRepo.findBySlug(slug);
     if (!agent) throw new NotFoundAppException({}, 'agents');
 
-    await this.db.agent.delete({ where: { slug } });
+    await this.agentRepo.deleteBySlug(slug);
     await this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
     return AgentResponseDto.from(agent);
   }
@@ -331,27 +252,13 @@ export class AgentsService {
   };
 
   async suggestTicket(agentSlug: string, projectSlug: string) {
-    const agent = await this.db.agent.findUnique({
-      where: { slug: agentSlug },
-      include: { capabilities: true },
-    });
+    const agent = await this.agentRepo.findBySlugWithCapabilities(agentSlug);
     if (!agent) throw new NotFoundAppException({}, 'agents');
 
-    const project = await this.db.project.findUnique({ where: { slug: projectSlug } });
+    const project = await this.agentRepo.findProjectBySlug(projectSlug);
     if (!project) return null;
 
-    const tickets = await this.db.ticket.findMany({
-      where: {
-        projectId: project.id,
-        status: 'VERIFIED',
-        assignedToAgentId: null,
-        assignedToUserId: null,
-        deletedAt: null,
-      },
-      include: {
-        labels: { include: { label: true } },
-      },
-    });
+    const tickets = await this.agentRepo.findVerifiedUnassignedTickets(project.id);
 
     if (tickets.length === 0) return null;
 
@@ -384,7 +291,7 @@ export class AgentsService {
   }
 
   async rotateApiKey(slug: string): Promise<{ apiKey: string; agent: AgentResponseDto }> {
-    const agent = await this.db.agent.findUnique({ where: { slug } });
+    const agent = await this.agentRepo.findBySlugScalar(slug);
     if (!agent) throw new NotFoundAppException({}, 'agents');
     return this.generateApiKey(agent.id);
   }

@@ -1,34 +1,20 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
-import type { PrismaClient } from '@prisma/client';
 import type { WriteAgentActionInput } from '../koda-domain-writer/write-result.dto';
+import type { AgentEventDomain } from './domain/events.domain';
+import { PrismaEventsRepository } from './prisma-events.repository';
 
 @Injectable()
 export class AgentEventService {
-  constructor(private readonly prisma: PrismaService<PrismaClient>) {}
+  constructor(private readonly eventsRepo: PrismaEventsRepository) {}
 
-  async create(data: WriteAgentActionInput) {
-    const project = await this.prisma.client.project.findUnique({
-      where: { id: data.projectId },
-    });
+  async create(data: WriteAgentActionInput): Promise<AgentEventDomain> {
+    const project = await this.eventsRepo.findProject(data.projectId);
 
     if (!project) {
       throw new ForbiddenAppException({ code: 'PROJECT_NOT_FOUND' }, 'koda-domain-writer');
     }
 
-    const event = await this.prisma.client.agentEvent.create({
-      data: {
-        agentId: data.agentId,
-        projectId: data.projectId,
-        action: data.action,
-        actorId: data.actorId,
-        source: data.source,
-        data: JSON.stringify(data.data),
-        timestamp: new Date(),
-      },
-    });
-
-    return event;
+    return this.eventsRepo.createAgentEvent(data);
   }
 }

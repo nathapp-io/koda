@@ -23,6 +23,7 @@ import { EvaluationService, EvalQuery } from '../../../src/retrieval/evaluation.
 import { HybridRetrieverService } from '../../../src/rag/hybrid-retriever.service';
 import { EmbeddingService } from '../../../src/rag/embedding.service';
 import { EntityStore } from '../../../src/rag/entity-store';
+import { PrismaRagRepository } from '../../../src/rag/prisma-rag.repository';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -106,6 +107,7 @@ describe('EvaluationService integration with real HybridRetrieverService', () =>
         },
         HybridRetrieverService,
         EvaluationService,
+        PrismaRagRepository,
       ],
     }).compile();
 

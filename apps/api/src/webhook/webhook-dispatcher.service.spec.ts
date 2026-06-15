@@ -1,19 +1,14 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { WebhookDispatcherService } from './webhook-dispatcher.service';
-import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaWebhookRepository } from './prisma-webhook.repository';
 
 describe('WebhookDispatcherService', () => {
   let service: WebhookDispatcherService;
 
-  const mockPrismaService = {
-    client: {
-      webhook: {
-        findMany: jest.fn(),
-      },
-    },
+  const mockWebhookRepo = {
+    findActiveByProject: jest.fn(),
   };
 
-  // Mock fetch globally
   let mockFetch: jest.Mock;
 
   beforeAll(() => {
@@ -31,7 +26,7 @@ describe('WebhookDispatcherService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         WebhookDispatcherService,
-        { provide: PrismaService, useValue: mockPrismaService },
+        { provide: PrismaWebhookRepository, useValue: mockWebhookRepo },
       ],
     }).compile();
 
@@ -51,9 +46,11 @@ describe('WebhookDispatcherService', () => {
         secret: 'test-secret',
         events: JSON.stringify(['STATUS_CHANGE']),
         active: true,
+        projectId,
+        createdAt: new Date(),
       };
 
-      mockPrismaService.client.webhook.findMany.mockResolvedValue([webhook]);
+      mockWebhookRepo.findActiveByProject.mockResolvedValue([webhook]);
 
       await service.dispatch(projectId, 'STATUS_CHANGE', { test: 'payload' });
 
@@ -69,7 +66,6 @@ describe('WebhookDispatcherService', () => {
         }),
       );
 
-      // Verify signature header is present and correct
       const call = mockFetch.mock.calls[0];
       const headers = call[1].headers as Record<string, string>;
       expect(headers['X-Koda-Signature']).toMatch(/^sha256=[a-f0-9]+$/);
@@ -81,11 +77,13 @@ describe('WebhookDispatcherService', () => {
         id: 'webhook-1',
         url: 'https://example.com/webhook',
         secret: 'test-secret',
-        events: JSON.stringify(['TICKET_CREATED']), // Does not include STATUS_CHANGE
+        events: JSON.stringify(['TICKET_CREATED']),
         active: true,
+        projectId,
+        createdAt: new Date(),
       };
 
-      mockPrismaService.client.webhook.findMany.mockResolvedValue([webhook]);
+      mockWebhookRepo.findActiveByProject.mockResolvedValue([webhook]);
 
       await service.dispatch(projectId, 'STATUS_CHANGE', { test: 'payload' });
 
@@ -100,12 +98,13 @@ describe('WebhookDispatcherService', () => {
         secret: 'test-secret',
         events: JSON.stringify(['STATUS_CHANGE']),
         active: true,
+        projectId,
+        createdAt: new Date(),
       };
 
       mockFetch.mockRejectedValue(new Error('Network error'));
-      mockPrismaService.client.webhook.findMany.mockResolvedValue([webhook]);
+      mockWebhookRepo.findActiveByProject.mockResolvedValue([webhook]);
 
-      // Should not throw
       await expect(
         service.dispatch(projectId, 'STATUS_CHANGE', { test: 'payload' }),
       ).resolves.not.toThrow();
@@ -114,16 +113,17 @@ describe('WebhookDispatcherService', () => {
     it('should compute HMAC-SHA256 signature correctly', async () => {
       const projectId = 'project-123';
       const secret = 'my-secret-key';
-      const payload = JSON.stringify({ event: 'STATUS_CHANGE', data: 'test' });
       const webhook = {
         id: 'webhook-1',
         url: 'https://example.com/webhook',
         secret,
         events: JSON.stringify(['STATUS_CHANGE']),
         active: true,
+        projectId,
+        createdAt: new Date(),
       };
 
-      mockPrismaService.client.webhook.findMany.mockResolvedValue([webhook]);
+      mockWebhookRepo.findActiveByProject.mockResolvedValue([webhook]);
 
       await service.dispatch(projectId, 'STATUS_CHANGE', { event: 'STATUS_CHANGE', data: 'test' });
 
@@ -131,11 +131,10 @@ describe('WebhookDispatcherService', () => {
       const headers = call[1].headers as Record<string, string>;
       const sig = headers['X-Koda-Signature'].replace('sha256=', '');
 
-      // Verify the signature is a valid hex string (64 chars for sha256)
       expect(sig).toMatch(/^[a-f0-9]{64}$/);
 
-      // Manually compute expected signature
       const crypto = await import('crypto');
+      const payload = JSON.stringify({ event: 'STATUS_CHANGE', data: 'test' });
       const expectedSig = crypto.createHmac('sha256', secret).update(payload).digest('hex');
       expect(sig).toBe(expectedSig);
     });

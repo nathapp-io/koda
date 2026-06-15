@@ -15,6 +15,22 @@ const getFieldNames = (prefix: 'createdBy' | 'authoredBy' | 'assignedTo' | 'acto
 
 export function actorForeignKeys(
   principal: KodaPrincipal,
+  prefix: 'createdBy',
+): { createdByUserId: string | null; createdByAgentId: string | null };
+export function actorForeignKeys(
+  principal: KodaPrincipal,
+  prefix: 'authoredBy',
+): { authorUserId: string | null; authorAgentId: string | null };
+export function actorForeignKeys(
+  principal: KodaPrincipal,
+  prefix: 'assignedTo',
+): { assignedToUserId: string | null; assignedToAgentId: string | null };
+export function actorForeignKeys(
+  principal: KodaPrincipal,
+  prefix: 'actor',
+): { actorUserId: string | null; actorAgentId: string | null };
+export function actorForeignKeys(
+  principal: KodaPrincipal,
   prefix: 'createdBy' | 'authoredBy' | 'assignedTo' | 'actor',
 ): Record<string, string | null> {
   const { userField, agentField } = getFieldNames(prefix);

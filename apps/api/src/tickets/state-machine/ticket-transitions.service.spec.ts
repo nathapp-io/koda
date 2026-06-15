@@ -1,27 +1,23 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { TicketStatus, CommentType, ActivityType } from '../../common/enums';
 import { TicketTransitionsService } from './ticket-transitions.service';
 import { AppException } from '@nathapp/nestjs-common';
+import { TICKET_REPOSITORY } from '../domain/ticket.domain';
 
 describe('TicketTransitionsService', () => {
   let service: TicketTransitionsService;
-  let prismaService: PrismaService<PrismaClient>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let mockTxManager: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let mockTicketRepo: any;
 
   const mockProject = {
     id: 'proj-123',
-    name: 'Koda',
     slug: 'koda',
     key: 'KODA',
-    description: 'Dev ticket tracker',
     gitRemoteUrl: 'https://github.com/nathapp-io/koda',
     autoIndexOnClose: true,
-    createdAt: new Date(),
-    updatedAt: new Date(),
     deletedAt: null,
   };
 
@@ -107,26 +103,6 @@ describe('TicketTransitionsService', () => {
     createdAt: new Date(),
   };
 
-  const mockPrismaClient = {
-    project: {
-      findUnique: jest.fn(),
-    },
-    ticket: {
-      findUnique: jest.fn(),
-      update: jest.fn(),
-    },
-    comment: {
-      create: jest.fn(),
-    },
-    ticketActivity: {
-      create: jest.fn(),
-    },
-  };
-
-  const mockPrismaService = {
-    client: mockPrismaClient,
-  };
-
   beforeEach(async () => {
     mockTxManager = {
       run: jest.fn((fn: () => unknown) => fn()),
@@ -134,12 +110,33 @@ describe('TicketTransitionsService', () => {
       isInTransaction: jest.fn(() => false),
     };
 
+    mockTicketRepo = {
+      findProjectBySlug: jest.fn(),
+      findLastTicketInProject: jest.fn(),
+      createTicket: jest.fn(),
+      findTicketsByProject: jest.fn(),
+      countTicketsByProject: jest.fn(),
+      findTicketByProjectAndNumber: jest.fn(),
+      findTicketById: jest.fn(),
+      updateTicket: jest.fn(),
+      assignTicket: jest.fn(),
+      softDeleteTicket: jest.fn(),
+      findTicketByRefRaw: jest.fn(),
+      // PrismaTicketsRepository extras used by transitions
+      findTicketWithComments: jest.fn(),
+      updateTicketStatus: jest.fn(),
+      createComment: jest.fn(),
+      createTicketActivity: jest.fn(),
+      createTicketLink: jest.fn(),
+      updateTicketLink: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TicketTransitionsService,
         {
-          provide: PrismaService,
-          useValue: mockPrismaService,
+          provide: TICKET_REPOSITORY,
+          useValue: mockTicketRepo,
         },
         {
           provide: TRANSACTION_MANAGER,
@@ -149,7 +146,6 @@ describe('TicketTransitionsService', () => {
     }).compile();
 
     service = module.get<TicketTransitionsService>(TicketTransitionsService);
-    prismaService = module.get<PrismaService<PrismaClient>>(PrismaService);
   });
 
   afterEach(() => {
@@ -162,11 +158,11 @@ describe('TicketTransitionsService', () => {
       const verificationComment = { ...mockComment, type: CommentType.VERIFICATION };
       const verifiedActivity = { ...mockActivity, toStatus: TicketStatus.VERIFIED };
 
-      mockPrismaClient.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaClient.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaClient.comment.create.mockResolvedValue(verificationComment);
-      mockPrismaClient.ticket.update.mockResolvedValue(updatedTicket);
-      mockPrismaClient.ticketActivity.create.mockResolvedValue(verifiedActivity);
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
+      mockTicketRepo.createComment.mockResolvedValue(verificationComment);
+      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.createTicketActivity.mockResolvedValue(verifiedActivity);
 
       const result = await service.verify(
         'koda',
@@ -187,11 +183,11 @@ describe('TicketTransitionsService', () => {
       const verificationComment = { ...mockComment, type: CommentType.VERIFICATION, authorUserId: 'user-123' };
       const verifiedActivity = { ...mockActivity };
 
-      mockPrismaClient.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaClient.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaClient.comment.create.mockResolvedValue(verificationComment);
-      mockPrismaClient.ticket.update.mockResolvedValue(updatedTicket);
-      mockPrismaClient.ticketActivity.create.mockResolvedValue(verifiedActivity);
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
+      mockTicketRepo.createComment.mockResolvedValue(verificationComment);
+      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.createTicketActivity.mockResolvedValue(verifiedActivity);
 
       await service.verify(
         'koda',
@@ -214,11 +210,11 @@ describe('TicketTransitionsService', () => {
         toStatus: TicketStatus.VERIFIED,
       };
 
-      mockPrismaClient.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaClient.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaClient.comment.create.mockResolvedValue(verificationComment);
-      mockPrismaClient.ticket.update.mockResolvedValue(updatedTicket);
-      mockPrismaClient.ticketActivity.create.mockResolvedValue(verifiedActivity);
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
+      mockTicketRepo.createComment.mockResolvedValue(verificationComment);
+      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.createTicketActivity.mockResolvedValue(verifiedActivity);
 
       const result = await service.verify(
         'koda',
@@ -233,7 +229,7 @@ describe('TicketTransitionsService', () => {
     });
 
     it('should throw 404 if project not found', async () => {
-      mockPrismaService.client.project.findUnique.mockResolvedValue(null);
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(null);
 
       await expect(
         service.verify('nonexistent', 'KODA-1', 'Comment', mockUserPrincipal)
@@ -241,8 +237,8 @@ describe('TicketTransitionsService', () => {
     });
 
     it('should throw 404 if ticket not found', async () => {
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(null);
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(null);
 
       await expect(
         service.verify('koda', 'KODA-999', 'Comment', mockUserPrincipal)
@@ -250,8 +246,8 @@ describe('TicketTransitionsService', () => {
     });
 
     it('should throw 400 if transition is invalid (not CREATED status)', async () => {
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue({
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue({
         ...mockTicket,
         status: TicketStatus.IN_PROGRESS,
       });
@@ -268,10 +264,10 @@ describe('TicketTransitionsService', () => {
       const updatedTicket = { ...verifiedTicket, status: TicketStatus.IN_PROGRESS };
       const inProgressActivity = { ...mockActivity, fromStatus: TicketStatus.VERIFIED, toStatus: TicketStatus.IN_PROGRESS };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(verifiedTicket);
-      mockPrismaService.client.ticket.update.mockResolvedValue(updatedTicket);
-      mockPrismaService.client.ticketActivity.create.mockResolvedValue(inProgressActivity);
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(verifiedTicket);
+      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.createTicketActivity.mockResolvedValue(inProgressActivity);
 
       const result = await service.start('koda', 'KODA-1', mockUserPrincipal);
 
@@ -285,10 +281,10 @@ describe('TicketTransitionsService', () => {
       const updatedTicket = { ...verifiedTicket, status: TicketStatus.IN_PROGRESS };
       const inProgressActivity = { ...mockActivity, fromStatus: TicketStatus.VERIFIED, toStatus: TicketStatus.IN_PROGRESS };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(verifiedTicket);
-      mockPrismaService.client.ticket.update.mockResolvedValue(updatedTicket);
-      mockPrismaService.client.ticketActivity.create.mockResolvedValue(inProgressActivity);
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(verifiedTicket);
+      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.createTicketActivity.mockResolvedValue(inProgressActivity);
 
       await service.start('koda', 'KODA-1', mockUserPrincipal);
 
@@ -296,10 +292,10 @@ describe('TicketTransitionsService', () => {
     });
 
     it('should throw 400 if transition is invalid (CLOSED status cannot start)', async () => {
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue({
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue({
         ...mockTicket,
-        status: TicketStatus.CLOSED, // CLOSED → IN_PROGRESS is not a valid transition
+        status: TicketStatus.CLOSED,
       });
 
       await expect(
@@ -315,11 +311,11 @@ describe('TicketTransitionsService', () => {
       const fixComment = { ...mockComment, type: CommentType.FIX_REPORT };
       const fixActivity = { ...mockActivity, fromStatus: TicketStatus.IN_PROGRESS, toStatus: TicketStatus.VERIFY_FIX };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(inProgressTicket);
-      mockPrismaService.client.comment.create.mockResolvedValue(fixComment);
-      mockPrismaService.client.ticket.update.mockResolvedValue(updatedTicket);
-      mockPrismaService.client.ticketActivity.create.mockResolvedValue(fixActivity);
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(inProgressTicket);
+      mockTicketRepo.createComment.mockResolvedValue(fixComment);
+      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.createTicketActivity.mockResolvedValue(fixActivity);
 
       const result = await service.fix(
         'koda',
@@ -340,11 +336,11 @@ describe('TicketTransitionsService', () => {
       const fixComment = { ...mockComment, type: CommentType.FIX_REPORT };
       const fixActivity = { ...mockActivity, fromStatus: TicketStatus.IN_PROGRESS, toStatus: TicketStatus.VERIFY_FIX };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(inProgressTicket);
-      mockPrismaService.client.comment.create.mockResolvedValue(fixComment);
-      mockPrismaService.client.ticket.update.mockResolvedValue(updatedTicket);
-      mockPrismaService.client.ticketActivity.create.mockResolvedValue(fixActivity);
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(inProgressTicket);
+      mockTicketRepo.createComment.mockResolvedValue(fixComment);
+      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.createTicketActivity.mockResolvedValue(fixActivity);
 
       await service.fix(
         'koda',
@@ -355,7 +351,6 @@ describe('TicketTransitionsService', () => {
 
       expect(mockTxManager.run).toHaveBeenCalled();
     });
-
   });
 
   describe('verifyFix (VERIFY_FIX → CLOSED or IN_PROGRESS)', () => {
@@ -365,11 +360,11 @@ describe('TicketTransitionsService', () => {
       const reviewComment = { ...mockComment, type: CommentType.REVIEW };
       const closedActivity = { ...mockActivity, fromStatus: TicketStatus.VERIFY_FIX, toStatus: TicketStatus.CLOSED };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(verifyFixTicket);
-      mockPrismaService.client.comment.create.mockResolvedValue(reviewComment);
-      mockPrismaService.client.ticket.update.mockResolvedValue(updatedTicket);
-      mockPrismaService.client.ticketActivity.create.mockResolvedValue(closedActivity);
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(verifyFixTicket);
+      mockTicketRepo.createComment.mockResolvedValue(reviewComment);
+      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.createTicketActivity.mockResolvedValue(closedActivity);
 
       const result = await service.verifyFix(
         'koda',
@@ -390,11 +385,11 @@ describe('TicketTransitionsService', () => {
       const reviewComment = { ...mockComment, type: CommentType.REVIEW };
       const inProgressActivity = { ...mockActivity, fromStatus: TicketStatus.VERIFY_FIX, toStatus: TicketStatus.IN_PROGRESS };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(verifyFixTicket);
-      mockPrismaService.client.comment.create.mockResolvedValue(reviewComment);
-      mockPrismaService.client.ticket.update.mockResolvedValue(updatedTicket);
-      mockPrismaService.client.ticketActivity.create.mockResolvedValue(inProgressActivity);
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(verifyFixTicket);
+      mockTicketRepo.createComment.mockResolvedValue(reviewComment);
+      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.createTicketActivity.mockResolvedValue(inProgressActivity);
 
       const result = await service.verifyFix(
         'koda',
@@ -415,11 +410,11 @@ describe('TicketTransitionsService', () => {
       const reviewComment = { ...mockComment, type: CommentType.REVIEW };
       const closedActivity = { ...mockActivity, fromStatus: TicketStatus.VERIFY_FIX, toStatus: TicketStatus.CLOSED };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(verifyFixTicket);
-      mockPrismaService.client.comment.create.mockResolvedValue(reviewComment);
-      mockPrismaService.client.ticket.update.mockResolvedValue(updatedTicket);
-      mockPrismaService.client.ticketActivity.create.mockResolvedValue(closedActivity);
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(verifyFixTicket);
+      mockTicketRepo.createComment.mockResolvedValue(reviewComment);
+      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.createTicketActivity.mockResolvedValue(closedActivity);
 
       await service.verifyFix(
         'koda',
@@ -439,10 +434,10 @@ describe('TicketTransitionsService', () => {
       const updatedTicket = { ...verifyFixTicket, status: TicketStatus.CLOSED };
       const closedActivity = { ...mockActivity, fromStatus: TicketStatus.VERIFY_FIX, toStatus: TicketStatus.CLOSED };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(verifyFixTicket);
-      mockPrismaService.client.ticket.update.mockResolvedValue(updatedTicket);
-      mockPrismaService.client.ticketActivity.create.mockResolvedValue(closedActivity);
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(verifyFixTicket);
+      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.createTicketActivity.mockResolvedValue(closedActivity);
 
       const result = await service.close('koda', 'KODA-1', mockUserPrincipal);
 
@@ -452,8 +447,8 @@ describe('TicketTransitionsService', () => {
     });
 
     it('should throw 400 if transition is invalid', async () => {
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockTicket); // CREATED status
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket); // CREATED status
 
       await expect(
         service.close('koda', 'KODA-1', mockUserPrincipal)
@@ -467,11 +462,11 @@ describe('TicketTransitionsService', () => {
       const generalComment = { ...mockComment, type: CommentType.GENERAL };
       const rejectedActivity = { ...mockActivity, fromStatus: TicketStatus.CREATED, toStatus: TicketStatus.REJECTED };
 
-      mockPrismaClient.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaClient.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaClient.comment.create.mockResolvedValue(generalComment);
-      mockPrismaClient.ticket.update.mockResolvedValue(updatedTicket);
-      mockPrismaClient.ticketActivity.create.mockResolvedValue(rejectedActivity);
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
+      mockTicketRepo.createComment.mockResolvedValue(generalComment);
+      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.createTicketActivity.mockResolvedValue(rejectedActivity);
 
       const result = await service.reject(
         'koda',
@@ -491,11 +486,11 @@ describe('TicketTransitionsService', () => {
       const generalComment = { ...mockComment, type: CommentType.GENERAL };
       const rejectedActivity = { ...mockActivity, fromStatus: TicketStatus.VERIFIED, toStatus: TicketStatus.REJECTED };
 
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(verifiedTicket);
-      mockPrismaService.client.comment.create.mockResolvedValue(generalComment);
-      mockPrismaService.client.ticket.update.mockResolvedValue(updatedTicket);
-      mockPrismaService.client.ticketActivity.create.mockResolvedValue(rejectedActivity);
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(verifiedTicket);
+      mockTicketRepo.createComment.mockResolvedValue(generalComment);
+      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.createTicketActivity.mockResolvedValue(rejectedActivity);
 
       const result = await service.reject(
         'koda',
@@ -509,9 +504,9 @@ describe('TicketTransitionsService', () => {
     });
 
     it('should throw 400 if trying to reject from IN_PROGRESS', async () => {
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       const inProgressTicket = { ...mockTicket, status: TicketStatus.IN_PROGRESS };
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(inProgressTicket);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(inProgressTicket);
 
       await expect(
         service.reject('koda', 'KODA-1', 'Not valid', mockUserPrincipal)
@@ -519,9 +514,9 @@ describe('TicketTransitionsService', () => {
     });
 
     it('should throw 400 if trying to reject from CLOSED', async () => {
-      mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       const closedTicket = { ...mockTicket, status: TicketStatus.CLOSED };
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(closedTicket);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(closedTicket);
 
       await expect(
         service.reject('koda', 'KODA-1', 'Not valid', mockUserPrincipal)
@@ -535,11 +530,11 @@ describe('TicketTransitionsService', () => {
       const userComment = { ...mockComment, authorUserId: 'user-123', authorAgentId: null };
       const userActivity = { ...mockActivity, actorUserId: 'user-123', actorAgentId: null };
 
-      mockPrismaClient.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaClient.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaClient.comment.create.mockResolvedValue(userComment);
-      mockPrismaClient.ticket.update.mockResolvedValue(updatedTicket);
-      mockPrismaClient.ticketActivity.create.mockResolvedValue(userActivity);
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
+      mockTicketRepo.createComment.mockResolvedValue(userComment);
+      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.createTicketActivity.mockResolvedValue(userActivity);
 
       const result = await service.verify(
         'koda',
@@ -559,11 +554,11 @@ describe('TicketTransitionsService', () => {
       const agentComment = { ...mockComment, authorUserId: null, authorAgentId: 'agent-123' };
       const agentActivity = { ...mockActivity, actorUserId: null, actorAgentId: 'agent-123' };
 
-      mockPrismaClient.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaClient.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaClient.comment.create.mockResolvedValue(agentComment);
-      mockPrismaClient.ticket.update.mockResolvedValue(updatedTicket);
-      mockPrismaClient.ticketActivity.create.mockResolvedValue(agentActivity);
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
+      mockTicketRepo.createComment.mockResolvedValue(agentComment);
+      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.createTicketActivity.mockResolvedValue(agentActivity);
 
       const result = await service.verify(
         'koda',
@@ -585,11 +580,11 @@ describe('TicketTransitionsService', () => {
       const verificationComment = { ...mockComment };
       const verifiedActivity = { ...mockActivity };
 
-      mockPrismaClient.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaClient.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaClient.comment.create.mockResolvedValue(verificationComment);
-      mockPrismaClient.ticket.update.mockResolvedValue(updatedTicket);
-      mockPrismaClient.ticketActivity.create.mockResolvedValue(verifiedActivity);
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
+      mockTicketRepo.createComment.mockResolvedValue(verificationComment);
+      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.createTicketActivity.mockResolvedValue(verifiedActivity);
 
       await service.verify(
         'koda',
@@ -606,11 +601,11 @@ describe('TicketTransitionsService', () => {
       const verificationComment = { ...mockComment };
       const verifiedActivity = { ...mockActivity };
 
-      mockPrismaClient.project.findUnique.mockResolvedValue(mockProject);
-      mockPrismaClient.ticket.findUnique.mockResolvedValue(mockTicket);
-      mockPrismaClient.comment.create.mockResolvedValue(verificationComment);
-      mockPrismaClient.ticket.update.mockResolvedValue(updatedTicket);
-      mockPrismaClient.ticketActivity.create.mockResolvedValue(verifiedActivity);
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
+      mockTicketRepo.createComment.mockResolvedValue(verificationComment);
+      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.createTicketActivity.mockResolvedValue(verifiedActivity);
 
       const result = await service.verify(
         'koda',

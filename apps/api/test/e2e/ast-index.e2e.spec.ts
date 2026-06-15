@@ -17,6 +17,7 @@ import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
 import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
+import { resetDb } from '../helpers/reset-db';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeE2E = DATABASE_URL ? describe : describe.skip;
@@ -38,15 +39,7 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
   beforeAll(async () => {
     if (!DATABASE_URL) return;
 
-    try {
-      const { execSync } = await import('child_process');
-      execSync('bunx prisma db push --force-reset --skip-generate', {
-        stdio: 'inherit',
-        env: { ...process.env, DATABASE_URL },
-      });
-    } catch {
-      // DB reset may fail if schema is already in sync
-    }
+    await resetDb();
 
     app = await AppFactory.create(AppModule);
 

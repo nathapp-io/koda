@@ -1,9 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
 import { subject } from '@casl/ability';
 import { CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { CommentType } from '../common/enums';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ValidationAppException, NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
@@ -16,15 +14,12 @@ import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
 @Injectable()
 export class CommentsService {
   constructor(
-    private readonly prisma: PrismaService<PrismaClient>,
     @Inject(COMMENT_REPOSITORY) private readonly commentRepo: PrismaCommentRepository,
     private readonly caslAbilityFactory: KodaCaslAbilityFactory,
   ) {}
 
-  private get db() { return this.prisma.client; }
-
   private async resolveTicketByRef(projectSlug: string, ticketRef: string) {
-    const project = await this.db.project.findUnique({ where: { slug: projectSlug } });
+    const project = await this.commentRepo.findProjectBySlug(projectSlug);
 
     if (!project || project.deletedAt) {
       throw new NotFoundAppException({}, 'comments');
@@ -32,10 +27,8 @@ export class CommentsService {
 
     const match = ticketRef.match(/^([A-Z]+)-(\d+)$/);
     const ticket = match
-      ? await this.db.ticket.findUnique({
-          where: { projectId_number: { projectId: project.id, number: parseInt(match[2], 10) } },
-        })
-      : await this.db.ticket.findUnique({ where: { id: ticketRef } });
+      ? await this.commentRepo.findTicketByNumber(project.id, parseInt(match[2], 10))
+      : await this.commentRepo.findTicketById(ticketRef);
 
     if (!ticket || ticket.deletedAt) {
       throw new NotFoundAppException({}, 'comments');

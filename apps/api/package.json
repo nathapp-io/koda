@@ -63,6 +63,7 @@
     "ts-morph": "^28.0.0"
   },
   "devDependencies": {
+    "@golevelup/ts-jest": "^3.0.0",
     "@nathapp/eslint-config": "workspace:*",
     "@nathapp/typescript-config": "workspace:*",
     "@nestjs/cli": "^11.0.0",
@@ -107,6 +108,7 @@
     "maxWorkers": 1,
     "setupFilesAfterEnv": [
       "<rootDir>/../test-setup.ts"
-    ]
+    ],
+    "globalSetup": "<rootDir>/../test/global-setup.ts"
   }
 }

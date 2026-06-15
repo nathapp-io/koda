@@ -1,15 +1,14 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtStrategyProvider, JwtRefreshStrategyProvider } from '@nathapp/nestjs-auth';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
 import { AuthService } from './auth.service';
+import { PrismaAuthRepository } from './prisma-auth.repository';
 import { ConfigService } from '@nestjs/config';
 import { AppException } from '@nathapp/nestjs-common';
 import * as bcrypt from 'bcrypt';
 
 describe('AuthService', () => {
   let service: AuthService;
-  let prismaService: PrismaService<PrismaClient>;
+  let authRepo: PrismaAuthRepository;
 
   const mockUser = {
     id: 'user-123',
@@ -21,14 +20,11 @@ describe('AuthService', () => {
     updatedAt: new Date(),
   };
 
-  const mockPrismaService = {
-    client: {
-      user: {
-        create: jest.fn(),
-        findUnique: jest.fn(),
-        findMany: jest.fn(),
-      },
-    },
+  const mockAuthRepository = {
+    findAnyUser: jest.fn(),
+    createUser: jest.fn(),
+    findUserByEmail: jest.fn(),
+    findUserById: jest.fn(),
   };
 
   const mockConfigService = {
@@ -47,7 +43,7 @@ describe('AuthService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
-        { provide: PrismaService, useValue: mockPrismaService },
+        { provide: PrismaAuthRepository, useValue: mockAuthRepository },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: JwtStrategyProvider, useValue: mockJwtStrategyProvider },
         { provide: JwtRefreshStrategyProvider, useValue: mockJwtRefreshStrategyProvider },
@@ -55,12 +51,12 @@ describe('AuthService', () => {
     }).compile();
 
     service = module.get<AuthService>(AuthService);
-    prismaService = module.get<PrismaService<PrismaClient>>(PrismaService);
+    authRepo = module.get<PrismaAuthRepository>(PrismaAuthRepository);
 
     // Default mock values
     mockJwtStrategyProvider.sign.mockReturnValue('mock-token');
     mockJwtRefreshStrategyProvider.sign.mockReturnValue('mock-token');
-    mockPrismaService.client.user.findMany.mockResolvedValue([]);
+    mockAuthRepository.findAnyUser.mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -75,17 +71,17 @@ describe('AuthService', () => {
         password: 'Password123!',
       };
 
-      mockPrismaService.client.user.create.mockResolvedValue(mockUser);
+      mockAuthRepository.createUser.mockResolvedValue(mockUser);
 
       const result = await service.register(registerDto);
 
-      expect(prismaService.client.user.create).toHaveBeenCalled();
-      const createCall = (prismaService.client.user.create as jest.Mock).mock.calls[0][0];
-      expect(createCall.data.email).toBe(registerDto.email);
-      expect(createCall.data.name).toBe(registerDto.name);
+      expect(authRepo.createUser).toHaveBeenCalled();
+      const createCall = (authRepo.createUser as jest.Mock).mock.calls[0][0];
+      expect(createCall.email).toBe(registerDto.email);
+      expect(createCall.name).toBe(registerDto.name);
 
       // Verify bcrypt was used (passwordHash should not be plaintext)
-      const hashedPassword = createCall.data.passwordHash;
+      const hashedPassword = createCall.passwordHash;
       expect(hashedPassword).not.toBe(registerDto.password);
       expect(await bcrypt.compare(registerDto.password, hashedPassword)).toBe(true);
 
@@ -101,7 +97,7 @@ describe('AuthService', () => {
         password: 'Password123!',
       };
 
-      mockPrismaService.client.user.create.mockResolvedValue(mockUser);
+      mockAuthRepository.createUser.mockResolvedValue(mockUser);
 
       const result = await service.register(registerDto);
 
@@ -120,7 +116,7 @@ describe('AuthService', () => {
       const hashedPassword = await bcrypt.hash(password, 12);
       const userWithHash = { ...mockUser, passwordHash: hashedPassword };
 
-      mockPrismaService.client.user.findUnique.mockResolvedValue(userWithHash);
+      mockAuthRepository.findUserByEmail.mockResolvedValue(userWithHash);
 
       const result = await service.login({
         email: mockUser.email,
@@ -134,7 +130,7 @@ describe('AuthService', () => {
     });
 
     it('should throw 401 error for invalid password', async () => {
-      mockPrismaService.client.user.findUnique.mockResolvedValue(mockUser);
+      mockAuthRepository.findUserByEmail.mockResolvedValue(mockUser);
 
       await expect(
         service.login({
@@ -145,7 +141,7 @@ describe('AuthService', () => {
     });
 
     it('should throw 401 error for non-existent user', async () => {
-      mockPrismaService.client.user.findUnique.mockResolvedValue(null);
+      mockAuthRepository.findUserByEmail.mockResolvedValue(null);
 
       await expect(
         service.login({
@@ -158,7 +154,7 @@ describe('AuthService', () => {
 
   describe('refresh', () => {
     it('should return new tokens with valid refresh token', async () => {
-      mockPrismaService.client.user.findUnique.mockResolvedValue(mockUser);
+      mockAuthRepository.findUserById.mockResolvedValue(mockUser);
 
       const result = await service.refresh({
         id: mockUser.id,
@@ -177,7 +173,7 @@ describe('AuthService', () => {
 
   describe('validateUser', () => {
     it('should return user for valid JWT payload', async () => {
-      mockPrismaService.client.user.findUnique.mockResolvedValue(mockUser);
+      mockAuthRepository.findUserById.mockResolvedValue(mockUser);
 
       const result = await service.validateUser({
         sub: mockUser.id,
@@ -186,13 +182,11 @@ describe('AuthService', () => {
       });
 
       expect(result).toEqual(mockUser);
-      expect(prismaService.client.user.findUnique).toHaveBeenCalledWith({
-        where: { id: mockUser.id },
-      });
+      expect(authRepo.findUserById).toHaveBeenCalledWith(mockUser.id);
     });
 
     it('should return null if user not found', async () => {
-      mockPrismaService.client.user.findUnique.mockResolvedValue(null);
+      mockAuthRepository.findUserById.mockResolvedValue(null);
 
       const result = await service.validateUser({
         sub: 'nonexistent-id',

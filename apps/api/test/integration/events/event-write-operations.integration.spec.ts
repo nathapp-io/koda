@@ -23,12 +23,14 @@ import { PrismaClient } from '@prisma/client';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 
 import { KodaDomainWriter } from '../../../src/koda-domain-writer/koda-domain-writer.service';
+import { PrismaKodaDomainWriterRepository } from '../../../src/koda-domain-writer/prisma-koda-domain-writer.repository';
 import { RagService } from '../../../src/rag/rag.service';
 import { OutboxService } from '../../../src/outbox/outbox.service';
 import { AgentAuthProvider } from '../../../src/auth/agent-auth.provider';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
 import { AgentEventService } from '../../../src/events/agent-event.service';
 import { DecisionEventService } from '../../../src/events/decision-event.service';
+import { PrismaEventsRepository } from '../../../src/events/prisma-events.repository';
 describe('Event Write Operations and Actor Resolution', () => {
   let kodaDomainWriter: KodaDomainWriter;
   let ticketEventService: TicketEventService;
@@ -151,6 +153,8 @@ describe('Event Write Operations and Actor Resolution', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         KodaDomainWriter,
+        PrismaKodaDomainWriterRepository,
+        PrismaEventsRepository,
         TicketEventService,
         AgentEventService,
         DecisionEventService,

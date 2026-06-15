@@ -13,11 +13,11 @@
 import { AsyncLocalStorage } from 'async_hooks';
 
 import { Injectable, Optional } from '@nestjs/common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient } from '@prisma/client';
 import { KodaError } from '../common/koda-error';
 import { CanonicalStateService } from '../memory/canonical-state.service';
 import { ContextBuilderService } from '../context/context-builder.service';
+import { PrismaPolicyRepository } from './prisma-policy.repository';
+import type { TicketSnapshot } from './domain/policy.domain';
 
 export interface GateResult {
   name: string;
@@ -36,13 +36,6 @@ interface SearchResult {
   source?: string;
   provenance?: { sources: string[] };
   projectId?: string;
-}
-
-interface TicketSnapshot {
-  id: string;
-  status: string;
-  priority: string;
-  title: string;
 }
 
 interface ProjectContextMeta {
@@ -179,7 +172,7 @@ const PRISMA_FIXTURE_MAP: ReadonlyMap<string, TicketSnapshot> = new Map(
 export class PolicyGateService {
   constructor(
     @Optional() private readonly canonicalStateService?: CanonicalStateService,
-    @Optional() private readonly prismaService?: PrismaService<PrismaClient>,
+    @Optional() private readonly policyRepo?: PrismaPolicyRepository,
     @Optional() private readonly contextBuilderService?: ContextBuilderService,
   ) {}
 
@@ -496,18 +489,11 @@ export class PolicyGateService {
   }
 
   private async getPrismaTicket(ticketId: string): Promise<TicketSnapshot | null> {
-    // When PrismaService is injected (real DI context), query the DB directly so the
+    // When policyRepo is injected (real DI context), query the DB directly so the
     // gate compares CanonicalStateService output against raw Prisma rows — independent sources.
-    if (this.prismaService) {
+    if (this.policyRepo) {
       try {
-        const ticket = await this.prismaService.client.ticket.findUnique({
-          where: { id: ticketId },
-          select: { id: true, status: true, priority: true, title: true },
-        });
-        if (ticket) {
-          return { id: ticket.id, status: ticket.status, priority: ticket.priority, title: ticket.title };
-        }
-        return null;
+        return await this.policyRepo.findTicketById(ticketId);
       } catch {
         // Fall through to fixture map on error
       }

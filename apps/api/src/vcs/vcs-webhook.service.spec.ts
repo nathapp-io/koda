@@ -3,12 +3,13 @@ import { VcsWebhookService, GitHubWebhookPayload, WebhookHandleResult } from './
 import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { OutboxService } from '../outbox/outbox.service';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ConfigService } from '@nestjs/config';
 import { VcsLinkExtractorService } from './vcs-link-extractor.service';
 import { VcsConnection, Project } from '@prisma/client';
 import type { OutboxEventDomain } from '../outbox/domain/outbox-event.domain';
 import type { OutboxEventInput } from '../outbox/outbox.service';
+import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
+import type { OutboxDedupQuery } from './domain/vcs.repository';
 
 interface SharedEnqueuedEvent {
   eventId: string;
@@ -17,33 +18,38 @@ interface SharedEnqueuedEvent {
   createdAt: number;
 }
 
-function createMockPrismaService(sharedEnqueuedEvents?: SharedEnqueuedEvent[]) {
+function createMockVcsRepository(sharedEnqueuedEvents?: SharedEnqueuedEvent[]): IVcsRepository {
   return {
-    client: {
-      ticketLink: {
-        findFirst: jest.fn().mockResolvedValue(null),
-      },
-      ticket: {
-        findUnique: jest.fn().mockResolvedValue(null),
-      },
-      outboxEvent: {
-        findMany: jest.fn().mockImplementation((args: unknown) => {
-          if (!sharedEnqueuedEvents) return Promise.resolve([]);
-          const { where } = args as { where?: Record<string, unknown> };
-          if (!where) return Promise.resolve([]);
-          const dedupWindowMs = 5 * 60 * 1000;
-          const now = Date.now();
-          const matches = sharedEnqueuedEvents.filter(
-            (e) =>
-              e.projectId === where.projectId &&
-              e.eventType === where.eventType &&
-              e.eventId === where.eventId &&
-              now - e.createdAt < dedupWindowMs,
-          );
-          return Promise.resolve(matches.map((m) => ({ id: `existing-${m.eventId}` })));
-        }),
-      },
-    },
+    findProjectById: jest.fn().mockResolvedValue(null),
+    findVcsConnectionByProjectId: jest.fn().mockResolvedValue(null),
+    findVcsConnectionById: jest.fn().mockResolvedValue(null),
+    findPollingConnections: jest.fn().mockResolvedValue([]),
+    createVcsConnection: jest.fn(),
+    updateVcsConnection: jest.fn(),
+    updateVcsConnectionLastSynced: jest.fn(),
+    deleteVcsConnection: jest.fn(),
+    createVcsSyncLog: jest.fn(),
+    findExistingTicketByExternalId: jest.fn().mockResolvedValue(null),
+    createTicketFromIssue: jest.fn(),
+    findTicketWithProject: jest.fn().mockResolvedValue(null),
+    findActiveTicketLinksWithPrs: jest.fn().mockResolvedValue([]),
+    findTicketLinkByPrNumber: jest.fn().mockResolvedValue(null),
+    updateTicketLinkPrState: jest.fn(),
+    updateTicketLinkWithPrState: jest.fn(),
+    applyMergedPrTransition: jest.fn(),
+    findPendingOutboxEvents: jest.fn().mockImplementation((query: OutboxDedupQuery) => {
+      if (!sharedEnqueuedEvents) return Promise.resolve([]);
+      const dedupWindowMs = 5 * 60 * 1000;
+      const now = Date.now();
+      const matches = sharedEnqueuedEvents.filter(
+        (e) =>
+          e.projectId === query.projectId &&
+          e.eventType === query.eventType &&
+          e.eventId === query.eventId &&
+          now - e.createdAt < dedupWindowMs,
+      );
+      return Promise.resolve(matches.map((m) => ({ id: `existing-${m.eventId}` })));
+    }),
   };
 }
 
@@ -159,7 +165,7 @@ function buildTestingModule(
   return Test.createTestingModule({
     providers: [
       VcsWebhookService,
-      { provide: PrismaService, useValue: createMockPrismaService(sharedEnqueuedEvents) },
+      { provide: VCS_REPOSITORY, useValue: createMockVcsRepository(sharedEnqueuedEvents) },
       { provide: VcsSyncService, useValue: createMockSyncService() },
       { provide: VcsPrSyncService, useValue: createMockPrSyncService() },
       { provide: OutboxService, useValue: createMockOutboxService(enqueueMock) },
@@ -243,15 +249,13 @@ describe('VcsWebhookService', () => {
         ],
       });
 
-      // Simulate DB dedup check failure — outboxEvent.findMany throws
-      const outboxFindMany = (service as unknown as { prisma: { client: { outboxEvent: { findMany: jest.Mock } } } }).prisma.client.outboxEvent.findMany;
-      outboxFindMany.mockRejectedValueOnce(new Error('DB connection timeout'));
+      // Simulate DB dedup check failure — findPendingOutboxEvents throws
+      const repo = (service as unknown as { vcsRepo: { findPendingOutboxEvents: jest.Mock } }).vcsRepo;
+      repo.findPendingOutboxEvents.mockRejectedValueOnce(new Error('DB connection timeout'));
 
       // SPEC: when DB dedup check fails, the handler must NOT fall through to enqueue.
       // If we cannot verify there is no duplicate, we must fail the request so the
       // provider retries later when the DB is available.
-      // BUG: catch block at line 661-663 logs a warning but does NOT break or continue.
-      // Execution falls through to line 666 where it enqueues the event, creating duplicates.
       let thrownError: unknown = null;
       try {
         await service.handleWebhook(connection, 'push', payload);
@@ -298,7 +302,6 @@ describe('VcsWebhookService', () => {
 
       // Spec: entries older than the 5-minute window (commit-1, commit-2) must be evicted.
       // Only commit-3 (enqueued at T0+6min) should remain in the map.
-      // BUG: The map currently retains ALL entries forever — map size will be 3 instead of <= 1.
       const mapAfterEviction: Map<string, number> = (service as unknown as { recentCommitHashes: Map<string, number> }).recentCommitHashes;
       expect(mapAfterEviction.size).toBeLessThan(3);
 
@@ -403,10 +406,6 @@ describe('VcsWebhookService — cross-instance deduplication', () => {
     // SPEC: Since the previous event was consumed (no longer pending/processing),
     // this should create a NEW outbox event. The DB dedup check would return
     // empty, so enqueue should proceed normally.
-    // BUG: The in-memory fast-path at line 638-641 finds the stale Map entry
-    // (it doesn't know the event was consumed) and skips without ever reaching
-    // the DB dedup check. `enqueue` is never called on this second push,
-    // silently dropping a legitimate re-enqueue.
     const result2 = await svc.handleWebhook(connection, 'push', payload);
 
     expect(enqueueWithTracking).toHaveBeenCalledTimes(2);

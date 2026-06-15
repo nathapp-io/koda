@@ -1,28 +1,12 @@
-import { Injectable, OnModuleDestroy, OnModuleInit, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
-import { PrismaService } from '@nathapp/nestjs-prisma';
+import { ConfigService } from '@nestjs/config';
 import { VcsConnection, Project } from '@prisma/client';
 import { decryptToken } from '../common/utils/encryption.util';
 import { createVcsProvider } from './factory';
 import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
-
-// PrismaClientLike from @nathapp/nestjs-prisma doesn't expose VCS models,
-// but they exist at runtime. Define a delegate interface for proper typing.
-interface PrismaDelegate {
-  findUnique(options: { where: Record<string, unknown>; select?: unknown; include?: unknown }): Promise<unknown>
-  findMany(options?: unknown): Promise<unknown[]>
-  findFirst(options?: unknown): Promise<unknown>
-  create(options: { data: unknown; select?: unknown; include?: unknown }): Promise<unknown>
-  update(options: { where: Record<string, unknown>; data: unknown; select?: unknown; include?: unknown }): Promise<unknown>
-  delete(options: { where: Record<string, unknown>; select?: unknown; include?: unknown }): Promise<unknown>
-}
-
-interface ExtendedPrismaClient {
-  vcsConnection: PrismaDelegate
-  vcsSyncLog: PrismaDelegate
-  [key: string]: unknown
-}
+import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 
 /**
  * Polling service for syncing issues on a schedule
@@ -33,15 +17,12 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
   private readonly scheduledConnectionIds = new Set<string>();
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(VCS_REPOSITORY) private readonly vcsRepo: IVcsRepository,
     private readonly schedulerRegistry: SchedulerRegistry,
     private readonly syncService: VcsSyncService,
     private readonly prSyncService: VcsPrSyncService,
+    private readonly configService: ConfigService,
   ) {}
-
-  private get db() {
-    return this.prisma.client as unknown as ExtendedPrismaClient;
-  }
 
   async onModuleInit() {
     // Initialize polling for all active connections with polling mode
@@ -58,15 +39,7 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
    * Initialize polling intervals for all polling connections
    */
   private async initializePolling(): Promise<void> {
-    const connections = (await this.db.vcsConnection.findMany({
-      where: {
-        syncMode: 'polling',
-        isActive: true,
-      },
-      include: {
-        project: true,
-      },
-    })) as Array<VcsConnection & { project: Project }>;
+    const connections = await this.vcsRepo.findPollingConnections();
 
     // Filter again in code for resilience (ensures only polling and active connections)
     const pollingConnections = connections.filter(
@@ -114,10 +87,7 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
   async refreshConnectionSchedule(connectionId: string): Promise<void> {
     this.unschedulePolling(connectionId);
 
-    const connection = (await this.db.vcsConnection.findUnique({
-      where: { id: connectionId },
-      include: { project: true },
-    })) as (VcsConnection & { project: Project }) | null;
+    const connection = await this.vcsRepo.findVcsConnectionById(connectionId);
 
     if (!connection || connection.syncMode !== 'polling' || !connection.isActive) {
       return;
@@ -133,8 +103,8 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
     const startTime = new Date();
 
     try {
-      // Get encryption key from env
-      const encryptionKey = process.env.VCS_ENCRYPTION_KEY;
+      // Get encryption key from config
+      const encryptionKey = this.configService.get<string>('vcs.encryptionKey');
       if (!encryptionKey) {
         throw new Error('VCS encryption key not configured');
       }
@@ -172,21 +142,16 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
       }
 
       // Update connection lastSyncedAt
-      await this.db.vcsConnection.update({
-        where: { id: connection.id },
-        data: { lastSyncedAt: new Date() },
-      });
+      await this.vcsRepo.updateVcsConnectionLastSynced(connection.id);
 
       // Write sync log
-      await this.db.vcsSyncLog.create({
-        data: {
-          vcsConnectionId: connection.id,
-          syncType: 'polling',
-          issuesSynced,
-          issuesSkipped,
-          startedAt: startTime,
-          completedAt: new Date(),
-        },
+      await this.vcsRepo.createVcsSyncLog({
+        vcsConnectionId: connection.id,
+        syncType: 'polling',
+        issuesSynced,
+        issuesSkipped,
+        startedAt: startTime,
+        completedAt: new Date(),
       });
 
       this.logger.debug(
@@ -194,7 +159,6 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
       );
 
       // Sync PR statuses after issue sync completes
-      // Note: encryptionKey is already validated above
       const prResult = await this.prSyncService.syncPrStatus(
         connection.project,
         connection,
@@ -207,16 +171,14 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
       // Write sync log with error
-      await this.db.vcsSyncLog.create({
-        data: {
-          vcsConnectionId: connection.id,
-          syncType: 'polling',
-          issuesSynced: 0,
-          issuesSkipped: 0,
-          errorMessage,
-          startedAt: startTime,
-          completedAt: new Date(),
-        },
+      await this.vcsRepo.createVcsSyncLog({
+        vcsConnectionId: connection.id,
+        syncType: 'polling',
+        issuesSynced: 0,
+        issuesSkipped: 0,
+        errorMessage,
+        startedAt: startTime,
+        completedAt: new Date(),
       });
 
       this.logger.error(`Polling failed for connection ${connection.id}: ${errorMessage}`);

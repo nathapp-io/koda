@@ -5,24 +5,16 @@ import { EntityNodeType, EntityLinkRelation } from './dto/entity-graph.types';
 describe('EntityGraphService comprehensive coverage', () => {
   let service: EntityGraphService;
   let entityStore: InMemoryEntityStore;
-  let mockPrismaService: any;
+  let mockEntityGraphRepo: any;
 
   beforeEach(() => {
     entityStore = new InMemoryEntityStore();
-    mockPrismaService = {
-      client: {
-        ticket: {
-          findMany: jest.fn().mockResolvedValue([]),
-        },
-        graphNode: {
-          findMany: jest.fn().mockResolvedValue([]),
-        },
-        graphLink: {
-          findMany: jest.fn().mockResolvedValue([]),
-        },
-      },
+    mockEntityGraphRepo = {
+      findTicketsWithLabelsAndLinks: jest.fn().mockResolvedValue([]),
+      findGraphNodesByType: jest.fn().mockResolvedValue([]),
+      findGraphLinksByRelation: jest.fn().mockResolvedValue([]),
     };
-    service = new EntityGraphService(entityStore, mockPrismaService);
+    service = new EntityGraphService(entityStore, mockEntityGraphRepo);
   });
 
   afterEach(() => {
@@ -31,7 +23,7 @@ describe('EntityGraphService comprehensive coverage', () => {
 
   describe('rebuildGraph with Prisma', () => {
     it('creates ticket-to-service links via gitRefFile matching', async () => {
-      mockPrismaService.client.ticket.findMany.mockResolvedValue([
+      mockEntityGraphRepo.findTicketsWithLabelsAndLinks.mockResolvedValue([
         {
           id: 'ticket-1',
           title: 'Auth bug',
@@ -43,11 +35,12 @@ describe('EntityGraphService comprehensive coverage', () => {
           gitRefVersion: null,
           gitRefLine: null,
           labels: [],
+          links: [],
           assignedToUserId: null,
           assignedToAgentId: null,
         },
       ]);
-      mockPrismaService.client.graphNode.findMany.mockResolvedValue([
+      mockEntityGraphRepo.findGraphNodesByType.mockResolvedValue([
         {
           nodeId: 'auth-module',
           label: 'AuthService',
@@ -68,7 +61,7 @@ describe('EntityGraphService comprehensive coverage', () => {
     });
 
     it('creates ticket-to-service links via label/tag matching', async () => {
-      mockPrismaService.client.ticket.findMany.mockResolvedValue([
+      mockEntityGraphRepo.findTicketsWithLabelsAndLinks.mockResolvedValue([
         {
           id: 'ticket-1',
           title: 'Auth bug',
@@ -80,11 +73,12 @@ describe('EntityGraphService comprehensive coverage', () => {
           gitRefVersion: null,
           gitRefLine: null,
           labels: [{ label: { name: 'backend' } }],
+          links: [],
           assignedToUserId: null,
           assignedToAgentId: null,
         },
       ]);
-      mockPrismaService.client.graphNode.findMany.mockResolvedValue([
+      mockEntityGraphRepo.findGraphNodesByType.mockResolvedValue([
         {
           nodeId: 'auth-module',
           label: 'AuthService',
@@ -113,7 +107,7 @@ describe('EntityGraphService comprehensive coverage', () => {
     });
 
     it('creates incident nodes for critical tickets', async () => {
-      mockPrismaService.client.ticket.findMany.mockResolvedValue([
+      mockEntityGraphRepo.findTicketsWithLabelsAndLinks.mockResolvedValue([
         {
           id: 'ticket-1',
           title: 'Critical outage',
@@ -125,6 +119,7 @@ describe('EntityGraphService comprehensive coverage', () => {
           gitRefVersion: null,
           gitRefLine: null,
           labels: [],
+          links: [],
           assignedToUserId: null,
           assignedToAgentId: null,
         },
@@ -141,7 +136,7 @@ describe('EntityGraphService comprehensive coverage', () => {
     });
 
     it('creates incident nodes for high priority tickets', async () => {
-      mockPrismaService.client.ticket.findMany.mockResolvedValue([
+      mockEntityGraphRepo.findTicketsWithLabelsAndLinks.mockResolvedValue([
         {
           id: 'ticket-1',
           title: 'High severity bug',
@@ -153,6 +148,7 @@ describe('EntityGraphService comprehensive coverage', () => {
           gitRefVersion: null,
           gitRefLine: null,
           labels: [],
+          links: [],
           assignedToUserId: null,
           assignedToAgentId: null,
         },
@@ -169,7 +165,7 @@ describe('EntityGraphService comprehensive coverage', () => {
     });
 
     it('does not create incident nodes for medium priority tickets', async () => {
-      mockPrismaService.client.ticket.findMany.mockResolvedValue([
+      mockEntityGraphRepo.findTicketsWithLabelsAndLinks.mockResolvedValue([
         {
           id: 'ticket-1',
           title: 'Medium bug',
@@ -181,6 +177,7 @@ describe('EntityGraphService comprehensive coverage', () => {
           gitRefVersion: null,
           gitRefLine: null,
           labels: [],
+          links: [],
           assignedToUserId: null,
           assignedToAgentId: null,
         },
@@ -196,8 +193,8 @@ describe('EntityGraphService comprehensive coverage', () => {
     });
 
     it('creates service-to-service links from graphLink depends_on records', async () => {
-      mockPrismaService.client.ticket.findMany.mockResolvedValue([]);
-      mockPrismaService.client.graphNode.findMany.mockResolvedValue([
+      mockEntityGraphRepo.findTicketsWithLabelsAndLinks.mockResolvedValue([]);
+      mockEntityGraphRepo.findGraphNodesByType.mockResolvedValue([
         {
           nodeId: 'auth-module',
           label: 'AuthService',
@@ -213,7 +210,7 @@ describe('EntityGraphService comprehensive coverage', () => {
           community: null,
         },
       ]);
-      mockPrismaService.client.graphLink.findMany.mockResolvedValue([
+      mockEntityGraphRepo.findGraphLinksByRelation.mockResolvedValue([
         {
           sourceId: 'auth-module',
           targetId: 'db-module',
@@ -232,7 +229,7 @@ describe('EntityGraphService comprehensive coverage', () => {
     });
 
     it('creates owner nodes and links for assigned tickets', async () => {
-      mockPrismaService.client.ticket.findMany.mockResolvedValue([
+      mockEntityGraphRepo.findTicketsWithLabelsAndLinks.mockResolvedValue([
         {
           id: 'ticket-1',
           title: 'Bug',
@@ -244,6 +241,7 @@ describe('EntityGraphService comprehensive coverage', () => {
           gitRefVersion: null,
           gitRefLine: null,
           labels: [],
+          links: [],
           assignedToUserId: 'user-abc',
           assignedToAgentId: null,
         },
