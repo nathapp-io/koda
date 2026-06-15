@@ -114,7 +114,7 @@ export class ImpactAnalysisService {
     const matchedGraphNodes = graphNodes.filter((node) => {
       if (!node.sourceFile) return false;
       return changedFiles.some(
-        (file) => file === node.sourceFile || file.includes(node.sourceFile!) || node.sourceFile!.includes(file),
+        (file) => file === node.sourceFile || file.includes(node.sourceFile) || node.sourceFile.includes(file),
       );
     });
 

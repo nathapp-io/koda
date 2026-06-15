@@ -255,7 +255,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     }
 
     // Verify project exists in the database
-    const project = await this.ragRepository!.findProjectById(projectId);
+    const project = await this.ragRepository.findProjectById(projectId);
 
     if (!project || project.deletedAt !== null) {
       const exception = new ForbiddenAppException({}, 'rag');
