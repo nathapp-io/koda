@@ -114,35 +114,22 @@ Controller layer tests:
 - @Principal() injection
 - Principal available for permission checks
 
-### 5. Integration Tests — Module
-**File:** `test/integration/code-intel/codeintel.module.integration.spec.ts`
+### 5. Unit Tests — Module (DI Wiring)
+**File:** `src/code-intel/code-intel.module.spec.ts` (co-located with module)
 
-Module integration tests:
+Module-compilation / DI-wiring tests are unit tests (not integration). They run
+under `bun run test` with no database, using `Test.createTestingModule({ imports: [GlobalStubsModule, CodeIntelModule] })` and a shared
+`GlobalStubsModule` that provides `PrismaService`, `TRANSACTION_MANAGER`, and
+`ConfigService` via `useValue`.
 
-**Module Structure (3 tests):**
-- SymbolStore provided
-- EntityGraphService provided
-- GraphStoreService provided
+**Module Compilation (1 test):**
+- CodeIntelModule compiles with global stub providers and no database
 
-**Dependency Injection (4 tests):**
-- SymbolStore with PrismaService and TransactionManager
-- EntityGraphService with entity store and optional Prisma
-- GraphStoreService with PrismaService
-- TRANSACTION_MANAGER token availability
+**Providers (6 tests):**
+- SymbolStore, AstIndexService, CodeGraphService, CodeCommitOutboxHandler, ImpactAnalysisService, CodeIntelController
 
-**Service Availability (3 tests):**
-- SymbolStore.findBySymbolId method
-- EntityGraphService.rebuildGraph method
-- GraphStoreService.getStoredGraph method
-
-**Integration Scenarios (2 tests):**
-- Service composition for getChangeImpact
-- Transaction manager usage across services
-
-**Module Registration (3 tests):**
-- Static module registration pattern
-- Token provision for entity store
-- Optional dependency support (Prisma)
+**BUG-6 regression (1 test):**
+- SymbolStore resolves from CodeIntelModule (requires TRANSACTION_MANAGER upstream)
 
 ## Test Coverage by Acceptance Criteria
 

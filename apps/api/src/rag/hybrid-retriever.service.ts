@@ -148,6 +148,9 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     doc: { source: string; sourceId: string; content: string; metadata: Record<string, unknown> },
   ): Promise<void> {
     const table = await this.getOrCreateTable(projectId);
+    const createdAtOverride = doc.metadata?.['createdAtOverride'];
+    const createdAt =
+      typeof createdAtOverride === 'string' ? createdAtOverride : new Date().toISOString();
     try {
       const vector = await this.embeddingService.embed(doc.content);
       const record: LanceRecord = {
@@ -157,7 +160,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
         content: doc.content,
         vector,
         metadata: JSON.stringify(doc.metadata),
-        created_at: new Date().toISOString(),
+        created_at: createdAt,
         provider: this.embeddingService.providerName,
         model: this.embeddingService.modelName,
       };
@@ -172,7 +175,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
         content: doc.content,
         vector: Array(dims).fill(0) as number[],
         metadata: JSON.stringify(doc.metadata ?? {}),
-        created_at: new Date().toISOString(),
+        created_at: createdAt,
         provider: this.embeddingService.providerName,
         model: this.embeddingService.modelName,
       };

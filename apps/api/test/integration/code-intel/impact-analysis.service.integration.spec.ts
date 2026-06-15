@@ -15,6 +15,8 @@ import { EntityNodeType, EntityRecord } from '../../../src/entity-graph/dto/enti
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 
+const DATABASE_URL = process.env.DATABASE_URL;
+
 /**
  * ImpactAnalysisService interface (to be implemented).
  * This is the service we'll test.
