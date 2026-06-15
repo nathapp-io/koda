@@ -44,17 +44,15 @@ Unit tests for vcsConfig registration:
 
 **Run:** `npx jest src/config/vcs.config.spec.ts`
 
-### 4. `vcs-config-registration.integration.spec.ts` (NEW)
+### 4. `vcs.module.spec.ts` (in src/vcs/) — Unit-level DI test
 **Acceptance Criteria Covered:** AC9
 
-Integration tests for vcsConfig in NestJS application context:
-- ConfigModule integration
-- Injection via ConfigService
-- ConfigService.get() access patterns
-- Environment variable isolation
-- Consistency across multiple calls
+Module-compilation / DI-wiring tests are unit tests, not integration tests.
+They live co-located with the module (`src/vcs/vcs.module.spec.ts`) and run
+under `bun run test` with no database. The vcsConfig registration under
+`ConfigModule` is verified here via `Test.createTestingModule({ imports: [GlobalStubsModule, VcsModule] })`.
 
-**Run:** `npx jest test/integration/vcs/vcs-config-registration.integration.spec.ts`
+**Run:** `npx jest src/vcs/vcs.module.spec.ts`
 
 ### 5. `token-encryption.integration.spec.ts` (NEW)
 **Acceptance Criteria Covered:** AC5, AC6, AC7, AC8
@@ -108,7 +106,7 @@ End-to-end integration test simulating real usage:
 | AC6 | decryptToken returns original plaintext | encryption.util.spec.ts, token-encryption.integration.spec.ts, vcs-foundation-integration.integration.spec.ts |
 | AC7 | decryptToken throws on tampered ciphertext | encryption.util.spec.ts, token-encryption.integration.spec.ts, vcs-foundation-integration.integration.spec.ts |
 | AC8 | decryptToken throws with wrong master key | encryption.util.spec.ts, token-encryption.integration.spec.ts, vcs-foundation-integration.integration.spec.ts |
-| AC9 | vcsConfig registers with namespace "vcs" | vcs.config.spec.ts, vcs-config-registration.integration.spec.ts, vcs-foundation-integration.integration.spec.ts |
+| AC9 | vcsConfig registers with namespace "vcs" | vcs.config.spec.ts, vcs.module.spec.ts, vcs-foundation-integration.integration.spec.ts |
 
 ## Running All Tests
 

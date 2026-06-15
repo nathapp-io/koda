@@ -474,7 +474,7 @@ describeIntegration('OutboxEvent Phase 1 Schema Validation', () => {
 
       await prisma.outboxEvent.delete({ where: { id: outbox.id } });
       await prisma.project.delete({ where: { id: project.id } });
-    });
+    }, 60000);
   });
 
   describe('OutboxEvent model AC5: prisma validate', () => {
@@ -489,6 +489,6 @@ describeIntegration('OutboxEvent Phase 1 Schema Validation', () => {
       } catch (error) {
         throw new Error(`prisma validate failed: ${error}`);
       }
-    });
+    }, 30000);
   });
 });

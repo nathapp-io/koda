@@ -404,14 +404,14 @@ describe('Intent-Weighted Fusion and Reranking', () => {
         source: 'ticket',
         sourceId: 'ticket-recent-doc',
         content: 'Recent bug in payment service',
-        metadata: { ref: 'RECENT-1' },
+        metadata: { ref: 'RECENT-1', createdAtOverride: recentTime.toISOString() },
       });
 
       await hybridService.indexDocument(projectId, {
         source: 'ticket',
         sourceId: 'ticket-old-doc',
         content: 'Old bug in payment service',
-        metadata: { ref: 'OLD-1' },
+        metadata: { ref: 'OLD-1', createdAtOverride: oldTime.toISOString() },
       });
 
       const result = await hybridService.search({
