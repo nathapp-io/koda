@@ -35,7 +35,14 @@ describe('AC8: OutboxFanOutRegistry dispatches to ExtractionService', () => {
         ExtractionService,
         PrismaMemoryItemRepository,
         { provide: PrismaService, useValue: mockPrismaService },
-        { provide: TRANSACTION_MANAGER, useValue: { transaction: jest.fn() } },
+        {
+          provide: TRANSACTION_MANAGER,
+          useValue: {
+            run: jest.fn((fn: () => Promise<unknown>) => fn()),
+            getClient: jest.fn(),
+            isInTransaction: jest.fn(() => false),
+          },
+        },
       ],
     }).compile();
 

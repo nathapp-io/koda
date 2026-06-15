@@ -122,6 +122,11 @@ describe('VcsPollingService', () => {
     vcsSyncLog: { ...mockVcsSyncLogDelegate },
   } as any;
 
+  // schedulePolling() creates real Node setInterval timers. The mocked
+  // SchedulerRegistry never clears them (unlike the real one), so we track and
+  // clear them in afterEach to stop leaked timers from firing poll() across tests.
+  const createdIntervals: NodeJS.Timeout[] = [];
+
   beforeEach(async () => {
     jest.clearAllMocks();
     jest.restoreAllMocks();
@@ -155,7 +160,9 @@ describe('VcsPollingService', () => {
         {
           provide: SchedulerRegistry,
           useValue: {
-            addInterval: jest.fn(),
+            addInterval: jest.fn((_name: string, interval: NodeJS.Timeout) => {
+              createdIntervals.push(interval);
+            }),
             deleteInterval: jest.fn(),
             getInterval: jest.fn(),
             getIntervals: jest.fn(() => []),
@@ -171,6 +178,11 @@ describe('VcsPollingService', () => {
   });
 
   afterEach(async () => {
+    // Clear any real interval timers schedulePolling() created so they don't
+    // fire poll() during later tests (the mocked registry can't clear them).
+    while (createdIntervals.length > 0) {
+      clearInterval(createdIntervals.pop());
+    }
     await module.close();
   });
 

@@ -18,7 +18,11 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
     client: mockPrismaClient,
   };
 
-  const mockTransactionManager = {};
+  const mockTransactionManager = {
+    run: jest.fn((fn: () => Promise<unknown>) => fn()),
+    getClient: jest.fn(),
+    isInTransaction: jest.fn(() => false),
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({

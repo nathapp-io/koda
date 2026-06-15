@@ -21,6 +21,53 @@ priority: 80
 - Ticket refs use `PROJECT_KEY-NUMBER` format
 - Keep workflow constraints centralized in state-machine validation
 
+## Layering & Boundaries (repository → service → public)
+
+Data flows **repository → service → public**, and each layer only talks to the one directly below it:
+
+- **Repository** — module-internal. Owns all Prisma access and all Prisma-to-domain mapping. Returns domain types, never raw Prisma models. Lives behind a `*_REPOSITORY` token used only inside its own module.
+- **Service** — the module's public face. Orchestrates repositories, applies business rules, returns domain types or DTOs. The only provider a module exports.
+- **Public (controllers + other modules)** — depend on services only.
+
+### `@prisma/client` is confined to the repository layer
+- Import Prisma model/client types (`PrismaClient`, `Project`, `Ticket`, …) **only** in `*.repository.ts` and persistence-mapping / domain files
+- **Banned** in controllers, DTOs, service *public* method signatures, and any other module
+- A controller that imports from `@prisma/client` is always a violation — route the data through a service that returns a DTO/domain type
+
+```typescript
+// Banned: controller leaking a Prisma model to the HTTP boundary
+import { Project } from '@prisma/client';
+@Get() list(): Promise<Project[]> { /* ... */ }
+
+// Correct: controller depends on a service that returns a DTO/domain type
+@Get() async list(): Promise<JsonResponse<ProjectDto[]>> {
+  return JsonResponse.Ok(await this.projects.list());
+}
+```
+
+### Repositories are module-private — never exported
+- A repository class or its `*_REPOSITORY` token MUST NOT appear in a module's `exports:`. Neither must `PrismaService`
+- Export **services** only — that is the module's entire public contract
+- `memory.module.ts` is the reference: `MEMORY_ITEM_REPOSITORY` is defined and consumed only inside the module and never exported
+
+```typescript
+// Banned: vcs.module.ts leaks a repository token to other modules
+exports: [VCS_REPOSITORY, VcsConnectionService, /* ... */]
+// Correct: export services only
+exports: [VcsConnectionService, VcsSyncService, /* ... */]
+```
+
+### Controllers and cross-module callers use services, not repositories
+- Never inject a repository or `PrismaService` into a controller
+- A module that needs another module's data calls that module's **service**, never its repository or Prisma directly
+- Service public methods return domain types or DTOs — never Prisma model types or `PrismaClient`
+
+### Migration carve-out (legacy direct-Prisma code)
+- Much existing code (auth, RAG, events, tickets/projects/labels services, webhooks, monitoring, …) injects `PrismaService` directly because it predates the repository pattern. This is **tolerated legacy**, not a template
+- **New** services and modules MUST follow repository → service → public
+- When you touch a legacy file for substantive work, prefer extracting a repository over extending the direct-Prisma usage
+- Even in legacy modules, do **not** add `@prisma/client` imports to controllers
+
 ## Prisma Module Setup
 - `PrismaModule.forRoot` MUST include `transaction: true` — this activates `TRANSACTION_MANAGER` and the transparent proxy on `PrismaService.client`
 - Without `transaction: true`, `@Inject(TRANSACTION_MANAGER)` will throw at startup
@@ -113,10 +160,10 @@ async findByTicketId(ticketId: string): Promise<CommentDomain[]> {
 }
 ```
 
-## PrismaService — Direct Injection (Non-Repository Code)
-- Inject `PrismaService` (without generic) for non-repository code (auth, RAG, VCS webhook, outbox) unless the file is already migrated to a repository
-- Access the client via `this.prisma.client` — never cast to `PrismaClient` or a custom interface
-- Do NOT write `private get db() { return this.prisma.client as unknown as T; }` — this defeats the transparent proxy
+## PrismaService — Direct Injection (legacy carve-out only)
+- Direct `PrismaService` injection outside a repository is **legacy** — see the migration carve-out under [Layering & Boundaries](#layering--boundaries-repository--service--public). Do not introduce it in new services or modules
+- Where it already exists: access the client via `this.prisma.client` — never cast to `PrismaClient` or a custom interface
+- Do NOT write `private get db() { return this.prisma.client as unknown as T; }` — this defeats the transparent proxy and re-leaks Prisma types
 
 ## Unsafe Casts — Banned
 - Do not cast `this.prisma.client as unknown as PrismaClient`

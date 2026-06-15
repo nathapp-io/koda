@@ -73,7 +73,14 @@ describe('US-003: TicketsService.update() — status field', () => {
       providers: [
         TicketsService,
         { provide: PrismaService, useValue: mockPrismaService },
-        { provide: TRANSACTION_MANAGER, useValue: { transaction: jest.fn() } },
+        {
+          provide: TRANSACTION_MANAGER,
+          useValue: {
+            run: jest.fn((fn: () => Promise<unknown>) => fn()),
+            getClient: jest.fn(),
+            isInTransaction: jest.fn(() => false),
+          },
+        },
       ],
     }).compile();
 
