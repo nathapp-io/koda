@@ -69,7 +69,14 @@ describe('TicketsService — agent permissions', () => {
       providers: [
         TicketsService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: TRANSACTION_MANAGER, useValue: { transaction: jest.fn() } },
+        {
+          provide: TRANSACTION_MANAGER,
+          useValue: {
+            run: jest.fn((fn: () => Promise<unknown>) => fn()),
+            getClient: jest.fn(),
+            isInTransaction: jest.fn(() => false),
+          },
+        },
       ],
     }).compile();
 
