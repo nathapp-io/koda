@@ -11,8 +11,8 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../../src/app.module';
 import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
-import { execSync } from 'child_process';
 import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
+import { resetDb } from '../helpers/reset-db';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = DATABASE_URL ? describe : describe.skip;
@@ -32,14 +32,7 @@ describeIntegration('US-002: Empty Description Support', () => {
   beforeAll(async () => {
     if (!DATABASE_URL) return;
 
-    try {
-      execSync('bunx prisma db push --force-reset --skip-generate', {
-        stdio: 'inherit',
-        env: { ...process.env, DATABASE_URL },
-      });
-    } catch (error) {
-      // Database reset may fail if schema is already in sync
-    }
+    await resetDb();
 
     app = await AppFactory.create(AppModule);
     const combinedGuard = app.get(CombinedAuthGuard);

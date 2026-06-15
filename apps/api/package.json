@@ -108,6 +108,7 @@
     "maxWorkers": 1,
     "setupFilesAfterEnv": [
       "<rootDir>/../test-setup.ts"
-    ]
+    ],
+    "globalSetup": "<rootDir>/../test/global-setup.ts"
   }
 }
