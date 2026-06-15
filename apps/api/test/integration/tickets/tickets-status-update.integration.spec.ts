@@ -11,6 +11,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { TicketsService } from '../../../src/tickets/tickets.service';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.repository';
+import { TICKET_REPOSITORY } from '../../../src/tickets/domain/ticket.domain';
 import { UpdateTicketDto } from '../../../src/tickets/dto/update-ticket.dto';
 import { TicketStatus } from '../../../src/common/enums';
 import * as ticketTransitions from '../../../src/tickets/state-machine/ticket-transitions';
@@ -72,6 +74,8 @@ describe('US-003: TicketsService.update() — status field', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TicketsService,
+        PrismaTicketsRepository,
+        { provide: TICKET_REPOSITORY, useExisting: PrismaTicketsRepository },
         { provide: PrismaService, useValue: mockPrismaService },
         {
           provide: TRANSACTION_MANAGER,

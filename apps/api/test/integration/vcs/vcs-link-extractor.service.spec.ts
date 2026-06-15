@@ -28,6 +28,7 @@ jest.mock('../../../src/common/utils/encryption.util', () => ({
 
 // Import after mocks are set up
 import { VcsLinkExtractorService } from '../../../src/vcs/vcs-link-extractor.service';
+import { PrismaVcsRepository } from '../../../src/vcs/prisma-vcs.repository';
 
 // Test data
 const mockProject = {
@@ -160,7 +161,9 @@ describe('VcsLinkExtractorService', () => {
       },
     };
 
-    service = new VcsLinkExtractorService(mockPrismaService);
+    const mockTxManager = { run: jest.fn(), getClient: jest.fn(), isInTransaction: jest.fn(() => false) };
+    const repo = new PrismaVcsRepository(mockTxManager as any, mockPrismaService as any);
+    service = new VcsLinkExtractorService(repo);
   });
 
   afterEach(() => {

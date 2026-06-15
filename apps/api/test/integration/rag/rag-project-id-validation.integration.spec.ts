@@ -4,6 +4,7 @@ import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { RagService } from '../../../src/rag/rag.service';
 import { EmbeddingService } from '../../../src/rag/embedding.service';
+import { PrismaRagRepository } from '../../../src/rag/prisma-rag.repository';
 
 /**
  * Project ID Hard Enforcement Tests
@@ -75,6 +76,7 @@ describe('RagService — Project ID Hard Enforcement (projectIdValidation)', () 
             },
           },
         },
+        PrismaRagRepository,
       ],
     }).compile();
 

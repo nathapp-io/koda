@@ -22,6 +22,7 @@ import { ForbiddenAppException } from '@nathapp/nestjs-common';
 
 // This service doesn't exist yet - tests will fail initially (RED phase)
 import { KodaDomainWriter } from '../../../src/koda-domain-writer/koda-domain-writer.service';
+import { PrismaKodaDomainWriterRepository } from '../../../src/koda-domain-writer/prisma-koda-domain-writer.repository';
 import { RagService } from '../../../src/rag/rag.service';
 import { OutboxService } from '../../../src/outbox/outbox.service';
 import { AgentAuthProvider } from '../../../src/auth/agent-auth.provider';
@@ -132,6 +133,7 @@ describe('KodaDomainWriter Integration Tests', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         KodaDomainWriter,
+        PrismaKodaDomainWriterRepository,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: RagService, useValue: mockRagService },
         { provide: AgentsService, useValue: mockAgentsService },

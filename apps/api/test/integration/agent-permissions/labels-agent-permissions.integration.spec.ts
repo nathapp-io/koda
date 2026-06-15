@@ -8,6 +8,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { LabelsService } from '../../../src/labels/labels.service';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { PrismaLabelRepository } from '../../../src/labels/prisma-label.repository';
+import { LABEL_REPOSITORY } from '../../../src/labels/domain/label.domain';
 import { CreateLabelDto } from '../../../src/labels/dto/create-label.dto';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 
@@ -45,6 +47,8 @@ describe('LabelsService — agent permissions', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         LabelsService,
+        PrismaLabelRepository,
+        { provide: LABEL_REPOSITORY, useExisting: PrismaLabelRepository },
         { provide: PrismaService, useValue: mockPrisma },
         {
           provide: TRANSACTION_MANAGER,

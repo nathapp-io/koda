@@ -15,6 +15,7 @@ import { VcsSyncService } from '../../../src/vcs/vcs-sync.service';
 import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
 import { VCS_REPOSITORY } from '../../../src/vcs/domain/vcs.repository';
 import { VcsIssue } from '../../../src/vcs/types';
+import { ConfigService } from '@nestjs/config';
 
 describe('VcsPollingService PR Sync Integration (VCS-P3-002-C AC1)', () => {
   let pollingService: VcsPollingService;
@@ -112,6 +113,10 @@ describe('VcsPollingService PR Sync Integration (VCS-P3-002-C AC1)', () => {
           useValue: {
             client: mockClient,
           },
+        },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue('test-encryption-key') },
         },
         {
           provide: SchedulerRegistry,
