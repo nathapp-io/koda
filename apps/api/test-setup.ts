@@ -12,14 +12,30 @@ jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
 jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => {});
 jest.spyOn(Logger.prototype, 'verbose').mockImplementation(() => {});
 
-// @ts-ignore - expect is global in Jest test environment
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-if (typeof expect !== 'undefined' && (expect as any).extend) {
-  (expect as any).extend({
-    toBeLessThanOrEqual(received: any, expected: any) {
+// Jest asymmetric matchers (e.g. expect.objectContaining) expose an
+// `asymmetricMatch` method; we narrow to this shape rather than using `any`.
+interface AsymmetricMatcher {
+  asymmetricMatch(other: unknown): boolean;
+}
+
+function isAsymmetricMatcher(value: unknown): value is AsymmetricMatcher {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { asymmetricMatch?: unknown }).asymmetricMatch === 'function'
+  );
+}
+
+// `expect` is global only inside a Jest environment; guard so this setup file
+// stays import-safe elsewhere.
+if (typeof expect !== 'undefined' && typeof expect.extend === 'function') {
+  expect.extend({
+    toBeLessThanOrEqual(received: unknown, expected: unknown) {
       // Handle Date objects
-      const receivedValue = received instanceof Date ? received.getTime() : received;
-      const expectedValue = expected instanceof Date ? expected.getTime() : expected;
+      const receivedValue =
+        received instanceof Date ? received.getTime() : (received as number);
+      const expectedValue =
+        expected instanceof Date ? expected.getTime() : (expected as number);
 
       const pass = receivedValue <= expectedValue;
 
@@ -36,19 +52,14 @@ if (typeof expect !== 'undefined' && (expect as any).extend) {
   // Patch Array.prototype.includes to support asymmetric matchers for toContain
   const originalIncludes = Array.prototype.includes;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   Array.prototype.includes = function (
-    searchElement: any,
+    searchElement: unknown,
     fromIndex?: number
   ): boolean {
     // Check if searchElement is an asymmetric matcher (has asymmetricMatch method)
-    if (
-      searchElement &&
-      typeof searchElement === 'object' &&
-      typeof searchElement.asymmetricMatch === 'function'
-    ) {
+    if (isAsymmetricMatcher(searchElement)) {
       // Find if any element matches the asymmetric matcher
-      for (let i = (fromIndex || 0); i < this.length; i++) {
+      for (let i = fromIndex || 0; i < this.length; i++) {
         if (searchElement.asymmetricMatch(this[i])) {
           return true;
         }
