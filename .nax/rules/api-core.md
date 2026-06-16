@@ -21,7 +21,7 @@ priority: 50
 ## Quality Gates
 - `bun run --cwd apps/api lint`
 - `bun run --cwd apps/api type-check`
-- `cd apps/api && DATABASE_URL=file:./koda-test.db npx jest --forceExit test/e2e`
+- `cd apps/api && DATABASE_URL=file:./koda-test.ephemeral.db npx jest --forceExit test/e2e`
 
 ## Async Patterns
 - Use `Promise.all([...])` for independent async calls — do not chain sequential `await` when calls have no data dependency

@@ -162,7 +162,7 @@ Integration details:
 - they must NOT require a database: compile the module with `Test.createTestingModule({ imports: [FeatureModule] }).compile()` and mock external collaborators (`PrismaService`, `TRANSACTION_MANAGER`, `ConfigService`) via provider `useValue`
 - `test/integration/` is reserved for behavior that genuinely needs a real DB: repository round-trips, constraints, soft-delete semantics, transactions
 
-Rationale: `bun run test` runs without a database, so DI/module-registration breakage must surface there. `test:integration` requires a DB (`koda-test.db`) and is not always run, so module-wiring tests hidden inside it can mask failures.
+Rationale: `bun run test` runs without a database, so DI/module-registration breakage must surface there. `test:integration` requires a DB (`koda-test.ephemeral.db`) and is not always run, so module-wiring tests hidden inside it can mask failures.
 
 Useful scripts:
 - `bun run test`

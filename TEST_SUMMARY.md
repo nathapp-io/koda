@@ -158,10 +158,10 @@ under `bun run test` with no database, using `Test.createTestingModule({ imports
 ### Run all new tests:
 ```bash
 # E2E tests
-DATABASE_URL=file:./koda-test.db npx jest test/e2e/api-endpoint/endpoint.e2e.spec.ts
+DATABASE_URL=file:./koda-test.ephemeral.db npx jest test/e2e/api-endpoint/endpoint.e2e.spec.ts
 
 # Integration tests
-DATABASE_URL=file:./koda-test.db npx jest test/integration/code-intel/
+DATABASE_URL=file:./koda-test.ephemeral.db npx jest test/integration/code-intel/
 
 # Unit tests
 npx jest test/unit/code-intel/
@@ -171,7 +171,7 @@ npx jest test/unit/code-intel/
 ```bash
 npx jest test/unit/code-intel/impact-analysis.service.spec.ts
 npx jest test/unit/code-intel/codeintel.controller.spec.ts
-DATABASE_URL=file:./koda-test.db npx jest test/integration/code-intel/impact-analysis.service.integration.spec.ts
+DATABASE_URL=file:./koda-test.ephemeral.db npx jest test/integration/code-intel/impact-analysis.service.integration.spec.ts
 ```
 
 ## Test Philosophy

@@ -4,7 +4,7 @@
  * Validates that the Prisma schema exactly matches all acceptance criteria
  * for VcsConnection, VcsSyncLog, and extended Ticket/Project models.
  *
- * Run: DATABASE_URL=file:./koda-test.db npx jest test/integration/vcs/schema-validation.integration.spec.ts
+ * Run: DATABASE_URL=file:./koda-test.ephemeral.db npx jest test/integration/vcs/schema-validation.integration.spec.ts
  */
 
 import { PrismaClient } from '@prisma/client';

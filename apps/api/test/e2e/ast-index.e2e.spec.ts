@@ -8,7 +8,7 @@
  *   - Permission gating (ADMIN, DEVELOPER agent)
  *   - code_commit outbox event triggering
  *
- * Run:  DATABASE_URL=file:./koda-test.db bun run test:integration
+ * Run:  DATABASE_URL=file:./koda-test.ephemeral.db bun run test:integration
  */
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';

@@ -10,7 +10,7 @@
  * All responses are wrapped in JsonResponse.Ok({ ret: 0, data: T }).
  * Use `body(res)` helper to unwrap.
  *
- * Run:  DATABASE_URL=file:./koda-test.db bun run test:integration
+ * Run:  DATABASE_URL=file:./koda-test.ephemeral.db bun run test:integration
  * File: test/integration/api-e2e/api-e2e.integration.spec.ts
  */
 import { INestApplication } from '@nestjs/common';
