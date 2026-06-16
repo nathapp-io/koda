@@ -4,7 +4,7 @@
  * Validates that the Prisma schema exactly matches the Phase 1 contract
  * for OutboxEvent table with all required fields and indexes.
  *
- * Run: DATABASE_URL=file:./koda-test.db bun run test test/integration/outbox-event-schema/outbox-event-schema.validation.integration.spec.ts
+ * Run: DATABASE_URL=file:./koda-test.ephemeral.db bun run test test/integration/outbox-event-schema/outbox-event-schema.validation.integration.spec.ts
  */
 
 import { PrismaClient } from '@prisma/client';

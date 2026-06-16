@@ -4,7 +4,7 @@
  * Tests the ImpactAnalysisService.getChangeImpact() method in isolation.
  * Covers: symbol lookup, entity graph traversal, impact score calculation, provenance.
  *
- * Run: DATABASE_URL=file:./koda-test.db npx jest --forceExit test/integration/code-intel/impact-analysis.service.integration.spec.ts
+ * Run: DATABASE_URL=file:./koda-test.ephemeral.db npx jest --forceExit test/integration/code-intel/impact-analysis.service.integration.spec.ts
  */
 
 import { Test, TestingModule } from '@nestjs/testing';

@@ -4,7 +4,7 @@
  * Tests for GitHubProvider.getDefaultBranch() and GitHubProvider.createPullRequest() methods.
  * Verifies correct GitHub API calls with proper authentication and response mapping.
  *
- * Run: DATABASE_URL=file:./koda-test.db bun test test/integration/vcs/github-pr.integration.spec.ts
+ * Run: DATABASE_URL=file:./koda-test.ephemeral.db bun test test/integration/vcs/github-pr.integration.spec.ts
  */
 
 import { GitHubProvider } from '../../../src/vcs/providers/github.provider';

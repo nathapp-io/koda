@@ -17,7 +17,7 @@
     "lint:fix": "eslint \"{src,test}/**/*.ts\" --fix",
     "type-check": "tsc --noEmit",
     "test:unit": "jest --forceExit --passWithNoTests --testPathIgnorePatterns=integration",
-    "test:integration": "DATABASE_URL=file:./koda-test.db jest --forceExit --passWithNoTests --testPathPattern=integration",
+    "test:integration": "DATABASE_URL=file:./koda-test.ephemeral.db jest --forceExit --passWithNoTests --testPathPattern=integration",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:migrate:prod": "prisma migrate deploy",
@@ -109,6 +109,7 @@
     "setupFilesAfterEnv": [
       "<rootDir>/../test-setup.ts"
     ],
-    "globalSetup": "<rootDir>/../test/global-setup.ts"
+    "globalSetup": "<rootDir>/../test/global-setup.ts",
+    "globalTeardown": "<rootDir>/../test/global-teardown.ts"
   }
 }

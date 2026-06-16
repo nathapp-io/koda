@@ -4,7 +4,7 @@
  * Verifies that VcsConnection and VcsSyncLog models exist in the schema
  * and that Ticket/Project models have been properly extended with VCS fields.
  *
- * Run: DATABASE_URL=file:./koda-test.db npx jest test/integration/vcs/prisma-models.integration.spec.ts
+ * Run: DATABASE_URL=file:./koda-test.ephemeral.db npx jest test/integration/vcs/prisma-models.integration.spec.ts
  */
 
 import { PrismaClient } from '@prisma/client';
