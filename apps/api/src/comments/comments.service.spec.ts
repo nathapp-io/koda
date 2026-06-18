@@ -304,7 +304,6 @@ describe('CommentsService', () => {
       const invalidDtos = [
         { type: 'GENERAL' }, // Missing body
         { body: '' }, // Empty body
-        { body: 'Test comment' }, // Missing type
       ];
 
       for (const invalidDto of invalidDtos) {

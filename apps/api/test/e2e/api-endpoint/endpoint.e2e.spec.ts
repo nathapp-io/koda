@@ -423,8 +423,8 @@ describeIntegration('API Integration Tests', () => {
         .send({ body: 'Reproduced on iOS Safari.' })
         .expect(200);
 
-      const data = body<{ ticket: { status: string } }>(res);
-      expect(data.ticket.status).toBe('VERIFIED');
+      const data = body<{ status: string }>(res);
+      expect(data.status).toBe('VERIFIED');
     });
 
     it('POST .../start — VERIFIED → IN_PROGRESS', async () => {
@@ -433,8 +433,8 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(200);
 
-      const data = body<{ ticket: { status: string } }>(res);
-      expect(data.ticket.status).toBe('IN_PROGRESS');
+      const data = body<{ status: string }>(res);
+      expect(data.status).toBe('IN_PROGRESS');
     });
 
     it('POST .../fix — IN_PROGRESS → VERIFY_FIX (agent API key)', async () => {
@@ -444,8 +444,8 @@ describeIntegration('API Integration Tests', () => {
         .send({ body: 'Fixed null ref in auth.ts:42. PR #17 merged.' })
         .expect(200);
 
-      const data = body<{ ticket: { status: string } }>(res);
-      expect(data.ticket.status).toBe('VERIFY_FIX');
+      const data = body<{ status: string }>(res);
+      expect(data.status).toBe('VERIFY_FIX');
     });
 
     it('POST .../verify-fix?approve=true — VERIFY_FIX → CLOSED', async () => {
@@ -455,8 +455,8 @@ describeIntegration('API Integration Tests', () => {
         .send({ body: 'Confirmed fixed. All tests pass.' })
         .expect(200);
 
-      const data = body<{ ticket: { status: string } }>(res);
-      expect(data.ticket.status).toBe('CLOSED');
+      const data = body<{ status: string }>(res);
+      expect(data.status).toBe('CLOSED');
     });
   });
 
@@ -481,7 +481,7 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(200);
 
-      expect(body<{ ticket: { status: string } }>(res).ticket.status).toBe('IN_PROGRESS');
+      expect(body<{ status: string }>(res).status).toBe('IN_PROGRESS');
     });
   });
 
@@ -508,7 +508,7 @@ describeIntegration('API Integration Tests', () => {
         .send({ body: 'Out of scope for MVP.' })
         .expect(200);
 
-      expect(body<{ ticket: { status: string } }>(res).ticket.status).toBe('REJECTED');
+      expect(body<{ status: string }>(res).status).toBe('REJECTED');
     });
   });
 
@@ -811,13 +811,10 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('DELETE /api/projects/:slug — soft-deletes project', async () => {
-      const res = await request(httpServer)
+      await request(httpServer)
         .delete(`/api/projects/${deleteProjectSlug}`)
         .set('Authorization', `Bearer ${userAccessToken}`)
-        .expect(200);
-
-      const data = body<{ deletedAt: string | null }>(res);
-      expect(data.deletedAt).not.toBeNull();
+        .expect(204);
     });
 
     it('GET deleted project → 404', async () => {
@@ -1083,8 +1080,8 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(200);
 
-      const data = body<{ ticket: { status: string } }>(res);
-      expect(data.ticket.status).toBe('CLOSED');
+      const data = body<{ status: string }>(res);
+      expect(data.status).toBe('CLOSED');
     });
 
     it('GET closed ticket — status is CLOSED', async () => {

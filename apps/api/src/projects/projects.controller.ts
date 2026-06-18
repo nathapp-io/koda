@@ -83,6 +83,7 @@ export class ProjectsController {
 
   @Post()
   @HttpCode(201)
+  @RequiredPermission('ADMIN')
   @ApiOperation({ summary: 'Create a new project (admin only)' })
   @ApiResponse({ status: 201, description: 'Project created successfully' })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
@@ -128,14 +129,15 @@ export class ProjectsController {
   }
 
   @Delete(':slug')
+  @HttpCode(204)
+  @RequiredPermission('ADMIN')
   @ApiOperation({ summary: 'Soft delete a project (admin only)' })
-  @ApiResponse({ status: 200, description: 'Project soft deleted successfully' })
+  @ApiResponse({ status: 204, description: 'Project soft deleted successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  async remove(@Param('slug') slug: string) {
-    const data = await this.projectsService.softDelete(slug);
-    return JsonResponse.Ok(data);
+  async remove(@Param('slug') slug: string): Promise<void> {
+    await this.projectsService.softDelete(slug);
   }
 
   @Get(':slug/memory')

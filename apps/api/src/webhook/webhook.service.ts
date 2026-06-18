@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { CreateWebhookDto } from './webhook.dto';
 import { PrismaWebhookRepository } from './prisma-webhook.repository';
@@ -9,10 +10,11 @@ export class WebhookService {
   constructor(private readonly webhookRepo: PrismaWebhookRepository) {}
 
   async create(projectId: string, dto: CreateWebhookDto): Promise<WebhookDomain> {
+    const secret = dto.secret ?? randomBytes(20).toString('hex');
     return this.webhookRepo.createWebhook({
       projectId,
       url: dto.url,
-      secret: dto.secret,
+      secret,
       events: JSON.stringify(dto.events),
     });
   }

@@ -4,9 +4,10 @@ export class CreateWebhookDto {
   @IsUrl()
   url: string;
 
+  @IsOptional()
   @IsString()
   @MinLength(32, { message: '$t(common.validation.webhookSecretMinLength)' })
-  secret: string;
+  secret?: string;
 
   @IsArray()
   @IsString({ each: true })

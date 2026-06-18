@@ -23,7 +23,8 @@ export class AuthService {
   ) {}
 
   async register(registerDto: RegisterDto) {
-    const { email, name, password } = registerDto;
+    const { email, password } = registerDto;
+    const name = registerDto.name ?? email.split('@')[0];
 
     const passwordHash = await bcrypt.hash(password, 12);
 

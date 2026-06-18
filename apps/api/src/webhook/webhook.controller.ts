@@ -57,4 +57,14 @@ export class WebhookController {
   async remove(@Param('id') id: string) {
     await this.webhookService.remove(id);
   }
+
+  @Delete('projects/:slug/webhooks/:id')
+  @HttpCode(204)
+  @RequiredPermission('ADMIN')
+  @ApiOperation({ summary: 'Remove a webhook (project-scoped)' })
+  @ApiResponse({ status: 204, description: 'Webhook deleted' })
+  @ApiResponse({ status: 404, description: 'Webhook not found' })
+  async removeByProject(@Param('id') id: string) {
+    await this.webhookService.remove(id);
+  }
 }
