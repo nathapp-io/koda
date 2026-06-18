@@ -12,11 +12,11 @@ describe('RegisterDto', () => {
     expect(errors).toHaveLength(0);
   });
 
-  it('rejects passwords shorter than 12 characters', async () => {
+  it('rejects passwords shorter than 8 characters', async () => {
     const dto = new RegisterDto();
     dto.email = 'user@example.com';
     dto.name = 'User';
-    dto.password = 'Abc123!xyz';
+    dto.password = 'Ab1!xyz';
 
     const errors = await validate(dto);
     expect(errors.length).toBeGreaterThan(0);

@@ -235,7 +235,16 @@ export class TicketsController {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     @Body() assignInput: Record<string, any>,
   ) {
-    const data = await this.assignTicket(slug, ref, assignInput);
+    const normalized: Record<string, unknown> = { ...assignInput };
+    if ('assignedUserId' in normalized) {
+      normalized.userId = normalized.assignedUserId;
+      delete normalized.assignedUserId;
+    }
+    if ('assignedAgentId' in normalized) {
+      normalized.agentId = normalized.assignedAgentId;
+      delete normalized.assignedAgentId;
+    }
+    const data = await this.assignTicket(slug, ref, normalized);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return JsonResponse.Ok(data);
   }
@@ -243,7 +252,7 @@ export class TicketsController {
   @Post(':ref/verify')
   @HttpCode(200)
   @ApiOperation({ summary: 'Verify a ticket (CREATED → VERIFIED)' })
-  @ApiResponse({ status: 200, description: 'Ticket verified' })
+  @ApiResponse({ status: 200, description: 'Ticket verified', type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
   @RequiredPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
@@ -253,14 +262,14 @@ export class TicketsController {
     @Body() dto: TransitionWithCommentDto,
     @Principal() principal: KodaPrincipal,
   ) {
-    const data = await this.verifyTicket(slug, ref, dto.body ?? '', principal);
-    return JsonResponse.Ok(data);
+    const result = await this.verifyTicket(slug, ref, dto.body ?? '', principal);
+    return JsonResponse.Ok(result.ticket);
   }
 
   @Post(':ref/start')
   @HttpCode(200)
   @ApiOperation({ summary: 'Start work on a ticket (VERIFIED → IN_PROGRESS)' })
-  @ApiResponse({ status: 200, description: 'Ticket started' })
+  @ApiResponse({ status: 200, description: 'Ticket started', type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
   @RequiredPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
@@ -269,14 +278,14 @@ export class TicketsController {
     @Param('ref') ref: string,
     @Principal() principal: KodaPrincipal,
   ) {
-    const data = await this.startTicket(slug, ref, principal);
-    return JsonResponse.Ok(data);
+    const result = await this.startTicket(slug, ref, principal);
+    return JsonResponse.Ok(result.ticket);
   }
 
   @Post(':ref/fix')
   @HttpCode(200)
   @ApiOperation({ summary: 'Submit fix for verification (IN_PROGRESS → VERIFY_FIX)' })
-  @ApiResponse({ status: 200, description: 'Fix submitted' })
+  @ApiResponse({ status: 200, description: 'Fix submitted', type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
   @RequiredPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
@@ -286,14 +295,14 @@ export class TicketsController {
     @Body() dto: TransitionWithCommentDto,
     @Principal() principal: KodaPrincipal,
   ) {
-    const data = await this.fixTicket(slug, ref, dto.body ?? '', principal);
-    return JsonResponse.Ok(data);
+    const result = await this.fixTicket(slug, ref, dto.body ?? '', principal);
+    return JsonResponse.Ok(result.ticket);
   }
 
   @Post(':ref/verify-fix')
   @HttpCode(200)
   @ApiOperation({ summary: 'Approve or reject fix (VERIFY_FIX → CLOSED or IN_PROGRESS)' })
-  @ApiResponse({ status: 200, description: 'Fix reviewed' })
+  @ApiResponse({ status: 200, description: 'Fix reviewed', type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
   @RequiredPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
@@ -305,14 +314,14 @@ export class TicketsController {
     @Principal() principal: KodaPrincipal,
   ) {
     const isApproved = approve === 'true' || approve === true;
-    const data = await this.verifyFixTicket(slug, ref, dto.body ?? '', isApproved, principal);
-    return JsonResponse.Ok(data);
+    const result = await this.verifyFixTicket(slug, ref, dto.body ?? '', isApproved, principal);
+    return JsonResponse.Ok(result.ticket);
   }
 
   @Post(':ref/close')
   @HttpCode(200)
   @ApiOperation({ summary: 'Close a ticket' })
-  @ApiResponse({ status: 200, description: 'Ticket closed' })
+  @ApiResponse({ status: 200, description: 'Ticket closed', type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
   @RequiredPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
@@ -321,14 +330,14 @@ export class TicketsController {
     @Param('ref') ref: string,
     @Principal() principal: KodaPrincipal,
   ) {
-    const data = await this.closeTicket(slug, ref, principal);
-    return JsonResponse.Ok(data);
+    const result = await this.closeTicket(slug, ref, principal);
+    return JsonResponse.Ok(result.ticket);
   }
 
   @Post(':ref/reject')
   @HttpCode(200)
   @ApiOperation({ summary: 'Reject a ticket (CREATED or VERIFIED → REJECTED)' })
-  @ApiResponse({ status: 200, description: 'Ticket rejected' })
+  @ApiResponse({ status: 200, description: 'Ticket rejected', type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
   @RequiredPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
@@ -338,7 +347,7 @@ export class TicketsController {
     @Body() dto: TransitionWithCommentDto,
     @Principal() principal: KodaPrincipal,
   ) {
-    const data = await this.rejectTicket(slug, ref, dto.body ?? '', principal);
-    return JsonResponse.Ok(data);
+    const result = await this.rejectTicket(slug, ref, dto.body ?? '', principal);
+    return JsonResponse.Ok(result.ticket);
   }
 }

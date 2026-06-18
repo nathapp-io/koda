@@ -128,10 +128,14 @@ async function deleteDocument(sourceId: string) {
           <Input
             v-model="searchQuery"
             :placeholder="t('kb.search.placeholder')"
+            class="flex-1"
             @keyup.enter="handleSearch"
           />
           <Button :disabled="isSearching || !searchQuery.trim()" @click="handleSearch">
             {{ isSearching ? t('common.loading') : t('kb.search.button') }}
+          </Button>
+          <Button variant="outline" :disabled="optimizing" @click="optimizeKb">
+            {{ optimizing ? t('common.loading') : t('kb.documents.optimize') }}
           </Button>
         </div>
 

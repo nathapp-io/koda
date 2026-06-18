@@ -50,7 +50,7 @@ export class CommentsService {
       throw new ValidationAppException({}, 'comments');
     }
     if (!createCommentDto.type) {
-      throw new ValidationAppException({}, 'comments');
+      createCommentDto.type = CommentType.GENERAL;
     }
 
     const { ticket } = await this.resolveTicketByRef(projectSlug, ticketRef);
