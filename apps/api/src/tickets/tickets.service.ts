@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, Logger } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { CreateTicketDto } from './dto/create-ticket.dto';
@@ -8,8 +8,10 @@ import { TicketType, TicketStatus, Priority } from '../common/enums';
 import { validateTransition } from './state-machine/ticket-transitions';
 import { buildGitUrl } from '../common/utils/git-url.util';
 import { actorForeignKeys } from '../auth/principal/actor-foreign-keys';
-import { KodaPrincipal } from '../auth/principal/koda-principal.types';
+import { isUserPrincipal, KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { TICKET_REPOSITORY, ITicketRepository } from './domain/ticket.domain';
+import { TicketEventService } from '../events/ticket-event.service';
+import { OutboxService } from '../outbox/outbox.service';
 
 interface FindAllFilters {
   status?: TicketStatus;
@@ -28,10 +30,45 @@ interface AssignInput {
 
 @Injectable()
 export class TicketsService {
+  private readonly logger = new Logger(TicketsService.name);
+
   constructor(
     @Inject(TICKET_REPOSITORY) private readonly ticketRepo: ITicketRepository,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+    private readonly ticketEventService: TicketEventService,
+    private readonly outboxService: OutboxService,
   ) {}
+
+  private async emitTicketEvent(
+    ticketId: string,
+    projectId: string,
+    action: string,
+    principal: KodaPrincipal,
+    extra: Record<string, unknown> = {},
+  ): Promise<void> {
+    try {
+      const actorType = isUserPrincipal(principal) ? 'user' : 'agent';
+      const event = await this.ticketEventService.create({
+        ticketId,
+        projectId,
+        action,
+        actorId: principal.id,
+        actorType,
+        source: 'internal',
+        data: extra,
+      });
+      await this.outboxService.enqueue({
+        projectId,
+        eventType: 'ticket_event',
+        eventId: event.id,
+        payload: { ticketId, projectId, actorId: principal.id, data: extra },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Non-fatal: failed to emit TicketEvent after ${action} on ticket ${ticketId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 
   private computeGitRefUrl(
     gitRemoteUrl: string | null | undefined,
@@ -83,7 +120,14 @@ export class TicketsService {
       });
     });
 
-    return TicketResponseDto.from({ ...ticket, ref: `${project.key}-${ticket.number}` }, project.key);
+    const response = TicketResponseDto.from({ ...ticket, ref: `${project.key}-${ticket.number}` }, project.key);
+
+    void this.emitTicketEvent(ticket.id, project.id, 'TICKET_CREATED', principal, {
+      type: ticket.type,
+      title: ticket.title,
+    });
+
+    return response;
   }
 
   async findAll(projectSlug: string, filters: FindAllFilters) {
@@ -168,7 +212,7 @@ export class TicketsService {
     projectSlug: string,
     ref: string,
     updateTicketDto: UpdateTicketDto,
-    _principal: KodaPrincipal,
+    principal: KodaPrincipal,
   ) {
     const ticket = await this.findByRef(projectSlug, ref);
     if (!ticket) {
@@ -201,7 +245,13 @@ export class TicketsService {
       updated.gitRefFile,
       updated.gitRefLine,
     );
-    return TicketResponseDto.from(updated, project?.key, gitRefUrl);
+    const response = TicketResponseDto.from(updated, project?.key, gitRefUrl);
+
+    void this.emitTicketEvent(ticket.id, project?.id ?? '', 'TICKET_UPDATED', principal, {
+      ...updateData,
+    });
+
+    return response;
   }
 
   async softDelete(
@@ -223,7 +273,11 @@ export class TicketsService {
       updated.gitRefFile,
       updated.gitRefLine,
     );
-    return TicketResponseDto.from(updated, project?.key, gitRefUrl);
+    const response = TicketResponseDto.from(updated, project?.key, gitRefUrl);
+
+    void this.emitTicketEvent(ticket.id, project?.id ?? '', 'TICKET_DELETED', principal);
+
+    return response;
   }
 
   async assign(projectSlug: string, ref: string, assignInput: AssignInput) {
