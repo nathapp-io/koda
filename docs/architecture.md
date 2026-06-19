@@ -148,12 +148,23 @@ Key data-model rules reflected in code/docs:
 
 ## Module Relationships Inside API
 
-Key internal dependencies:
+Core modules:
+- `AuthModule` and `CombinedAuthGuard` provide shared security across controllers
 - `TicketsModule` imports `RagModule` and `WebhookModule`
 - `RagModule` selects an optimization strategy at runtime based on config
 - `WebhookModule` contains both CRUD and dispatch logic
 - `CiWebhookModule` handles inbound CI events that can update ticket state
-- `AuthModule` and `CombinedAuthGuard` provide shared security across controllers
+
+Memory and context modules (ADR-001):
+- `OutboxModule` — durable outbox; fan-out handlers for ticket_event / agent_event / graphify_import / code_commit
+- `KodaDomainWriterModule` — single canonical write gateway for agent-initiated ticket, agent, and decision events
+- `EventsModule` — TicketEvent / AgentEvent / DecisionEvent services and repositories
+- `MemoryModule` — semantic memory items, governance, extraction, timeline
+- `EntityGraphModule` — entity nodes/links; IncrementalGraphDiffService
+- `CodeIntelModule` — AstIndexService, ImpactAnalysisService, CodeCommitOutboxHandler; Symbol index
+- `ContextModule` — ContextBuilderService (shared agent context assembly); ContextController
+- `PolicyModule` — PolicyGateService with 6 gates (Isolation, Provenance, TruthConsistency, Write, GraphifyEnabled, TokenBudget)
+- `MonitoringModule` — SloDashboardService; MemoryQueryMetric
 
 This keeps business rules centralized in the API while still allowing feature modules to collaborate.
 
@@ -196,6 +207,71 @@ Strategy selection is config-driven:
 - `counter`
 - `cron`
 - `manual`
+
+As of Phase 2, RAG is extended by `HybridRetrieverService` which fuses vector, lexical, entity,
+and recency signals with intent-weighted scoring. Direct use of `RagService.searchKnowledgeBase()`
+is deprecated for agent context assembly in favour of `ContextBuilderService.getProjectContext()`.
+
+## Memory Architecture
+
+Koda implements a layered memory system defined in ADR-001 and detailed in `docs/adr/ADR-001-layered-memory-architecture.md`.
+
+### Canonical stores (source of truth)
+
+All of the following are Prisma-managed tables with `projectId` FK and `onDelete: Cascade`:
+
+| Table | Purpose |
+|-------|---------|
+| `TicketEvent` | Canonical record of every ticket state change |
+| `AgentEvent` | Canonical record of agent actions within a project |
+| `DecisionEvent` | Canonical record of agent approval/rejection decisions |
+| `OutboxEvent` | Durable outbox for fan-out to derived stores |
+
+### Derived stores (non-authoritative)
+
+| Table / Store | Purpose |
+|---------------|---------|
+| `MemoryItem` | Semantic memory items extracted from events |
+| `EntityNode` / `EntityLink` | Entity graph nodes and typed relationships |
+| `GraphNode` / `GraphLink` | Graphify-imported knowledge graph |
+| `Symbol` | AST-indexed code symbols for code-intel |
+| LanceDB (external) | Vector embeddings for hybrid retrieval |
+
+Derived stores can be rebuilt from canonical stores without loss of authoritative truth.
+
+### Write path
+
+```
+Client request
+  → Controller (validates slug → projectId)
+  → TicketsService / CommentsService / KodaDomainWriter
+  → Prisma (canonical write — must succeed)
+  → TicketEventService.create()     (non-fatal)
+  → OutboxService.enqueue()         (non-fatal)
+```
+
+The outbox processor (`OutboxProcessor`) runs on a schedule and fans out to:
+- `MemoryExtractionHandler` → `MemoryItem` upsert
+- `EntityGraphOutboxHandler` → entity graph update
+- `CodeCommitOutboxHandler` → `Symbol` index update
+
+### Context assembly
+
+`ContextBuilderService` (`src/context/`) provides the single shared context contract for all
+agents. It composes:
+1. Canonical state (tickets, agents, project metadata)
+2. Semantic memory (`MemoryItem`)
+3. Hybrid retrieval (`HybridRetrieverService` — vector + lexical + entity + recency fusion)
+4. Entity graph paths (`EntityGraphService`)
+5. Code-intel impact analysis (`ImpactAnalysisService`)
+
+`PolicyGateService` enforces six gates before context is returned: Isolation, Provenance,
+TruthConsistency, Write, GraphifyEnabled, TokenBudget.
+
+### Phase roadmap
+
+See `docs/specs/SPEC-0XX-memory-roadmap-overview.md` and the individual `SPEC-00N` files for
+the phased delivery plan (Phases 0–5).
 
 ## Integration Surfaces
 
