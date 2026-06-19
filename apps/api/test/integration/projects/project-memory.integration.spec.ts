@@ -4,6 +4,7 @@ import { ProjectsService } from '../../../src/projects/projects.service';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-item.repository';
 import { ImpactAnalysisService } from '../../../src/code-intel/impact-analysis.service';
+import { AgentsService } from '../../../src/agents/agents.service';
 // NOTE: ContextBuilderService was moved from src/memory/ to src/context/ (Task 4 refactor).
 // The production service now requires many more dependencies than the interim 2-param version
 // that these tests targeted. The ContextBuilderService-dependent test blocks below have been
@@ -55,6 +56,7 @@ describe('ProjectMemoryController', () => {
         { provide: PrismaMemoryItemRepository, useValue: mockMemoryItemRepository },
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: ImpactAnalysisService, useValue: { getChangeImpact: jest.fn() } },
+        { provide: AgentsService, useValue: { findAll: jest.fn(), findById: jest.fn(), findByProjectSlug: jest.fn(), create: jest.fn(), update: jest.fn(), softDelete: jest.fn(), assignToProject: jest.fn(), getProjectAgents: jest.fn() } },
       ],
     }).compile();
 

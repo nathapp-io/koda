@@ -17,6 +17,8 @@ import { UpdateTicketDto } from '../../../src/tickets/dto/update-ticket.dto';
 import { TicketStatus } from '../../../src/common/enums';
 import * as ticketTransitions from '../../../src/tickets/state-machine/ticket-transitions';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
+import { TicketEventService } from '../../../src/events/ticket-event.service';
+import { OutboxService } from '../../../src/outbox/outbox.service';
 
 describe('US-003: TicketsService.update() — status field', () => {
   let service: TicketsService;
@@ -85,6 +87,8 @@ describe('US-003: TicketsService.update() — status field', () => {
             isInTransaction: jest.fn(() => false),
           },
         },
+        { provide: TicketEventService, useValue: { create: jest.fn().mockResolvedValue({ id: 'evt-1' }) } },
+        { provide: OutboxService, useValue: { enqueue: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 
