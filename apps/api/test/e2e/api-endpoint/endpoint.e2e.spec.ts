@@ -1189,6 +1189,74 @@ describeIntegration('API Integration Tests', () => {
     });
 
   // ─────────────────────────────────────────────────────────────────
+  // 19b. Project-Scoped Agent Routes
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('19b. Project-Scoped Agent Routes', () => {
+    it('GET /api/projects/:slug/agents — 200 returns agents with assigned tickets', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/agents`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const data = body<{ id: string; slug: string; status: string }[]>(res);
+      expect(Array.isArray(data)).toBe(true);
+      // agentSlug was assigned a ticket in section 18; it must appear in the list
+      const found = data.find((a) => a.slug === agentSlug);
+      expect(found).toBeDefined();
+      expect(found?.status).toBeDefined();
+    });
+
+    it('GET /api/projects/:slug/agents — 401 without auth token', async () => {
+      await request(httpServer)
+        .get(`/api/projects/${projectSlug}/agents`)
+        .expect(401);
+    });
+
+    it('GET /api/projects/nonexistent/agents — 404 for unknown project slug', async () => {
+      await request(httpServer)
+        .get('/api/projects/no-such-project/agents')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(404);
+    });
+
+    it('PATCH /api/projects/:slug/agents/:agentSlug — 200 updates agent status', async () => {
+      const res = await request(httpServer)
+        .patch(`/api/projects/${projectSlug}/agents/${agentSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ status: 'PAUSED' })
+        .expect(200);
+
+      const data = body<{ slug: string; status: string }>(res);
+      expect(data.slug).toBe(agentSlug);
+      expect(data.status).toBe('PAUSED');
+
+      // Restore to ACTIVE so downstream tests are not affected
+      await request(httpServer)
+        .patch(`/api/projects/${projectSlug}/agents/${agentSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ status: 'ACTIVE' })
+        .expect(200);
+    });
+
+    it('PATCH /api/projects/:slug/agents/nonexistent — 404 for unknown agent slug', async () => {
+      await request(httpServer)
+        .patch(`/api/projects/${projectSlug}/agents/no-such-agent`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ status: 'PAUSED' })
+        .expect(404);
+    });
+
+    it('PATCH /api/projects/:slug/agents/:agentSlug — 403 for non-member user', async () => {
+      await request(httpServer)
+        .patch(`/api/projects/${projectSlug}/agents/${agentSlug}`)
+        .set('Authorization', `Bearer ${nonAdminUserAccessToken}`)
+        .send({ status: 'PAUSED' })
+        .expect(403);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
   // 18. Ticket Links
   // ─────────────────────────────────────────────────────────────────
 
