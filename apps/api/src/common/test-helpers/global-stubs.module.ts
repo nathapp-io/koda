@@ -31,6 +31,9 @@ export const mockCacheManager = {
 @Global()
 @Module({
   imports: [
+    // ConfigModule.forRoot is required here (not a lightweight mock) because
+    // ProjectsModule → AgentsModule → NathappAuthModule.forRootAsync requires a
+    // real ConfigService that can resolve the JWT config object structure.
     ConfigModule.forRoot({
       isGlobal: true,
       load: [authConfig],

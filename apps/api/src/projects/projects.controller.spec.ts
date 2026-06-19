@@ -5,7 +5,7 @@ import { ProjectsService } from './projects.service';
 import { PrismaMemoryItemRepository } from '../memory/prisma-memory-item.repository';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
 import { AgentsService } from '../agents/agents.service';
-import { ForbiddenAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
@@ -383,6 +383,7 @@ describe('ProjectsController', () => {
 
     it('updates agent status for admin principal', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
+      agentsService.findByProject.mockResolvedValue([mockUpdatedAgent] as any);
       agentsService.update.mockResolvedValue(mockUpdatedAgent as any);
 
       const result = await controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, adminPrincipal);
@@ -395,6 +396,7 @@ describe('ProjectsController', () => {
     it('updates agent status for project member', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
       mockProjectMemberFindUnique.mockResolvedValue({ role: 'DEVELOPER' });
+      agentsService.findByProject.mockResolvedValue([mockUpdatedAgent] as any);
       agentsService.update.mockResolvedValue(mockUpdatedAgent as any);
 
       const result = await controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, memberPrincipal);
@@ -409,6 +411,16 @@ describe('ProjectsController', () => {
       await expect(
         controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, memberPrincipal),
       ).rejects.toThrow(ForbiddenAppException);
+    });
+
+    it('throws NotFoundAppException when agent is not in the project', async () => {
+      projectsService.findBySlug.mockResolvedValue(mockProject as any);
+      mockProjectMemberFindUnique.mockResolvedValue({ role: 'DEVELOPER' });
+      agentsService.findByProject.mockResolvedValue([]);
+
+      await expect(
+        controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, memberPrincipal),
+      ).rejects.toThrow(NotFoundAppException);
     });
   });
 });

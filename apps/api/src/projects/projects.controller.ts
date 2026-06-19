@@ -24,7 +24,7 @@ import {
 } from '@nestjs/swagger';
 import { PrismaMemoryItemRepository } from '../memory/prisma-memory-item.repository';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { ForbiddenAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
 import { ActorRole } from '../common/enums';
@@ -257,6 +257,10 @@ export class ProjectsController {
   ) {
     const project = await this.projectsService.findBySlug(slug);
     await this.checkProjectMembership(project.id, principal);
+    const projectAgents = await this.agentsService.findByProject(slug);
+    if (!projectAgents.some((a) => a.slug === agentSlug)) {
+      throw new NotFoundAppException({}, 'agents');
+    }
     const data = await this.agentsService.update(agentSlug, updateDto);
     return JsonResponse.Ok(data);
   }
