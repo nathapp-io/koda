@@ -85,6 +85,24 @@ describe('KodaDomainWriter Unit Tests', () => {
       await expect(service.writeTicketEvent(invalidData)).rejects.toThrow();
     });
 
+    describe('project guard', () => {
+      it('should throw ForbiddenAppException when project does not exist', async () => {
+        mockWriterRepo.findProjectById.mockResolvedValue(null);
+
+        const data = {
+          ticketId: 'ticket-001',
+          projectId: 'nonexistent-project',
+          action: 'TICKET_CREATED',
+          actorId: 'agent-001',
+          actorType: 'agent' as const,
+          source: 'api' as const,
+          data: {},
+        };
+
+        await expect(service.writeTicketEvent(data)).rejects.toBeInstanceOf(ForbiddenAppException);
+      });
+    });
+
     it('should validate project exists', async () => {
       const data = {
         ticketId: 'ticket-001',
@@ -161,6 +179,23 @@ describe('KodaDomainWriter Unit Tests', () => {
       };
 
       await expect(service.writeAgentAction(invalidData)).rejects.toThrow();
+    });
+
+    describe('project guard', () => {
+      it('should throw ForbiddenAppException when project does not exist', async () => {
+        mockWriterRepo.findProjectById.mockResolvedValue(null);
+
+        const data = {
+          agentId: 'agent-001',
+          projectId: 'nonexistent-project',
+          action: 'DIAGNOSE',
+          actorId: 'agent-001',
+          source: 'api' as const,
+          data: {},
+        };
+
+        await expect(service.writeAgentAction(data)).rejects.toBeInstanceOf(ForbiddenAppException);
+      });
     });
 
     it('should validate project exists', async () => {
@@ -331,6 +366,7 @@ describe('KodaDomainWriter Unit Tests', () => {
         data: {},
       };
 
+      mockWriterRepo.findProjectById.mockResolvedValue({ id: 'proj-123', deletedAt: null });
       mockTicketEventService.create.mockResolvedValue({
         id: 'event-123',
         ticketId: data.ticketId,
@@ -372,6 +408,7 @@ describe('KodaDomainWriter Unit Tests', () => {
         data: {},
       };
 
+      mockWriterRepo.findProjectById.mockResolvedValue({ id: 'proj-123', deletedAt: null });
       mockAgentEventService.create.mockResolvedValue({
         id: 'event-123',
         agentId: data.agentId,
@@ -413,6 +450,7 @@ describe('KodaDomainWriter Unit Tests', () => {
         timestamp: new Date(),
       };
 
+      mockWriterRepo.findProjectById.mockResolvedValue({ id: 'proj-123', deletedAt: null });
       mockTicketEventService.create.mockResolvedValue({
         id: 'event-index-001',
         ticketId: 'ticket-001',
@@ -475,6 +513,7 @@ describe('KodaDomainWriter Unit Tests', () => {
         data: {},
       };
 
+      mockWriterRepo.findProjectById.mockResolvedValue({ id: 'proj-123', deletedAt: null });
       const dbError = new Error('Database connection failed');
       mockTicketEventService.create.mockRejectedValue(dbError);
 
@@ -492,6 +531,7 @@ describe('KodaDomainWriter Unit Tests', () => {
         timestamp: new Date(),
       };
 
+      mockWriterRepo.findProjectById.mockResolvedValue({ id: 'proj-123', deletedAt: null });
       mockTicketEventService.create.mockResolvedValue({
         id: 'event-index-001',
         ticketId: 'ticket-001',

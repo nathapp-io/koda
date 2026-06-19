@@ -84,6 +84,8 @@ export class KodaDomainWriter {
     this.assertNonEmpty(data.action, 'action');
     this.assertNonEmpty(data.actorId, 'actorId');
 
+    await this.assertProjectExists(data.projectId);
+
     const payloadRole = this.roleFromEventPayload(data.data ?? {});
     const projectRoles = data.actorType === 'agent'
       ? await this.agentAuthProvider.loadAgentRoles(data.actorId)
@@ -119,6 +121,8 @@ export class KodaDomainWriter {
   async writeAgentAction(data: WriteAgentActionInput): Promise<WriteResult> {
     this.assertNonEmpty(data.projectId, 'projectId');
     this.assertNonEmpty(data.agentId, 'agentId');
+
+    await this.assertProjectExists(data.projectId);
 
     const actor = {
       actorType: 'agent' as const,
