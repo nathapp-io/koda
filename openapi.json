@@ -1152,12 +1152,12 @@
         ]
       }
     },
-    "/api/context/{projectId}": {
+    "/api/context/{slug}": {
       "get": {
         "operationId": "ContextController_getContext",
         "parameters": [
           {
-            "name": "projectId",
+            "name": "slug",
             "required": true,
             "in": "path",
             "schema": {
@@ -1190,12 +1190,12 @@
         ]
       }
     },
-    "/api/context/{projectId}/query": {
+    "/api/context/{slug}/query": {
       "post": {
         "operationId": "ContextController_queryContext",
         "parameters": [
           {
-            "name": "projectId",
+            "name": "slug",
             "required": true,
             "in": "path",
             "schema": {
