@@ -18,6 +18,9 @@ import { webhookCommand } from './commands/webhook';
 import { contextCommand } from './commands/context';
 import { memoryCommand } from './commands/memory';
 import { codeIntelCommand } from './commands/code-intel';
+import { authCommand } from './commands/auth';
+import { adminCommand } from './commands/admin';
+import { ciWebhookCommand } from './commands/ci-webhook';
 
 // Read package.json to get version
 let version = '0.1.0';
@@ -177,6 +180,15 @@ memoryCommand(program);
 
 // Code-intel command
 codeIntelCommand(program);
+
+// Auth command
+authCommand(program);
+
+// Admin command
+adminCommand(program);
+
+// CI webhook command
+ciWebhookCommand(program);
 
 // Global error handling for uncaught exceptions
 process.on('uncaughtException', (error: Error) => {
