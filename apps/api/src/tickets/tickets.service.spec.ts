@@ -738,6 +738,66 @@ describe('TicketsService', () => {
       expect(result).toBeDefined();
       expect(result.id).toBe('ticket-1');
     });
+
+    it('emits TicketEvent after update', async () => {
+      const updatedTicket = { ...fakeTicket, title: 'Updated' };
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(fakeProject);
+      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(fakeTicket);
+      mockTicketRepo.updateTicket.mockResolvedValue(updatedTicket);
+
+      await service.update('test-project', 'TST-1', { title: 'Updated' }, fakeUserPrincipal as any);
+
+      // Allow the fire-and-forget void promise to resolve
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(mockTicketEventService.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ticketId: fakeTicket.id,
+          projectId: fakeProject.id,
+          action: 'TICKET_UPDATED',
+          actorId: fakeUserPrincipal.id,
+          actorType: 'user',
+          source: 'internal',
+        }),
+      );
+      expect(mockOutboxService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: fakeProject.id,
+          eventType: 'ticket_event',
+          eventId: 'evt-1',
+        }),
+      );
+    });
+
+    it('emits TicketEvent after softDelete', async () => {
+      const deletedTicket = { ...fakeTicket, deletedAt: new Date() };
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(fakeProject);
+      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(fakeTicket);
+      mockTicketRepo.softDeleteTicket.mockResolvedValue(deletedTicket);
+
+      await service.softDelete('test-project', 'TST-1', fakeUserPrincipal as any);
+
+      // Allow the fire-and-forget void promise to resolve
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(mockTicketEventService.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ticketId: fakeTicket.id,
+          projectId: fakeProject.id,
+          action: 'TICKET_DELETED',
+          actorId: fakeUserPrincipal.id,
+          actorType: 'user',
+          source: 'internal',
+        }),
+      );
+      expect(mockOutboxService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: fakeProject.id,
+          eventType: 'ticket_event',
+          eventId: 'evt-1',
+        }),
+      );
+    });
   });
 
   describe('assign', () => {

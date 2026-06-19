@@ -247,9 +247,11 @@ export class TicketsService {
     );
     const response = TicketResponseDto.from(updated, project?.key, gitRefUrl);
 
-    void this.emitTicketEvent(ticket.id, project?.id ?? '', 'TICKET_UPDATED', principal, {
-      ...updateData,
-    });
+    if (project?.id) {
+      void this.emitTicketEvent(ticket.id, project.id, 'TICKET_UPDATED', principal, {
+        ...updateData,
+      });
+    }
 
     return response;
   }
@@ -275,7 +277,9 @@ export class TicketsService {
     );
     const response = TicketResponseDto.from(updated, project?.key, gitRefUrl);
 
-    void this.emitTicketEvent(ticket.id, project?.id ?? '', 'TICKET_DELETED', principal);
+    if (project?.id) {
+      void this.emitTicketEvent(ticket.id, project.id, 'TICKET_DELETED', principal);
+    }
 
     return response;
   }
