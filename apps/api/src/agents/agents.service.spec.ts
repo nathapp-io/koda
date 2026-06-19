@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AgentsService, CreateAgentDto as _CreateAgentDto } from './agents.service';
 import { PrismaAgentRepository } from './prisma-agent.repository';
 import { ConfigService } from '@nestjs/config';
-import { ValidationAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { createHmac } from 'crypto';
 import { randomBytes } from 'crypto';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
@@ -70,6 +70,7 @@ describe('AgentsService', () => {
     replaceCapabilities: jest.fn(),
     findProjectBySlug: jest.fn(),
     findVerifiedUnassignedTickets: jest.fn(),
+    findByProjectSlug: jest.fn(),
   };
 
   const mockConfigService = {
@@ -779,6 +780,40 @@ describe('AgentsService', () => {
       expect(safeResult.ticket.id).toBe('unassigned-ticket');
       // Verify the repo was called with the project id
       expect(agentRepo.findVerifiedUnassignedTickets).toHaveBeenCalledWith('project-1');
+    });
+  });
+
+  describe('findByProject', () => {
+    it('returns agents derived from project tickets', async () => {
+      const mockRepoResult = {
+        project: { id: 'proj-1', slug: 'alpha' },
+        agents: [
+          {
+            id: 'agent-1',
+            name: 'Bot',
+            slug: 'bot',
+            status: 'ACTIVE',
+            maxConcurrentTickets: 3,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            roles: [{ id: 'r1', agentId: 'agent-1', role: 'DEVELOPER' }],
+            capabilities: [{ id: 'c1', agentId: 'agent-1', capability: 'typescript' }],
+          },
+        ],
+      };
+      mockAgentRepo.findByProjectSlug.mockResolvedValue(mockRepoResult);
+
+      const result = await service.findByProject('alpha');
+
+      expect(mockAgentRepo.findByProjectSlug).toHaveBeenCalledWith('alpha');
+      expect(result).toHaveLength(1);
+      expect(result[0].slug).toBe('bot');
+    });
+
+    it('throws NotFoundAppException when project does not exist', async () => {
+      mockAgentRepo.findByProjectSlug.mockResolvedValue(null);
+
+      await expect(service.findByProject('nonexistent')).rejects.toThrow(NotFoundAppException);
     });
   });
 

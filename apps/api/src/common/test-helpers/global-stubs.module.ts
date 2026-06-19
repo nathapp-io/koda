@@ -1,8 +1,11 @@
 import { Global, Module } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { CacheManager } from '@nathapp/nestjs-cache';
 import { PrismaProjectRepository } from '../../projects/prisma-project.repository';
+import { AgentsService } from '../../agents/agents.service';
+import { authConfig } from '../../config/auth.config';
 
 export const mockPrismaService = {
   client: {},
@@ -14,18 +17,36 @@ export const mockTransactionManager: ITransactionManager = {
   isInTransaction: () => false,
 };
 
-export const mockConfigService = {
-  get: <T = unknown>(key?: string): T | undefined => key as unknown as T,
-} as unknown as ConfigService;
+export const mockAgentsService = {
+  findByProject: async () => [],
+  update: async () => undefined,
+} as unknown as AgentsService;
+
+export const mockCacheManager = {
+  get: async () => undefined,
+  set: async () => undefined,
+  del: async () => undefined,
+} as unknown as CacheManager;
 
 @Global()
 @Module({
+  imports: [
+    // ConfigModule.forRoot is required here (not a lightweight mock) because
+    // ProjectsModule → AgentsModule → NathappAuthModule.forRootAsync requires a
+    // real ConfigService that can resolve the JWT config object structure.
+    ConfigModule.forRoot({
+      isGlobal: true,
+      load: [authConfig],
+      envFilePath: ['.env.test'],
+    }),
+  ],
   providers: [
     { provide: PrismaService, useValue: mockPrismaService },
     { provide: TRANSACTION_MANAGER, useValue: mockTransactionManager },
-    { provide: ConfigService, useValue: mockConfigService },
     PrismaProjectRepository,
+    { provide: AgentsService, useValue: mockAgentsService },
+    { provide: CacheManager, useValue: mockCacheManager },
   ],
-  exports: [PrismaService, TRANSACTION_MANAGER, ConfigService, PrismaProjectRepository],
+  exports: [PrismaService, TRANSACTION_MANAGER, ConfigModule, PrismaProjectRepository, AgentsService, CacheManager],
 })
 export class GlobalStubsModule {}

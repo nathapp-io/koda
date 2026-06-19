@@ -1610,6 +1610,100 @@
         ]
       }
     },
+    "/api/projects/{slug}/agents": {
+      "get": {
+        "operationId": "ProjectsController_getProjectAgents",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agents retrieved successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - no project access"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List agents active in a project (derived from assigned tickets)",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/projects/{slug}/agents/{agentSlug}": {
+      "patch": {
+        "operationId": "ProjectsController_updateProjectAgent",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "agentSlug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAgentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Agent updated successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - no project access"
+          },
+          "404": {
+            "description": "Project or agent not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update an agent status within a project context (admin or project member)",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
     "/api/projects/{slug}/tickets": {
       "post": {
         "operationId": "TicketsController_create",

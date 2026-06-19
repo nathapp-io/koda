@@ -4,7 +4,8 @@ import { ProjectsController } from './projects.controller';
 import { ProjectsService } from './projects.service';
 import { PrismaMemoryItemRepository } from '../memory/prisma-memory-item.repository';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
-import { ForbiddenAppException } from '@nathapp/nestjs-common';
+import { AgentsService } from '../agents/agents.service';
+import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
@@ -67,6 +68,7 @@ describe('ProjectsController', () => {
   let projectsService: jest.Mocked<ProjectsService>;
   let memoryItemRepository: jest.Mocked<PrismaMemoryItemRepository>;
   let impactAnalysisService: jest.Mocked<ImpactAnalysisService>;
+  let agentsService: jest.Mocked<AgentsService>;
 
   const mockProjectMemberFindUnique = jest.fn();
   const mockPrismaClient = {
@@ -91,6 +93,11 @@ describe('ProjectsController', () => {
       getChangeImpact: jest.fn(),
     } as unknown as jest.Mocked<ImpactAnalysisService>;
 
+    agentsService = {
+      findByProject: jest.fn(),
+      update: jest.fn(),
+    } as unknown as jest.Mocked<AgentsService>;
+
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ProjectsController],
       providers: [
@@ -98,6 +105,7 @@ describe('ProjectsController', () => {
         { provide: PrismaMemoryItemRepository, useValue: memoryItemRepository },
         { provide: ImpactAnalysisService, useValue: impactAnalysisService },
         { provide: PrismaService, useValue: mockPrismaService },
+        { provide: AgentsService, useValue: agentsService },
       ],
     }).compile();
 
@@ -302,6 +310,117 @@ describe('ProjectsController', () => {
       await expect(
         controller.getChangeImpact('alpha', 'repo-1', 'abc', 'file.ts', memberPrincipal),
       ).rejects.toThrow(ForbiddenAppException);
+    });
+  });
+
+  describe('getProjectAgents', () => {
+    const mockAgent = {
+      id: 'agent-1',
+      name: 'Bot',
+      slug: 'bot',
+      status: 'ACTIVE',
+      maxConcurrentTickets: 3,
+      roles: [],
+      capabilities: [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    it('returns agents for a project (admin bypasses membership check)', async () => {
+      projectsService.findBySlug.mockResolvedValue(mockProject as any);
+      agentsService.findByProject.mockResolvedValue([mockAgent] as any);
+
+      const result = await controller.getProjectAgents('alpha', adminPrincipal);
+
+      expect(projectsService.findBySlug).toHaveBeenCalledWith('alpha');
+      expect(agentsService.findByProject).toHaveBeenCalledWith('alpha');
+      expect((result as any).data).toHaveLength(1);
+      expect((result as any).data[0].slug).toBe('bot');
+    });
+
+    it('returns agents for a project member', async () => {
+      projectsService.findBySlug.mockResolvedValue(mockProject as any);
+      mockProjectMemberFindUnique.mockResolvedValue({ role: 'DEVELOPER' });
+      agentsService.findByProject.mockResolvedValue([mockAgent] as any);
+
+      const result = await controller.getProjectAgents('alpha', memberPrincipal);
+
+      expect((result as any).data).toHaveLength(1);
+    });
+
+    it('throws ForbiddenAppException for non-member', async () => {
+      projectsService.findBySlug.mockResolvedValue(mockProject as any);
+      mockProjectMemberFindUnique.mockResolvedValue(null);
+
+      await expect(
+        controller.getProjectAgents('alpha', memberPrincipal),
+      ).rejects.toThrow(ForbiddenAppException);
+    });
+
+    it('allows agent principals without membership check', async () => {
+      projectsService.findBySlug.mockResolvedValue(mockProject as any);
+      agentsService.findByProject.mockResolvedValue([mockAgent] as any);
+
+      const result = await controller.getProjectAgents('alpha', agentPrincipal);
+
+      expect(mockProjectMemberFindUnique).not.toHaveBeenCalled();
+      expect((result as any).data).toHaveLength(1);
+    });
+  });
+
+  describe('updateProjectAgent', () => {
+    const mockUpdatedAgent = {
+      id: 'agent-1',
+      name: 'Bot',
+      slug: 'bot',
+      status: 'PAUSED',
+      maxConcurrentTickets: 3,
+      roles: [],
+      capabilities: [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    it('updates agent status for admin principal', async () => {
+      projectsService.findBySlug.mockResolvedValue(mockProject as any);
+      agentsService.findByProject.mockResolvedValue([mockUpdatedAgent] as any);
+      agentsService.update.mockResolvedValue(mockUpdatedAgent as any);
+
+      const result = await controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, adminPrincipal);
+
+      expect(projectsService.findBySlug).toHaveBeenCalledWith('alpha');
+      expect(agentsService.update).toHaveBeenCalledWith('bot', { status: 'PAUSED' });
+      expect((result as any).data.status).toBe('PAUSED');
+    });
+
+    it('updates agent status for project member', async () => {
+      projectsService.findBySlug.mockResolvedValue(mockProject as any);
+      mockProjectMemberFindUnique.mockResolvedValue({ role: 'DEVELOPER' });
+      agentsService.findByProject.mockResolvedValue([mockUpdatedAgent] as any);
+      agentsService.update.mockResolvedValue(mockUpdatedAgent as any);
+
+      const result = await controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, memberPrincipal);
+
+      expect((result as any).data.status).toBe('PAUSED');
+    });
+
+    it('throws ForbiddenAppException for non-member', async () => {
+      projectsService.findBySlug.mockResolvedValue(mockProject as any);
+      mockProjectMemberFindUnique.mockResolvedValue(null);
+
+      await expect(
+        controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, memberPrincipal),
+      ).rejects.toThrow(ForbiddenAppException);
+    });
+
+    it('throws NotFoundAppException when agent is not in the project', async () => {
+      projectsService.findBySlug.mockResolvedValue(mockProject as any);
+      mockProjectMemberFindUnique.mockResolvedValue({ role: 'DEVELOPER' });
+      agentsService.findByProject.mockResolvedValue([]);
+
+      await expect(
+        controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, memberPrincipal),
+      ).rejects.toThrow(NotFoundAppException);
     });
   });
 });

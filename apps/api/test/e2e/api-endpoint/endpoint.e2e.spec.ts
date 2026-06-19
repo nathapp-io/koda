@@ -1187,6 +1187,98 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(404);
     });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // 19b. Project-Scoped Agent Routes
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('19b. Project-Scoped Agent Routes', () => {
+    beforeAll(async () => {
+      // The assign endpoint requires the agent's Prisma ID, not slug.
+      // Fetch it first, then create and assign a ticket so agentSlug appears in the project agents list.
+      const agentRes = await request(httpServer)
+        .get(`/api/agents/${agentSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+      const agentId = body<{ id: string }>(agentRes).id;
+
+      const ticketRes = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ type: 'BUG', title: '19b assignment target', priority: 'LOW' })
+        .expect(201);
+      const ticketRef = body<{ ref: string }>(ticketRes).ref;
+
+      await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets/${ticketRef}/assign`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ agentId })
+        .expect(200);
+    });
+
+    it('GET /api/projects/:slug/agents — 200 returns agents with assigned tickets', async () => {
+      const res = await request(httpServer)
+        .get(`/api/projects/${projectSlug}/agents`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+
+      const data = body<{ id: string; slug: string; status: string }[]>(res);
+      expect(Array.isArray(data)).toBe(true);
+      // agentSlug has an assigned ticket (set up in beforeAll); it must appear in the list
+      const found = data.find((a) => a.slug === agentSlug);
+      expect(found).toBeDefined();
+      expect(found?.status).toBeDefined();
+    });
+
+    it('GET /api/projects/:slug/agents — 401 without auth token', async () => {
+      await request(httpServer)
+        .get(`/api/projects/${projectSlug}/agents`)
+        .expect(401);
+    });
+
+    it('GET /api/projects/nonexistent/agents — 404 for unknown project slug', async () => {
+      await request(httpServer)
+        .get('/api/projects/no-such-project/agents')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(404);
+    });
+
+    it('PATCH /api/projects/:slug/agents/:agentSlug — 200 updates agent status', async () => {
+      const res = await request(httpServer)
+        .patch(`/api/projects/${projectSlug}/agents/${agentSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ status: 'PAUSED' })
+        .expect(200);
+
+      const data = body<{ slug: string; status: string }>(res);
+      expect(data.slug).toBe(agentSlug);
+      expect(data.status).toBe('PAUSED');
+
+      // Restore to ACTIVE so downstream tests are not affected
+      await request(httpServer)
+        .patch(`/api/projects/${projectSlug}/agents/${agentSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ status: 'ACTIVE' })
+        .expect(200);
+    });
+
+    it('PATCH /api/projects/:slug/agents/nonexistent — 404 for unknown agent slug', async () => {
+      await request(httpServer)
+        .patch(`/api/projects/${projectSlug}/agents/no-such-agent`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ status: 'PAUSED' })
+        .expect(404);
+    });
+
+    it('PATCH /api/projects/:slug/agents/:agentSlug — 403 for non-member user', async () => {
+      await request(httpServer)
+        .patch(`/api/projects/${projectSlug}/agents/${agentSlug}`)
+        .set('Authorization', `Bearer ${nonAdminUserAccessToken}`)
+        .send({ status: 'PAUSED' })
+        .expect(403);
+    });
+  });
 
   // ─────────────────────────────────────────────────────────────────
   // 18. Ticket Links
@@ -1392,34 +1484,33 @@ describeIntegration('API Integration Tests', () => {
     });
   });
 
-    it('GET /api/agents/:slug/pickup — returns null data when no VERIFIED unassigned tickets remain', async () => {
-      // Create an agent with no matching tickets in a non-existent project
-      // Use a project slug that does not exist to get a null result
-      // (project not found should still return null gracefully, or 404 for project)
-      // We test the null path by using a fresh agent with no VERIFIED tickets
-      const freshAgentRes = await request(httpServer)
-        .post('/api/agents')
-        .set('Authorization', `Bearer ${userAccessToken}`)
-        .send({ name: 'Pickup Empty Agent', slug: 'pickup-empty-agent', roles: ['DEVELOPER'] })
-        .expect(201);
+  it('GET /api/agents/:slug/pickup — returns null data when no VERIFIED unassigned tickets remain', async () => {
+    // Create an agent with no matching tickets in a non-existent project
+    // Use a project slug that does not exist to get a null result
+    // (project not found should still return null gracefully, or 404 for project)
+    // We test the null path by using a fresh agent with no VERIFIED tickets
+    const freshAgentRes = await request(httpServer)
+      .post('/api/agents')
+      .set('Authorization', `Bearer ${userAccessToken}`)
+      .send({ name: 'Pickup Empty Agent', slug: 'pickup-empty-agent', roles: ['DEVELOPER'] })
+      .expect(201);
 
-      const freshAgentSlug = body<{ agent: { slug: string } }>(freshAgentRes).agent.slug;
+    const freshAgentSlug = body<{ agent: { slug: string } }>(freshAgentRes).agent.slug;
 
-      // Use a project that has no VERIFIED unassigned tickets for this new agent
-      // The simplest way: use a non-existent project slug → service returns null (or 404 for project)
-      // Per story spec: null when no candidates, so we verify this path via response
-      const res = await request(httpServer)
-        .get(`/api/agents/${freshAgentSlug}/pickup`)
-        .query({ project: projectSlug })
-        .set('Authorization', `Bearer ${userAccessToken}`)
-        .expect(200);
+    // Use a project that has no VERIFIED unassigned tickets for this new agent
+    // The simplest way: use a non-existent project slug → service returns null (or 404 for project)
+    // Per story spec: null when no candidates, so we verify this path via response
+    const res = await request(httpServer)
+      .get(`/api/agents/${freshAgentSlug}/pickup`)
+      .query({ project: projectSlug })
+      .set('Authorization', `Bearer ${userAccessToken}`)
+      .expect(200);
 
-      // All VERIFIED tickets in this project were already consumed or may still exist
-      // The key assertion: data is either a result or null — never an error for valid params
-      const { body: responseBody } = res;
-      expect(responseBody).toHaveProperty('ret', 0);
-      expect(responseBody).toHaveProperty('data');
-    });
+    // All VERIFIED tickets in this project were already consumed or may still exist
+    // The key assertion: data is either a result or null — never an error for valid params
+    const { body: responseBody } = res;
+    expect(responseBody).toHaveProperty('ret', 0);
+    expect(responseBody).toHaveProperty('data');
   });
 
   // ─────────────────────────────────────────────────────────────────
