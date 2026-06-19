@@ -4,7 +4,9 @@ import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-it
 import { MemoryGovernanceService } from '../../../src/memory/memory-governance.service';
 import { MemoryGovernanceProcessor } from '../../../src/memory/memory-governance.processor';
 import { ExtractionService } from '../../../src/memory/extraction.service';
-import { ContextBuilderService } from '../../../src/memory/context-builder.service';
+// NOTE: ContextBuilderService was moved from src/memory/ to src/context/ (Task 4 refactor).
+// Constructor signature changed; these acceptance tests tracked the interim 2-param implementation.
+import { ContextBuilderService } from '../../../src/context/context-builder.service';
 import { TimelineService } from '../../../src/memory/timeline.service';
 import { OutboxFanOutRegistry } from '../../../src/outbox/outbox-fan-out-registry';
 import { MemoryKind } from '../../../src/common/enums';

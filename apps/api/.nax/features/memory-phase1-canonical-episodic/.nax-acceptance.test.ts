@@ -10,7 +10,9 @@ import { OutboxService } from '../../../src/outbox/outbox.service';
 import { OutboxFanOutRegistry } from '../../../src/outbox/outbox-fan-out-registry';
 import { KodaDomainWriter } from '../../../src/koda-domain-writer/koda-domain-writer.service';
 import { ActorResolver } from '../../../src/events/actor-resolver.service';
-import { ContextBuilderService } from '../../../src/memory/context-builder.service';
+// NOTE: ContextBuilderService was moved from src/memory/ to src/context/ (Task 4 refactor).
+// Constructor signature changed; these acceptance tests tracked the interim 2-param implementation.
+import { ContextBuilderService } from '../../../src/context/context-builder.service';
 import { TimelineService } from '../../../src/memory/timeline.service';
 import { RagService } from '../../../src/rag/rag.service';
 import type { PrismaClient } from '@prisma/client';
