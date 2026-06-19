@@ -8,9 +8,11 @@ import { RagModule } from '../rag/rag.module';
 import { WebhookModule } from '../webhook/webhook.module';
 import { VcsModule } from '../vcs/vcs.module';
 import { TicketLinksModule } from '../ticket-links/ticket-links.module';
+import { EventsModule } from '../events/events.module';
+import { OutboxModule } from '../outbox/outbox.module';
 
 @Module({
-  imports: [RagModule, WebhookModule, VcsModule, TicketLinksModule],
+  imports: [RagModule, WebhookModule, VcsModule, TicketLinksModule, EventsModule, OutboxModule],
   controllers: [TicketsController],
   providers: [
     PrismaTicketsRepository,

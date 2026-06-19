@@ -5,6 +5,9 @@ import { TICKET_REPOSITORY } from './domain/ticket.domain';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import type { KodaAgentRole } from '../auth/principal/koda-principal.types';
+import { TicketEventService } from '../events/ticket-event.service';
+import { OutboxService } from '../outbox/outbox.service';
+import { TicketType, TicketStatus, Priority } from '../common/enums';
 
 describe('TicketsService', () => {
   let service: TicketsService;
@@ -112,12 +115,17 @@ describe('TicketsService', () => {
     isInTransaction: jest.fn(() => false),
   };
 
+  const mockTicketEventService = { create: jest.fn().mockResolvedValue({ id: 'evt-mock' }) };
+  const mockOutboxService = { enqueue: jest.fn().mockResolvedValue(undefined) };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TicketsService,
         { provide: TICKET_REPOSITORY, useValue: mockTicketRepo },
         { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
+        { provide: TicketEventService, useValue: mockTicketEventService },
+        { provide: OutboxService, useValue: mockOutboxService },
       ],
     }).compile();
 
@@ -634,6 +642,101 @@ describe('TicketsService', () => {
       await expect(
         service.softDelete('koda', 'KODA-999', mockAdminPrincipal)
       ).rejects.toThrow();
+    });
+  });
+
+  describe('event emission', () => {
+    const fakeProject = {
+      id: 'proj-1',
+      key: 'TST',
+      slug: 'test-project',
+      deletedAt: null,
+      gitRemoteUrl: null,
+      autoIndexOnClose: false,
+    };
+
+    const fakeTicket = {
+      id: 'ticket-1',
+      number: 1,
+      type: TicketType.TASK,
+      title: 'Hello',
+      description: null,
+      status: TicketStatus.CREATED,
+      priority: Priority.MEDIUM,
+      createdByUserId: 'user-1',
+      createdByAgentId: null,
+      deletedAt: null,
+      gitRefVersion: null,
+      gitRefFile: null,
+      gitRefLine: null,
+      assignedToUserId: null,
+      assignedToAgentId: null,
+      projectId: 'proj-1',
+      labels: [],
+      links: [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const fakeUserPrincipal = {
+      id: 'user-1',
+      sub: 'user-1',
+      actorType: 'user' as const,
+      role: 'DEVELOPER' as const,
+      email: 'a@b.com',
+      blacklisted: false,
+      revoked: false,
+      authorities: [] as string[],
+      name: 'Test User',
+    };
+
+    beforeEach(() => {
+      mockTicketEventService.create.mockResolvedValue({ id: 'evt-1' });
+      mockOutboxService.enqueue.mockResolvedValue(undefined);
+    });
+
+    it('emits TicketEvent after create', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(fakeProject);
+      mockTicketRepo.findLastTicketInProject.mockResolvedValue(null);
+      mockTicketRepo.createTicket.mockResolvedValue(fakeTicket);
+
+      await service.create('test-project', { type: TicketType.TASK, title: 'Hello' }, fakeUserPrincipal as any);
+
+      // Allow the void promise to resolve
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(mockTicketEventService.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ticketId: 'ticket-1',
+          projectId: 'proj-1',
+          action: 'TICKET_CREATED',
+          actorId: 'user-1',
+          actorType: 'user',
+          source: 'internal',
+        }),
+      );
+      expect(mockOutboxService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: 'proj-1',
+          eventType: 'ticket_event',
+          eventId: 'evt-1',
+        }),
+      );
+    });
+
+    it('still returns the ticket even if event emission throws', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(fakeProject);
+      mockTicketRepo.findLastTicketInProject.mockResolvedValue(null);
+      mockTicketRepo.createTicket.mockResolvedValue(fakeTicket);
+      mockTicketEventService.create.mockRejectedValue(new Error('event store down'));
+
+      const result = await service.create('test-project', { type: TicketType.TASK, title: 'Hello' }, fakeUserPrincipal as any);
+
+      // Allow the void promise to settle
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(result).toBeDefined();
+      expect(result.id).toBe('ticket-1');
     });
   });
 
