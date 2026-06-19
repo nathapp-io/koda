@@ -199,6 +199,12 @@ export class AgentsService {
     return AgentResponseDto.from(agent);
   }
 
+  async findByProject(projectSlug: string): Promise<AgentResponseDto[]> {
+    const result = await this.agentRepo.findByProjectSlug(projectSlug);
+    if (!result) throw new NotFoundAppException({}, 'projects');
+    return AgentResponseDto.fromMany(result.agents);
+  }
+
   async update(slug: string, updateData: UpdateAgentDto): Promise<AgentResponseDto> {
     const existing = await this.agentRepo.findBySlugScalar(slug);
     if (!existing) throw new NotFoundAppException({}, 'agents');
