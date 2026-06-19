@@ -14,6 +14,10 @@ import { labelCommand } from './commands/label';
 import { kbCommand } from './commands/kb';
 import { evaluateCommand } from './commands/evaluate';
 import { vcsCommand } from './commands/vcs';
+import { webhookCommand } from './commands/webhook';
+import { contextCommand } from './commands/context';
+import { memoryCommand } from './commands/memory';
+import { codeIntelCommand } from './commands/code-intel';
 
 // Read package.json to get version
 let version = '0.1.0';
@@ -161,6 +165,18 @@ evaluateCommand(program);
 
 // VCS command
 vcsCommand(program);
+
+// Webhook command
+webhookCommand(program);
+
+// Context command
+contextCommand(program);
+
+// Memory command
+memoryCommand(program);
+
+// Code-intel command
+codeIntelCommand(program);
 
 // Global error handling for uncaught exceptions
 process.on('uncaughtException', (error: Error) => {
