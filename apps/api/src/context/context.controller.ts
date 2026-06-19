@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
-import { JsonResponse, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { JsonResponse, ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
 import { ActorRole } from '../common/enums';
@@ -34,6 +34,20 @@ export class ContextController {
     private readonly contextBuilderService: ContextBuilderService,
     private readonly prisma: PrismaService,
   ) {}
+
+  private async resolveProjectId(slug: string): Promise<string> {
+    const projectDelegate = (this.prisma.client as unknown as Record<string, unknown>)['project'] as {
+      findFirst(options: unknown): Promise<{ id: string; deletedAt: Date | null } | null>;
+    };
+    const project = await projectDelegate.findFirst({
+      where: { slug, deletedAt: null },
+      select: { id: true, deletedAt: true },
+    });
+    if (!project) {
+      throw new NotFoundAppException({}, 'context');
+    }
+    return project.id;
+  }
 
   private async checkProjectMembership(
     projectId: string,
@@ -92,7 +106,7 @@ export class ContextController {
     };
   }
 
-  @Get(':projectId')
+  @Get(':slug')
   @ApiOperation({ summary: 'Get project context for agent use' })
   @ApiResponse({ status: 200, description: 'Project context retrieved' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -100,10 +114,11 @@ export class ContextController {
   @ApiResponse({ status: 404, description: 'Project not found' })
   @RequiredPermission([KodaAction.READ as CaslPermissionAction, 'ProjectContext'])
   async getContext(
-    @Param('projectId') projectId: string,
+    @Param('slug') slug: string,
     @Query() queryDto: GetContextQueryDto,
     @Principal() principal: KodaPrincipal,
   ) {
+    const projectId = await this.resolveProjectId(slug);
     await this.checkProjectMembership(projectId, principal);
     const actorId = principal.id;
     const result = await this.contextBuilderService.getProjectContext(
@@ -112,7 +127,7 @@ export class ContextController {
     return JsonResponse.Ok(result);
   }
 
-  @Post(':projectId/query')
+  @Post(':slug/query')
   @HttpCode(200)
   @ApiOperation({ summary: 'Query project context with request body' })
   @ApiResponse({ status: 200, description: 'Project context retrieved' })
@@ -121,10 +136,11 @@ export class ContextController {
   @ApiResponse({ status: 404, description: 'Project not found' })
   @RequiredPermission([KodaAction.READ as CaslPermissionAction, 'ProjectContext'])
   async queryContext(
-    @Param('projectId') projectId: string,
+    @Param('slug') slug: string,
     @Body() body: GetContextQueryDto,
     @Principal() principal: KodaPrincipal,
   ) {
+    const projectId = await this.resolveProjectId(slug);
     await this.checkProjectMembership(projectId, principal);
     const actorId = principal.id;
     const result = await this.contextBuilderService.getProjectContext(

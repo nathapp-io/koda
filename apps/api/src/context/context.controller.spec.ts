@@ -1,9 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { ContextController } from './context.controller';
 import { ContextBuilderService } from './context-builder.service';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
+
+const fakeProject = { id: 'project-1', slug: 'my-project', deletedAt: null };
 
 const makeContextResponse = () => ({
   projectId: 'project-1',
@@ -51,7 +53,10 @@ const agentPrincipal: KodaPrincipal = {
 describe('ContextController', () => {
   let controller: ContextController;
   let contextBuilderService: { getProjectContext: jest.Mock };
-  let prismaClientMock: { projectMember: { findUnique: jest.Mock } };
+  let prismaClientMock: {
+    project: { findFirst: jest.Mock };
+    projectMember: { findUnique: jest.Mock };
+  };
 
   beforeEach(async () => {
     contextBuilderService = {
@@ -59,6 +64,9 @@ describe('ContextController', () => {
     };
 
     prismaClientMock = {
+      project: {
+        findFirst: jest.fn().mockResolvedValue(fakeProject),
+      },
       projectMember: {
         findUnique: jest.fn(),
       },
@@ -79,27 +87,80 @@ describe('ContextController', () => {
     controller = module.get(ContextController);
     jest.clearAllMocks();
 
-    // Default: service returns context
+    // Default: project found, service returns context
+    prismaClientMock.project.findFirst.mockResolvedValue(fakeProject);
     contextBuilderService.getProjectContext.mockResolvedValue(makeContextResponse());
   });
 
-  describe('GET /context/:projectId — getContext', () => {
+  describe('slug resolution', () => {
+    it('resolves slug to projectId before building context (getContext)', async () => {
+      const result = await controller.getContext('my-project', { intent: 'answer' }, adminUser);
+
+      expect(prismaClientMock.project.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ slug: 'my-project' }) }),
+      );
+      expect(contextBuilderService.getProjectContext).toHaveBeenCalledWith(
+        expect.objectContaining({ projectId: 'project-1' }),
+      );
+      expect(result).toBeDefined();
+    });
+
+    it('throws NotFoundAppException for unknown slug (getContext)', async () => {
+      prismaClientMock.project.findFirst.mockResolvedValue(null);
+
+      await expect(
+        controller.getContext('nonexistent', { intent: 'answer' }, adminUser),
+      ).rejects.toBeInstanceOf(NotFoundAppException);
+    });
+
+    it('resolves slug to projectId before building context (queryContext)', async () => {
+      const result = await controller.queryContext('my-project', { intent: 'plan' }, adminUser);
+
+      expect(prismaClientMock.project.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ slug: 'my-project' }) }),
+      );
+      expect(contextBuilderService.getProjectContext).toHaveBeenCalledWith(
+        expect.objectContaining({ projectId: 'project-1' }),
+      );
+      expect(result).toBeDefined();
+    });
+
+    it('throws NotFoundAppException for unknown slug (queryContext)', async () => {
+      prismaClientMock.project.findFirst.mockResolvedValue(null);
+
+      await expect(
+        controller.queryContext('nonexistent', { intent: 'answer' }, adminUser),
+      ).rejects.toBeInstanceOf(NotFoundAppException);
+    });
+
+    it('queries project with deletedAt: null filter', async () => {
+      await controller.getContext('my-project', { intent: 'answer' }, adminUser);
+
+      expect(prismaClientMock.project.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ slug: 'my-project', deletedAt: null }),
+        }),
+      );
+    });
+  });
+
+  describe('GET /context/:slug — getContext', () => {
     describe('membership checks', () => {
       test('throws ForbiddenAppException when principal is null', async () => {
         await expect(
-          controller.getContext('project-1', { intent: 'answer' }, null as unknown as KodaPrincipal),
+          controller.getContext('my-project', { intent: 'answer' }, null as unknown as KodaPrincipal),
         ).rejects.toThrow(ForbiddenAppException);
       });
 
       test('allows ADMIN user without membership check', async () => {
-        const result = await controller.getContext('project-1', { intent: 'answer' }, adminUser);
+        const result = await controller.getContext('my-project', { intent: 'answer' }, adminUser);
 
         expect(prismaClientMock.projectMember.findUnique).not.toHaveBeenCalled();
         expect(result).toMatchObject({ data: expect.objectContaining({ projectId: 'project-1' }) });
       });
 
       test('allows agent principal without membership check', async () => {
-        const result = await controller.getContext('project-1', { intent: 'answer' }, agentPrincipal);
+        const result = await controller.getContext('my-project', { intent: 'answer' }, agentPrincipal);
 
         expect(prismaClientMock.projectMember.findUnique).not.toHaveBeenCalled();
         expect(result).toBeDefined();
@@ -109,14 +170,14 @@ describe('ContextController', () => {
         prismaClientMock.projectMember.findUnique.mockResolvedValue(null);
 
         await expect(
-          controller.getContext('project-1', { intent: 'answer' }, memberUser),
+          controller.getContext('my-project', { intent: 'answer' }, memberUser),
         ).rejects.toThrow(ForbiddenAppException);
       });
 
       test('allows member with valid DEVELOPER role membership', async () => {
         prismaClientMock.projectMember.findUnique.mockResolvedValue({ role: 'DEVELOPER' });
 
-        const result = await controller.getContext('project-1', { intent: 'answer' }, memberUser);
+        const result = await controller.getContext('my-project', { intent: 'answer' }, memberUser);
 
         expect(result).toBeDefined();
         expect(contextBuilderService.getProjectContext).toHaveBeenCalled();
@@ -125,7 +186,7 @@ describe('ContextController', () => {
       test('allows member with VIEWER role membership', async () => {
         prismaClientMock.projectMember.findUnique.mockResolvedValue({ role: 'VIEWER' });
 
-        const result = await controller.getContext('project-1', { intent: 'answer' }, memberUser);
+        const result = await controller.getContext('my-project', { intent: 'answer' }, memberUser);
 
         expect(result).toBeDefined();
       });
@@ -134,24 +195,24 @@ describe('ContextController', () => {
         prismaClientMock.projectMember.findUnique.mockResolvedValue({ role: 'UNKNOWN_ROLE' });
 
         await expect(
-          controller.getContext('project-1', { intent: 'answer' }, memberUser),
+          controller.getContext('my-project', { intent: 'answer' }, memberUser),
         ).rejects.toThrow(ForbiddenAppException);
       });
 
-      test('queries projectMember by projectId and userId for member user', async () => {
+      test('queries projectMember by resolved projectId and userId for member user', async () => {
         prismaClientMock.projectMember.findUnique.mockResolvedValue({ role: 'DEVELOPER' });
 
-        await controller.getContext('project-xyz', { intent: 'answer' }, memberUser);
+        await controller.getContext('my-project', { intent: 'answer' }, memberUser);
 
         expect(prismaClientMock.projectMember.findUnique).toHaveBeenCalledWith({
-          where: { projectId_userId: { projectId: 'project-xyz', userId: 'user-member' } },
+          where: { projectId_userId: { projectId: 'project-1', userId: 'user-member' } },
         });
       });
     });
 
     describe('query building', () => {
-      test('passes projectId and actorId to contextBuilderService', async () => {
-        await controller.getContext('project-1', { intent: 'answer' }, adminUser);
+      test('passes resolved projectId and actorId to contextBuilderService', async () => {
+        await controller.getContext('my-project', { intent: 'answer' }, adminUser);
 
         expect(contextBuilderService.getProjectContext).toHaveBeenCalledWith(
           expect.objectContaining({ projectId: 'project-1', actorId: 'user-admin' }),
@@ -159,7 +220,7 @@ describe('ContextController', () => {
       });
 
       test('passes intent from query dto', async () => {
-        await controller.getContext('project-1', { intent: 'diagnose' }, adminUser);
+        await controller.getContext('my-project', { intent: 'diagnose' }, adminUser);
 
         expect(contextBuilderService.getProjectContext).toHaveBeenCalledWith(
           expect.objectContaining({ intent: 'diagnose' }),
@@ -168,7 +229,7 @@ describe('ContextController', () => {
 
       test('passes optional query, ticketIds, repoRefs when provided', async () => {
         await controller.getContext(
-          'project-1',
+          'my-project',
           { intent: 'answer', query: 'auth flow', ticketIds: ['t-1'], repoRefs: ['sha-1'] },
           adminUser,
         );
@@ -180,7 +241,7 @@ describe('ContextController', () => {
 
       test('converts tokenBudget from query string to number', async () => {
         await controller.getContext(
-          'project-1',
+          'my-project',
           { intent: 'answer', tokenBudget: '2000' as unknown as number },
           adminUser,
         );
@@ -191,7 +252,7 @@ describe('ContextController', () => {
       });
 
       test('passes undefined tokenBudget when not provided', async () => {
-        await controller.getContext('project-1', { intent: 'answer' }, adminUser);
+        await controller.getContext('my-project', { intent: 'answer' }, adminUser);
 
         expect(contextBuilderService.getProjectContext).toHaveBeenCalledWith(
           expect.objectContaining({ tokenBudget: undefined }),
@@ -204,22 +265,22 @@ describe('ContextController', () => {
         const ctxResponse = makeContextResponse();
         contextBuilderService.getProjectContext.mockResolvedValue(ctxResponse);
 
-        const result = await controller.getContext('project-1', { intent: 'answer' }, adminUser);
+        const result = await controller.getContext('my-project', { intent: 'answer' }, adminUser);
 
         expect(result).toMatchObject({ data: expect.objectContaining({ projectId: 'project-1' }) });
       });
     });
   });
 
-  describe('POST /context/:projectId/query — queryContext', () => {
+  describe('POST /context/:slug/query — queryContext', () => {
     test('throws ForbiddenAppException when principal is null', async () => {
       await expect(
-        controller.queryContext('project-1', { intent: 'answer' }, null as unknown as KodaPrincipal),
+        controller.queryContext('my-project', { intent: 'answer' }, null as unknown as KodaPrincipal),
       ).rejects.toThrow(ForbiddenAppException);
     });
 
     test('allows ADMIN user and calls contextBuilderService', async () => {
-      const result = await controller.queryContext('project-1', { intent: 'plan' }, adminUser);
+      const result = await controller.queryContext('my-project', { intent: 'plan' }, adminUser);
 
       expect(contextBuilderService.getProjectContext).toHaveBeenCalledWith(
         expect.objectContaining({ intent: 'plan', projectId: 'project-1', actorId: 'user-admin' }),
@@ -231,7 +292,7 @@ describe('ContextController', () => {
       prismaClientMock.projectMember.findUnique.mockResolvedValue(null);
 
       await expect(
-        controller.queryContext('project-1', { intent: 'answer' }, memberUser),
+        controller.queryContext('my-project', { intent: 'answer' }, memberUser),
       ).rejects.toThrow(ForbiddenAppException);
     });
 
@@ -239,7 +300,7 @@ describe('ContextController', () => {
       prismaClientMock.projectMember.findUnique.mockResolvedValue({ role: 'DEVELOPER' });
       const body = { intent: 'search' as const, query: 'ticket bugs', ticketIds: ['t-2'] };
 
-      await controller.queryContext('project-1', body, memberUser);
+      await controller.queryContext('my-project', body, memberUser);
 
       expect(contextBuilderService.getProjectContext).toHaveBeenCalledWith(
         expect.objectContaining({ intent: 'search', query: 'ticket bugs', ticketIds: ['t-2'] }),
@@ -250,7 +311,7 @@ describe('ContextController', () => {
       const ctxResponse = makeContextResponse();
       contextBuilderService.getProjectContext.mockResolvedValue(ctxResponse);
 
-      const result = await controller.queryContext('project-1', { intent: 'answer' }, adminUser);
+      const result = await controller.queryContext('my-project', { intent: 'answer' }, adminUser);
 
       expect(result).toMatchObject({ data: expect.objectContaining({ projectId: 'project-1' }) });
     });
