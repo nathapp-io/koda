@@ -1194,6 +1194,29 @@ describeIntegration('API Integration Tests', () => {
   // ─────────────────────────────────────────────────────────────────
 
   describe('19b. Project-Scoped Agent Routes', () => {
+    beforeAll(async () => {
+      // The assign endpoint requires the agent's Prisma ID, not slug.
+      // Fetch it first, then create and assign a ticket so agentSlug appears in the project agents list.
+      const agentRes = await request(httpServer)
+        .get(`/api/agents/${agentSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(200);
+      const agentId = body<{ id: string }>(agentRes).id;
+
+      const ticketRes = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ type: 'BUG', title: '19b assignment target', priority: 'LOW' })
+        .expect(201);
+      const ticketRef = body<{ ref: string }>(ticketRes).ref;
+
+      await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets/${ticketRef}/assign`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ agentId })
+        .expect(200);
+    });
+
     it('GET /api/projects/:slug/agents — 200 returns agents with assigned tickets', async () => {
       const res = await request(httpServer)
         .get(`/api/projects/${projectSlug}/agents`)
@@ -1202,7 +1225,7 @@ describeIntegration('API Integration Tests', () => {
 
       const data = body<{ id: string; slug: string; status: string }[]>(res);
       expect(Array.isArray(data)).toBe(true);
-      // agentSlug was assigned a ticket in section 18; it must appear in the list
+      // agentSlug has an assigned ticket (set up in beforeAll); it must appear in the list
       const found = data.find((a) => a.slug === agentSlug);
       expect(found).toBeDefined();
       expect(found?.status).toBeDefined();
