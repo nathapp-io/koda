@@ -258,7 +258,10 @@
       "rolesUpdated": "代理角色更新成功",
       "updateRolesFailed": "更新代理角色失败",
       "capabilitiesUpdated": "代理能力更新成功",
-      "updateCapabilitiesFailed": "更新代理能力失败"
+      "updateCapabilitiesFailed": "更新代理能力失败",
+      "deleted": "代理删除成功",
+      "deleteFailed": "删除代理失败",
+      "rotateKeyFailed": "轮换 API 密钥失败"
     },
     "form": {
       "editRoles": "编辑代理角色",

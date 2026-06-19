@@ -1434,7 +1434,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Project soft deleted successfully"
           },
           "401": {
@@ -2005,7 +2005,14 @@
         },
         "responses": {
           "200": {
-            "description": "Ticket verified"
+            "description": "Ticket verified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid transition"
@@ -2048,7 +2055,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Ticket started"
+            "description": "Ticket started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid transition"
@@ -2101,7 +2115,14 @@
         },
         "responses": {
           "200": {
-            "description": "Fix submitted"
+            "description": "Fix submitted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid transition"
@@ -2154,7 +2175,14 @@
         },
         "responses": {
           "200": {
-            "description": "Fix reviewed"
+            "description": "Fix reviewed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid transition"
@@ -2197,7 +2225,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Ticket closed"
+            "description": "Ticket closed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid transition"
@@ -2250,7 +2285,14 @@
         },
         "responses": {
           "200": {
-            "description": "Ticket rejected"
+            "description": "Ticket rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketResponseDto"
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid transition"
@@ -2357,6 +2399,33 @@
           }
         },
         "summary": "Remove a webhook",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
+    "/api/projects/{slug}/webhooks/{id}": {
+      "delete": {
+        "operationId": "WebhookController_removeByProject",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Webhook deleted"
+          },
+          "404": {
+            "description": "Webhook not found"
+          }
+        },
+        "summary": "Remove a webhook (project-scoped)",
         "tags": [
           "webhooks"
         ]
@@ -3457,14 +3526,13 @@
           },
           "password": {
             "type": "string",
-            "minLength": 12,
+            "minLength": 8,
             "pattern": "/^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z\\d]).+$/",
             "example": "StrongPass123!"
           }
         },
         "required": [
           "email",
-          "name",
           "password"
         ]
       },
@@ -4350,7 +4418,6 @@
         },
         "required": [
           "url",
-          "secret",
           "events"
         ]
       },

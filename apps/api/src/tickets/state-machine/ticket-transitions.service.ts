@@ -17,7 +17,6 @@ import { createVcsProvider } from '../../vcs/factory';
 import { VcsLinkExtractorService } from '../../vcs/vcs-link-extractor.service';
 import { decryptToken } from '../../common/utils/encryption.util';
 import { TicketLinksService } from '../../ticket-links/ticket-links.service';
-import { IVcsProvider, VcsPullRequest } from '../../vcs';
 import { actorForeignKeys } from '../../auth/principal/actor-foreign-keys';
 import { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { TICKET_REPOSITORY, ITicketRepository } from '../domain/ticket.domain';
@@ -71,8 +70,10 @@ export class TicketTransitionsService {
         from: fromStatus,
         to: toStatus,
       })
-      .catch(() => {
-        // suppress webhook errors — transition must always succeed
+      .catch((err) => {
+        this.logger.warn(
+          `[webhook] Failed to dispatch STATUS_CHANGE for ticket in project ${projectId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
       });
   }
 
@@ -110,8 +111,10 @@ export class TicketTransitionsService {
           },
         });
       })
-      .catch(() => {
-        // suppress RAG indexing errors — ticket close must always succeed
+      .catch((err) => {
+        this.logger.warn(
+          `[rag] Failed to auto-index ticket ${ticket.id} on close: ${err instanceof Error ? err.message : String(err)}`,
+        );
       });
   }
 
@@ -197,8 +200,10 @@ export class TicketTransitionsService {
           });
         });
       })
-      .catch(() => {
-        // suppress VCS errors — ticket transition must always succeed
+      .catch((err) => {
+        this.logger.warn(
+          `[vcs] Failed to initiate PR creation for ticket in project ${projectId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
         return Promise.resolve();
       });
   }

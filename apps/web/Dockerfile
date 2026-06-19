@@ -90,6 +90,9 @@ ENV PORT=3101
 # Replace root package.json with runtime one for version metadata
 COPY --chown=nuxt:nodejs ./apps/${BUILD_APP}/package.json ./package.json
 
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=15s \
+  CMD wget -qO- http://127.0.0.1:3101/ || exit 1
+
 USER nuxt
 
 CMD ["bun", "/app/apps/runtime/.output/server/index.mjs"]

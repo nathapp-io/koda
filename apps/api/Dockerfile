@@ -114,5 +114,8 @@ ENV ENV_NAME=production
 # Replace root package.json with runtime one for version metadata
 COPY ./apps/${BUILD_APP}/package.json ./package.json
 
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 --start-period=10s \
+  CMD wget -qO- http://127.0.0.1:3100/api/health || exit 1
+
 # use bun run instead of bun dist/main to ensure package version is correctly picked up by the app
 CMD ["bun", "run", "start:prod-runtime"]
