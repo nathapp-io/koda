@@ -52,6 +52,7 @@ describeIntegration('Context API E2E', () => {
   let adminAccessToken: string;
   let memberAccessToken: string;
   let projectId: string;
+  let projectSlug: string;
 
   beforeAll(async () => {
     if (!DATABASE_URL) return;
@@ -104,16 +105,17 @@ describeIntegration('Context API E2E', () => {
       .expect(201);
 
     projectId = body<{ id: string }>(projectRes).id;
+    projectSlug = 'context-e2e-project';
   }, 30_000);
 
   afterAll(async () => {
     if (app) await app.close();
   });
 
-  describe('GET /api/context/:projectId', () => {
+  describe('GET /api/context/:slug', () => {
     it('AC-1: returns all four top-level blocks', async () => {
       const res = await request(httpServer)
-        .get(`/api/context/${projectId}`)
+        .get(`/api/context/${projectSlug}`)
         .query({ intent: 'answer', query: 'test' })
         .set('Authorization', `Bearer ${adminAccessToken}`)
         .expect(200);
@@ -128,7 +130,7 @@ describeIntegration('Context API E2E', () => {
 
     it('AC-2: recentEvents ordered DESC and limited to 20', async () => {
       const res = await request(httpServer)
-        .get(`/api/context/${projectId}`)
+        .get(`/api/context/${projectSlug}`)
         .query({ intent: 'diagnose' })
         .set('Authorization', `Bearer ${adminAccessToken}`)
         .expect(200);
@@ -143,7 +145,7 @@ describeIntegration('Context API E2E', () => {
 
     it('AC-3: semanticMemory ordered by confidence DESC and limited to 10', async () => {
       const res = await request(httpServer)
-        .get(`/api/context/${projectId}`)
+        .get(`/api/context/${projectSlug}`)
         .query({ intent: 'answer', query: 'test' })
         .set('Authorization', `Bearer ${adminAccessToken}`)
         .expect(200);
@@ -158,7 +160,7 @@ describeIntegration('Context API E2E', () => {
 
     it('AC-5: empty documents when query is absent or blank', async () => {
       const res = await request(httpServer)
-        .get(`/api/context/${projectId}`)
+        .get(`/api/context/${projectSlug}`)
         .query({ intent: 'answer' })
         .set('Authorization', `Bearer ${adminAccessToken}`)
         .expect(200);
@@ -169,7 +171,7 @@ describeIntegration('Context API E2E', () => {
 
     it('AC-6: excludes recentEvents when intent=plan', async () => {
       const res = await request(httpServer)
-        .get(`/api/context/${projectId}`)
+        .get(`/api/context/${projectSlug}`)
         .query({ intent: 'plan', query: 'test' })
         .set('Authorization', `Bearer ${adminAccessToken}`)
         .expect(200);
@@ -180,7 +182,7 @@ describeIntegration('Context API E2E', () => {
 
     it('AC-8: includes latencyMs in meta', async () => {
       const res = await request(httpServer)
-        .get(`/api/context/${projectId}`)
+        .get(`/api/context/${projectSlug}`)
         .query({ intent: 'answer' })
         .set('Authorization', `Bearer ${adminAccessToken}`)
         .expect(200);
@@ -199,7 +201,7 @@ describeIntegration('Context API E2E', () => {
 
     it('AC-11: requires authentication and project membership', async () => {
       await request(httpServer)
-        .get(`/api/context/${projectId}`)
+        .get(`/api/context/${projectSlug}`)
         .query({ intent: 'answer' })
         .expect(401);
     });
@@ -208,13 +210,13 @@ describeIntegration('Context API E2E', () => {
       const query = { intent: 'answer', query: 'test query' };
 
       const res1 = await request(httpServer)
-        .get(`/api/context/${projectId}`)
+        .get(`/api/context/${projectSlug}`)
         .query(query)
         .set('Authorization', `Bearer ${adminAccessToken}`)
         .expect(200);
 
       const res2 = await request(httpServer)
-        .get(`/api/context/${projectId}`)
+        .get(`/api/context/${projectSlug}`)
         .query(query)
         .set('Authorization', `Bearer ${adminAccessToken}`)
         .expect(200);
@@ -233,10 +235,10 @@ describeIntegration('Context API E2E', () => {
     });
   });
 
-  describe('POST /api/context/:projectId/query', () => {
+  describe('POST /api/context/:slug/query', () => {
     it('accepts POST with request body', async () => {
       const res = await request(httpServer)
-        .post(`/api/context/${projectId}/query`)
+        .post(`/api/context/${projectSlug}/query`)
         .set('Authorization', `Bearer ${adminAccessToken}`)
         .send({
           intent: 'answer',
