@@ -30,6 +30,8 @@ import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal
 import { ActorRole } from '../common/enums';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
 import { KodaAction } from '../auth/casl/koda-action.enum';
+import { AgentsService } from '../agents/agents.service';
+import { UpdateAgentDto } from '../agents/dto/update-agent.dto';
 
 @ApiTags('projects')
 @ApiBearerAuth()
@@ -40,6 +42,7 @@ export class ProjectsController {
     private memoryItemRepository: PrismaMemoryItemRepository,
     private impactAnalysisService: ImpactAnalysisService,
     private prisma: PrismaService,
+    private agentsService: AgentsService,
   ) {}
 
   private get db() { return this.prisma.client as unknown as { projectMember: { findUnique(options: unknown): Promise<unknown> } }; }
@@ -222,5 +225,39 @@ export class ProjectsController {
     });
 
     return JsonResponse.Ok(result);
+  }
+
+  @Get(':slug/agents')
+  @ApiOperation({ summary: 'List agents active in a project (derived from assigned tickets)' })
+  @ApiResponse({ status: 200, description: 'Agents retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - no project access' })
+  @ApiResponse({ status: 404, description: 'Project not found' })
+  async getProjectAgents(
+    @Param('slug') slug: string,
+    @Principal() principal: KodaPrincipal,
+  ) {
+    const project = await this.projectsService.findBySlug(slug);
+    await this.checkProjectMembership(project.id, principal);
+    const data = await this.agentsService.findByProject(slug);
+    return JsonResponse.Ok(data);
+  }
+
+  @Patch(':slug/agents/:agentSlug')
+  @ApiOperation({ summary: 'Update an agent status within a project context (admin or project member)' })
+  @ApiResponse({ status: 200, description: 'Agent updated successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - no project access' })
+  @ApiResponse({ status: 404, description: 'Project or agent not found' })
+  async updateProjectAgent(
+    @Param('slug') slug: string,
+    @Param('agentSlug') agentSlug: string,
+    @Body() updateDto: UpdateAgentDto,
+    @Principal() principal: KodaPrincipal,
+  ) {
+    const project = await this.projectsService.findBySlug(slug);
+    await this.checkProjectMembership(project.id, principal);
+    const data = await this.agentsService.update(agentSlug, updateDto);
+    return JsonResponse.Ok(data);
   }
 }

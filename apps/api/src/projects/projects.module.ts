@@ -7,9 +7,10 @@ import { PROJECT_REPOSITORY } from './domain/project.domain';
 import { RagModule } from '../rag/rag.module';
 import { MemoryModule } from '../memory/memory.module';
 import { CodeIntelModule } from '../code-intel/code-intel.module';
+import { AgentsModule } from '../agents/agents.module';
 
 @Module({
-  imports: [PrismaModule, RagModule, MemoryModule, CodeIntelModule],
+  imports: [PrismaModule, RagModule, MemoryModule, CodeIntelModule, AgentsModule],
   controllers: [ProjectsController],
   providers: [
     PrismaProjectRepository,
