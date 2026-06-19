@@ -1,5 +1,5 @@
 import { Global, Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { CacheManager } from '@nathapp/nestjs-cache';
@@ -16,10 +16,6 @@ export const mockTransactionManager: ITransactionManager = {
   getClient: () => undefined,
   isInTransaction: () => false,
 };
-
-export const mockConfigService = {
-  get: <T = unknown>(key?: string): T | undefined => key as unknown as T,
-} as unknown as ConfigService;
 
 export const mockAgentsService = {
   findByProject: async () => [],
