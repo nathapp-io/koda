@@ -106,8 +106,7 @@ describe('AstIndexService', () => {
       const files: SourceFile[] = [{ path: 'src/x.ts', content: '' }];
 
       codeGraph.parseSourceFile.mockImplementation(() => {
-        // eslint-disable-next-line @typescript-eslint/no-throw-literal
-        throw 'string error';
+        throw new Error('string error');
       });
       codeGraph.resolveRelationships.mockReturnValue(undefined);
 

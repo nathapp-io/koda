@@ -284,8 +284,8 @@ describe('ContextBuilderService', () => {
 
       const result = await service.getProjectContext(baseQuery);
 
-      expect(result.canonicalState.recentEvents![0].id).toBe('event-new');
-      expect(result.canonicalState.recentEvents![1].id).toBe('event-old');
+      expect(result.canonicalState.recentEvents?.[0].id).toBe('event-new');
+      expect(result.canonicalState.recentEvents?.[1].id).toBe('event-old');
     });
 
     test('returns undefined recentEvents for plan intent', async () => {

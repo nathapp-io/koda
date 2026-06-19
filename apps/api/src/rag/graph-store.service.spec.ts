@@ -63,7 +63,7 @@ describe('GraphStoreService', () => {
       expect(linkMap.size).toBe(2);
       expect(linkMap.get('n1')).toHaveLength(2);
       expect(linkMap.get('n2')).toHaveLength(1);
-      expect(linkMap.get('n2')![0]).toEqual({ source: 'n2', target: 'n3', relation: undefined });
+      expect(linkMap.get('n2')?.[0]).toEqual({ source: 'n2', target: 'n3', relation: undefined });
     });
 
     it('fetches nodes and links in parallel', async () => {

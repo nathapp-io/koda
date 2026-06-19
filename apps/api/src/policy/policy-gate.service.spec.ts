@@ -70,9 +70,9 @@ describe('PolicyGateService', () => {
     it('every gate result carries a name and a passed boolean', async () => {
       const result = await service.runAllGates('gate-fixture-project-a');
       for (const gate of result.gates) {
-        expect(typeof gate.name).toBe('string');
-        expect(gate.name.length).toBeGreaterThan(0);
-        expect(typeof gate.passed).toBe('boolean');
+        expect(typeof gate?.name).toBe('string');
+        expect(gate?.name.length).toBeGreaterThan(0);
+        expect(typeof gate?.passed).toBe('boolean');
       }
     });
 
@@ -140,8 +140,8 @@ describe('PolicyGateService', () => {
   describe('IsolationGate', () => {
     it('passes for fixture project-a (no cross-project leakage)', async () => {
       const result = await service.runAllGates('gate-fixture-project-a');
-      const gate = result.gates.find((g) => g.name === 'IsolationGate')!;
-      expect(gate.passed).toBe(true);
+      const gate = result.gates.find((g) => g.name === 'IsolationGate');
+      expect(gate?.passed).toBe(true);
     });
 
     it('passes for fixture project-b — scoped queries return only project-b records, no cross-project leak', async () => {
@@ -151,24 +151,24 @@ describe('PolicyGateService', () => {
       // AC-2 checks that project-B-keyed records do not appear in project-A scope;
       // when the projectId is project-B that same check confirms no project-A data leaks in.
       const result = await service.runAllGates('gate-fixture-project-b');
-      const gate = result.gates.find((g) => g.name === 'IsolationGate')!;
+      const gate = result.gates.find((g) => g.name === 'IsolationGate');
       // The AC-2 sub-check looks for results where r.projectId === FIXTURE_PROJECT_B
       // inside a project-B scoped query — those ARE project-B records and are correctly
       // flagged as a "leak" by the gate logic (which is designed for project-A context).
       // We assert the gate shape is present; the pass/fail value follows gate design.
       expect(gate).toBeDefined();
-      expect(typeof gate.passed).toBe('boolean');
+      expect(typeof gate?.passed).toBe('boolean');
     });
 
     it('passes for an unknown project (empty fixture store returns no results)', async () => {
       const result = await service.runAllGates('unknown-project-xyz');
-      const gate = result.gates.find((g) => g.name === 'IsolationGate')!;
-      expect(gate.passed).toBe(true);
+      const gate = result.gates.find((g) => g.name === 'IsolationGate');
+      expect(gate?.passed).toBe(true);
     });
 
     it('includes isolation details in the details field when it passes', async () => {
       const result = await service.runAllGates('gate-fixture-project-a');
-      const gate = result.gates.find((g) => g.name === 'IsolationGate')!;
+      const gate = result.gates.find((g) => g.name === 'IsolationGate');
       expect(gate.details).toBeDefined();
       expect((gate.details ?? '').toLowerCase()).toContain('isolation');
     });
@@ -181,13 +181,13 @@ describe('PolicyGateService', () => {
   describe('ProvenanceGate', () => {
     it('passes — all 20 fixture queries have provenance.sources populated', async () => {
       const result = await service.runAllGates('gate-fixture-project-a');
-      const gate = result.gates.find((g) => g.name === 'ProvenanceGate')!;
-      expect(gate.passed).toBe(true);
+      const gate = result.gates.find((g) => g.name === 'ProvenanceGate');
+      expect(gate?.passed).toBe(true);
     });
 
     it('details mentions the number of fixture queries checked', async () => {
       const result = await service.runAllGates('gate-fixture-project-a');
-      const gate = result.gates.find((g) => g.name === 'ProvenanceGate')!;
+      const gate = result.gates.find((g) => g.name === 'ProvenanceGate');
       expect(gate.details).toContain('20');
     });
   });
@@ -199,13 +199,13 @@ describe('PolicyGateService', () => {
   describe('TruthConsistencyGate', () => {
     it('passes — fixture canonical tickets match the fixture Prisma map', async () => {
       const result = await service.runAllGates('gate-fixture-project-a');
-      const gate = result.gates.find((g) => g.name === 'TruthConsistencyGate')!;
-      expect(gate.passed).toBe(true);
+      const gate = result.gates.find((g) => g.name === 'TruthConsistencyGate');
+      expect(gate?.passed).toBe(true);
     });
 
     it('details mentions sampled tickets count when it passes', async () => {
       const result = await service.runAllGates('gate-fixture-project-a');
-      const gate = result.gates.find((g) => g.name === 'TruthConsistencyGate')!;
+      const gate = result.gates.find((g) => g.name === 'TruthConsistencyGate');
       // Details should reference how many were sampled
       expect(gate.details).toBeDefined();
     });
@@ -216,8 +216,8 @@ describe('PolicyGateService', () => {
       };
       const svc = new PolicyGateService(failingCanonical as never, undefined, undefined);
       const result = await svc.runAllGates('gate-fixture-project-a');
-      const gate = result.gates.find((g) => g.name === 'TruthConsistencyGate')!;
-      expect(gate.passed).toBe(true);
+      const gate = result.gates.find((g) => g.name === 'TruthConsistencyGate');
+      expect(gate?.passed).toBe(true);
     });
 
     it('passes when PrismaPolicyRepository throws (falls back to fixture map)', async () => {
@@ -226,8 +226,8 @@ describe('PolicyGateService', () => {
       };
       const svc = new PolicyGateService(undefined, failingRepo as never, undefined);
       const result = await svc.runAllGates('gate-fixture-project-a');
-      const gate = result.gates.find((g) => g.name === 'TruthConsistencyGate')!;
-      expect(gate.passed).toBe(true);
+      const gate = result.gates.find((g) => g.name === 'TruthConsistencyGate');
+      expect(gate?.passed).toBe(true);
     });
 
     it('detects status discrepancy when canonical and Prisma disagree', async () => {
@@ -242,9 +242,9 @@ describe('PolicyGateService', () => {
       };
       const svc = new PolicyGateService(fakeCanonical as never, undefined, undefined);
       const result = await svc.runAllGates('gate-fixture-project-a');
-      const gate = result.gates.find((g) => g.name === 'TruthConsistencyGate')!;
+      const gate = result.gates.find((g) => g.name === 'TruthConsistencyGate');
       // Should fail because canonical status differs from the fixture Prisma map entry
-      expect(gate.passed).toBe(false);
+      expect(gate?.passed).toBe(false);
       expect(gate.details).toContain('discrepanc');
     });
   });
@@ -256,19 +256,19 @@ describe('PolicyGateService', () => {
   describe('WriteGate', () => {
     it('passes — KodaDomainWriter writes succeed and raw Prisma writes are blocked', async () => {
       const result = await service.runAllGates('gate-fixture-project-a');
-      const gate = result.gates.find((g) => g.name === 'WriteGate')!;
-      expect(gate.passed).toBe(true);
+      const gate = result.gates.find((g) => g.name === 'WriteGate');
+      expect(gate?.passed).toBe(true);
     });
 
     it('details confirms approved layer writes succeed', async () => {
       const result = await service.runAllGates('gate-fixture-project-a');
-      const gate = result.gates.find((g) => g.name === 'WriteGate')!;
+      const gate = result.gates.find((g) => g.name === 'WriteGate');
       expect(gate.details).toContain('KodaDomainWriter');
     });
 
     it('details confirms raw writes are blocked with WRITE_GATE_VIOLATION', async () => {
       const result = await service.runAllGates('gate-fixture-project-a');
-      const gate = result.gates.find((g) => g.name === 'WriteGate')!;
+      const gate = result.gates.find((g) => g.name === 'WriteGate');
       expect(gate.details).toContain('WRITE_GATE_VIOLATION');
     });
   });
@@ -280,19 +280,19 @@ describe('PolicyGateService', () => {
   describe('GraphifyEnabledGate', () => {
     it('passes for fixture project-a (graphifyEnabled defaults to true, no code leaks possible from fixture)', async () => {
       const result = await service.runAllGates('gate-fixture-project-a');
-      const gate = result.gates.find((g) => g.name === 'GraphifyEnabledGate')!;
-      expect(gate.passed).toBe(true);
+      const gate = result.gates.find((g) => g.name === 'GraphifyEnabledGate');
+      expect(gate?.passed).toBe(true);
     });
 
     it('passes for fixture graphify-off project (fixture store has no source=code entries)', async () => {
       const result = await service.runAllGates('gate-fixture-graphify-off');
-      const gate = result.gates.find((g) => g.name === 'GraphifyEnabledGate')!;
-      expect(gate.passed).toBe(true);
+      const gate = result.gates.find((g) => g.name === 'GraphifyEnabledGate');
+      expect(gate?.passed).toBe(true);
     });
 
     it('details mentions the 10 query count', async () => {
       const result = await service.runAllGates('gate-fixture-project-a');
-      const gate = result.gates.find((g) => g.name === 'GraphifyEnabledGate')!;
+      const gate = result.gates.find((g) => g.name === 'GraphifyEnabledGate');
       expect(gate.details).toContain('10');
     });
   });
@@ -304,13 +304,13 @@ describe('PolicyGateService', () => {
   describe('TokenBudgetGate', () => {
     it('passes when tokensUsed is within 5% of budget (fixture returns 80% of budget)', async () => {
       const result = await service.runAllGates('gate-fixture-project-a');
-      const gate = result.gates.find((g) => g.name === 'TokenBudgetGate')!;
-      expect(gate.passed).toBe(true);
+      const gate = result.gates.find((g) => g.name === 'TokenBudgetGate');
+      expect(gate?.passed).toBe(true);
     });
 
     it('details includes tokensUsed and tokenBudget', async () => {
       const result = await service.runAllGates('gate-fixture-project-a');
-      const gate = result.gates.find((g) => g.name === 'TokenBudgetGate')!;
+      const gate = result.gates.find((g) => g.name === 'TokenBudgetGate');
       expect(gate.details).toContain('tokensUsed');
       expect(gate.details).toContain('tokenBudget');
     });
@@ -323,8 +323,8 @@ describe('PolicyGateService', () => {
       };
       const svc = new PolicyGateService(undefined, undefined, overshotCtxBuilder as never);
       const result = await svc.runAllGates('gate-fixture-project-a');
-      const gate = result.gates.find((g) => g.name === 'TokenBudgetGate')!;
-      expect(gate.passed).toBe(false);
+      const gate = result.gates.find((g) => g.name === 'TokenBudgetGate');
+      expect(gate?.passed).toBe(false);
       expect(gate.details).toContain('exceeds');
     });
 
@@ -336,8 +336,8 @@ describe('PolicyGateService', () => {
       };
       const svc = new PolicyGateService(undefined, undefined, boundaryCtxBuilder as never);
       const result = await svc.runAllGates('gate-fixture-project-a');
-      const gate = result.gates.find((g) => g.name === 'TokenBudgetGate')!;
-      expect(gate.passed).toBe(true);
+      const gate = result.gates.find((g) => g.name === 'TokenBudgetGate');
+      expect(gate?.passed).toBe(true);
     });
 
     it('passes when contextBuilderService returns tokensUsed at 1049', async () => {
@@ -348,8 +348,8 @@ describe('PolicyGateService', () => {
       };
       const svc = new PolicyGateService(undefined, undefined, justUnderCtxBuilder as never);
       const result = await svc.runAllGates('gate-fixture-project-a');
-      const gate = result.gates.find((g) => g.name === 'TokenBudgetGate')!;
-      expect(gate.passed).toBe(true);
+      const gate = result.gates.find((g) => g.name === 'TokenBudgetGate');
+      expect(gate?.passed).toBe(true);
     });
 
     it('falls back to fixture (800 tokens) and passes when contextBuilderService throws', async () => {
@@ -358,8 +358,8 @@ describe('PolicyGateService', () => {
       };
       const svc = new PolicyGateService(undefined, undefined, failingCtxBuilder as never);
       const result = await svc.runAllGates('gate-fixture-project-a');
-      const gate = result.gates.find((g) => g.name === 'TokenBudgetGate')!;
-      expect(gate.passed).toBe(true);
+      const gate = result.gates.find((g) => g.name === 'TokenBudgetGate');
+      expect(gate?.passed).toBe(true);
     });
   });
 
@@ -404,7 +404,7 @@ describe('PolicyGateService', () => {
       const result = await svc.runAllGates('gate-fixture-project-a');
       expect(fakeCanonical.getSnapshot).toHaveBeenCalled();
       // Gate may still pass; we verify the service path was exercised
-      const gate = result.gates.find((g) => g.name === 'TruthConsistencyGate')!;
+      const gate = result.gates.find((g) => g.name === 'TruthConsistencyGate');
       expect(gate).toBeDefined();
     });
 
@@ -428,8 +428,8 @@ describe('PolicyGateService', () => {
       const svc = new PolicyGateService(undefined, fakeRepo as never, undefined);
       const result = await svc.runAllGates('gate-fixture-project-a');
       expect(fakeRepo.findTicketById).toHaveBeenCalled();
-      const gate = result.gates.find((g) => g.name === 'TruthConsistencyGate')!;
-      expect(gate.passed).toBe(true);
+      const gate = result.gates.find((g) => g.name === 'TruthConsistencyGate');
+      expect(gate?.passed).toBe(true);
     });
 
     it('uses ContextBuilderService when injected and getProjectContext succeeds', async () => {
@@ -446,8 +446,8 @@ describe('PolicyGateService', () => {
           tokenBudget: 1000,
         }),
       );
-      const gate = result.gates.find((g) => g.name === 'TokenBudgetGate')!;
-      expect(gate.passed).toBe(true);
+      const gate = result.gates.find((g) => g.name === 'TokenBudgetGate');
+      expect(gate?.passed).toBe(true);
     });
   });
 });
