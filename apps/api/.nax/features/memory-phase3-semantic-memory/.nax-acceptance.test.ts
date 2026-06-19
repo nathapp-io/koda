@@ -5,11 +5,10 @@ import { MemoryGovernanceService } from '../../../src/memory/memory-governance.s
 import { MemoryGovernanceProcessor } from '../../../src/memory/memory-governance.processor';
 import { ExtractionService } from '../../../src/memory/extraction.service';
 // NOTE: ContextBuilderService was moved from src/memory/ to src/context/ (Task 4 refactor).
-// The production constructor now takes 7 params; the tests below that call
+// The production constructor now takes 7 params; the tests below that called
 // new ContextBuilderService(mockTimelineSvc, mockRepo) tracked the interim 2-param implementation
 // which was deleted. Those describe blocks are marked xdescribe pending a rewrite against
 // the full production ContextBuilderService.
-// import { ContextBuilderService } from '../../../src/context/context-builder.service';
 import { TimelineService } from '../../../src/memory/timeline.service';
 import { OutboxFanOutRegistry } from '../../../src/outbox/outbox-fan-out-registry';
 import { MemoryKind } from '../../../src/common/enums';

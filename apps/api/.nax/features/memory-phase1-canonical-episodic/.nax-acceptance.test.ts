@@ -11,11 +11,10 @@ import { OutboxFanOutRegistry } from '../../../src/outbox/outbox-fan-out-registr
 import { KodaDomainWriter } from '../../../src/koda-domain-writer/koda-domain-writer.service';
 import { ActorResolver } from '../../../src/events/actor-resolver.service';
 // NOTE: ContextBuilderService was moved from src/memory/ to src/context/ (Task 4 refactor).
-// The production constructor now takes 7 params; the tests below that call
+// The production constructor now takes 7 params; the tests below that called
 // new ContextBuilderService(mockTimelineSvc, ...) tracked the interim 2-param implementation
 // which was deleted. Those describe blocks are marked xdescribe pending a rewrite against
 // the full production ContextBuilderService.
-// import { ContextBuilderService } from '../../../src/context/context-builder.service';
 import { TimelineService } from '../../../src/memory/timeline.service';
 import { RagService } from '../../../src/rag/rag.service';
 import type { PrismaClient } from '@prisma/client';
