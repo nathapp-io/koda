@@ -227,6 +227,59 @@ describe('KodaDomainWriter Unit Tests', () => {
     });
   });
 
+  describe('writeDecisionEvent', () => {
+    it('should be defined', () => {
+      expect(service.writeDecisionEvent).toBeDefined();
+      expect(typeof service.writeDecisionEvent).toBe('function');
+    });
+
+    it('should require projectId parameter', async () => {
+      const data = {
+        projectId: '',
+        agentId: 'agent-001',
+        action: 'DECIDE',
+        decision: 'approved' as const,
+        rationale: null,
+        source: 'api' as const,
+        data: {},
+      };
+
+      await expect(service.writeDecisionEvent(data)).rejects.toThrow();
+    });
+
+    it('should require agentId parameter', async () => {
+      const data = {
+        projectId: 'proj-123',
+        agentId: '',
+        action: 'DECIDE',
+        decision: 'approved' as const,
+        rationale: null,
+        source: 'api' as const,
+        data: {},
+      };
+
+      await expect(service.writeDecisionEvent(data)).rejects.toThrow();
+    });
+
+    describe('project guard', () => {
+      it('should throw ForbiddenAppException when project does not exist', async () => {
+        mockWriterRepo.findProjectById.mockResolvedValue(null);
+
+        const data = {
+          projectId: 'nonexistent-project',
+          agentId: 'agent-001',
+          action: 'DECIDE',
+          decision: 'approved' as const,
+          rationale: null,
+          source: 'api' as const,
+          data: {},
+        };
+
+        await expect(service.writeDecisionEvent(data)).rejects.toBeInstanceOf(ForbiddenAppException);
+      });
+    });
+  });
+
   describe('indexDocument', () => {
     it('should be defined', () => {
       expect(service.indexDocument).toBeDefined();
@@ -261,6 +314,24 @@ describe('KodaDomainWriter Unit Tests', () => {
       mockTicketEventService.create.mockRejectedValue(new ForbiddenAppException({}, 'events'));
 
       await expect(service.indexDocument(data)).rejects.toThrow(ForbiddenAppException);
+    });
+
+    describe('project guard', () => {
+      it('should throw ForbiddenAppException when project does not exist', async () => {
+        mockWriterRepo.findProjectById.mockResolvedValue(null);
+
+        const data = {
+          projectId: 'nonexistent-project',
+          source: 'ticket' as const,
+          sourceId: 'ticket-001',
+          content: 'Test content',
+          metadata: {},
+          actorId: 'agent-001',
+          timestamp: new Date(),
+        };
+
+        await expect(service.indexDocument(data)).rejects.toBeInstanceOf(ForbiddenAppException);
+      });
     });
 
     it('should require sourceId parameter', async () => {

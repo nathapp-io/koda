@@ -157,6 +157,8 @@ export class KodaDomainWriter {
     this.assertNonEmpty(data.agentId, 'agentId');
     this.assertNonEmpty(data.action, 'action');
 
+    await this.assertProjectExists(data.projectId);
+
     const actor = {
       actorType: 'agent' as const,
       actorId: data.agentId,
@@ -189,6 +191,8 @@ export class KodaDomainWriter {
     this.assertNonEmpty(data.projectId, 'projectId');
     this.assertNonEmpty(data.sourceId, 'sourceId');
     this.assertNonEmpty(data.content, 'content');
+
+    await this.assertProjectExists(data.projectId);
 
     if (data.source !== 'ticket') {
       throw new ValidationAppException({ source: 'source must be ticket for canonical indexing events' });
