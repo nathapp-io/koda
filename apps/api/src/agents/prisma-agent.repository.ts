@@ -111,6 +111,28 @@ export class PrismaAgentRepository {
     return this.db.project.findUnique({ where: { slug } });
   }
 
+  async findByProjectSlug(projectSlug: string) {
+    const project = await this.db.project.findUnique({
+      where: { slug: projectSlug },
+      select: { id: true, slug: true },
+    });
+    if (!project) return null;
+
+    const agents = await this.db.agent.findMany({
+      where: {
+        assignedTickets: {
+          some: {
+            projectId: project.id,
+            deletedAt: null,
+          },
+        },
+      },
+      include: { roles: true, capabilities: true },
+    });
+
+    return { project, agents };
+  }
+
   async findVerifiedUnassignedTickets(projectId: string) {
     return this.db.ticket.findMany({
       where: {
