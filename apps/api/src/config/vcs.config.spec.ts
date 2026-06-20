@@ -1,6 +1,6 @@
 /// <reference types="jest" />
 
-import { vcsConfig } from './vcs.config';
+import { IVcsConfig, vcsConfig } from './vcs.config';
 
 describe('vcsConfig', () => {
   describe('namespace registration', () => {
@@ -187,6 +187,14 @@ describe('vcsConfig', () => {
       expect(config2.defaultPollingIntervalMs).toBe(120000);
 
       delete process.env['VCS_DEFAULT_POLLING_INTERVAL_MS'];
+    });
+  });
+
+  describe('TypeScript interface', () => {
+    it('return value satisfies IVcsConfig interface', () => {
+      const cfg: IVcsConfig = vcsConfig();
+      expect(typeof cfg.defaultPollingIntervalMs).toBe('number');
+      expect(typeof cfg.githubApiUrl).toBe('string');
     });
   });
 });
