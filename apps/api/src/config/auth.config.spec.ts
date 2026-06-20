@@ -1,6 +1,6 @@
 /// <reference types="jest" />
 
-import { authConfig } from './auth.config';
+import { IAuthConfig, authConfig } from './auth.config';
 
 describe('authConfig defaults', () => {
   it('uses hardened defaults when expiry env vars are unset', () => {
@@ -53,5 +53,17 @@ describe('authConfig defaults', () => {
         delete process.env['JWT_REFRESH_EXPIRES_IN'];
       }
     }
+  });
+
+  it('returns typed IAuthConfig', () => {
+    process.env['JWT_SECRET'] = 'test-secret';
+    process.env['JWT_REFRESH_SECRET'] = 'test-refresh-secret';
+    process.env['API_KEY_SECRET'] = 'test-api-key-secret';
+    const cfg: IAuthConfig = authConfig();
+    expect(cfg.jwtSecret).toBe('test-secret');
+    expect(cfg.apiKeySecret).toBe('test-api-key-secret');
+    delete process.env['JWT_SECRET'];
+    delete process.env['JWT_REFRESH_SECRET'];
+    delete process.env['API_KEY_SECRET'];
   });
 });
