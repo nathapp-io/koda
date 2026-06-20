@@ -1,11 +1,6 @@
 import { Injectable, Optional, Logger, Inject } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
-import type {
-  Ticket,
-  Comment,
-  TicketActivity,
-} from '@prisma/client';
 import { TicketStatus, CommentType, ActivityType } from '../../common/enums';
 import { validateTransition } from './ticket-transitions';
 import { RagService } from '../../rag/rag.service';
@@ -22,15 +17,39 @@ import { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { TICKET_REPOSITORY, ITicketRepository } from '../domain/ticket.domain';
 import type { TicketDomain } from '../domain/ticket.domain';
 
+export interface TransitionTicketShape {
+  id: string;
+  status: string;
+  title: string;
+  projectId: string;
+  number: number;
+  [key: string]: unknown;
+}
+
+export interface TransitionCommentShape {
+  id: string;
+  ticketId: string;
+  body: string;
+  type: string;
+  [key: string]: unknown;
+}
+
+export interface TransitionActivityShape {
+  id: string;
+  ticketId: string;
+  action: string;
+  [key: string]: unknown;
+}
+
 export interface TransitionResultWithComment {
-  ticket: Ticket;
-  comment: Comment;
-  activity: TicketActivity;
+  ticket: TransitionTicketShape;
+  comment: TransitionCommentShape;
+  activity: TransitionActivityShape;
 }
 
 export interface TransitionResultWithoutComment {
-  ticket: Ticket;
-  activity: TicketActivity;
+  ticket: TransitionTicketShape;
+  activity: TransitionActivityShape;
 }
 
 export type TransitionResult = TransitionResultWithComment | TransitionResultWithoutComment;
@@ -187,7 +206,7 @@ export class TicketTransitionsService {
             // AC5: After createPrForTicket() completes, extractLinksFromPr() is called
             return vcsLinkExtractor.extractLinksFromPr(
               project,
-              ticket as unknown as Ticket,
+              { id: ticket.id, number: ticket.number, externalVcsId: null },
               connection,
               encryptionKey,
               branchName,
@@ -345,8 +364,8 @@ export class TicketTransitionsService {
       });
 
       return {
-        ticket: updatedTicket as unknown as Ticket,
-        activity: activity as unknown as TicketActivity,
+        ticket: updatedTicket as unknown as TransitionTicketShape,
+        activity: activity as unknown as TransitionActivityShape,
       };
     });
 
@@ -426,19 +445,17 @@ export class TicketTransitionsService {
       });
 
       if (comment) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return {
-          ticket: updatedTicket as unknown as Ticket,
-          comment: comment as unknown as Comment,
-          activity: activity as unknown as TicketActivity,
-        } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+          ticket: updatedTicket as unknown as TransitionTicketShape,
+          comment: comment as unknown as TransitionCommentShape,
+          activity: activity as unknown as TransitionActivityShape,
+        } satisfies TransitionResultWithComment;
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return {
-        ticket: updatedTicket as unknown as Ticket,
-        activity: activity as unknown as TicketActivity,
-      } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+        ticket: updatedTicket as unknown as TransitionTicketShape,
+        activity: activity as unknown as TransitionActivityShape,
+      } satisfies TransitionResultWithoutComment;
     });
 
     if (toStatus === TicketStatus.CLOSED) {
