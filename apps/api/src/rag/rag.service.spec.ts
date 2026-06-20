@@ -23,6 +23,7 @@ jest.mock('@lancedb/lancedb', () => ({
   Index: { fts: jest.fn().mockReturnValue({}) },
 }));
 
+import { IRagConfig } from '../config/rag.config';
 import {
   RagService,
   reciprocalRankFusion,
@@ -33,6 +34,26 @@ import {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyRecord = Record<string, any>;
+
+function makeRagConfig(overrides: Partial<IRagConfig> = {}): IRagConfig {
+  return {
+    embeddingProvider: 'ollama',
+    embeddingModel: 'nomic-embed-text',
+    ollamaBaseUrl: 'http://localhost:11434',
+    openaiApiKey: '',
+    lancedbPath: './lancedb',
+    inMemoryOnly: false,
+    ftsIndexMode: 'simple',
+    similarityHigh: 0.85,
+    similarityMedium: 0.70,
+    similarityLow: 0.50,
+    ftsOptimizeStrategy: 'counter',
+    ftsOptimizeThreshold: 10,
+    ftsOptimizeIntervalMs: 300000,
+    graphifyEnabledCacheTtlSec: 60,
+    ...overrides,
+  };
+}
 
 function makeMockRecord(id: string, content: string): AnyRecord {
   return {
@@ -48,18 +69,7 @@ function makeMockRecord(id: string, content: string): AnyRecord {
   };
 }
 
-const mockConfigServiceForSearch = {
-  get: (key: string): unknown => {
-    const config: Record<string, unknown> = {
-      'rag.lancedbPath': './lancedb',
-      'rag.similarityHigh': 0.85,
-      'rag.similarityMedium': 0.70,
-      'rag.similarityLow': 0.50,
-      'rag.ftsIndexMode': 'simple',
-    };
-    return config[key];
-  },
-};
+const mockRagConfigForSearch = makeRagConfig();
 
 const mockEmbeddingServiceForSearch = {
   embed: jest.fn().mockResolvedValue(new Float32Array(384).fill(0)),
@@ -198,20 +208,7 @@ describe('getVerdict', () => {
 
 describe('RagService lifecycle', () => {
   it('closes LanceDB connection on module destroy', () => {
-    const configService = {
-      get: (key: string): unknown => {
-        const config: Record<string, unknown> = {
-          'rag.lancedbPath': './lancedb',
-          'rag.similarityHigh': 0.85,
-          'rag.similarityMedium': 0.70,
-          'rag.similarityLow': 0.50,
-          'rag.ftsIndexMode': 'simple',
-        };
-        return config[key];
-      },
-    };
-
-    const ragService = new RagService(configService as never);
+    const ragService = new RagService(makeRagConfig());
     const closeSpy = jest.fn();
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -226,21 +223,10 @@ describe('RagService lifecycle', () => {
 });
 
 describe('RagService.getOrCreateTable — FTS index creation', () => {
-  const mockConfigService = {
-    get: (key: string): unknown => {
-      const config: Record<string, unknown> = {
-        'rag.lancedbPath': './lancedb',
-        'rag.similarityHigh': 0.85,
-        'rag.similarityMedium': 0.70,
-        'rag.similarityLow': 0.50,
-        'rag.ftsIndexMode': 'simple',
-      };
-      return config[key];
-    },
-  };
+  const mockRagConfig = makeRagConfig();
 
   it('calls table.createIndex with FTS config when lanceAvailable is true', async () => {
-    const ragService = new RagService(mockConfigService as never);
+    const ragService = new RagService(mockRagConfig);
     const createIndexSpy = jest.fn().mockResolvedValue(undefined);
     const deleteSpy = jest.fn().mockResolvedValue(undefined);
 
@@ -269,7 +255,7 @@ describe('RagService.getOrCreateTable — FTS index creation', () => {
   });
 
   it('does not call table.createIndex when lanceAvailable is false', async () => {
-    const ragService = new RagService(mockConfigService as never);
+    const ragService = new RagService(mockRagConfig);
     ragService.onModuleInit();
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -283,7 +269,7 @@ describe('RagService.getOrCreateTable — FTS index creation', () => {
   });
 
   it('logs warning and does not throw when createIndex rejects', async () => {
-    const ragService = new RagService(mockConfigService as never);
+    const ragService = new RagService(mockRagConfig);
     const loggerSpy = jest.spyOn(ragService['logger'], 'warn');
     const createIndexError = new Error('Index already exists');
     const createIndexSpy = jest.fn().mockRejectedValue(createIndexError);
@@ -339,7 +325,7 @@ describe('RagService.search — native FTS path (US-003-2)', () => {
 
   it('calls table.search(query, "fts", "content") when lanceAvailable is true', async () => {
     const ragService = new RagService(
-      mockConfigServiceForSearch as never,
+      mockRagConfigForSearch,
       mockEmbeddingServiceForSearch as never,
     );
 
@@ -358,7 +344,7 @@ describe('RagService.search — native FTS path (US-003-2)', () => {
 
   it('does not call table.search() when lanceAvailable is false', async () => {
     const ragService = new RagService(
-      mockConfigServiceForSearch as never,
+      mockRagConfigForSearch,
       mockEmbeddingServiceForSearch as never,
     );
 
@@ -377,7 +363,7 @@ describe('RagService.search — native FTS path (US-003-2)', () => {
 
   it('scores native FTS results by reciprocal position 1/(i+1)', async () => {
     const ragService = new RagService(
-      mockConfigServiceForSearch as never,
+      mockRagConfigForSearch,
       mockEmbeddingServiceForSearch as never,
     );
 
@@ -408,7 +394,7 @@ describe('RagService.search — native FTS path (US-003-2)', () => {
 
   it('adds ftsRows to recordMap so records unique to native FTS appear in results', async () => {
     const ragService = new RagService(
-      mockConfigServiceForSearch as never,
+      mockRagConfigForSearch,
       mockEmbeddingServiceForSearch as never,
     );
 
@@ -454,7 +440,7 @@ describe('RagService.search — in-memory FTS fallback path (US-003-3)', () => {
 
   it('when lanceAvailable=true and table.search() rejects, falls back to simpleFtsScore and returns non-empty results', async () => {
     const ragService = new RagService(
-      mockConfigServiceForSearch as never,
+      mockRagConfigForSearch,
       mockEmbeddingServiceForSearch as never,
     );
 
@@ -477,7 +463,7 @@ describe('RagService.search — in-memory FTS fallback path (US-003-3)', () => {
 
   it('when lanceAvailable=true and table.search() rejects, logs a warning', async () => {
     const ragService = new RagService(
-      mockConfigServiceForSearch as never,
+      mockRagConfigForSearch,
       mockEmbeddingServiceForSearch as never,
     );
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -499,7 +485,7 @@ describe('RagService.search — in-memory FTS fallback path (US-003-3)', () => {
 
   it('when lanceAvailable=true and table.search() rejects, fallback scores match simpleFtsScore output', async () => {
     const ragService = new RagService(
-      mockConfigServiceForSearch as never,
+      mockRagConfigForSearch,
       mockEmbeddingServiceForSearch as never,
     );
 
@@ -529,7 +515,7 @@ describe('RagService.search — in-memory FTS fallback path (US-003-3)', () => {
 
   it('when lanceAvailable=false, uses simpleFtsScore without calling table.search()', async () => {
     const ragService = new RagService(
-      mockConfigServiceForSearch as never,
+      mockRagConfigForSearch,
       mockEmbeddingServiceForSearch as never,
     );
 
@@ -573,18 +559,7 @@ describe('simpleFtsScore — export (US-003-3 AC-3)', () => {
 });
 
 describe('RagService — onFirstAccess and onDestroy lifecycle hooks (US-003-5)', () => {
-  const mockConfigService = {
-    get: (key: string): unknown => {
-      const config: Record<string, unknown> = {
-        'rag.lancedbPath': './lancedb',
-        'rag.similarityHigh': 0.85,
-        'rag.similarityMedium': 0.70,
-        'rag.similarityLow': 0.50,
-        'rag.ftsIndexMode': 'simple',
-      };
-      return config[key];
-    },
-  };
+  const mockRagConfig = makeRagConfig();
 
   function makeMockDb(tableExists: boolean) {
     const mockTable = {
@@ -601,7 +576,7 @@ describe('RagService — onFirstAccess and onDestroy lifecycle hooks (US-003-5)'
 
   describe('getOrCreateTable — onFirstAccess', () => {
     it('calls optimizeStrategy.onFirstAccess(projectId, table) when lanceAvailable is true', async () => {
-      const ragService = new RagService(mockConfigService as never);
+      const ragService = new RagService(mockRagConfig);
       const onFirstAccessSpy = jest.fn();
       const mockStrategy = { onFirstAccess: onFirstAccessSpy, onInsert: jest.fn(), onDestroy: jest.fn() };
       const { mockTable, ...mockDb } = makeMockDb(false);
@@ -619,7 +594,7 @@ describe('RagService — onFirstAccess and onDestroy lifecycle hooks (US-003-5)'
     });
 
     it('calls optimizeStrategy.onFirstAccess exactly once per projectId even when called multiple times', async () => {
-      const ragService = new RagService(mockConfigService as never);
+      const ragService = new RagService(mockRagConfig);
       const onFirstAccessSpy = jest.fn();
       const mockStrategy = { onFirstAccess: onFirstAccessSpy, onInsert: jest.fn(), onDestroy: jest.fn() };
       const { mockTable, ...mockDb } = makeMockDb(false);
@@ -639,7 +614,7 @@ describe('RagService — onFirstAccess and onDestroy lifecycle hooks (US-003-5)'
     });
 
     it('calls optimizeStrategy.onFirstAccess once per distinct projectId', async () => {
-      const ragService = new RagService(mockConfigService as never);
+      const ragService = new RagService(mockRagConfig);
       const onFirstAccessSpy = jest.fn();
       const mockStrategy = { onFirstAccess: onFirstAccessSpy, onInsert: jest.fn(), onDestroy: jest.fn() };
 
@@ -670,7 +645,7 @@ describe('RagService — onFirstAccess and onDestroy lifecycle hooks (US-003-5)'
     });
 
     it('does not call optimizeStrategy.onFirstAccess when lanceAvailable is false', async () => {
-      const ragService = new RagService(mockConfigService as never);
+      const ragService = new RagService(mockRagConfig);
       const onFirstAccessSpy = jest.fn();
       const mockStrategy = { onFirstAccess: onFirstAccessSpy, onInsert: jest.fn(), onDestroy: jest.fn() };
 
@@ -685,7 +660,7 @@ describe('RagService — onFirstAccess and onDestroy lifecycle hooks (US-003-5)'
     });
 
     it('does not call optimizeStrategy.onFirstAccess when optimizeStrategy is not injected', async () => {
-      const ragService = new RagService(mockConfigService as never);
+      const ragService = new RagService(mockRagConfig);
       const { mockTable, ...mockDb } = makeMockDb(false);
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -700,7 +675,7 @@ describe('RagService — onFirstAccess and onDestroy lifecycle hooks (US-003-5)'
 
   describe('onModuleDestroy — onDestroy', () => {
     it('calls optimizeStrategy.onDestroy() during onModuleDestroy', async () => {
-      const ragService = new RagService(mockConfigService as never);
+      const ragService = new RagService(mockRagConfig);
       const onDestroySpy = jest.fn().mockResolvedValue(undefined);
       const mockStrategy = { onFirstAccess: jest.fn(), onInsert: jest.fn(), onDestroy: onDestroySpy };
 
@@ -713,7 +688,7 @@ describe('RagService — onFirstAccess and onDestroy lifecycle hooks (US-003-5)'
     });
 
     it('calls optimizeStrategy.onDestroy() even when no LanceDB connection exists', async () => {
-      const ragService = new RagService(mockConfigService as never);
+      const ragService = new RagService(mockRagConfig);
       const onDestroySpy = jest.fn().mockResolvedValue(undefined);
       const mockStrategy = { onFirstAccess: jest.fn(), onInsert: jest.fn(), onDestroy: onDestroySpy };
 
@@ -728,7 +703,7 @@ describe('RagService — onFirstAccess and onDestroy lifecycle hooks (US-003-5)'
     });
 
     it('does not throw when optimizeStrategy is not injected', async () => {
-      const ragService = new RagService(mockConfigService as never);
+      const ragService = new RagService(mockRagConfig);
       // optimizeStrategy is undefined (not injected)
 
       await expect(ragService.onModuleDestroy()).resolves.toBeUndefined();
@@ -737,18 +712,7 @@ describe('RagService — onFirstAccess and onDestroy lifecycle hooks (US-003-5)'
 });
 
 describe('RagService.indexDocument — onInsert Strategy Hook (US-003-4)', () => {
-  const mockConfigService = {
-    get: (key: string): unknown => {
-      const config: Record<string, unknown> = {
-        'rag.lancedbPath': './lancedb',
-        'rag.similarityHigh': 0.85,
-        'rag.similarityMedium': 0.70,
-        'rag.similarityLow': 0.50,
-        'rag.ftsIndexMode': 'simple',
-      };
-      return config[key];
-    },
-  };
+  const mockRagConfig = makeRagConfig();
 
   const mockEmbeddingService = {
     embed: jest.fn().mockResolvedValue([0.1, 0.2, 0.3]),
@@ -758,7 +722,7 @@ describe('RagService.indexDocument — onInsert Strategy Hook (US-003-4)', () =>
   };
 
   it('calls optimizeStrategy.onInsert(projectId, table) after table.add() when lanceAvailable is true', async () => {
-    const ragService = new RagService(mockConfigService as never, mockEmbeddingService as never);
+    const ragService = new RagService(mockRagConfig, mockEmbeddingService as never);
     const onInsertSpy = jest.fn().mockResolvedValue(undefined);
     const mockStrategy = { onInsert: onInsertSpy } as unknown as never;
     const mockTable = { add: jest.fn().mockResolvedValue(undefined) };
@@ -781,7 +745,7 @@ describe('RagService.indexDocument — onInsert Strategy Hook (US-003-4)', () =>
   });
 
   it('does not call optimizeStrategy.onInsert() when lanceAvailable is false', async () => {
-    const ragService = new RagService(mockConfigService as never, mockEmbeddingService as never);
+    const ragService = new RagService(mockRagConfig, mockEmbeddingService as never);
     const onInsertSpy = jest.fn().mockResolvedValue(undefined);
     const mockStrategy = { onInsert: onInsertSpy } as unknown as never;
     const mockTable = { add: jest.fn().mockResolvedValue(undefined) };
@@ -805,21 +769,8 @@ describe('RagService.indexDocument — onInsert Strategy Hook (US-003-4)', () =>
 });
 
 describe('RagService.optimizeTable (US-004)', () => {
-  const mockConfigService = {
-    get: (key: string): unknown => {
-      const config: Record<string, unknown> = {
-        'rag.lancedbPath': './lancedb',
-        'rag.similarityHigh': 0.85,
-        'rag.similarityMedium': 0.70,
-        'rag.similarityLow': 0.50,
-        'rag.ftsIndexMode': 'simple',
-      };
-      return config[key];
-    },
-  };
-
   it('calls table.optimize() when lanceAvailable is true', async () => {
-    const ragService = new RagService(mockConfigService as never);
+    const ragService = new RagService(makeRagConfig());
     const mockTable = { optimize: jest.fn().mockResolvedValue(undefined) };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -833,7 +784,7 @@ describe('RagService.optimizeTable (US-004)', () => {
   });
 
   it('does not call table.optimize() when lanceAvailable is false', async () => {
-    const ragService = new RagService(mockConfigService as never);
+    const ragService = new RagService(makeRagConfig());
     const mockTable = { optimize: jest.fn().mockResolvedValue(undefined) };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -848,21 +799,8 @@ describe('RagService.optimizeTable (US-004)', () => {
 });
 
 describe('RagService.deleteAllBySourceType (US-002)', () => {
-  const mockConfigService = {
-    get: (key: string): unknown => {
-      const config: Record<string, unknown> = {
-        'rag.lancedbPath': './lancedb',
-        'rag.similarityHigh': 0.85,
-        'rag.similarityMedium': 0.70,
-        'rag.similarityLow': 0.50,
-        'rag.ftsIndexMode': 'simple',
-      };
-      return config[key];
-    },
-  };
-
   it('AC1: deletes all records where source = sourceType and returns count', async () => {
-    const ragService = new RagService(mockConfigService as never);
+    const ragService = new RagService(makeRagConfig());
     const mockTable = {
       countRows: jest.fn().mockResolvedValueOnce(3).mockResolvedValueOnce(0),
       delete: jest.fn().mockResolvedValue(undefined),
@@ -878,7 +816,7 @@ describe('RagService.deleteAllBySourceType (US-002)', () => {
   });
 
   it('AC2: returns 0 when no records exist for the source type', async () => {
-    const ragService = new RagService(mockConfigService as never);
+    const ragService = new RagService(makeRagConfig());
     const mockTable = {
       countRows: jest.fn().mockResolvedValue(0),
       query: jest.fn().mockReturnValue({
@@ -904,19 +842,7 @@ describe('RagService.deleteAllBySourceType (US-002)', () => {
       dimensions: 384,
     };
 
-    const ragService = new RagService({
-      get: (key: string): unknown => {
-        const config: Record<string, unknown> = {
-          'rag.lancedbPath': './lancedb',
-          'rag.similarityHigh': 0.85,
-          'rag.similarityMedium': 0.70,
-          'rag.similarityLow': 0.50,
-          'rag.ftsIndexMode': 'simple',
-          'rag.inMemoryOnly': true,
-        };
-        return config[key];
-      },
-    } as never, mockEmbeddingService as never);
+    const ragService = new RagService(makeRagConfig({ inMemoryOnly: true }), mockEmbeddingService as never);
 
     await ragService.indexDocument('proj-1', {
       source: 'code',
@@ -941,18 +867,7 @@ describe('RagService.deleteAllBySourceType (US-002)', () => {
 });
 
 describe('RagService.importGraphify (US-002)', () => {
-  const mockConfigService = {
-    get: (key: string): unknown => {
-      const config: Record<string, unknown> = {
-        'rag.lancedbPath': './lancedb',
-        'rag.similarityHigh': 0.85,
-        'rag.similarityMedium': 0.70,
-        'rag.similarityLow': 0.50,
-        'rag.ftsIndexMode': 'simple',
-      };
-      return config[key];
-    },
-  };
+  const mockRagConfig = makeRagConfig();
 
   const mockEmbeddingService = {
     embed: jest.fn().mockResolvedValue(new Float32Array(384).fill(0)),
@@ -962,7 +877,7 @@ describe('RagService.importGraphify (US-002)', () => {
   };
 
   it('AC3: calls deleteAllBySourceType before indexing any nodes', async () => {
-    const ragService = new RagService(mockConfigService as never, mockEmbeddingService as never);
+    const ragService = new RagService(mockRagConfig, mockEmbeddingService as never);
     const callOrder: string[] = [];
     const deleteAllBySourceTypeSpy = jest.spyOn(ragService, 'deleteAllBySourceType').mockImplementation(async () => {
       callOrder.push('deleteAllBySourceType');
@@ -985,7 +900,7 @@ describe('RagService.importGraphify (US-002)', () => {
   });
 
   it('AC4: with empty links, indexes each node with content "{type} {label} in {source_file}" (omitting source_file segment when absent)', async () => {
-    const ragService = new RagService(mockConfigService as never, mockEmbeddingService as never);
+    const ragService = new RagService(mockRagConfig, mockEmbeddingService as never);
     jest.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(0);
     const indexDocumentSpy = jest.spyOn(ragService, 'indexDocument').mockResolvedValue(undefined);
 
@@ -1016,7 +931,7 @@ describe('RagService.importGraphify (US-002)', () => {
   });
 
   it('AC5: builds content that includes "{relation} {neighbor_label}" for each link where node is the source', async () => {
-    const ragService = new RagService(mockConfigService as never, mockEmbeddingService as never);
+    const ragService = new RagService(mockRagConfig, mockEmbeddingService as never);
     jest.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(0);
     const indexDocumentSpy = jest.spyOn(ragService, 'indexDocument').mockResolvedValue(undefined);
 
@@ -1039,7 +954,7 @@ describe('RagService.importGraphify (US-002)', () => {
   });
 
   it('AC6: calls indexDocument with source: "code", sourceId: node.id, and metadata containing label, type, source_file, and community', async () => {
-    const ragService = new RagService(mockConfigService as never, mockEmbeddingService as never);
+    const ragService = new RagService(mockRagConfig, mockEmbeddingService as never);
     jest.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(0);
     const indexDocumentSpy = jest.spyOn(ragService, 'indexDocument').mockResolvedValue(undefined);
 
@@ -1063,7 +978,7 @@ describe('RagService.importGraphify (US-002)', () => {
   });
 
   it('AC7: returns { imported: 0, cleared: N } for empty nodes array', async () => {
-    const ragService = new RagService(mockConfigService as never, mockEmbeddingService as never);
+    const ragService = new RagService(mockRagConfig, mockEmbeddingService as never);
     jest.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(5);
 
     const result = await ragService.importGraphify('proj-1', [], []);
@@ -1072,7 +987,7 @@ describe('RagService.importGraphify (US-002)', () => {
   });
 
   it('defaults type to "node" when absent', async () => {
-    const ragService = new RagService(mockConfigService as never, mockEmbeddingService as never);
+    const ragService = new RagService(mockRagConfig, mockEmbeddingService as never);
     jest.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(0);
     const indexDocumentSpy = jest.spyOn(ragService, 'indexDocument').mockResolvedValue(undefined);
 
@@ -1091,7 +1006,7 @@ describe('RagService.importGraphify (US-002)', () => {
   });
 
   it('returns { imported: N, cleared: M } after successful import', async () => {
-    const ragService = new RagService(mockConfigService as never, mockEmbeddingService as never);
+    const ragService = new RagService(mockRagConfig, mockEmbeddingService as never);
     jest.spyOn(ragService, 'deleteAllBySourceType').mockResolvedValue(3);
     jest.spyOn(ragService, 'indexDocument').mockResolvedValue(undefined);
 
@@ -1125,7 +1040,7 @@ describe('RagService.search — Provenance Envelope (AC-1 through AC-6)', () => 
 
   it('AC-1: SearchKbResponseDto.provenance is non-null on success', async () => {
     const ragService = new RagService(
-      mockConfigServiceForSearch as never,
+      mockRagConfigForSearch,
       mockEmbeddingServiceForSearch as never,
     );
 
@@ -1145,7 +1060,7 @@ describe('RagService.search — Provenance Envelope (AC-1 through AC-6)', () => 
 
   it('AC-2: SearchKbResponseDto.provenance.sources lists unique source_type + source_id pairs only once', async () => {
     const ragService = new RagService(
-      mockConfigServiceForSearch as never,
+      mockRagConfigForSearch,
       mockEmbeddingServiceForSearch as never,
     );
 
@@ -1198,7 +1113,7 @@ describe('RagService.search — Provenance Envelope (AC-1 through AC-6)', () => 
 
   it('AC-3: KbResultDto.provenance.indexedAt is a valid ISO timestamp', async () => {
     const ragService = new RagService(
-      mockConfigServiceForSearch as never,
+      mockRagConfigForSearch,
       mockEmbeddingServiceForSearch as never,
     );
 
@@ -1224,7 +1139,7 @@ describe('RagService.search — Provenance Envelope (AC-1 through AC-6)', () => 
 
   it('AC-4: KbResultDto.provenance.sourceProjectId equals the request projectId', async () => {
     const ragService = new RagService(
-      mockConfigServiceForSearch as never,
+      mockRagConfigForSearch,
       mockEmbeddingServiceForSearch as never,
     );
 
@@ -1244,7 +1159,7 @@ describe('RagService.search — Provenance Envelope (AC-1 through AC-6)', () => 
 
   it('AC-5: No cross-project leakage — all results have sourceProjectId matching request', async () => {
     const ragService = new RagService(
-      mockConfigServiceForSearch as never,
+      mockRagConfigForSearch,
       mockEmbeddingServiceForSearch as never,
     );
 
@@ -1269,7 +1184,7 @@ describe('RagService.search — Provenance Envelope (AC-1 through AC-6)', () => 
 
   it('AC-6: SearchKbResponseDto.provenance.retrievedAt is within 1 second of server response', async () => {
     const ragService = new RagService(
-      mockConfigServiceForSearch as never,
+      mockRagConfigForSearch,
       mockEmbeddingServiceForSearch as never,
     );
 

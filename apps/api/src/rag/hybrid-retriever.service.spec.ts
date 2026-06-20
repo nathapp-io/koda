@@ -24,22 +24,29 @@ jest.mock('@lancedb/lancedb', () => ({
 }));
 
 import { HybridRetrieverService } from './hybrid-retriever.service';
-import type { ConfigService } from '@nestjs/config';
+import type { IRagConfig } from '../config/rag.config';
 import type { EmbeddingService } from './embedding.service';
 import type { EntityStore } from './entity-store';
 import type { PrismaRagRepository } from './prisma-rag.repository';
 
-function makeConfigService(overrides: Record<string, unknown> = {}): jest.Mocked<ConfigService> {
-  const defaults: Record<string, unknown> = {
-    'rag.lancedbPath': './lancedb-test',
-    'rag.similarityHigh': 0.85,
-    'rag.similarityMedium': 0.7,
-    'rag.similarityLow': 0.5,
-    'rag.inMemoryOnly': true,
-    'rag.graphifyEnabledCacheTtlSec': 60,
+function makeRagConfig(overrides: Partial<IRagConfig> = {}): IRagConfig {
+  return {
+    embeddingProvider: 'ollama',
+    embeddingModel: 'nomic-embed-text',
+    ollamaBaseUrl: 'http://localhost:11434',
+    openaiApiKey: '',
+    lancedbPath: './lancedb-test',
+    inMemoryOnly: true,
+    ftsIndexMode: 'simple',
+    similarityHigh: 0.85,
+    similarityMedium: 0.7,
+    similarityLow: 0.5,
+    ftsOptimizeStrategy: 'counter',
+    ftsOptimizeThreshold: 10,
+    ftsOptimizeIntervalMs: 300000,
+    graphifyEnabledCacheTtlSec: 60,
     ...overrides,
   };
-  return { get: jest.fn((key: string) => defaults[key]) } as unknown as jest.Mocked<ConfigService>;
 }
 
 function makeEmbeddingService(): jest.Mocked<EmbeddingService> {
@@ -64,19 +71,19 @@ function makeRagRepo(): jest.Mocked<PrismaRagRepository> {
   } as unknown as jest.Mocked<PrismaRagRepository>;
 }
 
-function buildService(configOverrides: Record<string, unknown> = {}): {
+function buildService(configOverrides: Partial<IRagConfig> = {}): {
   service: HybridRetrieverService;
-  config: jest.Mocked<ConfigService>;
+  ragConfig: IRagConfig;
   embeddingService: jest.Mocked<EmbeddingService>;
   entityStore: jest.Mocked<EntityStore>;
   ragRepo: jest.Mocked<PrismaRagRepository>;
 } {
-  const config = makeConfigService(configOverrides);
+  const ragConfig = makeRagConfig(configOverrides);
   const embeddingService = makeEmbeddingService();
   const entityStore = makeEntityStore();
   const ragRepo = makeRagRepo();
-  const service = new HybridRetrieverService(config, embeddingService, entityStore, ragRepo);
-  return { service, config, embeddingService, entityStore, ragRepo };
+  const service = new HybridRetrieverService(ragConfig, embeddingService, entityStore, ragRepo);
+  return { service, ragConfig, embeddingService, entityStore, ragRepo };
 }
 
 describe('HybridRetrieverService', () => {
@@ -86,13 +93,13 @@ describe('HybridRetrieverService', () => {
 
   describe('constructor / onModuleInit', () => {
     it('sets inMemoryOnly mode from config', () => {
-      const { service } = buildService({ 'rag.inMemoryOnly': true });
+      const { service } = buildService({ inMemoryOnly: true });
       // lanceAvailable is false in in-memory mode — verify by calling onModuleInit without throwing
       expect(() => service.onModuleInit()).not.toThrow();
     });
 
     it('does not throw on onModuleInit when inMemoryOnly=true', () => {
-      const { service } = buildService({ 'rag.inMemoryOnly': true });
+      const { service } = buildService({ inMemoryOnly: true });
       expect(() => service.onModuleInit()).not.toThrow();
     });
   });
@@ -113,7 +120,7 @@ describe('HybridRetrieverService', () => {
 
   describe('indexDocument', () => {
     it('embeds content and adds record to the in-memory table', async () => {
-      const { service, embeddingService } = buildService({ 'rag.inMemoryOnly': true });
+      const { service, embeddingService } = buildService({ inMemoryOnly: true });
       embeddingService.embed.mockResolvedValue(Array(8).fill(0.5));
 
       await expect(
@@ -129,7 +136,7 @@ describe('HybridRetrieverService', () => {
     });
 
     it('falls back to zero vector when embed throws', async () => {
-      const { service, embeddingService } = buildService({ 'rag.inMemoryOnly': true });
+      const { service, embeddingService } = buildService({ inMemoryOnly: true });
       embeddingService.embed.mockRejectedValueOnce(new Error('embed error'));
 
       await expect(
@@ -143,7 +150,7 @@ describe('HybridRetrieverService', () => {
     });
 
     it('uses createdAtOverride from metadata when present', async () => {
-      const { service, embeddingService } = buildService({ 'rag.inMemoryOnly': true });
+      const { service, embeddingService } = buildService({ inMemoryOnly: true });
       embeddingService.embed.mockResolvedValue(Array(8).fill(0));
 
       await expect(
@@ -159,7 +166,7 @@ describe('HybridRetrieverService', () => {
 
   describe('search', () => {
     it('returns empty results when table has no rows', async () => {
-      const { service } = buildService({ 'rag.inMemoryOnly': true });
+      const { service } = buildService({ inMemoryOnly: true });
 
       const result = await service.search({
         projectId: 'proj-1',
@@ -172,7 +179,7 @@ describe('HybridRetrieverService', () => {
     });
 
     it('respects explicit graphifyEnabled=false to exclude code sources', async () => {
-      const { service } = buildService({ 'rag.inMemoryOnly': true });
+      const { service } = buildService({ inMemoryOnly: true });
 
       const result = await service.search({
         projectId: 'proj-1',
@@ -184,7 +191,7 @@ describe('HybridRetrieverService', () => {
     });
 
     it('caps limit at 50', async () => {
-      const { service } = buildService({ 'rag.inMemoryOnly': true });
+      const { service } = buildService({ inMemoryOnly: true });
 
       const result = await service.search({
         projectId: 'proj-1',
@@ -197,7 +204,7 @@ describe('HybridRetrieverService', () => {
     });
 
     it('uses intent-specific weights when intent is provided', async () => {
-      const { service } = buildService({ 'rag.inMemoryOnly': true });
+      const { service } = buildService({ inMemoryOnly: true });
 
       const result = await service.search({
         projectId: 'proj-1',
@@ -209,7 +216,7 @@ describe('HybridRetrieverService', () => {
     });
 
     it('resolves graphifyEnabled from repo when not supplied explicitly', async () => {
-      const { service, ragRepo } = buildService({ 'rag.inMemoryOnly': true });
+      const { service, ragRepo } = buildService({ inMemoryOnly: true });
       ragRepo.findProjectGraphifyEnabled.mockResolvedValue({ graphifyEnabled: true } as any);
 
       await service.search({ projectId: 'proj-cache', query: 'test' });
@@ -220,7 +227,7 @@ describe('HybridRetrieverService', () => {
     });
 
     it('invalidateGraphifyEnabledCache forces repo re-fetch', async () => {
-      const { service, ragRepo } = buildService({ 'rag.inMemoryOnly': true });
+      const { service, ragRepo } = buildService({ inMemoryOnly: true });
       ragRepo.findProjectGraphifyEnabled.mockResolvedValue({ graphifyEnabled: false } as any);
 
       await service.search({ projectId: 'proj-2', query: 'a' });

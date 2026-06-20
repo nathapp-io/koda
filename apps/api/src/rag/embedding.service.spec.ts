@@ -1,17 +1,37 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConfigService } from '@nestjs/config';
 import { ValidationAppException } from '@nathapp/nestjs-common';
+import { RAG_CFG, IRagConfig } from '../config/rag.config';
 import { EmbeddingService } from './embedding.service';
 import { OllamaEmbeddingProvider } from './providers/ollama-embedding.provider';
 import { OpenAIEmbeddingProvider } from './providers/openai-embedding.provider';
 
-function buildModule(config: Record<string, unknown>): Promise<TestingModule> {
+function makeRagConfig(overrides: Partial<IRagConfig> = {}): IRagConfig {
+  return {
+    embeddingProvider: 'ollama',
+    embeddingModel: 'nomic-embed-text',
+    ollamaBaseUrl: 'http://localhost:11434',
+    openaiApiKey: '',
+    lancedbPath: './lancedb',
+    inMemoryOnly: true,
+    ftsIndexMode: 'simple',
+    similarityHigh: 0.85,
+    similarityMedium: 0.70,
+    similarityLow: 0.50,
+    ftsOptimizeStrategy: 'counter',
+    ftsOptimizeThreshold: 10,
+    ftsOptimizeIntervalMs: 300000,
+    graphifyEnabledCacheTtlSec: 60,
+    ...overrides,
+  };
+}
+
+function buildModule(ragConfig: IRagConfig): Promise<TestingModule> {
   return Test.createTestingModule({
     providers: [
       EmbeddingService,
       {
-        provide: ConfigService,
-        useValue: { get: (key: string) => config[key] },
+        provide: RAG_CFG,
+        useValue: ragConfig,
       },
     ],
   }).compile();
@@ -20,39 +40,39 @@ function buildModule(config: Record<string, unknown>): Promise<TestingModule> {
 describe('EmbeddingService', () => {
   describe('provider factory', () => {
     it('creates OllamaEmbeddingProvider when provider is "ollama"', async () => {
-      const module = await buildModule({
-        'rag.embeddingProvider': 'ollama',
-        'rag.embeddingModel': 'nomic-embed-text',
-        'rag.ollamaBaseUrl': 'http://localhost:11434',
-      });
+      const module = await buildModule(makeRagConfig({
+        embeddingProvider: 'ollama',
+        embeddingModel: 'nomic-embed-text',
+        ollamaBaseUrl: 'http://localhost:11434',
+      }));
       const service = module.get(EmbeddingService);
       expect(service.providerName).toBe('ollama');
       expect(service.dimensions).toBe(768);
     });
 
     it('creates OpenAIEmbeddingProvider when provider is "openai"', async () => {
-      const module = await buildModule({
-        'rag.embeddingProvider': 'openai',
-        'rag.embeddingModel': 'text-embedding-3-small',
-        'rag.openaiApiKey': 'sk-test-key',
-      });
+      const module = await buildModule(makeRagConfig({
+        embeddingProvider: 'openai',
+        embeddingModel: 'text-embedding-3-small',
+        openaiApiKey: 'sk-test-key',
+      }));
       const service = module.get(EmbeddingService);
       expect(service.providerName).toBe('openai');
       expect(service.dimensions).toBe(1536);
     });
 
     it('defaults to ollama when no provider configured', async () => {
-      const module = await buildModule({});
+      const module = await buildModule(makeRagConfig());
       const service = module.get(EmbeddingService);
       expect(service.providerName).toBe('ollama');
     });
 
     it('exposes correct model name', async () => {
-      const module = await buildModule({
-        'rag.embeddingProvider': 'ollama',
-        'rag.embeddingModel': 'mxbai-embed-large',
-        'rag.ollamaBaseUrl': 'http://localhost:11434',
-      });
+      const module = await buildModule(makeRagConfig({
+        embeddingProvider: 'ollama',
+        embeddingModel: 'mxbai-embed-large',
+        ollamaBaseUrl: 'http://localhost:11434',
+      }));
       const service = module.get(EmbeddingService);
       expect(service.modelName).toBe('mxbai-embed-large');
     });
