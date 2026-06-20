@@ -5,8 +5,7 @@
  * Handles graphify_import events (code_module nodes) and ticket_event events (ticket entities).
  */
 import { Injectable, Optional } from '@nestjs/common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import { Prisma, type PrismaClient } from '@prisma/client';
+import { PrismaRagRepository } from './prisma-rag.repository';
 
 export interface Entity {
   id: string;
@@ -25,7 +24,7 @@ export class EntityStore {
   private entities = new Map<string, Map<string, Entity>>();
 
   constructor(
-    @Optional() private readonly prisma?: PrismaService<PrismaClient>,
+    @Optional() private readonly ragRepository?: PrismaRagRepository,
     @Optional() private readonly getProjectCodeDocuments?: (projectId: string) => Promise<Array<{ id: string; label: string; type: string; source_file?: string }>>,
   ) {}
 
@@ -144,16 +143,14 @@ export class EntityStore {
   }
 
   async indexGraphifyEntitiesForProject(projectId: string): Promise<void> {
-    if (!this.prisma?.client) return;
+    if (!this.ragRepository) return;
 
     let nodes: Array<{ id: string; label: string; type: string; source_file?: string }> = [];
 
     if (this.getProjectCodeDocuments) {
       nodes = await this.getProjectCodeDocuments(projectId);
     } else {
-      nodes = await this.prisma.client.$queryRaw<Array<{ id: string; label: string; type: string; source_file?: string }>>(
-        Prisma.sql`SELECT id, label, type, source_file FROM code_document WHERE project_id = ${projectId}`,
-      );
+      nodes = await this.ragRepository.getProjectCodeDocuments(projectId);
     }
 
     for (const node of nodes) {
@@ -170,12 +167,9 @@ export class EntityStore {
   }
 
   private async indexTicketEntity(ticketId: string, projectId: string): Promise<void> {
-    if (!this.prisma?.client) return;
+    if (!this.ragRepository) return;
 
-    const ticket = await this.prisma.client.ticket.findUnique({
-      where: { id: ticketId },
-      select: { id: true, title: true },
-    });
+    const ticket = await this.ragRepository.findTicketById(ticketId);
     if (ticket) {
       this.indexEntity(projectId, {
         id: ticket.id,

@@ -3,6 +3,24 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { Prisma, PrismaClient } from '@prisma/client';
 import type { IRagRepository } from './domain/rag.domain';
 
+export interface RagProjectSlugRecord {
+  id: string;
+  graphifyEnabled: boolean;
+  deletedAt: Date | null;
+}
+
+export interface RagCodeDocumentRow {
+  id: string;
+  label: string;
+  type: string;
+  source_file?: string;
+}
+
+export interface RagTicketRecord {
+  id: string;
+  title: string;
+}
+
 @Injectable()
 export class PrismaRagRepository implements IRagRepository {
   private static readonly BATCH_SIZE = 500;
@@ -140,6 +158,43 @@ export class PrismaRagRepository implements IRagRepository {
           { targetId: { in: nodeIds } },
         ],
       },
+    });
+  }
+
+  async findProjectBySlug(slug: string): Promise<RagProjectSlugRecord | null> {
+    return this.prisma.client.project.findUnique({
+      where: { slug },
+      select: { id: true, graphifyEnabled: true, deletedAt: true },
+    });
+  }
+
+  async updateGraphifyLastImportedAt(projectId: string): Promise<void> {
+    await this.prisma.client.project.update({
+      where: { id: projectId },
+      data: { graphifyLastImportedAt: new Date() },
+    });
+  }
+
+  async getProjectCodeDocuments(projectId: string): Promise<RagCodeDocumentRow[]> {
+    return this.prisma.client.$queryRaw<RagCodeDocumentRow[]>(
+      Prisma.sql`SELECT id, label, type, source_file FROM code_document WHERE project_id = ${projectId}`,
+    );
+  }
+
+  async findTicketById(ticketId: string): Promise<RagTicketRecord | null> {
+    return this.prisma.client.ticket.findUnique({
+      where: { id: ticketId },
+      select: { id: true, title: true },
+    });
+  }
+
+  async findProjectMembership(
+    projectId: string,
+    userId: string,
+  ): Promise<{ role: string } | null> {
+    return this.prisma.client.projectMember.findUnique({
+      where: { projectId_userId: { projectId, userId } },
+      select: { role: true },
     });
   }
 }

@@ -1,9 +1,9 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { AstIndexService, SourceFile } from './ast-index.service';
 import { createVcsProvider } from '../vcs/factory';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 import type { VcsProviderConfig } from '../vcs/factory';
+import { PrismaCodeIntelRepository } from './prisma-code-intel.repository';
 
 interface CodeCommitPayload {
   repoId: string;
@@ -14,28 +14,15 @@ interface CodeCommitPayload {
   webhookOnly?: boolean;
 }
 
-interface VcsConnectionDelegate {
-  findUnique(options: { where: Record<string, unknown>; select?: unknown; include?: unknown }): Promise<unknown>
-}
-
-interface ExtendedPrismaClient {
-  vcsConnection: VcsConnectionDelegate
-  [key: string]: unknown
-}
-
 @Injectable()
 export class CodeCommitOutboxHandler {
   private readonly logger = new Logger(CodeCommitOutboxHandler.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly codeIntelRepository: PrismaCodeIntelRepository,
     private readonly astIndexService: AstIndexService,
     @Optional() @Inject(VCS_CFG) private readonly vcsConfig?: IVcsConfig,
   ) {}
-
-  private get db() {
-    return this.prisma.client as unknown as ExtendedPrismaClient;
-  }
 
   async process(payload: unknown): Promise<void> {
     const p = payload as CodeCommitPayload;
@@ -47,7 +34,7 @@ export class CodeCommitOutboxHandler {
 
     this.logger.log(`code_commit: processing ${p.repoId} ${p.commitHash} (${p.changedFiles.length} files)`);
 
-    const connection = await this.getVcsConnection(p.projectId);
+    const connection = await this.codeIntelRepository.findVcsConnectionByProjectId(p.projectId);
     if (!connection) {
       this.logger.warn(`code_commit: no VCS connection found for project ${p.projectId}`);
       return;
@@ -85,18 +72,5 @@ export class CodeCommitOutboxHandler {
 
     this.logger.log(`code_commit: fetched ${sourceFiles.length} files for ${p.commitHash}`);
     await this.astIndexService.indexCommit(p.repoId, p.commitHash, sourceFiles, p.projectId);
-  }
-
-  private async getVcsConnection(projectId: string): Promise<{
-    provider: string;
-    repoOwner: string;
-    repoName: string;
-    encryptedToken: string;
-  } | null> {
-    const connection = (await this.db.vcsConnection.findUnique({
-      where: { projectId },
-    })) as { provider: string; repoOwner: string; repoName: string; encryptedToken: string } | null;
-
-    return connection;
   }
 }

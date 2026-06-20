@@ -1,6 +1,6 @@
 import { CodeCommitOutboxHandler } from './code-commit-outbox-handler';
 import { AstIndexService } from './ast-index.service';
-import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaCodeIntelRepository } from './prisma-code-intel.repository';
 import { IVcsProvider } from '../vcs/vcs-provider';
 import { IVcsConfig } from '../config/vcs.config';
 import { SourceFile } from '../vcs/types';
@@ -32,14 +32,10 @@ function createMockVcsProvider(overrides?: Partial<IVcsProvider>): IVcsProvider 
   };
 }
 
-function createMockPrismaService(vcsConnection: object | null) {
+function createMockCodeIntelRepository(vcsConnection: object | null) {
   return {
-    client: {
-      vcsConnection: {
-        findUnique: jest.fn().mockResolvedValue(vcsConnection),
-      },
-    },
-  } as unknown as PrismaService;
+    findVcsConnectionByProjectId: jest.fn().mockResolvedValue(vcsConnection),
+  } as unknown as PrismaCodeIntelRepository;
 }
 
 function createMockAstIndexService() {
@@ -76,7 +72,7 @@ describe('CodeCommitOutboxHandler', () => {
   describe('process()', () => {
     it('should skip processing when webhookOnly is true', async () => {
       handler = new CodeCommitOutboxHandler(
-        createMockPrismaService(null),
+        createMockCodeIntelRepository(null),
         createMockAstIndexService(),
       );
 
@@ -96,7 +92,7 @@ describe('CodeCommitOutboxHandler', () => {
     it('should skip processing when changedFiles is empty', async () => {
       mockAstIndex = createMockAstIndexService();
       handler = new CodeCommitOutboxHandler(
-        createMockPrismaService(null),
+        createMockCodeIntelRepository(null),
         mockAstIndex,
       );
 
@@ -114,7 +110,7 @@ describe('CodeCommitOutboxHandler', () => {
     it('should skip processing when changedFiles property is absent', async () => {
       mockAstIndex = createMockAstIndexService();
       handler = new CodeCommitOutboxHandler(
-        createMockPrismaService(null),
+        createMockCodeIntelRepository(null),
         mockAstIndex,
       );
 
@@ -130,7 +126,7 @@ describe('CodeCommitOutboxHandler', () => {
 
     it('should handle missing VCS connection gracefully (logs warning, no crash)', async () => {
       handler = new CodeCommitOutboxHandler(
-        createMockPrismaService(null),
+        createMockCodeIntelRepository(null),
         createMockAstIndexService(),
         createMockVcsConfig('enc-key'),
       );
@@ -149,7 +145,7 @@ describe('CodeCommitOutboxHandler', () => {
 
     it('should handle missing encryption key gracefully', async () => {
       handler = new CodeCommitOutboxHandler(
-        createMockPrismaService(defaultConnection),
+        createMockCodeIntelRepository(defaultConnection),
         createMockAstIndexService(),
         createMockVcsConfig(undefined),
       );
@@ -171,7 +167,7 @@ describe('CodeCommitOutboxHandler', () => {
       });
 
       handler = new CodeCommitOutboxHandler(
-        createMockPrismaService(defaultConnection),
+        createMockCodeIntelRepository(defaultConnection),
         createMockAstIndexService(),
         createMockVcsConfig('enc-key'),
       );
@@ -195,7 +191,7 @@ describe('CodeCommitOutboxHandler', () => {
       (createVcsProvider as jest.Mock).mockReturnValue(mockProvider);
 
       handler = new CodeCommitOutboxHandler(
-        createMockPrismaService(defaultConnection),
+        createMockCodeIntelRepository(defaultConnection),
         createMockAstIndexService(),
         createMockVcsConfig('enc-key'),
       );
@@ -220,7 +216,7 @@ describe('CodeCommitOutboxHandler', () => {
 
       mockAstIndex = createMockAstIndexService();
       handler = new CodeCommitOutboxHandler(
-        createMockPrismaService(defaultConnection),
+        createMockCodeIntelRepository(defaultConnection),
         mockAstIndex,
         createMockVcsConfig('enc-key'),
       );

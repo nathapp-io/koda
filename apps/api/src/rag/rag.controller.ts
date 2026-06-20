@@ -11,8 +11,6 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ForbiddenAppException, JsonResponse, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient } from '@prisma/client';
 import { RagService } from './rag.service';
 import { HybridRetrieverService } from './hybrid-retriever.service';
 import { EvaluationService } from '../retrieval/evaluation.service';
@@ -23,6 +21,7 @@ import { Principal, RequiredPermission } from '@nathapp/nestjs-auth';
 import type { CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { KodaPrincipal, isAgentPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
 import { KodaAction } from '../auth/casl/koda-action.enum';
+import { PrismaRagRepository } from './prisma-rag.repository';
 
 @ApiTags('knowledge-base')
 @ApiBearerAuth()
@@ -31,14 +30,12 @@ export class RagController {
   constructor(
     private readonly ragService: RagService,
     private readonly hybridRetrieverService: HybridRetrieverService,
-    private readonly prisma: PrismaService<PrismaClient>,
+    private readonly ragRepository: PrismaRagRepository,
     private readonly evaluationService: EvaluationService,
   ) {}
 
-  private get db() { return this.prisma.client; }
-
   private async resolveProject(slug: string) {
-    const project = await this.db.project.findUnique({ where: { slug } });
+    const project = await this.ragRepository.findProjectBySlug(slug);
     if (!project || project.deletedAt) throw new NotFoundAppException({}, 'rag');
     return project;
   }
@@ -66,14 +63,7 @@ export class RagController {
       return;
     }
 
-    const membership = await this.db.projectMember.findUnique({
-      where: {
-        projectId_userId: {
-          projectId,
-          userId: principal.id,
-        },
-      },
-    });
+    const membership = await this.ragRepository.findProjectMembership(projectId, principal.id);
 
     if (!membership) {
       throw new ForbiddenAppException({}, 'rag');
@@ -197,12 +187,7 @@ export class RagController {
 
     const importResult = await this.ragService.importGraphify(project.id, dto.nodes, dto.links ?? []);
 
-    await this.db.$transaction(async (tx) => {
-      await tx.project.update({
-        where: { id: project.id },
-        data: { graphifyLastImportedAt: new Date() },
-      });
-    });
+    await this.ragRepository.updateGraphifyLastImportedAt(project.id);
 
     return JsonResponse.Ok(importResult);
   }

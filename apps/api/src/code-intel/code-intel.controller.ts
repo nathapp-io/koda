@@ -6,7 +6,8 @@ import {
   Param,
   Query,
   HttpCode,
-  Optional,
+  Logger,
+  NotFoundException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -20,9 +21,7 @@ import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/ne
 import { KodaPrincipal, isAgentPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
 import { AstIndexService } from './ast-index.service';
 import { IndexCommitDto } from './dto/index-commit.dto';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient } from '@prisma/client';
-import { Logger, NotFoundException } from '@nestjs/common';
+import { PrismaCodeIntelRepository } from './prisma-code-intel.repository';
 
 @ApiTags('code-intel')
 @ApiBearerAuth()
@@ -32,14 +31,15 @@ export class CodeIntelController {
 
   constructor(
     private readonly astIndexService: AstIndexService,
-    @Optional() private readonly prisma?: PrismaService<PrismaClient>,
+    private readonly codeIntelRepository: PrismaCodeIntelRepository,
   ) {}
 
-  private get db() {
-    if (!this.prisma) {
-      throw new Error('PrismaService is not available');
+  private async resolveProject(slug: string): Promise<{ id: string }> {
+    const project = await this.codeIntelRepository.findProjectBySlug(slug);
+    if (!project) {
+      throw new NotFoundException(`Project not found: ${slug}`);
     }
-    return this.prisma.client;
+    return project;
   }
 
   private async checkProjectMembership(
@@ -62,14 +62,7 @@ export class CodeIntelController {
       return;
     }
 
-    const membership = await this.db.projectMember.findUnique({
-      where: {
-        projectId_userId: {
-          projectId,
-          userId: principal.id,
-        },
-      },
-    });
+    const membership = await this.codeIntelRepository.findProjectMembership(projectId, principal.id);
 
     if (!membership) {
       throw new ForbiddenAppException({}, 'code-intel');
@@ -86,13 +79,7 @@ export class CodeIntelController {
     @Body() dto: IndexCommitDto,
     @Principal() principal: KodaPrincipal,
   ) {
-    const project = await this.db.project.findUnique({
-      where: { slug: dto.projectSlug },
-    });
-
-    if (!project) {
-      throw new NotFoundException(`Project not found: ${dto.projectSlug}`);
-    }
+    const project = await this.resolveProject(dto.projectSlug);
     await this.checkProjectMembership(project.id, principal);
 
     const result = await this.astIndexService.indexCommit(
@@ -117,13 +104,7 @@ export class CodeIntelController {
     @Query('projectSlug') projectSlug: string,
     @Principal() principal: KodaPrincipal,
   ) {
-    const project = await this.db.project.findUnique({
-      where: { slug: projectSlug },
-    });
-
-    if (!project) {
-      throw new NotFoundException(`Project not found: ${projectSlug}`);
-    }
+    const project = await this.resolveProject(projectSlug);
     await this.checkProjectMembership(project.id, principal);
 
     const data = await this.astIndexService.getSymbol(project.id, symbolId);
@@ -144,13 +125,7 @@ export class CodeIntelController {
     @Query('projectSlug') projectSlug: string,
     @Principal() principal: KodaPrincipal,
   ) {
-    const project = await this.db.project.findUnique({
-      where: { slug: projectSlug },
-    });
-
-    if (!project) {
-      throw new NotFoundException(`Project not found: ${projectSlug}`);
-    }
+    const project = await this.resolveProject(projectSlug);
     await this.checkProjectMembership(project.id, principal);
 
     const data = await this.astIndexService.getCallers(project.id, symbolId);
@@ -168,13 +143,7 @@ export class CodeIntelController {
     @Query('projectSlug') projectSlug: string,
     @Principal() principal: KodaPrincipal,
   ) {
-    const project = await this.db.project.findUnique({
-      where: { slug: projectSlug },
-    });
-
-    if (!project) {
-      throw new NotFoundException(`Project not found: ${projectSlug}`);
-    }
+    const project = await this.resolveProject(projectSlug);
     await this.checkProjectMembership(project.id, principal);
 
     const data = await this.astIndexService.getCallees(project.id, symbolId);
