@@ -1,7 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { VcsLinkExtractorService } from './vcs-link-extractor.service';
 import { PrismaVcsRepository } from './prisma-vcs.repository';
-import { Ticket, VcsConnection } from '@prisma/client';
+import type { VcsConnectionDomain } from './domain/vcs.domain';
+import type { VcsTicketRef } from './vcs-link-extractor.service';
 
 jest.mock('./factory', () => ({
   createVcsProvider: jest.fn(),
@@ -18,7 +19,7 @@ jest.mock('./ticket-ref-matcher.util', () => ({
 import { createVcsProvider } from './factory';
 import { containsTicketRef } from './ticket-ref-matcher.util';
 
-function makeConnection(overrides?: Partial<VcsConnection>): VcsConnection {
+function makeConnection(overrides?: Partial<VcsConnectionDomain>): VcsConnectionDomain {
   return {
     id: 'conn-1',
     projectId: 'proj-1',
@@ -35,30 +36,16 @@ function makeConnection(overrides?: Partial<VcsConnection>): VcsConnection {
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
-  } as VcsConnection;
+  };
 }
 
-function makeTicket(overrides?: Partial<Ticket>): Ticket {
+function makeTicket(overrides?: Partial<VcsTicketRef>): VcsTicketRef {
   return {
     id: 'ticket-1',
-    projectId: 'proj-1',
     number: 42,
-    type: 'BUG',
-    title: 'Fix the bug',
-    description: null,
-    status: 'IN_PROGRESS',
-    priority: 'HIGH',
-    assignedToUserId: null,
-    assignedToAgentId: null,
-    createdByUserId: 'user-1',
     externalVcsId: 'owner/repo#5',
-    externalVcsUrl: null,
-    vcsSyncedAt: null,
-    deletedAt: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
     ...overrides,
-  } as Ticket;
+  };
 }
 
 function makeCommit(sha: string, message: string) {

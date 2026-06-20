@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { IVcsRepository, TicketLinkData, VCS_REPOSITORY } from './domain/vcs.repository';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
-import { Project, VcsConnection } from '@prisma/client';
+import type { VcsConnectionDomain } from './domain/vcs.domain';
 import { VcsPrStatus } from './types';
 
 jest.mock('./factory', () => ({
@@ -15,27 +15,15 @@ jest.mock('../common/utils/encryption.util', () => ({
 
 import { createVcsProvider } from './factory';
 
-function makeProject(overrides?: Partial<Project>): Project {
+function makeProject(overrides?: Partial<{ id: string; key: string }>): { id: string; key: string } {
   return {
     id: 'proj-1',
-    name: 'Test Project',
-    slug: 'test-project',
     key: 'TEST',
-    description: null,
-    gitRemoteUrl: null,
-    autoIndexOnClose: true,
-    autoAssign: 'OFF',
-    graphifyEnabled: false,
-    graphifyLastImportedAt: null,
-    deletedAt: null,
-    ciWebhookToken: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
     ...overrides,
-  } as Project;
+  };
 }
 
-function makeConnection(overrides?: Partial<VcsConnection>): VcsConnection {
+function makeConnection(overrides?: Partial<VcsConnectionDomain>): VcsConnectionDomain {
   return {
     id: 'conn-1',
     projectId: 'proj-1',
@@ -52,7 +40,7 @@ function makeConnection(overrides?: Partial<VcsConnection>): VcsConnection {
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
-  } as VcsConnection;
+  };
 }
 
 function makeTicketLink(overrides?: Partial<TicketLinkData>): TicketLinkData {

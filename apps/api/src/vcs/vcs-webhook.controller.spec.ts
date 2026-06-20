@@ -4,7 +4,7 @@ import { VcsWebhookController } from './vcs-webhook.controller';
 import { ProjectsService } from '../projects/projects.service';
 import { VcsConnectionService } from './vcs-connection.service';
 import { VcsWebhookService, GitHubWebhookPayload } from './vcs-webhook.service';
-import { VcsConnection } from '@prisma/client';
+import type { VcsConnectionDomain } from './domain/vcs.domain';
 
 function makeProjectDto(overrides?: object) {
   return {
@@ -26,7 +26,7 @@ function makeProjectDto(overrides?: object) {
   };
 }
 
-function makeFullConnection(overrides?: Partial<VcsConnection>): VcsConnection {
+function makeFullConnection(overrides?: Partial<VcsConnectionDomain>): VcsConnectionDomain {
   return {
     id: 'conn-1',
     projectId: 'proj-1',
@@ -43,7 +43,7 @@ function makeFullConnection(overrides?: Partial<VcsConnection>): VcsConnection {
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
-  } as VcsConnection;
+  };
 }
 
 function makePushPayload(overrides?: Partial<GitHubWebhookPayload>): GitHubWebhookPayload {

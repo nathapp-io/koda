@@ -20,7 +20,6 @@ import {
 import { Principal } from '@nathapp/nestjs-auth';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
-import { Project } from '@prisma/client';
 import { VcsConnectionService } from './vcs-connection.service';
 import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
@@ -189,7 +188,7 @@ export class VcsController {
     const issue = await provider.fetchIssue(parseInt(issueNumber, 10));
 
     // Sync the issue (regardless of allowedAuthors per AC)
-    const result = await this.syncService.syncIssue(project as Project, issue, 'manual');
+    const result = await this.syncService.syncIssue(project, issue, 'manual');
 
     // Return HTTP 409 if issue is already synced
     if (result.action === 'skipped') {
@@ -239,7 +238,7 @@ export class VcsController {
     const connection = await this.vcsService.getFullByProject(project.id);
 
     // Run full sync
-    const result = await this.syncService.fullSync(project as Project, connection, encryptionKey);
+    const result = await this.syncService.fullSync(project, connection, encryptionKey);
 
     return {
       syncType: 'manual',
@@ -277,7 +276,7 @@ export class VcsController {
     const connection = await this.vcsService.getFullByProject(project.id);
 
     // Run PR sync
-    const result = await this.prSyncService.syncPrStatus(project as Project, connection, encryptionKey);
+    const result = await this.prSyncService.syncPrStatus(project, connection, encryptionKey);
 
     return { updated: result.updated };
   }

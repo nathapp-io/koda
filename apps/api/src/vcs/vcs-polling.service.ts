@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
-import { VcsConnection, Project } from '@prisma/client';
+import type { VcsConnectionWithProjectDomain } from './domain/vcs.domain';
 import { decryptToken } from '../common/utils/encryption.util';
 import { createVcsProvider } from './factory';
 import { VcsSyncService } from './vcs-sync.service';
@@ -54,7 +54,7 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
   /**
    * Schedule polling for a specific connection
    */
-  schedulePolling(connection: VcsConnection & { project: Project }): void {
+  schedulePolling(connection: VcsConnectionWithProjectDomain): void {
     const scheduleName = `vcs-polling-${connection.id}`;
 
     // Remove existing interval if it exists
@@ -99,7 +99,7 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
   /**
    * Poll a single connection for new issues
    */
-  private async poll(connection: VcsConnection & { project: Project }): Promise<void> {
+  private async poll(connection: VcsConnectionWithProjectDomain): Promise<void> {
     const startTime = new Date();
 
     try {

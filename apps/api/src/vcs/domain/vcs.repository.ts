@@ -1,4 +1,4 @@
-import { VcsConnection, VcsSyncLog, Project } from '@prisma/client';
+import type { VcsConnectionDomain, VcsConnectionWithProjectDomain, VcsSyncLogDomain } from './vcs.domain';
 
 export const VCS_REPOSITORY = Symbol('VCS_REPOSITORY');
 
@@ -87,20 +87,20 @@ export interface IVcsRepository {
   applyMergedPrTransition(input: MergedPrTransitionInput): Promise<void>;
 
   // Ticket lookup (for webhook synchronize handler)
-  findTicketWithProject(ticketId: string): Promise<{ id: string; externalVcsId: string | null; project: { id: string; key: string } } | null>;
+  findTicketWithProject(ticketId: string): Promise<{ id: string; number: number; externalVcsId: string | null; project: { id: string; key: string } } | null>;
 
   // VcsConnection operations
   findProjectById(projectId: string): Promise<{ id: string } | null>;
-  findVcsConnectionByProjectId(projectId: string): Promise<VcsConnection | null>;
-  findVcsConnectionById(connectionId: string): Promise<(VcsConnection & { project: Project }) | null>;
-  findPollingConnections(): Promise<Array<VcsConnection & { project: Project }>>;
-  createVcsConnection(data: CreateVcsConnectionData): Promise<VcsConnection>;
-  updateVcsConnection(projectId: string, data: UpdateVcsConnectionData): Promise<VcsConnection>;
+  findVcsConnectionByProjectId(projectId: string): Promise<VcsConnectionDomain | null>;
+  findVcsConnectionById(connectionId: string): Promise<VcsConnectionWithProjectDomain | null>;
+  findPollingConnections(): Promise<VcsConnectionWithProjectDomain[]>;
+  createVcsConnection(data: CreateVcsConnectionData): Promise<VcsConnectionDomain>;
+  updateVcsConnection(projectId: string, data: UpdateVcsConnectionData): Promise<VcsConnectionDomain>;
   updateVcsConnectionLastSynced(connectionId: string): Promise<void>;
   deleteVcsConnection(projectId: string): Promise<void>;
 
   // VcsSyncLog operations
-  createVcsSyncLog(data: CreateVcsSyncLogData): Promise<VcsSyncLog>;
+  createVcsSyncLog(data: CreateVcsSyncLogData): Promise<VcsSyncLogDomain>;
 
   // Outbox dedup (cross-instance push deduplication)
   findPendingOutboxEvents(query: OutboxDedupQuery): Promise<{ id: string }[]>;

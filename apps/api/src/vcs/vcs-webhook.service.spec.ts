@@ -5,7 +5,7 @@ import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { VcsLinkExtractorService } from './vcs-link-extractor.service';
 import { VCS_CFG } from '../config/vcs.config';
-import { VcsConnection, Project } from '@prisma/client';
+import type { VcsConnectionWithProjectDomain } from './domain/vcs.domain';
 import type { OutboxEventDomain } from '../outbox/domain/outbox-event.domain';
 import type { OutboxEventInput } from '../outbox/outbox.service';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
@@ -80,7 +80,7 @@ function createMockPrSyncService() {
   };
 }
 
-function createMockConnection(): VcsConnection & { project: Project } {
+function createMockConnection(): VcsConnectionWithProjectDomain {
   return {
     id: 'conn-1',
     projectId: 'project-1',
@@ -98,20 +98,9 @@ function createMockConnection(): VcsConnection & { project: Project } {
     updatedAt: new Date(),
     project: {
       id: 'project-1',
-      name: 'Test Project',
-      slug: 'test-project',
       key: 'TEST',
-      description: null,
-      gitRemoteUrl: null,
-      autoIndexOnClose: true,
-      autoAssign: 'OFF',
-      graphifyEnabled: false,
-      graphifyLastImportedAt: null,
-      deletedAt: null,
-      ciWebhookToken: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    } as Project,
+      slug: 'test-project',
+    },
   };
 }
 

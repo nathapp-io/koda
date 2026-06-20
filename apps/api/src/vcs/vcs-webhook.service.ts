@@ -1,6 +1,6 @@
 import { HttpException, HttpStatus, Inject, Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'crypto';
-import { VcsConnection, Project } from '@prisma/client';
+import type { VcsConnectionWithProjectDomain } from './domain/vcs.domain';
 import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { VcsLinkExtractorService } from './vcs-link-extractor.service';
@@ -134,7 +134,7 @@ export class VcsWebhookService implements OnModuleDestroy {
    * Handle GitHub webhook event
    */
   async handleWebhook(
-    connection: VcsConnection & { project: Project },
+    connection: VcsConnectionWithProjectDomain,
     event: string,
     payload: GitHubWebhookPayload,
   ): Promise<WebhookHandleResult> {
@@ -161,7 +161,7 @@ export class VcsWebhookService implements OnModuleDestroy {
    * Handle issues.opened event
    */
   private async handleIssueOpened(
-    connection: VcsConnection & { project: Project },
+    connection: VcsConnectionWithProjectDomain,
     payload: GitHubWebhookPayload,
   ): Promise<WebhookHandleResult> {
     if (!payload.issue) {
@@ -213,7 +213,7 @@ export class VcsWebhookService implements OnModuleDestroy {
    * Handle pull_request event
    */
   private async handlePullRequest(
-    connection: VcsConnection & { project: Project },
+    connection: VcsConnectionWithProjectDomain,
     payload: GitHubWebhookPayload,
   ): Promise<WebhookHandleResult> {
     if (!payload.pull_request) {
@@ -265,7 +265,7 @@ export class VcsWebhookService implements OnModuleDestroy {
    * AC2: sets prState to 'draft' if draft=true, otherwise 'open'
    */
   private async handlePullRequestOpened(
-    connection: VcsConnection & { project: Project },
+    connection: VcsConnectionWithProjectDomain,
     pr: NonNullable<GitHubWebhookPayload['pull_request']>,
   ): Promise<WebhookHandleResult> {
     const prNumber = pr.number;
@@ -299,7 +299,7 @@ export class VcsWebhookService implements OnModuleDestroy {
    * AC3: updates prState to 'merged' and triggers auto-transition
    */
   private async handlePullRequestMerged(
-    connection: VcsConnection & { project: Project },
+    connection: VcsConnectionWithProjectDomain,
     pr: NonNullable<GitHubWebhookPayload['pull_request']>,
   ): Promise<WebhookHandleResult> {
     const prNumber = pr.number;
@@ -348,7 +348,7 @@ export class VcsWebhookService implements OnModuleDestroy {
    * AC4: sets prState to 'closed'
    */
   private async handlePullRequestClosed(
-    connection: VcsConnection & { project: Project },
+    connection: VcsConnectionWithProjectDomain,
     pr: NonNullable<GitHubWebhookPayload['pull_request']>,
   ): Promise<WebhookHandleResult> {
     const prNumber = pr.number;
@@ -380,7 +380,7 @@ export class VcsWebhookService implements OnModuleDestroy {
    * AC5: transitions prState from 'draft' to 'open'
    */
   private async handlePullRequestReadyForReview(
-    connection: VcsConnection & { project: Project },
+    connection: VcsConnectionWithProjectDomain,
     pr: NonNullable<GitHubWebhookPayload['pull_request']>,
   ): Promise<WebhookHandleResult> {
     const prNumber = pr.number;
@@ -412,7 +412,7 @@ export class VcsWebhookService implements OnModuleDestroy {
    * Reopened PRs should return to open state.
    */
   private async handlePullRequestReopened(
-    connection: VcsConnection & { project: Project },
+    connection: VcsConnectionWithProjectDomain,
     pr: NonNullable<GitHubWebhookPayload['pull_request']>,
   ): Promise<WebhookHandleResult> {
     const prNumber = pr.number;
@@ -438,7 +438,7 @@ export class VcsWebhookService implements OnModuleDestroy {
    * Handle pull_request converted_to_draft action
    */
   private async handlePullRequestConvertedToDraft(
-    connection: VcsConnection & { project: Project },
+    connection: VcsConnectionWithProjectDomain,
     pr: NonNullable<GitHubWebhookPayload['pull_request']>,
   ): Promise<WebhookHandleResult> {
     const prNumber = pr.number;
@@ -465,7 +465,7 @@ export class VcsWebhookService implements OnModuleDestroy {
    * AC-24: Calls extractLinksFromPr to capture new commits
    */
   private async handlePullRequestSynchronize(
-    connection: VcsConnection & { project: Project },
+    connection: VcsConnectionWithProjectDomain,
     pr: NonNullable<GitHubWebhookPayload['pull_request']>,
   ): Promise<WebhookHandleResult> {
     const prNumber = pr.number;
@@ -500,8 +500,7 @@ export class VcsWebhookService implements OnModuleDestroy {
         try {
           await this.vcsLinkExtractorService.extractLinksFromPr(
             { id: fullTicket.project.id, key: fullTicket.project.key },
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            fullTicket as any,
+            fullTicket,
             connection,
             encryptionKey,
             pr.head.ref,
@@ -528,7 +527,7 @@ export class VcsWebhookService implements OnModuleDestroy {
    * Validates payload and enqueues code_commit outbox events for each commit.
    */
   private async handlePush(
-    connection: VcsConnection & { project: Project },
+    connection: VcsConnectionWithProjectDomain,
     payload: GitHubWebhookPayload,
   ): Promise<WebhookHandleResult> {
     const repoId = payload.repository?.full_name ?? payload.repository?.name;

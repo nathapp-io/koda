@@ -5,7 +5,7 @@ import { VCS_CFG } from '../config/vcs.config';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
-import { Project, VcsConnection } from '@prisma/client';
+import type { VcsConnectionWithProjectDomain } from './domain/vcs.domain';
 
 jest.mock('./factory', () => ({
   createVcsProvider: jest.fn(),
@@ -17,27 +17,7 @@ jest.mock('../common/utils/encryption.util', () => ({
 
 import { createVcsProvider } from './factory';
 
-function makeProject(overrides?: Partial<Project>): Project {
-  return {
-    id: 'proj-1',
-    name: 'Test Project',
-    slug: 'test-project',
-    key: 'TEST',
-    description: null,
-    gitRemoteUrl: null,
-    autoIndexOnClose: true,
-    autoAssign: 'OFF',
-    graphifyEnabled: false,
-    graphifyLastImportedAt: null,
-    deletedAt: null,
-    ciWebhookToken: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    ...overrides,
-  } as Project;
-}
-
-function makeConnection(overrides?: Partial<VcsConnection & { project: Project }>): VcsConnection & { project: Project } {
+function makeConnection(overrides?: Partial<VcsConnectionWithProjectDomain>): VcsConnectionWithProjectDomain {
   return {
     id: 'conn-1',
     projectId: 'proj-1',
@@ -53,9 +33,9 @@ function makeConnection(overrides?: Partial<VcsConnection & { project: Project }
     isActive: true,
     createdAt: new Date(),
     updatedAt: new Date(),
-    project: makeProject(),
+    project: { id: 'proj-1', key: 'TEST', slug: 'test-project' },
     ...overrides,
-  } as VcsConnection & { project: Project };
+  };
 }
 
 function createMockRepo(): jest.Mocked<IVcsRepository> {

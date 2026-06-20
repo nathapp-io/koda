@@ -1,7 +1,8 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient, VcsConnection, VcsSyncLog, Project, Ticket } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import type { VcsConnectionDomain, VcsConnectionWithProjectDomain, VcsSyncLogDomain, VcsProjectDomain } from './domain/vcs.domain';
 import { VcsIssue } from './types';
 import { TicketStatus, CommentType, ActivityType } from '../common/enums';
 import {
@@ -27,6 +28,49 @@ export class PrismaVcsRepository implements IVcsRepository {
   }
 
   // ---------------------------------------------------------------------------
+  // Domain mappers
+  // ---------------------------------------------------------------------------
+
+  private toConnectionDomain(m: {
+    id: string; projectId: string; provider: string; repoOwner: string; repoName: string;
+    encryptedToken: string; syncMode: string; allowedAuthors: string; pollingIntervalMs: number;
+    webhookSecret: string | null; isActive: boolean; lastSyncedAt: Date | null;
+    createdAt: Date; updatedAt: Date;
+  }): VcsConnectionDomain {
+    return {
+      id: m.id, projectId: m.projectId, provider: m.provider,
+      repoOwner: m.repoOwner, repoName: m.repoName, encryptedToken: m.encryptedToken,
+      syncMode: m.syncMode, allowedAuthors: m.allowedAuthors, pollingIntervalMs: m.pollingIntervalMs,
+      webhookSecret: m.webhookSecret, isActive: m.isActive, lastSyncedAt: m.lastSyncedAt,
+      createdAt: m.createdAt, updatedAt: m.updatedAt,
+    };
+  }
+
+  private toProjectDomain(m: { id: string; key: string; slug: string }): VcsProjectDomain {
+    return { id: m.id, key: m.key, slug: m.slug };
+  }
+
+  private toConnectionWithProjectDomain(m: {
+    id: string; projectId: string; provider: string; repoOwner: string; repoName: string;
+    encryptedToken: string; syncMode: string; allowedAuthors: string; pollingIntervalMs: number;
+    webhookSecret: string | null; isActive: boolean; lastSyncedAt: Date | null;
+    createdAt: Date; updatedAt: Date;
+    project: { id: string; key: string; slug: string };
+  }): VcsConnectionWithProjectDomain {
+    return { ...this.toConnectionDomain(m), project: this.toProjectDomain(m.project) };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private toSyncLogDomain(m: any): VcsSyncLogDomain {
+    return {
+      id: m.id, vcsConnectionId: m.vcsConnectionId, syncType: m.syncType,
+      issuesSynced: m.issuesSynced, issuesSkipped: m.issuesSkipped,
+      errorMessage: m.errorMessage, startedAt: m.startedAt,
+      completedAt: m.completedAt, createdAt: m.createdAt,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
   // Project
   // ---------------------------------------------------------------------------
 
@@ -38,35 +82,36 @@ export class PrismaVcsRepository implements IVcsRepository {
   // VcsConnection
   // ---------------------------------------------------------------------------
 
-  async findVcsConnectionByProjectId(projectId: string): Promise<VcsConnection | null> {
-    return this.db.vcsConnection.findUnique({ where: { projectId } });
+  async findVcsConnectionByProjectId(projectId: string): Promise<VcsConnectionDomain | null> {
+    const m = await this.db.vcsConnection.findUnique({ where: { projectId } });
+    return m ? this.toConnectionDomain(m) : null;
   }
 
-  async findVcsConnectionById(
-    connectionId: string,
-  ): Promise<(VcsConnection & { project: Project }) | null> {
-    return this.db.vcsConnection.findUnique({
+  async findVcsConnectionById(connectionId: string): Promise<VcsConnectionWithProjectDomain | null> {
+    const m = await this.db.vcsConnection.findUnique({
       where: { id: connectionId },
       include: { project: true },
     });
+    return m ? this.toConnectionWithProjectDomain(m) : null;
   }
 
-  async findPollingConnections(): Promise<Array<VcsConnection & { project: Project }>> {
-    return this.db.vcsConnection.findMany({
+  async findPollingConnections(): Promise<VcsConnectionWithProjectDomain[]> {
+    const rows = await this.db.vcsConnection.findMany({
       where: { syncMode: 'polling', isActive: true },
       include: { project: true },
     });
+    return rows.map((m) => this.toConnectionWithProjectDomain(m));
   }
 
-  async createVcsConnection(data: CreateVcsConnectionData): Promise<VcsConnection> {
-    return this.db.vcsConnection.create({ data });
+  async createVcsConnection(data: CreateVcsConnectionData): Promise<VcsConnectionDomain> {
+    return this.toConnectionDomain(await this.db.vcsConnection.create({ data }));
   }
 
   async updateVcsConnection(
     projectId: string,
     data: UpdateVcsConnectionData,
-  ): Promise<VcsConnection> {
-    return this.db.vcsConnection.update({ where: { projectId }, data });
+  ): Promise<VcsConnectionDomain> {
+    return this.toConnectionDomain(await this.db.vcsConnection.update({ where: { projectId }, data }));
   }
 
   async updateVcsConnectionLastSynced(connectionId: string): Promise<void> {
@@ -84,8 +129,8 @@ export class PrismaVcsRepository implements IVcsRepository {
   // VcsSyncLog
   // ---------------------------------------------------------------------------
 
-  async createVcsSyncLog(data: CreateVcsSyncLogData): Promise<VcsSyncLog> {
-    return this.db.vcsSyncLog.create({ data });
+  async createVcsSyncLog(data: CreateVcsSyncLogData): Promise<VcsSyncLogDomain> {
+    return this.toSyncLogDomain(await this.db.vcsSyncLog.create({ data }));
   }
 
   // ---------------------------------------------------------------------------
@@ -99,7 +144,7 @@ export class PrismaVcsRepository implements IVcsRepository {
   async findExistingTicketByExternalId(
     projectId: string,
     externalVcsId: string,
-  ): Promise<Ticket | null> {
+  ): Promise<unknown | null> {
     return this.db.ticket.findFirst({
       where: { projectId, externalVcsId, deletedAt: null },
     });
@@ -146,11 +191,12 @@ export class PrismaVcsRepository implements IVcsRepository {
 
   async findTicketWithProject(
     ticketId: string,
-  ): Promise<{ id: string; externalVcsId: string | null; project: { id: string; key: string } } | null> {
+  ): Promise<{ id: string; number: number; externalVcsId: string | null; project: { id: string; key: string } } | null> {
     return this.db.ticket.findUnique({
       where: { id: ticketId },
       select: {
         id: true,
+        number: true,
         externalVcsId: true,
         project: { select: { id: true, key: true } },
       },
