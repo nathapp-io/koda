@@ -118,7 +118,7 @@ describe('VcsSyncService', () => {
       const project = makeProject();
       const issue = makeIssue({ number: 42 });
 
-      mockRepo.findExistingTicketByExternalId.mockResolvedValue({ id: 'existing-t' });
+      mockRepo.findExistingTicketByExternalId.mockResolvedValue({ id: 'existing-t' } as any);
 
       const result = await service.syncIssue(project, issue, 'polling');
 
@@ -212,7 +212,7 @@ describe('VcsSyncService', () => {
       };
       (createVcsProvider as jest.Mock).mockReturnValue(mockProvider);
 
-      mockRepo.findExistingTicketByExternalId.mockResolvedValue({ id: 'existing' });
+      mockRepo.findExistingTicketByExternalId.mockResolvedValue({ id: 'existing' } as any);
 
       const result = await service.fullSync(project, connection, encryptionKey);
 

@@ -1,6 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
+import type { Ticket, VcsSyncLog } from '@prisma/client';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { VcsConnectionDomain, VcsConnectionWithProjectDomain, VcsSyncLogDomain, VcsProjectDomain } from './domain/vcs.domain';
 import { VcsIssue } from './types';
@@ -60,13 +61,12 @@ export class PrismaVcsRepository implements IVcsRepository {
     return { ...this.toConnectionDomain(m), project: this.toProjectDomain(m.project) };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private toSyncLogDomain(m: any): VcsSyncLogDomain {
+  private toSyncLogDomain(m: VcsSyncLog): VcsSyncLogDomain {
     return {
       id: m.id, vcsConnectionId: m.vcsConnectionId, syncType: m.syncType,
       issuesSynced: m.issuesSynced, issuesSkipped: m.issuesSkipped,
       errorMessage: m.errorMessage, startedAt: m.startedAt,
-      completedAt: m.completedAt, createdAt: m.createdAt,
+      completedAt: m.completedAt,
     };
   }
 
@@ -144,7 +144,7 @@ export class PrismaVcsRepository implements IVcsRepository {
   async findExistingTicketByExternalId(
     projectId: string,
     externalVcsId: string,
-  ): Promise<unknown | null> {
+  ): Promise<Ticket | null> {
     return this.db.ticket.findFirst({
       where: { projectId, externalVcsId, deletedAt: null },
     });
