@@ -1,5 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { IRagConfig, RAG_CFG } from '../../config/rag.config';
 import type { FtsOptimizeStrategy } from './fts-optimize-strategy.interface';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -19,11 +19,11 @@ export class CronOptimizeStrategy implements FtsOptimizeStrategy {
   private intervalId: ReturnType<typeof setInterval> | null = null;
 
   constructor(
-    private readonly configService: ConfigService,
+    @Inject(RAG_CFG) ragConfig: IRagConfig,
     // @Inject(SchedulerRegistry) injected via NestJS DI in real usage
     private readonly schedulerRegistry: SchedulerRegistryLike,
   ) {
-    this.intervalMs = this.configService.get<number>('rag.ftsOptimizeIntervalMs') ?? 300_000;
+    this.intervalMs = ragConfig.ftsOptimizeIntervalMs;
     this.intervalId = setInterval(() => {
       void this.optimizeDirtyTables();
     }, this.intervalMs);

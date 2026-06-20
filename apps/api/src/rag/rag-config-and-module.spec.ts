@@ -1,10 +1,29 @@
-import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
-import { ragConfig } from '../config/rag.config';
+import { IRagConfig, ragConfig } from '../config/rag.config';
 import { FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interface';
 import { CounterOptimizeStrategy } from './strategies/counter-optimize.strategy';
 import { CronOptimizeStrategy } from './strategies/cron-optimize.strategy';
 import { ManualOptimizeStrategy } from './strategies/manual-optimize.strategy';
+
+function mockRagConfig(overrides: Partial<IRagConfig> = {}): IRagConfig {
+  return {
+    embeddingProvider: 'ollama',
+    embeddingModel: 'nomic-embed-text',
+    ollamaBaseUrl: 'http://localhost:11434',
+    openaiApiKey: '',
+    lancedbPath: './lancedb',
+    inMemoryOnly: true,
+    ftsIndexMode: 'simple',
+    similarityHigh: 0.85,
+    similarityMedium: 0.70,
+    similarityLow: 0.50,
+    ftsOptimizeStrategy: 'counter',
+    ftsOptimizeThreshold: 10,
+    ftsOptimizeIntervalMs: 300_000,
+    graphifyEnabledCacheTtlSec: 60,
+    ...overrides,
+  };
+}
 
 describe('RAG Config & Module Wiring (US-002)', () => {
   describe('rag.config.ts', () => {
@@ -70,37 +89,29 @@ describe('RAG Config & Module Wiring (US-002)', () => {
     });
 
     describe('FTS_OPTIMIZE_STRATEGY factory', () => {
-      let mockConfigService: ConfigService;
+      let ragCfg: IRagConfig;
       let mockSchedulerRegistry: SchedulerRegistry;
 
       beforeEach(() => {
-        // Mock ConfigService
-        mockConfigService = {
-          get: jest.fn(),
-        } as unknown as ConfigService;
+        ragCfg = mockRagConfig();
 
-        // Mock SchedulerRegistry
         mockSchedulerRegistry = {
           addInterval: jest.fn(),
         } as unknown as SchedulerRegistry;
       });
 
       it('resolves to CounterOptimizeStrategy when ftsOptimizeStrategy is "counter"', () => {
-        jest.spyOn(mockConfigService, 'get').mockReturnValue('counter');
-
-        // Simulate the factory function logic
-        const strategy = mockConfigService.get('rag.ftsOptimizeStrategy') === 'counter'
-          ? new CounterOptimizeStrategy(mockConfigService)
+        const cfg = mockRagConfig({ ftsOptimizeStrategy: 'counter' });
+        const strategy = cfg.ftsOptimizeStrategy === 'counter'
+          ? new CounterOptimizeStrategy(cfg)
           : null;
 
         expect(strategy).toBeInstanceOf(CounterOptimizeStrategy);
       });
 
       it('resolves to ManualOptimizeStrategy when ftsOptimizeStrategy is "manual"', () => {
-        jest.spyOn(mockConfigService, 'get').mockReturnValue('manual');
-
-        // Simulate the factory function logic
-        const strategy = mockConfigService.get('rag.ftsOptimizeStrategy') === 'manual'
+        const cfg = mockRagConfig({ ftsOptimizeStrategy: 'manual' });
+        const strategy = cfg.ftsOptimizeStrategy === 'manual'
           ? new ManualOptimizeStrategy()
           : null;
 
@@ -108,35 +119,33 @@ describe('RAG Config & Module Wiring (US-002)', () => {
       });
 
       it('resolves to CronOptimizeStrategy when ftsOptimizeStrategy is "cron"', () => {
-        jest.spyOn(mockConfigService, 'get').mockReturnValue('cron');
-
-        // Simulate the factory function logic
-        const strategy = mockConfigService.get('rag.ftsOptimizeStrategy') === 'cron'
-          ? new CronOptimizeStrategy(mockConfigService, mockSchedulerRegistry)
+        const cfg = mockRagConfig({ ftsOptimizeStrategy: 'cron' });
+        const strategy = cfg.ftsOptimizeStrategy === 'cron'
+          ? new CronOptimizeStrategy(cfg, mockSchedulerRegistry)
           : null;
 
         expect(strategy).toBeInstanceOf(CronOptimizeStrategy);
       });
 
       it('resolves to CounterOptimizeStrategy when ftsOptimizeStrategy is unknown value', () => {
-        jest.spyOn(mockConfigService, 'get').mockReturnValue('unknown-strategy');
-
-        // Simulate the factory function logic (defaults to counter)
-        const configValue = mockConfigService.get('rag.ftsOptimizeStrategy');
+        const cfg = mockRagConfig({ ftsOptimizeStrategy: 'unknown-strategy' });
         let strategy: FtsOptimizeStrategy;
-        switch (configValue) {
+        switch (cfg.ftsOptimizeStrategy) {
           case 'cron':
-            strategy = new CronOptimizeStrategy(mockConfigService, mockSchedulerRegistry);
+            strategy = new CronOptimizeStrategy(cfg, mockSchedulerRegistry);
             break;
           case 'manual':
             strategy = new ManualOptimizeStrategy();
             break;
           default:
-            strategy = new CounterOptimizeStrategy(mockConfigService);
+            strategy = new CounterOptimizeStrategy(cfg);
         }
 
         expect(strategy).toBeInstanceOf(CounterOptimizeStrategy);
       });
+
+      // Suppress unused variable warning — ragCfg is used in beforeEach to test default state
+      void ragCfg;
     });
   });
 });
