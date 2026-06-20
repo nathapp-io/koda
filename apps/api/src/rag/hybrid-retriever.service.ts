@@ -1,6 +1,6 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Inject } from '@nestjs/common';
 import { mkdirSync } from 'node:fs';
-import { ConfigService } from '@nestjs/config';
+import { RAG_CFG, IRagConfig } from '../config/rag.config';
 import { PrismaRagRepository } from './prisma-rag.repository';
 import { EmbeddingService } from './embedding.service';
 import { EntityStore } from './entity-store';
@@ -82,18 +82,17 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
   private readonly graphifyEnabledCacheTtlMs: number;
 
   constructor(
-    private readonly configService: ConfigService,
+    @Inject(RAG_CFG) ragConfig: IRagConfig,
     private readonly embeddingService: EmbeddingService,
     private readonly entityStore: EntityStore,
     private readonly ragRepository: PrismaRagRepository,
   ) {
-    this.lancedbPath = configService.get<string>('rag.lancedbPath') ?? './lancedb';
-    this.similarityHigh = configService.get<number>('rag.similarityHigh') ?? 0.85;
-    this.similarityMedium = configService.get<number>('rag.similarityMedium') ?? 0.7;
-    this.similarityLow = configService.get<number>('rag.similarityLow') ?? 0.5;
-    this.inMemoryOnly = configService.get<boolean>('rag.inMemoryOnly') ?? false;
-    this.graphifyEnabledCacheTtlMs = configService.get<number>('rag.graphifyEnabledCacheTtlSec') ?? 60;
-    this.graphifyEnabledCacheTtlMs = this.graphifyEnabledCacheTtlMs * 1000;
+    this.lancedbPath = ragConfig.lancedbPath;
+    this.similarityHigh = ragConfig.similarityHigh;
+    this.similarityMedium = ragConfig.similarityMedium;
+    this.similarityLow = ragConfig.similarityLow;
+    this.inMemoryOnly = ragConfig.inMemoryOnly;
+    this.graphifyEnabledCacheTtlMs = ragConfig.graphifyEnabledCacheTtlSec * 1000;
 
     if (this.inMemoryOnly) {
       this.lanceAvailable = false;

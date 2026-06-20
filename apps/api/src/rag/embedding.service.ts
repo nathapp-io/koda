@@ -1,5 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { RAG_CFG, IRagConfig } from '../config/rag.config';
 import { EmbeddingProvider } from './embedding.interface';
 import { OllamaEmbeddingProvider } from './providers/ollama-embedding.provider';
 import { OpenAIEmbeddingProvider } from './providers/openai-embedding.provider';
@@ -9,17 +9,14 @@ export class EmbeddingService {
   private readonly provider: EmbeddingProvider;
   private readonly _modelName: string;
 
-  constructor(@Inject(ConfigService) configService: ConfigService) {
-    const providerName = configService.get<string>('rag.embeddingProvider') ?? 'ollama';
-    const model = configService.get<string>('rag.embeddingModel') ?? 'nomic-embed-text';
-    this._modelName = model;
+  constructor(@Inject(RAG_CFG) ragConfig: IRagConfig) {
+    const { embeddingProvider, embeddingModel, openaiApiKey, ollamaBaseUrl } = ragConfig;
+    this._modelName = embeddingModel;
 
-    if (providerName === 'openai') {
-      const apiKey = configService.get<string>('rag.openaiApiKey') ?? '';
-      this.provider = new OpenAIEmbeddingProvider(apiKey, model);
+    if (embeddingProvider === 'openai') {
+      this.provider = new OpenAIEmbeddingProvider(openaiApiKey, embeddingModel);
     } else {
-      const baseUrl = configService.get<string>('rag.ollamaBaseUrl') ?? 'http://localhost:11434';
-      this.provider = new OllamaEmbeddingProvider(baseUrl, model);
+      this.provider = new OllamaEmbeddingProvider(ollamaBaseUrl, embeddingModel);
     }
   }
 

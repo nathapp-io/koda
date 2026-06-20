@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional, Inject, forwardRef } from '@nestjs/common';
 import { mkdirSync } from 'node:fs';
-import { ConfigService } from '@nestjs/config';
+import { RAG_CFG, IRagConfig } from '../config/rag.config';
 import { ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { PrismaRagRepository } from './prisma-rag.repository';
@@ -154,7 +154,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
   private readonly firstAccessedProjectIds = new Set<string>();
 
   constructor(
-    private readonly configService: ConfigService,
+    @Inject(RAG_CFG) ragConfig: IRagConfig,
     @Optional() private readonly embeddingService?: EmbeddingService,
     @Optional() @Inject(FTS_OPTIMIZE_STRATEGY) private readonly optimizeStrategy?: FtsOptimizeStrategy,
     @Optional() private readonly ragRepository?: PrismaRagRepository,
@@ -164,12 +164,12 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     @Optional() private readonly graphStore?: GraphStoreService,
     @Optional() @Inject(forwardRef(() => IncrementalGraphDiffService)) private readonly incrementalDiff?: IncrementalGraphDiffService,
   ) {
-    this.lancedbPath = configService.get<string>('rag.lancedbPath') ?? './lancedb';
-    this.similarityHigh = configService.get<number>('rag.similarityHigh') ?? 0.85;
-    this.similarityMedium = configService.get<number>('rag.similarityMedium') ?? 0.70;
-    this.similarityLow = configService.get<number>('rag.similarityLow') ?? 0.50;
-    this.ftsIndexMode = configService.get<string>('rag.ftsIndexMode') ?? 'simple';
-    this.inMemoryOnly = configService.get<boolean>('rag.inMemoryOnly') ?? false;
+    this.lancedbPath = ragConfig.lancedbPath;
+    this.similarityHigh = ragConfig.similarityHigh;
+    this.similarityMedium = ragConfig.similarityMedium;
+    this.similarityLow = ragConfig.similarityLow;
+    this.ftsIndexMode = ragConfig.ftsIndexMode;
+    this.inMemoryOnly = ragConfig.inMemoryOnly;
 
     if (this.inMemoryOnly) {
       this.lanceAvailable = false;
