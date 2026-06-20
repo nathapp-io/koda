@@ -5,9 +5,9 @@ import { IsOptional, IsString } from 'class-validator';
 export const AUTH_CFG = 'auth';
 
 export interface IAuthConfig {
-  jwtSecret: string | undefined;
+  jwtSecret: string;
   jwtExpiresIn: string;
-  jwtRefreshSecret: string | undefined;
+  jwtRefreshSecret: string;
   jwtRefreshExpiresIn: string;
   apiKeySecret: string | undefined;
 }

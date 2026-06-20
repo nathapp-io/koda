@@ -23,6 +23,7 @@ import { VcsSyncService, SyncIssueResult } from '../../../src/vcs/vcs-sync.servi
 import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
 import { VCS_REPOSITORY } from '../../../src/vcs/domain/vcs.repository';
 import { VcsIssue } from '../../../src/vcs/types';
+import { VCS_CFG, IVcsConfig } from '../../../src/config/vcs.config';
 
 describe('VcsPollingService', () => {
   let service: VcsPollingService;
@@ -136,6 +137,12 @@ describe('VcsPollingService', () => {
     applyMergedPrTransition: jest.fn(),
   };
 
+  const mockVcsConfig: IVcsConfig = {
+    encryptionKey: 'test-encryption-key',
+    defaultPollingIntervalMs: 300000,
+    githubApiUrl: 'https://api.github.com',
+  };
+
   // schedulePolling() creates real Node setInterval timers. The mocked
   // SchedulerRegistry never clears them (unlike the real one), so we track and
   // clear them in afterEach to stop leaked timers from firing poll() across tests.
@@ -180,6 +187,7 @@ describe('VcsPollingService', () => {
           provide: ConfigService,
           useValue: { get: jest.fn().mockReturnValue('test-encryption-key') },
         },
+        { provide: VCS_CFG, useValue: mockVcsConfig },
       ],
     }).compile();
 

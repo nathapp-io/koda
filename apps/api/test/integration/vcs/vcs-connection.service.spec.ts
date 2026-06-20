@@ -18,6 +18,7 @@ import { VcsPollingService } from '../../../src/vcs/vcs-polling.service';
 import { PrismaVcsRepository } from '../../../src/vcs/prisma-vcs.repository';
 import { VCS_REPOSITORY } from '../../../src/vcs/domain/vcs.repository';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { VCS_CFG, IVcsConfig } from '../../../src/config/vcs.config';
 import { CreateVcsConnectionDto, VcsProviderType, VcsSyncModeType } from '../../../src/vcs/dto/create-vcs-connection.dto';
 import { UpdateVcsConnectionDto } from '../../../src/vcs/dto/update-vcs-connection.dto';
 import { VcsConnectionResponseDto } from '../../../src/vcs/dto/vcs-connection-response.dto';
@@ -33,6 +34,12 @@ describe('VcsConnectionService', () => {
   const encryptionKey = crypto.randomBytes(32).toString('hex');
   const projectId = 'project-123';
   const connectionId = 'connection-456';
+
+  const mockVcsConfig: IVcsConfig = {
+    encryptionKey,
+    defaultPollingIntervalMs: 300000,
+    githubApiUrl: 'https://api.github.com',
+  };
 
   const mockPrismaDelegate = {
     findUnique: jest.fn(),
@@ -76,6 +83,7 @@ describe('VcsConnectionService', () => {
             get: jest.fn(),
           },
         },
+        { provide: VCS_CFG, useValue: mockVcsConfig },
         {
           provide: VcsPollingService,
           useValue: {

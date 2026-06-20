@@ -5,7 +5,7 @@ import { IsOptional, IsString } from 'class-validator';
 export const DATABASE_CFG = 'database';
 
 export interface IDatabaseConfig {
-  url: string | undefined;
+  url: string;
   provider: string;
 }
 
