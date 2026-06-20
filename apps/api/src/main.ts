@@ -4,6 +4,7 @@ import { Logger } from '@nathapp/nestjs-logging';
 import { HttpAdapterHost } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { CombinedAuthGuard } from './auth/guards/combined-auth.guard';
+import { APP_CFG, IAppConfig } from './config/app.config';
 
 async function bootstrap() {
   const app = await AppFactory.createFastifyApp(AppModule, {
@@ -35,8 +36,7 @@ async function bootstrap() {
     return Readable.from([body]);
   });
 
-  const apiPort = parseInt(process.env.API_PORT || '3100', 10);
-  const apiHost = process.env.API_HOST || '0.0.0.0';
+  const { port, host } = app.get<IAppConfig>(APP_CFG);
 
   // DI container is ready right after createFastifyApp() — get the guard before
   // setting up global handlers. Global guards MUST be registered before init()
@@ -55,7 +55,7 @@ async function bootstrap() {
       version: '1.0.0',
     });
 
-  await app.start(apiPort, apiHost);
+  await app.start(port, host);
 }
 
 bootstrap();
