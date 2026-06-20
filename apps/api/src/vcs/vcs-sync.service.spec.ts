@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { VcsSyncService } from './vcs-sync.service';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VcsIssue } from './types';
-import { Project, VcsConnection } from '@prisma/client';
+import type { VcsConnectionDomain } from './domain/vcs.domain';
 
 jest.mock('./factory', () => ({
   createVcsProvider: jest.fn(),
@@ -27,27 +27,15 @@ function makeIssue(overrides?: Partial<VcsIssue>): VcsIssue {
   };
 }
 
-function makeProject(overrides?: Partial<Project>): Project {
+function makeProject(overrides?: Partial<{ id: string; key: string }>): { id: string; key: string } {
   return {
     id: 'proj-1',
-    name: 'Test Project',
-    slug: 'test-project',
     key: 'TEST',
-    description: null,
-    gitRemoteUrl: null,
-    autoIndexOnClose: true,
-    autoAssign: 'OFF',
-    graphifyEnabled: false,
-    graphifyLastImportedAt: null,
-    deletedAt: null,
-    ciWebhookToken: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
     ...overrides,
-  } as Project;
+  };
 }
 
-function makeConnection(overrides?: Partial<VcsConnection>): VcsConnection {
+function makeConnection(overrides?: Partial<VcsConnectionDomain>): VcsConnectionDomain {
   return {
     id: 'conn-1',
     projectId: 'proj-1',
@@ -64,7 +52,7 @@ function makeConnection(overrides?: Partial<VcsConnection>): VcsConnection {
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
-  } as VcsConnection;
+  };
 }
 
 function createMockRepo(): jest.Mocked<IVcsRepository> {

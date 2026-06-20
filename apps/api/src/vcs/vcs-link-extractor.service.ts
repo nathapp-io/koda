@@ -8,7 +8,14 @@
  * - Gracefully handles GitHub API failures during commit listing
  */
 import { Injectable, Logger } from '@nestjs/common';
-import type { Ticket, VcsConnection } from '@prisma/client';
+import type { VcsConnectionDomain } from './domain/vcs.domain';
+
+/** Minimal ticket fields required by VcsLinkExtractorService */
+export interface VcsTicketRef {
+  id: string;
+  number: number;
+  externalVcsId: string | null;
+}
 import { PrismaVcsRepository } from './prisma-vcs.repository';
 import { decryptToken } from '../common/utils/encryption.util';
 import { createVcsProvider } from './factory';
@@ -31,8 +38,8 @@ export class VcsLinkExtractorService {
    */
   async extractLinksFromPr(
     project: { id: string; key: string },
-    ticket: Ticket,
-    connection: VcsConnection,
+    ticket: VcsTicketRef,
+    connection: VcsConnectionDomain,
     encryptionKey: string,
     branchName: string,
     prNumber?: number,

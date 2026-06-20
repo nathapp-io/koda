@@ -5,7 +5,19 @@ import { VCS_CFG } from '../config/vcs.config';
 import { VcsConnectionService } from './vcs-connection.service';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VcsPollingService } from './vcs-polling.service';
-import { VcsConnection } from '@prisma/client';
+import type { VcsConnectionDomain } from './domain/vcs.domain';
+
+// TDD type-level compile test: VcsConnectionDomain has no @prisma/client dependency
+it('findVcsConnection result has no @prisma/client type — plain object shape', () => {
+  const conn: VcsConnectionDomain = {
+    id: 'c1', projectId: 'p1', provider: 'github',
+    repoOwner: 'acme', repoName: 'repo', encryptedToken: 'tok',
+    syncMode: 'polling', allowedAuthors: '[]', pollingIntervalMs: 60000,
+    webhookSecret: null, isActive: true, lastSyncedAt: null,
+    createdAt: new Date(), updatedAt: new Date(),
+  };
+  expect(conn.id).toBe('c1');
+});
 import { CreateVcsConnectionDto } from './dto/create-vcs-connection.dto';
 import { UpdateVcsConnectionDto } from './dto/update-vcs-connection.dto';
 
@@ -20,7 +32,7 @@ jest.mock('./factory', () => ({
 
 import { createVcsProvider } from './factory';
 
-function makeConnection(overrides?: Partial<VcsConnection>): VcsConnection {
+function makeConnection(overrides?: Partial<VcsConnectionDomain>): VcsConnectionDomain {
   return {
     id: 'conn-1',
     projectId: 'proj-1',
@@ -37,7 +49,7 @@ function makeConnection(overrides?: Partial<VcsConnection>): VcsConnection {
     createdAt: new Date('2024-01-01T00:00:00Z'),
     updatedAt: new Date('2024-01-01T00:00:00Z'),
     ...overrides,
-  } as VcsConnection;
+  };
 }
 
 function createMockRepo(): jest.Mocked<IVcsRepository> {

@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { Project, VcsConnection } from '@prisma/client';
+import type { VcsConnectionDomain } from './domain/vcs.domain';
 import { VcsIssue } from './types';
 import { createVcsProvider } from './factory';
 import { decryptToken } from '../common/utils/encryption.util';
@@ -24,7 +24,7 @@ export class VcsSyncService {
    * Sync a single issue into a ticket
    */
   async syncIssue(
-    project: Project,
+    project: { id: string },
     issue: VcsIssue,
     syncMode: 'manual' | 'polling' | 'webhook',
   ): Promise<SyncIssueResult> {
@@ -76,8 +76,8 @@ export class VcsSyncService {
    * Perform a full sync of all issues from the provider
    */
   async fullSync(
-    project: Project,
-    connection: VcsConnection,
+    project: { id: string; key: string },
+    connection: VcsConnectionDomain,
     encryptionKey: string,
   ): Promise<{
     issuesSynced: number;

@@ -1,6 +1,6 @@
 import { HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
-import { VcsConnection } from '@prisma/client';
+import type { VcsConnectionDomain } from './domain/vcs.domain';
 import { randomBytes } from 'crypto';
 import { encryptToken, decryptToken } from '../common/utils/encryption.util';
 import { CreateVcsConnectionDto } from './dto/create-vcs-connection.dto';
@@ -222,7 +222,7 @@ export class VcsConnectionService {
   /**
    * Get full connection for internal use (includes encryptedToken)
    */
-  async getFullByProject(projectId: string): Promise<VcsConnection> {
+  async getFullByProject(projectId: string): Promise<VcsConnectionDomain> {
     const connection = await this.vcsRepo.findVcsConnectionByProjectId(projectId);
 
     if (!connection) {
@@ -233,9 +233,9 @@ export class VcsConnectionService {
   }
 
   /**
-   * Map Prisma VcsConnection to response DTO (excludes encryptedToken)
+   * Map VcsConnectionDomain to response DTO (excludes encryptedToken)
    */
-  private mapToResponseDto(connection: VcsConnection): VcsConnectionResponseDto {
+  private mapToResponseDto(connection: VcsConnectionDomain): VcsConnectionResponseDto {
     return {
       id: connection.id,
       projectId: connection.projectId,

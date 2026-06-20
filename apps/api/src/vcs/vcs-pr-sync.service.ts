@@ -3,13 +3,13 @@
  */
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
-import { Project, Ticket, VcsConnection } from '@prisma/client';
+import type { VcsConnectionDomain } from './domain/vcs.domain';
 import { decryptToken } from '../common/utils/encryption.util';
 import { createVcsProvider } from './factory';
 import { VcsPrStatus } from './types';
 import { TicketStatus, CommentType } from '../common/enums';
 import { validateTransition } from '../tickets/state-machine/ticket-transitions';
-import { VcsLinkExtractorService } from './vcs-link-extractor.service';
+import { VcsLinkExtractorService, VcsTicketRef } from './vcs-link-extractor.service';
 import { IVcsRepository, TicketLinkData, VCS_REPOSITORY } from './domain/vcs.repository';
 
 export interface SyncPrStatusResult {
@@ -52,8 +52,8 @@ export class VcsPrSyncService {
    * @returns Summary of updated and skipped PR counts
    */
   async syncPrStatus(
-    project: Project,
-    connection: VcsConnection,
+    project: { id: string; key: string },
+    connection: VcsConnectionDomain,
     encryptionKey: string,
   ): Promise<SyncPrStatusResult> {
     // Decrypt the token
@@ -100,25 +100,11 @@ export class VcsPrSyncService {
           // to pick up new commits from the PR
           if (this.vcsLinkExtractorService && link.ticket && prStatus.branchName) {
             const ticketData = link.ticket;
-            const ticketForExtraction = {
+            const ticketForExtraction: VcsTicketRef = {
               id: ticketData.id,
-              projectId: ticketData.projectId,
               number: ticketData.number,
-              type: 'BUG' as const, // dummy value, not used by extractLinksFromPr
-              title: '',
-              description: null,
-              status: ticketData.status as TicketStatus,
-              priority: 'HIGH' as const, // dummy value, not used by extractLinksFromPr
-              assignedToUserId: null,
-              assignedToAgentId: null,
-              createdByUserId: '',
               externalVcsId: ticketData.externalVcsId,
-              externalVcsUrl: null,
-              vcsSyncedAt: null,
-              deletedAt: null,
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            } as Ticket;
+            };
 
             this.vcsLinkExtractorService.extractLinksFromPr(
               { id: project.id, key: project.key },

@@ -27,6 +27,6 @@ import { OutboxModule } from '../outbox/outbox.module';
     VcsPrSyncService,
     VcsLinkExtractorService,
   ],
-  exports: [VCS_REPOSITORY, VcsConnectionService, VcsSyncService, VcsWebhookService, VcsPollingService, VcsPrSyncService, VcsLinkExtractorService],
+  exports: [VcsConnectionService, VcsSyncService, VcsWebhookService, VcsPollingService, VcsPrSyncService, VcsLinkExtractorService],
 })
 export class VcsModule {}
