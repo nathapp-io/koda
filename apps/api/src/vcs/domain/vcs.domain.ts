@@ -24,7 +24,6 @@ export interface VcsSyncLogDomain {
   errorMessage: string | null;
   startedAt: Date;
   completedAt: Date;
-  createdAt: Date;
 }
 
 export interface VcsProjectDomain {
