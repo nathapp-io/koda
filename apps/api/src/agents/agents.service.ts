@@ -1,5 +1,4 @@
-import { Injectable, Optional } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Injectable, Optional, Inject } from '@nestjs/common';
 import { IsString, IsOptional, IsNumber, IsArray, IsIn, MinLength, ArrayMinSize } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
@@ -10,6 +9,7 @@ import { TicketResponseDto } from '../tickets/dto/ticket-response.dto';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
 import { AgentAuthProvider } from '../auth/agent-auth.provider';
 import { PrismaAgentRepository } from './prisma-agent.repository';
+import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
 
 export class CreateAgentDto {
   @ApiProperty({ example: 'Subrina Coder' })
@@ -78,7 +78,7 @@ export class UpdateCapabilitiesDto {
 export class AgentsService {
   constructor(
     private readonly agentRepo: PrismaAgentRepository,
-    private configService: ConfigService,
+    @Inject(AUTH_CFG) private readonly authConfig: IAuthConfig,
     @Optional() private readonly kodaDomainWriter?: KodaDomainWriter,
     @Optional() private readonly agentAuthProvider?: AgentAuthProvider,
   ) {}
@@ -124,8 +124,7 @@ export class AgentsService {
     const rawKey = randomBytes(32).toString('hex');
 
     // Compute HMAC-SHA256 hash with API_KEY_SECRET
-    const authCfg = this.configService.get<{ apiKeySecret?: string }>('auth');
-    const apiKeySecret = authCfg?.apiKeySecret;
+    const apiKeySecret = this.authConfig.apiKeySecret;
     if (!apiKeySecret) {
       throw new ValidationAppException();
     }
