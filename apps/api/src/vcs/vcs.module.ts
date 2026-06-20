@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ConfigModule } from '@nestjs/config';
 import { VcsController } from './vcs.controller';
 import { VcsWebhookController } from './vcs-webhook.controller';
 import { VcsConnectionService } from './vcs-connection.service';
@@ -15,7 +16,7 @@ import { VCS_REPOSITORY } from './domain/vcs.repository';
 import { OutboxModule } from '../outbox/outbox.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), RagModule, OutboxModule, ProjectsModule],
+  imports: [ScheduleModule.forRoot(), ConfigModule, RagModule, OutboxModule, ProjectsModule],
   controllers: [VcsController, VcsWebhookController],
   providers: [
     PrismaVcsRepository,

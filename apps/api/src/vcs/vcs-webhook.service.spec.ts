@@ -3,8 +3,8 @@ import { VcsWebhookService, GitHubWebhookPayload, WebhookHandleResult } from './
 import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { OutboxService } from '../outbox/outbox.service';
-import { ConfigService } from '@nestjs/config';
 import { VcsLinkExtractorService } from './vcs-link-extractor.service';
+import { VCS_CFG } from '../config/vcs.config';
 import { VcsConnection, Project } from '@prisma/client';
 import type { OutboxEventDomain } from '../outbox/domain/outbox-event.domain';
 import type { OutboxEventInput } from '../outbox/outbox.service';
@@ -169,7 +169,7 @@ function buildTestingModule(
       { provide: VcsSyncService, useValue: createMockSyncService() },
       { provide: VcsPrSyncService, useValue: createMockPrSyncService() },
       { provide: OutboxService, useValue: createMockOutboxService(enqueueMock) },
-      { provide: ConfigService, useValue: { get: jest.fn() } },
+      { provide: VCS_CFG, useValue: { encryptionKey: 'test-key', defaultPollingIntervalMs: 600000, githubApiUrl: 'https://api.github.com' } },
       { provide: VcsLinkExtractorService, useValue: { extractLinksFromPr: jest.fn() } },
     ],
   }).compile();

@@ -9,6 +9,7 @@ import {
   HttpCode,
   HttpStatus,
   HttpException,
+  Inject,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -17,8 +18,8 @@ import {
   ApiResponse,
 } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
-import { ConfigService } from '@nestjs/config';
 import { ValidationAppException } from '@nathapp/nestjs-common';
+import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 import { Project } from '@prisma/client';
 import { VcsConnectionService } from './vcs-connection.service';
 import { VcsSyncService } from './vcs-sync.service';
@@ -41,7 +42,7 @@ export class VcsController {
     private readonly syncService: VcsSyncService,
     private readonly prSyncService: VcsPrSyncService,
     private readonly projectsService: ProjectsService,
-    private readonly configService: ConfigService,
+    @Inject(VCS_CFG) private readonly vcsConfig: IVcsConfig,
   ) {}
 
   private throwEncryptionKeyNotConfigured(): never {
@@ -64,7 +65,7 @@ export class VcsController {
     const project = await this.projectsService.findBySlug(slug);
 
     // Get encryption key from config
-    const encryptionKey = this.configService.get<string>('vcs.encryptionKey');
+    const encryptionKey = this.vcsConfig.encryptionKey;
     if (!encryptionKey) {
       this.throwEncryptionKeyNotConfigured();
     }
@@ -103,7 +104,7 @@ export class VcsController {
     const project = await this.projectsService.findBySlug(slug);
 
     // Get encryption key from config
-    const encryptionKey = this.configService.get<string>('vcs.encryptionKey');
+    const encryptionKey = this.vcsConfig.encryptionKey;
     if (!encryptionKey) {
       this.throwEncryptionKeyNotConfigured();
     }
@@ -142,7 +143,7 @@ export class VcsController {
     const project = await this.projectsService.findBySlug(slug);
 
     // Get encryption key from config
-    const encryptionKey = this.configService.get<string>('vcs.encryptionKey');
+    const encryptionKey = this.vcsConfig.encryptionKey;
     if (!encryptionKey) {
       this.throwEncryptionKeyNotConfigured();
     }
@@ -168,7 +169,7 @@ export class VcsController {
     const project = await this.projectsService.findBySlug(slug);
 
     // Get encryption key from config
-    const encryptionKey = this.configService.get<string>('vcs.encryptionKey');
+    const encryptionKey = this.vcsConfig.encryptionKey;
     if (!encryptionKey) {
       this.throwEncryptionKeyNotConfigured();
     }
@@ -229,7 +230,7 @@ export class VcsController {
     const project = await this.projectsService.findBySlug(slug);
 
     // Get encryption key from config
-    const encryptionKey = this.configService.get<string>('vcs.encryptionKey');
+    const encryptionKey = this.vcsConfig.encryptionKey;
     if (!encryptionKey) {
       this.throwEncryptionKeyNotConfigured();
     }
@@ -267,7 +268,7 @@ export class VcsController {
     const project = await this.projectsService.findBySlug(slug);
 
     // Get encryption key from config
-    const encryptionKey = this.configService.get<string>('vcs.encryptionKey');
+    const encryptionKey = this.vcsConfig.encryptionKey;
     if (!encryptionKey) {
       this.throwEncryptionKeyNotConfigured();
     }

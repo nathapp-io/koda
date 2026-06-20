@@ -1,12 +1,12 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
-import { ConfigService } from '@nestjs/config';
 import { VcsConnection, Project } from '@prisma/client';
 import { decryptToken } from '../common/utils/encryption.util';
 import { createVcsProvider } from './factory';
 import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
+import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 
 /**
  * Polling service for syncing issues on a schedule
@@ -21,7 +21,7 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
     private readonly schedulerRegistry: SchedulerRegistry,
     private readonly syncService: VcsSyncService,
     private readonly prSyncService: VcsPrSyncService,
-    private readonly configService: ConfigService,
+    @Inject(VCS_CFG) private readonly vcsConfig: IVcsConfig,
   ) {}
 
   async onModuleInit() {
@@ -104,7 +104,7 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
 
     try {
       // Get encryption key from config
-      const encryptionKey = this.configService.get<string>('vcs.encryptionKey');
+      const encryptionKey = this.vcsConfig.encryptionKey;
       if (!encryptionKey) {
         throw new Error('VCS encryption key not configured');
       }

@@ -1,5 +1,4 @@
 import { HttpException, HttpStatus, Inject, Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { VcsConnection, Project } from '@prisma/client';
 import { VcsSyncService } from './vcs-sync.service';
@@ -8,6 +7,7 @@ import { VcsLinkExtractorService } from './vcs-link-extractor.service';
 import { VcsIssue } from './types';
 import { OutboxService } from '../outbox/outbox.service';
 import { IVcsRepository, TicketLinkData, VCS_REPOSITORY } from './domain/vcs.repository';
+import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 
 /**
  * GitHub webhook event payload (issues)
@@ -86,7 +86,7 @@ export class VcsWebhookService implements OnModuleDestroy {
     private readonly syncService: VcsSyncService,
     private readonly prSyncService: VcsPrSyncService,
     @Optional() private readonly vcsLinkExtractorService?: VcsLinkExtractorService,
-    @Optional() private readonly configService?: ConfigService,
+    @Optional() @Inject(VCS_CFG) private readonly vcsConfig?: IVcsConfig,
     @Optional() private readonly outboxService?: OutboxService,
   ) {
     this.cleanupInterval = setInterval(() => {
@@ -494,8 +494,8 @@ export class VcsWebhookService implements OnModuleDestroy {
 
     // Call extractLinksFromPr to capture new commits
     // The head.ref contains the branch name that was pushed
-    if (this.vcsLinkExtractorService && this.configService) {
-      const encryptionKey = this.configService.get<string>('vcs.encryptionKey');
+    if (this.vcsLinkExtractorService) {
+      const encryptionKey = this.vcsConfig?.encryptionKey;
       if (encryptionKey) {
         try {
           await this.vcsLinkExtractorService.extractLinksFromPr(

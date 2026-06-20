@@ -1,8 +1,8 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { AstIndexService, SourceFile } from './ast-index.service';
 import { createVcsProvider } from '../vcs/factory';
+import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 import type { VcsProviderConfig } from '../vcs/factory';
 
 interface CodeCommitPayload {
@@ -30,7 +30,7 @@ export class CodeCommitOutboxHandler {
   constructor(
     private readonly prisma: PrismaService,
     private readonly astIndexService: AstIndexService,
-    @Optional() @Inject(ConfigService) private readonly configService?: ConfigService,
+    @Optional() @Inject(VCS_CFG) private readonly vcsConfig?: IVcsConfig,
   ) {}
 
   private get db() {
@@ -53,7 +53,7 @@ export class CodeCommitOutboxHandler {
       return;
     }
 
-    const encryptionKey = this.configService?.get<string>('vcs.encryptionKey');
+    const encryptionKey = this.vcsConfig?.encryptionKey;
     if (!encryptionKey) {
       this.logger.error(`code_commit: VCS encryption key not configured`);
       return;

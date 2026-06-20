@@ -1,8 +1,8 @@
 import { CodeCommitOutboxHandler } from './code-commit-outbox-handler';
 import { AstIndexService } from './ast-index.service';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { ConfigService } from '@nestjs/config';
 import { IVcsProvider } from '../vcs/vcs-provider';
+import { IVcsConfig } from '../config/vcs.config';
 import { SourceFile } from '../vcs/types';
 
 jest.mock('../common/utils/encryption.util', () => ({
@@ -46,8 +46,12 @@ function createMockAstIndexService() {
   return { indexCommit: jest.fn().mockResolvedValue(undefined) } as unknown as jest.Mocked<AstIndexService>;
 }
 
-function createMockConfigService(encryptionKey?: string) {
-  return { get: jest.fn().mockReturnValue(encryptionKey) } as unknown as ConfigService;
+function createMockVcsConfig(encryptionKey?: string): IVcsConfig {
+  return {
+    encryptionKey,
+    defaultPollingIntervalMs: 600000,
+    githubApiUrl: 'https://api.github.com',
+  };
 }
 
 const defaultConnection = {
@@ -128,7 +132,7 @@ describe('CodeCommitOutboxHandler', () => {
       handler = new CodeCommitOutboxHandler(
         createMockPrismaService(null),
         createMockAstIndexService(),
-        createMockConfigService('enc-key'),
+        createMockVcsConfig('enc-key'),
       );
 
       await handler.process({
@@ -147,7 +151,7 @@ describe('CodeCommitOutboxHandler', () => {
       handler = new CodeCommitOutboxHandler(
         createMockPrismaService(defaultConnection),
         createMockAstIndexService(),
-        createMockConfigService(undefined),
+        createMockVcsConfig(undefined),
       );
 
       await handler.process({
@@ -169,7 +173,7 @@ describe('CodeCommitOutboxHandler', () => {
       handler = new CodeCommitOutboxHandler(
         createMockPrismaService(defaultConnection),
         createMockAstIndexService(),
-        createMockConfigService('enc-key'),
+        createMockVcsConfig('enc-key'),
       );
 
       await handler.process({
@@ -193,7 +197,7 @@ describe('CodeCommitOutboxHandler', () => {
       handler = new CodeCommitOutboxHandler(
         createMockPrismaService(defaultConnection),
         createMockAstIndexService(),
-        createMockConfigService('enc-key'),
+        createMockVcsConfig('enc-key'),
       );
 
       await expect(handler.process({
@@ -218,7 +222,7 @@ describe('CodeCommitOutboxHandler', () => {
       handler = new CodeCommitOutboxHandler(
         createMockPrismaService(defaultConnection),
         mockAstIndex,
-        createMockConfigService('enc-key'),
+        createMockVcsConfig('enc-key'),
       );
 
       await handler.process({

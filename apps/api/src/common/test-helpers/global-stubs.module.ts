@@ -6,6 +6,7 @@ import { CacheManager } from '@nathapp/nestjs-cache';
 import { PrismaProjectRepository } from '../../projects/prisma-project.repository';
 import { AgentsService } from '../../agents/agents.service';
 import { authConfig } from '../../config/auth.config';
+import { vcsConfig } from '../../config/vcs.config';
 
 export const mockPrismaService = {
   client: {},
@@ -36,7 +37,7 @@ export const mockCacheManager = {
     // real ConfigService that can resolve the JWT config object structure.
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [authConfig],
+      load: [authConfig, vcsConfig],
       envFilePath: ['.env.test'],
     }),
   ],

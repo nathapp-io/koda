@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { SchedulerRegistry } from '@nestjs/schedule';
-import { ConfigService } from '@nestjs/config';
 import { VcsPollingService } from './vcs-polling.service';
+import { VCS_CFG } from '../config/vcs.config';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
@@ -87,8 +87,6 @@ describe('VcsPollingService', () => {
   let mockSchedulerRegistry: jest.Mocked<Pick<SchedulerRegistry, 'addInterval' | 'deleteInterval'>>;
   let mockSyncService: jest.Mocked<Pick<VcsSyncService, 'filterByAllowedAuthors' | 'syncIssue'>>;
   let mockPrSyncService: jest.Mocked<Pick<VcsPrSyncService, 'syncPrStatus'>>;
-  let mockConfigService: { get: jest.Mock };
-
   beforeEach(async () => {
     mockRepo = createMockRepo();
 
@@ -106,10 +104,6 @@ describe('VcsPollingService', () => {
       syncPrStatus: jest.fn().mockResolvedValue({ updated: 0, skipped: 0 }),
     };
 
-    mockConfigService = {
-      get: jest.fn().mockReturnValue('test-encryption-key-32-chars-padded'),
-    };
-
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         VcsPollingService,
@@ -117,7 +111,7 @@ describe('VcsPollingService', () => {
         { provide: SchedulerRegistry, useValue: mockSchedulerRegistry },
         { provide: VcsSyncService, useValue: mockSyncService },
         { provide: VcsPrSyncService, useValue: mockPrSyncService },
-        { provide: ConfigService, useValue: mockConfigService },
+        { provide: VCS_CFG, useValue: { encryptionKey: 'test-encryption-key-32-chars-padded', defaultPollingIntervalMs: 600000, githubApiUrl: 'https://api.github.com' } },
       ],
     }).compile();
 
