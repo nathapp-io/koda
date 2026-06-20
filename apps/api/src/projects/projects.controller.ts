@@ -22,16 +22,14 @@ import {
   ApiResponse,
   ApiQuery,
 } from '@nestjs/swagger';
-import { PrismaMemoryItemRepository } from '../memory/prisma-memory-item.repository';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
-import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
-import { ActorRole } from '../common/enums';
+import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
 import { KodaAction } from '../auth/casl/koda-action.enum';
 import { AgentsService } from '../agents/agents.service';
 import { UpdateAgentDto } from '../agents/dto/update-agent.dto';
+import { MemoryGovernanceService } from '../memory/memory-governance.service';
 
 @ApiTags('projects')
 @ApiBearerAuth()
@@ -39,50 +37,10 @@ import { UpdateAgentDto } from '../agents/dto/update-agent.dto';
 export class ProjectsController {
   constructor(
     private projectsService: ProjectsService,
-    private memoryItemRepository: PrismaMemoryItemRepository,
+    private memoryGovernanceService: MemoryGovernanceService,
     private impactAnalysisService: ImpactAnalysisService,
-    private prisma: PrismaService,
     private agentsService: AgentsService,
   ) {}
-
-  private get db() { return this.prisma.client as unknown as { projectMember: { findUnique(options: unknown): Promise<unknown> } }; }
-
-  private async checkProjectMembership(
-    projectId: string,
-    principal: KodaPrincipal | null,
-  ): Promise<void> {
-    if (!principal) {
-      throw new ForbiddenAppException({}, 'projects');
-    }
-
-    // Agents are authorized by principal-level permissions, not projectMember rows.
-    if (!isUserPrincipal(principal)) {
-      return;
-    }
-
-    if (principal.role === 'ADMIN') {
-      return;
-    }
-
-    const membership = await this.db.projectMember.findUnique({
-      where: {
-        projectId_userId: {
-          projectId,
-          userId: principal.id,
-        },
-      },
-    });
-
-    if (!membership) {
-      throw new ForbiddenAppException({}, 'projects');
-    }
-
-    const allowedRoles = [ActorRole.ADMIN, ActorRole.DEVELOPER, ActorRole.AGENT, ActorRole.VIEWER] as const;
-    const membershipRole = (membership as { role?: string }).role;
-    if (!membershipRole || !allowedRoles.includes(membershipRole as typeof allowedRoles[number])) {
-      throw new ForbiddenAppException({}, 'projects');
-    }
-  }
 
   @Post()
   @HttpCode(201)
@@ -158,9 +116,9 @@ export class ProjectsController {
     @Principal() principal: KodaPrincipal,
   ) {
     const project = await this.projectsService.findBySlug(slug);
-    await this.checkProjectMembership(project.id, principal);
+    await this.projectsService.assertProjectMembership(project.id, principal);
 
-    const result = await this.memoryItemRepository.findByProjectMemory({
+    const result = await this.memoryGovernanceService.getProjectMemory({
       projectId: project.id,
       kind: query.kind,
       subject: query.subjects,
@@ -212,7 +170,7 @@ export class ProjectsController {
     }
 
     const project = await this.projectsService.findBySlug(slug);
-    await this.checkProjectMembership(project.id, principal);
+    await this.projectsService.assertProjectMembership(project.id, principal);
 
     const changedFiles = changedFilesStr.split(',').map((f) => f.trim());
 
@@ -238,7 +196,7 @@ export class ProjectsController {
     @Principal() principal: KodaPrincipal,
   ) {
     const project = await this.projectsService.findBySlug(slug);
-    await this.checkProjectMembership(project.id, principal);
+    await this.projectsService.assertProjectMembership(project.id, principal);
     const data = await this.agentsService.findByProject(slug);
     return JsonResponse.Ok(data);
   }
@@ -256,7 +214,7 @@ export class ProjectsController {
     @Principal() principal: KodaPrincipal,
   ) {
     const project = await this.projectsService.findBySlug(slug);
-    await this.checkProjectMembership(project.id, principal);
+    await this.projectsService.assertProjectMembership(project.id, principal);
     const projectAgents = await this.agentsService.findByProject(slug);
     if (!projectAgents.some((a) => a.slug === agentSlug)) {
       throw new NotFoundAppException({}, 'agents');

@@ -2,9 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ProjectsController } from './projects.controller';
 import { ProjectsService } from './projects.service';
 import { AgentsService } from '../agents/agents.service';
-import { PrismaMemoryItemRepository } from '../memory/prisma-memory-item.repository';
+import { MemoryGovernanceService } from '../memory/memory-governance.service';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 
 describe('ProjectsModule — DI wiring', () => {
   let module: TestingModule;
@@ -15,12 +14,8 @@ describe('ProjectsModule — DI wiring', () => {
       providers: [
         { provide: ProjectsService, useValue: {} },
         { provide: AgentsService, useValue: {} },
-        { provide: PrismaMemoryItemRepository, useValue: {} },
+        { provide: MemoryGovernanceService, useValue: {} },
         { provide: ImpactAnalysisService, useValue: {} },
-        {
-          provide: PrismaService,
-          useValue: { client: { projectMember: { findUnique: jest.fn() } } },
-        },
       ],
     }).compile();
   });
@@ -29,7 +24,7 @@ describe('ProjectsModule — DI wiring', () => {
     await module.close();
   });
 
-  it('ProjectsController resolves with AgentsService injected', () => {
+  it('ProjectsController resolves with MemoryGovernanceService injected', () => {
     const controller = module.get(ProjectsController);
     expect(controller).toBeDefined();
   });

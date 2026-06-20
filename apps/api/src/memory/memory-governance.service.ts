@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
-import { MemoryItem } from './memory-item-repository';
+import { MemoryItem, ProjectMemoryQuery } from './memory-item-repository';
 import { MemoryKind } from '../common/enums';
 
 export interface GovernanceResult {
@@ -19,6 +19,10 @@ export class MemoryGovernanceService {
   private readonly logger = new Logger(MemoryGovernanceService.name);
 
   constructor(private readonly repository: PrismaMemoryItemRepository) {}
+
+  async getProjectMemory(query: ProjectMemoryQuery): Promise<{ items: MemoryItem[]; total: number }> {
+    return this.repository.findByProjectMemory(query);
+  }
 
   async runCleanup(projectId: string): Promise<GovernanceResult> {
     const start = Date.now();

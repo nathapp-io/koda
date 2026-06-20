@@ -2,11 +2,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import { ProjectsController } from './projects.controller';
 import { ProjectsService } from './projects.service';
-import { PrismaMemoryItemRepository } from '../memory/prisma-memory-item.repository';
+import { MemoryGovernanceService } from '../memory/memory-governance.service';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
 import { AgentsService } from '../agents/agents.service';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 const mockProject = {
@@ -66,15 +65,9 @@ const agentPrincipal: KodaPrincipal = {
 describe('ProjectsController', () => {
   let controller: ProjectsController;
   let projectsService: jest.Mocked<ProjectsService>;
-  let memoryItemRepository: jest.Mocked<PrismaMemoryItemRepository>;
+  let memoryGovernanceService: jest.Mocked<MemoryGovernanceService>;
   let impactAnalysisService: jest.Mocked<ImpactAnalysisService>;
   let agentsService: jest.Mocked<AgentsService>;
-
-  const mockProjectMemberFindUnique = jest.fn();
-  const mockPrismaClient = {
-    projectMember: { findUnique: mockProjectMemberFindUnique },
-  };
-  const mockPrismaService = { client: mockPrismaClient };
 
   beforeEach(async () => {
     projectsService = {
@@ -83,11 +76,12 @@ describe('ProjectsController', () => {
       findBySlug: jest.fn(),
       update: jest.fn(),
       softDelete: jest.fn(),
+      assertProjectMembership: jest.fn(),
     } as unknown as jest.Mocked<ProjectsService>;
 
-    memoryItemRepository = {
-      findByProjectMemory: jest.fn(),
-    } as unknown as jest.Mocked<PrismaMemoryItemRepository>;
+    memoryGovernanceService = {
+      getProjectMemory: jest.fn(),
+    } as unknown as jest.Mocked<MemoryGovernanceService>;
 
     impactAnalysisService = {
       getChangeImpact: jest.fn(),
@@ -102,9 +96,8 @@ describe('ProjectsController', () => {
       controllers: [ProjectsController],
       providers: [
         { provide: ProjectsService, useValue: projectsService },
-        { provide: PrismaMemoryItemRepository, useValue: memoryItemRepository },
+        { provide: MemoryGovernanceService, useValue: memoryGovernanceService },
         { provide: ImpactAnalysisService, useValue: impactAnalysisService },
-        { provide: PrismaService, useValue: mockPrismaService },
         { provide: AgentsService, useValue: agentsService },
       ],
     }).compile();
@@ -179,27 +172,29 @@ describe('ProjectsController', () => {
   describe('getProjectMemory', () => {
     it('allows admin without membership check', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      memoryItemRepository.findByProjectMemory.mockResolvedValue({ total: 0, items: [] } as any);
+      projectsService.assertProjectMembership.mockResolvedValue(undefined);
+      memoryGovernanceService.getProjectMemory.mockResolvedValue({ total: 0, items: [] } as any);
 
       const result = await controller.getProjectMemory('alpha', {}, adminPrincipal);
 
-      expect(mockProjectMemberFindUnique).not.toHaveBeenCalled();
+      expect(projectsService.assertProjectMembership).toHaveBeenCalledWith('proj-1', adminPrincipal);
       expect((result as any).data.total).toBe(0);
     });
 
     it('allows agent without membership row check', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      memoryItemRepository.findByProjectMemory.mockResolvedValue({ total: 1, items: [] } as any);
+      projectsService.assertProjectMembership.mockResolvedValue(undefined);
+      memoryGovernanceService.getProjectMemory.mockResolvedValue({ total: 1, items: [] } as any);
 
       const result = await controller.getProjectMemory('alpha', {}, agentPrincipal);
 
-      expect(mockProjectMemberFindUnique).not.toHaveBeenCalled();
+      expect(projectsService.assertProjectMembership).toHaveBeenCalledWith('proj-1', agentPrincipal);
       expect((result as any).data.total).toBe(1);
     });
 
     it('forbids member without project membership', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      mockProjectMemberFindUnique.mockResolvedValue(null);
+      projectsService.assertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'projects'));
 
       await expect(
         controller.getProjectMemory('alpha', {}, memberPrincipal),
@@ -208,8 +203,8 @@ describe('ProjectsController', () => {
 
     it('allows member with valid project role', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      mockProjectMemberFindUnique.mockResolvedValue({ role: 'DEVELOPER' });
-      memoryItemRepository.findByProjectMemory.mockResolvedValue({
+      projectsService.assertProjectMembership.mockResolvedValue(undefined);
+      memoryGovernanceService.getProjectMemory.mockResolvedValue({
         total: 2,
         items: [
           {
@@ -235,7 +230,7 @@ describe('ProjectsController', () => {
 
     it('maps memory items to response shape', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      mockProjectMemberFindUnique.mockResolvedValue({ role: 'ADMIN' });
+      projectsService.assertProjectMembership.mockResolvedValue(undefined);
 
       const mockItem = {
         id: 'm1',
@@ -249,7 +244,7 @@ describe('ProjectsController', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       };
-      memoryItemRepository.findByProjectMemory.mockResolvedValue({ total: 1, items: [mockItem] } as any);
+      memoryGovernanceService.getProjectMemory.mockResolvedValue({ total: 1, items: [mockItem] } as any);
 
       const result = await controller.getProjectMemory('alpha', {}, memberPrincipal);
 
@@ -281,7 +276,7 @@ describe('ProjectsController', () => {
 
     it('calls impactAnalysisService with parsed changed files', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      mockProjectMemberFindUnique.mockResolvedValue({ role: 'ADMIN' });
+      projectsService.assertProjectMembership.mockResolvedValue(undefined);
       impactAnalysisService.getChangeImpact.mockResolvedValue({ affected: [] } as any);
 
       const result = await controller.getChangeImpact(
@@ -305,7 +300,7 @@ describe('ProjectsController', () => {
 
     it('forbids member without membership', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      mockProjectMemberFindUnique.mockResolvedValue(null);
+      projectsService.assertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'projects'));
 
       await expect(
         controller.getChangeImpact('alpha', 'repo-1', 'abc', 'file.ts', memberPrincipal),
@@ -328,6 +323,7 @@ describe('ProjectsController', () => {
 
     it('returns agents for a project (admin bypasses membership check)', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
+      projectsService.assertProjectMembership.mockResolvedValue(undefined);
       agentsService.findByProject.mockResolvedValue([mockAgent] as any);
 
       const result = await controller.getProjectAgents('alpha', adminPrincipal);
@@ -340,7 +336,7 @@ describe('ProjectsController', () => {
 
     it('returns agents for a project member', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      mockProjectMemberFindUnique.mockResolvedValue({ role: 'DEVELOPER' });
+      projectsService.assertProjectMembership.mockResolvedValue(undefined);
       agentsService.findByProject.mockResolvedValue([mockAgent] as any);
 
       const result = await controller.getProjectAgents('alpha', memberPrincipal);
@@ -350,7 +346,7 @@ describe('ProjectsController', () => {
 
     it('throws ForbiddenAppException for non-member', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      mockProjectMemberFindUnique.mockResolvedValue(null);
+      projectsService.assertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'projects'));
 
       await expect(
         controller.getProjectAgents('alpha', memberPrincipal),
@@ -359,11 +355,12 @@ describe('ProjectsController', () => {
 
     it('allows agent principals without membership check', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
+      projectsService.assertProjectMembership.mockResolvedValue(undefined);
       agentsService.findByProject.mockResolvedValue([mockAgent] as any);
 
       const result = await controller.getProjectAgents('alpha', agentPrincipal);
 
-      expect(mockProjectMemberFindUnique).not.toHaveBeenCalled();
+      expect(projectsService.assertProjectMembership).toHaveBeenCalledWith('proj-1', agentPrincipal);
       expect((result as any).data).toHaveLength(1);
     });
   });
@@ -383,6 +380,7 @@ describe('ProjectsController', () => {
 
     it('updates agent status for admin principal', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
+      projectsService.assertProjectMembership.mockResolvedValue(undefined);
       agentsService.findByProject.mockResolvedValue([mockUpdatedAgent] as any);
       agentsService.update.mockResolvedValue(mockUpdatedAgent as any);
 
@@ -395,7 +393,7 @@ describe('ProjectsController', () => {
 
     it('updates agent status for project member', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      mockProjectMemberFindUnique.mockResolvedValue({ role: 'DEVELOPER' });
+      projectsService.assertProjectMembership.mockResolvedValue(undefined);
       agentsService.findByProject.mockResolvedValue([mockUpdatedAgent] as any);
       agentsService.update.mockResolvedValue(mockUpdatedAgent as any);
 
@@ -406,7 +404,7 @@ describe('ProjectsController', () => {
 
     it('throws ForbiddenAppException for non-member', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      mockProjectMemberFindUnique.mockResolvedValue(null);
+      projectsService.assertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'projects'));
 
       await expect(
         controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, memberPrincipal),
@@ -415,7 +413,7 @@ describe('ProjectsController', () => {
 
     it('throws NotFoundAppException when agent is not in the project', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      mockProjectMemberFindUnique.mockResolvedValue({ role: 'DEVELOPER' });
+      projectsService.assertProjectMembership.mockResolvedValue(undefined);
       agentsService.findByProject.mockResolvedValue([]);
 
       await expect(
