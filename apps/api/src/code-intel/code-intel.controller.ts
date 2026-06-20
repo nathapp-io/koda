@@ -7,7 +7,6 @@ import {
   Query,
   HttpCode,
   Logger,
-  NotFoundException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -16,12 +15,12 @@ import {
   ApiResponse,
   ApiQuery,
 } from '@nestjs/swagger';
-import { ForbiddenAppException, JsonResponse } from '@nathapp/nestjs-common';
+import { JsonResponse, NotFoundAppException } from '@nathapp/nestjs-common';
 import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
-import { KodaPrincipal, isAgentPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
+import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { AstIndexService } from './ast-index.service';
 import { IndexCommitDto } from './dto/index-commit.dto';
-import { PrismaCodeIntelRepository } from './prisma-code-intel.repository';
+import { ProjectsService } from '../projects/projects.service';
 
 @ApiTags('code-intel')
 @ApiBearerAuth()
@@ -31,42 +30,21 @@ export class CodeIntelController {
 
   constructor(
     private readonly astIndexService: AstIndexService,
-    private readonly codeIntelRepository: PrismaCodeIntelRepository,
+    private readonly projectsService: ProjectsService,
   ) {}
 
   private async resolveProject(slug: string): Promise<{ id: string }> {
-    const project = await this.codeIntelRepository.findProjectBySlug(slug);
-    if (!project) {
-      throw new NotFoundException(`Project not found: ${slug}`);
-    }
-    return project;
+    // findProjectIdBySlug throws NotFoundAppException if missing or soft-deleted
+    const id = await this.projectsService.findProjectIdBySlug(slug);
+    return { id };
   }
 
   private async checkProjectMembership(
     projectId: string,
-    principal: KodaPrincipal | null,
+    principal: KodaPrincipal,
   ): Promise<void> {
-    if (!principal) {
-      throw new ForbiddenAppException({}, 'code-intel');
-    }
-
-    if (isAgentPrincipal(principal)) {
-      return;
-    }
-
-    if (!isUserPrincipal(principal)) {
-      throw new ForbiddenAppException({}, 'code-intel');
-    }
-
-    if (principal.role === 'ADMIN') {
-      return;
-    }
-
-    const membership = await this.codeIntelRepository.findProjectMembership(projectId, principal.id);
-
-    if (!membership) {
-      throw new ForbiddenAppException({}, 'code-intel');
-    }
+    // assertProjectMembership throws ForbiddenAppException when access is denied
+    await this.projectsService.assertProjectMembership(projectId, principal);
   }
 
   @Post('index')
@@ -109,7 +87,7 @@ export class CodeIntelController {
 
     const data = await this.astIndexService.getSymbol(project.id, symbolId);
     if (!data) {
-      throw new NotFoundException(`Symbol not found: ${symbolId}`);
+      throw new NotFoundAppException({}, 'code-intel');
     }
     return JsonResponse.Ok(data);
   }
