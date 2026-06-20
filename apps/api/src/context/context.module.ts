@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { ContextBuilderService } from './context-builder.service';
 import { ContextController } from './context.controller';
@@ -9,14 +9,15 @@ import { CodeIntelModule } from '../code-intel/code-intel.module';
 import { MonitoringModule } from '../monitoring/monitoring.module';
 import { PrismaContextRepository } from './prisma-context.repository';
 import { CONTEXT_REPOSITORY } from './domain/context.domain';
-import { ProjectsModule } from '../projects/projects.module';
+import { PrismaProjectRepository } from '../projects/prisma-project.repository';
 
 @Module({
-  imports: [PrismaModule, ProjectsModule, MemoryModule, RagModule, EntityGraphModule, CodeIntelModule, MonitoringModule],
+  imports: [PrismaModule, MemoryModule, forwardRef(() => RagModule), EntityGraphModule, forwardRef(() => CodeIntelModule), MonitoringModule],
   controllers: [ContextController],
   providers: [
     PrismaContextRepository,
     { provide: CONTEXT_REPOSITORY, useExisting: PrismaContextRepository },
+    PrismaProjectRepository,
     ContextBuilderService,
   ],
   exports: [ContextBuilderService],

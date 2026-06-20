@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
-import { ProjectsModule } from '../projects/projects.module';
+import { PrismaProjectRepository } from '../projects/prisma-project.repository';
 import { TimelineService } from './timeline.service';
 import { PrismaTimelineRepository } from './prisma-timeline.repository';
 import { TimelineController } from './timeline.controller';
@@ -15,9 +15,10 @@ import { PrismaCanonicalStateRepository } from './prisma-canonical-state.reposit
 import { CANONICAL_STATE_REPOSITORY } from './domain/canonical-state.domain';
 
 @Module({
-  imports: [PrismaModule, ProjectsModule],
+  imports: [PrismaModule],
   controllers: [TimelineController, MemoryController],
   providers: [
+    PrismaProjectRepository,
     PrismaTimelineRepository,
     TimelineService,
     PrismaCanonicalStateRepository,

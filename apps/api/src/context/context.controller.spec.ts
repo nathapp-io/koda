@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { ContextController } from './context.controller';
 import { ContextBuilderService } from './context-builder.service';
-import { ProjectsService } from '../projects/projects.service';
+import { PrismaProjectRepository } from '../projects/prisma-project.repository';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 const makeContextResponse = () => ({
@@ -51,9 +51,9 @@ const agentPrincipal: KodaPrincipal = {
 describe('ContextController', () => {
   let controller: ContextController;
   let contextBuilderService: { getProjectContext: jest.Mock };
-  let projectsService: {
-    findProjectIdBySlug: jest.Mock;
-    assertProjectMembership: jest.Mock;
+  let projectRepo: {
+    findBySlug: jest.Mock;
+    findMembershipRole: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -61,25 +61,25 @@ describe('ContextController', () => {
       getProjectContext: jest.fn().mockResolvedValue(makeContextResponse()),
     };
 
-    projectsService = {
-      findProjectIdBySlug: jest.fn().mockResolvedValue('project-1'),
-      assertProjectMembership: jest.fn().mockResolvedValue(undefined),
+    projectRepo = {
+      findBySlug: jest.fn().mockResolvedValue({ id: 'project-1', deletedAt: null }),
+      findMembershipRole: jest.fn().mockResolvedValue('ADMIN'),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ContextController],
       providers: [
         { provide: ContextBuilderService, useValue: contextBuilderService },
-        { provide: ProjectsService, useValue: projectsService },
+        { provide: PrismaProjectRepository, useValue: projectRepo },
       ],
     }).compile();
 
     controller = module.get(ContextController);
     jest.clearAllMocks();
 
-    // Default: project found, service returns context
-    projectsService.findProjectIdBySlug.mockResolvedValue('project-1');
-    projectsService.assertProjectMembership.mockResolvedValue(undefined);
+    // Default: project found, membership ok
+    projectRepo.findBySlug.mockResolvedValue({ id: 'project-1', deletedAt: null });
+    projectRepo.findMembershipRole.mockResolvedValue('ADMIN');
     contextBuilderService.getProjectContext.mockResolvedValue(makeContextResponse());
   });
 
@@ -87,7 +87,7 @@ describe('ContextController', () => {
     it('resolves slug to projectId before building context (getContext)', async () => {
       const result = await controller.getContext('my-project', { intent: 'answer' }, adminUser);
 
-      expect(projectsService.findProjectIdBySlug).toHaveBeenCalledWith('my-project');
+      expect(projectRepo.findBySlug).toHaveBeenCalledWith('my-project');
       expect(contextBuilderService.getProjectContext).toHaveBeenCalledWith(
         expect.objectContaining({ projectId: 'project-1' }),
       );
@@ -95,17 +95,25 @@ describe('ContextController', () => {
     });
 
     it('throws NotFoundAppException for unknown slug (getContext)', async () => {
-      projectsService.findProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'context'));
+      projectRepo.findBySlug.mockResolvedValue(null);
 
       await expect(
         controller.getContext('nonexistent', { intent: 'answer' }, adminUser),
       ).rejects.toBeInstanceOf(NotFoundAppException);
     });
 
+    it('throws NotFoundAppException for soft-deleted project (getContext)', async () => {
+      projectRepo.findBySlug.mockResolvedValue({ id: 'project-1', deletedAt: new Date() });
+
+      await expect(
+        controller.getContext('deleted-project', { intent: 'answer' }, adminUser),
+      ).rejects.toBeInstanceOf(NotFoundAppException);
+    });
+
     it('resolves slug to projectId before building context (queryContext)', async () => {
       const result = await controller.queryContext('my-project', { intent: 'plan' }, adminUser);
 
-      expect(projectsService.findProjectIdBySlug).toHaveBeenCalledWith('my-project');
+      expect(projectRepo.findBySlug).toHaveBeenCalledWith('my-project');
       expect(contextBuilderService.getProjectContext).toHaveBeenCalledWith(
         expect.objectContaining({ projectId: 'project-1' }),
       );
@@ -113,7 +121,7 @@ describe('ContextController', () => {
     });
 
     it('throws NotFoundAppException for unknown slug (queryContext)', async () => {
-      projectsService.findProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'context'));
+      projectRepo.findBySlug.mockResolvedValue(null);
 
       await expect(
         controller.queryContext('nonexistent', { intent: 'answer' }, adminUser),
@@ -124,29 +132,29 @@ describe('ContextController', () => {
   describe('GET /context/:slug — getContext', () => {
     describe('membership checks', () => {
       test('throws ForbiddenAppException when principal is null', async () => {
-        projectsService.assertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'context'));
-
         await expect(
           controller.getContext('my-project', { intent: 'answer' }, null as unknown as KodaPrincipal),
         ).rejects.toThrow(ForbiddenAppException);
       });
 
-      test('allows ADMIN user — assertProjectMembership resolves without error', async () => {
+      test('allows ADMIN user without checking membership role', async () => {
         const result = await controller.getContext('my-project', { intent: 'answer' }, adminUser);
 
-        expect(projectsService.assertProjectMembership).toHaveBeenCalledWith('project-1', adminUser);
+        // ADMIN role bypasses membership check
+        expect(projectRepo.findMembershipRole).not.toHaveBeenCalled();
         expect(result).toMatchObject({ data: expect.objectContaining({ projectId: 'project-1' }) });
       });
 
-      test('allows agent principal — assertProjectMembership resolves without error', async () => {
+      test('allows agent principal without checking membership role', async () => {
         const result = await controller.getContext('my-project', { intent: 'answer' }, agentPrincipal);
 
-        expect(projectsService.assertProjectMembership).toHaveBeenCalledWith('project-1', agentPrincipal);
+        // Non-user principals bypass membership check
+        expect(projectRepo.findMembershipRole).not.toHaveBeenCalled();
         expect(result).toBeDefined();
       });
 
       test('throws ForbiddenAppException when member has no project membership', async () => {
-        projectsService.assertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'context'));
+        projectRepo.findMembershipRole.mockResolvedValue(null);
 
         await expect(
           controller.getContext('my-project', { intent: 'answer' }, memberUser),
@@ -154,7 +162,7 @@ describe('ContextController', () => {
       });
 
       test('allows member with valid membership', async () => {
-        projectsService.assertProjectMembership.mockResolvedValue(undefined);
+        projectRepo.findMembershipRole.mockResolvedValue('DEVELOPER');
 
         const result = await controller.getContext('my-project', { intent: 'answer' }, memberUser);
 
@@ -162,10 +170,11 @@ describe('ContextController', () => {
         expect(contextBuilderService.getProjectContext).toHaveBeenCalled();
       });
 
-      test('calls assertProjectMembership with resolved projectId and principal for member user', async () => {
+      test('calls findMembershipRole with resolved projectId and userId for member user', async () => {
+        projectRepo.findMembershipRole.mockResolvedValue('DEVELOPER');
         await controller.getContext('my-project', { intent: 'answer' }, memberUser);
 
-        expect(projectsService.assertProjectMembership).toHaveBeenCalledWith('project-1', memberUser);
+        expect(projectRepo.findMembershipRole).toHaveBeenCalledWith('project-1', 'user-member');
       });
     });
 
@@ -233,8 +242,6 @@ describe('ContextController', () => {
 
   describe('POST /context/:slug/query — queryContext', () => {
     test('throws ForbiddenAppException when principal is null', async () => {
-      projectsService.assertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'context'));
-
       await expect(
         controller.queryContext('my-project', { intent: 'answer' }, null as unknown as KodaPrincipal),
       ).rejects.toThrow(ForbiddenAppException);
@@ -250,7 +257,7 @@ describe('ContextController', () => {
     });
 
     test('throws ForbiddenAppException when member has no project membership', async () => {
-      projectsService.assertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'context'));
+      projectRepo.findMembershipRole.mockResolvedValue(null);
 
       await expect(
         controller.queryContext('my-project', { intent: 'answer' }, memberUser),
@@ -258,7 +265,7 @@ describe('ContextController', () => {
     });
 
     test('allows member with valid membership and passes body fields', async () => {
-      projectsService.assertProjectMembership.mockResolvedValue(undefined);
+      projectRepo.findMembershipRole.mockResolvedValue('DEVELOPER');
       const body = { intent: 'search' as const, query: 'ticket bugs', ticketIds: ['t-2'] };
 
       await controller.queryContext('my-project', body, memberUser);

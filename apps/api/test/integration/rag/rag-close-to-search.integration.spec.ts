@@ -13,8 +13,8 @@
  * fallback (temp directory set via ConfigService).
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
+import { RAG_CFG, IRagConfig } from '../../../src/config/rag.config';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -82,28 +82,32 @@ describe('RAG close-to-search integration', () => {
         // Provide RagService with a factory so we can inject FakeEmbeddingService directly
         {
           provide: RagService,
-          useFactory: (configSvc: ConfigService) => {
+          useFactory: (ragCfg: IRagConfig) => {
             // EmbeddingService injected as 2nd constructor arg — bypass NestJS DI
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const rag = new RagService(configSvc, fakeEmbedding as any);
+            const rag = new RagService(ragCfg, fakeEmbedding as any);
             return rag;
           },
-          inject: [ConfigService],
+          inject: [RAG_CFG],
         },
         {
-          provide: ConfigService,
+          provide: RAG_CFG,
           useValue: {
-            get: (key: string) => {
-              const config: Record<string, unknown> = {
-                'rag.lancedbPath': tmpDir,
-                'rag.inMemoryOnly': true,
-                'rag.similarityHigh': 0.85,
-                'rag.similarityMedium': 0.70,
-                'rag.similarityLow': 0.50,
-              };
-              return config[key];
-            },
-          },
+            lancedbPath: tmpDir,
+            inMemoryOnly: true,
+            similarityHigh: 0.85,
+            similarityMedium: 0.70,
+            similarityLow: 0.50,
+            ftsIndexMode: 'simple',
+            ftsOptimizeStrategy: 'counter',
+            ftsOptimizeThreshold: 10,
+            ftsOptimizeIntervalMs: 300000,
+            embeddingProvider: 'ollama',
+            embeddingModel: 'nomic-embed-text',
+            ollamaBaseUrl: 'http://localhost:11434',
+            openaiApiKey: '',
+            graphifyEnabledCacheTtlSec: 60,
+          } as IRagConfig,
         },
       ],
     }).compile();
