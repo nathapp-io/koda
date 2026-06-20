@@ -1,7 +1,8 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
+import { ValidationAppException } from '@nathapp/nestjs-common';
 import type {
   ILabelRepository,
   LabelDomain,
@@ -23,6 +24,17 @@ export class PrismaLabelRepository implements ILabelRepository {
     return this.prisma.client;
   }
 
+  private async exec<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ValidationAppException({}, 'labels');
+      }
+      throw error;
+    }
+  }
+
   async findProjectBySlug(slug: string): Promise<ProjectRow | null> {
     return this.db.project.findUnique({
       where: { slug },
@@ -31,7 +43,7 @@ export class PrismaLabelRepository implements ILabelRepository {
   }
 
   async createLabel(data: { projectId: string; name: string; color: string | null }): Promise<LabelDomain> {
-    const row = await this.db.label.create({ data });
+    const row = await this.exec(() => this.db.label.create({ data }));
     return { id: row.id, projectId: row.projectId, name: row.name, color: row.color };
   }
 
@@ -47,11 +59,11 @@ export class PrismaLabelRepository implements ILabelRepository {
   }
 
   async deleteLabel(id: string): Promise<void> {
-    await this.db.label.delete({ where: { id } });
+    await this.exec(() => this.db.label.delete({ where: { id } }));
   }
 
   async updateLabel(id: string, data: { name?: string; color?: string | null }): Promise<LabelDomain> {
-    const row = await this.db.label.update({ where: { id }, data });
+    const row = await this.exec(() => this.db.label.update({ where: { id }, data }));
     return { id: row.id, projectId: row.projectId, name: row.name, color: row.color };
   }
 
@@ -108,7 +120,7 @@ export class PrismaLabelRepository implements ILabelRepository {
   }
 
   async assignLabelToTicket(ticketId: string, labelId: string): Promise<void> {
-    await this.db.ticketLabel.create({ data: { ticketId, labelId } });
+    await this.exec(() => this.db.ticketLabel.create({ data: { ticketId, labelId } }));
   }
 
   async removeLabelFromTicket(ticketId: string, labelId: string): Promise<void> {

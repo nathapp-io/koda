@@ -1,5 +1,4 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { ValidationAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { CreateLabelDto } from './dto/create-label.dto';
 import { UpdateLabelDto } from './dto/update-label.dto';
@@ -32,19 +31,12 @@ export class LabelsService {
       throw new NotFoundAppException({}, 'labels');
     }
 
-    try {
-      const label = await this.repo.createLabel({
-        projectId: project.id,
-        name: createLabelDto.name,
-        color: createLabelDto.color ?? null,
-      });
-      return LabelResponseDto.from(label);
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        throw new ValidationAppException({}, 'labels');
-      }
-      throw error;
-    }
+    const label = await this.repo.createLabel({
+      projectId: project.id,
+      name: createLabelDto.name,
+      color: createLabelDto.color ?? null,
+    });
+    return LabelResponseDto.from(label);
   }
 
   async findByProject(projectSlug: string) {
@@ -91,19 +83,12 @@ export class LabelsService {
     const label = await this.repo.findLabelById(labelId);
     if (!label || label.projectId !== project.id) throw new NotFoundAppException();
 
-    try {
-      return LabelResponseDto.from(
-        await this.repo.updateLabel(labelId, {
-          ...(updateLabelDto.name !== undefined ? { name: updateLabelDto.name } : {}),
-          ...(updateLabelDto.color !== undefined ? { color: updateLabelDto.color } : {}),
-        }),
-      );
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        throw new ValidationAppException({}, 'labels');
-      }
-      throw error;
-    }
+    return LabelResponseDto.from(
+      await this.repo.updateLabel(labelId, {
+        ...(updateLabelDto.name !== undefined ? { name: updateLabelDto.name } : {}),
+        ...(updateLabelDto.color !== undefined ? { color: updateLabelDto.color } : {}),
+      }),
+    );
   }
 
   async assignToTicket(
@@ -131,48 +116,36 @@ export class LabelsService {
       throw new ValidationAppException({}, 'labels');
     }
 
-    try {
-      const result = await this.repo.runInTransaction(async () => {
-        const existingAssignment = await this.repo.findTicketLabelAssignment(
-          ticket.id,
-          assignLabelDto.labelId,
-        );
+    const result = await this.repo.runInTransaction(async () => {
+      const existingAssignment = await this.repo.findTicketLabelAssignment(
+        ticket.id,
+        assignLabelDto.labelId,
+      );
 
-        if (existingAssignment) {
-          throw new ValidationAppException();
-        }
+      if (existingAssignment) {
+        throw new ValidationAppException();
+      }
 
-        await this.repo.assignLabelToTicket(ticket.id, assignLabelDto.labelId);
+      await this.repo.assignLabelToTicket(ticket.id, assignLabelDto.labelId);
 
-        const actor = actorForeignKeys(principal, 'actor');
-        await this.repo.createTicketActivity({
-          ticketId: ticket.id,
-          action: 'LABEL_CHANGE',
-          field: 'labels',
-          newValue: label.name,
-          actorUserId: actor.actorUserId ?? null,
-          actorAgentId: actor.actorAgentId ?? null,
-        });
-
-        const updated = await this.repo.findTicketWithLabels(ticket.id);
-        if (!updated) {
-          throw new NotFoundAppException({}, 'labels');
-        }
-        return updated;
+      const actor = actorForeignKeys(principal, 'actor');
+      await this.repo.createTicketActivity({
+        ticketId: ticket.id,
+        action: 'LABEL_CHANGE',
+        field: 'labels',
+        newValue: label.name,
+        actorUserId: actor.actorUserId ?? null,
+        actorAgentId: actor.actorAgentId ?? null,
       });
 
-      return result;
-    } catch (error) {
-      if (error instanceof ValidationAppException || error instanceof NotFoundAppException) {
-        throw error;
+      const updated = await this.repo.findTicketWithLabels(ticket.id);
+      if (!updated) {
+        throw new NotFoundAppException({}, 'labels');
       }
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === 'P2002' || error.code === 'P2003') {
-          throw new ValidationAppException({}, 'labels');
-        }
-      }
-      throw error;
-    }
+      return updated;
+    });
+
+    return result;
   }
 
   async removeFromTicket(
