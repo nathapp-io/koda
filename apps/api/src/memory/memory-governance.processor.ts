@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { MemoryGovernanceService } from './memory-governance.service';
+import { ProjectsService } from '../projects/projects.service';
 
 @Injectable()
 export class MemoryGovernanceProcessor {
@@ -9,16 +9,13 @@ export class MemoryGovernanceProcessor {
 
   constructor(
     private readonly governanceService: MemoryGovernanceService,
-    private readonly prisma: PrismaService,
+    private readonly projectsService: ProjectsService,
   ) {}
 
   @Cron('0 3 * * *')
   async scheduledCleanup(): Promise<void> {
     this.logger.log('Starting scheduled memory governance cleanup');
-    const client = this.prisma.client as unknown as {
-      project: { findMany(): Promise<{ id: string }[]> };
-    };
-    const projects = await client.project.findMany();
+    const projects = await this.projectsService.findAllProjectIds();
     const errors: Error[] = [];
     for (const project of projects) {
       try {
