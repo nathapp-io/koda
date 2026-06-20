@@ -6,6 +6,7 @@ import { RagService } from '../../../src/rag/rag.service';
 import { HybridRetrieverService } from '../../../src/rag/hybrid-retriever.service';
 import { EvaluationService } from '../../../src/retrieval/evaluation.service';
 import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaRagRepository } from '../../../src/rag/prisma-rag.repository';
 
 /**
  * RAG API Project ID Validation Tests
@@ -83,6 +84,7 @@ describe('RagController — Project ID Validation at API Boundary (AC6)', () => 
             runQueries: jest.fn().mockResolvedValue({ precision: 0, queries: [] }),
           },
         },
+        PrismaRagRepository,
       ],
     }).compile();
 

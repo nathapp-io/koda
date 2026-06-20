@@ -18,7 +18,7 @@
  * @see HybridRetrieverService
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConfigService } from '@nestjs/config';
+import { RAG_CFG } from '../../../src/config/rag.config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { EmbeddingService } from '../../../src/rag/embedding.service';
 import { EntityStore } from '../../../src/rag/entity-store';
@@ -93,19 +93,22 @@ describe('HybridRetrieverService integration', () => {
       providers: [
         HybridRetrieverService,
         {
-          provide: ConfigService,
+          provide: RAG_CFG,
           useValue: {
-            get: (key: string) => {
-              const config: Record<string, unknown> = {
-                'rag.lancedbPath': tmpDir,
-                'rag.inMemoryOnly': true,
-                'rag.ftsIndexMode': 'simple',
-                'rag.similarityHigh': 0.85,
-                'rag.similarityMedium': 0.70,
-                'rag.similarityLow': 0.50,
-              };
-              return config[key];
-            },
+            embeddingProvider: 'ollama',
+            embeddingModel: 'nomic-embed-text',
+            ollamaBaseUrl: 'http://localhost:11434',
+            openaiApiKey: '',
+            lancedbPath: tmpDir,
+            inMemoryOnly: true,
+            ftsIndexMode: 'simple',
+            similarityHigh: 0.85,
+            similarityMedium: 0.70,
+            similarityLow: 0.50,
+            ftsOptimizeStrategy: 'counter',
+            ftsOptimizeThreshold: 100,
+            ftsOptimizeIntervalMs: 60000,
+            graphifyEnabledCacheTtlSec: 60,
           },
         },
         {

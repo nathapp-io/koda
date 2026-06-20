@@ -23,7 +23,7 @@ jest.mock('@lancedb/lancedb', () => ({
 }));
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConfigService } from '@nestjs/config';
+import { RAG_CFG } from '../../../src/config/rag.config';
 import { RagService } from '../../../src/rag/rag.service';
 import { IncrementalGraphDiffService } from '../../../src/rag/incremental-graph-diff.service';
 import { GraphStoreService, StoredGraph } from '../../../src/rag/graph-store.service';
@@ -68,18 +68,21 @@ const mockTxManager = {
   isInTransaction: jest.fn(() => false),
 };
 
-const mockConfigService = {
-  get: (key: string): unknown => {
-    const config: Record<string, unknown> = {
-      'rag.lancedbPath': './lancedb-wiring-test',
-      'rag.inMemoryOnly': true,
-      'rag.ftsIndexMode': 'simple',
-      'rag.similarityHigh': 0.85,
-      'rag.similarityMedium': 0.70,
-      'rag.similarityLow': 0.50,
-    };
-    return config[key];
-  },
+const mockRagConfig = {
+  embeddingProvider: 'ollama',
+  embeddingModel: 'nomic-embed-text',
+  ollamaBaseUrl: 'http://localhost:11434',
+  openaiApiKey: '',
+  lancedbPath: './lancedb-wiring-test',
+  inMemoryOnly: true,
+  ftsIndexMode: 'simple',
+  similarityHigh: 0.85,
+  similarityMedium: 0.70,
+  similarityLow: 0.50,
+  ftsOptimizeStrategy: 'counter',
+  ftsOptimizeThreshold: 100,
+  ftsOptimizeIntervalMs: 60000,
+  graphifyEnabledCacheTtlSec: 60,
 };
 
 describe('IncrementalGraphDiffService wiring (SRC-001)', () => {
@@ -104,7 +107,7 @@ describe('IncrementalGraphDiffService wiring (SRC-001)', () => {
           useValue: { diffAndApply: diffAndApplyMock, getStoredGraph: jest.fn() },
         },
         { provide: EmbeddingService, useClass: FakeEmbeddingService },
-        { provide: ConfigService, useValue: mockConfigService },
+        { provide: RAG_CFG, useValue: mockRagConfig },
         { provide: GraphStoreService, useValue: mockGraphStore },
         { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
       ],

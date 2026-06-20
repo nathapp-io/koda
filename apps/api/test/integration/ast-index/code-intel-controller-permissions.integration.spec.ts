@@ -4,6 +4,7 @@ import { CodeIntelController } from '../../../src/code-intel/code-intel.controll
 import { AstIndexService } from '../../../src/code-intel/ast-index.service';
 import { SymbolStore } from '../../../src/code-intel/symbol-store';
 import { CodeGraphService } from '../../../src/code-intel/code-graph.service';
+import { ProjectsService } from '../../../src/projects/projects.service';
 import { PERMISSION_KEY } from '@nathapp/nestjs-auth';
 import { KodaAction } from '../../../src/auth/casl/koda-action.enum';
 import type { CaslPermissionAction } from '@nathapp/nestjs-auth';
@@ -34,6 +35,12 @@ describe('CodeIntelController', () => {
     extractCallees: jest.fn(),
   };
 
+  const mockProjectsService = {
+    findProjectIdBySlug: jest.fn(),
+    findBySlug: jest.fn(),
+    assertProjectMembership: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [CodeIntelController],
@@ -41,6 +48,7 @@ describe('CodeIntelController', () => {
         { provide: AstIndexService, useValue: mockAstIndexService },
         { provide: SymbolStore, useValue: mockSymbolStore },
         { provide: CodeGraphService, useValue: mockCodeGraph },
+        { provide: ProjectsService, useValue: mockProjectsService },
         Reflector,
       ],
     }).compile();

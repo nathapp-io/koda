@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConfigService } from '@nestjs/config';
+import { RAG_CFG } from '../../../src/config/rag.config';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { RagService } from '../../../src/rag/rag.service';
@@ -61,19 +61,22 @@ describe('RagService — Project ID Hard Enforcement (projectIdValidation)', () 
           useValue: mockPrismaService,
         },
         {
-          provide: ConfigService,
+          provide: RAG_CFG,
           useValue: {
-            get: (key: string) => {
-              const config: Record<string, unknown> = {
-                'rag.lancedbPath': './lancedb',
-                'rag.inMemoryOnly': true,
-                'rag.ftsIndexMode': 'simple',
-                'rag.similarityHigh': 0.85,
-                'rag.similarityMedium': 0.70,
-                'rag.similarityLow': 0.50,
-              };
-              return config[key];
-            },
+            embeddingProvider: 'ollama',
+            embeddingModel: 'nomic-embed-text',
+            ollamaBaseUrl: 'http://localhost:11434',
+            openaiApiKey: '',
+            lancedbPath: './lancedb',
+            inMemoryOnly: true,
+            ftsIndexMode: 'simple',
+            similarityHigh: 0.85,
+            similarityMedium: 0.70,
+            similarityLow: 0.50,
+            ftsOptimizeStrategy: 'counter',
+            ftsOptimizeThreshold: 100,
+            ftsOptimizeIntervalMs: 60000,
+            graphifyEnabledCacheTtlSec: 60,
           },
         },
         PrismaRagRepository,

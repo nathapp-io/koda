@@ -3,6 +3,7 @@ import { SymbolStore } from '../../src/code-intel/symbol-store';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { PrismaCodeIntelRepository } from '../../src/code-intel/prisma-code-intel.repository';
 
 describe('SymbolStore', () => {
   let store: SymbolStore;
@@ -28,6 +29,7 @@ describe('SymbolStore', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SymbolStore,
+        PrismaCodeIntelRepository,
         { provide: PrismaService, useValue: { client: mockPrismaClient } },
         { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
       ],

@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TimelineController } from './timeline.controller';
 import { TimelineService } from './timeline.service';
-import { ProjectsService } from '../projects/projects.service';
+import { PrismaProjectRepository } from '../projects/prisma-project.repository';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { JsonResponse } from '@nathapp/nestjs-common';
 
@@ -21,8 +21,8 @@ const makeTimelineResponse = () => ({
 describe('TimelineController', () => {
   let controller: TimelineController;
 
-  const mockProjectsService = {
-    findProjectIdBySlug: jest.fn(),
+  const mockProjectRepo = {
+    findBySlug: jest.fn(),
   };
 
   const mockTimelineService = {
@@ -34,7 +34,7 @@ describe('TimelineController', () => {
       providers: [
         TimelineController,
         { provide: TimelineService, useValue: mockTimelineService },
-        { provide: ProjectsService, useValue: mockProjectsService },
+        { provide: PrismaProjectRepository, useValue: mockProjectRepo },
       ],
     }).compile();
 
@@ -46,24 +46,30 @@ describe('TimelineController', () => {
   describe('getTimeline', () => {
     describe('project resolution', () => {
       it('throws NotFoundAppException when project does not exist', async () => {
-        mockProjectsService.findProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
+        mockProjectRepo.findBySlug.mockResolvedValue(null);
 
         await expect(controller.getTimeline('nonexistent')).rejects.toThrow(NotFoundAppException);
       });
 
+      it('throws NotFoundAppException when project is soft-deleted', async () => {
+        mockProjectRepo.findBySlug.mockResolvedValue({ id: 'p-1', deletedAt: new Date() });
+
+        await expect(controller.getTimeline('deleted-project')).rejects.toThrow(NotFoundAppException);
+      });
+
       it('resolves project by slug', async () => {
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-1');
+        mockProjectRepo.findBySlug.mockResolvedValue({ id: 'project-1', deletedAt: null });
         mockTimelineService.getProjectTimeline.mockResolvedValue(makeTimelineResponse());
 
         await controller.getTimeline('my-project');
 
-        expect(mockProjectsService.findProjectIdBySlug).toHaveBeenCalledWith('my-project');
+        expect(mockProjectRepo.findBySlug).toHaveBeenCalledWith('my-project');
       });
     });
 
     describe('date parsing', () => {
       it('throws ValidationAppException for invalid from date', async () => {
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-1');
+        mockProjectRepo.findBySlug.mockResolvedValue({ id: 'project-1', deletedAt: null });
 
         await expect(
           controller.getTimeline('my-project', undefined, undefined, undefined, 'not-a-date'),
@@ -71,7 +77,7 @@ describe('TimelineController', () => {
       });
 
       it('throws ValidationAppException for invalid to date', async () => {
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-1');
+        mockProjectRepo.findBySlug.mockResolvedValue({ id: 'project-1', deletedAt: null });
 
         await expect(
           controller.getTimeline('my-project', undefined, undefined, undefined, undefined, 'not-a-date'),
@@ -79,7 +85,7 @@ describe('TimelineController', () => {
       });
 
       it('throws ValidationAppException when from is after to', async () => {
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-1');
+        mockProjectRepo.findBySlug.mockResolvedValue({ id: 'project-1', deletedAt: null });
 
         await expect(
           controller.getTimeline(
@@ -96,7 +102,7 @@ describe('TimelineController', () => {
 
     describe('limit parsing', () => {
       it('throws ValidationAppException for invalid limit string', async () => {
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-1');
+        mockProjectRepo.findBySlug.mockResolvedValue({ id: 'project-1', deletedAt: null });
 
         await expect(
           controller.getTimeline('my-project', undefined, undefined, undefined, undefined, undefined, 'abc'),
@@ -106,7 +112,7 @@ describe('TimelineController', () => {
 
     describe('event types parsing', () => {
       it('parses comma-separated eventTypes string into array', async () => {
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-1');
+        mockProjectRepo.findBySlug.mockResolvedValue({ id: 'project-1', deletedAt: null });
         mockTimelineService.getProjectTimeline.mockResolvedValue(makeTimelineResponse());
 
         await controller.getTimeline('my-project', undefined, undefined, 'ticket_event,agent_event');
@@ -119,7 +125,7 @@ describe('TimelineController', () => {
       });
 
       it('passes array eventTypes through unchanged', async () => {
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-1');
+        mockProjectRepo.findBySlug.mockResolvedValue({ id: 'project-1', deletedAt: null });
         mockTimelineService.getProjectTimeline.mockResolvedValue(makeTimelineResponse());
 
         await controller.getTimeline('my-project', undefined, undefined, ['ticket_event', 'decision_event']);
@@ -132,7 +138,7 @@ describe('TimelineController', () => {
       });
 
       it('passes undefined eventTypes when not provided', async () => {
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-1');
+        mockProjectRepo.findBySlug.mockResolvedValue({ id: 'project-1', deletedAt: null });
         mockTimelineService.getProjectTimeline.mockResolvedValue(makeTimelineResponse());
 
         await controller.getTimeline('my-project');
@@ -147,7 +153,7 @@ describe('TimelineController', () => {
 
     describe('happy path', () => {
       it('delegates to TimelineService with projectId from resolved project', async () => {
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-resolved');
+        mockProjectRepo.findBySlug.mockResolvedValue({ id: 'project-resolved', deletedAt: null });
         mockTimelineService.getProjectTimeline.mockResolvedValue(makeTimelineResponse());
 
         await controller.getTimeline('my-project');
@@ -158,7 +164,7 @@ describe('TimelineController', () => {
       });
 
       it('returns JsonResponse.Ok wrapping timeline data', async () => {
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-1');
+        mockProjectRepo.findBySlug.mockResolvedValue({ id: 'project-1', deletedAt: null });
         const timeline = makeTimelineResponse();
         mockTimelineService.getProjectTimeline.mockResolvedValue(timeline);
 
@@ -169,7 +175,7 @@ describe('TimelineController', () => {
       });
 
       it('passes actorId, ticketId, from, to, limit and cursor to timeline service', async () => {
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-1');
+        mockProjectRepo.findBySlug.mockResolvedValue({ id: 'project-1', deletedAt: null });
         mockTimelineService.getProjectTimeline.mockResolvedValue(makeTimelineResponse());
 
         await controller.getTimeline(

@@ -5,6 +5,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-item.repository';
 import { ImpactAnalysisService } from '../../../src/code-intel/impact-analysis.service';
 import { AgentsService } from '../../../src/agents/agents.service';
+import { MemoryGovernanceService } from '../../../src/memory/memory-governance.service';
 // NOTE: ContextBuilderService was moved from src/memory/ to src/context/ (Task 4 refactor).
 // The production service now requires many more dependencies than the interim 2-param version
 // that these tests targeted. The ContextBuilderService-dependent test blocks below have been
@@ -21,7 +22,6 @@ type MemoryKind = (typeof MemoryKind)[keyof typeof MemoryKind];
 describe('ProjectMemoryController', () => {
   let controller: ProjectsController;
   let projectsService: ProjectsService;
-  let memoryItemRepository: PrismaMemoryItemRepository;
 
   const mockProjectsService = {
     findBySlug: jest.fn(),
@@ -29,6 +29,7 @@ describe('ProjectMemoryController', () => {
     update: jest.fn(),
     softDelete: jest.fn(),
     findAll: jest.fn(),
+    assertProjectMembership: jest.fn(),
   };
 
   const mockMemoryItemRepository = {
@@ -48,6 +49,11 @@ describe('ProjectMemoryController', () => {
     },
   };
 
+  const mockMemoryGovernanceService = {
+    getProjectMemory: jest.fn(),
+    runCleanup: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ProjectsController],
@@ -57,12 +63,12 @@ describe('ProjectMemoryController', () => {
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: ImpactAnalysisService, useValue: { getChangeImpact: jest.fn() } },
         { provide: AgentsService, useValue: { findAll: jest.fn(), findById: jest.fn(), findByProjectSlug: jest.fn(), create: jest.fn(), update: jest.fn(), softDelete: jest.fn(), assignToProject: jest.fn(), getProjectAgents: jest.fn() } },
+        { provide: MemoryGovernanceService, useValue: mockMemoryGovernanceService },
       ],
     }).compile();
 
     controller = module.get<ProjectsController>(ProjectsController);
     projectsService = module.get<ProjectsService>(ProjectsService);
-    memoryItemRepository = module.get<PrismaMemoryItemRepository>(PrismaMemoryItemRepository);
 
     jest.clearAllMocks();
   });
@@ -82,6 +88,7 @@ describe('ProjectMemoryController', () => {
 
     beforeEach(() => {
       mockProjectsService.findBySlug.mockResolvedValue({ id: 'project-123', slug: 'koda-test', key: 'KT', name: 'Koda Test', deletedAt: null });
+      mockProjectsService.assertProjectMembership.mockResolvedValue(undefined);
       mockPrismaService.client.projectMember.findUnique.mockResolvedValue({ role: 'ADMIN' });
     });
 
@@ -115,14 +122,14 @@ describe('ProjectMemoryController', () => {
         },
       ];
 
-      mockMemoryItemRepository.findByProjectMemory.mockResolvedValue({
+      mockMemoryGovernanceService.getProjectMemory.mockResolvedValue({
         items: mockActiveMemories,
         total: 2,
       });
 
       const result = await controller.getProjectMemory('koda-test', {}, mockCurrentUser);
 
-      expect(mockMemoryItemRepository.findByProjectMemory).toHaveBeenCalledWith(
+      expect(mockMemoryGovernanceService.getProjectMemory).toHaveBeenCalledWith(
         expect.objectContaining({
           projectId: 'project-123',
         })
@@ -151,14 +158,14 @@ describe('ProjectMemoryController', () => {
         },
       ];
 
-      mockMemoryItemRepository.findByProjectMemory.mockResolvedValue({
+      mockMemoryGovernanceService.getProjectMemory.mockResolvedValue({
         items: factMemories,
         total: 1,
       });
 
       const result = await controller.getProjectMemory('koda-test', { kind: MemoryKind.FACT }, mockCurrentUser);
 
-      expect(mockMemoryItemRepository.findByProjectMemory).toHaveBeenCalledWith(
+      expect(mockMemoryGovernanceService.getProjectMemory).toHaveBeenCalledWith(
         expect.objectContaining({
           projectId: 'project-123',
           kind: MemoryKind.FACT,
@@ -189,14 +196,14 @@ describe('ProjectMemoryController', () => {
         },
       ];
 
-      mockMemoryItemRepository.findByProjectMemory.mockResolvedValue({
+      mockMemoryGovernanceService.getProjectMemory.mockResolvedValue({
         items: subjectMemories,
         total: 1,
       });
 
       const result = await controller.getProjectMemory('koda-test', { subjects: 'ticket:123' }, mockCurrentUser);
 
-      expect(mockMemoryItemRepository.findByProjectMemory).toHaveBeenCalledWith(
+      expect(mockMemoryGovernanceService.getProjectMemory).toHaveBeenCalledWith(
         expect.objectContaining({
           projectId: 'project-123',
           subject: 'ticket:123',
@@ -241,7 +248,7 @@ describe('ProjectMemoryController', () => {
         },
       ];
 
-      mockMemoryItemRepository.findByProjectMemory.mockResolvedValue({
+      mockMemoryGovernanceService.getProjectMemory.mockResolvedValue({
         items: supersededMemories,
         total: 2,
       });
@@ -256,19 +263,19 @@ describe('ProjectMemoryController', () => {
     it('AC5: Memory retrieval respects projectId isolation - cannot access another project memories', async () => {
       mockProjectsService.findBySlug.mockResolvedValue({ id: 'project-456', slug: 'other-project', key: 'OP', name: 'Other Project', deletedAt: null });
 
-      mockMemoryItemRepository.findByProjectMemory.mockResolvedValue({
+      mockMemoryGovernanceService.getProjectMemory.mockResolvedValue({
         items: [],
         total: 0,
       });
 
       await controller.getProjectMemory('other-project', {}, mockCurrentUser);
 
-      expect(mockMemoryItemRepository.findByProjectMemory).toHaveBeenCalledWith(
+      expect(mockMemoryGovernanceService.getProjectMemory).toHaveBeenCalledWith(
         expect.objectContaining({
           projectId: 'project-456',
         })
       );
-      expect(mockMemoryItemRepository.findByProjectMemory).not.toHaveBeenCalledWith(
+      expect(mockMemoryGovernanceService.getProjectMemory).not.toHaveBeenCalledWith(
         expect.objectContaining({
           projectId: 'project-123',
         })

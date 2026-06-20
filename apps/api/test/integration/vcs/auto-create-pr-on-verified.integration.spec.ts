@@ -369,7 +369,7 @@ describe('AC14: prNumber and prState persisted on TicketLink after successful PR
 
       const mockTxManager2 = { run: (fn: () => Promise<unknown>) => fn(), getClient: jest.fn(), isInTransaction: jest.fn(() => false) };
       const mockVcsLinkExtractorService = { extractLinksFromPr: jest.fn().mockResolvedValue(undefined) };
-      const mockConfigService = { get: jest.fn().mockImplementation((key: string) => key === 'vcs.encryptionKey' ? 'a'.repeat(64) : undefined) };
+      const mockVcsConfig = { encryptionKey: 'a'.repeat(64), defaultPollingIntervalMs: 300000, githubApiUrl: 'https://api.github.com' };
 
       transitionsService = new TicketTransitionsService(
         new PrismaTicketsRepository(mockPrismaService as any),
@@ -379,7 +379,7 @@ describe('AC14: prNumber and prState persisted on TicketLink after successful PR
         mockVcsConnectionService as any,
         mockTicketLinksService as any,
         mockVcsLinkExtractorService as any,
-        mockConfigService as any,
+        mockVcsConfig as any,
       );
     });
 

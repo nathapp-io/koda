@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { KodaDomainWriter } from './koda-domain-writer.service';
 import { PrismaKodaDomainWriterRepository } from './prisma-koda-domain-writer.repository';
@@ -9,7 +9,7 @@ import { EventsModule } from '../events/events.module';
 import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [PrismaModule, RagModule, OutboxModule, EventsModule, AuthModule],
+  imports: [PrismaModule, forwardRef(() => RagModule), forwardRef(() => OutboxModule), EventsModule, AuthModule],
   providers: [
     PrismaKodaDomainWriterRepository,
     { provide: KODA_DOMAIN_WRITER_REPOSITORY, useExisting: PrismaKodaDomainWriterRepository },

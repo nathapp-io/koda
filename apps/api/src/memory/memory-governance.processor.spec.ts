@@ -3,32 +3,32 @@ import { Reflector } from '@nestjs/core';
 import { ScheduleModule, SchedulerRegistry } from '@nestjs/schedule';
 import { MemoryGovernanceProcessor } from './memory-governance.processor';
 import { MemoryGovernanceService } from './memory-governance.service';
-import { ProjectsService } from '../projects/projects.service';
+import { PrismaProjectRepository } from '../projects/prisma-project.repository';
 
 const createMockGovernanceService = () => ({
   runCleanup: jest.fn(),
 });
 
-const createMockProjectsService = () => ({
-  findAllProjectIds: jest.fn(),
+const createMockProjectRepo = () => ({
+  findAllIds: jest.fn(),
 });
 
 describe('MemoryGovernanceProcessor', () => {
   let processor: MemoryGovernanceProcessor;
   let mockGovernanceService: ReturnType<typeof createMockGovernanceService>;
-  let mockProjectsService: ReturnType<typeof createMockProjectsService>;
+  let mockProjectRepo: ReturnType<typeof createMockProjectRepo>;
   let schedulerRegistry: SchedulerRegistry;
 
   beforeEach(async () => {
     mockGovernanceService = createMockGovernanceService();
-    mockProjectsService = createMockProjectsService();
+    mockProjectRepo = createMockProjectRepo();
 
     const module: TestingModule = await Test.createTestingModule({
       imports: [ScheduleModule.forRoot()],
       providers: [
         MemoryGovernanceProcessor,
         { provide: MemoryGovernanceService, useValue: mockGovernanceService },
-        { provide: ProjectsService, useValue: mockProjectsService },
+        { provide: PrismaProjectRepository, useValue: mockProjectRepo },
         SchedulerRegistry,
         Reflector,
       ],
@@ -62,7 +62,7 @@ describe('MemoryGovernanceProcessor', () => {
   describe('scheduledCleanup', () => {
     it('should call runCleanup for each project', async () => {
       const projects = [{ id: 'proj-1' }, { id: 'proj-2' }];
-      mockProjectsService.findAllProjectIds.mockResolvedValue(projects);
+      mockProjectRepo.findAllIds.mockResolvedValue(projects);
       mockGovernanceService.runCleanup.mockResolvedValue({
         expiredCount: 0,
         downrankedCount: 0,
@@ -72,14 +72,14 @@ describe('MemoryGovernanceProcessor', () => {
 
       await processor.scheduledCleanup();
 
-      expect(mockProjectsService.findAllProjectIds).toHaveBeenCalled();
+      expect(mockProjectRepo.findAllIds).toHaveBeenCalled();
       expect(mockGovernanceService.runCleanup).toHaveBeenCalledTimes(2);
       expect(mockGovernanceService.runCleanup).toHaveBeenCalledWith('proj-1');
       expect(mockGovernanceService.runCleanup).toHaveBeenCalledWith('proj-2');
     });
 
     it('should handle when no projects exist', async () => {
-      mockProjectsService.findAllProjectIds.mockResolvedValue([]);
+      mockProjectRepo.findAllIds.mockResolvedValue([]);
 
       await processor.scheduledCleanup();
 
@@ -88,7 +88,7 @@ describe('MemoryGovernanceProcessor', () => {
 
     it('should continue processing other projects if one throws and throw aggregate error at end', async () => {
       const projects = [{ id: 'proj-1' }, { id: 'proj-2' }];
-      mockProjectsService.findAllProjectIds.mockResolvedValue(projects);
+      mockProjectRepo.findAllIds.mockResolvedValue(projects);
       mockGovernanceService.runCleanup
         .mockRejectedValueOnce(new Error('Cleanup failed'))
         .mockResolvedValueOnce({
@@ -104,7 +104,7 @@ describe('MemoryGovernanceProcessor', () => {
 
     it('AC-8: should complete cleanup for 1000 memories in under 30 seconds', async () => {
       const projects = [{ id: 'proj-1' }];
-      mockProjectsService.findAllProjectIds.mockResolvedValue(projects);
+      mockProjectRepo.findAllIds.mockResolvedValue(projects);
       mockGovernanceService.runCleanup.mockResolvedValue({
         expiredCount: 250,
         downrankedCount: 250,
