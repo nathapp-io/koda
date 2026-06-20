@@ -9,7 +9,8 @@ import { createVcsProvider } from './factory';
 import { VcsPrStatus } from './types';
 import { TicketStatus, CommentType } from '../common/enums';
 import { validateTransition } from '../tickets/state-machine/ticket-transitions';
-import { VcsLinkExtractorService, VcsTicketRef } from './vcs-link-extractor.service';
+import { VcsLinkExtractorService } from './vcs-link-extractor.service';
+import type { VcsTicketDomain } from './domain/vcs.domain';
 import { IVcsRepository, TicketLinkData, VCS_REPOSITORY } from './domain/vcs.repository';
 
 export interface SyncPrStatusResult {
@@ -100,7 +101,7 @@ export class VcsPrSyncService {
           // to pick up new commits from the PR
           if (this.vcsLinkExtractorService && link.ticket && prStatus.branchName) {
             const ticketData = link.ticket;
-            const ticketForExtraction: VcsTicketRef = {
+            const ticketForExtraction: VcsTicketDomain = {
               id: ticketData.id,
               number: ticketData.number,
               externalVcsId: ticketData.externalVcsId,

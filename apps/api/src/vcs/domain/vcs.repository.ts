@@ -1,5 +1,4 @@
-import type { VcsConnectionDomain, VcsConnectionWithProjectDomain, VcsSyncLogDomain } from './vcs.domain';
-import type { Ticket } from '@prisma/client';
+import type { VcsConnectionDomain, VcsConnectionWithProjectDomain, VcsSyncLogDomain, VcsTicketDomain } from './vcs.domain';
 
 export const VCS_REPOSITORY = Symbol('VCS_REPOSITORY');
 
@@ -75,7 +74,7 @@ export interface OutboxDedupQuery {
 
 export interface IVcsRepository {
   // Ticket + Issue operations
-  findExistingTicketByExternalId(projectId: string, externalVcsId: string): Promise<Ticket | null>;
+  findExistingTicketByExternalId(projectId: string, externalVcsId: string): Promise<VcsTicketDomain | null>;
   createTicketFromIssue(project: { id: string }, issue: { number: number; title: string; body: string | null }): Promise<CreateTicketFromIssueResult>;
 
   // TicketLink operations
