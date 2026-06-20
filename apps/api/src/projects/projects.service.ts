@@ -1,11 +1,13 @@
 import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
-import { ValidationAppException, NotFoundAppException } from '@nathapp/nestjs-common';
+import { ValidationAppException, NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { ProjectResponseDto } from './dto/project-response.dto';
 import { PrismaProjectRepository } from './prisma-project.repository';
 import { RagService } from '../rag/rag.service';
 import { HybridRetrieverService } from '../rag/hybrid-retriever.service';
+import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
+import { ActorRole } from '../common/enums';
 
 @Injectable()
 export class ProjectsService {
@@ -160,6 +162,26 @@ export class ProjectsService {
     }
 
     return ProjectResponseDto.from(updatedProject);
+  }
+
+  async findProjectIdBySlug(slug: string): Promise<string> {
+    const project = await this.projectRepo.findBySlug(slug);
+    if (!project || project.deletedAt) throw new NotFoundAppException({}, 'projects');
+    return project.id;
+  }
+
+  async assertProjectMembership(projectId: string, principal: KodaPrincipal): Promise<void> {
+    if (!isUserPrincipal(principal)) return;
+    if (principal.role === 'ADMIN') return;
+    const role = await this.projectRepo.findMembershipRole(projectId, principal.id);
+    const allowed = [ActorRole.ADMIN, ActorRole.DEVELOPER, ActorRole.AGENT, ActorRole.MEMBER, ActorRole.VIEWER] as const;
+    if (!role || !allowed.includes(role as typeof allowed[number])) {
+      throw new ForbiddenAppException({}, 'projects');
+    }
+  }
+
+  async findAllProjectIds(): Promise<{ id: string }[]> {
+    return this.projectRepo.findAllIds();
   }
 
   async softDelete(slug: string) {

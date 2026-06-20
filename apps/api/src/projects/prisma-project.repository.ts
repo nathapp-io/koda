@@ -55,4 +55,16 @@ export class PrismaProjectRepository {
     const model = await this.prisma.client.project.update({ where: { slug }, data });
     return this.toDomain(model);
   }
+
+  async findAllIds(): Promise<{ id: string }[]> {
+    return this.prisma.client.project.findMany({ where: { deletedAt: null }, select: { id: true } });
+  }
+
+  async findMembershipRole(projectId: string, userId: string): Promise<string | null> {
+    const m = await this.prisma.client.projectMember.findUnique({
+      where: { projectId_userId: { projectId, userId } },
+      select: { role: true },
+    });
+    return m?.role ?? null;
+  }
 }

@@ -10,7 +10,14 @@ import { RAG_CFG, IRagConfig } from '../../config/rag.config';
 import { VCS_CFG, IVcsConfig, vcsConfig } from '../../config/vcs.config';
 
 export const mockPrismaService = {
-  client: {},
+  client: {
+    project: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    projectMember: {
+      findUnique: jest.fn().mockResolvedValue(null),
+    },
+  },
 } as unknown as PrismaService;
 
 export const mockTransactionManager: ITransactionManager = {
