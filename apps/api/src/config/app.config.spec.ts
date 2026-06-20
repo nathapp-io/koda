@@ -1,3 +1,4 @@
+/// <reference types="jest" />
 import { appConfig, IAppConfig } from './app.config';
 
 describe('appConfig', () => {
