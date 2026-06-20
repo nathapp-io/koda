@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AgentsService, CreateAgentDto as _CreateAgentDto } from './agents.service';
 import { PrismaAgentRepository } from './prisma-agent.repository';
-import { ConfigService } from '@nestjs/config';
+import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { createHmac } from 'crypto';
 import { randomBytes } from 'crypto';
@@ -73,8 +73,12 @@ describe('AgentsService', () => {
     findByProjectSlug: jest.fn(),
   };
 
-  const mockConfigService = {
-    get: jest.fn(),
+  const mockAuthConfig: IAuthConfig = {
+    jwtSecret: 'jwt-secret',
+    jwtExpiresIn: '15m',
+    jwtRefreshSecret: 'jwt-refresh-secret',
+    jwtRefreshExpiresIn: '7d',
+    apiKeySecret: 'test-secret',
   };
 
   const mockKodaDomainWriter = {
@@ -86,7 +90,7 @@ describe('AgentsService', () => {
       providers: [
         AgentsService,
         { provide: PrismaAgentRepository, useValue: mockAgentRepo },
-        { provide: ConfigService, useValue: mockConfigService },
+        { provide: AUTH_CFG, useValue: mockAuthConfig },
         { provide: KodaDomainWriter, useValue: mockKodaDomainWriter },
       ],
     }).compile();
@@ -95,12 +99,6 @@ describe('AgentsService', () => {
     agentRepo = module.get(PrismaAgentRepository);
     kodaDomainWriter = module.get(KodaDomainWriter);
 
-    mockConfigService.get.mockImplementation((key: string) => {
-      if (key === 'auth') {
-        return { apiKeySecret: 'test-secret' };
-      }
-      return null;
-    });
     mockAgentRepo.createRolesAndCapabilities.mockResolvedValue(undefined);
 
     mockAgentRepo.replaceRoles.mockResolvedValue(undefined);
@@ -115,7 +113,6 @@ describe('AgentsService', () => {
     describe('for new agent creation', () => {
       it('should generate random 32-byte hex key', async () => {
         mockAgentRepo.create.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey({
           name: 'Test Agent',
@@ -131,7 +128,6 @@ describe('AgentsService', () => {
 
       it('should compute HMAC-SHA256 hash with API_KEY_SECRET', async () => {
         mockAgentRepo.create.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey({
           name: 'Test Agent',
@@ -148,7 +144,6 @@ describe('AgentsService', () => {
 
       it('should return raw key ONCE to client (not stored)', async () => {
         mockAgentRepo.create.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey({
           name: 'Test Agent',
@@ -163,7 +158,6 @@ describe('AgentsService', () => {
 
       it('should store only hash in database', async () => {
         mockAgentRepo.create.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey({
           name: 'Test Agent',
@@ -180,7 +174,6 @@ describe('AgentsService', () => {
 
       it('should include agent name and slug in creation', async () => {
         mockAgentRepo.create.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         await service.generateApiKey({
           name: 'Test Agent',
@@ -195,9 +188,7 @@ describe('AgentsService', () => {
       });
 
       it('should use correct API_KEY_SECRET from config', async () => {
-        const secret = 'my-custom-secret';
         mockAgentRepo.create.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue({ apiKeySecret: secret });
 
         const result = await service.generateApiKey({
           name: 'Test Agent',
@@ -205,16 +196,26 @@ describe('AgentsService', () => {
           roles: ['DEVELOPER'],
         });
 
-        const expectedHash = createHmac('sha256', secret).update(result.apiKey).digest('hex');
+        const expectedHash = createHmac('sha256', 'test-secret').update(result.apiKey).digest('hex');
 
         const createCall = (agentRepo.create as jest.Mock).mock.calls[0][0];
         expect(createCall.apiKeyHash).toBe(expectedHash);
       });
 
       it('should throw error when API_KEY_SECRET is not configured', async () => {
-        mockConfigService.get.mockReturnValue({});
+        // Mock auth config without apiKeySecret
+        const moduleWithoutSecret: TestingModule = await Test.createTestingModule({
+          providers: [
+            AgentsService,
+            { provide: PrismaAgentRepository, useValue: mockAgentRepo },
+            { provide: AUTH_CFG, useValue: { ...mockAuthConfig, apiKeySecret: undefined } },
+            { provide: KodaDomainWriter, useValue: mockKodaDomainWriter },
+          ],
+        }).compile();
 
-        await expect(service.generateApiKey({
+        const serviceWithoutSecret = moduleWithoutSecret.get<AgentsService>(AgentsService);
+
+        await expect(serviceWithoutSecret.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
           roles: ['DEVELOPER'],
@@ -222,8 +223,6 @@ describe('AgentsService', () => {
       });
 
       it('should reject invalid roles before creating the agent', async () => {
-        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
-
         await expect(service.generateApiKey({
           name: 'Test Agent',
           slug: 'test-agent',
@@ -235,7 +234,6 @@ describe('AgentsService', () => {
 
       it('should return created agent in response', async () => {
         mockAgentRepo.create.mockResolvedValue(mockAgent);
-        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey({
           name: 'Test Agent',
@@ -256,7 +254,6 @@ describe('AgentsService', () => {
       it('should generate new random API key', async () => {
         mockAgentRepo.updateApiKeyHash.mockResolvedValue(mockAgent);
         mockAgentRepo.findBySlugScalar.mockResolvedValue(mockAgentWithRelations);
-        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey('agent-123');
 
@@ -270,7 +267,6 @@ describe('AgentsService', () => {
 
         mockAgentRepo.updateApiKeyHash.mockResolvedValue(agentWithOldHash);
         mockAgentRepo.findBySlugScalar.mockResolvedValue(mockAgentWithRelations);
-        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey('agent-123');
 
@@ -289,7 +285,6 @@ describe('AgentsService', () => {
         const agentWithOldKey = { ...mockAgent, apiKeyHash: oldHash };
         mockAgentRepo.updateApiKeyHash.mockResolvedValue(agentWithOldKey);
         mockAgentRepo.findBySlugScalar.mockResolvedValue(mockAgentWithRelations);
-        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey('agent-123');
 
@@ -301,7 +296,6 @@ describe('AgentsService', () => {
       it('should return new raw key ONCE', async () => {
         mockAgentRepo.updateApiKeyHash.mockResolvedValue(mockAgent);
         mockAgentRepo.findBySlugScalar.mockResolvedValue(mockAgentWithRelations);
-        mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
         const result = await service.generateApiKey('agent-123');
 
@@ -627,7 +621,6 @@ describe('AgentsService', () => {
     it('should generate new API key for agent', async () => {
       mockAgentRepo.updateApiKeyHash.mockResolvedValue(mockAgent);
       mockAgentRepo.findBySlugScalar.mockResolvedValue(mockAgent);
-      mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
       const result = await service.rotateApiKey('test-agent');
 
@@ -640,7 +633,6 @@ describe('AgentsService', () => {
 
       mockAgentRepo.updateApiKeyHash.mockResolvedValue(agentWithOldHash);
       mockAgentRepo.findBySlugScalar.mockResolvedValue(mockAgent);
-      mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
       const result = await service.rotateApiKey('test-agent');
 
@@ -651,7 +643,6 @@ describe('AgentsService', () => {
     it('should return raw key ONCE', async () => {
       mockAgentRepo.updateApiKeyHash.mockResolvedValue(mockAgent);
       mockAgentRepo.findBySlugScalar.mockResolvedValue(mockAgent);
-      mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
       const result = await service.rotateApiKey('test-agent');
 
@@ -661,7 +652,6 @@ describe('AgentsService', () => {
 
     it('should throw error when agent not found', async () => {
       mockAgentRepo.findBySlugScalar.mockResolvedValue(null);
-      mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
       await expect(service.rotateApiKey('nonexistent')).rejects.toThrow();
     });
@@ -820,7 +810,6 @@ describe('AgentsService', () => {
   describe('API Key Validation', () => {
     it('should generate unique API keys on multiple calls', async () => {
       mockAgentRepo.create.mockResolvedValue(mockAgent);
-      mockConfigService.get.mockReturnValue({ apiKeySecret: 'test-secret' });
 
       const result1 = await service.generateApiKey({
         name: 'Agent 1',
