@@ -124,7 +124,7 @@ export class PrismaLabelRepository implements ILabelRepository {
   }
 
   async removeLabelFromTicket(ticketId: string, labelId: string): Promise<void> {
-    await this.db.ticketLabel.delete({ where: { ticketId_labelId: { ticketId, labelId } } });
+    await this.exec(() => this.db.ticketLabel.delete({ where: { ticketId_labelId: { ticketId, labelId } } }));
   }
 
   async createTicketActivity(data: {
