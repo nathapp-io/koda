@@ -174,7 +174,7 @@ export class ProjectsService {
     if (!isUserPrincipal(principal)) return;
     if (principal.role === 'ADMIN') return;
     const role = await this.projectRepo.findMembershipRole(projectId, principal.id);
-    const allowed = [ActorRole.ADMIN, ActorRole.DEVELOPER, ActorRole.AGENT, ActorRole.MEMBER, ActorRole.VIEWER] as const;
+    const allowed = [ActorRole.ADMIN, ActorRole.DEVELOPER, ActorRole.AGENT, ActorRole.VIEWER] as const;
     if (!role || !allowed.includes(role as typeof allowed[number])) {
       throw new ForbiddenAppException({}, 'projects');
     }
