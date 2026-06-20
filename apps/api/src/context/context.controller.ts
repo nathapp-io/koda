@@ -9,12 +9,11 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
-import { JsonResponse, ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
-import { ActorRole } from '../common/enums';
+import { JsonResponse, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { KodaAction } from '../auth/casl/koda-action.enum';
 import { ContextBuilderService, GetProjectContextQuery, ContextIntent } from './context-builder.service';
+import { ProjectsService } from '../projects/projects.service';
 
 class GetContextQueryDto {
   intent!: ContextIntent;
@@ -32,21 +31,11 @@ class GetContextQueryDto {
 export class ContextController {
   constructor(
     private readonly contextBuilderService: ContextBuilderService,
-    private readonly prisma: PrismaService,
+    private readonly projectsService: ProjectsService,
   ) {}
 
   private async resolveProjectId(slug: string): Promise<string> {
-    const projectDelegate = (this.prisma.client as unknown as Record<string, unknown>)['project'] as {
-      findFirst(options: unknown): Promise<{ id: string; deletedAt: Date | null } | null>;
-    };
-    const project = await projectDelegate.findFirst({
-      where: { slug, deletedAt: null },
-      select: { id: true, deletedAt: true },
-    });
-    if (!project) {
-      throw new NotFoundAppException({}, 'context');
-    }
-    return project.id;
+    return this.projectsService.findProjectIdBySlug(slug);
   }
 
   private async checkProjectMembership(
@@ -56,36 +45,7 @@ export class ContextController {
     if (!principal) {
       throw new ForbiddenAppException({}, 'context');
     }
-
-    if (!isUserPrincipal(principal)) {
-      return;
-    }
-
-    if (principal.role === 'ADMIN') {
-      return;
-    }
-
-    const projectMemberDelegate = (this.prisma.client as unknown as Record<string, unknown>)['projectMember'] as {
-      findUnique(options: unknown): Promise<unknown>;
-    };
-    const membership = await projectMemberDelegate.findUnique({
-      where: {
-        projectId_userId: {
-          projectId,
-          userId: principal.id,
-        },
-      },
-    });
-
-    if (!membership) {
-      throw new ForbiddenAppException({}, 'context');
-    }
-
-    const allowedRoles = [ActorRole.ADMIN, ActorRole.DEVELOPER, ActorRole.AGENT, ActorRole.VIEWER] as const;
-    const membershipRole = (membership as { role?: string }).role;
-    if (!membershipRole || !allowedRoles.includes(membershipRole as typeof allowedRoles[number])) {
-      throw new ForbiddenAppException({}, 'context');
-    }
+    return this.projectsService.assertProjectMembership(projectId, principal);
   }
 
   private buildQuery(
