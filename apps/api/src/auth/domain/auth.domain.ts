@@ -9,3 +9,10 @@ export interface UserDomain {
   createdAt: Date;
   updatedAt: Date;
 }
+
+export interface AgentDomain {
+  id: string;
+  slug: string;
+  status: string;
+  apiKeyHash: string;
+}

@@ -1,10 +1,9 @@
 import { ExecutionContext, Inject, Injectable, Logger } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY, JwtAuthGuard } from '@nathapp/nestjs-auth';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
 import { createHmac } from 'crypto';
 import { AgentAuthProvider } from '../agent-auth.provider';
+import { PrismaAuthRepository } from '../prisma-auth.repository';
 import { AUTH_CFG, IAuthConfig } from '../../config/auth.config';
 
 @Injectable()
@@ -13,7 +12,7 @@ export class CombinedAuthGuard extends JwtAuthGuard {
 
   constructor(
     private readonly myReflector: Reflector,
-    private readonly prisma: PrismaService,
+    private readonly authRepo: PrismaAuthRepository,
     @Inject(AUTH_CFG) private readonly authConfig: IAuthConfig,
     private readonly agentAuthProvider: AgentAuthProvider,
   ) {
@@ -81,9 +80,7 @@ export class CombinedAuthGuard extends JwtAuthGuard {
 
     const keyHash = createHmac('sha256', secret).update(rawKey).digest('hex');
 
-    const agent = await (this.prisma.client as unknown as PrismaClient).agent.findFirst({
-      where: { apiKeyHash: keyHash },
-    });
+    const agent = await this.authRepo.findAgentByKeyHash(keyHash);
 
     if (!agent) return false;
     // OFFLINE means decommissioned — no longer allowed to authenticate.
