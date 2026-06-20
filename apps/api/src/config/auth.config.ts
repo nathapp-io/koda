@@ -34,9 +34,9 @@ export class AuthConfigSchema {
 export const authConfig = registerAs(AUTH_CFG, (): IAuthConfig => {
   validateUtil(process.env, AuthConfigSchema);
   return {
-    jwtSecret: process.env['JWT_SECRET']!,
+    jwtSecret: process.env['JWT_SECRET'] as string,
     jwtExpiresIn: process.env['JWT_EXPIRES_IN'] ?? '15m',
-    jwtRefreshSecret: process.env['JWT_REFRESH_SECRET']!,
+    jwtRefreshSecret: process.env['JWT_REFRESH_SECRET'] as string,
     jwtRefreshExpiresIn: process.env['JWT_REFRESH_EXPIRES_IN'] ?? '7d',
     apiKeySecret: process.env['API_KEY_SECRET'],
   };
