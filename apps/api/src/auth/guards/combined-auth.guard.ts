@@ -1,11 +1,11 @@
-import { ExecutionContext, Injectable, Logger } from '@nestjs/common';
+import { ExecutionContext, Inject, Injectable, Logger } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { ConfigService } from '@nestjs/config';
 import { IS_PUBLIC_KEY, JwtAuthGuard } from '@nathapp/nestjs-auth';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
 import { createHmac } from 'crypto';
 import { AgentAuthProvider } from '../agent-auth.provider';
+import { AUTH_CFG, IAuthConfig } from '../../config/auth.config';
 
 @Injectable()
 export class CombinedAuthGuard extends JwtAuthGuard {
@@ -14,7 +14,7 @@ export class CombinedAuthGuard extends JwtAuthGuard {
   constructor(
     private readonly myReflector: Reflector,
     private readonly prisma: PrismaService,
-    private readonly config: ConfigService,
+    @Inject(AUTH_CFG) private readonly authConfig: IAuthConfig,
     private readonly agentAuthProvider: AgentAuthProvider,
   ) {
     super(myReflector);
@@ -73,8 +73,7 @@ export class CombinedAuthGuard extends JwtAuthGuard {
     // JWTs always have exactly 3 dot-separated parts; skip them
     if (rawKey.split('.').length === 3) return false;
 
-    const authCfg = this.config.get<{ apiKeySecret?: string }>('auth');
-    const secret = authCfg?.apiKeySecret;
+    const secret = this.authConfig.apiKeySecret;
     if (!secret) {
       this.combinedLogger.error('auth.apiKeySecret not configured');
       return false;

@@ -1,5 +1,4 @@
 import { HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { VcsConnection } from '@prisma/client';
 import { randomBytes } from 'crypto';
@@ -11,12 +10,13 @@ import { TestConnectionResultDto } from './dto/test-connection-result.dto';
 import { createVcsProvider } from './factory';
 import { VcsPollingService } from './vcs-polling.service';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
+import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 
 @Injectable()
 export class VcsConnectionService {
   constructor(
     @Inject(VCS_REPOSITORY) private readonly vcsRepo: IVcsRepository,
-    private readonly configService: ConfigService,
+    @Inject(VCS_CFG) private readonly vcsConfig: IVcsConfig,
     private readonly vcsPollingService: VcsPollingService,
   ) {}
 
@@ -65,7 +65,7 @@ export class VcsConnectionService {
     const syncMode = dto.syncMode ?? 'off';
     const pollingIntervalMs =
       dto.pollingIntervalMs
-      ?? this.configService.get<number>('vcs.defaultPollingIntervalMs')
+      ?? this.vcsConfig.defaultPollingIntervalMs
       ?? 600000;
 
     const connection = await this.vcsRepo.createVcsConnection({

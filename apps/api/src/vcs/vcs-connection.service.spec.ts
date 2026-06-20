@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpException, HttpStatus } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { VCS_CFG } from '../config/vcs.config';
 import { VcsConnectionService } from './vcs-connection.service';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VcsPollingService } from './vcs-polling.service';
@@ -74,21 +74,18 @@ describe('VcsConnectionService', () => {
   let service: VcsConnectionService;
   let mockRepo: jest.Mocked<IVcsRepository>;
   let mockPolling: ReturnType<typeof createMockPollingService>;
-  let mockConfigService: { get: jest.Mock };
-
   const ENCRYPTION_KEY = 'test-key-32-chars-exactly-padded!!';
 
   beforeEach(async () => {
     mockRepo = createMockRepo();
     mockPolling = createMockPollingService();
-    mockConfigService = { get: jest.fn().mockReturnValue(null) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         VcsConnectionService,
         { provide: VCS_REPOSITORY, useValue: mockRepo },
         { provide: VcsPollingService, useValue: mockPolling },
-        { provide: ConfigService, useValue: mockConfigService },
+        { provide: VCS_CFG, useValue: { encryptionKey: undefined, defaultPollingIntervalMs: 600000, githubApiUrl: 'https://api.github.com' } },
       ],
     }).compile();
 

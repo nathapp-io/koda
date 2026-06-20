@@ -1,7 +1,7 @@
 import { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { ConfigService } from '@nestjs/config';
 import { IS_PUBLIC_KEY } from '@nathapp/nestjs-auth';
+import { AUTH_CFG, IAuthConfig } from '../../config/auth.config';
 import { CombinedAuthGuard } from './combined-auth.guard';
 import type { PrismaService } from '@nathapp/nestjs-prisma';
 import type { AgentAuthProvider } from '../agent-auth.provider';
@@ -22,10 +22,14 @@ function makePrisma(agent: unknown = null): jest.Mocked<PrismaService> {
   } as unknown as jest.Mocked<PrismaService>;
 }
 
-function makeConfig(apiKeySecret = 'super-secret'): jest.Mocked<ConfigService> {
+function makeConfig(apiKeySecret: string | undefined = 'super-secret'): IAuthConfig {
   return {
-    get: jest.fn().mockReturnValue({ apiKeySecret }),
-  } as unknown as jest.Mocked<ConfigService>;
+    apiKeySecret,
+    jwtSecret: undefined,
+    jwtExpiresIn: '15m',
+    jwtRefreshSecret: undefined,
+    jwtRefreshExpiresIn: '7d',
+  };
 }
 
 function makeAgentAuthProvider(principal = { actorType: 'agent', id: 'agent-1' }): jest.Mocked<AgentAuthProvider> {
@@ -174,8 +178,7 @@ describe('CombinedAuthGuard', () => {
     });
 
     it('falls back to JWT when apiKeySecret is not configured', async () => {
-      const config = makeConfig(undefined as any);
-      config.get.mockReturnValue({ apiKeySecret: undefined });
+      const config = makeConfig(undefined);
       const prisma = makePrisma();
       const reflector = makeReflector(false);
       const guard = new CombinedAuthGuard(reflector, prisma, config, makeAgentAuthProvider());

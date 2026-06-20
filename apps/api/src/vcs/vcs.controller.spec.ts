@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpException, HttpStatus } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { ValidationAppException } from '@nathapp/nestjs-common';
+import { VCS_CFG } from '../config/vcs.config';
 import { VcsController } from './vcs.controller';
 import { VcsConnectionService } from './vcs-connection.service';
 import { VcsSyncService } from './vcs-sync.service';
@@ -88,7 +88,7 @@ describe('VcsController', () => {
   let mockVcsService: jest.Mocked<Pick<VcsConnectionService, 'create' | 'findByProject' | 'update' | 'delete' | 'testConnection' | 'getFullByProject'>>;
   let mockSyncService: jest.Mocked<Pick<VcsSyncService, 'syncIssue' | 'fullSync'>>;
   let mockPrSyncService: jest.Mocked<Pick<VcsPrSyncService, 'syncPrStatus'>>;
-  let mockConfigService: { get: jest.Mock };
+  let mockVcsConfig: { encryptionKey: string | null };
 
   const encryptionKey = 'test-key-32-chars-exactly-padded!!';
 
@@ -115,8 +115,8 @@ describe('VcsController', () => {
       syncPrStatus: jest.fn().mockResolvedValue({ updated: 3, skipped: 0 }),
     };
 
-    mockConfigService = {
-      get: jest.fn().mockReturnValue(encryptionKey),
+    mockVcsConfig = {
+      encryptionKey,
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -126,7 +126,7 @@ describe('VcsController', () => {
         { provide: VcsSyncService, useValue: mockSyncService },
         { provide: VcsPrSyncService, useValue: mockPrSyncService },
         { provide: ProjectsService, useValue: mockProjectsService },
-        { provide: ConfigService, useValue: mockConfigService },
+        { provide: VCS_CFG, useValue: mockVcsConfig },
       ],
     }).compile();
 
@@ -155,7 +155,7 @@ describe('VcsController', () => {
     });
 
     it('should throw ValidationAppException when encryption key is not configured', async () => {
-      mockConfigService.get.mockReturnValue(null);
+      mockVcsConfig.encryptionKey = null;
 
       await expect(
         controller.createConnection('test-project', {} as CreateVcsConnectionDto),
@@ -183,7 +183,7 @@ describe('VcsController', () => {
     });
 
     it('should throw ValidationAppException when encryption key is not configured', async () => {
-      mockConfigService.get.mockReturnValue(null);
+      mockVcsConfig.encryptionKey = null;
 
       await expect(
         controller.updateConnection('test-project', {} as UpdateVcsConnectionDto),
@@ -212,7 +212,7 @@ describe('VcsController', () => {
     });
 
     it('should throw ValidationAppException when encryption key is not configured', async () => {
-      mockConfigService.get.mockReturnValue(null);
+      mockVcsConfig.encryptionKey = null;
 
       await expect(controller.testConnection('test-project')).rejects.toThrow(ValidationAppException);
     });
@@ -275,7 +275,7 @@ describe('VcsController', () => {
     });
 
     it('should throw ValidationAppException when encryption key is not configured', async () => {
-      mockConfigService.get.mockReturnValue(null);
+      mockVcsConfig.encryptionKey = null;
 
       await expect(controller.syncIssue('test-project', '5')).rejects.toThrow(ValidationAppException);
     });
@@ -300,7 +300,7 @@ describe('VcsController', () => {
     });
 
     it('should throw ValidationAppException when encryption key is not configured', async () => {
-      mockConfigService.get.mockReturnValue(null);
+      mockVcsConfig.encryptionKey = null;
 
       await expect(controller.syncAll('test-project')).rejects.toThrow(ValidationAppException);
     });
@@ -317,7 +317,7 @@ describe('VcsController', () => {
     });
 
     it('should throw ValidationAppException when encryption key is not configured', async () => {
-      mockConfigService.get.mockReturnValue(null);
+      mockVcsConfig.encryptionKey = null;
 
       await expect(controller.syncPr('test-project')).rejects.toThrow(ValidationAppException);
     });

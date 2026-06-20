@@ -3,7 +3,6 @@
  */
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
-import { ConfigService } from '@nestjs/config';
 import { Project, Ticket, VcsConnection } from '@prisma/client';
 import { decryptToken } from '../common/utils/encryption.util';
 import { createVcsProvider } from './factory';
@@ -25,7 +24,6 @@ export class VcsPrSyncService {
   constructor(
     @Inject(VCS_REPOSITORY) private readonly vcsRepo: IVcsRepository,
     @Optional() private readonly vcsLinkExtractorService?: VcsLinkExtractorService,
-    @Optional() private readonly configService?: ConfigService,
   ) {}
 
   /**

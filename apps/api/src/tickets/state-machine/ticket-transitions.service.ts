@@ -1,5 +1,4 @@
 import { Injectable, Optional, Logger, Inject } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import type {
@@ -15,6 +14,7 @@ import { VcsConnectionService } from '../../vcs/vcs-connection.service';
 import { buildBranchName } from '../../vcs/branch-name.util';
 import { createVcsProvider } from '../../vcs/factory';
 import { VcsLinkExtractorService } from '../../vcs/vcs-link-extractor.service';
+import { VCS_CFG, IVcsConfig } from '../../config/vcs.config';
 import { decryptToken } from '../../common/utils/encryption.util';
 import { TicketLinksService } from '../../ticket-links/ticket-links.service';
 import { actorForeignKeys } from '../../auth/principal/actor-foreign-keys';
@@ -47,7 +47,7 @@ export class TicketTransitionsService {
     @Optional() private readonly vcsConnectionService?: VcsConnectionService,
     @Optional() private readonly ticketLinksService?: TicketLinksService,
     @Optional() private readonly vcsLinkExtractorService?: VcsLinkExtractorService,
-    @Optional() private readonly configService?: ConfigService,
+    @Optional() @Inject(VCS_CFG) private readonly vcsConfig?: IVcsConfig,
   ) {}
 
   /**
@@ -126,11 +126,11 @@ export class TicketTransitionsService {
     project: { id: string; key: string },
     ticket: TicketDomain,
   ): Promise<void> {
-    if (!this.vcsConnectionService || !this.ticketLinksService || !this.vcsLinkExtractorService || !this.configService) return Promise.resolve();
+    if (!this.vcsConnectionService || !this.ticketLinksService || !this.vcsLinkExtractorService || !this.vcsConfig) return Promise.resolve();
 
     const vcsService = this.vcsConnectionService;
     const vcsLinkExtractor = this.vcsLinkExtractorService;
-    const encryptionKey = this.configService.get<string>('vcs.encryptionKey');
+    const encryptionKey = this.vcsConfig.encryptionKey;
     if (!encryptionKey) return Promise.resolve();
 
     const projectId = project.id;
