@@ -27,13 +27,13 @@ import { EntityGraphModule } from './entity-graph/entity-graph.module';
 import { ContextModule } from './context/context.module';
 import { PolicyModule } from './policy/policy.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
-import { APP_CFG, IAppConfig, appConfig } from './config/app.config';
-import { AUTH_CFG, IAuthConfig, authConfig } from './config/auth.config';
+import { appConfig } from './config/app.config';
+import { authConfig } from './config/auth.config';
 import { databaseConfig } from './config/database.config';
-import { RAG_CFG, IRagConfig, ragConfig } from './config/rag.config';
-import { VCS_CFG, IVcsConfig, vcsConfig } from './config/vcs.config';
+import { ragConfig } from './config/rag.config';
+import { vcsConfig } from './config/vcs.config';
 import { validate } from './config/env.validation';
-import { ConfigService } from '@nestjs/config';
+import { ConfigBridgeModule } from './config/config-bridge.module';
 
 @Module({
   imports: [
@@ -43,12 +43,13 @@ import { ConfigService } from '@nestjs/config';
       load: [appConfig, authConfig, databaseConfig, ragConfig, vcsConfig],
       validate: validate,
     }),
+    ConfigBridgeModule,
     I18nCoreModule.forRoot({
       fallbackLanguage: 'en',
       loaderOptions: {
         path: join(__dirname, 'i18n'),
         watch: false,
-      },      
+      },
     }),
     LoggingModule.register({}),
     PrismaModule.forRoot({
@@ -90,12 +91,5 @@ import { ConfigService } from '@nestjs/config';
     PolicyModule,
     MonitoringModule,
   ],
-  providers: [
-    { provide: APP_CFG,  useFactory: (cs: ConfigService) => cs.get<IAppConfig>('app'),  inject: [ConfigService] },
-    { provide: AUTH_CFG, useFactory: (cs: ConfigService) => cs.get<IAuthConfig>('auth'), inject: [ConfigService] },
-    { provide: RAG_CFG,  useFactory: (cs: ConfigService) => cs.get<IRagConfig>('rag'),   inject: [ConfigService] },
-    { provide: VCS_CFG,  useFactory: (cs: ConfigService) => cs.get<IVcsConfig>('vcs'),   inject: [ConfigService] },
-  ],
-  exports: [APP_CFG, AUTH_CFG, RAG_CFG, VCS_CFG],
 })
 export class AppModule {}
