@@ -1,8 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { VcsLinkExtractorService } from './vcs-link-extractor.service';
 import { PrismaVcsRepository } from './prisma-vcs.repository';
-import type { VcsConnectionDomain } from './domain/vcs.domain';
-import type { VcsTicketRef } from './vcs-link-extractor.service';
+import type { VcsConnectionDomain, VcsTicketDomain } from './domain/vcs.domain';
 
 jest.mock('./factory', () => ({
   createVcsProvider: jest.fn(),
@@ -39,7 +38,7 @@ function makeConnection(overrides?: Partial<VcsConnectionDomain>): VcsConnection
   };
 }
 
-function makeTicket(overrides?: Partial<VcsTicketRef>): VcsTicketRef {
+function makeTicket(overrides?: Partial<VcsTicketDomain>): VcsTicketDomain {
   return {
     id: 'ticket-1',
     number: 42,

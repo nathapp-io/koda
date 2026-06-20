@@ -35,3 +35,9 @@ export interface VcsProjectDomain {
 export interface VcsConnectionWithProjectDomain extends VcsConnectionDomain {
   project: VcsProjectDomain;
 }
+
+export interface VcsTicketDomain {
+  id: string;
+  number: number;
+  externalVcsId: string | null;
+}
