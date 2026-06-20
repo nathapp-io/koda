@@ -26,6 +26,7 @@ import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
 import { VcsWebhookService } from '../../../src/vcs/vcs-webhook.service';
 import { ProjectsService } from '../../../src/projects/projects.service';
 import { ConfigService } from '@nestjs/config';
+import { VCS_CFG, IVcsConfig } from '../../../src/config/vcs.config';
 import { CreateVcsConnectionDto, VcsProviderType } from '../../../src/vcs/dto/create-vcs-connection.dto';
 import { UpdateVcsConnectionDto } from '../../../src/vcs/dto/update-vcs-connection.dto';
 import { VcsSyncModeType } from '../../../src/vcs/dto/create-vcs-connection.dto';
@@ -45,6 +46,12 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
   const projectId = mockProject.id;
   const projectSlug = mockProject.slug;
   const encryptionKey = 'test-encryption-key-32-chars-long';
+
+  const mockVcsConfig: IVcsConfig = {
+    encryptionKey,
+    defaultPollingIntervalMs: 300000,
+    githubApiUrl: 'https://api.github.com',
+  };
 
   const mockVcsConnection: VcsConnectionResponseDto = {
     id: 'vcs-conn-123',
@@ -93,6 +100,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
         { provide: VcsWebhookService, useValue: {} },
         { provide: ProjectsService, useValue: mockProjectsServiceInstance },
         { provide: ConfigService, useValue: mockConfigServiceInstance },
+        { provide: VCS_CFG, useValue: mockVcsConfig },
       ],
     }).compile();
 
@@ -443,7 +451,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
       expect(vcsService.create).toHaveBeenCalledWith(projectId, expect.any(String), createDto);
     });
 
-    it('retrieves encryption key from config for operations that need it', async () => {
+    it('retrieves encryption key from VCS config for operations that need it', async () => {
       vcsService.create.mockResolvedValue(mockVcsConnection);
 
       const createDto: CreateVcsConnectionDto = {
@@ -455,8 +463,8 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       await controller.createConnection(projectSlug, createDto);
 
-      // Verify encryption key was retrieved from config for create operation
-      expect(configService.get).toHaveBeenCalledWith('vcs.encryptionKey');
+      // Verify encryption key was passed to service from VCS_CFG token
+      expect(vcsService.create).toHaveBeenCalledWith(projectId, encryptionKey, createDto);
     });
 
     it('passes correct DTO to service on create', async () => {

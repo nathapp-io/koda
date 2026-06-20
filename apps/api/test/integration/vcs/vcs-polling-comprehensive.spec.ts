@@ -23,6 +23,7 @@ import { VcsSyncService } from '../../../src/vcs/vcs-sync.service';
 import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
 import { VCS_REPOSITORY } from '../../../src/vcs/domain/vcs.repository';
 import { VcsIssue } from '../../../src/vcs/types';
+import { VCS_CFG, IVcsConfig } from '../../../src/config/vcs.config';
 
 describe('VcsPollingService - Comprehensive Behavior Tests', () => {
   let service: VcsPollingService;
@@ -149,6 +150,12 @@ describe('VcsPollingService - Comprehensive Behavior Tests', () => {
     applyMergedPrTransition: jest.fn(),
   };
 
+  const mockVcsConfig: IVcsConfig = {
+    encryptionKey: 'test-encryption-key',
+    defaultPollingIntervalMs: 300000,
+    githubApiUrl: 'https://api.github.com',
+  };
+
   // schedulePolling() creates real Node setInterval timers. The mocked
   // SchedulerRegistry never clears them (unlike the real one), so we track and
   // clear them in afterEach to stop leaked timers from firing poll() across tests.
@@ -193,6 +200,7 @@ describe('VcsPollingService - Comprehensive Behavior Tests', () => {
           provide: ConfigService,
           useValue: { get: jest.fn().mockReturnValue('test-encryption-key') },
         },
+        { provide: VCS_CFG, useValue: mockVcsConfig },
       ],
     }).compile();
 

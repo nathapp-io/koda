@@ -16,6 +16,7 @@ import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
 import { VCS_REPOSITORY } from '../../../src/vcs/domain/vcs.repository';
 import { VcsIssue } from '../../../src/vcs/types';
 import { ConfigService } from '@nestjs/config';
+import { VCS_CFG, IVcsConfig } from '../../../src/config/vcs.config';
 
 describe('VcsPollingService PR Sync Integration (VCS-P3-002-C AC1)', () => {
   let pollingService: VcsPollingService;
@@ -84,6 +85,12 @@ describe('VcsPollingService PR Sync Integration (VCS-P3-002-C AC1)', () => {
     vcsSyncLog: { ...mockVcsSyncLogDelegate },
   } as any;
 
+  const mockVcsConfig: IVcsConfig = {
+    encryptionKey: 'test-encryption-key',
+    defaultPollingIntervalMs: 300000,
+    githubApiUrl: 'https://api.github.com',
+  };
+
   // schedulePolling() creates real Node setInterval timers. The mocked
   // SchedulerRegistry never clears them (unlike the real one), so we track and
   // clear them in afterEach to stop leaked timers from firing poll() across tests.
@@ -118,6 +125,7 @@ describe('VcsPollingService PR Sync Integration (VCS-P3-002-C AC1)', () => {
           provide: ConfigService,
           useValue: { get: jest.fn().mockReturnValue('test-encryption-key') },
         },
+        { provide: VCS_CFG, useValue: mockVcsConfig },
         {
           provide: SchedulerRegistry,
           useValue: {

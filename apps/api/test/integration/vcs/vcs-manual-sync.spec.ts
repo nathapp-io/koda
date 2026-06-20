@@ -23,6 +23,7 @@ import { VcsWebhookService } from '../../../src/vcs/vcs-webhook.service';
 import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
 import { ProjectsService } from '../../../src/projects/projects.service';
 import { ConfigService } from '@nestjs/config';
+import { VCS_CFG, IVcsConfig } from '../../../src/config/vcs.config';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { VcsIssue } from '../../../src/vcs/types';
@@ -85,6 +86,12 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
 
   const encryptionKey = 'test-encryption-key-32-chars-long';
 
+  const mockVcsConfig: IVcsConfig = {
+    encryptionKey,
+    defaultPollingIntervalMs: 300000,
+    githubApiUrl: 'https://api.github.com',
+  };
+
   const mockVcsIssue: VcsIssue = {
     number: 42,
     title: 'Fix authentication bug',
@@ -136,6 +143,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         { provide: VcsWebhookService, useValue: {} },
         { provide: ProjectsService, useValue: mockProjectsServiceInstance },
         { provide: ConfigService, useValue: mockConfigServiceInstance },
+        { provide: VCS_CFG, useValue: mockVcsConfig },
       ],
     }).compile();
 

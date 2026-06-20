@@ -63,10 +63,7 @@ export class VcsConnectionService {
     const encryptedToken = encryptToken(dto.token, encryptionKey);
 
     const syncMode = dto.syncMode ?? 'off';
-    const pollingIntervalMs =
-      dto.pollingIntervalMs
-      ?? this.vcsConfig.defaultPollingIntervalMs
-      ?? 600000;
+    const pollingIntervalMs = dto.pollingIntervalMs ?? this.vcsConfig.defaultPollingIntervalMs;
 
     const connection = await this.vcsRepo.createVcsConnection({
       projectId,

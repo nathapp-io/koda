@@ -42,7 +42,7 @@ export const mockRagConfig: IRagConfig = {
   embeddingProvider: 'ollama',
   embeddingModel: 'nomic-embed-text',
   ollamaBaseUrl: 'http://localhost:11434',
-  openaiApiKey: undefined,
+  openaiApiKey: '',
   lancedbPath: '/tmp/lancedb-test',
   inMemoryOnly: true,
   ftsIndexMode: 'disk',
