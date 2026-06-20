@@ -85,8 +85,8 @@ export class VcsWebhookService implements OnModuleDestroy {
     @Inject(VCS_REPOSITORY) private readonly vcsRepo: IVcsRepository,
     private readonly syncService: VcsSyncService,
     private readonly prSyncService: VcsPrSyncService,
+    @Inject(VCS_CFG) private readonly vcsConfig: IVcsConfig,
     @Optional() private readonly vcsLinkExtractorService?: VcsLinkExtractorService,
-    @Optional() @Inject(VCS_CFG) private readonly vcsConfig?: IVcsConfig,
     @Optional() private readonly outboxService?: OutboxService,
   ) {
     this.cleanupInterval = setInterval(() => {
@@ -495,7 +495,7 @@ export class VcsWebhookService implements OnModuleDestroy {
     // Call extractLinksFromPr to capture new commits
     // The head.ref contains the branch name that was pushed
     if (this.vcsLinkExtractorService) {
-      const encryptionKey = this.vcsConfig?.encryptionKey;
+      const encryptionKey = this.vcsConfig.encryptionKey;
       if (encryptionKey) {
         try {
           await this.vcsLinkExtractorService.extractLinksFromPr(
