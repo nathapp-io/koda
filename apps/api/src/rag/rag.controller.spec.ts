@@ -4,7 +4,7 @@ import { RagService } from './rag.service';
 import { HybridRetrieverService } from './hybrid-retriever.service';
 import { EvaluationService } from '../retrieval/evaluation.service';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaRagRepository } from './prisma-rag.repository';
 
 const mockProject = {
   id: 'proj-1',
@@ -60,19 +60,14 @@ describe('RagController', () => {
   let hybridRetrieverService: jest.Mocked<HybridRetrieverService>;
   let evaluationService: jest.Mocked<EvaluationService>;
 
-  const mockProjectFindUnique = jest.fn();
-  const mockProjectMemberFindUnique = jest.fn();
-  const mockProjectUpdate = jest.fn();
-  const mockTransaction = jest.fn();
+  const mockFindProjectBySlug = jest.fn();
+  const mockFindProjectMembership = jest.fn();
+  const mockUpdateGraphifyLastImportedAt = jest.fn();
 
-  const mockPrismaClient = {
-    project: { findUnique: mockProjectFindUnique, update: mockProjectUpdate },
-    projectMember: { findUnique: mockProjectMemberFindUnique },
-    $transaction: mockTransaction,
-  };
-
-  const mockPrismaService = {
-    client: mockPrismaClient,
+  const mockRagRepository: Partial<PrismaRagRepository> = {
+    findProjectBySlug: mockFindProjectBySlug,
+    findProjectMembership: mockFindProjectMembership,
+    updateGraphifyLastImportedAt: mockUpdateGraphifyLastImportedAt,
   };
 
   beforeEach(async () => {
@@ -99,7 +94,7 @@ describe('RagController', () => {
         { provide: RagService, useValue: ragService },
         { provide: HybridRetrieverService, useValue: hybridRetrieverService },
         { provide: EvaluationService, useValue: evaluationService },
-        { provide: PrismaService, useValue: mockPrismaService },
+        { provide: PrismaRagRepository, useValue: mockRagRepository },
       ],
     }).compile();
 
@@ -112,7 +107,7 @@ describe('RagController', () => {
 
   describe('addDocument', () => {
     it('indexes in both ragService and hybridRetrieverService', async () => {
-      mockProjectFindUnique.mockResolvedValue(mockProject);
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
       ragService.indexDocument.mockResolvedValue(undefined);
       hybridRetrieverService.indexDocument.mockResolvedValue(undefined);
 
@@ -129,7 +124,7 @@ describe('RagController', () => {
     });
 
     it('throws NotFoundAppException when project not found', async () => {
-      mockProjectFindUnique.mockResolvedValue(null);
+      mockFindProjectBySlug.mockResolvedValue(null);
 
       await expect(
         controller.addDocument('missing', { source: 'doc', sourceId: 'x', content: 'y', metadata: {} }),
@@ -137,7 +132,7 @@ describe('RagController', () => {
     });
 
     it('throws NotFoundAppException when project is soft-deleted', async () => {
-      mockProjectFindUnique.mockResolvedValue({ ...mockProject, deletedAt: new Date() });
+      mockFindProjectBySlug.mockResolvedValue({ ...mockProject, deletedAt: new Date() });
 
       await expect(
         controller.addDocument('alpha', { source: 'doc', sourceId: 'x', content: 'y', metadata: {} }),
@@ -147,7 +142,7 @@ describe('RagController', () => {
 
   describe('listDocuments', () => {
     it('lists documents with default limit 100', async () => {
-      mockProjectFindUnique.mockResolvedValue(mockProject);
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
       ragService.listDocuments.mockResolvedValue([]);
 
       await controller.listDocuments('alpha');
@@ -156,7 +151,7 @@ describe('RagController', () => {
     });
 
     it('respects provided limit capped at 500', async () => {
-      mockProjectFindUnique.mockResolvedValue(mockProject);
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
       ragService.listDocuments.mockResolvedValue([]);
 
       await controller.listDocuments('alpha', '1000');
@@ -165,7 +160,7 @@ describe('RagController', () => {
     });
 
     it('uses provided limit when below cap', async () => {
-      mockProjectFindUnique.mockResolvedValue(mockProject);
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
       ragService.listDocuments.mockResolvedValue([]);
 
       await controller.listDocuments('alpha', '25');
@@ -176,7 +171,7 @@ describe('RagController', () => {
 
   describe('deleteDocument', () => {
     it('deletes by sourceId for admin', async () => {
-      mockProjectFindUnique.mockResolvedValue(mockProject);
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
       ragService.deleteBySource.mockResolvedValue(undefined);
 
       const result = await controller.deleteDocument('alpha', 'doc-1', mockAdminUser);
@@ -194,7 +189,7 @@ describe('RagController', () => {
     };
 
     it('allows agent principal to search', async () => {
-      mockProjectFindUnique.mockResolvedValue(mockProject);
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
       hybridRetrieverService.search.mockResolvedValue(mockSearchResult);
 
       const result = await controller.search('alpha', { query: 'auth bug', limit: 10 }, mockAgentPrincipal);
@@ -204,17 +199,17 @@ describe('RagController', () => {
     });
 
     it('allows admin to search without membership check', async () => {
-      mockProjectFindUnique.mockResolvedValue(mockProject);
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
       hybridRetrieverService.search.mockResolvedValue(mockSearchResult);
 
       await controller.search('alpha', { query: 'test' }, mockAdminUser);
 
-      expect(mockProjectMemberFindUnique).not.toHaveBeenCalled();
+      expect(mockFindProjectMembership).not.toHaveBeenCalled();
     });
 
     it('forbids user without membership', async () => {
-      mockProjectFindUnique.mockResolvedValue(mockProject);
-      mockProjectMemberFindUnique.mockResolvedValue(null);
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
+      mockFindProjectMembership.mockResolvedValue(null);
 
       await expect(
         controller.search('alpha', { query: 'test' }, mockMemberUser),
@@ -222,8 +217,8 @@ describe('RagController', () => {
     });
 
     it('allows member with valid project role', async () => {
-      mockProjectFindUnique.mockResolvedValue(mockProject);
-      mockProjectMemberFindUnique.mockResolvedValue({ role: 'DEVELOPER' });
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
+      mockFindProjectMembership.mockResolvedValue({ role: 'DEVELOPER' });
       hybridRetrieverService.search.mockResolvedValue(mockSearchResult);
 
       const result = await controller.search('alpha', { query: 'test' }, mockMemberUser);
@@ -232,7 +227,7 @@ describe('RagController', () => {
     });
 
     it('throws NotFoundAppException for missing project', async () => {
-      mockProjectFindUnique.mockResolvedValue(null);
+      mockFindProjectBySlug.mockResolvedValue(null);
 
       await expect(
         controller.search('missing', { query: 'test' }, mockAdminUser),
@@ -240,7 +235,7 @@ describe('RagController', () => {
     });
 
     it('includes provenance in response', async () => {
-      mockProjectFindUnique.mockResolvedValue(mockProject);
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
       hybridRetrieverService.search.mockResolvedValue({
         results: [
           {
@@ -269,8 +264,8 @@ describe('RagController', () => {
 
   describe('importGraphify', () => {
     it('returns immediately when nodes array is empty', async () => {
-      mockProjectFindUnique.mockResolvedValue({ ...mockProject, graphifyEnabled: true });
-      mockProjectMemberFindUnique.mockResolvedValue({ role: 'DEVELOPER' });
+      mockFindProjectBySlug.mockResolvedValue({ ...mockProject, graphifyEnabled: true });
+      mockFindProjectMembership.mockResolvedValue({ role: 'DEVELOPER' });
 
       const result = await controller.importGraphify('alpha', { nodes: [], links: [] }, mockAdminUser);
 
@@ -279,8 +274,8 @@ describe('RagController', () => {
     });
 
     it('throws ValidationAppException when graphify is disabled for project', async () => {
-      mockProjectFindUnique.mockResolvedValue({ ...mockProject, graphifyEnabled: false });
-      mockProjectMemberFindUnique.mockResolvedValue({ role: 'ADMIN' });
+      mockFindProjectBySlug.mockResolvedValue({ ...mockProject, graphifyEnabled: false });
+      mockFindProjectMembership.mockResolvedValue({ role: 'ADMIN' });
 
       await expect(
         controller.importGraphify(
@@ -292,12 +287,10 @@ describe('RagController', () => {
     });
 
     it('imports nodes and updates graphifyLastImportedAt', async () => {
-      mockProjectFindUnique.mockResolvedValue({ ...mockProject, graphifyEnabled: true });
-      mockProjectMemberFindUnique.mockResolvedValue({ role: 'ADMIN' });
+      mockFindProjectBySlug.mockResolvedValue({ ...mockProject, graphifyEnabled: true });
+      mockFindProjectMembership.mockResolvedValue({ role: 'ADMIN' });
       ragService.importGraphify.mockResolvedValue({ imported: 1, cleared: 0 } as any);
-      mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-        return fn({ project: { update: mockProjectUpdate } });
-      });
+      mockUpdateGraphifyLastImportedAt.mockResolvedValue(undefined);
 
       const result = await controller.importGraphify(
         'alpha',
@@ -306,13 +299,14 @@ describe('RagController', () => {
       );
 
       expect(ragService.importGraphify).toHaveBeenCalledWith('proj-1', [{ id: 'n1', label: 'Foo' }], []);
+      expect(mockUpdateGraphifyLastImportedAt).toHaveBeenCalledWith('proj-1');
       expect((result as any).data).toEqual({ imported: 1, cleared: 0 });
     });
   });
 
   describe('optimizeTable', () => {
     it('calls ragService.optimizeTable and returns optimized true', async () => {
-      mockProjectFindUnique.mockResolvedValue(mockProject);
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
       ragService.optimizeTable.mockResolvedValue(undefined);
 
       const result = await controller.optimizeTable('alpha', mockAdminUser);

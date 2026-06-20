@@ -8,6 +8,22 @@ import {
   EntityNodeRow,
   EntityLinkRow,
 } from './domain/code-intel.domain';
+import type { SymbolData } from './symbol-store';
+
+export interface VcsConnectionRecord {
+  provider: string;
+  repoOwner: string;
+  repoName: string;
+  encryptedToken: string;
+}
+
+export interface ProjectSlugRecord {
+  id: string;
+}
+
+export interface ProjectMembershipRecord {
+  role: string;
+}
 
 @Injectable()
 export class PrismaCodeIntelRepository implements ICodeIntelRepository {
@@ -68,6 +84,103 @@ export class PrismaCodeIntelRepository implements ICodeIntelRepository {
   async countEntityNodesByType(projectId: string, entityType: string): Promise<number> {
     return this.prisma.client.entityNode.count({
       where: { projectId, entityType },
+    });
+  }
+
+  // Symbol store methods
+
+  async upsertSymbol(symbol: SymbolData): Promise<SymbolData> {
+    const data = {
+      ...symbol,
+      callers: symbol.callers as unknown as string[],
+      callees: symbol.callees as unknown as string[],
+    };
+
+    const result = await this.prisma.client.symbol.upsert({
+      where: { id: symbol.id },
+      create: data as Parameters<typeof this.prisma.client.symbol.upsert>[0]['create'],
+      update: data as Parameters<typeof this.prisma.client.symbol.upsert>[0]['update'],
+    });
+
+    return {
+      ...result,
+      callers: (result.callers as unknown as string[]) || [],
+      callees: (result.callees as unknown as string[]) || [],
+    } as SymbolData;
+  }
+
+  async findSymbolByExactId(projectId: string, symbolId: string): Promise<SymbolRow | null> {
+    return this.prisma.client.symbol.findUnique({
+      where: { projectId_symbolId: { projectId, symbolId } },
+    });
+  }
+
+  async findSymbolsByFallback(projectId: string, symbolId: string): Promise<SymbolRow[]> {
+    return this.prisma.client.symbol.findMany({
+      where: {
+        projectId,
+        OR: [
+          { symbolId: { endsWith: `::${symbolId}` } },
+          { name: symbolId },
+        ],
+      },
+      take: 1,
+    });
+  }
+
+  async findSymbolsByIds(projectId: string, symbolIds: string[]): Promise<SymbolRow[]> {
+    return this.prisma.client.symbol.findMany({
+      where: { projectId, symbolId: { in: symbolIds } },
+    });
+  }
+
+  async findSymbolsByIdsOrNames(
+    projectId: string,
+    symbolIds: string[],
+    names: string[],
+  ): Promise<SymbolRow[]> {
+    return this.prisma.client.symbol.findMany({
+      where: {
+        projectId,
+        OR: [
+          { symbolId: { in: symbolIds } },
+          { name: { in: names } },
+        ],
+      },
+    });
+  }
+
+  async deleteSymbolsByFile(projectId: string, repoId: string, file: string): Promise<void> {
+    await this.prisma.client.symbol.deleteMany({
+      where: { projectId, repoId, file },
+    });
+  }
+
+  // VCS connection lookup (for outbox handler)
+
+  async findVcsConnectionByProjectId(projectId: string): Promise<VcsConnectionRecord | null> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client = this.prisma.client as unknown as { vcsConnection: { findUnique: (opts: unknown) => Promise<unknown> } };
+    const result = await client.vcsConnection.findUnique({ where: { projectId } });
+    return result as VcsConnectionRecord | null;
+  }
+
+  // Project/membership lookups (for controller)
+
+  async findProjectBySlug(slug: string): Promise<ProjectSlugRecord | null> {
+    return this.prisma.client.project.findUnique({
+      where: { slug },
+      select: { id: true },
+    });
+  }
+
+  async findProjectMembership(
+    projectId: string,
+    userId: string,
+  ): Promise<ProjectMembershipRecord | null> {
+    return this.prisma.client.projectMember.findUnique({
+      where: { projectId_userId: { projectId, userId } },
+      select: { role: true },
     });
   }
 }

@@ -1,8 +1,7 @@
 import { Injectable, Inject, Optional } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import type { PrismaClient } from '@prisma/client';
 import { Logger } from '@nestjs/common';
+import { PrismaCodeIntelRepository } from './prisma-code-intel.repository';
 
 export interface SymbolData {
   id: string;
@@ -40,35 +39,19 @@ export class SymbolStore {
   private readonly logger = new Logger(SymbolStore.name);
 
   constructor(
-    private readonly prisma: PrismaService<PrismaClient>,
+    private readonly codeIntelRepository: PrismaCodeIntelRepository,
     @Optional() @Inject(TRANSACTION_MANAGER) private readonly txManager?: ITransactionManager,
   ) {}
 
-  private get db() {
-    return this.prisma.client;
-  }
-
   async upsertSymbol(symbol: SymbolData): Promise<SymbolData> {
     const write = async () => {
-      const data = {
-        ...symbol,
-        callers: symbol.callers as unknown as string[],
-        callees: symbol.callees as unknown as string[],
-      };
-
-      const result = await this.db.symbol.upsert({
-        where: { id: symbol.id },
-        create: data as Parameters<typeof this.db.symbol.upsert>[0]['create'],
-        update: data as Parameters<typeof this.db.symbol.upsert>[0]['update'],
-      });
-
+      const result = await this.codeIntelRepository.upsertSymbol(symbol);
       return {
         ...result,
         callers: (result.callers as unknown as string[]) || [],
         callees: (result.callees as unknown as string[]) || [],
       } as SymbolData;
     };
-
     return this.txManager ? this.txManager.run(write) : write();
   }
 
@@ -92,22 +75,17 @@ export class SymbolStore {
     const callerIds = (symbol.callers as unknown as string[]) || [];
     if (callerIds.length === 0) return [];
 
-    const callerSymbols = await this.db.symbol.findMany({
-      where: {
-        projectId,
-        symbolId: { in: callerIds },
-      },
-    });
+    const callerSymbols = await this.codeIntelRepository.findSymbolsByIds(projectId, callerIds);
 
     const found = new Map(callerSymbols.map((s) => [s.symbolId, s]));
     return callerIds.flatMap((id) => {
       const s = found.get(id);
       if (!s) return [];
       return [{
-      symbolId: s.symbolId,
-      file: s.file,
-      name: s.name,
-      kind: s.kind,
+        symbolId: s.symbolId,
+        file: s.file,
+        name: s.name,
+        kind: s.kind,
       }];
     });
   }
@@ -121,15 +99,11 @@ export class SymbolStore {
 
     if (calleesArr.length === 0) return [];
 
-    const calleeSymbols = await this.db.symbol.findMany({
-      where: {
-        projectId,
-        OR: [
-          { symbolId: { in: calleesArr } },
-          { name: { in: calleesArr } },
-        ],
-      },
-    });
+    const calleeSymbols = await this.codeIntelRepository.findSymbolsByIdsOrNames(
+      projectId,
+      calleesArr,
+      calleesArr,
+    );
 
     const found = new Map<string, typeof calleeSymbols[number]>();
     for (const s of calleeSymbols) {
@@ -149,27 +123,14 @@ export class SymbolStore {
   }
 
   async deleteByFile(projectId: string, repoId: string, file: string): Promise<void> {
-    await this.db.symbol.deleteMany({
-      where: { projectId, repoId, file },
-    });
+    await this.codeIntelRepository.deleteSymbolsByFile(projectId, repoId, file);
   }
 
   private async findSymbolRecord(projectId: string, symbolId: string) {
-    const exact = await this.db.symbol.findUnique({
-      where: { projectId_symbolId: { projectId, symbolId } },
-    });
+    const exact = await this.codeIntelRepository.findSymbolByExactId(projectId, symbolId);
     if (exact) return exact;
 
-    const [fallback] = await this.db.symbol.findMany({
-      where: {
-        projectId,
-        OR: [
-          { symbolId: { endsWith: `::${symbolId}` } },
-          { name: symbolId },
-        ],
-      },
-      take: 1,
-    });
+    const [fallback] = await this.codeIntelRepository.findSymbolsByFallback(projectId, symbolId);
     return fallback ?? null;
   }
 }

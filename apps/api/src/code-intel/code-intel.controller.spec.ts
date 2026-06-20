@@ -6,6 +6,7 @@ import { AstIndexService, SymbolIndexResult, Symbol } from './ast-index.service'
 import { CallerInfo, CalleeInfo } from './symbol-store';
 import { UserPrincipal, AgentPrincipal, KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { IndexCommitDto, SourceFileDto } from './dto/index-commit.dto';
+import { PrismaCodeIntelRepository } from './prisma-code-intel.repository';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -100,20 +101,18 @@ describe('CodeIntelController', () => {
   let controller: CodeIntelController;
   let astIndexService: jest.Mocked<Pick<AstIndexService, 'indexCommit' | 'getSymbol' | 'getCallers' | 'getCallees'>>;
 
-  // Prisma mock — provides client.project.findUnique and client.projectMember.findUnique
+  // Repository mock — provides findProjectBySlug and findProjectMembership
   let mockProjectFindUnique: jest.Mock;
   let mockProjectMemberFindUnique: jest.Mock;
-  let mockPrisma: { client: { project: { findUnique: jest.Mock }; projectMember: { findUnique: jest.Mock } } };
+  let mockCodeIntelRepository: jest.Mocked<Pick<PrismaCodeIntelRepository, 'findProjectBySlug' | 'findProjectMembership'>>;
 
   beforeEach(async () => {
     mockProjectFindUnique = jest.fn();
     mockProjectMemberFindUnique = jest.fn();
 
-    mockPrisma = {
-      client: {
-        project: { findUnique: mockProjectFindUnique },
-        projectMember: { findUnique: mockProjectMemberFindUnique },
-      },
+    mockCodeIntelRepository = {
+      findProjectBySlug: mockProjectFindUnique,
+      findProjectMembership: mockProjectMemberFindUnique,
     };
 
     astIndexService = {
@@ -127,16 +126,11 @@ describe('CodeIntelController', () => {
       controllers: [CodeIntelController],
       providers: [
         { provide: AstIndexService, useValue: astIndexService },
-        // PrismaService is @Optional() — provide via the token name used by NestJS
-        { provide: 'PrismaService', useValue: mockPrisma },
+        { provide: PrismaCodeIntelRepository, useValue: mockCodeIntelRepository },
       ],
     }).compile();
 
     controller = module.get<CodeIntelController>(CodeIntelController);
-
-    // Inject prisma manually since it is @Optional()
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (controller as any).prisma = mockPrisma;
   });
 
   afterEach(() => {
