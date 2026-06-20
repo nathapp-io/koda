@@ -187,8 +187,6 @@ export class RagController {
 
     const importResult = await this.ragService.importGraphify(project.id, dto.nodes, dto.links ?? []);
 
-    await this.ragRepository.updateGraphifyLastImportedAt(project.id);
-
     return JsonResponse.Ok(importResult);
   }
 

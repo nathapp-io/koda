@@ -17,14 +17,6 @@ export interface VcsConnectionRecord {
   encryptedToken: string;
 }
 
-export interface ProjectSlugRecord {
-  id: string;
-}
-
-export interface ProjectMembershipRecord {
-  role: string;
-}
-
 @Injectable()
 export class PrismaCodeIntelRepository implements ICodeIntelRepository {
   constructor(private readonly prisma: PrismaService<PrismaClient>) {}
@@ -159,28 +151,11 @@ export class PrismaCodeIntelRepository implements ICodeIntelRepository {
   // VCS connection lookup (for outbox handler)
 
   async findVcsConnectionByProjectId(projectId: string): Promise<VcsConnectionRecord | null> {
+    // Cast required because the stale generated Prisma client type does not reflect the
+    // vcsConnection model that exists in the actual schema include shape at runtime.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const client = this.prisma.client as unknown as { vcsConnection: { findUnique: (opts: unknown) => Promise<unknown> } };
     const result = await client.vcsConnection.findUnique({ where: { projectId } });
     return result as VcsConnectionRecord | null;
-  }
-
-  // Project/membership lookups (for controller)
-
-  async findProjectBySlug(slug: string): Promise<ProjectSlugRecord | null> {
-    return this.prisma.client.project.findUnique({
-      where: { slug },
-      select: { id: true },
-    });
-  }
-
-  async findProjectMembership(
-    projectId: string,
-    userId: string,
-  ): Promise<ProjectMembershipRecord | null> {
-    return this.prisma.client.projectMember.findUnique({
-      where: { projectId_userId: { projectId, userId } },
-      select: { role: true },
-    });
   }
 }

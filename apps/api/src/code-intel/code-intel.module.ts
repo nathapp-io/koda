@@ -9,11 +9,12 @@ import { CodeCommitOutboxHandler } from './code-commit-outbox-handler';
 import { ImpactAnalysisService } from './impact-analysis.service';
 import { EntityGraphModule } from '../entity-graph/entity-graph.module';
 import { RagModule } from '../rag/rag.module';
+import { ProjectsModule } from '../projects/projects.module';
 import { PrismaCodeIntelRepository } from './prisma-code-intel.repository';
 import { CODE_INTEL_REPOSITORY } from './domain/code-intel.domain';
 
 @Module({
-  imports: [PrismaModule, ConfigModule, EntityGraphModule, forwardRef(() => RagModule)],
+  imports: [PrismaModule, ConfigModule, EntityGraphModule, forwardRef(() => RagModule), forwardRef(() => ProjectsModule)],
   controllers: [CodeIntelController],
   providers: [
     PrismaCodeIntelRepository,

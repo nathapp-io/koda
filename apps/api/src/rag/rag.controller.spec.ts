@@ -286,11 +286,10 @@ describe('RagController', () => {
       ).rejects.toThrow();
     });
 
-    it('imports nodes and updates graphifyLastImportedAt', async () => {
+    it('imports nodes and returns the import result (timestamp updated inside service)', async () => {
       mockFindProjectBySlug.mockResolvedValue({ ...mockProject, graphifyEnabled: true });
       mockFindProjectMembership.mockResolvedValue({ role: 'ADMIN' });
       ragService.importGraphify.mockResolvedValue({ imported: 1, cleared: 0 } as any);
-      mockUpdateGraphifyLastImportedAt.mockResolvedValue(undefined);
 
       const result = await controller.importGraphify(
         'alpha',
@@ -299,7 +298,9 @@ describe('RagController', () => {
       );
 
       expect(ragService.importGraphify).toHaveBeenCalledWith('proj-1', [{ id: 'n1', label: 'Foo' }], []);
-      expect(mockUpdateGraphifyLastImportedAt).toHaveBeenCalledWith('proj-1');
+      // graphifyLastImportedAt is now updated inside RagService.importGraphify,
+      // not in the controller, so the repository mock is not called here.
+      expect(mockUpdateGraphifyLastImportedAt).not.toHaveBeenCalled();
       expect((result as any).data).toEqual({ imported: 1, cleared: 0 });
     });
   });

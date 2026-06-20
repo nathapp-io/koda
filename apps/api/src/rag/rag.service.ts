@@ -739,6 +739,8 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
    * Imports a Graphify knowledge graph into the knowledge base for a project.
    * Uses incremental diff-and-apply when IncrementalGraphDiffService is available,
    * falling back to full re-import otherwise.
+   * Updates graphifyLastImportedAt on the project atomically with the import to
+   * ensure the timestamp is never out-of-sync with actual graph content.
    * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
    */
   async importGraphify(
@@ -753,12 +755,20 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     const typedNodes = nodes as GraphifyNodeDto[];
     const typedLinks = links as GraphifyLinkDto[];
 
+    let result: { imported: number; cleared: number };
+
     if (this.incrementalDiff) {
-      const result = await this.incrementalDiff.diffAndApply(projectId, typedNodes, typedLinks);
-      return { imported: typedNodes.length, cleared: result.removed };
+      const diffResult = await this.incrementalDiff.diffAndApply(projectId, typedNodes, typedLinks);
+      result = { imported: typedNodes.length, cleared: diffResult.removed };
+    } else {
+      result = await this.importGraphifyFull(projectId, typedNodes, typedLinks);
     }
 
-    return this.importGraphifyFull(projectId, typedNodes, typedLinks);
+    // Update the timestamp immediately after the import completes so it is always
+    // in sync with the graph content (best-effort single write, no cross-store txn).
+    await this.ragRepository?.updateGraphifyLastImportedAt(projectId);
+
+    return result;
   }
 
   private async importGraphifyFull(
