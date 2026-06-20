@@ -3,7 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '@nathapp/nestjs-auth';
 import { AUTH_CFG, IAuthConfig } from '../../config/auth.config';
 import { CombinedAuthGuard } from './combined-auth.guard';
-import type { PrismaService } from '@nathapp/nestjs-prisma';
+import type { PrismaAuthRepository } from '../prisma-auth.repository';
 import type { AgentAuthProvider } from '../agent-auth.provider';
 
 function makeReflector(isPublic = false): jest.Mocked<Reflector> {
@@ -12,14 +12,10 @@ function makeReflector(isPublic = false): jest.Mocked<Reflector> {
   } as unknown as jest.Mocked<Reflector>;
 }
 
-function makePrisma(agent: unknown = null): jest.Mocked<PrismaService> {
+function makeAuthRepo(agent: unknown = null): jest.Mocked<PrismaAuthRepository> {
   return {
-    client: {
-      agent: {
-        findFirst: jest.fn().mockResolvedValue(agent),
-      },
-    },
-  } as unknown as jest.Mocked<PrismaService>;
+    findAgentByKeyHash: jest.fn().mockResolvedValue(agent),
+  } as unknown as jest.Mocked<PrismaAuthRepository>;
 }
 
 function makeConfig(apiKeySecret: string | undefined = 'super-secret'): IAuthConfig {
@@ -67,7 +63,7 @@ describe('CombinedAuthGuard', () => {
       const reflector = makeReflector(true);
       const guard = new CombinedAuthGuard(
         reflector,
-        makePrisma(),
+        makeAuthRepo(),
         makeConfig(),
         makeAgentAuthProvider(),
       );
@@ -84,12 +80,12 @@ describe('CombinedAuthGuard', () => {
 
   describe('API key authentication', () => {
     it('returns true when a valid non-JWT Bearer token matches an active agent', async () => {
-      const mockAgent = { id: 'agent-1', status: 'ACTIVE', apiKeyHash: 'somehash' };
-      const prisma = makePrisma(mockAgent);
+      const mockAgent = { id: 'agent-1', slug: 'bot', status: 'ACTIVE', apiKeyHash: 'somehash' };
+      const authRepo = makeAuthRepo(mockAgent);
       const agentAuth = makeAgentAuthProvider();
       const reflector = makeReflector(false);
 
-      const guard = new CombinedAuthGuard(reflector, prisma, makeConfig(), agentAuth);
+      const guard = new CombinedAuthGuard(reflector, authRepo, makeConfig(), agentAuth);
 
       // Patch super.canActivate so it doesn't actually run JWT logic
       jest.spyOn(Object.getPrototypeOf(Object.getPrototypeOf(guard)), 'canActivate').mockResolvedValue(true);
@@ -105,9 +101,9 @@ describe('CombinedAuthGuard', () => {
     });
 
     it('skips API key path for JWT-shaped tokens (3 dots)', async () => {
-      const prisma = makePrisma(null);
+      const authRepo = makeAuthRepo(null);
       const reflector = makeReflector(false);
-      const guard = new CombinedAuthGuard(reflector, prisma, makeConfig(), makeAgentAuthProvider());
+      const guard = new CombinedAuthGuard(reflector, authRepo, makeConfig(), makeAgentAuthProvider());
 
       const jwtToken = 'header.payload.signature';
 
@@ -120,15 +116,14 @@ describe('CombinedAuthGuard', () => {
       await guard.canActivate(ctx);
 
       // Agent lookup should not have been called for a JWT-shaped token
-      const agentFindFirst = (prisma.client as any).agent.findFirst;
-      expect(agentFindFirst).not.toHaveBeenCalled();
+      expect(authRepo.findAgentByKeyHash).not.toHaveBeenCalled();
     });
 
     it('returns false for API key when agent has OFFLINE status', async () => {
-      const offlineAgent = { id: 'agent-2', status: 'OFFLINE', apiKeyHash: 'hash' };
-      const prisma = makePrisma(offlineAgent);
+      const offlineAgent = { id: 'agent-2', slug: 'bot', status: 'OFFLINE', apiKeyHash: 'hash' };
+      const authRepo = makeAuthRepo(offlineAgent);
       const reflector = makeReflector(false);
-      const guard = new CombinedAuthGuard(reflector, prisma, makeConfig(), makeAgentAuthProvider());
+      const guard = new CombinedAuthGuard(reflector, authRepo, makeConfig(), makeAgentAuthProvider());
 
       // Falls back to JWT after API key fails
       jest.spyOn(Object.getPrototypeOf(Object.getPrototypeOf(guard)), 'canActivate').mockResolvedValue(true);
@@ -144,9 +139,9 @@ describe('CombinedAuthGuard', () => {
     });
 
     it('falls back to JWT when no agent found for key', async () => {
-      const prisma = makePrisma(null);
+      const authRepo = makeAuthRepo(null);
       const reflector = makeReflector(false);
-      const guard = new CombinedAuthGuard(reflector, prisma, makeConfig(), makeAgentAuthProvider());
+      const guard = new CombinedAuthGuard(reflector, authRepo, makeConfig(), makeAgentAuthProvider());
 
       const jwtCanActivate = jest
         .spyOn(Object.getPrototypeOf(Object.getPrototypeOf(guard)), 'canActivate')
@@ -161,9 +156,9 @@ describe('CombinedAuthGuard', () => {
     });
 
     it('returns false for empty Bearer token', async () => {
-      const prisma = makePrisma(null);
+      const authRepo = makeAuthRepo(null);
       const reflector = makeReflector(false);
-      const guard = new CombinedAuthGuard(reflector, prisma, makeConfig(), makeAgentAuthProvider());
+      const guard = new CombinedAuthGuard(reflector, authRepo, makeConfig(), makeAgentAuthProvider());
 
       jest.spyOn(Object.getPrototypeOf(Object.getPrototypeOf(guard)), 'canActivate').mockResolvedValue(true);
 
@@ -173,15 +168,14 @@ describe('CombinedAuthGuard', () => {
       await guard.canActivate(ctx);
 
       // Empty key should skip API key check and go to JWT
-      const agentFindFirst = (prisma.client as any).agent.findFirst;
-      expect(agentFindFirst).not.toHaveBeenCalled();
+      expect(authRepo.findAgentByKeyHash).not.toHaveBeenCalled();
     });
 
     it('falls back to JWT when apiKeySecret is not configured', async () => {
       const config = makeConfig(undefined);
-      const prisma = makePrisma();
+      const authRepo = makeAuthRepo();
       const reflector = makeReflector(false);
-      const guard = new CombinedAuthGuard(reflector, prisma, config, makeAgentAuthProvider());
+      const guard = new CombinedAuthGuard(reflector, authRepo, config, makeAgentAuthProvider());
 
       const jwtCanActivate = jest
         .spyOn(Object.getPrototypeOf(Object.getPrototypeOf(guard)), 'canActivate')
@@ -198,7 +192,7 @@ describe('CombinedAuthGuard', () => {
   describe('JWT fallback', () => {
     it('rethrows exceptions from JWT canActivate', async () => {
       const reflector = makeReflector(false);
-      const guard = new CombinedAuthGuard(reflector, makePrisma(null), makeConfig(), makeAgentAuthProvider());
+      const guard = new CombinedAuthGuard(reflector, makeAuthRepo(null), makeConfig(), makeAgentAuthProvider());
 
       const jwtError = Object.assign(new Error('Unauthorized'), { status: 401 });
       jest

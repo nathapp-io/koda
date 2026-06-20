@@ -1,17 +1,17 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
 import { CacheManager } from '@nathapp/nestjs-cache';
-import type { Agent, PrismaClient } from '@prisma/client';
 import { AgentPrincipal, KodaAgentRole, KodaAgentStatus } from './principal/koda-principal.types';
+import { PrismaAuthRepository } from './prisma-auth.repository';
+import type { AgentDomain } from './domain/auth.domain';
 
 @Injectable()
 export class AgentAuthProvider {
   constructor(
-    private readonly prisma: PrismaService<PrismaClient>,
+    private readonly authRepo: PrismaAuthRepository,
     private readonly cache: CacheManager,
   ) {}
 
-  async buildPrincipal(agent: Agent): Promise<AgentPrincipal> {
+  async buildPrincipal(agent: AgentDomain): Promise<AgentPrincipal> {
     return this.cache.get<AgentPrincipal>(
       ['agent-principal', agent.id, agent.status],
       async () => {
@@ -44,19 +44,12 @@ export class AgentAuthProvider {
   }
 
   async loadAgentRoles(agentId: string): Promise<KodaAgentRole[]> {
-    const roles = await this.prisma.client.agentRoleEntry.findMany({
-      where: { agentId },
-      select: { role: true },
-    });
-    return roles.map((entry) => entry.role as KodaAgentRole);
+    const roles = await this.authRepo.findAgentRoles(agentId);
+    return roles as KodaAgentRole[];
   }
 
   async loadAgentCapabilities(agentId: string): Promise<string[]> {
-    const capabilities = await this.prisma.client.agentCapabilityEntry.findMany({
-      where: { agentId },
-      select: { capability: true },
-    });
-    return capabilities.map((entry) => entry.capability);
+    return this.authRepo.findAgentCapabilities(agentId);
   }
 
   async invalidateByTag(tag: string): Promise<void> {
