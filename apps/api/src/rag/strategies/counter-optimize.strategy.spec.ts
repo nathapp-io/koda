@@ -1,9 +1,25 @@
-import type { ConfigService } from '@nestjs/config';
+import { IRagConfig } from '../../config/rag.config';
 import { CounterOptimizeStrategy } from './counter-optimize.strategy';
 import { FTS_OPTIMIZE_STRATEGY } from './fts-optimize-strategy.interface';
 
-function mockConfigService(values: Record<string, unknown> = {}): ConfigService {
-  return { get: jest.fn((key: string) => values[key]) } as unknown as ConfigService;
+function mockRagConfig(overrides: Partial<IRagConfig> = {}): IRagConfig {
+  return {
+    embeddingProvider: 'ollama',
+    embeddingModel: 'nomic-embed-text',
+    ollamaBaseUrl: 'http://localhost:11434',
+    openaiApiKey: '',
+    lancedbPath: './lancedb',
+    inMemoryOnly: true,
+    ftsIndexMode: 'simple',
+    similarityHigh: 0.85,
+    similarityMedium: 0.70,
+    similarityLow: 0.50,
+    ftsOptimizeStrategy: 'counter',
+    ftsOptimizeThreshold: 10,
+    ftsOptimizeIntervalMs: 300_000,
+    graphifyEnabledCacheTtlSec: 60,
+    ...overrides,
+  };
 }
 
 function mockTable() {
@@ -21,18 +37,16 @@ describe('FTS_OPTIMIZE_STRATEGY token (AC-1)', () => {
 
 describe('CounterOptimizeStrategy', () => {
   describe('AC-7: threshold config', () => {
-    it('reads threshold from rag.ftsOptimizeThreshold', async () => {
-      const strategy = new CounterOptimizeStrategy(
-        mockConfigService({ 'rag.ftsOptimizeThreshold': 2 }),
-      );
+    it('reads threshold from ragConfig.ftsOptimizeThreshold', async () => {
+      const strategy = new CounterOptimizeStrategy(mockRagConfig({ ftsOptimizeThreshold: 2 }));
       const table = mockTable();
       await strategy.onInsert('p', table);
       await strategy.onInsert('p', table); // should trigger at 2
       expect(table.optimize).toHaveBeenCalledTimes(1);
     });
 
-    it('defaults to 10 when rag.ftsOptimizeThreshold is not set', async () => {
-      const strategy = new CounterOptimizeStrategy(mockConfigService({}));
+    it('defaults to 10 when ftsOptimizeThreshold is not overridden', async () => {
+      const strategy = new CounterOptimizeStrategy(mockRagConfig());
       const table = mockTable();
       for (let i = 0; i < 9; i++) await strategy.onInsert('p', table);
       expect(table.optimize).not.toHaveBeenCalled();
@@ -41,9 +55,7 @@ describe('CounterOptimizeStrategy', () => {
 
   describe('AC-2: onInsert() triggers optimize at threshold', () => {
     it('calls table.optimize() when insert count reaches threshold', async () => {
-      const strategy = new CounterOptimizeStrategy(
-        mockConfigService({ 'rag.ftsOptimizeThreshold': 3 }),
-      );
+      const strategy = new CounterOptimizeStrategy(mockRagConfig({ ftsOptimizeThreshold: 3 }));
       const table = mockTable();
       await strategy.onInsert('p1', table);
       await strategy.onInsert('p1', table);
@@ -54,9 +66,7 @@ describe('CounterOptimizeStrategy', () => {
 
   describe('AC-3: onInsert() does not trigger below threshold', () => {
     it('does NOT call table.optimize() when count is below threshold', async () => {
-      const strategy = new CounterOptimizeStrategy(
-        mockConfigService({ 'rag.ftsOptimizeThreshold': 3 }),
-      );
+      const strategy = new CounterOptimizeStrategy(mockRagConfig({ ftsOptimizeThreshold: 3 }));
       const table = mockTable();
       await strategy.onInsert('p1', table);
       await strategy.onInsert('p1', table); // 2 < 3
@@ -66,9 +76,7 @@ describe('CounterOptimizeStrategy', () => {
 
   describe('AC-4: onInsert() resets counter after optimize', () => {
     it('resets counter to 0 after calling table.optimize()', async () => {
-      const strategy = new CounterOptimizeStrategy(
-        mockConfigService({ 'rag.ftsOptimizeThreshold': 3 }),
-      );
+      const strategy = new CounterOptimizeStrategy(mockRagConfig({ ftsOptimizeThreshold: 3 }));
       const table = mockTable();
       await strategy.onInsert('p1', table);
       await strategy.onInsert('p1', table);
@@ -82,9 +90,7 @@ describe('CounterOptimizeStrategy', () => {
 
   describe('AC-5: onInsert() handles table.optimize() rejection gracefully', () => {
     it('logs warning and does not throw when table.optimize() rejects', async () => {
-      const strategy = new CounterOptimizeStrategy(
-        mockConfigService({ 'rag.ftsOptimizeThreshold': 3 }),
-      );
+      const strategy = new CounterOptimizeStrategy(mockRagConfig({ ftsOptimizeThreshold: 3 }));
       const table = mockTable();
       table.optimize.mockRejectedValue(new Error('optimize boom'));
       await strategy.onInsert('p1', table);
@@ -95,9 +101,7 @@ describe('CounterOptimizeStrategy', () => {
 
   describe('AC-6: onFirstAccess() is fire-and-forget', () => {
     it('calls table.optimize() and returns void synchronously', () => {
-      const strategy = new CounterOptimizeStrategy(
-        mockConfigService({ 'rag.ftsOptimizeThreshold': 10 }),
-      );
+      const strategy = new CounterOptimizeStrategy(mockRagConfig({ ftsOptimizeThreshold: 10 }));
       const table = mockTable();
       const result = strategy.onFirstAccess('p1', table);
       expect(result).toBeUndefined();
@@ -107,9 +111,7 @@ describe('CounterOptimizeStrategy', () => {
 
   describe('counter isolation per projectId', () => {
     it('maintains separate counters per projectId', async () => {
-      const strategy = new CounterOptimizeStrategy(
-        mockConfigService({ 'rag.ftsOptimizeThreshold': 2 }),
-      );
+      const strategy = new CounterOptimizeStrategy(mockRagConfig({ ftsOptimizeThreshold: 2 }));
       const t1 = mockTable();
       const t2 = mockTable();
       await strategy.onInsert('p1', t1); // p1 count: 1
@@ -122,9 +124,7 @@ describe('CounterOptimizeStrategy', () => {
 
   describe('cleanup', () => {
     it('clearProject removes project counter state', async () => {
-      const strategy = new CounterOptimizeStrategy(
-        mockConfigService({ 'rag.ftsOptimizeThreshold': 2 }),
-      );
+      const strategy = new CounterOptimizeStrategy(mockRagConfig({ ftsOptimizeThreshold: 2 }));
       const table = mockTable();
       await strategy.onInsert('p1', table); // p1 count: 1
       strategy.clearProject('p1');
@@ -133,9 +133,7 @@ describe('CounterOptimizeStrategy', () => {
     });
 
     it('onDestroy clears all counters', async () => {
-      const strategy = new CounterOptimizeStrategy(
-        mockConfigService({ 'rag.ftsOptimizeThreshold': 2 }),
-      );
+      const strategy = new CounterOptimizeStrategy(mockRagConfig({ ftsOptimizeThreshold: 2 }));
       const t1 = mockTable();
       const t2 = mockTable();
       await strategy.onInsert('p1', t1);

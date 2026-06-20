@@ -1,6 +1,6 @@
 import { Injectable, Logger, Module, OnModuleInit, Optional, forwardRef } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { ScheduleModule, SchedulerRegistry } from '@nestjs/schedule';
+import { RAG_CFG, IRagConfig } from '../config/rag.config';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { RagController } from './rag.controller';
 import { RagService } from './rag.service';
@@ -138,20 +138,20 @@ class EntityStoreWarmup implements OnModuleInit {
     IncrementalGraphDiffService,
     {
       provide: FTS_OPTIMIZE_STRATEGY,
-      useFactory: (configService: ConfigService, schedulerRegistry: SchedulerRegistry): FtsOptimizeStrategy => {
-        const strategy = configService.get<string>('rag.ftsOptimizeStrategy') ?? 'counter';
+      useFactory: (ragConfig: IRagConfig, schedulerRegistry: SchedulerRegistry): FtsOptimizeStrategy => {
+        const strategy = ragConfig.ftsOptimizeStrategy;
 
         switch (strategy) {
           case 'cron':
-            return new CronOptimizeStrategy(configService, schedulerRegistry);
+            return new CronOptimizeStrategy(ragConfig, schedulerRegistry);
           case 'manual':
             return new ManualOptimizeStrategy();
           case 'counter':
           default:
-            return new CounterOptimizeStrategy(configService);
+            return new CounterOptimizeStrategy(ragConfig);
         }
       },
-      inject: [ConfigService, SchedulerRegistry],
+      inject: [RAG_CFG, SchedulerRegistry],
     },
   ],
   exports: [RagService, HybridRetrieverService, LexicalIndex, EntityStore, GraphStoreService, FTS_OPTIMIZE_STRATEGY, IncrementalGraphDiffService],

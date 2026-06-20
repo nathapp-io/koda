@@ -1,8 +1,24 @@
-import type { ConfigService } from '@nestjs/config';
+import { IRagConfig } from '../../config/rag.config';
 import { CronOptimizeStrategy } from './cron-optimize.strategy';
 
-function mockConfigService(values: Record<string, unknown> = {}): ConfigService {
-  return { get: jest.fn((key: string) => values[key]) } as unknown as ConfigService;
+function mockRagConfig(overrides: Partial<IRagConfig> = {}): IRagConfig {
+  return {
+    embeddingProvider: 'ollama',
+    embeddingModel: 'nomic-embed-text',
+    ollamaBaseUrl: 'http://localhost:11434',
+    openaiApiKey: '',
+    lancedbPath: './lancedb',
+    inMemoryOnly: true,
+    ftsIndexMode: 'simple',
+    similarityHigh: 0.85,
+    similarityMedium: 0.70,
+    similarityLow: 0.50,
+    ftsOptimizeStrategy: 'cron',
+    ftsOptimizeThreshold: 10,
+    ftsOptimizeIntervalMs: 300_000,
+    graphifyEnabledCacheTtlSec: 60,
+    ...overrides,
+  };
 }
 
 function mockTable() {
@@ -17,7 +33,7 @@ function mockSchedulerRegistry() {
 
 function makeStrategy(intervalMs?: number) {
   return new CronOptimizeStrategy(
-    mockConfigService({ 'rag.ftsOptimizeIntervalMs': intervalMs }),
+    mockRagConfig(intervalMs !== undefined ? { ftsOptimizeIntervalMs: intervalMs } : {}),
     mockSchedulerRegistry() as never,
   );
 }
@@ -30,7 +46,7 @@ describe('CronOptimizeStrategy', () => {
     it('calls schedulerRegistry.addInterval("fts-optimize", interval) during construction', () => {
       const schedulerRegistry = mockSchedulerRegistry();
       new CronOptimizeStrategy(
-        mockConfigService({ 'rag.ftsOptimizeIntervalMs': 60_000 }),
+        mockRagConfig({ ftsOptimizeIntervalMs: 60_000 }),
         schedulerRegistry as never,
       );
       expect(schedulerRegistry.addInterval).toHaveBeenCalledWith('fts-optimize', expect.anything());
@@ -38,18 +54,18 @@ describe('CronOptimizeStrategy', () => {
   });
 
   describe('AC-11: reads interval from config', () => {
-    it('reads rag.ftsOptimizeIntervalMs from ConfigService', () => {
+    it('reads ftsOptimizeIntervalMs from IRagConfig', () => {
       const schedulerRegistry = mockSchedulerRegistry();
       new CronOptimizeStrategy(
-        mockConfigService({ 'rag.ftsOptimizeIntervalMs': 60_000 }),
+        mockRagConfig({ ftsOptimizeIntervalMs: 60_000 }),
         schedulerRegistry as never,
       );
       expect(schedulerRegistry.addInterval).toHaveBeenCalledWith('fts-optimize', expect.anything());
     });
 
-    it('defaults to 300000 when rag.ftsOptimizeIntervalMs is not set', () => {
+    it('uses 300000 when ftsOptimizeIntervalMs is not overridden', () => {
       const schedulerRegistry = mockSchedulerRegistry();
-      new CronOptimizeStrategy(mockConfigService({}), schedulerRegistry as never);
+      new CronOptimizeStrategy(mockRagConfig(), schedulerRegistry as never);
       expect(schedulerRegistry.addInterval).toHaveBeenCalledWith('fts-optimize', expect.anything());
     });
   });

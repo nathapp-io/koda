@@ -1,5 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { IRagConfig, RAG_CFG } from '../../config/rag.config';
 import type { FtsOptimizeStrategy } from './fts-optimize-strategy.interface';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -11,8 +11,8 @@ export class CounterOptimizeStrategy implements FtsOptimizeStrategy {
   private readonly threshold: number;
   private readonly counters = new Map<string, number>();
 
-  constructor(private readonly configService: ConfigService) {
-    this.threshold = this.configService.get<number>('rag.ftsOptimizeThreshold') ?? 10;
+  constructor(@Inject(RAG_CFG) ragConfig: IRagConfig) {
+    this.threshold = ragConfig.ftsOptimizeThreshold;
   }
 
   async onInsert(projectId: string, table: LanceTable): Promise<void> {
