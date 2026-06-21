@@ -10,7 +10,7 @@ import { CodeIntelModule } from '../code-intel/code-intel.module';
 import { AgentsModule } from '../agents/agents.module';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => RagModule), MemoryModule, forwardRef(() => CodeIntelModule), forwardRef(() => AgentsModule)],
+  imports: [PrismaModule, forwardRef(() => RagModule), forwardRef(() => MemoryModule), forwardRef(() => CodeIntelModule), forwardRef(() => AgentsModule)],
   controllers: [ProjectsController],
   providers: [
     PrismaProjectRepository,

@@ -9,12 +9,11 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
-import { JsonResponse, ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
-import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
+import { JsonResponse, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { KodaAction } from '../auth/casl/koda-action.enum';
 import { ContextBuilderService, GetProjectContextQuery, ContextIntent } from './context-builder.service';
-import { PrismaProjectRepository } from '../projects/prisma-project.repository';
-import { ActorRole } from '../common/enums';
+import { ProjectsService } from '../projects/projects.service';
 
 class GetContextQueryDto {
   intent!: ContextIntent;
@@ -32,13 +31,11 @@ class GetContextQueryDto {
 export class ContextController {
   constructor(
     private readonly contextBuilderService: ContextBuilderService,
-    private readonly projectRepo: PrismaProjectRepository,
+    private readonly projectsService: ProjectsService,
   ) {}
 
   private async resolveProjectId(slug: string): Promise<string> {
-    const project = await this.projectRepo.findBySlug(slug);
-    if (!project || project.deletedAt) throw new NotFoundAppException({}, 'projects');
-    return project.id;
+    return this.projectsService.findProjectIdBySlug(slug);
   }
 
   private async checkProjectMembership(
@@ -48,13 +45,7 @@ export class ContextController {
     if (!principal) {
       throw new ForbiddenAppException({}, 'context');
     }
-    if (!isUserPrincipal(principal)) return;
-    if (principal.role === 'ADMIN') return;
-    const role = await this.projectRepo.findMembershipRole(projectId, principal.id);
-    const allowed = [ActorRole.ADMIN, ActorRole.DEVELOPER, ActorRole.AGENT, ActorRole.VIEWER] as const;
-    if (!role || !allowed.includes(role as typeof allowed[number])) {
-      throw new ForbiddenAppException({}, 'projects');
-    }
+    await this.projectsService.assertProjectMembership(projectId, principal);
   }
 
   private buildQuery(
