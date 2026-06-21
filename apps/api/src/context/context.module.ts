@@ -9,15 +9,14 @@ import { CodeIntelModule } from '../code-intel/code-intel.module';
 import { MonitoringModule } from '../monitoring/monitoring.module';
 import { PrismaContextRepository } from './prisma-context.repository';
 import { CONTEXT_REPOSITORY } from './domain/context.domain';
-import { PrismaProjectRepository } from '../projects/prisma-project.repository';
+import { ProjectsModule } from '../projects/projects.module';
 
 @Module({
-  imports: [PrismaModule, MemoryModule, forwardRef(() => RagModule), EntityGraphModule, forwardRef(() => CodeIntelModule), MonitoringModule],
+  imports: [PrismaModule, forwardRef(() => MemoryModule), forwardRef(() => RagModule), EntityGraphModule, forwardRef(() => CodeIntelModule), MonitoringModule, forwardRef(() => ProjectsModule)],
   controllers: [ContextController],
   providers: [
     PrismaContextRepository,
     { provide: CONTEXT_REPOSITORY, useExisting: PrismaContextRepository },
-    PrismaProjectRepository,
     ContextBuilderService,
   ],
   exports: [ContextBuilderService],

@@ -3,7 +3,6 @@ import { ConfigModule } from '@nestjs/config';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { CacheManager } from '@nathapp/nestjs-cache';
-import { PrismaProjectRepository } from '../../projects/prisma-project.repository';
 import { AgentsService } from '../../agents/agents.service';
 import { AUTH_CFG, IAuthConfig, authConfig } from '../../config/auth.config';
 import { RAG_CFG, IRagConfig } from '../../config/rag.config';
@@ -83,13 +82,12 @@ export const mockVcsConfig: IVcsConfig = {
   providers: [
     { provide: PrismaService, useValue: mockPrismaService },
     { provide: TRANSACTION_MANAGER, useValue: mockTransactionManager },
-    PrismaProjectRepository,
     { provide: AgentsService, useValue: mockAgentsService },
     { provide: CacheManager, useValue: mockCacheManager },
     { provide: AUTH_CFG, useValue: mockAuthConfig },
     { provide: RAG_CFG, useValue: mockRagConfig },
     { provide: VCS_CFG, useValue: mockVcsConfig },
   ],
-  exports: [PrismaService, TRANSACTION_MANAGER, ConfigModule, PrismaProjectRepository, AgentsService, CacheManager, AUTH_CFG, RAG_CFG, VCS_CFG],
+  exports: [PrismaService, TRANSACTION_MANAGER, ConfigModule, AgentsService, CacheManager, AUTH_CFG, RAG_CFG, VCS_CFG],
 })
 export class GlobalStubsModule {}

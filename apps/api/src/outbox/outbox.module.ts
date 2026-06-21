@@ -15,7 +15,9 @@ import { OUTBOX_REPOSITORY } from './domain/outbox-event.domain';
   // CodeIntelModule participates in a module cycle
   // (OutboxModule -> CodeIntelModule -> RagModule -> OutboxModule); use forwardRef so
   // the reference resolves lazily instead of landing in the ESM temporal dead zone.
-  imports: [PrismaModule, ScheduleModule, MemoryModule, EntityGraphModule, forwardRef(() => CodeIntelModule)],
+  // MemoryModule now imports ProjectsModule which imports RagModule which imports OutboxModule,
+  // creating a circular chain; wrap with forwardRef to resolve lazily.
+  imports: [PrismaModule, ScheduleModule, forwardRef(() => MemoryModule), EntityGraphModule, forwardRef(() => CodeIntelModule)],
   controllers: [AdminController],
   providers: [
     PrismaOutboxRepository,

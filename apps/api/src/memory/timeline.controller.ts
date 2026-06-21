@@ -1,8 +1,8 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { JsonResponse, ValidationAppException, NotFoundAppException } from '@nathapp/nestjs-common';
+import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
 import { TimelineService } from './timeline.service';
-import { PrismaProjectRepository } from '../projects/prisma-project.repository';
+import { ProjectsService } from '../projects/projects.service';
 
 @ApiTags('memory')
 @ApiBearerAuth()
@@ -10,13 +10,12 @@ import { PrismaProjectRepository } from '../projects/prisma-project.repository';
 export class TimelineController {
   constructor(
     private readonly timelineService: TimelineService,
-    private readonly projectRepo: PrismaProjectRepository,
+    private readonly projectsService: ProjectsService,
   ) {}
 
   private async resolveProject(slug: string): Promise<{ id: string }> {
-    const project = await this.projectRepo.findBySlug(slug);
-    if (!project || project.deletedAt) throw new NotFoundAppException({}, 'projects');
-    return { id: project.id };
+    const id = await this.projectsService.findProjectIdBySlug(slug);
+    return { id };
   }
 
   private parseDate(value?: string): Date | undefined {
