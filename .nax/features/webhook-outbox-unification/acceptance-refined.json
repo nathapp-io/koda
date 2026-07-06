@@ -1,0 +1,142 @@
+[
+  {
+    "acId": "AC-1",
+    "original": "Given `PrismaWebhookRepository.findById(webhookId)` resolves `{ id: 'w1', url: 'https://example.com/hook', secret: 's3cret', active: true }`, when `WebhookDeliveryHandler.handle({ webhookId: 'w1', event: 'STATUS_CHANGE', payload: { a: 1 } })` is called, then the global `fetch` is called exactly once with `'https://example.com/hook'` as the first argument.",
+    "refined": "Given PrismaWebhookRepository.findById('w1') resolves a webhook object with url='https://example.com/hook', secret='s3cret', active=true, when WebhookDeliveryHandler.handle({ webhookId: 'w1', event: 'STATUS_CHANGE', payload: { a: 1 } }) is called, then global fetch is called exactly once with first argument equal to 'https://example.com/hook' (string match).",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-2",
+    "original": "When `WebhookDeliveryHandler.handle()` sends the request, then the `fetch` call's second argument has `method: 'POST'` and `headers['X-Koda-Event']` equal to `'STATUS_CHANGE'`.",
+    "refined": "When WebhookDeliveryHandler.handle() sends the request, then fetch is called with second argument where options.method === 'POST' (strict equality) AND options.headers['X-Koda-Event'] === 'STATUS_CHANGE' (string match).",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-3",
+    "original": "When `WebhookDeliveryHandler.handle()` sends the request, then the `fetch` call's second argument has `headers['X-Koda-Signature']` equal to `` `sha256=${hex}` `` where `hex` is the HMAC-SHA256 hex digest of `JSON.stringify({ a: 1 })` keyed by `'s3cret'`, computed independently in the test via Node's `crypto` module for comparison.",
+    "refined": "When WebhookDeliveryHandler.handle() sends the request, then fetch is called with second argument where options.headers['X-Koda-Signature'] matches the pattern /^sha256=[a-f0-9]{64}$/ and the hex portion equals the HMAC-SHA256 hex digest of JSON.stringify(payload) using the webhook secret as the key, verified by computing crypto.createHmac('sha256', secret).update(JSON.stringify(payload)).digest('hex') independently.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-4",
+    "original": "When `WebhookDeliveryHandler.handle()` sends the request, then the `fetch` call's second argument has `signal` that is an instance of `AbortSignal`.",
+    "refined": "When WebhookDeliveryHandler.handle() sends the request, then fetch is called with second argument where options.signal instanceof AbortSignal === true.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-5",
+    "original": "When `fetch` resolves with `{ ok: true }`, then `WebhookDeliveryHandler.handle()` resolves without throwing.",
+    "refined": "When fetch is called and resolves with { ok: true }, then WebhookDeliveryHandler.handle() returns a Promise that fulfills (does not reject) with undefined, verified by awaiting the result in a try/catch that asserts error is null/undefined after the call.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-6",
+    "original": "When `fetch` resolves with `{ ok: false, status: 503 }`, then `WebhookDeliveryHandler.handle()` rejects with an `Error` whose `message` includes `'503'`.",
+    "refined": "When fetch is called and resolves with { ok: false, status: 503 }, then WebhookDeliveryHandler.handle() returns a Promise that rejects with an Error instance where error.message includes the string '503', verified by catching the rejection and asserting error.message contains '503'.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-7",
+    "original": "When `fetch` rejects with `new Error('network down')`, then `WebhookDeliveryHandler.handle()` rejects with that same error.",
+    "refined": "When fetch is called and rejects with Error('network down'), then WebhookDeliveryHandler.handle() returns a Promise that rejects with an Error instance where error.message === 'network down' (strict equality check that it is the exact same error reference, not a copy).",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-8",
+    "original": "When `PrismaWebhookRepository.findById(webhookId)` resolves `null`, then `WebhookDeliveryHandler.handle()` resolves without throwing and `fetch` is not called.",
+    "refined": "When PrismaWebhookRepository.findById('w1') resolves null, then: (1) WebhookDeliveryHandler.handle() returns a Promise that fulfills without throwing, verified by awaiting in try/catch with no error caught, AND (2) global fetch has never been called, verified by asserting fetch.mock.calls.length === 0 before the handle() call completes.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-9",
+    "original": "When `PrismaWebhookRepository.findById(webhookId)` resolves `{ id: 'w1', url: 'https://example.com/hook', secret: 's3cret', active: false }`, then `WebhookDeliveryHandler.handle()` resolves without throwing and `fetch` is not called.",
+    "refined": "When PrismaWebhookRepository.findById('w1') resolves a webhook object with active=false (regardless of url/secret values), then: (1) WebhookDeliveryHandler.handle() returns a Promise that fulfills without throwing, verified by awaiting in try/catch with no error caught, AND (2) global fetch has never been called, verified by asserting fetch.mock.calls.length === 0 before the handle() call completes.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-10",
+    "original": "When a Nest testing module is constructed with `WebhookDeliveryHandler` as a provider and a mocked `PrismaWebhookRepository` provider (`useValue`), then compilation succeeds and `module.get(WebhookDeliveryHandler)` returns a defined instance.",
+    "refined": "NestJS TestModule created with `WebhookModule` and a mock provider `{ provide: PrismaWebhookRepository, useValue: mockRepo }` compiles without throwing. After compilation, `module.get(WebhookDeliveryHandler)` returns a value that is not null, not undefined, and is an instance of WebhookDeliveryHandler.",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-11",
+    "original": "When the `WebhookDeliveryHandler` DI smoke test provides only a mocked `PrismaWebhookRepository` and no database-backed Prisma provider, then resolving `module.get(WebhookDeliveryHandler)` does not throw.",
+    "refined": "NestJS TestModule created with `WebhookModule` and ONLY a mock `{ provide: PrismaWebhookRepository, useValue: mockRepo }` (no `PrismaService` or database-backed provider) resolves `module.get(WebhookDeliveryHandler)` without throwing any exception. The resolved handler instance is defined and is an instance of WebhookDeliveryHandler.",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-12",
+    "original": "Given `OutboxFanOutRegistry` is constructed directly with a mock object `{ handle: jest.fn() }` as the `webhookDeliveryHandler` constructor argument, when `dispatch({ eventType: 'webhook_delivery', payload: { webhookId: 'w1', event: 'STATUS_CHANGE', payload: {} } })` is called, then the mock's `handle` is called exactly once with `{ webhookId: 'w1', event: 'STATUS_CHANGE', payload: {} }`.",
+    "refined": "Construct `OutboxFanOutRegistry` with a mock `{ handle: jest.fn() }` passed as `webhookDeliveryHandler`. Call `dispatch({ eventType: 'webhook_delivery', payload: { webhookId: 'w1', event: 'STATUS_CHANGE', payload: {} } })`. Assert: `mock.handle` is called exactly 1 time AND `mock.handle.mock.calls[0][0]` deep equals `{ webhookId: 'w1', event: 'STATUS_CHANGE', payload: {} }`.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-13",
+    "original": "When `OutboxFanOutRegistry` is constructed with a defined `webhookDeliveryHandler`, then `getHandlers('webhook_delivery')` returns an array of length 1.",
+    "refined": "Construct `OutboxFanOutRegistry` with a non-null `webhookDeliveryHandler` (e.g., an object with a `handle` method). Call `registry.getHandlers('webhook_delivery')`. Assert: return value is an Array, `Array.isArray(result)` is true, `result.length === 1`, and `result[0] === webhookDeliveryHandler`.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-14",
+    "original": "When `OutboxFanOutRegistry` is constructed with `webhookDeliveryHandler` left `undefined`, then `getHandlers('webhook_delivery')` returns an empty array.",
+    "refined": "Construct `OutboxFanOutRegistry` with `webhookDeliveryHandler: undefined`. Call `registry.getHandlers('webhook_delivery')`. Assert: return value is an Array, `Array.isArray(result)` is true, and `result.length === 0`.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-15",
+    "original": "When a Nest testing module is constructed with `OutboxFanOutRegistry` as the sole provider and no other constructor arguments supplied, then compilation succeeds and `module.get(OutboxFanOutRegistry)` returns a defined instance.",
+    "refined": "Create a NestJS `TestingModule` via `Test.createTestingModule({ providers: [OutboxFanOutRegistry] })` with no additional providers or imports. Call `await module.init()`. Assert: `module.get(OutboxFanOutRegistry)` returns a value that is not `null` and not `undefined` (i.e., `instance !== null && instance !== undefined`). Optionally assert `instance instanceof OutboxFanOutRegistry`.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-16",
+    "original": "Given `findActiveByProject(projectId)` resolves one webhook `{ id: 'w1', events: JSON.stringify(['STATUS_CHANGE']), active: true }`, when `dispatch(projectId, 'STATUS_CHANGE', payload)` is called, then `OutboxService.enqueue` is called exactly once with an argument deep-equal to `{ projectId, eventType: 'webhook_delivery', eventId: expect.any(String), payload: { webhookId: 'w1', event: 'STATUS_CHANGE', payload } }`.",
+    "refined": "Assert: mockOutboxService.enqueue is called exactly once. Assert: the call receives a single argument that is a plain object where { projectId } matches the input, { eventType } equals 'webhook_delivery', { eventId } matches UUID v4 format, and { payload } equals { webhookId: 'w1', event: 'STATUS_CHANGE', payload: <inputPayload> }. Assert: dispatch() promise resolves (does not reject).",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-17",
+    "original": "Given two active webhooks (`w1`, `w2`) both match the dispatched event, when `dispatch()` is called, then `OutboxService.enqueue` is called exactly twice, once per webhook id, and both calls are issued before either mocked enqueue promise resolves.",
+    "refined": "Assert: mockOutboxService.enqueue is called exactly twice. Assert: call Arguments list contains one call with payload.webhookId === 'w1' and another with payload.webhookId === 'w2'. Assert: both mock enqueue functions are invoked before any resolve/reject is executed on either mock — verified by storing invocation timestamps or by wrapping mocks to capture call order, and confirming both calls occur while enqueue promises are still pending.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-18",
+    "original": "Given a webhook whose `events` array does not include the dispatched event, when `dispatch()` is called, then `OutboxService.enqueue` is not called for that webhook.",
+    "refined": "Assert: mockOutboxService.enqueue is called zero times for webhooks whose events array (parsed from JSON) does not contain the dispatched event string. Assert: the total call count equals the number of matching webhooks only.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-19",
+    "original": "When `dispatch()` is called, then the global `fetch` function is never called.",
+    "refined": "Assert: global fetch is not invoked during dispatch() execution — verified by spying on globalThis.fetch (or self.fetch in Node) and asserting it has zero recorded calls after dispatch() completes.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-20",
+    "original": "When `OutboxService.enqueue` rejects for a matching webhook, then the promise returned by `dispatch()` rejects.",
+    "refined": "Assert: when mockOutboxService.enqueue rejects with an Error, the promise returned by dispatch() rejects with an Error. Assert: the rejection reason is the same Error instance or has the same message as the enqueue rejection. Assert: dispatch() rejection occurs before dispatch() returns (synchronous propagation via Promise.all rejection).",
+    "testable": true,
+    "storyId": "US-004"
+  }
+]
