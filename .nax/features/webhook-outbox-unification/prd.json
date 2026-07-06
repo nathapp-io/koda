@@ -3,7 +3,7 @@
   "feature": "webhook-outbox-unification",
   "branchName": "feat/webhook-outbox-unification",
   "createdAt": "2026-07-06T05:32:06Z",
-  "updatedAt": "2026-07-06T06:13:38.795Z",
+  "updatedAt": "2026-07-06T06:32:14.863Z",
   "userStories": [
     {
       "id": "US-001",
@@ -80,8 +80,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -143,7 +143,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "opencode",
         "initialProfileId": "opencode-medium",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -161,7 +163,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "bf50296ef07475f06995f068f44b578a8c89fdad"
     },
     {
       "id": "US-004",
