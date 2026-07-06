@@ -1,4 +1,5 @@
 import * as crypto from 'crypto';
+import { Injectable } from '@nestjs/common';
 import { PrismaWebhookRepository } from './prisma-webhook.repository';
 
 export interface WebhookDeliveryPayload {
@@ -7,6 +8,7 @@ export interface WebhookDeliveryPayload {
   payload: unknown;
 }
 
+@Injectable()
 export class WebhookDeliveryHandler {
   constructor(private readonly webhookRepo: PrismaWebhookRepository) {}
 
