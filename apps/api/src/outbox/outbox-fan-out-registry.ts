@@ -6,6 +6,7 @@ import { MemoryKind } from '../common/enums';
 import { AstIndexService, SourceFile } from '../code-intel/ast-index.service';
 import { CodeCommitOutboxHandler } from '../code-intel/code-commit-outbox-handler';
 import { EntityGraphService } from '../entity-graph/entity-graph.service';
+import { WebhookDeliveryHandler } from '../webhook/webhook-delivery.handler';
 
 export interface OutboxHandler {
   eventType: string;
@@ -31,6 +32,7 @@ export class OutboxFanOutRegistry implements OnModuleInit {
   private memoryRepository: PrismaMemoryItemRepository | null = null;
   private astIndexService: AstIndexService | null = null;
   private codeCommitHandler: CodeCommitOutboxHandler | null = null;
+  private webhookDeliveryHandler: WebhookDeliveryHandler | null = null;
 
   constructor(
     @Optional() extractionService?: ExtractionService,
@@ -38,11 +40,13 @@ export class OutboxFanOutRegistry implements OnModuleInit {
     @Optional() astIndexService?: AstIndexService,
     @Optional() codeCommitHandler?: CodeCommitOutboxHandler,
     @Optional() private readonly entityGraphService?: EntityGraphService,
+    @Optional() webhookDeliveryHandler?: WebhookDeliveryHandler,
   ) {
     this.extractionService = extractionService ?? null;
     this.memoryRepository = memoryRepository ?? null;
     this.astIndexService = astIndexService ?? null;
     this.codeCommitHandler = codeCommitHandler ?? null;
+    this.webhookDeliveryHandler = webhookDeliveryHandler ?? null;
 
     for (const { eventType, handler } of DEFAULT_HANDLERS) {
       this.register(eventType, handler);
@@ -58,6 +62,9 @@ export class OutboxFanOutRegistry implements OnModuleInit {
     if (this.codeCommitHandler || this.astIndexService) {
       this.register('code_commit', this.handleCodeCommit.bind(this));
     }
+    if (this.webhookDeliveryHandler) {
+      this.register('webhook_delivery', this.handleWebhookDelivery.bind(this));
+    }
   }
 
   onModuleInit(): void {
@@ -65,6 +72,12 @@ export class OutboxFanOutRegistry implements OnModuleInit {
     const entityGraphHandlers = this.entityGraphService ? 2 : 0;
     const codeCommitHandlers = (this.codeCommitHandler || this.astIndexService) ? 1 : 0;
     this.logger.log(`Registered ${DEFAULT_HANDLERS.length + extractionHandlers + entityGraphHandlers + codeCommitHandlers} handlers`);
+  }
+
+  private async handleWebhookDelivery(payload: unknown): Promise<void> {
+    if (!this.webhookDeliveryHandler) return;
+    const p = payload as { webhookId: string; event: string; payload: unknown };
+    await this.webhookDeliveryHandler.handle(p);
   }
 
   private async handleCodeCommit(payload: unknown): Promise<void> {

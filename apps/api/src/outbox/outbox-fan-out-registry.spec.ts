@@ -1,4 +1,6 @@
 import { OutboxFanOutRegistry } from './outbox-fan-out-registry';
+import { WebhookDeliveryHandler } from '../webhook/webhook-delivery.handler';
+import { WebhookDeliveryPayload } from '../webhook/webhook-delivery.handler';
 
 /**
  * OutboxFanOutRegistry Tests
@@ -15,6 +17,11 @@ import { OutboxFanOutRegistry } from './outbox-fan-out-registry';
  * AC44: document_indexed payload has sourceId, content, metadata fields
  * AC45: graphify_import payload has projectId, nodeCount, linkCount fields
  * AC25: If dispatch() throws, markFailed() is called (not immediate dead-letter)
+ *
+ * Story: Register webhook delivery in OutboxModule fan-out
+ * AC1: dispatch('webhook_delivery', payload) -> WebhookDeliveryHandler.handle(payload) called exactly once
+ * AC2: getHandlers('webhook_delivery') returns array of length 1 when handler is provided
+ * AC3: getHandlers('webhook_delivery') returns empty array when handler is undefined
  */
 
 describe('OutboxFanOutRegistry', () => {
@@ -203,6 +210,45 @@ describe('OutboxFanOutRegistry', () => {
       expect(result).toBeUndefined();
       expect(handler).toHaveBeenCalledTimes(1);
       expect(registry.consumeLastDispatchFailureCount()).toBe(1);
+    });
+  });
+
+  describe('webhook_delivery fan-out', () => {
+    it('AC1: dispatch({ eventType: "webhook_delivery", payload }) calls WebhookDeliveryHandler.handle exactly once with the payload', async () => {
+      const webhookDeliveryHandler = { handle: jest.fn().mockResolvedValue(undefined) } as unknown as jest.Mocked<WebhookDeliveryHandler>;
+      registry = new OutboxFanOutRegistry(undefined, undefined, undefined, undefined, undefined, webhookDeliveryHandler);
+
+      const payload: WebhookDeliveryPayload = {
+        webhookId: 'w1',
+        event: 'STATUS_CHANGE',
+        payload: {},
+      };
+
+      await registry.dispatch({ eventType: 'webhook_delivery', payload });
+
+      expect(webhookDeliveryHandler.handle).toHaveBeenCalledTimes(1);
+      expect(webhookDeliveryHandler.handle).toHaveBeenCalledWith({
+        webhookId: 'w1',
+        event: 'STATUS_CHANGE',
+        payload: {},
+      });
+    });
+
+    it('AC2: when constructed with a defined webhookDeliveryHandler, getHandlers("webhook_delivery") returns an array of length 1', () => {
+      const webhookDeliveryHandler = { handle: jest.fn().mockResolvedValue(undefined) } as unknown as jest.Mocked<WebhookDeliveryHandler>;
+      registry = new OutboxFanOutRegistry(undefined, undefined, undefined, undefined, undefined, webhookDeliveryHandler);
+
+      const handlers = registry.getHandlers('webhook_delivery');
+
+      expect(handlers).toHaveLength(1);
+    });
+
+    it('AC3: when constructed with webhookDeliveryHandler left undefined, getHandlers("webhook_delivery") returns an empty array', () => {
+      registry = new OutboxFanOutRegistry();
+
+      const handlers = registry.getHandlers('webhook_delivery');
+
+      expect(handlers).toHaveLength(0);
     });
   });
 });

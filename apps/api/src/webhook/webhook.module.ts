@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { WebhookController } from './webhook.controller';
 import { WebhookService } from './webhook.service';
@@ -9,7 +9,9 @@ import { WEBHOOK_REPOSITORY } from './domain/webhook.domain';
 import { OutboxModule } from '../outbox/outbox.module';
 
 @Module({
-  imports: [PrismaModule, OutboxModule],
+  // OutboxModule imports WebhookModule via forwardRef to resolve WebhookDeliveryHandler
+  // for fan-out; mirror the edge with forwardRef here to break the cycle.
+  imports: [PrismaModule, forwardRef(() => OutboxModule)],
   controllers: [WebhookController],
   providers: [
     PrismaWebhookRepository,
