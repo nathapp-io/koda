@@ -26,6 +26,7 @@ export class WebhookDeliveryHandler {
       throw new Error(`Webhook payload serialization failed: ${err instanceof Error ? err.message : String(err)}`);
     }
     const sig = crypto.createHmac('sha256', webhook.secret).update(body).digest('hex');
+    const deliveryId = crypto.createHash('sha256').update(`${input.webhookId}:${input.event}:${body}`).digest('hex');
 
     const response = await fetch(webhook.url, {
       method: 'POST',
@@ -33,6 +34,7 @@ export class WebhookDeliveryHandler {
         'Content-Type': 'application/json',
         'X-Koda-Signature': `sha256=${sig}`,
         'X-Koda-Event': input.event,
+        'X-Koda-Delivery-Id': deliveryId,
       },
       body,
       signal: AbortSignal.timeout(5000),
