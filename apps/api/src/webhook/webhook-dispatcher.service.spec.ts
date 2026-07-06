@@ -171,6 +171,20 @@ describe('WebhookDispatcherService', () => {
     });
   });
 
+  describe('dispatch with zero active webhooks', () => {
+    it('resolves and does not call OutboxService.enqueue when findActiveByProject returns an empty array', async () => {
+      const projectId = 'project-123';
+      mockWebhookRepo.findActiveByProject.mockResolvedValue([]);
+
+      await expect(
+        service.dispatch(projectId, 'STATUS_CHANGE', { hello: 'world' }),
+      ).resolves.toBeUndefined();
+
+      expect(mockOutboxService.enqueue).not.toHaveBeenCalled();
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
   describe('AC5: rejection propagation when OutboxService.enqueue rejects', () => {
     it('rejects the dispatch promise when enqueue rejects for a matching webhook', async () => {
       const projectId = 'project-123';
