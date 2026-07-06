@@ -17,6 +17,10 @@ export class KodaJwtRefreshStrategyProvider extends JwtRefreshStrategyProvider {
     @Inject(JWT_OPTIONS) jwtOptions: { refreshJwtOptions?: JwtOptions; jwtOptions: JwtOptions },
     private readonly authRepo: PrismaAuthRepository,
   ) {
+    // Simplified version of the library's private resolveJwtRefreshOption: it also falls back
+    // to jwtOptions when refreshJwtOptions has no secret/key, and inherits isBase64AsymmetricKey.
+    // Our config always sets an explicit refreshJwtOptions.secret and never sets
+    // isBase64AsymmetricKey, so those extra fallbacks are moot here.
     super(jwtOptions.refreshJwtOptions ?? jwtOptions.jwtOptions);
   }
 
@@ -34,7 +38,9 @@ export class KodaJwtRefreshStrategyProvider extends JwtRefreshStrategyProvider {
       blacklisted: false,
       revoked,
       hashToken: refreshToken,
-      authorities: (payload.authorities ?? []).filter((a): a is string => typeof a === 'string'),
+      // Matches the library's own DefaultJwtRefreshStrategyProvider: authorities are passed
+      // through as-is, not narrowed to strings, since IPrincipal allows object-shaped entries too.
+      authorities: (payload.authorities ?? []) as IPrincipal['authorities'],
     };
     return principal as unknown as T;
   }
