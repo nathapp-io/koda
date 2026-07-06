@@ -16,22 +16,26 @@ jest.mock('conf', () => jest.fn(() => mockStore));
 jest.mock('../generated', () => ({
   authControllerMe: jest.fn(),
   authControllerRegister: jest.fn(),
+  authControllerLogout: jest.fn(),
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 jest.mock('../generated/core/OpenAPI', () => ({ OpenAPI: { BASE: '', TOKEN: '' } }));
 
 jest.mock('../config', () => ({
   resolveContext: jest.fn(),
+  clearApiKey: jest.fn(),
 }));
 
 import { Command } from 'commander';
 import { authCommand } from './auth';
-import { authControllerMe, authControllerRegister } from '../generated';
-import { resolveContext } from '../config';
+import { authControllerMe, authControllerRegister, authControllerLogout } from '../generated';
+import { resolveContext, clearApiKey } from '../config';
 
 const mockResolveContext = resolveContext as jest.Mock;
 const mockMe = authControllerMe as jest.Mock;
 const mockRegister = authControllerRegister as jest.Mock;
+const mockLogout = authControllerLogout as jest.Mock;
+const mockClearApiKey = clearApiKey as jest.Mock;
 
 const CTX = { apiKey: 'sk-test', apiUrl: 'http://localhost:3100/api', projectSlug: 'my-proj' };
 
@@ -113,6 +117,35 @@ describe('authCommand', () => {
       expect(mockRegister).toHaveBeenCalledWith(expect.objectContaining({
         requestBody: expect.objectContaining({ name: 'Bob' }),
       }));
+    });
+  });
+
+  describe('logout', () => {
+    it('revokes tokens and clears local credentials', async () => {
+      mockLogout.mockResolvedValue({ ret: 0, data: {} });
+
+      await program.parseAsync(['node', 'koda', 'auth', 'logout']);
+
+      expect(mockLogout).toHaveBeenCalled();
+      expect(mockClearApiKey).toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('outputs JSON when --json is set', async () => {
+      mockLogout.mockResolvedValue({ ret: 0, data: {} });
+
+      await program.parseAsync(['node', 'koda', 'auth', 'logout', '--json']);
+
+      expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ success: true }, null, 2));
+    });
+
+    it('exits non-zero on API error and does not clear local credentials', async () => {
+      mockLogout.mockRejectedValue(Object.assign(new Error('Unauthorized'), { status: 401 }));
+
+      await program.parseAsync(['node', 'koda', 'auth', 'logout']);
+
+      expect(mockClearApiKey).not.toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(expect.any(Number));
     });
   });
 });

@@ -1,17 +1,20 @@
 import { Injectable } from '@nestjs/common';
 import { JwtStrategyProvider, JwtRefreshStrategyProvider } from '@nathapp/nestjs-auth';
 import { AuthException } from '@nathapp/nestjs-common';
+import { CacheManager } from '@nathapp/nestjs-cache';
 import * as bcrypt from 'bcrypt';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import type { IPrincipal } from './types';
 import { UserResponseDto } from './dto/auth-response.dto';
 import { PrismaAuthRepository } from './prisma-auth.repository';
+import { userTokenVersionCacheTag } from './token-version.cache';
 
 export interface JwtPayload {
   sub: string;
   email: string;
   role: string;
+  tokenVersion: number;
 }
 
 @Injectable()
@@ -20,6 +23,7 @@ export class AuthService {
     private authRepo: PrismaAuthRepository,
     private jwtStrategyProvider: JwtStrategyProvider,
     private jwtRefreshStrategyProvider: JwtRefreshStrategyProvider,
+    private cache: CacheManager,
   ) {}
 
   async register(registerDto: RegisterDto) {
@@ -38,8 +42,8 @@ export class AuthService {
       ...(role ? { role } : {}),
     });
 
-    const accessToken = this.generateAccessToken(user.id, user.email, user.role);
-    const refreshToken = this.generateRefreshToken(user.id);
+    const accessToken = this.generateAccessToken(user.id, user.email, user.role, user.tokenVersion);
+    const refreshToken = this.generateRefreshToken(user.id, user.tokenVersion);
 
     return {
       accessToken,
@@ -62,8 +66,8 @@ export class AuthService {
       throw new AuthException({}, 'auth');
     }
 
-    const accessToken = this.generateAccessToken(user.id, user.email, user.role);
-    const refreshToken = this.generateRefreshToken(user.id);
+    const accessToken = this.generateAccessToken(user.id, user.email, user.role, user.tokenVersion);
+    const refreshToken = this.generateRefreshToken(user.id, user.tokenVersion);
 
     return {
       accessToken,
@@ -80,8 +84,8 @@ export class AuthService {
       throw new AuthException({}, 'auth');
     }
 
-    const accessToken = this.generateAccessToken(user.id, user.email, user.role);
-    const refreshToken = this.generateRefreshToken(user.id);
+    const accessToken = this.generateAccessToken(user.id, user.email, user.role, user.tokenVersion);
+    const refreshToken = this.generateRefreshToken(user.id, user.tokenVersion);
 
     return {
       accessToken,
@@ -97,12 +101,17 @@ export class AuthService {
     return user || null;
   }
 
-  generateAccessToken(userId: string, email: string, role: string): string {
-    const payload: JwtPayload = { sub: userId, email, role };
+  async logout(userId: string): Promise<void> {
+    await this.authRepo.bumpTokenVersion(userId);
+    await this.cache.invalidate(userTokenVersionCacheTag(userId), { mode: 'tag' });
+  }
+
+  generateAccessToken(userId: string, email: string, role: string, tokenVersion: number): string {
+    const payload: JwtPayload = { sub: userId, email, role, tokenVersion };
     return this.jwtStrategyProvider.sign(payload);
   }
 
-  generateRefreshToken(userId: string): string {
-    return this.jwtRefreshStrategyProvider.sign({ sub: userId });
+  generateRefreshToken(userId: string, tokenVersion: number): string {
+    return this.jwtRefreshStrategyProvider.sign({ sub: userId, tokenVersion });
   }
 }

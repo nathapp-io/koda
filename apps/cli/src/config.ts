@@ -167,6 +167,10 @@ export function maskApiKey(apiKey: string): string {
   return `***${visible}`;
 }
 
+export function clearApiKey(): void {
+  store.delete('apiKey');
+}
+
 export function setProfile(name: string, profile: Profile): void {
   const profiles = (store.get('profiles') as Record<string, Profile>) || {};
   store.set('profiles', { ...profiles, [name]: profile });

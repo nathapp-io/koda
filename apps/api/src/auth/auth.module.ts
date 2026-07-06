@@ -1,23 +1,23 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthModule as NathappAuthModule, JwtStrategy, JwtRefreshStrategy } from '@nathapp/nestjs-auth';
-import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtAuthProvider } from './jwt-auth.provider';
+import { KodaJwtRefreshStrategyProvider } from './koda-jwt-refresh-strategy.provider';
 import { CombinedAuthGuard } from './guards/combined-auth.guard';
 import { AgentAuthProvider } from './agent-auth.provider';
 import { KodaCaslAbilityFactory } from './casl/koda-casl-ability.factory';
-import { PrismaAuthRepository } from './prisma-auth.repository';
-import { AUTH_REPOSITORY } from './domain/auth.domain';
+import { AuthRepositoryModule } from './auth-repository.module';
 
 @Module({
   imports: [
-    PrismaModule,
+    AuthRepositoryModule,
     NathappAuthModule.forRootAsync({
-      imports: [ConfigModule],
+      imports: [ConfigModule, AuthRepositoryModule],
       inject: [ConfigService],
       authProvider: { useClass: JwtAuthProvider },
+      refreshStrategyProvider: { useClass: KodaJwtRefreshStrategyProvider },
       caslAbilityFactory: KodaCaslAbilityFactory,
       useFactory: (config: ConfigService) => {
         const authConfig = config.get<{
@@ -44,10 +44,9 @@ import { AUTH_REPOSITORY } from './domain/auth.domain';
     }),
   ],
   providers: [
-    PrismaAuthRepository,
-    { provide: AUTH_REPOSITORY, useExisting: PrismaAuthRepository },
     AuthService,
     JwtAuthProvider,
+    KodaJwtRefreshStrategyProvider,
     JwtStrategy,
     JwtRefreshStrategy,
     AgentAuthProvider,

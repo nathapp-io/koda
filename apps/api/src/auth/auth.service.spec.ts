@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtStrategyProvider, JwtRefreshStrategyProvider } from '@nathapp/nestjs-auth';
+import { CacheManager } from '@nathapp/nestjs-cache';
 import { AuthService } from './auth.service';
 import { PrismaAuthRepository } from './prisma-auth.repository';
 import { ConfigService } from '@nestjs/config';
@@ -16,6 +17,7 @@ describe('AuthService', () => {
     name: 'Test User',
     passwordHash: 'hashed-password',
     role: 'MEMBER',
+    tokenVersion: 0,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -25,6 +27,7 @@ describe('AuthService', () => {
     createUser: jest.fn(),
     findUserByEmail: jest.fn(),
     findUserById: jest.fn(),
+    bumpTokenVersion: jest.fn(),
   };
 
   const mockConfigService = {
@@ -39,6 +42,10 @@ describe('AuthService', () => {
     sign: jest.fn(),
   };
 
+  const mockCacheManager = {
+    invalidate: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -47,6 +54,7 @@ describe('AuthService', () => {
         { provide: ConfigService, useValue: mockConfigService },
         { provide: JwtStrategyProvider, useValue: mockJwtStrategyProvider },
         { provide: JwtRefreshStrategyProvider, useValue: mockJwtRefreshStrategyProvider },
+        { provide: CacheManager, useValue: mockCacheManager },
       ],
     }).compile();
 
@@ -179,6 +187,7 @@ describe('AuthService', () => {
         sub: mockUser.id,
         email: mockUser.email,
         role: mockUser.role,
+        tokenVersion: mockUser.tokenVersion,
       });
 
       expect(result).toEqual(mockUser);
@@ -192,6 +201,7 @@ describe('AuthService', () => {
         sub: 'nonexistent-id',
         email: 'nonexistent@example.com',
         role: 'MEMBER',
+        tokenVersion: 0,
       });
 
       expect(result).toBeNull();
@@ -200,33 +210,47 @@ describe('AuthService', () => {
 
   describe('JWT token generation', () => {
     it('should generate access token with correct payload', () => {
-      const token = service.generateAccessToken(mockUser.id, mockUser.email, mockUser.role);
+      const token = service.generateAccessToken(mockUser.id, mockUser.email, mockUser.role, mockUser.tokenVersion);
 
       expect(token).toBe('mock-token');
       expect(mockJwtStrategyProvider.sign).toHaveBeenCalledWith({
         sub: mockUser.id,
         email: mockUser.email,
         role: mockUser.role,
+        tokenVersion: mockUser.tokenVersion,
       });
     });
 
     it('should generate refresh token', () => {
-      const token = service.generateRefreshToken(mockUser.id);
+      const token = service.generateRefreshToken(mockUser.id, mockUser.tokenVersion);
 
       expect(token).toBe('mock-token');
       expect(mockJwtRefreshStrategyProvider.sign).toHaveBeenCalledWith({
         sub: mockUser.id,
+        tokenVersion: mockUser.tokenVersion,
       });
     });
 
-    it('should include sub, email, and role in JWT payload', () => {
-      const token = service.generateAccessToken(mockUser.id, mockUser.email, 'ADMIN');
+    it('should include sub, email, role, and tokenVersion in JWT payload', () => {
+      const token = service.generateAccessToken(mockUser.id, mockUser.email, 'ADMIN', 2);
 
       expect(token).toBe('mock-token');
       const callArgs = (mockJwtStrategyProvider.sign as jest.Mock).mock.calls[0][0];
       expect(callArgs.sub).toBe(mockUser.id);
       expect(callArgs.email).toBe(mockUser.email);
       expect(callArgs.role).toBe('ADMIN');
+      expect(callArgs.tokenVersion).toBe(2);
+    });
+  });
+
+  describe('logout', () => {
+    it('should bump the token version and invalidate the cached tokenVersion', async () => {
+      mockAuthRepository.bumpTokenVersion.mockResolvedValue(1);
+
+      await service.logout(mockUser.id);
+
+      expect(authRepo.bumpTokenVersion).toHaveBeenCalledWith(mockUser.id);
+      expect(mockCacheManager.invalidate).toHaveBeenCalledWith(`USER:${mockUser.id}`, { mode: 'tag' });
     });
   });
 });

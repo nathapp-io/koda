@@ -131,6 +131,29 @@
         ]
       }
     },
+    "/api/auth/logout": {
+      "post": {
+        "operationId": "AuthController_logout",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Tokens revoked"
+          },
+          "401": {
+            "description": "Missing or invalid token"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Revoke all outstanding access and refresh tokens for the current user",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/agents": {
       "post": {
         "operationId": "AgentsController_generateApiKey",
@@ -996,288 +1019,6 @@
         ]
       }
     },
-    "/api/code-intel/index": {
-      "post": {
-        "operationId": "CodeIntelController_indexCommit",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IndexCommitDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Indexing completed"
-          },
-          "403": {
-            "description": "Forbidden"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Index a commit for AST symbol extraction",
-        "tags": [
-          "code-intel"
-        ]
-      }
-    },
-    "/api/code-intel/symbols/{symbolId}": {
-      "get": {
-        "operationId": "CodeIntelController_getSymbol",
-        "parameters": [
-          {
-            "name": "symbolId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "projectSlug",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Symbol data"
-          },
-          "403": {
-            "description": "Forbidden"
-          },
-          "404": {
-            "description": "Symbol not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Get a symbol by ID",
-        "tags": [
-          "code-intel"
-        ]
-      }
-    },
-    "/api/code-intel/symbols/{symbolId}/callers": {
-      "get": {
-        "operationId": "CodeIntelController_getCallers",
-        "parameters": [
-          {
-            "name": "symbolId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "projectSlug",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "List of caller symbols"
-          },
-          "403": {
-            "description": "Forbidden"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Get callers of a symbol",
-        "tags": [
-          "code-intel"
-        ]
-      }
-    },
-    "/api/code-intel/symbols/{symbolId}/callees": {
-      "get": {
-        "operationId": "CodeIntelController_getCallees",
-        "parameters": [
-          {
-            "name": "symbolId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "projectSlug",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "List of callee symbols"
-          },
-          "403": {
-            "description": "Forbidden"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Get callees of a symbol",
-        "tags": [
-          "code-intel"
-        ]
-      }
-    },
-    "/api/context/{slug}": {
-      "get": {
-        "operationId": "ContextController_getContext",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Project context retrieved"
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Forbidden"
-          },
-          "404": {
-            "description": "Project not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Get project context for agent use",
-        "tags": [
-          "context"
-        ]
-      }
-    },
-    "/api/context/{slug}/query": {
-      "post": {
-        "operationId": "ContextController_queryContext",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GetContextQueryDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Project context retrieved"
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Forbidden"
-          },
-          "404": {
-            "description": "Project not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Query project context with request body",
-        "tags": [
-          "context"
-        ]
-      }
-    },
-    "/api/admin/slos": {
-      "get": {
-        "operationId": "SloDashboardController_getSloMetrics",
-        "parameters": [
-          {
-            "name": "from",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "to",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "SLO metrics computed"
-          },
-          "403": {
-            "description": "Forbidden - requires admin role"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Get SLO dashboard metrics for a time window",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
     "/api/projects": {
       "post": {
         "operationId": "ProjectsController_create",
@@ -1701,6 +1442,288 @@
         "summary": "Update an agent status within a project context (admin or project member)",
         "tags": [
           "projects"
+        ]
+      }
+    },
+    "/api/code-intel/index": {
+      "post": {
+        "operationId": "CodeIntelController_indexCommit",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IndexCommitDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Indexing completed"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Index a commit for AST symbol extraction",
+        "tags": [
+          "code-intel"
+        ]
+      }
+    },
+    "/api/code-intel/symbols/{symbolId}": {
+      "get": {
+        "operationId": "CodeIntelController_getSymbol",
+        "parameters": [
+          {
+            "name": "symbolId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectSlug",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Symbol data"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Symbol not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a symbol by ID",
+        "tags": [
+          "code-intel"
+        ]
+      }
+    },
+    "/api/code-intel/symbols/{symbolId}/callers": {
+      "get": {
+        "operationId": "CodeIntelController_getCallers",
+        "parameters": [
+          {
+            "name": "symbolId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectSlug",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of caller symbols"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get callers of a symbol",
+        "tags": [
+          "code-intel"
+        ]
+      }
+    },
+    "/api/code-intel/symbols/{symbolId}/callees": {
+      "get": {
+        "operationId": "CodeIntelController_getCallees",
+        "parameters": [
+          {
+            "name": "symbolId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectSlug",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of callee symbols"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get callees of a symbol",
+        "tags": [
+          "code-intel"
+        ]
+      }
+    },
+    "/api/context/{slug}": {
+      "get": {
+        "operationId": "ContextController_getContext",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project context retrieved"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get project context for agent use",
+        "tags": [
+          "context"
+        ]
+      }
+    },
+    "/api/context/{slug}/query": {
+      "post": {
+        "operationId": "ContextController_queryContext",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetContextQueryDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Project context retrieved"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Query project context with request body",
+        "tags": [
+          "context"
+        ]
+      }
+    },
+    "/api/admin/slos": {
+      "get": {
+        "operationId": "SloDashboardController_getSloMetrics",
+        "parameters": [
+          {
+            "name": "from",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SLO metrics computed"
+          },
+          "403": {
+            "description": "Forbidden - requires admin role"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get SLO dashboard metrics for a time window",
+        "tags": [
+          "admin"
         ]
       }
     },
@@ -3925,51 +3948,6 @@
           "nodes"
         ]
       },
-      "SourceFileDto": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string"
-          },
-          "content": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "path",
-          "content"
-        ]
-      },
-      "IndexCommitDto": {
-        "type": "object",
-        "properties": {
-          "repoId": {
-            "type": "string"
-          },
-          "commitHash": {
-            "type": "string"
-          },
-          "projectSlug": {
-            "type": "string"
-          },
-          "files": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SourceFileDto"
-            }
-          }
-        },
-        "required": [
-          "repoId",
-          "commitHash",
-          "projectSlug",
-          "files"
-        ]
-      },
-      "GetContextQueryDto": {
-        "type": "object",
-        "properties": {}
-      },
       "CreateProjectDto": {
         "type": "object",
         "properties": {
@@ -4170,6 +4148,51 @@
           "total",
           "items"
         ]
+      },
+      "SourceFileDto": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ]
+      },
+      "IndexCommitDto": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string"
+          },
+          "commitHash": {
+            "type": "string"
+          },
+          "projectSlug": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SourceFileDto"
+            }
+          }
+        },
+        "required": [
+          "repoId",
+          "commitHash",
+          "projectSlug",
+          "files"
+        ]
+      },
+      "GetContextQueryDto": {
+        "type": "object",
+        "properties": {}
       },
       "CreateTicketDto": {
         "type": "object",
