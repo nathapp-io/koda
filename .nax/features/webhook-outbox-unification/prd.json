@@ -1,0 +1,201 @@
+{
+  "project": "koda",
+  "feature": "webhook-outbox-unification",
+  "branchName": "feat/webhook-outbox-unification",
+  "createdAt": "2026-07-06T05:32:06Z",
+  "updatedAt": "2026-07-06T05:35:54.556Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add webhook delivery handler",
+      "description": "**Goal** — Create the handler that owns the actual signed HTTP delivery, looked up fresh by webhook id at delivery time.\n\n**Motivation** — `WebhookDispatcherService.dispatch()` (`apps/api/src/webhook/webhook-dispatcher.service.ts`) looks up matching active webhooks and calls `fetch()` directly, catching failures with a `.catch()` that only logs a warning.\n\n**Approach** — Create the handler that owns the actual signed HTTP delivery, looked up fresh by webhook id at delivery time.\n\n**Scope** — In: signed webhook POST delivery, live webhook re-fetch by id, no-op behavior for deleted/inactive webhooks, timeout/error propagation for outbox retries. Out: webhook CRUD changes, Prisma model changes, receiver-side idempotency/dedup tracking, admin UI changes.\n\n**Interface**\n```typescript\nWebhookDeliveryHandler.handle(payload: { webhookId: string; event: string; payload: unknown }): Promise<void>\n```\n\n**Design Notes**\n```text\nDelivery re-fetches live webhook config by id, rather than snapshotting `url`/`secret` into the outbox payload. The handler looks up the `Webhook` row at delivery time. This avoids duplicating the secret into the outbox `payload` column, and correctly no-ops if the webhook was deleted/deactivated/rotated between enqueue and a later retry (retries can be up to ~16s+ later).\n\nUnit tests for `WebhookDeliveryHandler` use direct instantiation (`new WebhookDeliveryHandler(mockRepo)`), not `Test.createTestingModule` — it has no Nest lifecycle hook (no `OnModuleInit`), matching the existing style in `outbox-fan-out-registry.spec.ts`.\n```",
+      "acceptanceCriteria": [
+        "Given `PrismaWebhookRepository.findById(webhookId)` resolves `{ id: 'w1', url: 'https://example.com/hook', secret: 's3cret', active: true }`, when `WebhookDeliveryHandler.handle({ webhookId: 'w1', event: 'STATUS_CHANGE', payload: { a: 1 } })` is called, then the global `fetch` is called exactly once with `'https://example.com/hook'` as the first argument.",
+        "When `WebhookDeliveryHandler.handle()` sends the request, then the `fetch` call's second argument has `method: 'POST'` and `headers['X-Koda-Event']` equal to `'STATUS_CHANGE'`.",
+        "When `WebhookDeliveryHandler.handle()` sends the request, then the `fetch` call's second argument has `headers['X-Koda-Signature']` equal to `` `sha256=${hex}` `` where `hex` is the HMAC-SHA256 hex digest of `JSON.stringify({ a: 1 })` keyed by `'s3cret'`, computed independently in the test via Node's `crypto` module for comparison.",
+        "When `WebhookDeliveryHandler.handle()` sends the request, then the `fetch` call's second argument has `signal` that is an instance of `AbortSignal`.",
+        "When `fetch` resolves with `{ ok: true }`, then `WebhookDeliveryHandler.handle()` resolves without throwing.",
+        "When `fetch` resolves with `{ ok: false, status: 503 }`, then `WebhookDeliveryHandler.handle()` rejects with an `Error` whose `message` includes `'503'`.",
+        "When `fetch` rejects with `new Error('network down')`, then `WebhookDeliveryHandler.handle()` rejects with that same error.",
+        "When `PrismaWebhookRepository.findById(webhookId)` resolves `null`, then `WebhookDeliveryHandler.handle()` resolves without throwing and `fetch` is not called.",
+        "When `PrismaWebhookRepository.findById(webhookId)` resolves `{ id: 'w1', url: 'https://example.com/hook', secret: 's3cret', active: false }`, then `WebhookDeliveryHandler.handle()` resolves without throwing and `fetch` is not called."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "webhook",
+        "outbox"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "New runtime class plus unit tests across repository lookup, signed HTTP delivery, and failure propagation; security override applies because the story implements HMAC signing.",
+        "agent": "opencode",
+        "agentProfileId": "opencode-structural",
+        "profileModelTier": "fast",
+        "initialAgent": "opencode",
+        "initialProfileId": "opencode-structural",
+        "initialModelTier": "fast"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/webhook/prisma-webhook.repository.ts",
+        "apps/api/src/webhook/domain/webhook.domain.ts",
+        "apps/api/src/webhook/webhook-dispatcher.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/webhook/webhook-delivery.handler.ts",
+        "apps/api/src/webhook/webhook-delivery.handler.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When `WebhookDeliveryHandler.handle()` sends the request, then the `fetch` call body equals `JSON.stringify(payload)` and `headers['Content-Type']` equals `'application/json'`.",
+        "When the webhook secret changes after enqueue but before delivery, then `WebhookDeliveryHandler.handle()` signs the request with the latest persisted secret returned by `findById()`."
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "Wire WebhookModule for outbox-backed delivery",
+      "description": "**Goal** — Update `WebhookModule` so it provides and exports the new delivery handler and can inject `OutboxService` into `WebhookDispatcherService`.\n\n**Motivation** — `WebhookDispatcherService.dispatch()` (`apps/api/src/webhook/webhook-dispatcher.service.ts`) looks up matching active webhooks and calls `fetch()` directly, catching failures with a `.catch()` that only logs a warning.\n\n**Approach** — `WebhookModule` provides and exports `WebhookDeliveryHandler`, and imports `OutboxModule` so `WebhookDispatcherService` (US-004) can later inject `OutboxService`.\n\n**Scope** — In: Nest module imports/providers/exports for webhook delivery and unit-level DI smoke coverage without a database. Out: behavior changes in outbox fan-out registration, dispatcher enqueue logic, webhook CRUD, Prisma model changes.\n\n**Interface**\n```typescript\nWebhookDeliveryHandler.handle(payload: { webhookId: string; event: string; payload: unknown }): Promise<void>\n```",
+      "acceptanceCriteria": [
+        "When a Nest testing module is constructed with `WebhookDeliveryHandler` as a provider and a mocked `PrismaWebhookRepository` provider (`useValue`), then compilation succeeds and `module.get(WebhookDeliveryHandler)` returns a defined instance.",
+        "When the `WebhookDeliveryHandler` DI smoke test provides only a mocked `PrismaWebhookRepository` and no database-backed Prisma provider, then resolving `module.get(WebhookDeliveryHandler)` does not throw."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "webhook",
+        "nest-di"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Small module-wiring change plus a focused DI smoke test across a few files; no new runtime abstraction beyond provider/export registration.",
+        "agentProfileId": "opencode-medium",
+        "agent": "opencode",
+        "profileModelTier": "balanced",
+        "initialAgent": "opencode",
+        "initialProfileId": "opencode-medium",
+        "initialModelTier": "balanced"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/webhook/webhook.module.ts",
+        "apps/api/src/webhook/webhook-delivery.handler.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/webhook/webhook.module.spec.ts"
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "Register webhook delivery in OutboxModule fan-out",
+      "description": "**Goal** — Wire the outbox module and fan-out registry so `webhook_delivery` events dispatch into `WebhookDeliveryHandler`.\n\n**Motivation** — The outbox module already has claim-based concurrency, exponential backoff (`nextAttemptAt`, shipped under defect #4), and dead-letter handling — but webhook delivery doesn't use it, so a webhook receiver that is briefly down loses events permanently.\n\n**Approach** — `OutboxModule` imports `forwardRef(() => WebhookModule)`; `OutboxFanOutRegistry` gains an optional `webhookDeliveryHandler` constructor param and registers it for the `webhook_delivery` event type, following the same pattern already used for `codeCommitHandler`.\n\n**Scope** — In: module cycle wiring, optional constructor injection, `webhook_delivery` registration, fan-out seam tests, outbox DI smoke test. Out: changing outbox retry logic, cron processing, webhook CRUD, inline dispatcher rewrite.\n\n**Interface**\n```typescript\nregister(eventType: string, handler: (payload: unknown) => void | Promise<void>): void\ndispatch(input: { eventType: string; payload: unknown }): Promise<void>\nWebhookDeliveryHandler.handle(payload: { webhookId: string; event: string; payload: unknown }): Promise<void>\n```\n\n**Design Notes**\n```text\nConstructor-based optional injection, following the existing convention in `OutboxFanOutRegistry` (`codeCommitHandler`, `astIndexService`, `entityGraphService` are all `@Optional()` constructor params registered internally in the constructor) rather than an external imperative `.register()` call from another module.\n```",
+      "acceptanceCriteria": [
+        "Given `OutboxFanOutRegistry` is constructed directly with a mock object `{ handle: jest.fn() }` as the `webhookDeliveryHandler` constructor argument, when `dispatch({ eventType: 'webhook_delivery', payload: { webhookId: 'w1', event: 'STATUS_CHANGE', payload: {} } })` is called, then the mock's `handle` is called exactly once with `{ webhookId: 'w1', event: 'STATUS_CHANGE', payload: {} }`.",
+        "When `OutboxFanOutRegistry` is constructed with a defined `webhookDeliveryHandler`, then `getHandlers('webhook_delivery')` returns an array of length 1.",
+        "When `OutboxFanOutRegistry` is constructed with `webhookDeliveryHandler` left `undefined`, then `getHandlers('webhook_delivery')` returns an empty array.",
+        "When a Nest testing module is constructed with `OutboxFanOutRegistry` as the sole provider and no other constructor arguments supplied, then compilation succeeds and `module.get(OutboxFanOutRegistry)` returns a defined instance."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "outbox",
+        "webhook",
+        "nest-di"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "This is a bounded multi-file Nest wiring change in one package: one module import cycle, one optional constructor dependency, and focused seam/module tests using existing outbox patterns.",
+        "agentProfileId": "opencode-medium",
+        "agent": "opencode",
+        "profileModelTier": "balanced",
+        "initialAgent": "opencode",
+        "initialProfileId": "opencode-medium",
+        "initialModelTier": "balanced"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/outbox/outbox.module.ts",
+        "apps/api/src/outbox/outbox-fan-out-registry.ts",
+        "apps/api/src/outbox/outbox-fan-out-registry.spec.ts",
+        "apps/api/src/webhook/webhook.module.ts",
+        "apps/api/src/webhook/webhook-delivery.handler.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/outbox/outbox.module.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "When `webhookDeliveryHandler.handle()` throws during `dispatch({ eventType: 'webhook_delivery', ... })`, then `OutboxFanOutRegistry.consumeLastDispatchFailureCount()` returns `1` after dispatch completes."
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "Rewrite webhook dispatcher to enqueue outbox events",
+      "description": "**Goal** — Replace inline webhook delivery in `WebhookDispatcherService.dispatch()` with concurrent per-webhook outbox enqueueing.\n\n**Motivation** — `WebhookDispatcherService.dispatch()` (`apps/api/src/webhook/webhook-dispatcher.service.ts`) looks up matching active webhooks and calls `fetch()` directly, catching failures with a `.catch()` that only logs a warning.\n\n**Approach** — `dispatch()` keeps its existing \"find active webhooks matching event\" filter but now enqueues one outbox event per matching webhook via `OutboxService.enqueue` (issued concurrently via `Promise.all`), instead of calling `fetch()` directly. The `sign()` method and direct `fetch` call are removed from this file (that logic now lives solely in `WebhookDeliveryHandler`, US-001).\n\n**Scope** — In: dispatcher dependency injection of `OutboxService`, event filtering, per-webhook outbox enqueue payloads, rejection propagation, removal of inline fetch/signing logic, and unit-level regression coverage proving delivery no longer happens inline. Out: changing the caller in `TicketTransitionsService`, webhook CRUD, outbox processing logic, public API contracts.\n\n**Interface**\n```typescript\nWebhookDispatcherService.dispatch(projectId: string, event: string, payload: object): Promise<void>\nOutboxService.enqueue(event: OutboxEventInput): Promise<OutboxEventData>\n```\n\n**Design Notes**\n```text\nOne outbox event per matching webhook, not one event per ticket action fanning out to N webhooks. Each webhook gets its own row, attempt count, and backoff/dead-letter lifecycle, so one flaky endpoint's retries don't block or re-trigger delivery to webhooks that already succeeded.\n\nEnqueue independent per-webhook outbox writes concurrently (`Promise.all`), not with sequential `await`s in a loop — per this repo's async-pattern convention (`.nax/rules/api-core.md`: \"Use `Promise.all([...])` for independent async calls\"). The enqueue calls have no data dependency on one another.\n\nUnit tests for `WebhookDispatcherService` use direct instantiation (`new WebhookDispatcherService(mockRepo, mockOutboxService)`), not `Test.createTestingModule` — it has no Nest lifecycle hook (no `OnModuleInit`), matching the existing style in `outbox-fan-out-registry.spec.ts`. This is a change from the existing `webhook-dispatcher.service.spec.ts`, which currently uses `Test.createTestingModule` even though the class has no lifecycle hook.\n```",
+      "acceptanceCriteria": [
+        "Given `findActiveByProject(projectId)` resolves one webhook `{ id: 'w1', events: JSON.stringify(['STATUS_CHANGE']), active: true }`, when `dispatch(projectId, 'STATUS_CHANGE', payload)` is called, then `OutboxService.enqueue` is called exactly once with an argument deep-equal to `{ projectId, eventType: 'webhook_delivery', eventId: expect.any(String), payload: { webhookId: 'w1', event: 'STATUS_CHANGE', payload } }`.",
+        "Given two active webhooks (`w1`, `w2`) both match the dispatched event, when `dispatch()` is called, then `OutboxService.enqueue` is called exactly twice, once per webhook id, and both calls are issued before either mocked enqueue promise resolves.",
+        "Given a webhook whose `events` array does not include the dispatched event, when `dispatch()` is called, then `OutboxService.enqueue` is not called for that webhook.",
+        "When `dispatch()` is called, then the global `fetch` function is never called.",
+        "When `OutboxService.enqueue` rejects for a matching webhook, then the promise returned by `dispatch()` rejects."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "webhook",
+        "outbox"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "Multi-file behavioral rewrite of one service and its unit tests, with concurrency and error-propagation requirements but no new public surface.",
+        "agentProfileId": "opencode-medium",
+        "agent": "opencode",
+        "profileModelTier": "balanced",
+        "initialAgent": "opencode",
+        "initialProfileId": "opencode-medium",
+        "initialModelTier": "balanced"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/webhook/webhook-dispatcher.service.ts",
+        "apps/api/src/webhook/webhook-dispatcher.service.spec.ts",
+        "apps/api/src/webhook/prisma-webhook.repository.ts",
+        "apps/api/src/outbox/outbox.service.ts",
+        "apps/api/src/tickets/state-machine/ticket-transitions.service.ts"
+      ],
+      "suggestedCriteria": [
+        "Given zero matching active webhooks, when `dispatch()` is called, then it resolves without calling `OutboxService.enqueue`."
+      ]
+    }
+  ],
+  "analysis": "This feature is an API-only behavioral change centered on moving outbound webhook delivery from inline fire-and-forget HTTP calls into the existing outbox pipeline. The current delivery path lives in apps/api/src/webhook/webhook-dispatcher.service.ts:6-50, where WebhookDispatcherService.dispatch() loads active webhooks, filters by event, and then calls a private dispatchToWebhook() that signs the payload and invokes global fetch() with AbortSignal.timeout(5000). Failures are swallowed inside a per-webhook .catch() that only logs a warning, so transient receiver outages lose events permanently. The sole production caller is TicketTransitionsService.dispatchStatusChangeWebhook() in apps/api/src/tickets/state-machine/ticket-transitions.service.ts:75-97, which already treats dispatch as fire-and-forget and attaches its own .catch(); the spec keeps that caller unchanged, so the migration path is internal and does not require controller, DTO, or client changes.\n\nThe target integration points already exist. PrismaWebhookRepository exposes findActiveByProject() and findById() in apps/api/src/webhook/prisma-webhook.repository.ts:78-88, which supports the design choice to re-fetch live webhook configuration at delivery time instead of snapshotting url/secret into outbox payloads. OutboxService.enqueue() is a thin pass-through in apps/api/src/outbox/outbox.service.ts:22-24, and OutboxService.processEvent() in apps/api/src/outbox/outbox.service.ts:64-76 already parses persisted payload JSON, dispatches through OutboxFanOutRegistry, consumes lastDispatchFailureCount, and throws when any handler failed, which is the retry trigger for markFailed()/dead-letter behavior. The retry and dead-letter lifecycle is already implemented in apps/api/src/outbox/outbox.service.ts:78-123 and apps/api/src/outbox/domain/outbox-event.domain.ts:16-26, including exponential backoff via OUTBOX_BACKOFF_MS at 1s/4s/16s.\n\nThe main code changes will touch apps/api/src/webhook/webhook-dispatcher.service.ts, apps/api/src/webhook/webhook.module.ts, apps/api/src/outbox/outbox.module.ts, and apps/api/src/outbox/outbox-fan-out-registry.ts, plus new handler and module-spec files. WebhookModule currently imports only PrismaModule and exports WebhookService and WebhookDispatcherService in apps/api/src/webhook/webhook.module.ts:1-18. OutboxModule currently imports PrismaModule, ScheduleModule, forwardRef(() => MemoryModule), EntityGraphModule, and forwardRef(() => CodeIntelModule), then provides/exports OutboxService and OutboxFanOutRegistry in apps/api/src/outbox/outbox.module.ts:1-29. Introducing WebhookModule <-> OutboxModule creates a new direct cycle, so both sides must use forwardRef consistently. That is the highest architectural risk: incorrect module wiring will surface as Nest DI resolution failures rather than runtime logic bugs.\n\nOutboxFanOutRegistry is the seam for delivery fan-out. Its constructor already follows the optional-injection pattern the spec requires: optional collaborators are accepted in the constructor, normalized to nullable fields, and registered immediately via this.register(...) in apps/api/src/outbox/outbox-fan-out-registry.ts:26-61. It also implements sequential dispatch with per-handler try/catch and tracks failure counts in dispatch()/consumeLastDispatchFailureCount() at apps/api/src/outbox/outbox-fan-out-registry.ts:216-238. Adding webhook_delivery should follow that existing constructor-registration pattern rather than an imperative external registration call. Because dispatch() catches handler errors and continues, a throwing WebhookDeliveryHandler will naturally integrate with current retry semantics: processEvent() will see a non-zero failure count and throw, which leads OutboxService.processPending() to markFailed(). The failure-handling table in the spec maps cleanly onto this path: deleted/inactive webhook resolves without throwing; non-2xx and network/timeout throw and get retried; after 3 failed attempts the existing markFailed() logic moves the event to dead_letter.\n\nExisting tests already cover both affected areas and reveal where the story work will land. Webhook dispatcher tests are in apps/api/src/webhook/webhook-dispatcher.service.spec.ts:1-129 and currently assert direct fetch behavior using Test.createTestingModule and a mocked global fetch. Those tests will need to be rewritten around direct instantiation and OutboxService.enqueue(), while adding a separate new unit suite for WebhookDeliveryHandler that owns the fetch/signature assertions. Outbox fan-out tests are in apps/api/src/outbox/outbox-fan-out-registry.spec.ts:1-183 and already instantiate the registry directly, making them the right place to add webhook_delivery handler-registration and dispatch seam coverage. Existing module-compilation patterns live in files like apps/api/src/code-intel/code-intel.module.spec.ts:1-63; however, this feature's module smoke tests can stay narrowly scoped to the providers named in the spec. There are currently no webhook.module.spec.ts or outbox.module.spec.ts files, so those are new outputs. Tests that indirectly depend on WebhookDispatcherService through TicketTransitionsService, especially apps/api/src/tickets/state-machine/ticket-transitions.service.spec.ts referenced by the graph trace, may need minor fixture updates if they assert old dispatcher behavior.\n\nBackward-compatibility risk is low at the API contract level because no controller routes, DTOs, Prisma schema, or generated clients change; the spec explicitly rules out openapi.json and CLI regeneration. Behavioral risk is moderate in three places: event payload shape must remain stable between dispatcher enqueue and delivery handler fetch; Promise.all concurrency in dispatch() must be real so one slow enqueue does not serialize others; and moving signing logic out of WebhookDispatcherService must not alter the HMAC/body/header contract the receiver expects. The migration path is code-only with no data migration: new webhook_delivery outbox rows will start being created after deployment, existing outbox admin/dead-letter endpoints will expose failures automatically, and any preexisting direct-dispatch callers continue calling the same service method. Done looks like: WebhookDispatcherService no longer touches fetch directly, each matching webhook gets its own outbox event, WebhookDeliveryHandler re-fetches webhook state by id and performs signed POST delivery with timeout, OutboxFanOutRegistry routes webhook_delivery into the handler, and failures participate in the existing retry/dead-letter flow.",
+  "routingProfile": "cross-agent-mm"
+}
