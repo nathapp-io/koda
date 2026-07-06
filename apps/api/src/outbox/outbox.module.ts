@@ -8,6 +8,7 @@ import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { MemoryModule } from '../memory/memory.module';
 import { EntityGraphModule } from '../entity-graph/entity-graph.module';
 import { CodeIntelModule } from '../code-intel/code-intel.module';
+import { WebhookModule } from '../webhook/webhook.module';
 import { PrismaOutboxRepository } from './prisma-outbox.repository';
 import { OUTBOX_REPOSITORY } from './domain/outbox-event.domain';
 
@@ -17,7 +18,16 @@ import { OUTBOX_REPOSITORY } from './domain/outbox-event.domain';
   // the reference resolves lazily instead of landing in the ESM temporal dead zone.
   // MemoryModule now imports ProjectsModule which imports RagModule which imports OutboxModule,
   // creating a circular chain; wrap with forwardRef to resolve lazily.
-  imports: [PrismaModule, ScheduleModule, forwardRef(() => MemoryModule), EntityGraphModule, forwardRef(() => CodeIntelModule)],
+  // WebhookModule imports OutboxModule; reverse the edge with forwardRef so
+  // OutboxFanOutRegistry can resolve WebhookDeliveryHandler via DI.
+  imports: [
+    PrismaModule,
+    ScheduleModule,
+    forwardRef(() => MemoryModule),
+    EntityGraphModule,
+    forwardRef(() => CodeIntelModule),
+    forwardRef(() => WebhookModule),
+  ],
   controllers: [AdminController],
   providers: [
     PrismaOutboxRepository,
