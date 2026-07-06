@@ -4,26 +4,29 @@
   "tests": {
     "allPassing": true,
     "passCount": 10,
-    "failCount": 0
+    "failCount": 0,
+    "file": "apps/api/src/webhook/webhook-delivery.handler.spec.ts"
   },
   "testModifications": {
-    "detected": false,
-    "files": [],
+    "detected": true,
+    "files": [
+      "apps/api/src/webhook/webhook-delivery.handler.spec.ts"
+    ],
     "legitimate": true,
-    "reasoning": "Test file was created by test-writer in commit b7fd89b6, implementation was added by implementer in commit a6942e8e. No test modifications by implementer detected."
+    "reasoning": "Commit c804b8e7 modified the test file to align mock structure with PrismaWebhookRepository interface. Changes: (1) import changed to import type, (2) mock upgraded from partial Pick<,'findById'> to full jest.Mocked<PrismaWebhookRepository> with all methods stubbed. These are infrastructure-only changes that improve mock fidelity without altering any assertions or test behavior. All 9 ACs remain fully tested."
   },
   "acceptanceCriteria": {
     "allMet": true,
     "criteria": [
-      { "criterion": "AC1: active webhook triggers fetch with url", "met": true },
+      { "criterion": "AC1: fetch called once with webhook.url", "met": true },
       { "criterion": "AC2: POST method and X-Koda-Event header", "met": true },
-      { "criterion": "AC3: X-Koda-Signature HMAC-SHA256", "met": true },
-      { "criterion": "AC4: AbortSignal passed to fetch", "met": true },
-      { "criterion": "AC5: fetch { ok: true } resolves without throwing", "met": true },
-      { "criterion": "AC6: fetch { ok: false, status: 503 } rejects with Error containing 503", "met": true },
+      { "criterion": "AC3: X-Koda-Signature = sha256=HMAC-SHA256(secret, body)", "met": true },
+      { "criterion": "AC4: signal is instance of AbortSignal", "met": true },
+      { "criterion": "AC5: fetch {ok: true} resolves without throwing", "met": true },
+      { "criterion": "AC6: fetch {ok: false, status: 503} rejects with Error containing '503'", "met": true },
       { "criterion": "AC7: fetch rejection propagates", "met": true },
-      { "criterion": "AC8: missing webhook -> no-op", "met": true },
-      { "criterion": "AC9: inactive webhook -> no-op", "met": true }
+      { "criterion": "AC8: findById null -> no-op, fetch not called", "met": true },
+      { "criterion": "AC9: findById {active: false} -> no-op, fetch not called", "met": true }
     ]
   },
   "quality": {
@@ -31,5 +34,5 @@
     "issues": []
   },
   "fixes": [],
-  "reasoning": "TDD handoff integrity verified. Tests were written first (commit b7fd89b6) and implementation followed (commit a6942e8e). All 10 story-scoped tests pass. No test modifications by implementer detected. Implementation correctly handles all 9 acceptance criteria: webhook lookup by id, HMAC-SHA256 signature, POST method, AbortSignal timeout, error propagation for non-ok responses, and no-op for null/inactive webhooks."
+  "reasoning": "Story-scoped tests (WebhookDeliveryHandler, 10 tests) all pass. One pre-existing unrelated failure in encryption.util.spec.ts exists in the broader suite but is outside story scope. Implementer made one commit modifying the test file (c804b8e7) to structurally align the mock with the PrismaWebhookRepository interface - this is a legitimate infrastructure fix that does not weaken any assertions. The implementation correctly handles: live webhook re-fetch by id, HMAC-SHA256 signing, POST with correct headers, AbortSignal timeout, error propagation, and no-op behavior for null/inactive webhooks."
 }
