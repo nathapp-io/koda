@@ -1,6 +1,6 @@
 import * as crypto from 'crypto';
 import { WebhookDeliveryHandler } from './webhook-delivery.handler';
-import { PrismaWebhookRepository } from './prisma-webhook.repository';
+import type { PrismaWebhookRepository } from './prisma-webhook.repository';
 import { WebhookDomain } from './domain/webhook.domain';
 
 /**
@@ -25,7 +25,15 @@ import { WebhookDomain } from './domain/webhook.domain';
  * matching the existing style in src/outbox/outbox-fan-out-registry.spec.ts.
  */
 
-type WebhookRepoShape = Pick<PrismaWebhookRepository, 'findById'>;
+function makeWebhookRepo(): jest.Mocked<PrismaWebhookRepository> {
+  return {
+    createWebhook: jest.fn(),
+    findByProject: jest.fn(),
+    findById: jest.fn(),
+    deleteWebhook: jest.fn(),
+    findProjectBySlug: jest.fn(),
+  } as unknown as jest.Mocked<PrismaWebhookRepository>;
+}
 
 function makeWebhook(overrides: Partial<WebhookDomain> = {}): WebhookDomain {
   return {
@@ -41,18 +49,14 @@ function makeWebhook(overrides: Partial<WebhookDomain> = {}): WebhookDomain {
 }
 
 describe('WebhookDeliveryHandler', () => {
-  let mockRepo: { findById: jest.Mock };
+  let webhookRepo: jest.Mocked<PrismaWebhookRepository>;
   let handler: WebhookDeliveryHandler;
   let mockFetch: jest.Mock;
   let originalFetch: typeof global.fetch | undefined;
 
   beforeEach(() => {
-    mockRepo = {
-      findById: jest.fn(),
-    };
-    handler = new WebhookDeliveryHandler(
-      mockRepo as unknown as WebhookRepoShape as PrismaWebhookRepository,
-    );
+    webhookRepo = makeWebhookRepo();
+    handler = new WebhookDeliveryHandler(webhookRepo);
 
     originalFetch = global.fetch;
     mockFetch = jest.fn();
@@ -69,7 +73,7 @@ describe('WebhookDeliveryHandler', () => {
 
   describe('AC1: active webhook triggers single fetch with webhook.url', () => {
     it('AC1: handle() calls global fetch exactly once with webhook.url as the first argument', async () => {
-      mockRepo.findById.mockResolvedValue(makeWebhook());
+      webhookRepo.findById.mockResolvedValue(makeWebhook());
       mockFetch.mockResolvedValue({ ok: true });
 
       await handler.handle({
@@ -85,7 +89,7 @@ describe('WebhookDeliveryHandler', () => {
 
   describe('AC2: POST method and X-Koda-Event header', () => {
     it('AC2: fetch second argument has method POST and headers["X-Koda-Event"] equal to event', async () => {
-      mockRepo.findById.mockResolvedValue(makeWebhook());
+      webhookRepo.findById.mockResolvedValue(makeWebhook());
       mockFetch.mockResolvedValue({ ok: true });
 
       await handler.handle({
@@ -102,7 +106,7 @@ describe('WebhookDeliveryHandler', () => {
 
   describe('AC3: X-Koda-Signature header is sha256=HMAC-SHA256(secret, body)', () => {
     it('AC3: X-Koda-Signature equals sha256=<hex> where hex is HMAC-SHA256 of JSON.stringify(payload) keyed by secret', async () => {
-      mockRepo.findById.mockResolvedValue(makeWebhook({ secret: 's3cret' }));
+      webhookRepo.findById.mockResolvedValue(makeWebhook({ secret: 's3cret' }));
       mockFetch.mockResolvedValue({ ok: true });
 
       const payload = { a: 1 };
@@ -124,7 +128,7 @@ describe('WebhookDeliveryHandler', () => {
     });
 
     it('AC3 boundary: different secrets produce different signatures', async () => {
-      mockRepo.findById.mockResolvedValue(makeWebhook({ secret: 'other-secret' }));
+      webhookRepo.findById.mockResolvedValue(makeWebhook({ secret: 'other-secret' }));
       mockFetch.mockResolvedValue({ ok: true });
 
       await handler.handle({
@@ -150,7 +154,7 @@ describe('WebhookDeliveryHandler', () => {
 
   describe('AC4: AbortSignal passed to fetch', () => {
     it('AC4: fetch second argument has signal that is an instance of AbortSignal', async () => {
-      mockRepo.findById.mockResolvedValue(makeWebhook());
+      webhookRepo.findById.mockResolvedValue(makeWebhook());
       mockFetch.mockResolvedValue({ ok: true });
 
       await handler.handle({
@@ -166,7 +170,7 @@ describe('WebhookDeliveryHandler', () => {
 
   describe('AC5: fetch { ok: true } resolves without throwing', () => {
     it('AC5: when fetch resolves with { ok: true }, handle() resolves without throwing', async () => {
-      mockRepo.findById.mockResolvedValue(makeWebhook());
+      webhookRepo.findById.mockResolvedValue(makeWebhook());
       mockFetch.mockResolvedValue({ ok: true });
 
       await expect(
@@ -181,7 +185,7 @@ describe('WebhookDeliveryHandler', () => {
 
   describe('AC6: fetch { ok: false, status: 503 } rejects with Error containing "503"', () => {
     it('AC6: when fetch resolves { ok: false, status: 503 }, handle() rejects with Error whose message includes "503"', async () => {
-      mockRepo.findById.mockResolvedValue(makeWebhook());
+      webhookRepo.findById.mockResolvedValue(makeWebhook());
       mockFetch.mockResolvedValue({ ok: false, status: 503 });
 
       await expect(
@@ -196,7 +200,7 @@ describe('WebhookDeliveryHandler', () => {
 
   describe('AC7: fetch rejection propagates', () => {
     it('AC7: when fetch rejects with new Error("network down"), handle() rejects with that same error', async () => {
-      mockRepo.findById.mockResolvedValue(makeWebhook());
+      webhookRepo.findById.mockResolvedValue(makeWebhook());
       const networkError = new Error('network down');
       mockFetch.mockRejectedValue(networkError);
 
@@ -212,7 +216,7 @@ describe('WebhookDeliveryHandler', () => {
 
   describe('AC8: missing webhook -> no-op (no fetch)', () => {
     it('AC8: when findById resolves null, handle() resolves without throwing and fetch is not called', async () => {
-      mockRepo.findById.mockResolvedValue(null);
+      webhookRepo.findById.mockResolvedValue(null);
 
       await expect(
         handler.handle({
@@ -228,7 +232,7 @@ describe('WebhookDeliveryHandler', () => {
 
   describe('AC9: inactive webhook -> no-op (no fetch)', () => {
     it('AC9: when findById resolves { active: false }, handle() resolves without throwing and fetch is not called', async () => {
-      mockRepo.findById.mockResolvedValue(makeWebhook({ active: false }));
+      webhookRepo.findById.mockResolvedValue(makeWebhook({ active: false }));
 
       await expect(
         handler.handle({
