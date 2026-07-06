@@ -1,4 +1,4 @@
-<!-- spec-writing: completed-through-phase-5 -->
+<!-- spec-writing: completed-through-phase-6 -->
 # SPEC: Webhook Outbox Unification
 
 ## Summary
@@ -15,6 +15,7 @@ Route outbound webhook delivery through the existing outbox pipeline (`apps/api/
 - Changes to webhook CRUD (`WebhookService`, `WebhookController`) or the `Webhook` Prisma model.
 - Admin UI changes — existing outbox admin/dead-letter endpoints already expose dead-lettered events.
 - The GitLab VCS provider stub (gap-analysis defect #2) — unrelated, tracked separately.
+- `openapi.json` / CLI client regeneration — this spec adds no controller routes and changes no DTO shapes, so there is no public API contract change to regenerate.
 
 ## Design
 
@@ -23,6 +24,8 @@ Route outbound webhook delivery through the existing outbox pipeline (`apps/api/
 1. **Delivery re-fetches live webhook config by id**, rather than snapshotting `url`/`secret` into the outbox payload. The handler looks up the `Webhook` row at delivery time. This avoids duplicating the secret into the outbox `payload` column, and correctly no-ops if the webhook was deleted/deactivated/rotated between enqueue and a later retry (retries can be up to ~16s+ later).
 2. **One outbox event per matching webhook**, not one event per ticket action fanning out to N webhooks. Each webhook gets its own row, attempt count, and backoff/dead-letter lifecycle, so one flaky endpoint's retries don't block or re-trigger delivery to webhooks that already succeeded.
 3. **Constructor-based optional injection**, following the existing convention in `OutboxFanOutRegistry` (`codeCommitHandler`, `astIndexService`, `entityGraphService` are all `@Optional()` constructor params registered internally in the constructor) rather than an external imperative `.register()` call from another module.
+4. **Enqueue independent per-webhook outbox writes concurrently** (`Promise.all`), not with sequential `await`s in a loop — per this repo's async-pattern convention (`.nax/rules/api-core.md`: "Use `Promise.all([...])` for independent async calls"). The enqueue calls have no data dependency on one another.
+5. **Unit tests for `WebhookDeliveryHandler` and `WebhookDispatcherService` use direct instantiation** (`new WebhookDeliveryHandler(mockRepo)`, `new WebhookDispatcherService(mockRepo, mockOutboxService)`), not `Test.createTestingModule`. Neither class has a Nest lifecycle hook (no `OnModuleInit`, no decorator metadata under test), matching this repo's testing convention (`.nax/rules/api-testing.md`) and the existing style already used in `outbox-fan-out-registry.spec.ts`. `Test.createTestingModule` is reserved for the module-wiring smoke tests (US-002's `webhook.module.spec.ts`, US-003's `outbox.module.spec.ts`), whose entire purpose is verifying DI resolution.
 
 ### Integration
 
@@ -88,7 +91,9 @@ Create the handler that owns the actual signed HTTP delivery, looked up fresh by
 
 ### US-004: `WebhookDispatcherService` enqueues instead of fetching
 
-`dispatch()` keeps its existing "find active webhooks matching event" filter but now enqueues one outbox event per matching webhook via `OutboxService.enqueue`, instead of calling `fetch()` directly. The `sign()` method and direct `fetch` call are removed from this file (that logic now lives solely in `WebhookDeliveryHandler`, US-001).
+`dispatch()` keeps its existing "find active webhooks matching event" filter but now enqueues one outbox event per matching webhook via `OutboxService.enqueue` (issued concurrently via `Promise.all`), instead of calling `fetch()` directly. The `sign()` method and direct `fetch` call are removed from this file (that logic now lives solely in `WebhookDeliveryHandler`, US-001).
+
+> This story both adds (enqueue path) and removes (direct fetch/sign) code in the same method. It is **not** split into a separate terminal-cleanup story: the removal has no independent value on its own (an incomplete removal would silently stop delivering webhooks with no replacement), it is a single-method behavioral rewrite rather than a bulk/cross-file consolidation, and no AC encodes the removal as a static "file does not contain X" claim — AC18 asserts the new runtime behavior (fetch is not invoked by `dispatch()` after the rewrite), which is agent-implementable, unlike a source-text absence check.
 
 - **Workdir:** `apps/api`
 - **Context Files:** `apps/api/src/webhook/webhook-dispatcher.service.ts`, `apps/api/src/webhook/webhook-dispatcher.service.spec.ts`, `apps/api/src/webhook/prisma-webhook.repository.ts`
@@ -128,7 +133,7 @@ Create the handler that owns the actual signed HTTP delivery, looked up fresh by
 ### US-004: `WebhookDispatcherService` enqueues instead of fetching
 
 - **AC15** `[unit]` Given `findActiveByProject(projectId)` resolves one webhook `{ id: 'w1', events: JSON.stringify(['STATUS_CHANGE']), active: true }`, calling `dispatch(projectId, 'STATUS_CHANGE', payload)` calls `OutboxService.enqueue` exactly once with an argument deep-equal to `{ projectId, eventType: 'webhook_delivery', eventId: expect.any(String), payload: { webhookId: 'w1', event: 'STATUS_CHANGE', payload } }`.
-- **AC16** `[unit]` Given two active webhooks (`w1`, `w2`) both matching the dispatched event, `dispatch()` calls `OutboxService.enqueue` exactly twice, once per webhook id.
+- **AC16** `[unit]` Given two active webhooks (`w1`, `w2`) both matching the dispatched event, `dispatch()` calls `OutboxService.enqueue` exactly twice, once per webhook id, issued via `Promise.all` (both calls happen before either enqueue's mocked promise resolves — i.e. the second call is not gated on the first's resolution).
 - **AC17** `[unit]` Given a webhook whose `events` array does not include the dispatched event, `dispatch()` does not call `OutboxService.enqueue` for that webhook.
 - **AC18** `[unit]` Calling `dispatch()` never calls the global `fetch` function (delivery now happens exclusively through the outbox pipeline, not inline).
 - **AC19** `[unit]` When `OutboxService.enqueue` rejects for a matching webhook, the promise returned by `dispatch()` rejects (the failure is not swallowed inside `dispatch()`).
