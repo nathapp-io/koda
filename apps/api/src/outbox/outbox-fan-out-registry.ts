@@ -6,7 +6,7 @@ import { MemoryKind } from '../common/enums';
 import { AstIndexService, SourceFile } from '../code-intel/ast-index.service';
 import { CodeCommitOutboxHandler } from '../code-intel/code-commit-outbox-handler';
 import { EntityGraphService } from '../entity-graph/entity-graph.service';
-import { WebhookDeliveryHandler } from '../webhook/webhook-delivery.handler';
+import { WebhookDeliveryHandler, WebhookDeliveryPayload } from '../webhook/webhook-delivery.handler';
 
 export interface OutboxHandler {
   eventType: string;
@@ -77,7 +77,7 @@ export class OutboxFanOutRegistry implements OnModuleInit {
 
   private async handleWebhookDelivery(payload: unknown): Promise<void> {
     if (!this.webhookDeliveryHandler) return;
-    const p = payload as { webhookId: string; event: string; payload: unknown };
+    const p = payload as WebhookDeliveryPayload;
     await this.webhookDeliveryHandler.handle(p);
   }
 
