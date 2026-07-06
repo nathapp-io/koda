@@ -37,7 +37,7 @@ const mockGetContext = contextControllerGetContext as jest.Mock;
 const mockQueryContext = contextControllerQueryContext as jest.Mock;
 
 const CTX = { apiKey: 'sk-test', apiUrl: 'http://localhost:3100/api', projectSlug: 'my-proj' };
-const PROJECT_ID = 'proj-uuid-123';
+const PROJECT_SLUG = 'my-proj';
 
 describe('contextCommand', () => {
   let program: Command;
@@ -60,12 +60,12 @@ describe('contextCommand', () => {
 
   describe('get', () => {
     it('fetches and prints project context as JSON', async () => {
-      const contextData = { projectId: PROJECT_ID, canonicalState: { tickets: [] } };
+      const contextData = { projectSlug: PROJECT_SLUG, canonicalState: { tickets: [] } };
       mockGetContext.mockResolvedValue({ ret: 0, data: contextData });
 
-      await program.parseAsync(['node', 'koda', 'context', 'get', '--project-id', PROJECT_ID]);
+      await program.parseAsync(['node', 'koda', 'context', 'get', '--project', PROJECT_SLUG]);
 
-      expect(mockGetContext).toHaveBeenCalledWith({ projectId: PROJECT_ID });
+      expect(mockGetContext).toHaveBeenCalledWith({ slug: PROJECT_SLUG });
       expect(logSpy).toHaveBeenCalledWith(JSON.stringify(contextData, null, 2));
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
@@ -74,9 +74,17 @@ describe('contextCommand', () => {
       const err = Object.assign(new Error('Not found'), { status: 404 });
       mockGetContext.mockRejectedValue(err);
 
-      await program.parseAsync(['node', 'koda', 'context', 'get', '--project-id', PROJECT_ID]);
+      await program.parseAsync(['node', 'koda', 'context', 'get', '--project', PROJECT_SLUG]);
 
       expect(exitSpy).toHaveBeenCalledWith(expect.any(Number));
+    });
+
+    it('errors when project is not configured', async () => {
+      mockResolveContext.mockResolvedValue({ ...CTX, projectSlug: undefined });
+
+      await program.parseAsync(['node', 'koda', 'context', 'get']);
+
+      expect(exitSpy).toHaveBeenCalledWith(2);
     });
   });
 
@@ -87,13 +95,13 @@ describe('contextCommand', () => {
 
       await program.parseAsync([
         'node', 'koda', 'context', 'query',
-        '--project-id', PROJECT_ID,
+        '--project', PROJECT_SLUG,
         '--query', 'what is broken',
         '--intent', 'diagnose',
       ]);
 
       expect(mockQueryContext).toHaveBeenCalledWith(expect.objectContaining({
-        projectId: PROJECT_ID,
+        slug: PROJECT_SLUG,
         requestBody: expect.objectContaining({ query: 'what is broken', intent: 'diagnose' }),
       }));
       expect(logSpy).toHaveBeenCalledWith(JSON.stringify(result, null, 2));
@@ -105,7 +113,7 @@ describe('contextCommand', () => {
 
       await program.parseAsync([
         'node', 'koda', 'context', 'query',
-        '--project-id', PROJECT_ID,
+        '--project', PROJECT_SLUG,
         '--ticket-ids', 'tid-1,tid-2',
         '--token-budget', '4000',
       ]);
@@ -116,6 +124,14 @@ describe('contextCommand', () => {
           tokenBudget: 4000,
         }),
       }));
+    });
+
+    it('errors when project is not configured', async () => {
+      mockResolveContext.mockResolvedValue({ ...CTX, projectSlug: undefined });
+
+      await program.parseAsync(['node', 'koda', 'context', 'query']);
+
+      expect(exitSpy).toHaveBeenCalledWith(2);
     });
   });
 });
