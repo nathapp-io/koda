@@ -71,7 +71,8 @@ export class OutboxFanOutRegistry implements OnModuleInit {
     const extractionHandlers = this.extractionService && this.memoryRepository ? 2 : 0;
     const entityGraphHandlers = this.entityGraphService ? 2 : 0;
     const codeCommitHandlers = (this.codeCommitHandler || this.astIndexService) ? 1 : 0;
-    this.logger.log(`Registered ${DEFAULT_HANDLERS.length + extractionHandlers + entityGraphHandlers + codeCommitHandlers} handlers`);
+    const webhookDeliveryHandlers = this.webhookDeliveryHandler ? 1 : 0;
+    this.logger.log(`Registered ${DEFAULT_HANDLERS.length + extractionHandlers + entityGraphHandlers + codeCommitHandlers + webhookDeliveryHandlers} handlers`);
   }
 
   private async handleWebhookDelivery(payload: unknown): Promise<void> {
