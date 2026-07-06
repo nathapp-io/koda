@@ -7,6 +7,7 @@ import {
 } from '../generated';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
+import { error } from '../utils/output';
 
 export function contextCommand(program: Command): void {
   const ctx = program.command('context');
@@ -14,33 +15,39 @@ export function contextCommand(program: Command): void {
 
   ctx
     .command('get')
-    .description('Get full project context by project ID')
-    .requiredOption('--project-id <id>', 'Project UUID')
+    .description('Get full project context by project slug')
+    .option('--project <slug>', 'Project slug')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const config = await resolveContext({});
-        if (!config.apiKey || !config.apiUrl) {
+        const context = await resolveContext({ projectSlug: options.project });
+
+        if (!context.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+        }
+
+        if (!context.apiKey || !context.apiUrl) {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        OpenAPI.BASE = config.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = config.apiKey;
+        OpenAPI.BASE = context.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = context.apiKey;
 
-        const response = await contextControllerGetContext({ projectId: options.projectId });
+        const response = await contextControllerGetContext({ slug: context.projectSlug });
         const data = unwrap<Record<string, unknown>>(response);
 
         console.log(JSON.stringify(data, null, 2));
         process.exit(0);
       } catch (err: unknown) {
-        handleApiError(err, { notFoundMessage: `Project not found: ${options.projectId}` });
+        handleApiError(err, { notFoundMessage: `Project not found: ${options.project}` });
       }
     });
 
   ctx
     .command('query')
     .description('Query project context with a natural-language prompt')
-    .requiredOption('--project-id <id>', 'Project UUID')
+    .option('--project <slug>', 'Project slug')
     .option('--query <text>', 'Natural-language query')
     .option('--intent <intent>', 'Query intent (e.g. plan, diagnose, review)')
     .option('--ticket-ids <ids>', 'Comma-separated ticket IDs to scope the query')
@@ -48,13 +55,19 @@ export function contextCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const config = await resolveContext({});
-        if (!config.apiKey || !config.apiUrl) {
+        const context = await resolveContext({ projectSlug: options.project });
+
+        if (!context.projectSlug) {
+          error('Project not configured. Run: koda init');
+          process.exit(2);
+        }
+
+        if (!context.apiKey || !context.apiUrl) {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        OpenAPI.BASE = config.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = config.apiKey;
+        OpenAPI.BASE = context.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = context.apiKey;
 
         const requestBody: Record<string, unknown> = {};
         if (options.query) requestBody['query'] = options.query;
@@ -63,7 +76,7 @@ export function contextCommand(program: Command): void {
         if (options.tokenBudget) requestBody['tokenBudget'] = options.tokenBudget;
 
         const response = await contextControllerQueryContext({
-          projectId: options.projectId,
+          slug: context.projectSlug,
           requestBody,
         });
         const data = unwrap<Record<string, unknown>>(response);
@@ -71,7 +84,7 @@ export function contextCommand(program: Command): void {
         console.log(JSON.stringify(data, null, 2));
         process.exit(0);
       } catch (err: unknown) {
-        handleApiError(err, { notFoundMessage: `Project not found: ${options.projectId}` });
+        handleApiError(err, { notFoundMessage: `Project not found: ${options.project}` });
       }
     });
 }
