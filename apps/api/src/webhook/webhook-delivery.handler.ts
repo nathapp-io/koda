@@ -17,7 +17,12 @@ export class WebhookDeliveryHandler {
       return;
     }
 
-    const body = JSON.stringify(input.payload);
+    let body: string;
+    try {
+      body = JSON.stringify(input.payload ?? null);
+    } catch (err) {
+      throw new Error(`Webhook payload serialization failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
     const sig = crypto.createHmac('sha256', webhook.secret).update(body).digest('hex');
 
     const response = await fetch(webhook.url, {
