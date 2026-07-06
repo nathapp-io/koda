@@ -143,6 +143,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RagService.name);
   private db: LanceConnection = null;
   private readonly tableCache = new Map<string, LanceTable>();
+  private readonly tableCreationLocks = new Map<string, Promise<LanceTable>>();
   private readonly TABLE_CACHE_MAX_SIZE = 50;
   private lanceAvailable = true;
   private readonly lancedbPath: string;
@@ -296,6 +297,23 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     }
 
     const tableName = `project_${projectId}`;
+    const cached = this.tableCache.get(tableName);
+    if (cached) return cached;
+
+    // Serialize table open/create per project: concurrent callers for the same
+    // tableName await the same in-flight creation instead of racing LanceDB's
+    // check-then-create against each other.
+    const inFlight = this.tableCreationLocks.get(tableName);
+    if (inFlight) return inFlight;
+
+    const creation = this.createOrOpenTable(projectId, tableName).finally(() => {
+      this.tableCreationLocks.delete(tableName);
+    });
+    this.tableCreationLocks.set(tableName, creation);
+    return creation;
+  }
+
+  private async createOrOpenTable(projectId: string, tableName: string): Promise<LanceTable> {
     const cached = this.tableCache.get(tableName);
     if (cached) return cached;
 

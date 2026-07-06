@@ -31,12 +31,16 @@ import {
   type ResolveContextDeps,
 } from './config';
 
+const KODA_ENV_VARS = ['KODA_API_KEY', 'KODA_API_URL', 'KODA_PROJECT_SLUG'] as const;
+
 describe('config', () => {
   beforeEach(() => {
     Object.keys(mockData).forEach((key) => {
       delete mockData[key];
     });
     mockData.profiles = {};
+    // Prevent a developer's or CI's real KODA_* env vars from leaking into resolveContext tests.
+    KODA_ENV_VARS.forEach((key) => delete process.env[key]);
   });
 
   describe('maskApiKey', () => {
@@ -434,6 +438,52 @@ describe('config', () => {
       await resolveContext({ cwd: '/repo/feature-dir' }, deps);
 
       expect(findProjectConfig).toHaveBeenCalledWith('/repo/feature-dir');
+    });
+
+    describe('env var overrides', () => {
+      afterEach(() => {
+        KODA_ENV_VARS.forEach((key) => delete process.env[key]);
+      });
+
+      it('KODA_API_KEY and KODA_API_URL env vars are honored when no flag is provided', async () => {
+        process.env.KODA_API_KEY = 'env-key-abcdefghij';
+        process.env.KODA_API_URL = 'https://env.example.com';
+
+        const deps: ResolveContextDeps = {
+          findProjectConfig: makeProjectConfigDep({ projectSlug: 'my-project' }),
+          getConfig: makeGlobalConfig({ apiKey: 'global-key-abcdefghij', apiUrl: 'https://global.example.com' }),
+        };
+
+        const result = await resolveContext({}, deps);
+        expect(result.apiKey).toBe('env-key-abcdefghij');
+        expect(result.apiUrl).toBe('https://env.example.com');
+      });
+
+      it('explicit flags still take precedence over env vars', async () => {
+        process.env.KODA_API_KEY = 'env-key-abcdefghij';
+        process.env.KODA_API_URL = 'https://env.example.com';
+
+        const deps: ResolveContextDeps = {
+          findProjectConfig: makeProjectConfigDep(null),
+          getConfig: makeGlobalConfig({}),
+        };
+
+        const result = await resolveContext({ apiKey: 'flag-key-abcdefghij', apiUrl: 'https://flag.example.com' }, deps);
+        expect(result.apiKey).toBe('flag-key-abcdefghij');
+        expect(result.apiUrl).toBe('https://flag.example.com');
+      });
+
+      it('KODA_PROJECT_SLUG env var is honored when no flag or project config provides one', async () => {
+        process.env.KODA_PROJECT_SLUG = 'env-project';
+
+        const deps: ResolveContextDeps = {
+          findProjectConfig: makeProjectConfigDep(null),
+          getConfig: makeGlobalConfig({}),
+        };
+
+        const result = await resolveContext({}, deps);
+        expect(result.projectSlug).toBe('env-project');
+      });
     });
   });
 });

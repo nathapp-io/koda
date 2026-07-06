@@ -360,6 +360,7 @@ model OutboxEvent {
   status       String   @default("pending") // pending | processing | completed | failed | dead_letter
   attempts     Int      @default(0)
   lastError    String?
+  nextAttemptAt DateTime?
   processedAt  DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -368,6 +369,7 @@ model OutboxEvent {
 
   @@index([status, createdAt])
   @@index([projectId, createdAt])
+  @@index([status, nextAttemptAt])
 }
 
 // ---------------------------------------------------------------------------

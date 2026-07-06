@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OutboxFanOutRegistry } from './outbox-fan-out-registry';
 import { PrismaOutboxRepository } from './prisma-outbox.repository';
-import { OutboxEventDomain, OutboxEventInput } from './domain/outbox-event.domain';
+import { OutboxEventDomain, OutboxEventInput, OUTBOX_BACKOFF_MS } from './domain/outbox-event.domain';
 
 export type { OutboxEventInput };
 
@@ -9,7 +9,6 @@ export type OutboxEventData = OutboxEventDomain;
 
 const MAX_RETRIES = 3;
 const PROCESSING_STALE_MS = 60_000;
-const BACKOFF_MS = (attempt: number) => Math.pow(2, attempt * 2) * 1000;
 
 @Injectable()
 export class OutboxService {
@@ -81,7 +80,7 @@ export class OutboxService {
       return this.markDeadLetter(event.id, `Failed after ${MAX_RETRIES} retries`);
     }
 
-    await this.delay(BACKOFF_MS(event.attempts));
+    await this.delay(OUTBOX_BACKOFF_MS(event.attempts));
 
     const updated = await this.outboxRepo.incrementAttemptsAndRequeue(event.id, event.attempts + 1);
 

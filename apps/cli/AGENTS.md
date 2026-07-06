@@ -67,6 +67,7 @@ Command surface currently includes:
 
 The CLI resolves context in this order where applicable:
 - explicit flags
+- `KODA_API_KEY` / `KODA_API_URL` / `KODA_PROJECT_SLUG` environment variables
 - local project config from `.koda/config.json`
 - selected profile from global config
 - top-level global config in `~/.koda/config.json`

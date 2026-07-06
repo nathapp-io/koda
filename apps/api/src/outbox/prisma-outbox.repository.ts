@@ -2,7 +2,7 @@ import { Injectable, Inject } from '@nestjs/common';
 import { AbstractPrismaRepository, PrismaClientLike, PrismaModelDelegate, PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { OutboxEvent as OutboxEventModel, PrismaClient } from '@prisma/client';
-import { OutboxEventDomain, OutboxEventInput } from './domain/outbox-event.domain';
+import { OutboxEventDomain, OutboxEventInput, OUTBOX_BACKOFF_MS } from './domain/outbox-event.domain';
 
 @Injectable()
 export class PrismaOutboxRepository extends AbstractPrismaRepository<OutboxEventDomain, OutboxEventModel, string> {
@@ -27,6 +27,7 @@ export class PrismaOutboxRepository extends AbstractPrismaRepository<OutboxEvent
       status: m.status,
       attempts: m.attempts,
       lastError: m.lastError,
+      nextAttemptAt: m.nextAttemptAt,
       processedAt: m.processedAt,
       createdAt: m.createdAt,
       updatedAt: m.updatedAt,
@@ -42,6 +43,7 @@ export class PrismaOutboxRepository extends AbstractPrismaRepository<OutboxEvent
       status: d.status,
       attempts: d.attempts,
       lastError: d.lastError ?? null,
+      nextAttemptAt: d.nextAttemptAt ?? null,
       processedAt: d.processedAt ?? null,
     };
   }
@@ -55,6 +57,7 @@ export class PrismaOutboxRepository extends AbstractPrismaRepository<OutboxEvent
     if (patch.status !== undefined) data.status = patch.status;
     if (patch.attempts !== undefined) data.attempts = patch.attempts;
     if (patch.lastError !== undefined) data.lastError = patch.lastError;
+    if (patch.nextAttemptAt !== undefined) data.nextAttemptAt = patch.nextAttemptAt;
     if (patch.processedAt !== undefined) data.processedAt = patch.processedAt;
     return data;
   }
@@ -74,7 +77,10 @@ export class PrismaOutboxRepository extends AbstractPrismaRepository<OutboxEvent
 
   async findPending(limit: number): Promise<OutboxEventDomain[]> {
     const models = await this.prisma.client.outboxEvent.findMany({
-      where: { status: 'pending' },
+      where: {
+        status: 'pending',
+        OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: new Date() } }],
+      },
       orderBy: { createdAt: 'asc' },
       take: limit,
     });
@@ -110,12 +116,17 @@ export class PrismaOutboxRepository extends AbstractPrismaRepository<OutboxEvent
   }
 
   async markFailed(id: string, error: string, nextAttempts: number, nextStatus: string): Promise<void> {
+    // nextAttempts is the post-increment attempt count; OUTBOX_BACKOFF_MS expects the
+    // pre-increment count (matching OutboxService.retry()'s schedule of 1s, 4s, 16s).
+    const nextAttemptAt = nextStatus === 'pending' ? new Date(Date.now() + OUTBOX_BACKOFF_MS(nextAttempts - 1)) : null;
+
     await this.prisma.client.outboxEvent.update({
       where: { id },
       data: {
         attempts: nextAttempts,
         lastError: error,
         status: nextStatus,
+        nextAttemptAt,
       },
     });
   }
@@ -137,6 +148,7 @@ export class PrismaOutboxRepository extends AbstractPrismaRepository<OutboxEvent
       data: {
         status: 'pending',
         lastError: null,
+        nextAttemptAt: null,
       },
     });
   }
@@ -147,6 +159,7 @@ export class PrismaOutboxRepository extends AbstractPrismaRepository<OutboxEvent
       data: {
         attempts: nextAttempts,
         status: 'pending',
+        nextAttemptAt: null,
       },
     });
     return this.toDomain(model);
@@ -158,7 +171,7 @@ export class PrismaOutboxRepository extends AbstractPrismaRepository<OutboxEvent
         status: 'processing',
         updatedAt: { lt: staleThreshold },
       },
-      data: { status: 'pending' },
+      data: { status: 'pending', nextAttemptAt: null },
     });
   }
 }
