@@ -19,6 +19,7 @@ export class PrismaAuthRepository {
       name: m.name,
       role: m.role,
       passwordHash: m.passwordHash,
+      tokenVersion: m.tokenVersion,
       createdAt: m.createdAt,
       updatedAt: m.updatedAt,
     };
@@ -46,6 +47,15 @@ export class PrismaAuthRepository {
   async findUserById(id: string): Promise<UserDomain | null> {
     const m = await this.db.user.findUnique({ where: { id } });
     return m ? this.toDomain(m) : null;
+  }
+
+  async bumpTokenVersion(userId: string): Promise<number> {
+    const m = await this.db.user.update({
+      where: { id: userId },
+      data: { tokenVersion: { increment: 1 } },
+      select: { tokenVersion: true },
+    });
+    return m.tokenVersion;
   }
 
   async findAgentByKeyHash(keyHash: string): Promise<AgentDomain | null> {

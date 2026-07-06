@@ -29,6 +29,7 @@ describe('AuthController', () => {
     validateUser: jest.fn(),
     generateAccessToken: jest.fn(),
     generateRefreshToken: jest.fn(),
+    logout: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -196,6 +197,7 @@ describe('AuthController', () => {
         sub: mockUser.id,
         email: mockUser.email,
         role: mockUser.role,
+        tokenVersion: 0,
       };
 
       mockAuthService.validateUser.mockResolvedValue(mockUser);
@@ -220,6 +222,7 @@ describe('AuthController', () => {
         sub: mockUser.id,
         email: mockUser.email,
         role: mockUser.role,
+        tokenVersion: 0,
       };
 
       mockAuthService.validateUser.mockResolvedValue(mockUser);
@@ -232,6 +235,35 @@ describe('AuthController', () => {
       expect(data.email).toBe(mockUser.email);
       expect(data.name).toBe(mockUser.name);
       expect(data.role).toBe(mockUser.role);
+    });
+  });
+
+  describe('POST /auth/logout', () => {
+    it('should revoke tokens for the current user', async () => {
+      const user = {
+        sub: mockUser.id,
+        email: mockUser.email,
+        role: mockUser.role,
+        tokenVersion: 0,
+      };
+
+      mockAuthService.logout.mockResolvedValue(undefined);
+
+      const result = await controller.logout(user);
+
+      expect(result).toBeInstanceOf(JsonResponse);
+      expect(authService.logout).toHaveBeenCalledWith(mockUser.id);
+    });
+
+    it('should fall back to principal.id when sub is absent', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const user = { id: mockUser.id } as any;
+
+      mockAuthService.logout.mockResolvedValue(undefined);
+
+      await controller.logout(user);
+
+      expect(authService.logout).toHaveBeenCalledWith(mockUser.id);
     });
   });
 });

@@ -1,9 +1,10 @@
 import { Command } from 'commander';
-import { resolveContext } from '../config';
+import { resolveContext, clearApiKey } from '../config';
 import { OpenAPI } from '../generated/core/OpenAPI';
 import {
   authControllerMe,
   authControllerRegister,
+  authControllerLogout,
 } from '../generated';
 import { table } from '../utils/output';
 import { unwrap } from '../utils/api';
@@ -72,6 +73,34 @@ export function authCommand(program: Command): void {
           console.log(JSON.stringify(data, null, 2));
         } else {
           console.log(`User registered: ${String(data['email'] ?? options.email)}`);
+        }
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err);
+      }
+    });
+
+  auth
+    .command('logout')
+    .description('Revoke all outstanding access and refresh tokens for the current user')
+    .option('--json', 'Output as JSON')
+    .action(async (options) => {
+      try {
+        const ctx = await resolveContext({});
+        if (!ctx.apiKey || !ctx.apiUrl) {
+          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
+        }
+
+        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        OpenAPI.TOKEN = ctx.apiKey;
+
+        await authControllerLogout();
+        clearApiKey();
+
+        if (options.json) {
+          console.log(JSON.stringify({ success: true }, null, 2));
+        } else {
+          console.log('Logged out. Tokens revoked and local credentials cleared.');
         }
         process.exit(0);
       } catch (err: unknown) {

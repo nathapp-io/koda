@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { AuthProvider } from '@nathapp/nestjs-auth';
+import { CacheManager } from '@nathapp/nestjs-cache';
 import { UserPrincipal, KodaUserRole } from './principal/koda-principal.types';
+import { PrismaAuthRepository } from './prisma-auth.repository';
+import { userTokenVersionCacheKey, userTokenVersionCacheTag } from './token-version.cache';
 
 /**
  * Custom AuthProvider that preserves JWT claims (role, email) in the principal.
@@ -13,10 +16,26 @@ import { UserPrincipal, KodaUserRole } from './principal/koda-principal.types';
  */
 @Injectable()
 export class JwtAuthProvider implements AuthProvider {
+  constructor(
+    private readonly authRepo: PrismaAuthRepository,
+    private readonly cache: CacheManager,
+  ) {}
+
   async getPrincipal(jwtPayload: Record<string, unknown>): Promise<UserPrincipal> {
     const role = ((jwtPayload['role'] as KodaUserRole | undefined) ?? 'MEMBER') as KodaUserRole;
     const id = (jwtPayload['sub'] as string) ?? '';
     const email = (jwtPayload['email'] as string) ?? id;
+    const tokenVersion = (jwtPayload['tokenVersion'] as number | undefined) ?? 0;
+
+    const currentTokenVersion = await this.cache.get<number>(
+      userTokenVersionCacheKey(id),
+      async () => {
+        const user = await this.authRepo.findUserById(id);
+        return user?.tokenVersion ?? 0;
+      },
+      60_000,
+      { tags: [userTokenVersionCacheTag(id)] },
+    );
 
     return {
       actorType: 'user',
@@ -25,7 +44,7 @@ export class JwtAuthProvider implements AuthProvider {
       email,
       role,
       blacklisted: false,
-      revoked: false,
+      revoked: (currentTokenVersion ?? 0) > tokenVersion,
       authorities: [role],
       extra: {
         sub: id,

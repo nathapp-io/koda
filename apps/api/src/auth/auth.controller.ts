@@ -73,4 +73,16 @@ export class AuthController {
     }
     return JsonResponse.Ok(validatedUser);
   }
+
+  @Post('logout')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Revoke all outstanding access and refresh tokens for the current user' })
+  @ApiResponse({ status: 200, description: 'Tokens revoked' })
+  @ApiResponse({ status: 401, description: 'Missing or invalid token' })
+  async logout(@Principal() user: JwtPayload) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await this.authService.logout(user.sub ?? (user as any).id);
+    return JsonResponse.Ok({});
+  }
 }
