@@ -34,7 +34,7 @@ describe('KodaJwtRefreshStrategyProvider', () => {
   it('is not revoked when the payload tokenVersion matches the user record', async () => {
     mockAuthRepository.findUserById.mockResolvedValue({ tokenVersion: 0 });
 
-    const principal = await provider.validate(undefined, { sub: 'user-1', tokenVersion: 0 });
+    const principal = await provider.validate({ headers: {} }, { sub: 'user-1', tokenVersion: 0 });
 
     expect(principal.revoked).toBe(false);
   });
@@ -42,7 +42,7 @@ describe('KodaJwtRefreshStrategyProvider', () => {
   it('is revoked when the user tokenVersion has advanced past the payload', async () => {
     mockAuthRepository.findUserById.mockResolvedValue({ tokenVersion: 2 });
 
-    const principal = await provider.validate(undefined, { sub: 'user-1', tokenVersion: 0 });
+    const principal = await provider.validate({ headers: {} }, { sub: 'user-1', tokenVersion: 0 });
 
     expect(principal.revoked).toBe(true);
   });
@@ -50,7 +50,7 @@ describe('KodaJwtRefreshStrategyProvider', () => {
   it('is revoked when the user no longer exists', async () => {
     mockAuthRepository.findUserById.mockResolvedValue(null);
 
-    const principal = await provider.validate(undefined, { sub: 'user-1', tokenVersion: 0 });
+    const principal = await provider.validate({ headers: {} }, { sub: 'user-1', tokenVersion: 0 });
 
     expect(principal.revoked).toBe(true);
   });

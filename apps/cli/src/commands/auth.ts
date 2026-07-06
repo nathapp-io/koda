@@ -100,7 +100,10 @@ export function authCommand(program: Command): void {
         if (options.json) {
           console.log(JSON.stringify({ success: true }, null, 2));
         } else {
-          console.log('Logged out. Tokens revoked and local credentials cleared.');
+          console.log(
+            'Logged out. Server-side tokens revoked and the cached API key cleared from global config ' +
+              '(profile-, project-, or env-provided keys are not affected).',
+          );
         }
         process.exit(0);
       } catch (err: unknown) {
