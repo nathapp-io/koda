@@ -47,15 +47,16 @@ describe('WebhookModule (DI wiring)', () => {
     it('AC1: compiles and resolves WebhookDeliveryHandler with mocked PrismaWebhookRepository and no database-backed Prisma provider', async () => {
       const webhookRepoMock = makeWebhookRepoMock();
 
-      await expect(
-        Test.createTestingModule({
-          imports: [GlobalStubsModule],
-          providers: [
-            { provide: PrismaWebhookRepository, useValue: webhookRepoMock },
-            WebhookDeliveryHandler,
-          ],
-        }).compile(),
-      ).resolves.toBeDefined();
+      moduleRef = await Test.createTestingModule({
+        imports: [GlobalStubsModule],
+        providers: [
+          { provide: PrismaWebhookRepository, useValue: webhookRepoMock },
+          WebhookDeliveryHandler,
+        ],
+      }).compile();
+
+      const handler = moduleRef.get(WebhookDeliveryHandler);
+      expect(handler).toBeDefined();
     });
 
     it('AC2: module.get(WebhookDeliveryHandler) does not throw and returns a defined instance when only a mocked PrismaWebhookRepository is provided', async () => {
