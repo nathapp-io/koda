@@ -3,7 +3,7 @@
   "feature": "webhook-outbox-unification",
   "branchName": "feat/webhook-outbox-unification",
   "createdAt": "2026-07-06T05:32:06Z",
-  "updatedAt": "2026-07-06T05:35:54.556Z",
+  "updatedAt": "2026-07-06T05:52:53.824Z",
   "userStories": [
     {
       "id": "US-001",
@@ -40,7 +40,9 @@
         "profileModelTier": "fast",
         "initialAgent": "opencode",
         "initialProfileId": "opencode-structural",
-        "initialModelTier": "fast"
+        "initialModelTier": "fast",
+        "initialComplexity": "medium",
+        "modelTier": "fast"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -55,7 +57,11 @@
       "suggestedCriteria": [
         "When `WebhookDeliveryHandler.handle()` sends the request, then the `fetch` call body equals `JSON.stringify(payload)` and `headers['Content-Type']` equals `'application/json'`.",
         "When the webhook secret changes after enqueue but before delivery, then `WebhookDeliveryHandler.handle()` signs the request with the latest persisted secret returned by `findById()`."
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "251dab3467392a1ad8154d0074d9d5d2c2c84ba5"
     },
     {
       "id": "US-002",
@@ -96,7 +102,10 @@
       ],
       "expectedFiles": [
         "apps/api/src/webhook/webhook.module.spec.ts"
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -146,7 +155,10 @@
       ],
       "suggestedCriteria": [
         "When `webhookDeliveryHandler.handle()` throws during `dispatch({ eventType: 'webhook_delivery', ... })`, then `OutboxFanOutRegistry.consumeLastDispatchFailureCount()` returns `1` after dispatch completes."
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -193,7 +205,10 @@
       ],
       "suggestedCriteria": [
         "Given zero matching active webhooks, when `dispatch()` is called, then it resolves without calling `OutboxService.enqueue`."
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "This feature is an API-only behavioral change centered on moving outbound webhook delivery from inline fire-and-forget HTTP calls into the existing outbox pipeline. The current delivery path lives in apps/api/src/webhook/webhook-dispatcher.service.ts:6-50, where WebhookDispatcherService.dispatch() loads active webhooks, filters by event, and then calls a private dispatchToWebhook() that signs the payload and invokes global fetch() with AbortSignal.timeout(5000). Failures are swallowed inside a per-webhook .catch() that only logs a warning, so transient receiver outages lose events permanently. The sole production caller is TicketTransitionsService.dispatchStatusChangeWebhook() in apps/api/src/tickets/state-machine/ticket-transitions.service.ts:75-97, which already treats dispatch as fire-and-forget and attaches its own .catch(); the spec keeps that caller unchanged, so the migration path is internal and does not require controller, DTO, or client changes.\n\nThe target integration points already exist. PrismaWebhookRepository exposes findActiveByProject() and findById() in apps/api/src/webhook/prisma-webhook.repository.ts:78-88, which supports the design choice to re-fetch live webhook configuration at delivery time instead of snapshotting url/secret into outbox payloads. OutboxService.enqueue() is a thin pass-through in apps/api/src/outbox/outbox.service.ts:22-24, and OutboxService.processEvent() in apps/api/src/outbox/outbox.service.ts:64-76 already parses persisted payload JSON, dispatches through OutboxFanOutRegistry, consumes lastDispatchFailureCount, and throws when any handler failed, which is the retry trigger for markFailed()/dead-letter behavior. The retry and dead-letter lifecycle is already implemented in apps/api/src/outbox/outbox.service.ts:78-123 and apps/api/src/outbox/domain/outbox-event.domain.ts:16-26, including exponential backoff via OUTBOX_BACKOFF_MS at 1s/4s/16s.\n\nThe main code changes will touch apps/api/src/webhook/webhook-dispatcher.service.ts, apps/api/src/webhook/webhook.module.ts, apps/api/src/outbox/outbox.module.ts, and apps/api/src/outbox/outbox-fan-out-registry.ts, plus new handler and module-spec files. WebhookModule currently imports only PrismaModule and exports WebhookService and WebhookDispatcherService in apps/api/src/webhook/webhook.module.ts:1-18. OutboxModule currently imports PrismaModule, ScheduleModule, forwardRef(() => MemoryModule), EntityGraphModule, and forwardRef(() => CodeIntelModule), then provides/exports OutboxService and OutboxFanOutRegistry in apps/api/src/outbox/outbox.module.ts:1-29. Introducing WebhookModule <-> OutboxModule creates a new direct cycle, so both sides must use forwardRef consistently. That is the highest architectural risk: incorrect module wiring will surface as Nest DI resolution failures rather than runtime logic bugs.\n\nOutboxFanOutRegistry is the seam for delivery fan-out. Its constructor already follows the optional-injection pattern the spec requires: optional collaborators are accepted in the constructor, normalized to nullable fields, and registered immediately via this.register(...) in apps/api/src/outbox/outbox-fan-out-registry.ts:26-61. It also implements sequential dispatch with per-handler try/catch and tracks failure counts in dispatch()/consumeLastDispatchFailureCount() at apps/api/src/outbox/outbox-fan-out-registry.ts:216-238. Adding webhook_delivery should follow that existing constructor-registration pattern rather than an imperative external registration call. Because dispatch() catches handler errors and continues, a throwing WebhookDeliveryHandler will naturally integrate with current retry semantics: processEvent() will see a non-zero failure count and throw, which leads OutboxService.processPending() to markFailed(). The failure-handling table in the spec maps cleanly onto this path: deleted/inactive webhook resolves without throwing; non-2xx and network/timeout throw and get retried; after 3 failed attempts the existing markFailed() logic moves the event to dead_letter.\n\nExisting tests already cover both affected areas and reveal where the story work will land. Webhook dispatcher tests are in apps/api/src/webhook/webhook-dispatcher.service.spec.ts:1-129 and currently assert direct fetch behavior using Test.createTestingModule and a mocked global fetch. Those tests will need to be rewritten around direct instantiation and OutboxService.enqueue(), while adding a separate new unit suite for WebhookDeliveryHandler that owns the fetch/signature assertions. Outbox fan-out tests are in apps/api/src/outbox/outbox-fan-out-registry.spec.ts:1-183 and already instantiate the registry directly, making them the right place to add webhook_delivery handler-registration and dispatch seam coverage. Existing module-compilation patterns live in files like apps/api/src/code-intel/code-intel.module.spec.ts:1-63; however, this feature's module smoke tests can stay narrowly scoped to the providers named in the spec. There are currently no webhook.module.spec.ts or outbox.module.spec.ts files, so those are new outputs. Tests that indirectly depend on WebhookDispatcherService through TicketTransitionsService, especially apps/api/src/tickets/state-machine/ticket-transitions.service.spec.ts referenced by the graph trace, may need minor fixture updates if they assert old dispatcher behavior.\n\nBackward-compatibility risk is low at the API contract level because no controller routes, DTOs, Prisma schema, or generated clients change; the spec explicitly rules out openapi.json and CLI regeneration. Behavioral risk is moderate in three places: event payload shape must remain stable between dispatcher enqueue and delivery handler fetch; Promise.all concurrency in dispatch() must be real so one slow enqueue does not serialize others; and moving signing logic out of WebhookDispatcherService must not alter the HMAC/body/header contract the receiver expects. The migration path is code-only with no data migration: new webhook_delivery outbox rows will start being created after deployment, existing outbox admin/dead-letter endpoints will expose failures automatically, and any preexisting direct-dispatch callers continue calling the same service method. Done looks like: WebhookDispatcherService no longer touches fetch directly, each matching webhook gets its own outbox event, WebhookDeliveryHandler re-fetches webhook state by id and performs signed POST delivery with timeout, OutboxFanOutRegistry routes webhook_delivery into the handler, and failures participate in the existing retry/dead-letter flow.",

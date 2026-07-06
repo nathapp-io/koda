@@ -3,31 +3,27 @@
   "approved": true,
   "tests": {
     "allPassing": true,
-    "passCount": 21,
+    "passCount": 10,
     "failCount": 0
   },
   "testModifications": {
-    "detected": true,
-    "files": [
-      "test/integration/policy/policy-gate.service.spec.ts"
-    ],
+    "detected": false,
+    "files": [],
     "legitimate": true,
-    "reasoning": "Implementer modified test stubs in commit a5a48ef. The original tests used `await expect(service.runAllGates(...)).rejects.toThrow()` which was always failing because `runAllGates()` never rejects — it returns a Promise<PolicyGateResult> that resolves. The implementer replaced these stub assertions with correct assertions that check the actual `GateResult` shape. This was a legitimate fix required because the service API returns a resolved result object, not a thrown error."
+    "reasoning": "Test file was created by test-writer in commit b7fd89b6, implementation was added by implementer in commit a6942e8e. No test modifications by implementer detected."
   },
   "acceptanceCriteria": {
     "allMet": true,
     "criteria": [
-      {"criterion": "AC-1: IsolationGate runs 10 queries returning 0 results for empty project", "met": true},
-      {"criterion": "AC-2: IsolationGate blocks cross-project data leaks", "met": true},
-      {"criterion": "AC-3: ProvenanceGate validates search response provenance", "met": true},
-      {"criterion": "AC-4: WriteGate allows KodaDomainWriter writes but blocks raw Prisma writes", "met": true},
-      {"criterion": "AC-5: TruthConsistencyGate compares canonical state to Prisma data", "met": true},
-      {"criterion": "AC-6: GraphifyEnabledGate hides code results when graphifyEnabled=false", "met": true},
-      {"criterion": "AC-7: TokenBudgetGate enforces 5% token budget tolerance", "met": true},
-      {"criterion": "AC-8: All gates runnable via policy:gates script", "met": true},
-      {"criterion": "AC-9: blockedReason populated when any gate fails", "met": true},
-      {"criterion": "AC-10: Gate results written to results.json artifact", "met": true},
-      {"criterion": "AC-11: Policy gates use deterministic fixture data", "met": true}
+      { "criterion": "AC1: active webhook triggers fetch with url", "met": true },
+      { "criterion": "AC2: POST method and X-Koda-Event header", "met": true },
+      { "criterion": "AC3: X-Koda-Signature HMAC-SHA256", "met": true },
+      { "criterion": "AC4: AbortSignal passed to fetch", "met": true },
+      { "criterion": "AC5: fetch { ok: true } resolves without throwing", "met": true },
+      { "criterion": "AC6: fetch { ok: false, status: 503 } rejects with Error containing 503", "met": true },
+      { "criterion": "AC7: fetch rejection propagates", "met": true },
+      { "criterion": "AC8: missing webhook -> no-op", "met": true },
+      { "criterion": "AC9: inactive webhook -> no-op", "met": true }
     ]
   },
   "quality": {
@@ -35,5 +31,5 @@
     "issues": []
   },
   "fixes": [],
-  "reasoning": "All 21 story-scoped tests pass. The implementer made legitimate test modifications in commit a5a48ef — fixing stub assertions that were incorrectly expecting rejections from a service that always resolves with a PolicyGateResult object. The param-scope tests (4 tests) confirm the three parameter-scope bugs (IsolationGate, ProvenanceGate, GraphifyEnabledGate using hardcoded FIXTURE constants instead of the caller-provided projectId) were properly fixed in commit d6d606c. No loosening of assertions or shortcuts detected. results.json confirms all 6 gates pass."
+  "reasoning": "TDD handoff integrity verified. Tests were written first (commit b7fd89b6) and implementation followed (commit a6942e8e). All 10 story-scoped tests pass. No test modifications by implementer detected. Implementation correctly handles all 9 acceptance criteria: webhook lookup by id, HMAC-SHA256 signature, POST method, AbortSignal timeout, error propagation for non-ok responses, and no-op for null/inactive webhooks."
 }
