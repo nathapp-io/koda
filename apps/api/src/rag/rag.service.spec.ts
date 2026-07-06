@@ -293,6 +293,45 @@ describe('RagService.getOrCreateTable — FTS index creation', () => {
     expect(loggerSpy).toHaveBeenCalled();
     expect(loggerSpy.mock.calls[0][0]).toContain('FTS index');
   });
+
+  it('serializes concurrent calls for the same project so the table is only created once', async () => {
+    const ragService = new RagService(mockRagConfig);
+
+    let resolveCreateTable = (_table: unknown): void => {};
+    const createTablePromise = new Promise((resolve) => {
+      resolveCreateTable = resolve;
+    });
+    const createTableSpy = jest.fn().mockReturnValue(createTablePromise);
+
+    const mockDb = {
+      tableNames: jest.fn().mockResolvedValue([]),
+      createTable: createTableSpy,
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).db = mockDb;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).lanceAvailable = true;
+
+    const first = ragService.getOrCreateTable('concurrent-project');
+    const second = ragService.getOrCreateTable('concurrent-project');
+
+    // Let both calls' preceding awaits (validateProjectId, connect, tableNames) flush
+    // before asserting createTable was only invoked once.
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(createTableSpy).toHaveBeenCalledTimes(1);
+
+    resolveCreateTable({
+      delete: jest.fn().mockResolvedValue(undefined),
+      createIndex: jest.fn().mockResolvedValue(undefined),
+    });
+
+    const [firstTable, secondTable] = await Promise.all([first, second]);
+    expect(firstTable).toBe(secondTable);
+    expect(createTableSpy).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('reciprocalRankFusion — export (US-003-2 AC-3)', () => {

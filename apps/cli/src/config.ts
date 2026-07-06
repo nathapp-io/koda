@@ -130,18 +130,20 @@ export async function resolveContext(
 
   const apiUrl =
     flags.apiUrl ??
+    process.env.KODA_API_URL ??
     projectConfig?.apiUrl ??
     profile?.apiUrl ??
     (globalConfig.apiUrl || DEFAULT_API_URL);
 
   const apiKey =
     flags.apiKey ??
+    process.env.KODA_API_KEY ??
     projectConfig?.apiKey ??
     profile?.apiKey ??
     globalConfig.apiKey ??
     '';
 
-  const projectSlug = flags.projectSlug ?? projectConfig?.projectSlug;
+  const projectSlug = flags.projectSlug ?? process.env.KODA_PROJECT_SLUG ?? projectConfig?.projectSlug;
 
   return { projectSlug, apiKey, apiUrl };
 }

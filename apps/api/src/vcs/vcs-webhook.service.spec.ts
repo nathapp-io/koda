@@ -140,6 +140,7 @@ function resolveOutboxEvent(overrides?: Partial<OutboxEventDomain>): OutboxEvent
     status: 'pending',
     attempts: 0,
     lastError: null,
+    nextAttemptAt: null,
     processedAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),

@@ -44,6 +44,8 @@ async function bootstrap() {
   const combinedGuard = app.get(CombinedAuthGuard);
   app.setJwtAuthGuard(combinedGuard);
 
+  await app.useServerSecurityConfig();
+
   app
     .useAppGlobalPrefix()
     .useAppGlobalPipes()

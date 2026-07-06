@@ -1,7 +1,7 @@
 import { join } from 'path';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { I18nCoreModule } from '@nathapp/nestjs-common';
+import { I18nCoreModule, ServerSecurityConfig } from '@nathapp/nestjs-common';
 import { CacheModule, CacheStrategy } from '@nathapp/nestjs-cache';
 import { LoggingModule } from '@nathapp/nestjs-logging';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
@@ -40,7 +40,7 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
-      load: [appConfig, authConfig, databaseConfig, ragConfig, vcsConfig],
+      load: [appConfig, authConfig, databaseConfig, ragConfig, vcsConfig, ServerSecurityConfig],
       validate: validate,
     }),
     ConfigBridgeModule,
