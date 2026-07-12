@@ -190,6 +190,10 @@
       "assign": "指派",
       "unassign": "取消指派"
     },
+    "labels": {
+      "select": "选择标签",
+      "add": "添加标签"
+    },
     "links": {
       "title": "链接",
       "placeholder": "https://...",

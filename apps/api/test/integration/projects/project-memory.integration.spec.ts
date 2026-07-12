@@ -21,6 +21,11 @@ import { resetDb } from '../../helpers/reset-db';
 const DATABASE_URL = process.env.DATABASE_URL;
 const describeIntegration = DATABASE_URL ? describe : describe.skip;
 
+const decisionCount = 20;
+const factCount = 35;
+const supersededCount = 3;
+const activeCount = decisionCount + factCount; // excludes the 1 expired-TTL active item
+
 /** Unwrap JsonResponse { ret: 0, data: T } → data */
 function body<T = unknown>(res: request.Response): T {
   expect(res.body).toHaveProperty('ret', 0);
@@ -78,7 +83,7 @@ describeIntegration('GET /projects/:slug/memory (HTTP route via MemoryReadContro
     const projectRes = await request(httpServer)
       .post('/api/projects')
       .set('Authorization', `Bearer ${memberToken}`)
-      .send({ name: 'Memory Test Project', slug: 'mem-test-proj', description: 'for memory tests' })
+      .send({ name: 'Memory Test Project', slug: 'mem-test-proj', key: 'MEMT', description: 'for memory tests' })
       .expect(201);
     projectSlug = body<{ slug: string }>(projectRes).slug;
 
@@ -88,68 +93,156 @@ describeIntegration('GET /projects/:slug/memory (HTTP route via MemoryReadContro
       .send({ email: 'memtest-nonmember@koda.test', name: 'Non Member', password: 'Admin1234!Aa' })
       .expect(201);
     nonMemberToken = body<{ accessToken: string }>(nonMemberRes).accessToken;
+
+    const projectRow = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+    const projectId = projectRow.id;
+
+    // 20 active DECISION items (kind filter + pagination coverage)
+    await prisma.client.memoryItem.createMany({
+      data: Array.from({ length: decisionCount }, (_, i) => ({
+        projectId,
+        kind: 'DECISION',
+        subject: `ticket:${i}`,
+        predicate: 'status',
+        object: 'IN_PROGRESS',
+        status: 'active',
+        activeKey: `decision-${i}`,
+      })),
+    });
+
+    // 35 active FACT items (bulk, for the limit=1000 clamp-to-50 assertion)
+    await prisma.client.memoryItem.createMany({
+      data: Array.from({ length: factCount }, (_, i) => ({
+        projectId,
+        kind: 'FACT',
+        subject: `ticket:${i}`,
+        predicate: 'assigned_to',
+        object: `user:${i}`,
+        status: 'active',
+        activeKey: `fact-${i}`,
+      })),
+    });
+
+    // 3 superseded items — must not appear in the default (active) filter
+    await prisma.client.memoryItem.createMany({
+      data: Array.from({ length: supersededCount }, (_, i) => ({
+        projectId,
+        kind: 'FACT',
+        subject: `ticket:sup-${i}`,
+        predicate: 'status',
+        object: 'DONE',
+        status: 'superseded',
+        activeKey: null,
+      })),
+    });
+
+    // 1 active item with an expired TTL — must not appear in the default (active) filter
+    await prisma.client.memoryItem.create({
+      data: {
+        projectId,
+        kind: 'FACT',
+        subject: 'ticket:expired',
+        predicate: 'status',
+        object: 'STALE',
+        status: 'active',
+        ttlAt: new Date('2000-01-01T00:00:00.000Z'),
+        activeKey: 'fact-expired',
+      },
+    });
   }, 30_000);
 
   afterAll(async () => {
     if (app) await app.close();
   });
 
-  it('AC1: returns 200 with items array and total for a project member', async () => {
+  it('AC1: items/total reflect the seeded active count for a project member', async () => {
     const res = await request(httpServer)
       .get(`/api/projects/${projectSlug}/memory`)
+      .query({ limit: '100' })
       .set('Authorization', `Bearer ${memberToken}`)
       .expect(200);
 
-    const data = body<{ items: unknown[]; total: number }>(res);
+    const data = body<{ items: { kind: string; status: string }[]; total: number }>(res);
     expect(Array.isArray(data.items)).toBe(true);
-    expect(typeof data.total).toBe('number');
-    expect(data.total).toBeGreaterThanOrEqual(0);
+    // limit is clamped to 50 server-side, but total must reflect the full active count
+    expect(data.total).toBe(activeCount);
+    expect(data.items.length).toBeLessThanOrEqual(50);
   });
 
-  it('AC2: accepts kind query param without error', async () => {
+  it('AC2: kind=DECISION returns only DECISION items and the matching total', async () => {
     const res = await request(httpServer)
       .get(`/api/projects/${projectSlug}/memory`)
-      .query({ kind: 'FACT' })
+      .query({ kind: 'DECISION', limit: '50' })
       .set('Authorization', `Bearer ${memberToken}`)
       .expect(200);
 
-    const data = body<{ items: unknown[]; total: number }>(res);
-    expect(Array.isArray(data.items)).toBe(true);
+    const data = body<{ items: { kind: string }[]; total: number }>(res);
+    expect(data.total).toBe(decisionCount);
+    expect(data.items.length).toBeGreaterThan(0);
+    expect(data.items.every((item) => item.kind === 'DECISION')).toBe(true);
   });
 
-  it('AC3: returns 200 with default status behaviour when no status param is given', async () => {
+  it('AC3: default (no status param) returns only active items with non-expired TTL', async () => {
     const res = await request(httpServer)
       .get(`/api/projects/${projectSlug}/memory`)
+      .query({ limit: '50' })
       .set('Authorization', `Bearer ${memberToken}`)
       .expect(200);
 
-    body<{ items: unknown[]; total: number }>(res);
+    const data = body<{ items: { status: string; subject: string }[]; total: number }>(res);
+    expect(data.total).toBe(activeCount);
+    expect(data.items.every((item) => item.status === 'active')).toBe(true);
+    expect(data.items.some((item) => item.subject === 'ticket:expired')).toBe(false);
   });
 
-  it('AC4: accepts status=superseded query param without error', async () => {
+  it('AC4: status=superseded returns only superseded items', async () => {
     const res = await request(httpServer)
       .get(`/api/projects/${projectSlug}/memory`)
       .query({ status: 'superseded' })
       .set('Authorization', `Bearer ${memberToken}`)
       .expect(200);
 
-    const data = body<{ items: unknown[]; total: number }>(res);
-    expect(Array.isArray(data.items)).toBe(true);
+    const data = body<{ items: { status: string }[]; total: number }>(res);
+    expect(data.total).toBe(supersededCount);
+    expect(data.items.length).toBe(supersededCount);
+    expect(data.items.every((item) => item.status === 'superseded')).toBe(true);
   });
 
-  it('AC5: accepts page and limit query params and returns valid envelope', async () => {
+  it('AC5: page=2&limit=10 returns the second page of at most 10 items', async () => {
+    const page1 = body<{ items: { subject: string; predicate: string }[]; total: number }>(
+      await request(httpServer)
+        .get(`/api/projects/${projectSlug}/memory`)
+        .query({ page: '1', limit: '10' })
+        .set('Authorization', `Bearer ${memberToken}`)
+        .expect(200),
+    );
+    const page2 = body<{ items: { subject: string; predicate: string }[]; total: number }>(
+      await request(httpServer)
+        .get(`/api/projects/${projectSlug}/memory`)
+        .query({ page: '2', limit: '10' })
+        .set('Authorization', `Bearer ${memberToken}`)
+        .expect(200),
+    );
+
+    expect(page2.items.length).toBeLessThanOrEqual(10);
+    expect(page2.total).toBe(activeCount);
+    const page1Subjects = new Set(page1.items.map((item) => item.subject));
+    expect(page2.items.some((item) => page1Subjects.has(item.subject))).toBe(false);
+  });
+
+  it('AC6: limit=1000 clamps items to at most 50 while total reflects the full count', async () => {
     const res = await request(httpServer)
       .get(`/api/projects/${projectSlug}/memory`)
-      .query({ page: '2', limit: '10' })
+      .query({ limit: '1000' })
       .set('Authorization', `Bearer ${memberToken}`)
       .expect(200);
 
     const data = body<{ items: unknown[]; total: number }>(res);
-    expect(Array.isArray(data.items)).toBe(true);
-    expect(typeof data.total).toBe('number');
+    expect(data.items.length).toBeLessThanOrEqual(50);
+    expect(data.total).toBe(activeCount);
   });
 
-  it('AC6: accepts subject query param without error', async () => {
+  it('accepts subject query param without error', async () => {
     const res = await request(httpServer)
       .get(`/api/projects/${projectSlug}/memory`)
       .query({ subject: 'ticket:123' })

@@ -39,6 +39,7 @@ export function useMemory(slug: string) {
   const error = ref<unknown>(null)
   const total = ref(0)
   const page = ref(1)
+  let latestRequestId = 0
 
   const kindFilter = ref<string>('')
   const statusFilter = ref<string>('')
@@ -46,6 +47,7 @@ export function useMemory(slug: string) {
   const hasMore = computed(() => items.value.length < total.value)
 
   async function loadMemory({ append = false }: { append?: boolean } = {}) {
+    const requestId = ++latestRequestId
     isLoading.value = true
     error.value = null
     try {
@@ -58,11 +60,13 @@ export function useMemory(slug: string) {
         `/projects/${slug}/memory`,
         { query },
       )
+      if (requestId !== latestRequestId) return
       const fetched = res.items ?? []
       items.value = append ? [...items.value, ...fetched] : fetched
       total.value = res.total ?? items.value.length
     }
     catch (err) {
+      if (requestId !== latestRequestId) return
       error.value = err
       // On a failed initial load, clear items so the empty-state copy
       // doesn't show stale data. On a failed append (loadMore), preserve
@@ -80,7 +84,9 @@ export function useMemory(slug: string) {
       throw err
     }
     finally {
-      isLoading.value = false
+      if (requestId === latestRequestId) {
+        isLoading.value = false
+      }
     }
   }
 
