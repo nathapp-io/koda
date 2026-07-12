@@ -40,12 +40,14 @@ export function useTimelineEvents(slug: string) {
   const isLoading = ref(false)
   const error = ref<unknown>(null)
   const cursor = ref<string | undefined>(undefined)
+  let latestRequestId = 0
 
   const eventTypeFilter = ref<string>('')
   const fromFilter = ref<string>('')
   const toFilter = ref<string>('')
 
   async function loadEvents({ append = false }: { append?: boolean } = {}) {
+    const requestId = ++latestRequestId
     isLoading.value = true
     error.value = null
     try {
@@ -59,18 +61,20 @@ export function useTimelineEvents(slug: string) {
         `/projects/${slug}/timeline`,
         { query },
       )
+      if (requestId !== latestRequestId) return
       const fetched = res.events ?? []
       events.value = append ? [...events.value, ...fetched] : fetched
       cursor.value = res.nextCursor
     }
     catch (err) {
+      if (requestId !== latestRequestId) return
       error.value = err
-      events.value = []
-      cursor.value = undefined
       throw err
     }
     finally {
-      isLoading.value = false
+      if (requestId === latestRequestId) {
+        isLoading.value = false
+      }
     }
   }
 
