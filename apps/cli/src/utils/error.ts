@@ -56,9 +56,10 @@ function getStatusAndMessage(err: unknown): { status: number | undefined; messag
  * Handle API errors and exit with appropriate code.
  * Exit codes:
  *   - 0: success
- *   - 1: API error (5xx, 404, unknown)
+ *   - 1: API error (5xx, unknown)
  *   - 2: config/auth error (401, 403, or config errors)
  *   - 3: validation error (400)
+ *   - 4: not found (404)
  */
 export function handleApiError(err: unknown, opts?: HandleApiErrorOpts): never {
   if (opts?.configError) {
