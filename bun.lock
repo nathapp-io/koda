@@ -30,14 +30,14 @@
         "@fastify/static": "^9.0.0",
         "@keyv/redis": "^3.0.0",
         "@lancedb/lancedb": "0.17.0",
-        "@nathapp/nestjs-app": "^3.2.2",
-        "@nathapp/nestjs-auth": "^3.2.2",
-        "@nathapp/nestjs-cache": "^3.2.1",
-        "@nathapp/nestjs-common": "^3.2.3",
-        "@nathapp/nestjs-data": "^3.2.1",
-        "@nathapp/nestjs-logging": "^3.2.1",
-        "@nathapp/nestjs-prisma": "^3.2.2",
-        "@nathapp/nestjs-throttler": "^3.2.2",
+        "@nathapp/nestjs-app": "^3.3.0",
+        "@nathapp/nestjs-auth": "^3.3.0",
+        "@nathapp/nestjs-cache": "^3.3.0",
+        "@nathapp/nestjs-common": "^3.3.0",
+        "@nathapp/nestjs-data": "^3.3.0",
+        "@nathapp/nestjs-logging": "^3.3.0",
+        "@nathapp/nestjs-prisma": "^3.3.0",
+        "@nathapp/nestjs-throttler": "^3.3.0",
         "@nestjs/cache-manager": "^3.0.0",
         "@nestjs/common": "^11.0.0",
         "@nestjs/config": "^4.0.0",
@@ -566,21 +566,21 @@
 
     "@nathapp/koda-web": ["@nathapp/koda-web@workspace:apps/web"],
 
-    "@nathapp/nestjs-app": ["@nathapp/nestjs-app@3.2.2", "https://npm.nathapp.io/@nathapp/nestjs-app/-/nestjs-app-3.2.2.tgz", { "dependencies": { "@nathapp/nestjs-auth": "^3.2.2", "@nathapp/nestjs-common": "^3.2.3" }, "peerDependencies": { "@nathapp/auth": "^1.0.2", "@nathapp/nestjs-cache": "^3.0.0", "@nathapp/nestjs-microservices": "^3.0.0", "@nestjs/common": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@nestjs/config": "^1.0.0 || ^2.0.0 || ^3.0.0 || ^4.0.0", "@nestjs/core": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@nestjs/passport": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@nestjs/swagger": "^7.1.1 || ^8.0.0 || ^11.0.0", "cache-manager": ">=6", "class-transformer": "*", "class-validator": "*", "rxjs": "*" }, "optionalPeers": ["@nathapp/nestjs-cache", "@nathapp/nestjs-microservices", "cache-manager"] }, "sha512-R9c4DLGoOic4KF2O1yIeFcIGm4n6kYmPnZTEkvKIahxBtV31R812N4unPK+vnzwDWITjKT35oAkk6j/xE+J8bg=="],
+    "@nathapp/nestjs-app": ["@nathapp/nestjs-app@3.3.0", "", { "dependencies": { "@nathapp/nestjs-auth": "^3.3.0", "@nathapp/nestjs-common": "^3.3.0" }, "peerDependencies": { "@nathapp/auth": "^1.0.2", "@nathapp/nestjs-cache": "^3.0.0", "@nathapp/nestjs-microservices": "^3.0.0", "@nestjs/common": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@nestjs/config": "^1.0.0 || ^2.0.0 || ^3.0.0 || ^4.0.0", "@nestjs/core": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@nestjs/passport": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@nestjs/swagger": "^7.1.1 || ^8.0.0 || ^11.0.0", "cache-manager": ">=6", "class-transformer": "*", "class-validator": "*", "rxjs": "*" }, "optionalPeers": ["@nathapp/nestjs-cache", "@nathapp/nestjs-microservices", "cache-manager"] }, "sha512-XCy4h2RkbEhWtiq75UYVeQ7mawOapbsmxXSmox14OEVVSNt0CCMrmYYF0Su5mXo6BwzguW8NGcpMFUZvbDEoYw=="],
 
-    "@nathapp/nestjs-auth": ["@nathapp/nestjs-auth@3.2.2", "https://npm.nathapp.io/@nathapp/nestjs-auth/-/nestjs-auth-3.2.2.tgz", { "dependencies": { "@nathapp/nestjs-common": "^3.2.3", "passport-jwt": "^4.0.1" }, "peerDependencies": { "@casl/ability": "^6.7.1", "@nathapp/auth": "^1.0.2", "@nestjs/passport": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "jwks-rsa": "^3.2.0" }, "optionalPeers": ["jwks-rsa"] }, "sha512-Mxxb21muS4T1AGQyMLT+RcCWEF06Y/xytJg8m7nmHyiXJZzMHpLxVIWFfbbKWXc/ZfJ3dxFAZPhmlusvkW4fnw=="],
+    "@nathapp/nestjs-auth": ["@nathapp/nestjs-auth@3.3.0", "", { "dependencies": { "@nathapp/nestjs-common": "^3.3.0", "passport-jwt": "^4.0.1" }, "peerDependencies": { "@casl/ability": "^6.7.1", "@nathapp/auth": "^1.0.2", "@nestjs/passport": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "jwks-rsa": "^3.2.0" }, "optionalPeers": ["jwks-rsa"] }, "sha512-3RgE+3DtosAlabnNeRNHhw3MpVCTV9J5dEJfAFHboJAi8r/y+dqFuDU+Y1w7nDCDhs5M1dsR4kUHHbQSQvkdig=="],
 
-    "@nathapp/nestjs-cache": ["@nathapp/nestjs-cache@3.2.1", "https://npm.nathapp.io/@nathapp/nestjs-cache/-/nestjs-cache-3.2.1.tgz", { "peerDependencies": { "@keyv/redis": "^3.0.0", "@nestjs/cache-manager": "^3.0.0", "@nestjs/common": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@nestjs/core": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@qified/redis": "^1.0.0", "cache-manager": ">=6", "cacheable": "^1.0.0" }, "optionalPeers": ["@keyv/redis", "@nestjs/cache-manager", "@qified/redis", "cache-manager", "cacheable"] }, "sha512-nOrlkl9ZRjhMATz3NDjNu4fPm01zNtFgnGvEN3DZ9p9308Z07DOVdTRL1grBB4k+nsqrnXii2U9lDnvO50czRA=="],
+    "@nathapp/nestjs-cache": ["@nathapp/nestjs-cache@3.3.0", "", { "peerDependencies": { "@keyv/redis": "^3.0.0", "@nestjs/cache-manager": "^3.0.0", "@nestjs/common": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@nestjs/core": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@qified/redis": "^1.0.0", "cache-manager": ">=6", "cacheable": "^1.0.0" }, "optionalPeers": ["@keyv/redis", "@nestjs/cache-manager", "@qified/redis", "cache-manager", "cacheable"] }, "sha512-BAIw2nXbS6TIqz8enUfSyxh8l9qQAfCOIIiyRlv7u4uDqApAb0h6iE1Q4N4inbqnJObZ7WbGFQ0q9gMm2uli0w=="],
 
-    "@nathapp/nestjs-common": ["@nathapp/nestjs-common@3.2.3", "https://npm.nathapp.io/@nathapp/nestjs-common/-/nestjs-common-3.2.3.tgz", { "dependencies": { "@nathapp/common": "^0.1.14", "ipaddr.js": "^2.3.0", "joi": "^17.6.0", "nestjs-i18n": "^10.5.1" }, "peerDependencies": { "@nestjs/common": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@nestjs/core": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@nestjs/throttler": "^5.0.0 || ^6.0.0", "class-transformer": "*", "class-validator": "*" }, "optionalPeers": ["@nestjs/throttler"] }, "sha512-9TqfEsq5aiGJTjPD+8F2ydXwVfeISYwG29gW8oLMfmsE+yADX+Jkjn6myJPKxXvnsInSWirNCIxNFPo1FbW/Ag=="],
+    "@nathapp/nestjs-common": ["@nathapp/nestjs-common@3.3.0", "", { "dependencies": { "@nathapp/common": "^0.1.14", "ipaddr.js": "^2.3.0", "joi": "^17.6.0", "nestjs-i18n": "^10.5.1" }, "peerDependencies": { "@nestjs/common": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@nestjs/core": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@nestjs/throttler": "^5.0.0 || ^6.0.0", "class-transformer": "*", "class-validator": "*" }, "optionalPeers": ["@nestjs/throttler"] }, "sha512-gw0wUEurYwrd8mamlYOOtUYgjorMv2qRHgqUp+nEMOe1e5ts+UL98JqDKVQ+vb6m5Yz4t3KTygAbrruqA3AzgQ=="],
 
-    "@nathapp/nestjs-data": ["@nathapp/nestjs-data@3.2.1", "https://npm.nathapp.io/@nathapp/nestjs-data/-/nestjs-data-3.2.1.tgz", { "dependencies": { "@nathapp/nestjs-common": "^3.2.1" }, "peerDependencies": { "@nestjs/common": "^10.0.0 || ^11.0.0" } }, "sha512-H326G6pRGF1n8a9+9Za3fFQTwDKuywZlnvRxg6h60iFzFoueTNXhkuyizZGs+aJaYyurRumL0wJEKE8b25VuZw=="],
+    "@nathapp/nestjs-data": ["@nathapp/nestjs-data@3.3.0", "", { "dependencies": { "@nathapp/nestjs-common": "^3.3.0" }, "peerDependencies": { "@nestjs/common": "^10.0.0 || ^11.0.0" } }, "sha512-DD2YTpviuYdILkXdnabgY9i8Qvr9qxgh1A1IhYrlbYs/hl9XpkBCAy4OTFx9zbGLbLJmhWSuuO/ybOXE3GMPGQ=="],
 
-    "@nathapp/nestjs-logging": ["@nathapp/nestjs-logging@3.2.1", "https://npm.nathapp.io/@nathapp/nestjs-logging/-/nestjs-logging-3.2.1.tgz", { "dependencies": { "@nathapp/nestjs-common": "^3.2.1", "fast-redact": "^3.0.0" }, "peerDependencies": { "pino": "^7.5.0 || ^8.0.0 || ^9.0.0", "rotating-file-stream": "^3.0.0", "winston": "^3.0.0", "winston-loki": "*" }, "optionalPeers": ["pino", "rotating-file-stream", "winston", "winston-loki"] }, "sha512-5GMyIonziBckj+t15szdWbViXBfPOhQf/HSbukWBHwdVWxezp1rqbiCeYqH1LkThJm/nQqlGeGc6kZzWkbvQFw=="],
+    "@nathapp/nestjs-logging": ["@nathapp/nestjs-logging@3.3.0", "", { "dependencies": { "@nathapp/nestjs-common": "^3.3.0", "fast-redact": "^3.0.0" }, "peerDependencies": { "pino": "^7.5.0 || ^8.0.0 || ^9.0.0", "rotating-file-stream": "^3.0.0", "winston": "^3.0.0", "winston-loki": "*" }, "optionalPeers": ["pino", "rotating-file-stream", "winston", "winston-loki"] }, "sha512-ZfjIsXNOiFefUnLlCoF3/29yN1Uivdb5kcqZ9CQYLOc61eFQIe+fi67+tYUCzdDzYBJwrZCqKZihM2nDd61/nw=="],
 
-    "@nathapp/nestjs-prisma": ["@nathapp/nestjs-prisma@3.2.2", "https://npm.nathapp.io/@nathapp/nestjs-prisma/-/nestjs-prisma-3.2.2.tgz", { "dependencies": { "@nathapp/nestjs-common": "^3.2.3", "@nathapp/nestjs-data": "^3.2.1" }, "peerDependencies": { "@nestjs/common": "^10.0.0 || ^11.0.0", "@nestjs/core": "^10.0.0 || ^11.0.0", "@prisma/client": "^6.0.0" } }, "sha512-8YVUrvkklPnB7rz5qmtaTaQoTRiauyGpNt4EpZJvNxkUVvhYKtIEicMR5HTQ019Gtj/CBgta+FGoAiF1kJaoLg=="],
+    "@nathapp/nestjs-prisma": ["@nathapp/nestjs-prisma@3.3.0", "", { "dependencies": { "@nathapp/nestjs-common": "^3.3.0", "@nathapp/nestjs-data": "^3.3.0" }, "peerDependencies": { "@nestjs/common": "^10.0.0 || ^11.0.0", "@nestjs/core": "^10.0.0 || ^11.0.0", "@prisma/client": "^6.0.0" } }, "sha512-dY5JdjaaCm7gKbfwToHbNQr4XNZTqKSXGi5dthYAYxy9UhWu7sHV3Fv2sJbup72uzC+D7KBmPtJlrnsvGlvgFQ=="],
 
-    "@nathapp/nestjs-throttler": ["@nathapp/nestjs-throttler@3.2.2", "https://npm.nathapp.io/@nathapp/nestjs-throttler/-/nestjs-throttler-3.2.2.tgz", { "peerDependencies": { "@nathapp/nestjs-common": "^3.0.0", "@nestjs/common": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@nestjs/core": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@nestjs/throttler": "^6.0.0 || ^7.0.0" } }, "sha512-0E53If8asPBO8mSw/6flUUrYQw/GAqtDR4dsvvyBlpNhDHmItBch8lZoc4UiJyK93qmprZmsR7HwdtaJcOASQw=="],
+    "@nathapp/nestjs-throttler": ["@nathapp/nestjs-throttler@3.3.0", "", { "peerDependencies": { "@nathapp/nestjs-common": "^3.0.0", "@nestjs/common": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@nestjs/core": "^8.0.0 || ^9.0.0 || ^10.0.0 || ^11.0.0", "@nestjs/throttler": "^6.0.0 || ^7.0.0" } }, "sha512-ZHYcoU+JJWTQkpFJjxMysK37lnxr8yMM0UggJr7Imand/kFSaYIpNu7f1nQTWT+/FM1GGuEgvFOQ8M/6fYN6lQ=="],
 
     "@nathapp/typescript-config": ["@nathapp/typescript-config@workspace:packages/typescript-config"],
 
