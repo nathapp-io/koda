@@ -16,21 +16,42 @@ interface CodeIntelSymbol {
   kind: string
   file: string
   signature?: string
+}
+
+interface CodeIntelSymbolDetail {
+  id: string
+  name: string
+  kind: string
+  file: string
+  signature?: string
   docComment?: string
-  callers?: string[]
-  callees?: string[]
+}
+
+interface CallerInfo {
+  id: string
+  name: string
+  file: string
+}
+
+interface CodeIntelDetailState {
+  detail: CodeIntelSymbolDetail | null
+  callers: CallerInfo[]
+  callees: CallerInfo[]
 }
 
 const searchQuery = ref('')
 const isSearching = ref(false)
 const symbols = ref<CodeIntelSymbol[]>([])
 const expandedSymbolId = ref<string | null>(null)
+const detailState = ref<CodeIntelDetailState | null>(null)
+const isLoadingDetail = ref(false)
 
 async function handleSearch() {
   if (!searchQuery.value.trim()) return
   isSearching.value = true
   symbols.value = []
   expandedSymbolId.value = null
+  detailState.value = null
   try {
     const res = await $api.get<{ items: CodeIntelSymbol[]; total: number }>(
       '/code-intel/symbols',
@@ -47,14 +68,36 @@ async function handleSearch() {
   }
 }
 
-function toggleSymbol(id: string) {
-  expandedSymbolId.value = expandedSymbolId.value === id ? null : id
+async function toggleSymbol(id: string) {
+  if (expandedSymbolId.value === id) {
+    expandedSymbolId.value = null
+    detailState.value = null
+    return
+  }
+  expandedSymbolId.value = id
+  isLoadingDetail.value = true
+  detailState.value = null
+  try {
+    const [detail, callers, callees] = await Promise.all([
+      $api.get<CodeIntelSymbolDetail>(`/code-intel/symbols/${id}`, { query: { projectSlug: slug } }),
+      $api.get<CallerInfo[]>(`/code-intel/symbols/${id}/callers`, { query: { projectSlug: slug } }),
+      $api.get<CallerInfo[]>(`/code-intel/symbols/${id}/callees`, { query: { projectSlug: slug } }),
+    ])
+    detailState.value = { detail, callers, callees }
+  }
+  catch (err) {
+    detailState.value = null
+    expandedSymbolId.value = null
+    toast.error(extractApiError(err))
+  }
+  finally {
+    isLoadingDetail.value = false
+  }
 }
 
-const expandedSymbol = computed(() => {
-  if (!expandedSymbolId.value) return null
-  return symbols.value.find(s => s.id === expandedSymbolId.value) ?? null
-})
+const expandedSymbol = computed(() => detailState.value?.detail ?? null)
+const expandedCallers = computed(() => detailState.value?.callers ?? [])
+const expandedCallees = computed(() => detailState.value?.callees ?? [])
 </script>
 
 <template>
@@ -111,8 +154,10 @@ const expandedSymbol = computed(() => {
         </table>
       </div>
 
+      <LoadingState v-if="isLoadingDetail" />
+
       <div
-        v-if="expandedSymbol"
+        v-else-if="expandedSymbol"
         class="overflow-hidden rounded-lg border border-border bg-muted/20 p-4"
       >
         <dl class="space-y-3 text-sm">
@@ -127,17 +172,19 @@ const expandedSymbol = computed(() => {
           <div>
             <dt class="text-xs font-medium text-muted-foreground">{{ t('codeIntel.detail.callers') }}</dt>
             <dd class="mt-1">
-              <ul class="space-y-0.5 font-mono text-xs text-muted-foreground">
-                <li v-for="caller in expandedSymbol.callers" :key="caller">{{ caller }}</li>
+              <ul v-if="expandedCallers.length > 0" class="space-y-0.5 font-mono text-xs text-muted-foreground">
+                <li v-for="caller in expandedCallers" :key="caller.id">{{ caller.name }} <span class="text-muted-foreground/60">({{ caller.file }})</span></li>
               </ul>
+              <p v-else class="font-mono text-xs text-muted-foreground">—</p>
             </dd>
           </div>
           <div>
             <dt class="text-xs font-medium text-muted-foreground">{{ t('codeIntel.detail.callees') }}</dt>
             <dd class="mt-1">
-              <ul class="space-y-0.5 font-mono text-xs text-muted-foreground">
-                <li v-for="callee in expandedSymbol.callees" :key="callee">{{ callee }}</li>
+              <ul v-if="expandedCallees.length > 0" class="space-y-0.5 font-mono text-xs text-muted-foreground">
+                <li v-for="callee in expandedCallees" :key="callee.id">{{ callee.name }} <span class="text-muted-foreground/60">({{ callee.file }})</span></li>
               </ul>
+              <p v-else class="font-mono text-xs text-muted-foreground">—</p>
             </dd>
           </div>
         </dl>

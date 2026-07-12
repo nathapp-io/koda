@@ -267,78 +267,176 @@ describe('Code-intel AC5 (Behavioral SFC mount): $api.get rejection surfaces ext
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AC6 — Clicking a result row toggles a detail panel that renders signature,
-//        docComment, callers, and callees as plain text.
+// AC6 — Clicking a result row fetches the symbol detail, callers, and callees
+//        from the existing detail endpoints, then renders them as plain text.
+//        The search response itself is intentionally lightweight and does NOT
+//        include docComment/callers/callees — those come from the detail
+//        endpoints (`/symbols/:id`, `/symbols/:id/callers`, `/symbols/:id/callees`).
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('Code-intel AC6 (Behavioral SFC mount): toggleSymbol toggles the expanded panel ref', () => {
-  test('toggleSymbol sets expandedSymbolId to the symbol id, then back to null when called again', async () => {
-    const items = [
-      {
-        id: 's1',
-        name: 'handleSearch',
-        kind: 'function',
-        file: 'pages/[project]/code-intel.vue',
-        signature: 'async function handleSearch(): Promise<void>',
-        docComment: 'Runs the symbol search.',
-        callers: ['onSearchSubmit'],
-        callees: ['$api.get'],
-      },
-    ]
-    const fetchMock = jest.fn(async () => ({ data: { items, total: 1 } }))
+describe('Code-intel AC6 (Behavioral SFC mount): toggleSymbol fetches detail + callers + callees', () => {
+  // The /code-intel/symbols search contract returns ONLY id, name, kind, file,
+  // signature. The detail panel's docComment/callers/callees come from
+  // separate endpoints that toggleSymbol must invoke.
+  const searchItem = {
+    id: 's1',
+    name: 'handleSearch',
+    kind: 'function',
+    file: 'pages/[project]/code-intel.vue',
+    signature: 'async function handleSearch(): Promise<void>',
+  }
+  const detailResponse = {
+    id: 's1',
+    name: 'handleSearch',
+    kind: 'function',
+    file: 'pages/[project]/code-intel.vue',
+    signature: 'async function handleSearch(): Promise<void>',
+    docComment: 'Runs the symbol search.',
+  }
+  const callersResponse = [
+    { id: 'caller-1', name: 'onSearchSubmit', file: 'pages/[project]/code-intel.vue' },
+  ]
+  const calleesResponse = [
+    { id: 'callee-1', name: '$api.get', file: 'composables/useApi.ts' },
+  ]
 
-    const { bindings } = await mountCodeIntelPage({ slug: 'acme', fetchMock })
+  function makeFetchMock() {
+    return jest.fn(async (url: string) => {
+      if (url === '/code-intel/symbols') {
+        return { data: { items: [searchItem], total: 1 } }
+      }
+      if (url === '/code-intel/symbols/s1') {
+        return { data: detailResponse }
+      }
+      if (url === '/code-intel/symbols/s1/callers') {
+        return { data: callersResponse }
+      }
+      if (url === '/code-intel/symbols/s1/callees') {
+        return { data: calleesResponse }
+      }
+      throw new Error(`Unexpected URL in test: ${url}`)
+    })
+  }
+
+  test('toggleSymbol fetches /symbols/:id, /symbols/:id/callers, /symbols/:id/callees (not the search payload)', async () => {
+    const fetchMock = makeFetchMock()
+    const { fetchCalls, bindings } = await mountCodeIntelPage({ slug: 'acme', fetchMock })
+
     const handleSearch = bindings.handleSearch as () => Promise<void>
     const searchQuery = bindings.searchQuery as { value: string }
     searchQuery.value = 'handleSearch'
     await handleSearch()
     await new Promise(resolve => setTimeout(resolve, 20))
 
-    const symbols = bindings.symbols as { value: Array<{ id: string }> }
-    expect(symbols.value).toHaveLength(1)
+    // Search fired — exactly one /code-intel/symbols call so far.
+    const searchCalls = fetchCalls.filter(c => c.url === '/code-intel/symbols')
+    expect(searchCalls.length).toBe(1)
 
-    const expandedSymbolId = bindings.expandedSymbolId as { value: string | null }
-    expect(expandedSymbolId.value).toBeNull()
+    // Now click the row to expand.
+    const toggleSymbol = bindings.toggleSymbol as (id: string) => Promise<void>
+    await toggleSymbol('s1')
+    await new Promise(resolve => setTimeout(resolve, 30))
 
-    const toggleSymbol = bindings.toggleSymbol as (id: string) => void
-    toggleSymbol('s1')
-    expect(expandedSymbolId.value).toBe('s1')
+    // toggleSymbol must have invoked the three detail endpoints with
+    // projectSlug=acme.
+    const detailCalls = fetchCalls.filter(c => c.url === '/code-intel/symbols/s1')
+    const callerCalls = fetchCalls.filter(c => c.url === '/code-intel/symbols/s1/callers')
+    const calleeCalls = fetchCalls.filter(c => c.url === '/code-intel/symbols/s1/callees')
+    expect(detailCalls.length).toBe(1)
+    expect(callerCalls.length).toBe(1)
+    expect(calleeCalls.length).toBe(1)
 
-    toggleSymbol('s1')
-    expect(expandedSymbolId.value).toBeNull()
+    for (const call of [...detailCalls, ...callerCalls, ...calleeCalls]) {
+      const query = (call.opts?.query ?? {}) as Record<string, string>
+      expect(query.projectSlug).toBe('acme')
+    }
   })
 
-  test('the expandedSymbol computed ref resolves to the selected symbol when expandedSymbolId is set', async () => {
-    const items = [
-      {
-        id: 's1',
-        name: 'handleSearch',
-        kind: 'function',
-        file: 'pages/[project]/code-intel.vue',
-        signature: 'async function handleSearch(): Promise<void>',
-        docComment: 'Runs the symbol search.',
-        callers: ['onSearchSubmit'],
-        callees: ['$api.get'],
-      },
-    ]
-    const fetchMock = jest.fn(async () => ({ data: { items, total: 1 } }))
-
+  test('expandedSymbol, expandedCallers, and expandedCallees populate from the detail endpoints (not from search items)', async () => {
+    const fetchMock = makeFetchMock()
     const { bindings } = await mountCodeIntelPage({ slug: 'acme', fetchMock })
+
     const handleSearch = bindings.handleSearch as () => Promise<void>
     const searchQuery = bindings.searchQuery as { value: string }
     searchQuery.value = 'handleSearch'
     await handleSearch()
     await new Promise(resolve => setTimeout(resolve, 20))
 
-    const toggleSymbol = bindings.toggleSymbol as (id: string) => void
-    toggleSymbol('s1')
+    // Before clicking the row, no detail state is populated.
+    const expandedSymbolBefore = bindings.expandedSymbol as { value: unknown }
+    expect(expandedSymbolBefore.value).toBeNull()
 
-    const expandedSymbol = bindings.expandedSymbol as { value: { id: string; signature: string; docComment: string; callers: string[]; callees: string[] } | null }
+    // Click the row.
+    const toggleSymbol = bindings.toggleSymbol as (id: string) => Promise<void>
+    await toggleSymbol('s1')
+    await new Promise(resolve => setTimeout(resolve, 30))
+
+    // expandedSymbol is populated from the /symbols/:id endpoint and
+    // includes docComment — which the search payload does NOT provide.
+    const expandedSymbol = bindings.expandedSymbol as { value: { id: string; signature: string; docComment: string } | null }
     expect(expandedSymbol.value).not.toBeNull()
     expect(expandedSymbol.value?.id).toBe('s1')
     expect(expandedSymbol.value?.signature).toBe('async function handleSearch(): Promise<void>')
     expect(expandedSymbol.value?.docComment).toBe('Runs the symbol search.')
-    expect(expandedSymbol.value?.callers).toEqual(['onSearchSubmit'])
-    expect(expandedSymbol.value?.callees).toEqual(['$api.get'])
+
+    // expandedCallers comes from the /symbols/:id/callers endpoint.
+    const expandedCallers = bindings.expandedCallers as { value: Array<{ id: string; name: string }> }
+    expect(expandedCallers.value).toEqual(callersResponse)
+    expect(expandedCallers.value[0].name).toBe('onSearchSubmit')
+
+    // expandedCallees comes from the /symbols/:id/callees endpoint.
+    const expandedCallees = bindings.expandedCallees as { value: Array<{ id: string; name: string }> }
+    expect(expandedCallees.value).toEqual(calleesResponse)
+    expect(expandedCallees.value[0].name).toBe('$api.get')
+  })
+
+  test('calling toggleSymbol on the same id again clears the detail state (no second fetch)', async () => {
+    const fetchMock = makeFetchMock()
+    const { fetchCalls, bindings } = await mountCodeIntelPage({ slug: 'acme', fetchMock })
+
+    const handleSearch = bindings.handleSearch as () => Promise<void>
+    const searchQuery = bindings.searchQuery as { value: string }
+    searchQuery.value = 'handleSearch'
+    await handleSearch()
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    const toggleSymbol = bindings.toggleSymbol as (id: string) => Promise<void>
+    await toggleSymbol('s1')
+    await new Promise(resolve => setTimeout(resolve, 30))
+
+    const detailCallsBefore = fetchCalls.filter(c => c.url === '/code-intel/symbols/s1').length
+    expect(detailCallsBefore).toBe(1)
+
+    // Click the same row again — should clear without a second fetch.
+    await toggleSymbol('s1')
+    await new Promise(resolve => setTimeout(resolve, 10))
+
+    const detailCallsAfter = fetchCalls.filter(c => c.url === '/code-intel/symbols/s1').length
+    expect(detailCallsAfter).toBe(1)
+
+    const expandedSymbolId = bindings.expandedSymbolId as { value: string | null }
+    expect(expandedSymbolId.value).toBeNull()
+    const expandedSymbol = bindings.expandedSymbol as { value: unknown }
+    expect(expandedSymbol.value).toBeNull()
+  })
+
+  test('search payload carries NO docComment/callers/callees (contract sanity)', async () => {
+    const fetchMock = makeFetchMock()
+    const { bindings } = await mountCodeIntelPage({ slug: 'acme', fetchMock })
+
+    const handleSearch = bindings.handleSearch as () => Promise<void>
+    const searchQuery = bindings.searchQuery as { value: string }
+    searchQuery.value = 'handleSearch'
+    await handleSearch()
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    const symbols = bindings.symbols as { value: Array<Record<string, unknown>> }
+    expect(symbols.value).toHaveLength(1)
+    // The page must NOT rely on these fields from search — assert they are
+    // absent so the contract mismatch is visible in the test if the API
+    // ever changes.
+    expect(symbols.value[0]).not.toHaveProperty('docComment')
+    expect(symbols.value[0]).not.toHaveProperty('callers')
+    expect(symbols.value[0]).not.toHaveProperty('callees')
   })
 })

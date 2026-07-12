@@ -245,7 +245,12 @@ describe('Code-intel AC6: clicking a row expands detail panel with signature/doc
 
   test('detail panel is gated by an expandedSymbol check', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toMatch(/v-if=["'][^"']*expandedSymbol[^"']*["']/)
+    // Match v-if, v-else-if, or v-else containing 'expandedSymbol' (the
+    // gate may live in either a v-if or a v-else-if branch in the template).
+    const hasGate =
+      /v-if=["'][^"']*expandedSymbol[^"']*["']/.test(source) ||
+      /v-else-if=["'][^"']*expandedSymbol[^"']*["']/.test(source)
+    expect(hasGate).toBe(true)
   })
 
   test('detail panel renders the selected symbol signature', () => {
@@ -260,7 +265,9 @@ describe('Code-intel AC6: clicking a row expands detail panel with signature/doc
 
   test('detail panel renders callers as a text list (not interactive links)', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toMatch(/v-for=["'][^"']*in\s+(selectedSymbol|expandedSymbol)\.callers[^"']*["']/)
+    // The callers may be iterated via a computed ref (expandedCallers) or
+    // directly off the selected symbol — both patterns are acceptable.
+    expect(source).toMatch(/v-for=["'][^"']*in\s+[^"']*(expandedCallers|selectedSymbol\.callers|expandedSymbol\.callers)[^"']*["']/)
     // Should not render callers as <NuxtLink> — just text interpolation.
     // Confirm via pattern that callers are rendered with simple text interpolation.
     expect(source).toMatch(/\{\{[^}]*caller[^}]*\}\}/)
@@ -268,7 +275,7 @@ describe('Code-intel AC6: clicking a row expands detail panel with signature/doc
 
   test('detail panel renders callees as a text list (not interactive links)', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toMatch(/v-for=["'][^"']*in\s+(selectedSymbol|expandedSymbol)\.callees[^"']*["']/)
+    expect(source).toMatch(/v-for=["'][^"']*in\s+[^"']*(expandedCallees|selectedSymbol\.callees|expandedSymbol\.callees)[^"']*["']/)
     expect(source).toMatch(/\{\{[^}]*callee[^}]*\}\}/)
   })
 })
