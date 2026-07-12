@@ -70,6 +70,32 @@ export class CodeIntelController {
     return JsonResponse.Ok(result);
   }
 
+  @Get('symbols')
+  @ApiOperation({ summary: 'Search symbols by name or file fragment' })
+  @ApiResponse({ status: 200, description: 'Symbol search results' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Project not found' })
+  @ApiQuery({ name: 'projectSlug', required: true })
+  @ApiQuery({ name: 'q', required: false })
+  @ApiQuery({ name: 'file', required: false })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  @RequiredPermission([CaslPermissionAction.READ, 'CodeIntel'])
+  async searchSymbols(
+    @Query() query: { projectSlug: string; q?: string; file?: string; page?: number; limit?: number },
+    @Principal() principal: KodaPrincipal,
+  ) {
+    const { projectSlug, q, file, page = 1, limit: rawLimit = 20 } = query;
+    const MAX_LIMIT = 100;
+    const limit = Math.min(Number(rawLimit), MAX_LIMIT);
+
+    const project = await this.resolveProject(projectSlug);
+    await this.checkProjectMembership(project.id, principal);
+
+    const { items, total } = await this.astIndexService.searchSymbols(project.id, { q, file, page: Number(page), limit });
+    return JsonResponse.Ok({ items, total });
+  }
+
   @Get('symbols/:symbolId')
   @ApiOperation({ summary: 'Get a symbol by ID' })
   @ApiResponse({ status: 200, description: 'Symbol data' })

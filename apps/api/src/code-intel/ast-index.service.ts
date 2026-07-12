@@ -130,6 +130,13 @@ export class AstIndexService {
     return this.toSymbol(result);
   }
 
+  async searchSymbols(
+    projectId: string,
+    opts: { q?: string; file?: string; page?: number; limit?: number },
+  ) {
+    return this.symbolStore.searchSymbols(projectId, opts);
+  }
+
   async getCallers(projectId: string, symbolId: string): Promise<CallerInfo[]> {
     return this.symbolStore.findCallers(projectId, symbolId);
   }

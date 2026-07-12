@@ -150,6 +150,23 @@ export class PrismaCodeIntelRepository implements ICodeIntelRepository {
 
   // VCS connection lookup (for outbox handler)
 
+  async searchSymbols(
+    projectId: string,
+    opts: { q?: string; file?: string; page?: number; limit?: number },
+  ): Promise<{ items: SymbolRow[]; total: number }> {
+    const { q, file, page = 1, limit = 20 } = opts;
+    const where: Record<string, unknown> = { projectId };
+    if (q !== undefined) where.name = { contains: q };
+    if (file !== undefined) where.file = { contains: file };
+
+    const skip = (page - 1) * limit;
+    const [items, total] = await Promise.all([
+      this.prisma.client.symbol.findMany({ where, take: limit, skip, orderBy: { name: 'asc' } }),
+      this.prisma.client.symbol.count({ where }),
+    ]);
+    return { items, total };
+  }
+
   async findVcsConnectionByProjectId(projectId: string): Promise<VcsConnectionRecord | null> {
     // Cast required because the stale generated Prisma client type does not reflect the
     // vcsConnection model that exists in the actual schema include shape at runtime.

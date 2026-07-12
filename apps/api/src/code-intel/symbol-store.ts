@@ -122,6 +122,13 @@ export class SymbolStore {
     return result;
   }
 
+  async searchSymbols(
+    projectId: string,
+    opts: { q?: string; file?: string; page?: number; limit?: number },
+  ) {
+    return this.codeIntelRepository.searchSymbols(projectId, opts);
+  }
+
   async deleteByFile(projectId: string, repoId: string, file: string): Promise<void> {
     await this.codeIntelRepository.deleteSymbolsByFile(projectId, repoId, file);
   }
