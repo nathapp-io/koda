@@ -683,3 +683,101 @@ describe('Timeline AC3/AC5 composable contract (SSR-verified reactive transition
     expect(html).not.toContain('timeline.empty')
   })
 })
+
+describe('Timeline AC6/AC7 (Behavioral SSR): filter UI renders with correct bindings', () => {
+  let pageTemplate: string
+
+  beforeAll(() => {
+    pageTemplate = extractTemplateSfc(readFileSync(pagePath, 'utf-8'))
+  })
+
+  function makeFilterApp(eventType: string, from: string, to: string) {
+    const ctx = createRenderContext({
+      eventTypeFilter: VueFull.ref(eventType),
+      fromFilter: VueFull.ref(from),
+      toFilter: VueFull.ref(to),
+      isLoading: VueFull.ref(false),
+      events: VueFull.ref([
+        { id: 'e1', eventType: 'x', actorId: 'a', action: 'y', createdAt: 'now' },
+      ]),
+      error: VueFull.ref(null),
+    })
+
+    return VueFull.createSSRApp({
+      template: pageTemplate,
+      setup: () => ctx,
+      components: {
+        PageHeader: stubDiv('PageHeader'),
+        LoadingState: stubDiv('LoadingState'),
+        Input: {
+          name: 'MockInput',
+          props: { type: String, modelValue: String },
+          render(this: { $props: { type: string; modelValue: string } }) {
+            return VueFull.h('input', {
+              type: this.$props.type,
+              value: this.$props.modelValue,
+              class: 'mock-input',
+            })
+          },
+        },
+        Button: stubDiv('Button'),
+      },
+      directives: { model: {} },
+    })
+  }
+
+  test('AC6: event-type select renders with options from EVENT_TYPES and selected value bound to eventTypeFilter', async () => {
+    const app = makeFilterApp('ticket_event', '', '')
+    const html = await renderToString(app)
+
+    // The <select> must contain all EVENT_TYPES options
+    const optionMatches = html.match(/<option[^>]*value="([^"]*)"[^>]*>/g)
+    expect(optionMatches).not.toBeNull()
+    const values = (optionMatches ?? []).map((o: string) => {
+      const m = o.match(/value="([^"]*)"/)
+      return m ? m[1] : ''
+    })
+    expect(values).toEqual(expect.arrayContaining(['', 'ticket_event', 'agent_event', 'decision_event']))
+
+    // The selected option should reflect the eventTypeFilter ref value ('ticket_event')
+    expect(html).toContain('<option value="ticket_event" selected>')
+  })
+
+  test('AC6: re-rendering with a different eventTypeFilter shows the new value as selected', async () => {
+    const app = makeFilterApp('agent_event', '', '')
+    const html = await renderToString(app)
+
+    // Now agent_event should be selected instead
+    expect(html).toContain('<option value="agent_event" selected>')
+    expect(html).not.toContain('<option value="ticket_event" selected>')
+  })
+
+  test('AC7: date inputs render with type="date" and values bound to fromFilter/toFilter', async () => {
+    const app = makeFilterApp('', '2026-01-01', '2026-01-31')
+    const html = await renderToString(app)
+
+    // Both date inputs must be type="date"
+    const dateInputs = html.match(/<input[^>]*type="date"[^>]*>/g)
+    expect(dateInputs).not.toBeNull()
+    expect(dateInputs?.length).toBe(2)
+
+    // One must carry the from filter value
+    expect(html).toContain('value="2026-01-01"')
+    // One must carry the to filter value
+    expect(html).toContain('value="2026-01-31"')
+  })
+
+  test('AC7: re-rendering with empty date filters shows empty values', async () => {
+    const app = makeFilterApp('', '', '')
+    const html = await renderToString(app)
+
+    const dateInputs = html.match(/<input[^>]*type="date"[^>]*>/g)
+    expect(dateInputs).not.toBeNull()
+    expect(dateInputs?.length).toBe(2)
+
+    // With empty filters, no value attributes should reference specific dates
+    expect(html).not.toContain('value="2026-01-01"')
+    // The inputs should still exist (they render even with empty values)
+    expect(html).toContain('type="date"')
+  })
+})
