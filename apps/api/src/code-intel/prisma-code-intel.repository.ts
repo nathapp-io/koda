@@ -153,7 +153,7 @@ export class PrismaCodeIntelRepository implements ICodeIntelRepository {
   async searchSymbols(
     projectId: string,
     opts: { q?: string; file?: string; page?: number; limit?: number },
-  ): Promise<{ items: SymbolRow[]; total: number }> {
+  ): Promise<{ items: Pick<SymbolRow, 'id' | 'name' | 'kind' | 'file' | 'signature'>[]; total: number }> {
     const { q, file, page = 1, limit = 20 } = opts;
     const where: Record<string, unknown> = { projectId };
     if (q !== undefined) where.name = { contains: q };
@@ -161,7 +161,13 @@ export class PrismaCodeIntelRepository implements ICodeIntelRepository {
 
     const skip = (page - 1) * limit;
     const [items, total] = await Promise.all([
-      this.prisma.client.symbol.findMany({ where, take: limit, skip, orderBy: { name: 'asc' } }),
+      this.prisma.client.symbol.findMany({
+        where,
+        take: limit,
+        skip,
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true, kind: true, file: true, signature: true },
+      }),
       this.prisma.client.symbol.count({ where }),
     ]);
     return { items, total };
