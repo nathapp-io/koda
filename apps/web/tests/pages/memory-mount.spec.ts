@@ -70,6 +70,9 @@ async function mountMemoryPage(opts: MountOptions) {
     return await fetchMock(url, fetchOpts)
   })
 
+  // Capture the toast instance so tests can assert on toast.error(...) calls.
+  const toastInstance = { success: jest.fn(), error: jest.fn() }
+
   const useMemoryBundle = await buildUseMemoryBundle()
   const pageBundle = await buildPageBundle()
 
@@ -86,7 +89,7 @@ async function mountMemoryPage(opts: MountOptions) {
 
     useRoute: () => ({ params: { project: slug }, path: `/${slug}/memory` }),
     useI18n: () => ({ t: (k: string) => k, locale: { value: 'en' } }),
-    useAppToast: () => ({ success: jest.fn(), error: jest.fn() }),
+    useAppToast: () => toastInstance,
     definePageMeta: () => {},
     onMounted: (fn: () => unknown) => { fn() },
     useApi: () => ({
@@ -133,7 +136,7 @@ async function mountMemoryPage(opts: MountOptions) {
   // Wait for the loadMemory promise to resolve.
   await new Promise(resolve => setTimeout(resolve, 20))
 
-  return { bindings, fetchCalls }
+  return { bindings, fetchCalls, toast: toastInstance }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -229,5 +232,168 @@ describe('US-004 AC8 (Behavioral SFC mount): invoking load-more re-invokes $api.
     expect(itemsRef.value.length).toBe(2)
     expect(itemsRef.value[1].id).toBe('m2')
     expect(itemsRef.value[1].subject).toBe('ticket:2')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AC5 — Error path: when $api.get rejects, the page must call
+//        useAppToast().error(extractApiError(err)) and render no rows.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('US-004 AC5 (Behavioral SFC mount): $api.get rejection surfaces extractApiError via toast', () => {
+  test('mounting with a fetch that rejects causes toast.error to be called with extractApiError(err)', async () => {
+    const networkError = Object.assign(new Error('boom'), {
+      data: { ret: 1, message: 'Memory service unavailable' },
+    })
+    const fetchMock = jest.fn(() => Promise.reject(networkError))
+
+    const { toast, fetchCalls } = await mountMemoryPage({ slug: 'acme', fetchMock })
+
+    // The fetch was attempted once on mount.
+    expect(fetchCalls).toHaveLength(1)
+    expect(fetchCalls[0].url).toBe('/projects/acme/memory')
+
+    // Wait for the async chain: loadMemory rejects → withToastError catches
+    // → toast.error(extractApiError(err)) is invoked.
+    await new Promise(resolve => setTimeout(resolve, 30))
+
+    // toast.error was called exactly once.
+    expect(toast.error).toHaveBeenCalledTimes(1)
+    // The argument is the extracted error message from extractApiError.
+    const calledWith = (toast.error as jest.Mock).mock.calls[0][0]
+    expect(calledWith).toBe('Memory service unavailable')
+  })
+
+  test('on rejection, the items ref stays empty (no rows rendered)', async () => {
+    const fetchMock = jest.fn(() => Promise.reject(new Error('fail')))
+
+    const { bindings, fetchCalls } = await mountMemoryPage({ slug: 'acme', fetchMock })
+    await new Promise(resolve => setTimeout(resolve, 30))
+
+    expect(fetchCalls).toHaveLength(1)
+    const itemsRef = bindings.items as { value: unknown[] }
+    expect(itemsRef.value).toEqual([])
+    // error ref is set so the template can suppress row rendering.
+    const errorRef = bindings.error as { value: unknown }
+    expect(errorRef.value).not.toBeNull()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AC6 — kind filter: changing the kind select re-invokes $api.get with the
+//        kind query param set to the chosen value.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('US-004 AC6 (Behavioral SFC mount): kind filter re-invokes $api.get with the chosen kind', () => {
+  test('setting kindFilter to FACT and applying triggers a new fetch with kind=FACT', async () => {
+    const initial = { data: { items: [], total: 0 } }
+    const afterFilter = { data: { items: [], total: 0 } }
+    const fetchMock = jest.fn()
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce(afterFilter)
+
+    const { fetchCalls, bindings } = await mountMemoryPage({ slug: 'acme', fetchMock })
+    expect(fetchCalls).toHaveLength(1)
+
+    // Mutate the kind filter and invoke applyFilters (which is what the
+    // page wires to @change on the kind <select>).
+    const kindFilter = bindings.kindFilter as { value: string }
+    expect(kindFilter.value).toBe('')
+
+    kindFilter.value = 'FACT'
+    const applyFilters = bindings.applyFilters as () => Promise<void>
+    await applyFilters()
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    expect(fetchCalls).toHaveLength(2)
+    const filterCall = fetchCalls[1]
+    expect(filterCall.url).toBe('/projects/acme/memory')
+    const query = (filterCall.opts?.query ?? {}) as Record<string, string>
+    expect(query.kind).toBe('FACT')
+    // status and page are not set when kind is the only filter applied.
+    expect(query.status).toBeUndefined()
+  })
+
+  test('changing kind filter to INCIDENT_PATTERN sends that value in the query', async () => {
+    const fetchMock = jest.fn(() => Promise.resolve({ data: { items: [], total: 0 } }))
+
+    const { fetchCalls, bindings } = await mountMemoryPage({ slug: 'acme', fetchMock })
+    expect(fetchCalls).toHaveLength(1)
+
+    const kindFilter = bindings.kindFilter as { value: string }
+    kindFilter.value = 'INCIDENT_PATTERN'
+    const applyFilters = bindings.applyFilters as () => Promise<void>
+    await applyFilters()
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    expect(fetchCalls).toHaveLength(2)
+    const query = (fetchCalls[1].opts?.query ?? {}) as Record<string, string>
+    expect(query.kind).toBe('INCIDENT_PATTERN')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AC7 — status filter: changing the status select re-invokes $api.get with
+//        the status query param set to the chosen value.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('US-004 AC7 (Behavioral SFC mount): status filter re-invokes $api.get with the chosen status', () => {
+  test('setting statusFilter to active and applying triggers a new fetch with status=active', async () => {
+    const fetchMock = jest.fn(() => Promise.resolve({ data: { items: [], total: 0 } }))
+
+    const { fetchCalls, bindings } = await mountMemoryPage({ slug: 'acme', fetchMock })
+    expect(fetchCalls).toHaveLength(1)
+
+    const statusFilter = bindings.statusFilter as { value: string }
+    expect(statusFilter.value).toBe('')
+
+    statusFilter.value = 'active'
+    const applyFilters = bindings.applyFilters as () => Promise<void>
+    await applyFilters()
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    expect(fetchCalls).toHaveLength(2)
+    const filterCall = fetchCalls[1]
+    expect(filterCall.url).toBe('/projects/acme/memory')
+    const query = (filterCall.opts?.query ?? {}) as Record<string, string>
+    expect(query.status).toBe('active')
+    expect(query.kind).toBeUndefined()
+  })
+
+  test('changing status filter to superseded sends that value in the query', async () => {
+    const fetchMock = jest.fn(() => Promise.resolve({ data: { items: [], total: 0 } }))
+
+    const { fetchCalls, bindings } = await mountMemoryPage({ slug: 'acme', fetchMock })
+    expect(fetchCalls).toHaveLength(1)
+
+    const statusFilter = bindings.statusFilter as { value: string }
+    statusFilter.value = 'superseded'
+    const applyFilters = bindings.applyFilters as () => Promise<void>
+    await applyFilters()
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    expect(fetchCalls).toHaveLength(2)
+    const query = (fetchCalls[1].opts?.query ?? {}) as Record<string, string>
+    expect(query.status).toBe('superseded')
+  })
+
+  test('applying both kind and status filters sends both query params', async () => {
+    const fetchMock = jest.fn(() => Promise.resolve({ data: { items: [], total: 0 } }))
+
+    const { fetchCalls, bindings } = await mountMemoryPage({ slug: 'acme', fetchMock })
+    expect(fetchCalls).toHaveLength(1)
+
+    const kindFilter = bindings.kindFilter as { value: string }
+    const statusFilter = bindings.statusFilter as { value: string }
+    kindFilter.value = 'DECISION'
+    statusFilter.value = 'rejected'
+    const applyFilters = bindings.applyFilters as () => Promise<void>
+    await applyFilters()
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    expect(fetchCalls).toHaveLength(2)
+    const query = (fetchCalls[1].opts?.query ?? {}) as Record<string, string>
+    expect(query.kind).toBe('DECISION')
+    expect(query.status).toBe('rejected')
   })
 })
