@@ -983,6 +983,16 @@
       "post": {
         "operationId": "MemoryController_recordDecision",
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordDecisionDto"
+              }
+            }
+          }
+        },
         "responses": {
           "201": {
             "description": "Decision recorded"
@@ -1003,6 +1013,16 @@
       "post": {
         "operationId": "MemoryController_createMemory",
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMemoryDto"
+              }
+            }
+          }
+        },
         "responses": {
           "201": {
             "description": "Memory item created"
@@ -1727,6 +1747,125 @@
         ]
       }
     },
+    "/api/projects/{slug}/webhooks": {
+      "post": {
+        "operationId": "WebhookController_register",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWebhookDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Webhook registered"
+          },
+          "400": {
+            "description": "Invalid request data"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "summary": "Register a webhook for a project",
+        "tags": [
+          "webhooks"
+        ]
+      },
+      "get": {
+        "operationId": "WebhookController_list",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of webhooks"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "summary": "List all webhooks for a project",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
+    "/api/webhooks/{id}": {
+      "delete": {
+        "operationId": "WebhookController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Webhook deleted"
+          },
+          "404": {
+            "description": "Webhook not found"
+          }
+        },
+        "summary": "Remove a webhook",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
+    "/api/projects/{slug}/webhooks/{id}": {
+      "delete": {
+        "operationId": "WebhookController_removeByProject",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Webhook deleted"
+          },
+          "404": {
+            "description": "Webhook not found"
+          }
+        },
+        "summary": "Remove a webhook (project-scoped)",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
     "/api/projects/{slug}/tickets": {
       "post": {
         "operationId": "TicketsController_create",
@@ -2426,125 +2565,6 @@
         "summary": "Reject a ticket (CREATED or VERIFIED → REJECTED)",
         "tags": [
           "tickets"
-        ]
-      }
-    },
-    "/api/projects/{slug}/webhooks": {
-      "post": {
-        "operationId": "WebhookController_register",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateWebhookDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Webhook registered"
-          },
-          "400": {
-            "description": "Invalid request data"
-          },
-          "404": {
-            "description": "Project not found"
-          }
-        },
-        "summary": "Register a webhook for a project",
-        "tags": [
-          "webhooks"
-        ]
-      },
-      "get": {
-        "operationId": "WebhookController_list",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "List of webhooks"
-          },
-          "404": {
-            "description": "Project not found"
-          }
-        },
-        "summary": "List all webhooks for a project",
-        "tags": [
-          "webhooks"
-        ]
-      }
-    },
-    "/api/webhooks/{id}": {
-      "delete": {
-        "operationId": "WebhookController_remove",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Webhook deleted"
-          },
-          "404": {
-            "description": "Webhook not found"
-          }
-        },
-        "summary": "Remove a webhook",
-        "tags": [
-          "webhooks"
-        ]
-      }
-    },
-    "/api/projects/{slug}/webhooks/{id}": {
-      "delete": {
-        "operationId": "WebhookController_removeByProject",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Webhook deleted"
-          },
-          "404": {
-            "description": "Webhook not found"
-          }
-        },
-        "summary": "Remove a webhook (project-scoped)",
-        "tags": [
-          "webhooks"
         ]
       }
     },
@@ -3948,6 +3968,104 @@
           "nodes"
         ]
       },
+      "RecordDecisionDto": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Project ID the decision belongs to"
+          },
+          "actorId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ID of the user or agent making the decision"
+          },
+          "topic": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Short topic/subject of the decision"
+          },
+          "decision": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The decision that was made"
+          },
+          "rationale": {
+            "type": "string",
+            "description": "Why the decision was made"
+          },
+          "sourceId": {
+            "type": "string",
+            "description": "ID of the source record (e.g. ticket, comment) this decision came from"
+          }
+        },
+        "required": [
+          "projectId",
+          "actorId",
+          "topic",
+          "decision"
+        ]
+      },
+      "CreateMemoryDto": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Project ID the memory item belongs to"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "FACT",
+              "DECISION",
+              "PREFERENCE",
+              "CONSTRAINT",
+              "INCIDENT_PATTERN"
+            ],
+            "description": "Kind of memory item"
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Subject of the fact/decision/preference/constraint (e.g. a ticket ID, a topic)"
+          },
+          "predicate": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Predicate — the relationship or statement being made about the subject"
+          },
+          "object": {
+            "type": "string",
+            "description": "Object — the value/target of the predicate"
+          },
+          "sourceType": {
+            "type": "string",
+            "description": "Where this memory item came from (defaults to \"manual\")"
+          },
+          "sourceId": {
+            "type": "string",
+            "description": "ID of the source record this memory item came from"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Confidence score between 0 and 1 (defaults to 0.8)"
+          },
+          "ownerId": {
+            "type": "string",
+            "description": "ID of the user/agent who owns this memory item (defaults to the caller)"
+          }
+        },
+        "required": [
+          "projectId",
+          "kind",
+          "subject",
+          "predicate"
+        ]
+      },
       "CreateProjectDto": {
         "type": "object",
         "properties": {
@@ -4193,6 +4311,29 @@
       "GetContextQueryDto": {
         "type": "object",
         "properties": {}
+      },
+      "CreateWebhookDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "secret": {
+            "type": "string",
+            "minLength": 32
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "url",
+          "events"
+        ]
       },
       "CreateTicketDto": {
         "type": "object",
@@ -4514,29 +4655,6 @@
             "example": "This ticket has been verified and is ready to work on"
           }
         }
-      },
-      "CreateWebhookDto": {
-        "type": "object",
-        "properties": {
-          "url": {
-            "type": "string",
-            "format": "uri"
-          },
-          "secret": {
-            "type": "string",
-            "minLength": 32
-          },
-          "events": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "url",
-          "events"
-        ]
       },
       "CreateVcsConnectionDto": {
         "type": "object",

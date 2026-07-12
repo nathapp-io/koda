@@ -4,20 +4,10 @@ import { Principal } from '@nathapp/nestjs-auth';
 import { ExtractionService, WriteResult } from './extraction.service';
 import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
 import { MemoryItemInput } from './memory-item-repository';
-import { MemoryKind, ActorRole } from '../common/enums';
+import { ActorRole } from '../common/enums';
 import { KodaPrincipal, isAgentPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
-
-interface MemoryWriteInput {
-  projectId: string;
-  kind: MemoryKind;
-  subject: string;
-  predicate: string;
-  object?: string;
-  sourceType?: string;
-  sourceId?: string;
-  confidence?: number;
-  ownerId?: string;
-}
+import { RecordDecisionDto } from './dto/record-decision.dto';
+import { CreateMemoryDto } from './dto/create-memory.dto';
 
 @ApiTags('memory')
 @ApiBearerAuth()
@@ -69,7 +59,7 @@ export class MemoryController {
   @ApiOperation({ summary: 'Record a decision' })
   @ApiResponse({ status: 201, description: 'Decision recorded' })
   async recordDecision(
-    @Body() decision: { projectId: string; actorId: string; topic: string; decision: string; rationale?: string; sourceId?: string },
+    @Body() decision: RecordDecisionDto,
     @Principal() _principal: KodaPrincipal,
   ): Promise<WriteResult> {
     return this.extractionService.recordDecision(
@@ -88,7 +78,7 @@ export class MemoryController {
   @Post()
   @ApiOperation({ summary: 'Create a memory item' })
   @ApiResponse({ status: 201, description: 'Memory item created' })
-  async createMemory(@Body() input: MemoryWriteInput, @Principal() principal: KodaPrincipal) {
+  async createMemory(@Body() input: CreateMemoryDto, @Principal() principal: KodaPrincipal) {
     const role = isAgentPrincipal(principal)
       ? 'AGENT'
       : (isUserPrincipal(principal) ? principal.role : null);
