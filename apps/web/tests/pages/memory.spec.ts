@@ -156,8 +156,11 @@ describe('Memory AC5: page-level error wrapper uses extractApiError and toast', 
 
   test('composable re-throws so the page wrapper receives the error', () => {
     const composableSource = readFileSync(composablePath, 'utf-8')
-    const rethrows =
-      /catch\s*\([^)]*\)\s*\{[\s\S]{0,200}throw\s+/.test(composableSource)
+    // The composable's catch handler must re-throw the original error so the
+    // page-level `withToastError` wrapper sees it. Match the catch block's
+    // body with a generous window so additional state-recovery logic
+    // (clearing items, restoring page) doesn't break the assertion.
+    const rethrows = /catch\s*\([^)]*\)\s*\{[\s\S]*?throw\s+err[\s\S]*?\}/.test(composableSource)
     expect(rethrows).toBe(true)
   })
 })
@@ -568,6 +571,9 @@ describe('Memory AC1/AC3/AC4/AC5 (Behavioral SSR): page renders correctly with s
     expect(html).not.toContain('<tbody')
     expect(html).not.toContain('<tr')
     expect(html).not.toContain('loading-indicator')
+    // The error branch must render (not the empty-state copy), proving
+    // the template checks `error` before `items.length === 0`.
+    expect(html).toContain('memory.error')
   })
 })
 

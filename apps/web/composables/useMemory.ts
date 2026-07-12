@@ -64,8 +64,19 @@ export function useMemory(slug: string) {
     }
     catch (err) {
       error.value = err
-      items.value = []
-      total.value = 0
+      // On a failed initial load, clear items so the empty-state copy
+      // doesn't show stale data. On a failed append (loadMore), preserve
+      // the rows already loaded so the user can retry without losing
+      // what they had.
+      if (!append) {
+        items.value = []
+        total.value = 0
+      }
+      // If this was an append that we incremented page for, restore it
+      // so the next retry re-fetches the same page instead of skipping.
+      if (append && page.value > 1) {
+        page.value -= 1
+      }
       throw err
     }
     finally {
@@ -81,6 +92,9 @@ export function useMemory(slug: string) {
   async function loadMore() {
     if (!hasMore.value) return
     page.value += 1
+    // loadMemory already handles page-restore and error propagation
+    // internally — a failed append decrements `page` and re-throws so
+    // the page wrapper surfaces the error via toast.
     await loadMemory({ append: true })
   }
 
