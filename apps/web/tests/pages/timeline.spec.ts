@@ -4,6 +4,7 @@ import { join } from 'path'
 
 const webDir = join(__dirname, '../..')
 const pagePath = join(webDir, 'pages', '[project]', 'timeline.vue')
+const composablePath = join(webDir, 'composables', 'useTimelineEvents.ts')
 const enLocalePath = join(webDir, 'i18n', 'locales', 'en.json')
 const zhLocalePath = join(webDir, 'i18n', 'locales', 'zh.json')
 
@@ -15,23 +16,30 @@ describe('US-Timeline: pages/[project]/timeline.vue exists', () => {
   test('file is present at pages/[project]/timeline.vue', () => {
     expect(existsSync(pagePath)).toBe(true)
   })
+
+  test('useTimelineEvents composable is extracted at composables/useTimelineEvents.ts', () => {
+    // The page delegates data access to a composable that the suite can
+    // exercise behaviorally (see tests/composables/useTimelineEvents.spec.ts).
+    expect(existsSync(composablePath)).toBe(true)
+  })
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC1 — Timeline page is reachable with the default layout and uses the
-//        existing page pattern (useApi().$api.get, route.params.project,
-//        useI18n, useAppToast, extractApiError)
+// AC1/AC2 — Mount-time fetch + page pattern.
+// The actual $api.get call is exercised behaviorally in tests/composables/
+// useTimelineEvents.spec.ts (AC2/AC5/AC6/AC7/AC8). These source assertions
+// confirm the page is wired to the composable and triggers the fetch on mount.
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('Timeline AC1: uses default layout and shared page pattern', () => {
+describe('Timeline AC1: page pattern + composable delegation', () => {
   test('source declares default layout via definePageMeta', () => {
     const source = readFileSync(pagePath, 'utf-8')
     expect(source).toMatch(/definePageMeta\s*\(\s*\{[^}]*layout\s*:\s*['"]default['"]/)
   })
 
-  test('source uses useApi composable', () => {
+  test('source delegates data access to useTimelineEvents', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('useApi')
+    expect(source).toContain('useTimelineEvents')
   })
 
   test('source uses useI18n composable', () => {
@@ -53,31 +61,13 @@ describe('Timeline AC1: uses default layout and shared page pattern', () => {
     const source = readFileSync(pagePath, 'utf-8')
     expect(source).toMatch(/route\.params\.project|\bparams\.project\b/)
   })
-})
 
-// ──────────────────────────────────────────────────────────────────────────────
-// AC2 — calls $api.get with the path `/projects/<slug>/timeline`
-// ──────────────────────────────────────────────────────────────────────────────
-
-describe('Timeline AC2: calls $api.get with /projects/<slug>/timeline', () => {
-  test('source uses $api.get for the timeline request', () => {
+  test('source triggers the initial fetch on mount (onMounted invokes the loadEvents wrapper)', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toMatch(/\$api\.get[\s<(]/)
-  })
-
-  test('source interpolates slug into /projects/<slug>/timeline path', () => {
-    const source = readFileSync(pagePath, 'utf-8')
-    const matched = source.match(/\$api\.get[\s<(][^,;]*[`'"]\/projects\/\$\{slug\}\/timeline/)
-    expect(matched).not.toBeNull()
-  })
-
-  test('source triggers the initial fetch on mount (onMounted calls loadEvents)', () => {
-    const source = readFileSync(pagePath, 'utf-8')
-    // The page must wire an onMounted hook that invokes loadEvents,
-    // otherwise AC1/AC2 (events rendered after mount, $api.get called on mount) cannot hold.
+    // The page must wire an onMounted hook that triggers loading.
     const hasOnMounted = /\bonMounted\s*\(/.test(source)
-    const callsLoadEventsInMount = /\bonMounted\s*\([\s\S]{0,200}loadEvents\s*\(\s*\)/.test(source)
-    expect(hasOnMounted && callsLoadEventsInMount).toBe(true)
+    const callsLoadInMount = /\bonMounted\s*\([\s\S]{0,400}(loadEvents|load[A-Z][A-Za-z]+\(\))[\s\S]{0,40}\)/.test(source)
+    expect(hasOnMounted && callsLoadInMount).toBe(true)
   })
 })
 
@@ -86,7 +76,7 @@ describe('Timeline AC2: calls $api.get with /projects/<slug>/timeline', () => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('Timeline AC3: shows loading indicator when pending', () => {
-  test('source has v-if="..." guard referencing isLoading or pending', () => {
+  test('source has v-if guard referencing isLoading', () => {
     const source = readFileSync(pagePath, 'utf-8')
     const hasPendingGuard =
       /v-if=["']pending["']/.test(source) ||
@@ -95,7 +85,7 @@ describe('Timeline AC3: shows loading indicator when pending', () => {
     expect(hasPendingGuard).toBe(true)
   })
 
-  test('source renders LoadingState component or loading i18n key while pending', () => {
+  test('source renders LoadingState component while isLoading', () => {
     const source = readFileSync(pagePath, 'utf-8')
     const hasLoadingText =
       source.includes("t('common.loading')") ||
@@ -139,96 +129,66 @@ describe('Timeline AC4: empty response shows empty-state message', () => {
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC5 — error → toast.error(extractApiError(err)) and renders no rows
+// AC5 — error path: source uses extractApiError + toast.error in the page's
+//        wrapper. The composable's error behavior is exercised behaviorally
+//        in tests/composables/useTimelineEvents.spec.ts.
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('Timeline AC5: error path uses extractApiError and shows toast', () => {
-  test('source catches errors from $api.get', () => {
+describe('Timeline AC5: page-level error wrapper uses extractApiError and toast', () => {
+  test('source imports extractApiError', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    const hasTryCatch = /try\s*\{/.test(source) && /\bcatch\b/.test(source)
-    expect(hasTryCatch).toBe(true)
+    expect(source).toMatch(/import\s*\{[^}]*extractApiError[^}]*\}/)
   })
 
   test('source calls toast.error with extractApiError', () => {
     const source = readFileSync(pagePath, 'utf-8')
     expect(source).toMatch(/toast\.error\(\s*extractApiError\(/)
   })
+})
 
-  test('source has error ref or branching (renders no rows on error)', () => {
+// ──────────────────────────────────────────────────────────────────────────────
+// AC6 — Filter UI: page drives the composable's eventTypeFilter from a select
+//        that calls applyFilters on change. The actual $api.get behavior
+//        with eventTypes is exercised behaviorally in useTimelineEvents.spec.ts.
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('Timeline AC6: event-type filter UI re-invokes loadEvents', () => {
+  test('source contains an event-type select bound to the composable filter', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    const hasErrorGuard =
-      source.includes('v-else-if="error"') ||
-      source.includes("v-else-if='error'") ||
-      source.includes('v-if="error"') ||
-      source.includes("v-if='error'")
-    expect(hasErrorGuard).toBe(true)
+    expect(source).toMatch(/v-model=["']eventTypeFilter["']/)
+  })
+
+  test('page re-invokes loadEvents when the filter changes', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    // The select @change handler must call applyFilters or loadEvents.
+    const reInvokes =
+      /@change=[\s\S]{0,40}(apply[A-Za-z]*|loadEvents)/.test(source)
+    expect(reInvokes).toBe(true)
   })
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC6 — event-type filter re-invokes $api.get with eventTypes query param
+// AC7 — Date filters: page drives fromFilter / toFilter on `<Input type="date">`
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('Timeline AC6: event-type filter re-invokes $api.get with eventTypes', () => {
-  test('source contains a filter input/state for event types', () => {
+describe('Timeline AC7: from/to date filter UI re-invokes loadEvents', () => {
+  test('source binds from / to inputs and re-invokes loadEvents on change', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    const hasFilterControl =
-      source.includes('eventTypes') ||
-      source.includes('eventType') ||
-      source.includes('event_type') ||
-      source.includes('timeline.filter.eventType')
-    expect(hasFilterControl).toBe(true)
-  })
-
-  test('source passes eventTypes as $api.get query param (key set in buildQuery)', () => {
-    const source = readFileSync(pagePath, 'utf-8')
-    // The query builder literal must set `eventTypes` as a key,
-    // and the same literal block must be passed via $api.get's options.
-    const setsEventTypes = /query\.eventTypes\s*=\s*/.test(source)
-    const passesQuery = /\$api\.get[\s\S]{0,400}buildQuery\(\)/.test(source)
-    expect(setsEventTypes && passesQuery).toBe(true)
+    expect(source).toMatch(/v-model=["']fromFilter["']/)
+    expect(source).toMatch(/v-model=["']toFilter["']/)
+    const reInvokesOnChange = /@change=[\s\S]{0,40}(apply[A-Za-z]*|loadEvents)/.test(source)
+    expect(reInvokesOnChange).toBe(true)
   })
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC7 — from/to date filters re-invoke $api.get with from and to query params
-// ──────────────────────────────────────────────────────────────────────────────────────
-
-describe('Timeline AC7: from/to date filters re-invoke $api.get', () => {
-  test('source exposes from and to controls/state', () => {
-    const source = readFileSync(pagePath, 'utf-8')
-    const hasFrom = /\bfrom\b/.test(source)
-    const hasTo = /\bto\b/.test(source)
-    expect(hasFrom && hasTo).toBe(true)
-  })
-
-  test('source passes from and to as $api.get query params (keys set in buildQuery)', () => {
-    const source = readFileSync(pagePath, 'utf-8')
-    const setsFrom = /query\.from\s*=\s*/.test(source)
-    const setsTo = /query\.to\s*=\s*/.test(source)
-    const passesQuery = /\$api\.get[\s\S]{0,400}buildQuery\(\)/.test(source)
-    expect(setsFrom && setsTo && passesQuery).toBe(true)
-  })
-})
-
-// ──────────────────────────────────────────────────────────────────────────────
-// AC8 — pagination: load more re-invokes $api.get with cursor; appends events
+// AC8 — pagination: load more button wired to loadMore.
+//        The actual cursor/append behavior is exercised behaviorally in
+//        useTimelineEvents.spec.ts.
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('Timeline AC8: load more re-invokes $api.get with cursor and appends events', () => {
-  test('source tracks a cursor state', () => {
-    const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toMatch(/\bcursor\b/)
-  })
-
-  test('source passes cursor as $api.get query param (key set in buildQuery)', () => {
-    const source = readFileSync(pagePath, 'utf-8')
-    const setsCursor = /query\.cursor\s*=\s*/.test(source)
-    const passesQuery = /\$api\.get[\s\S]{0,400}buildQuery\(\)/.test(source)
-    expect(setsCursor && passesQuery).toBe(true)
-  })
-
-  test('source has a load more button that triggers pagination', () => {
+describe('Timeline AC8: load more button wired to loadMore', () => {
+  test('source has a load more button', () => {
     const source = readFileSync(pagePath, 'utf-8')
     const hasLoadMore =
       source.includes('loadMore') ||
@@ -239,18 +199,14 @@ describe('Timeline AC8: load more re-invokes $api.get with cursor and appends ev
     expect(hasLoadMore).toBe(true)
   })
 
-  test('source appends newly fetched events to the existing list (push or concat)', () => {
+  test('load more button is only shown when there is a next cursor (hasMore)', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    const appends =
-      /\.value\.push\s*\(/.test(source) ||
-      /\[\s*\.\.\.[^\]]*[a-zA-Z_$][^,]*,\s*\.\.\.[^\]]*[a-zA-Z_$][^\]]*\]/.test(source) ||
-      /events\.value\s*=\s*\[\s*\.\.\./.test(source)
-    expect(appends).toBe(true)
+    expect(source).toMatch(/v-if=["']hasMore["']/)
   })
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC9 — Renders the eventType, actorId, and action per row
+// AC9 — Renders the eventType, actorId, and action per row (template)
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('Timeline AC9: each row renders eventType, actorId, action', () => {
