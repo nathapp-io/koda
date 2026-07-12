@@ -59,6 +59,7 @@
     "board": "看板",
     "agents": "代理",
     "kb": "知识库",
+    "timeline": "时间线",
     "labels": "标签",
     "tickets": "工单",
     "toggleSidebar": "切换侧栏",
@@ -186,32 +187,44 @@
       "assign": "指派",
       "unassign": "取消指派"
     },
-    "labels": {
-      "select": "选择标签",
-      "add": "添加标签"
-    },
     "links": {
       "title": "链接",
       "placeholder": "https://...",
       "add": "添加链接",
       "toast": {
-        "added": "链接已添加",
-        "deleted": "链接已移除"
+        "added": "已添加链接",
+        "deleted": "已移除链接"
       }
     },
     "delete": {
       "button": "删除工单",
-      "confirm": "确认删除此工单？",
-      "success": "工单删除成功"
+      "confirm": "确定要删除该工单？",
+      "success": "工单已删除"
     },
     "toast": {
       "created": "工单创建成功",
       "createFailed": "创建工单失败",
-      "updated": "工单更新成功",
+      "updated": "工单已更新",
       "updateFailed": "更新工单失败",
       "actionFailed": "操作失败",
       "assigned": "工单已指派",
       "unassigned": "工单已取消指派"
+    }
+  },
+  "timeline": {
+    "empty": "暂无时间线事件。",
+    "loadMore": "加载更多",
+    "filter": {
+      "eventType": "事件类型",
+      "all": "全部",
+      "from": "起始",
+      "to": "结束"
+    },
+    "columns": {
+      "eventType": "事件",
+      "actorId": "操作者",
+      "action": "动作",
+      "created": "时间"
     }
   },
   "comments": {
