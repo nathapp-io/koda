@@ -109,7 +109,7 @@ export function agentCommand(program: Command): void {
 
   agent
     .command('list')
-    .description('List all agents (admin only)')
+    .description('List all agents')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {

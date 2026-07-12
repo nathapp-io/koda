@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { MemoryController } from './memory.controller';
 import { ExtractionService } from './extraction.service';
 import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
@@ -196,6 +197,48 @@ describe('MemoryController', () => {
       );
       expect(result).toEqual(writeResult);
     });
+
+    it('throws ForbiddenAppException for MEMBER user', async () => {
+      const principal = makeUserPrincipal(ActorRole.MEMBER);
+
+      await expect(
+        controller.recordDecision(
+          { projectId: 'project-123', topic: 't', decision: 'd' },
+          principal,
+        ),
+      ).rejects.toThrow(ForbiddenAppException);
+      expect(extractionService.recordDecision).not.toHaveBeenCalled();
+    });
+
+    it('ignores a non-admin-supplied actorId and records the decision as the caller', async () => {
+      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
+      (extractionService.recordDecision as jest.Mock).mockResolvedValue({ canonicalId: 'x', memoryId: 'y' });
+
+      await controller.recordDecision(
+        { projectId: 'project-123', actorId: 'someone-else', topic: 't', decision: 'd' },
+        principal,
+      );
+
+      expect(extractionService.recordDecision).toHaveBeenCalledWith(
+        expect.objectContaining({ actorId: 'user-1' }),
+        repository,
+      );
+    });
+
+    it('honors an admin-supplied actorId', async () => {
+      const principal = makeUserPrincipal(ActorRole.ADMIN);
+      (extractionService.recordDecision as jest.Mock).mockResolvedValue({ canonicalId: 'x', memoryId: 'y' });
+
+      await controller.recordDecision(
+        { projectId: 'project-123', actorId: 'attributed-actor', topic: 't', decision: 'd' },
+        principal,
+      );
+
+      expect(extractionService.recordDecision).toHaveBeenCalledWith(
+        expect.objectContaining({ actorId: 'attributed-actor' }),
+        repository,
+      );
+    });
   });
 
   describe('createMemory', () => {
@@ -229,37 +272,37 @@ describe('MemoryController', () => {
       expect(result).toEqual(created);
     });
 
-    it('returns ACCESS_DENIED for MEMBER user', async () => {
+    it('throws ForbiddenAppException for MEMBER user', async () => {
       const principal = makeUserPrincipal(ActorRole.MEMBER);
 
-      const result = await controller.createMemory(
-        {
-          projectId: 'project-123',
-          kind: MemoryKind.FACT,
-          subject: 'ticket:1',
-          predicate: 'status',
-        },
-        principal,
-      );
-
-      expect(result).toEqual({ error: 'ACCESS_DENIED' });
+      await expect(
+        controller.createMemory(
+          {
+            projectId: 'project-123',
+            kind: MemoryKind.FACT,
+            subject: 'ticket:1',
+            predicate: 'status',
+          },
+          principal,
+        ),
+      ).rejects.toThrow(ForbiddenAppException);
       expect(repository.upsert).not.toHaveBeenCalled();
     });
 
-    it('returns ACCESS_DENIED for VIEWER user', async () => {
+    it('throws ForbiddenAppException for VIEWER user', async () => {
       const principal = makeUserPrincipal(ActorRole.VIEWER);
 
-      const result = await controller.createMemory(
-        {
-          projectId: 'project-123',
-          kind: MemoryKind.FACT,
-          subject: 'ticket:1',
-          predicate: 'status',
-        },
-        principal,
-      );
-
-      expect(result).toEqual({ error: 'ACCESS_DENIED' });
+      await expect(
+        controller.createMemory(
+          {
+            projectId: 'project-123',
+            kind: MemoryKind.FACT,
+            subject: 'ticket:1',
+            predicate: 'status',
+          },
+          principal,
+        ),
+      ).rejects.toThrow(ForbiddenAppException);
     });
 
     it('uses provided ownerId over principal id', async () => {
