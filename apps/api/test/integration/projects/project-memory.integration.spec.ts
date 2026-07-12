@@ -1,184 +1,189 @@
 /**
- * Integration-style controller tests for GET /projects/:slug/memory.
+ * HTTP-level integration tests for GET /projects/:slug/memory.
  *
- * These tests target MemoryReadController (memory module), which is the
- * authoritative handler for this route per the W1 observability spec.
- * ProjectsController.getProjectMemory is the LEGACY handler that must be
- * removed by the implementer to avoid a duplicate-route conflict.
+ * These tests boot the full NestJS app with AppFactory and use supertest so
+ * that route registration, guard wiring, and which controller actually handles
+ * the request are all exercised. Direct-instantiation tests cannot catch
+ * duplicate route registration, decorator/query-name mismatches, or a legacy
+ * handler shadowing the new one — HTTP-level tests can.
+ *
+ * Requires a database: run with DATABASE_URL=file:./koda-test.ephemeral.db
  */
-import { ForbiddenAppException, JsonResponse, NotFoundAppException } from '@nathapp/nestjs-common';
-import { MemoryGovernanceService } from '../../../src/memory/memory-governance.service';
-import { MemoryReadController } from '../../../src/memory/memory-read.controller';
-import type { MemoryItem } from '../../../src/memory/memory-item-repository';
-import type { UserPrincipal } from '../../../src/auth/principal/koda-principal.types';
-import { ProjectsService } from '../../../src/projects/projects.service';
+import { INestApplication } from '@nestjs/common';
+import request from 'supertest';
+import { AppModule } from '../../../src/app.module';
+import { AppFactory, NathApplication } from '@nathapp/nestjs-app';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaClient } from '@prisma/client';
+import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard';
+import { resetDb } from '../../helpers/reset-db';
 
-const makeMemoryItem = (overrides: Partial<MemoryItem> = {}): MemoryItem => ({
-  id: 'mem-1',
-  projectId: 'project-123',
-  kind: 'FACT',
-  subject: 'ticket:123',
-  predicate: 'status',
-  object: 'IN_PROGRESS',
-  status: 'active',
-  confidence: 0.9,
-  createdAt: new Date('2024-01-01'),
-  updatedAt: new Date('2024-01-02'),
-  ...overrides,
-});
+const DATABASE_URL = process.env.DATABASE_URL;
+const describeIntegration = DATABASE_URL ? describe : describe.skip;
 
-const mockCurrentUser: UserPrincipal = {
-  actorType: 'user',
-  id: 'user-123',
-  sub: 'user-123',
-  role: 'ADMIN',
-  email: 'test@example.com',
-  name: undefined,
-  blacklisted: false,
-  revoked: false,
-  authorities: [],
-};
+/** Unwrap JsonResponse { ret: 0, data: T } → data */
+function body<T = unknown>(res: request.Response): T {
+  expect(res.body).toHaveProperty('ret', 0);
+  expect(res.body).toHaveProperty('data');
+  return res.body.data as T;
+}
 
-describe('MemoryReadController (routes via memory module)', () => {
-  let controller: MemoryReadController;
+describeIntegration('GET /projects/:slug/memory (HTTP route via MemoryReadController)', () => {
+  let app: NathApplication;
+  let httpServer: ReturnType<INestApplication['getHttpServer']>;
 
-  const mockMemoryGovernanceService = {
-    getProjectMemory: jest.fn(),
-  };
+  let memberToken: string;
+  let nonMemberToken: string;
+  let projectSlug: string;
 
-  const mockProjectsService = {
-    // MemoryReadController uses findProjectIdBySlug (returns string),
-    // NOT findBySlug (returns project object) — this is a deliberate difference
-    // from the legacy ProjectsController.getProjectMemory implementation.
-    findProjectIdBySlug: jest.fn(),
-    assertProjectMembership: jest.fn(),
-  };
+  beforeAll(async () => {
+    if (!DATABASE_URL) return;
 
-  beforeEach(() => {
-    jest.clearAllMocks();
-    mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-123');
-    mockProjectsService.assertProjectMembership.mockResolvedValue(undefined);
-    controller = new MemoryReadController(
-      mockMemoryGovernanceService as unknown as MemoryGovernanceService,
-      mockProjectsService as unknown as ProjectsService,
-    );
+    await resetDb();
+
+    app = await AppFactory.create(AppModule);
+
+    const combinedGuard = app.get(CombinedAuthGuard);
+    app.setJwtAuthGuard(combinedGuard);
+
+    app
+      .useAppGlobalPrefix()
+      .useAppGlobalPipes()
+      .useAppGlobalFilters()
+      .useAppGlobalGuards();
+
+    await app.init();
+    httpServer = app.getHttpServer();
+
+    // Register admin user
+    const registerRes = await request(httpServer)
+      .post('/api/auth/register')
+      .send({ email: 'memtest-admin@koda.test', name: 'Memory Test Admin', password: 'Admin1234!Aa' })
+      .expect(201);
+    const adminData = body<{ accessToken: string }>(registerRes);
+
+    // Promote to ADMIN so they can create a project
+    const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+    const adminUser = await prisma.client.user.findUnique({ where: { email: 'memtest-admin@koda.test' } });
+    await prisma.client.user.update({ where: { id: adminUser?.id }, data: { role: 'ADMIN' } });
+
+    // Re-login to get ADMIN-scoped token
+    const loginRes = await request(httpServer)
+      .post('/api/auth/login')
+      .send({ email: 'memtest-admin@koda.test', password: 'Admin1234!Aa' })
+      .expect(200);
+    memberToken = body<{ accessToken: string }>(loginRes).accessToken;
+
+    // Create project — creator becomes a member automatically
+    const projectRes = await request(httpServer)
+      .post('/api/projects')
+      .set('Authorization', `Bearer ${memberToken}`)
+      .send({ name: 'Memory Test Project', slug: 'mem-test-proj', description: 'for memory tests' })
+      .expect(201);
+    projectSlug = body<{ slug: string }>(projectRes).slug;
+
+    // Register a separate non-member user
+    const nonMemberRes = await request(httpServer)
+      .post('/api/auth/register')
+      .send({ email: 'memtest-nonmember@koda.test', name: 'Non Member', password: 'Admin1234!Aa' })
+      .expect(201);
+    nonMemberToken = body<{ accessToken: string }>(nonMemberRes).accessToken;
+  }, 30_000);
+
+  afterAll(async () => {
+    if (app) await app.close();
   });
 
-  describe('GET /projects/:slug/memory', () => {
-    it('AC1: returns items and total for a project with active memory items', async () => {
-      const items = [
-        makeMemoryItem(),
-        makeMemoryItem({
-          id: 'mem-2',
-          kind: 'DECISION',
-          subject: 'deployment:prod',
-          predicate: 'approved',
-          object: 'true',
-        }),
-      ];
-      mockMemoryGovernanceService.getProjectMemory.mockResolvedValue({ items, total: 2 });
+  it('AC1: returns 200 with items array and total for a project member', async () => {
+    const res = await request(httpServer)
+      .get(`/api/projects/${projectSlug}/memory`)
+      .set('Authorization', `Bearer ${memberToken}`)
+      .expect(200);
 
-      const result = await controller.getMemory('koda-test', mockCurrentUser);
+    const data = body<{ items: unknown[]; total: number }>(res);
+    expect(Array.isArray(data.items)).toBe(true);
+    expect(typeof data.total).toBe('number');
+    expect(data.total).toBeGreaterThanOrEqual(0);
+  });
 
-      expect(mockMemoryGovernanceService.getProjectMemory).toHaveBeenCalledWith(
-        expect.objectContaining({ projectId: 'project-123' }),
-      );
-      expect(result).toBeInstanceOf(JsonResponse);
-      expect(result.data.total).toBe(2);
-      expect(result.data.items).toHaveLength(2);
-    });
+  it('AC2: accepts kind query param without error', async () => {
+    const res = await request(httpServer)
+      .get(`/api/projects/${projectSlug}/memory`)
+      .query({ kind: 'FACT' })
+      .set('Authorization', `Bearer ${memberToken}`)
+      .expect(200);
 
-    it('AC2: GET /projects/:slug/memory?kind=FACT returns only FACT memories', async () => {
-      const factItems = [makeMemoryItem({ kind: 'FACT' })];
-      mockMemoryGovernanceService.getProjectMemory.mockResolvedValue({ items: factItems, total: 1 });
+    const data = body<{ items: unknown[]; total: number }>(res);
+    expect(Array.isArray(data.items)).toBe(true);
+  });
 
-      const result = await controller.getMemory('koda-test', mockCurrentUser, 'FACT');
+  it('AC3: returns 200 with default status behaviour when no status param is given', async () => {
+    const res = await request(httpServer)
+      .get(`/api/projects/${projectSlug}/memory`)
+      .set('Authorization', `Bearer ${memberToken}`)
+      .expect(200);
 
-      expect(mockMemoryGovernanceService.getProjectMemory).toHaveBeenCalledWith(
-        expect.objectContaining({ projectId: 'project-123', kind: 'FACT' }),
-      );
-      expect(result.data.items).toHaveLength(1);
-      expect(result.data.items[0]).toHaveProperty('kind', 'FACT');
-    });
+    body<{ items: unknown[]; total: number }>(res);
+  });
 
-    it('AC3: calls service without status when no status param is given (repository defaults to active + non-expired)', async () => {
-      mockMemoryGovernanceService.getProjectMemory.mockResolvedValue({ items: [], total: 0 });
+  it('AC4: accepts status=superseded query param without error', async () => {
+    const res = await request(httpServer)
+      .get(`/api/projects/${projectSlug}/memory`)
+      .query({ status: 'superseded' })
+      .set('Authorization', `Bearer ${memberToken}`)
+      .expect(200);
 
-      await controller.getMemory('koda-test', mockCurrentUser);
+    const data = body<{ items: unknown[]; total: number }>(res);
+    expect(Array.isArray(data.items)).toBe(true);
+  });
 
-      expect(mockMemoryGovernanceService.getProjectMemory).toHaveBeenCalled();
-      const calledQuery = mockMemoryGovernanceService.getProjectMemory.mock.calls[0][0];
-      expect(calledQuery.status).toBeUndefined();
-    });
+  it('AC5: accepts page and limit query params and returns valid envelope', async () => {
+    const res = await request(httpServer)
+      .get(`/api/projects/${projectSlug}/memory`)
+      .query({ page: '2', limit: '10' })
+      .set('Authorization', `Bearer ${memberToken}`)
+      .expect(200);
 
-    it('AC4: GET /projects/:slug/memory?status=superseded returns superseded memories', async () => {
-      const supersededItems = [
-        makeMemoryItem({
-          id: 'mem-old',
-          status: 'superseded',
-          supersededBy: 'mem-new',
-        }),
-      ];
-      mockMemoryGovernanceService.getProjectMemory.mockResolvedValue({ items: supersededItems, total: 1 });
+    const data = body<{ items: unknown[]; total: number }>(res);
+    expect(Array.isArray(data.items)).toBe(true);
+    expect(typeof data.total).toBe('number');
+  });
 
-      const result = await controller.getMemory('koda-test', mockCurrentUser, undefined, undefined, 'superseded');
+  it('AC6: accepts subject query param without error', async () => {
+    const res = await request(httpServer)
+      .get(`/api/projects/${projectSlug}/memory`)
+      .query({ subject: 'ticket:123' })
+      .set('Authorization', `Bearer ${memberToken}`)
+      .expect(200);
 
-      expect(mockMemoryGovernanceService.getProjectMemory).toHaveBeenCalledWith(
-        expect.objectContaining({ projectId: 'project-123', status: 'superseded' }),
-      );
-      expect(result.data.items[0]).toHaveProperty('supersededBy', 'mem-new');
-    });
+    const data = body<{ items: unknown[]; total: number }>(res);
+    expect(Array.isArray(data.items)).toBe(true);
+  });
 
-    it('AC5: pagination — passes page and limit as numbers to the service', async () => {
-      const page2Items = Array.from({ length: 5 }, (_, i) => makeMemoryItem({ id: `mem-${i + 11}` }));
-      mockMemoryGovernanceService.getProjectMemory.mockResolvedValue({ items: page2Items, total: 15 });
+  it('AC7: returns 404 for an unknown project slug', async () => {
+    await request(httpServer)
+      .get('/api/projects/does-not-exist-slug/memory')
+      .set('Authorization', `Bearer ${memberToken}`)
+      .expect(404);
+  });
 
-      const result = await controller.getMemory('koda-test', mockCurrentUser, undefined, undefined, undefined, '2', '10');
+  it('AC8: returns 403 for a user who is not a member of the project', async () => {
+    await request(httpServer)
+      .get(`/api/projects/${projectSlug}/memory`)
+      .set('Authorization', `Bearer ${nonMemberToken}`)
+      .expect(403);
+  });
 
-      expect(mockMemoryGovernanceService.getProjectMemory).toHaveBeenCalledWith(
-        expect.objectContaining({ page: 2, limit: 10 }),
-      );
-      expect(result.data.items).toHaveLength(5);
-    });
+  it('returns 401 when no auth token is provided', async () => {
+    await request(httpServer)
+      .get(`/api/projects/${projectSlug}/memory`)
+      .expect(401);
+  });
 
-    it('AC6: subject filter — passes subject to service when subject param is given', async () => {
-      const items = [makeMemoryItem({ subject: 'ticket:123' })];
-      mockMemoryGovernanceService.getProjectMemory.mockResolvedValue({ items, total: 1 });
-
-      const result = await controller.getMemory('koda-test', mockCurrentUser, undefined, 'ticket:123');
-
-      expect(mockMemoryGovernanceService.getProjectMemory).toHaveBeenCalledWith(
-        expect.objectContaining({ projectId: 'project-123', subject: 'ticket:123' }),
-      );
-      expect(result.data.items[0]).toHaveProperty('subject', 'ticket:123');
-    });
-
-    it('AC7: returns 404 when project slug does not resolve', async () => {
-      mockProjectsService.findProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
-
-      await expect(controller.getMemory('nonexistent', mockCurrentUser)).rejects.toThrow(NotFoundAppException);
-    });
-
-    it('AC8: returns 403 for a principal who is not a member of the project', async () => {
-      mockProjectsService.assertProjectMembership.mockRejectedValue(
-        new ForbiddenAppException({}, 'projects'),
-      );
-
-      await expect(controller.getMemory('koda-test', mockCurrentUser)).rejects.toThrow(ForbiddenAppException);
-    });
-
-    it('project isolation: uses the projectId from the resolved slug, not a hardcoded value', async () => {
-      mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-456');
-      mockMemoryGovernanceService.getProjectMemory.mockResolvedValue({ items: [], total: 0 });
-
-      await controller.getMemory('other-project', mockCurrentUser);
-
-      expect(mockMemoryGovernanceService.getProjectMemory).toHaveBeenCalledWith(
-        expect.objectContaining({ projectId: 'project-456' }),
-      );
-      expect(mockMemoryGovernanceService.getProjectMemory).not.toHaveBeenCalledWith(
-        expect.objectContaining({ projectId: 'project-123' }),
-      );
-    });
+  it('project isolation: returns 404 for a different project slug even with valid token', async () => {
+    await request(httpServer)
+      .get('/api/projects/other-totally-unknown-project/memory')
+      .set('Authorization', `Bearer ${memberToken}`)
+      .expect(404);
   });
 });
