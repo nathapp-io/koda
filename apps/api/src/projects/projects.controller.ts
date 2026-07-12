@@ -13,7 +13,6 @@ import {
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
-import { GetProjectMemoryDto, ProjectMemoryResponseDto } from './dto/project-memory.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import {
   ApiTags,
@@ -29,7 +28,6 @@ import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
 import { KodaAction } from '../auth/casl/koda-action.enum';
 import { AgentsService } from '../agents/agents.service';
 import { UpdateAgentDto } from '../agents/dto/update-agent.dto';
-import { MemoryGovernanceService } from '../memory/memory-governance.service';
 
 @ApiTags('projects')
 @ApiBearerAuth()
@@ -37,7 +35,6 @@ import { MemoryGovernanceService } from '../memory/memory-governance.service';
 export class ProjectsController {
   constructor(
     private projectsService: ProjectsService,
-    private memoryGovernanceService: MemoryGovernanceService,
     private impactAnalysisService: ImpactAnalysisService,
     private agentsService: AgentsService,
   ) {}
@@ -99,47 +96,6 @@ export class ProjectsController {
   @ApiResponse({ status: 404, description: 'Project not found' })
   async remove(@Param('slug') slug: string): Promise<void> {
     await this.projectsService.softDelete(slug);
-  }
-
-  @Get(':slug/memory')
-  @ApiOperation({ summary: 'Get project semantic memories' })
-  @ApiResponse({ status: 200, description: 'Project memories retrieved', type: ProjectMemoryResponseDto })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - no project access' })
-  @ApiResponse({ status: 404, description: 'Project not found' })
-  @ApiQuery({ name: 'kind', required: false, enum: ['FACT', 'INCIDENT_PATTERN', 'DECISION'] })
-  @ApiQuery({ name: 'subjects', required: false, description: 'Filter by subject prefix' })
-  @ApiQuery({ name: 'status', required: false, description: 'Filter by status (active, superseded, rejected)' })
-  async getProjectMemory(
-    @Param('slug') slug: string,
-    @Query() query: GetProjectMemoryDto,
-    @Principal() principal: KodaPrincipal,
-  ) {
-    const project = await this.projectsService.findBySlug(slug);
-    await this.projectsService.assertProjectMembership(project.id, principal);
-
-    const result = await this.memoryGovernanceService.getProjectMemory({
-      projectId: project.id,
-      kind: query.kind,
-      subject: query.subjects,
-      status: query.status,
-    });
-
-    return JsonResponse.Ok({
-      total: result.total,
-      items: result.items.map((item) => ({
-        id: item.id,
-        projectId: item.projectId,
-        kind: item.kind,
-        subject: item.subject,
-        predicate: item.predicate,
-        object: item.object,
-        confidence: item.confidence,
-        supersededBy: item.supersededBy,
-        createdAt: item.createdAt,
-        updatedAt: item.updatedAt,
-      })),
-    });
   }
 
   @Get(':slug/codeintel/impact')

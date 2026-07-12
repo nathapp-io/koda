@@ -577,7 +577,7 @@
           },
           {
             "name": "limit",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -818,7 +818,7 @@
         "parameters": [
           {
             "name": "status",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -893,7 +893,7 @@
           },
           {
             "name": "actorId",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -901,7 +901,7 @@
           },
           {
             "name": "ticketId",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -909,7 +909,7 @@
           },
           {
             "name": "from",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -917,7 +917,7 @@
           },
           {
             "name": "to",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -925,7 +925,7 @@
           },
           {
             "name": "limit",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -933,11 +933,17 @@
           },
           {
             "name": "cursor",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "eventTypes",
+            "required": false,
+            "in": "query",
+            "schema": {}
           }
         ],
         "responses": {
@@ -1034,6 +1040,89 @@
           }
         ],
         "summary": "Create a memory item",
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/api/projects/{slug}/memory": {
+      "get": {
+        "operationId": "MemoryReadController_getMemory",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subject",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "orderBy",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project memory items"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get project memory items",
         "tags": [
           "memory"
         ]
@@ -1214,85 +1303,6 @@
           }
         ],
         "summary": "Soft delete a project (admin only)",
-        "tags": [
-          "projects"
-        ]
-      }
-    },
-    "/api/projects/{slug}/memory": {
-      "get": {
-        "operationId": "ProjectsController_getProjectMemory",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "kind",
-            "required": false,
-            "in": "query",
-            "description": "Filter by memory kind",
-            "schema": {
-              "enum": [
-                "FACT",
-                "INCIDENT_PATTERN",
-                "DECISION"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "name": "subjects",
-            "required": false,
-            "in": "query",
-            "description": "Filter by subject prefix",
-            "schema": {
-              "example": "ticket:123",
-              "type": "string"
-            }
-          },
-          {
-            "name": "status",
-            "required": false,
-            "in": "query",
-            "description": "Filter by status (active, superseded, rejected)",
-            "schema": {
-              "example": "active",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Project memories retrieved",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectMemoryResponseDto"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Forbidden - no project access"
-          },
-          "404": {
-            "description": "Project not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Get project semantic memories",
         "tags": [
           "projects"
         ]
@@ -1493,6 +1503,83 @@
           }
         ],
         "summary": "Index a commit for AST symbol extraction",
+        "tags": [
+          "code-intel"
+        ]
+      }
+    },
+    "/api/code-intel/symbols": {
+      "get": {
+        "operationId": "CodeIntelController_searchSymbols",
+        "parameters": [
+          {
+            "name": "projectSlug",
+            "required": true,
+            "in": "query",
+            "description": "Project slug",
+            "schema": {
+              "example": "my-project",
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Symbol name contains this fragment",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "file",
+            "required": false,
+            "in": "query",
+            "description": "Symbol file path contains this fragment",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-indexed)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Items per page (clamped to a maximum)",
+            "schema": {
+              "minimum": 1,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Symbol search results"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Search symbols by name or file fragment",
         "tags": [
           "code-intel"
         ]
@@ -1713,7 +1800,7 @@
         "parameters": [
           {
             "name": "from",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -1721,7 +1808,7 @@
           },
           {
             "name": "to",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
               "type": "string"
@@ -2787,16 +2874,6 @@
               }
             }
           },
-          "201": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SyncResultDto"
-                }
-              }
-            }
-          },
           "404": {
             "description": "Project or VCS connection not found"
           },
@@ -2831,16 +2908,6 @@
         "responses": {
           "200": {
             "description": "Full sync completed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SyncResultDto"
-                }
-              }
-            }
-          },
-          "201": {
-            "description": "",
             "content": {
               "application/json": {
                 "schema": {
@@ -2887,9 +2954,6 @@
                 }
               }
             }
-          },
-          "201": {
-            "description": ""
           },
           "404": {
             "description": "Project or VCS connection not found"
@@ -3664,7 +3728,7 @@
           "password": {
             "type": "string",
             "minLength": 8,
-            "pattern": "/^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z\\d]).+$/",
+            "pattern": "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z\\d]).+$",
             "example": "StrongPass123!"
           }
         },
@@ -3810,14 +3874,24 @@
         "type": "object",
         "properties": {
           "roles": {
-            "description": "Agent roles",
-            "example": [
-              "DEVELOPER",
-              "REVIEWER"
-            ],
             "type": "array",
             "items": {
-              "type": "string"
+              "required": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "DEVELOPER",
+                  "REVIEWER",
+                  "VERIFIER",
+                  "TRIAGER"
+                ]
+              },
+              "description": "Agent roles",
+              "example": [
+                "DEVELOPER",
+                "REVIEWER"
+              ],
+              "type": "array"
             }
           }
         },
@@ -3849,13 +3923,13 @@
         "type": "object",
         "properties": {
           "source": {
-            "type": "string",
             "enum": [
               "ticket",
               "doc",
               "manual",
               "code"
             ],
+            "type": "string",
             "description": "Source type"
           },
           "sourceId": {
@@ -3870,6 +3944,7 @@
           },
           "metadata": {
             "type": "object",
+            "additionalProperties": true,
             "description": "Arbitrary metadata stored with the document"
           }
         },
@@ -4014,7 +4089,6 @@
             "description": "Project ID the memory item belongs to"
           },
           "kind": {
-            "type": "string",
             "enum": [
               "FACT",
               "DECISION",
@@ -4022,6 +4096,7 @@
               "CONSTRAINT",
               "INCIDENT_PATTERN"
             ],
+            "type": "string",
             "description": "Kind of memory item"
           },
           "subject": {
@@ -4180,91 +4255,6 @@
           }
         }
       },
-      "MemoryItemResponseDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "description": "Memory item ID"
-          },
-          "projectId": {
-            "type": "string",
-            "description": "Project ID"
-          },
-          "kind": {
-            "type": "string",
-            "description": "Memory kind",
-            "enum": [
-              "FACT",
-              "DECISION",
-              "PREFERENCE",
-              "CONSTRAINT",
-              "INCIDENT_PATTERN"
-            ]
-          },
-          "subject": {
-            "type": "string",
-            "description": "Memory subject",
-            "example": "ticket:123"
-          },
-          "predicate": {
-            "type": "string",
-            "description": "Memory predicate",
-            "example": "status"
-          },
-          "object": {
-            "type": "string",
-            "description": "Memory object value"
-          },
-          "confidence": {
-            "type": "number",
-            "description": "Confidence score (0.0 - 1.0)"
-          },
-          "supersededBy": {
-            "type": "string",
-            "description": "ID of the memory item that superseded this one"
-          },
-          "createdAt": {
-            "format": "date-time",
-            "type": "string",
-            "description": "Creation timestamp"
-          },
-          "updatedAt": {
-            "format": "date-time",
-            "type": "string",
-            "description": "Last update timestamp"
-          }
-        },
-        "required": [
-          "id",
-          "projectId",
-          "kind",
-          "subject",
-          "predicate",
-          "createdAt",
-          "updatedAt"
-        ]
-      },
-      "ProjectMemoryResponseDto": {
-        "type": "object",
-        "properties": {
-          "total": {
-            "type": "number",
-            "description": "Total number of matching memories"
-          },
-          "items": {
-            "description": "Memory items",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/MemoryItemResponseDto"
-            }
-          }
-        },
-        "required": [
-          "total",
-          "items"
-        ]
-      },
       "SourceFileDto": {
         "type": "object",
         "properties": {
@@ -4337,14 +4327,14 @@
         "type": "object",
         "properties": {
           "type": {
-            "type": "string",
-            "description": "Ticket type",
             "enum": [
               "BUG",
               "ENHANCEMENT",
               "TASK",
               "QUESTION"
             ],
+            "type": "string",
+            "description": "Ticket type",
             "example": "BUG"
           },
           "title": {
@@ -4359,14 +4349,14 @@
             "example": "Users cannot login with email"
           },
           "priority": {
-            "type": "string",
-            "description": "Ticket priority",
             "enum": [
               "LOW",
               "MEDIUM",
               "HIGH",
               "CRITICAL"
             ],
+            "type": "string",
+            "description": "Ticket priority",
             "example": "MEDIUM",
             "default": "MEDIUM"
           }
@@ -4454,14 +4444,14 @@
             "description": "Project-scoped ticket reference, e.g. NAX-1"
           },
           "type": {
-            "type": "string",
-            "description": "Ticket type",
             "enum": [
               "BUG",
               "ENHANCEMENT",
               "TASK",
               "QUESTION"
-            ]
+            ],
+            "type": "string",
+            "description": "Ticket type"
           },
           "title": {
             "type": "string",
@@ -4473,8 +4463,6 @@
             "description": "Ticket description"
           },
           "status": {
-            "type": "string",
-            "description": "Ticket status",
             "enum": [
               "CREATED",
               "VERIFIED",
@@ -4482,17 +4470,19 @@
               "VERIFY_FIX",
               "CLOSED",
               "REJECTED"
-            ]
+            ],
+            "type": "string",
+            "description": "Ticket status"
           },
           "priority": {
-            "type": "string",
-            "description": "Ticket priority",
             "enum": [
               "LOW",
               "MEDIUM",
               "HIGH",
               "CRITICAL"
-            ]
+            ],
+            "type": "string",
+            "description": "Ticket priority"
           },
           "assignedToUserId": {
             "type": "string",
@@ -4619,19 +4609,17 @@
             "example": "Updated description"
           },
           "priority": {
-            "type": "string",
-            "description": "Ticket priority",
             "enum": [
               "LOW",
               "MEDIUM",
               "HIGH",
               "CRITICAL"
             ],
+            "type": "string",
+            "description": "Ticket priority",
             "example": "HIGH"
           },
           "status": {
-            "type": "string",
-            "description": "Ticket status",
             "enum": [
               "CREATED",
               "VERIFIED",
@@ -4640,6 +4628,8 @@
               "CLOSED",
               "REJECTED"
             ],
+            "type": "string",
+            "description": "Ticket status",
             "example": "IN_PROGRESS"
           }
         }

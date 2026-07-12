@@ -2,7 +2,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import { ProjectsController } from './projects.controller';
 import { ProjectsService } from './projects.service';
-import { MemoryGovernanceService } from '../memory/memory-governance.service';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
 import { AgentsService } from '../agents/agents.service';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
@@ -65,7 +64,6 @@ const agentPrincipal: KodaPrincipal = {
 describe('ProjectsController', () => {
   let controller: ProjectsController;
   let projectsService: jest.Mocked<ProjectsService>;
-  let memoryGovernanceService: jest.Mocked<MemoryGovernanceService>;
   let impactAnalysisService: jest.Mocked<ImpactAnalysisService>;
   let agentsService: jest.Mocked<AgentsService>;
 
@@ -78,10 +76,6 @@ describe('ProjectsController', () => {
       softDelete: jest.fn(),
       assertProjectMembership: jest.fn(),
     } as unknown as jest.Mocked<ProjectsService>;
-
-    memoryGovernanceService = {
-      getProjectMemory: jest.fn(),
-    } as unknown as jest.Mocked<MemoryGovernanceService>;
 
     impactAnalysisService = {
       getChangeImpact: jest.fn(),
@@ -96,7 +90,6 @@ describe('ProjectsController', () => {
       controllers: [ProjectsController],
       providers: [
         { provide: ProjectsService, useValue: projectsService },
-        { provide: MemoryGovernanceService, useValue: memoryGovernanceService },
         { provide: ImpactAnalysisService, useValue: impactAnalysisService },
         { provide: AgentsService, useValue: agentsService },
       ],
@@ -169,93 +162,6 @@ describe('ProjectsController', () => {
     });
   });
 
-  describe('getProjectMemory', () => {
-    it('allows admin without membership check', async () => {
-      projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      projectsService.assertProjectMembership.mockResolvedValue(undefined);
-      memoryGovernanceService.getProjectMemory.mockResolvedValue({ total: 0, items: [] } as any);
-
-      const result = await controller.getProjectMemory('alpha', {}, adminPrincipal);
-
-      expect(projectsService.assertProjectMembership).toHaveBeenCalledWith('proj-1', adminPrincipal);
-      expect((result as any).data.total).toBe(0);
-    });
-
-    it('allows agent without membership row check', async () => {
-      projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      projectsService.assertProjectMembership.mockResolvedValue(undefined);
-      memoryGovernanceService.getProjectMemory.mockResolvedValue({ total: 1, items: [] } as any);
-
-      const result = await controller.getProjectMemory('alpha', {}, agentPrincipal);
-
-      expect(projectsService.assertProjectMembership).toHaveBeenCalledWith('proj-1', agentPrincipal);
-      expect((result as any).data.total).toBe(1);
-    });
-
-    it('forbids member without project membership', async () => {
-      projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      projectsService.assertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'projects'));
-
-      await expect(
-        controller.getProjectMemory('alpha', {}, memberPrincipal),
-      ).rejects.toThrow(ForbiddenAppException);
-    });
-
-    it('allows member with valid project role', async () => {
-      projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      projectsService.assertProjectMembership.mockResolvedValue(undefined);
-      memoryGovernanceService.getProjectMemory.mockResolvedValue({
-        total: 2,
-        items: [
-          {
-            id: 'm1',
-            projectId: 'proj-1',
-            kind: 'FACT',
-            subject: 'auth',
-            predicate: 'is',
-            object: 'JWT',
-            confidence: 0.9,
-            supersededBy: null,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          },
-        ],
-      } as any);
-
-      const result = await controller.getProjectMemory('alpha', { kind: 'FACT' }, memberPrincipal);
-
-      expect((result as any).data.total).toBe(2);
-      expect((result as any).data.items).toHaveLength(1);
-    });
-
-    it('maps memory items to response shape', async () => {
-      projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      projectsService.assertProjectMembership.mockResolvedValue(undefined);
-
-      const mockItem = {
-        id: 'm1',
-        projectId: 'proj-1',
-        kind: 'DECISION',
-        subject: 'db',
-        predicate: 'is',
-        object: 'postgres',
-        confidence: 1,
-        supersededBy: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-      memoryGovernanceService.getProjectMemory.mockResolvedValue({ total: 1, items: [mockItem] } as any);
-
-      const result = await controller.getProjectMemory('alpha', {}, memberPrincipal);
-
-      const item = (result as any).data.items[0];
-      expect(item).toMatchObject({
-        id: 'm1',
-        kind: 'DECISION',
-        subject: 'db',
-      });
-    });
-  });
 
   describe('getChangeImpact', () => {
     it('throws BadRequestException when required params are missing', async () => {
