@@ -307,3 +307,203 @@ describe('US-006 AC6 (Behavioral SFC mount): non-403 error surfaces extractApiEr
     expect(adminOnly.value).toBe(false)
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Behavioral SSR tests — render the SFC template with stubbed state and verify
+// the actual rendered HTML for the user-facing branches the ACs describe.
+// This guards against the template (`v-for`, `v-if`, `v-else-if`) regressing
+// in a way that the script-mock tests above would not catch.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const VueFull = require('vue/dist/vue.cjs.js')
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { renderToString } = require('vue/server-renderer')
+
+function extractTemplateSfc(sfcSource: string): string {
+  const m = sfcSource.match(/<template>([\s\S]*)<\/template>/)
+  if (!m) throw new Error('No template found in SFC source')
+  return m[1]
+}
+
+function stubDiv(tag: string): VueFull.Component {
+  const { h } = VueFull
+  return {
+    name: `Stub${tag}`,
+    render() {
+      const slots = this.$slots.default?.()
+      return h('div', { class: `stub-${tag.toLowerCase()}` }, slots)
+    },
+  }
+}
+
+interface SloMetric { label: string; value: number }
+
+function createRenderContext(overrides: Record<string, unknown> = {}) {
+  const { ref } = VueFull
+  return {
+    t: (key: string) => key,
+    from: ref('2026-01-01'),
+    to: ref('2026-01-31'),
+    metrics: ref<SloMetric[]>([]),
+    pending: ref(false),
+    adminOnly: ref(false),
+    reload: () => Promise.resolve(),
+    ...overrides,
+  }
+}
+
+describe('US-006 AC1 (Behavioral SSR): template renders one metric card per metric with label and value', () => {
+  let pageTemplate: string
+
+  beforeAll(() => {
+    pageTemplate = extractTemplateSfc(readFileSync(pagePath, 'utf-8'))
+  })
+
+  test('rendering with two metrics produces two metric cards containing their label and value', async () => {
+    const ctx = createRenderContext({
+      metrics: VueFull.ref([
+        { label: 'Availability', value: 99.95 },
+        { label: 'Latency p95', value: 120 },
+      ]),
+    })
+
+    const app = VueFull.createSSRApp({
+      template: pageTemplate,
+      setup: () => ctx,
+      components: {
+        PageHeader: stubDiv('PageHeader'),
+        LoadingState: stubDiv('LoadingState'),
+      },
+      directives: { model: {} },
+    })
+
+    const html = await renderToString(app)
+
+    const cards = html.match(/data-testid="slo-metric-card"/g) ?? []
+    expect(cards).toHaveLength(2)
+
+    // Each metric's label and value must be rendered inside its card.
+    expect(html).toContain('Availability')
+    expect(html).toContain('99.95')
+    expect(html).toContain('Latency p95')
+    expect(html).toContain('120')
+  })
+
+  test('rendering with an empty metrics list produces zero metric cards and the empty-state copy', async () => {
+    const ctx = createRenderContext({ metrics: VueFull.ref([]) })
+
+    const app = VueFull.createSSRApp({
+      template: pageTemplate,
+      setup: () => ctx,
+      components: {
+        PageHeader: stubDiv('PageHeader'),
+        LoadingState: stubDiv('LoadingState'),
+      },
+      directives: { model: {} },
+    })
+
+    const html = await renderToString(app)
+
+    const cards = html.match(/data-testid="slo-metric-card"/g) ?? []
+    expect(cards).toHaveLength(0)
+    expect(html).toContain('slos.empty')
+  })
+})
+
+describe('US-006 AC4 (Behavioral SSR): pending renders the loading indicator and not metric cards', () => {
+  let pageTemplate: string
+
+  beforeAll(() => {
+    pageTemplate = extractTemplateSfc(readFileSync(pagePath, 'utf-8'))
+  })
+
+  test('when pending=true the rendered HTML contains the loading indicator and no metric cards', async () => {
+    const ctx = createRenderContext({
+      pending: VueFull.ref(true),
+      metrics: VueFull.ref([{ label: 'Availability', value: 99.95 }]),
+    })
+
+    const app = VueFull.createSSRApp({
+      template: pageTemplate,
+      setup: () => ctx,
+      components: {
+        PageHeader: stubDiv('PageHeader'),
+        LoadingState: {
+          name: 'MockLoadingState',
+          render(this: { title?: string }) {
+            return VueFull.h('div', { class: 'loading-indicator' }, this.title ?? 'Loading...')
+          },
+        },
+      },
+      directives: { model: {} },
+    })
+
+    const html = await renderToString(app)
+
+    expect(html).toContain('loading-indicator')
+    expect(html).not.toContain('data-testid="slo-metric-card"')
+    expect(html).not.toContain('Availability')
+    expect(html).not.toContain('slos.adminOnly')
+    expect(html).not.toContain('slos.empty')
+  })
+
+  test('when pending=false and metrics are present, the loading indicator is absent and cards are rendered', async () => {
+    const ctx = createRenderContext({
+      pending: VueFull.ref(false),
+      metrics: VueFull.ref([{ label: 'Availability', value: 99.95 }]),
+    })
+
+    const app = VueFull.createSSRApp({
+      template: pageTemplate,
+      setup: () => ctx,
+      components: {
+        PageHeader: stubDiv('PageHeader'),
+        LoadingState: {
+          name: 'MockLoadingState',
+          render(this: { title?: string }) {
+            return VueFull.h('div', { class: 'loading-indicator' }, this.title ?? 'Loading...')
+          },
+        },
+      },
+      directives: { model: {} },
+    })
+
+    const html = await renderToString(app)
+
+    expect(html).not.toContain('loading-indicator')
+    expect(html).toContain('data-testid="slo-metric-card"')
+  })
+})
+
+describe('US-006 AC5 (Behavioral SSR): adminOnly renders the friendly admin-only state instead of metric cards or loading', () => {
+  let pageTemplate: string
+
+  beforeAll(() => {
+    pageTemplate = extractTemplateSfc(readFileSync(pagePath, 'utf-8'))
+  })
+
+  test('when adminOnly=true the rendered HTML contains the admin-only message and no metric cards', async () => {
+    const ctx = createRenderContext({
+      adminOnly: VueFull.ref(true),
+      metrics: VueFull.ref([{ label: 'Availability', value: 99.95 }]),
+    })
+
+    const app = VueFull.createSSRApp({
+      template: pageTemplate,
+      setup: () => ctx,
+      components: {
+        PageHeader: stubDiv('PageHeader'),
+        LoadingState: stubDiv('LoadingState'),
+      },
+      directives: { model: {} },
+    })
+
+    const html = await renderToString(app)
+
+    expect(html).toContain('slos.adminOnly')
+    expect(html).not.toContain('data-testid="slo-metric-card"')
+    expect(html).not.toContain('loading-indicator')
+    expect(html).not.toContain('slos.empty')
+  })
+})
