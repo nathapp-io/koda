@@ -1,10 +1,31 @@
 import { error as printError } from './output';
 import { ApiError } from '../generated/core/ApiError';
+import { isJsonMode } from './json-mode';
 
 interface HandleApiErrorOpts {
   notFoundMessage?: string;
   configError?: boolean;
   validationError?: boolean;
+}
+
+type ErrorCode = 'CONFIG_ERROR' | 'VALIDATION_ERROR' | 'UNAUTHORIZED' | 'NOT_FOUND' | 'API_ERROR';
+
+/**
+ * Print an error either as colorized text to stderr (default) or, under
+ * --json, as a single machine-readable JSON object to stderr — so scripts
+ * that parse --json output don't have to also scrape colorized text, and
+ * stdout stays reserved for successful command output.
+ */
+function emitError(message: string, code: ErrorCode, status: number | undefined, hint?: string): void {
+  if (isJsonMode()) {
+    console.error(JSON.stringify({ error: { code, message, status: status ?? null, hint: hint ?? null } }, null, 2));
+    return;
+  }
+
+  printError(message);
+  if (hint) {
+    printError(hint);
+  }
 }
 
 function getStatusAndMessage(err: unknown): { status: number | undefined; message: string } {
@@ -42,34 +63,33 @@ function getStatusAndMessage(err: unknown): { status: number | undefined; messag
 export function handleApiError(err: unknown, opts?: HandleApiErrorOpts): never {
   if (opts?.configError) {
     const configError = err as { message?: string };
-    printError(configError.message ?? 'Configuration error');
+    emitError(configError.message ?? 'Configuration error', 'CONFIG_ERROR', undefined);
     process.exit(2);
   }
 
   if (opts?.validationError) {
     const validationErr = err as { message?: string };
-    printError(validationErr.message ?? 'Validation error');
+    emitError(validationErr.message ?? 'Validation error', 'VALIDATION_ERROR', undefined);
     process.exit(3);
   }
 
   const { status, message } = getStatusAndMessage(err);
 
   if (status === 401 || status === 403) {
-    printError(message);
-    printError('Check your API key: koda config set apiKey <key>');
+    emitError(message, 'UNAUTHORIZED', status, 'Check your API key: koda config set apiKey <key>');
     process.exit(2);
   }
 
   if (status === 400) {
-    printError(message);
+    emitError(message, 'VALIDATION_ERROR', status);
     process.exit(3);
   }
 
   if (status === 404) {
-    printError(opts?.notFoundMessage ?? 'Not found');
+    emitError(opts?.notFoundMessage ?? 'Not found', 'NOT_FOUND', status);
     process.exit(4);
   }
 
-  printError(message);
+  emitError(message, 'API_ERROR', status);
   process.exit(1);
 }

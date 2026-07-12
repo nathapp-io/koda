@@ -22,6 +22,7 @@ import { codeIntelCommand } from './commands/code-intel';
 import { authCommand } from './commands/auth';
 import { adminCommand } from './commands/admin';
 import { ciWebhookCommand } from './commands/ci-webhook';
+import { setJsonMode } from './utils/json-mode';
 
 // Read package.json to get version
 let version = '0.1.0';
@@ -56,6 +57,14 @@ program.hook('preAction', (thisCommand) => {
     console.error(`Error: invalid --cwd path (${targetCwd}): ${errorMessage}`);
     process.exit(2);
   }
+});
+
+// --json is declared per-command, not globally, so handleApiError (called
+// from ~160 sites without access to that command's local options) can't
+// see it directly. Read it off the matched command here instead.
+program.hook('preAction', (_thisCommand, actionCommand) => {
+  const opts = actionCommand.opts() as { json?: boolean };
+  setJsonMode(!!opts.json);
 });
 
 // Login command

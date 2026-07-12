@@ -13,6 +13,7 @@ jest.mock('chalk', () => ({
 }));
 
 import { handleApiError } from './error';
+import { setJsonMode } from './json-mode';
 
 describe('error', () => {
   const originalExit = process.exit;
@@ -38,6 +39,7 @@ describe('error', () => {
   afterEach(() => {
     process.exit = originalExit;
     console.error = originalError;
+    setJsonMode(false);
   });
 
   describe('handleApiError', () => {
@@ -306,6 +308,94 @@ describe('error', () => {
 
       const output = errorOutput.join('\n');
       expect(output).toContain('koda config set apiKey');
+    });
+  });
+
+  describe('handleApiError with --json mode', () => {
+    beforeEach(() => {
+      setJsonMode(true);
+    });
+
+    it('emits a single JSON object instead of colorized text', () => {
+      const error = {
+        response: { status: 400, data: { message: 'Invalid input' } },
+        message: 'Request failed',
+      };
+
+      try {
+        handleApiError(error);
+      } catch {
+        // Expected to throw process.exit
+      }
+
+      expect(errorOutput).toHaveLength(1);
+      const parsed = JSON.parse(errorOutput[0]);
+      expect(parsed).toEqual({
+        error: { code: 'VALIDATION_ERROR', message: 'Invalid input', status: 400, hint: null },
+      });
+      expect(exitCode).toBe(3);
+    });
+
+    it('includes the auth hint inside the JSON object for 401/403, not as a second line', () => {
+      const error = {
+        response: { status: 401, data: { message: 'Unauthorized' } },
+        message: 'Unauthorized',
+      };
+
+      try {
+        handleApiError(error);
+      } catch {
+        // Expected to throw process.exit
+      }
+
+      expect(errorOutput).toHaveLength(1);
+      const parsed = JSON.parse(errorOutput[0]);
+      expect(parsed.error.hint).toBe('Check your API key: koda config set apiKey <key>');
+      expect(exitCode).toBe(2);
+    });
+
+    it('includes notFoundMessage for 404 errors', () => {
+      const error = { response: { status: 404 }, message: 'Not Found' };
+
+      try {
+        handleApiError(error, { notFoundMessage: 'Project not found: my-slug' });
+      } catch {
+        // Expected to throw process.exit
+      }
+
+      const parsed = JSON.parse(errorOutput[0]);
+      expect(parsed).toEqual({
+        error: { code: 'NOT_FOUND', message: 'Project not found: my-slug', status: 404, hint: null },
+      });
+      expect(exitCode).toBe(4);
+    });
+
+    it('emits config-error and validation-error opts as JSON with a null status', () => {
+      try {
+        handleApiError(new Error('bad config'), { configError: true });
+      } catch {
+        // Expected to throw process.exit
+      }
+
+      const parsed = JSON.parse(errorOutput[0]);
+      expect(parsed).toEqual({
+        error: { code: 'CONFIG_ERROR', message: 'bad config', status: null, hint: null },
+      });
+      expect(exitCode).toBe(2);
+    });
+
+    it('emits generic errors with no HTTP status as API_ERROR with a null status', () => {
+      try {
+        handleApiError(new Error('Network timeout'));
+      } catch {
+        // Expected to throw process.exit
+      }
+
+      const parsed = JSON.parse(errorOutput[0]);
+      expect(parsed).toEqual({
+        error: { code: 'API_ERROR', message: 'Network timeout', status: null, hint: null },
+      });
+      expect(exitCode).toBe(1);
     });
   });
 
