@@ -104,6 +104,27 @@ describe('Timeline AC3: shows loading indicator when pending', () => {
       /v-if=["'][^"']*isLoading[^"']*["']/.test(source)
     expect(hasVFor && hasPendingGuard).toBe(true)
   })
+
+  test('event table appears AFTER the loading indicator in the template (chain)', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    // The LoadingState block must come before the event table block so
+    // that v-if="isLoading" controls visibility precedence.
+    const loadingIdx = source.indexOf('LoadingState')
+    const tableIdx = source.indexOf('<table')
+    expect(loadingIdx).toBeGreaterThan(-1)
+    expect(tableIdx).toBeGreaterThan(-1)
+    expect(loadingIdx).toBeLessThan(tableIdx)
+  })
+
+  test('event table is wrapped in v-else (exclusivity with the loading branch)', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    // The block containing the <table> must be guarded by v-if/v-else-if/v-else,
+    // and the immediately preceding sibling must be the loading block.
+    const tableIdx = source.indexOf('<table')
+    // The wrapper <div v-else ...> wrapping the table block:
+    const vElseBeforeTable = /v-else(?!\s*-if)/.test(source.slice(Math.max(0, tableIdx - 400), tableIdx))
+    expect(vElseBeforeTable).toBe(true)
+  })
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -143,6 +164,39 @@ describe('Timeline AC5: page-level error wrapper uses extractApiError and toast'
   test('source calls toast.error with extractApiError', () => {
     const source = readFileSync(pagePath, 'utf-8')
     expect(source).toMatch(/toast\.error\(\s*extractApiError\(/)
+  })
+
+  test('source wraps loadEvents/loadMore calls in a try/catch wrapper so errors reach toast', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    // The page has a helper that catches errors from the composable (verified
+    // behaviorally in tests/composables/useTimelineEvents.spec.ts) and feeds
+    // them to extractApiError + toast.error. Either pattern is acceptable:
+    //   1) try/catch directly around loadEvents/loadMore, OR
+    //   2) a wrapper helper (e.g. withToastError) called from each handler.
+    const inlineTryCatch = /\btry\s*\{[\s\S]{0,400}\b(load|apply)[A-Z]?[\s\S]{0,400}\bcatch\b[\s\S]{0,400}extractApiError/.test(source)
+    const hasWrapperCalledWith = /\bwithToast[A-Za-z]*\s*\(/.test(source)
+      && /extractApiError/.test(source)
+      && /loadEvents|loadMore|applyFilters/.test(source)
+    expect(inlineTryCatch || hasWrapperCalledWith).toBe(true)
+  })
+
+  test('composable re-throws so the page wrapper receives the error', () => {
+    // Cross-reference the composable source: loadEvents / loadMore / applyFilters
+    // must re-throw errors, otherwise the page-level try/catch never sees them.
+    const composableSource = readFileSync(composablePath, 'utf-8')
+    const rethrows =
+      /catch\s*\([^)]*\)\s*\{[\s\S]{0,200}throw\s+/.test(composableSource)
+    expect(rethrows).toBe(true)
+  })
+
+  test('event table rendering is hidden when error is non-null (no rows on error)', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    // The template must have a `v-if="error"` (or v-else-if) branch BEFORE
+    // the event table block, so a failed load shows nothing.
+    const errorGuardIdx = source.search(/v-if=["']error["']|v-else-if=["']error["']/)
+    const tableIdx = source.indexOf('<table')
+    expect(errorGuardIdx).toBeGreaterThan(-1)
+    expect(tableIdx).toBeGreaterThan(errorGuardIdx)
   })
 })
 
@@ -210,19 +264,39 @@ describe('Timeline AC8: load more button wired to loadMore', () => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('Timeline AC9: each row renders eventType, actorId, action', () => {
-  test('source renders eventType per event row', () => {
+  test('the v-for body interpolates {{ event.eventType }} (binds the data field)', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toMatch(/event\.eventType|\.eventType|\beventType\b/)
+    // The composable returns events with field eventType; the template must
+    // explicitly bind that field via interpolation (not just mention the name).
+    expect(source).toMatch(/\{\{[^}]*event\.eventType[^}]*\}\}/)
   })
 
-  test('source renders actorId per event row', () => {
+  test('the v-for body interpolates {{ event.actorId }} (binds the data field)', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toMatch(/\.actorId\b|\bactorId\b/)
+    expect(source).toMatch(/\{\{[^}]*event\.actorId[^}]*\}\}/)
   })
 
-  test('source renders action per event row', () => {
+  test('the v-for body interpolates {{ event.action }} (binds the data field)', () => {
     const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toMatch(/\.action\b|\baction\b/)
+    expect(source).toMatch(/\{\{[^}]*event\.action[^}]*\}\}/)
+  })
+
+  test('eventType, actorId, action bindings are inside the v-for loop body', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    // Find the v-for that iterates over `events` (not the EVENT_TYPES <option>
+    // loop, which is a UI constant).
+    const eventsVFor = source.match(/v-for=["']event in events["']/)
+    expect(eventsVFor).not.toBeNull()
+    const vForIdx = (eventsVFor?.index ?? -1) as number
+    // Walk back to the start of the containing <tr ... v-for=...> element
+    const trStart = source.lastIndexOf('<tr', vForIdx)
+    const trEnd = source.indexOf('</tr>', vForIdx)
+    expect(trStart).toBeGreaterThan(-1)
+    expect(trEnd).toBeGreaterThan(trStart)
+    const rowBody = source.slice(trStart, trEnd)
+    expect(rowBody).toMatch(/\{\{[^}]*event\.eventType[^}]*\}\}/)
+    expect(rowBody).toMatch(/\{\{[^}]*event\.actorId[^}]*\}\}/)
+    expect(rowBody).toMatch(/\{\{[^}]*event\.action[^}]*\}\}/)
   })
 })
 
