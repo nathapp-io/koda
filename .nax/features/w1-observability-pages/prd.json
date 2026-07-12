@@ -3,7 +3,7 @@
   "feature": "w1-observability-pages",
   "branchName": "feat/w1-observability-pages",
   "createdAt": "2026-07-12T05:36:29Z",
-  "updatedAt": "2026-07-12T05:43:42.996Z",
+  "updatedAt": "2026-07-12T07:31:26.836Z",
   "userStories": [
     {
       "id": "US-001",
@@ -29,8 +29,8 @@
         "security"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -42,7 +42,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "claude",
         "initialProfileId": "claude-final",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -59,7 +61,11 @@
       "suggestedCriteria": [
         "Given a subject prefix filter, when `GET /projects/:slug/memory` is called with `subject=<prefix>`, then it returns only memory items whose subject starts with that prefix.",
         "Given `orderBy=updatedAt` or `orderBy=createdAt`, when `GET /projects/:slug/memory` is called, then it returns items in the repository's deterministic descending sort order for that field."
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "5950f5a5f9460a9e76513964bbc7cd0f4e045916"
     },
     {
       "id": "US-002",
@@ -89,7 +95,16 @@
       "status": "pending",
       "passes": false,
       "attempts": 0,
-      "escalations": [],
+      "escalations": [
+        {
+          "fromTier": "balanced",
+          "toTier": "powerful",
+          "fromAgent": "claude",
+          "toAgent": "claude",
+          "reason": "Rectification exhausted with unfixed findings",
+          "timestamp": "2026-07-12T07:31:24.797Z"
+        }
+      ],
       "routing": {
         "complexity": "medium",
         "testStrategy": "three-session-tdd",
@@ -99,7 +114,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "claude",
         "initialProfileId": "claude-final",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "powerful"
       },
       "workdir": "apps/api",
       "contextFiles": [
@@ -116,7 +133,24 @@
       "suggestedCriteria": [
         "Given both `q` and `file`, when `GET /code-intel/symbols` is called, then it applies both filters before pagination.",
         "Given two identical search requests, when `GET /code-intel/symbols?projectSlug=<slug>` is called twice, then the item ordering is stable across calls."
-      ]
+      ],
+      "priorErrors": [
+        "Attempt 1 failed with model tier: balanced: Rectification exhausted with unfixed findings"
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "balanced",
+          "stage": "escalation",
+          "summary": "Tier balanced: Rectification exhausted with unfixed findings",
+          "cost": 8.4223398,
+          "timestamp": "2026-07-12T07:31:24.797Z",
+          "agent": "claude",
+          "agentProfileId": "claude-final"
+        }
+      ],
+      "storyPoints": 1,
+      "storyGitRef": "3ca2395d92bd8fbb7b3c46fa67ecf8a58af9f5f1"
     },
     {
       "id": "US-003",
@@ -167,7 +201,10 @@
       "expectedFiles": [
         "apps/web/pages/[project]/timeline.vue",
         "apps/web/tests/pages/timeline.spec.ts"
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -220,7 +257,10 @@
       "expectedFiles": [
         "apps/web/pages/[project]/memory.vue",
         "apps/web/tests/pages/memory.spec.ts"
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -271,7 +311,10 @@
       "expectedFiles": [
         "apps/web/pages/[project]/code-intel.vue",
         "apps/web/tests/pages/code-intel.spec.ts"
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-006",
@@ -320,7 +363,10 @@
       "expectedFiles": [
         "apps/web/pages/admin/slos.vue",
         "apps/web/tests/pages/slos.spec.ts"
-      ]
+      ],
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "This feature stays within existing Koda architecture: `apps/api` remains the system of record and `apps/web` remains a Nuxt 3 client over API endpoints. The API already exposes two of the four required read endpoints: timeline is implemented by `TimelineController` at `apps/api/src/memory/timeline.controller.ts:10` and SLO metrics are implemented by `SloDashboardController` at `apps/api/src/monitoring/slo-dashboard.controller.ts:11`. The web package is Nuxt 3 rather than Next.js: existing pages use `definePageMeta`, `useRoute`, `useApi`, `useI18n`, `useAppToast`, and `extractApiError` as shown in `apps/web/pages/[project]/kb.vue:2` and `apps/web/composables/useApi.ts:68`, and navigation is owned by `apps/web/layouts/default.vue:1`.\n\nThe highest-risk backend seam is memory: the spec asks for a new `apps/api/src/memory/memory-read.controller.ts`, but the repo already has `GET :slug/memory` on `ProjectsController` at `apps/api/src/projects/projects.controller.ts:104`. That existing route already asserts membership and maps a memory response shape. Implementation must converge ownership without leaving duplicate handlers for the same path. The read logic itself already exists and should be reused, not reimplemented: `MemoryGovernanceService.getProjectMemory()` delegates to `PrismaMemoryItemRepository.findByProjectMemory()` at `apps/api/src/memory/memory-governance.service.ts:24`, and that repository already enforces most spec semantics including `limit <= 50`, `page >= 1`, default `status='active'`, TTL filtering, subject prefix filtering, and supported orderings at `apps/api/src/memory/memory-item-repository.ts:208`. `MemoryModule` currently wires `TimelineController` and `MemoryController` only at `apps/api/src/memory/memory.module.ts:17`, so US-001 needs controller registration plus unit DI coverage. Existing tests around the current memory route live in `apps/api/src/projects/projects.controller.spec.ts:172`, which is relevant for preserving behavior while moving the route.\n\nCode-intel also already has the needed controller/module/service seams. `CodeIntelController` exposes `GET symbols/:symbolId`, `GET symbols/:symbolId/callers`, and `GET symbols/:symbolId/callees`, reusing `resolveProject(slug)` and `checkProjectMembership(projectId, principal)` at `apps/api/src/code-intel/code-intel.controller.ts:28`. The read chain the spec wants to extend is already `AstIndexService -> SymbolStore -> PrismaCodeIntelRepository`, visible in `apps/api/src/code-intel/ast-index.service.ts:122`, `apps/api/src/code-intel/symbol-store.ts:48`, and `apps/api/src/code-intel/prisma-code-intel.repository.ts:104`. `CodeIntelModule` is already wired and compile-tested at `apps/api/src/code-intel/code-intel.module.ts:16` and `apps/api/src/code-intel/code-intel.module.spec.ts:11`. This means US-002 is an additive extension to standard patterns rather than a new abstraction.\n\nOn the web side, every new page should follow the existing page pattern in `apps/web/pages/[project]/kb.vue:1`: string-path `$api.get` calls, route-derived slug, i18n keys in both `apps/web/i18n/locales/en.json` and `apps/web/i18n/locales/zh.json`, and toast error handling through `extractApiError(err)`. The layout currently shows top-level Dashboard and Agents links plus project-scoped Board, Labels, KB, and Settings links at `apps/web/layouts/default.vue:71`; the new pages need to extend that navigation without breaking existing links or breadcrumb behavior. The SLO nav link must be shown unconditionally to authenticated users because the client has no admin role signal; server-side access control remains on `GET /admin/slos` via `@RequiredPermission('ADMIN')` in `apps/api/src/monitoring/slo-dashboard.controller.ts:19`.\n\nTesting conventions in the repo are mixed. Existing web tests often inspect source files directly, for example `apps/web/tests/pages/labels.spec.ts:25` and `apps/web/tests/layouts/default.spec.ts:13`, but the spec explicitly calls for page/component tests that mock the `$api` boundary and assert loading, empty, error, filtering, and pagination behavior. For this feature, implementation should prefer mounted Jest component/page tests under `apps/web/tests/pages/`. For API work, controller/module compile tests already exist in place, and the spec also requires integration-style endpoint behavior tests. No schema migration or new packages are needed. Root-level generated artifacts do matter for US-001 and US-002 because contract changes must refresh committed `openapi.json` and the generated CLI client via `bun run generate`; that is a verification note, not a story in itself.",

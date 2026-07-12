@@ -49,7 +49,9 @@ export class MemoryReadController {
       ...(orderBy !== undefined && { orderBy: orderBy as ProjectMemoryQuery['orderBy'] }),
     };
 
+    const MAX_LIMIT = 50;
     const result = await this.governance.getProjectMemory(query);
-    return JsonResponse.Ok(result) as JsonResponse<MemoryPageResult>;
+    const items = result.items.slice(0, MAX_LIMIT);
+    return JsonResponse.Ok({ items, total: result.total }) as JsonResponse<MemoryPageResult>;
   }
 }
