@@ -230,6 +230,7 @@
   },
   "memory": {
     "empty": "暂无记忆项。",
+    "error": "加载记忆项失败。",
     "loadMore": "加载更多",
     "filter": {
       "kind": "类型",

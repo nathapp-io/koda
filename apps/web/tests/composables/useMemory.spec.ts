@@ -328,3 +328,110 @@ describe('AC5 page contract: error propagates so page-level catch can feed extra
     expect(mem.isLoading.value).toBe(false)
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recovery behavior — when loadMore fails after incrementing `page`, the
+// composable must restore the previous page and preserve the already-loaded
+// rows so the user can retry without losing data or skipping results.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('useMemory: loadMore failure restores page and preserves items', () => {
+  beforeEach(resetGlobals)
+
+  test('when loadMore fails, page is restored to its pre-increment value', async () => {
+    const firstPage = {
+      data: {
+        items: [
+          { id: 'mem-1', subject: 'a', predicate: 'b', object: 'c', kind: 'FACT', confidence: 0.9, status: 'active' },
+        ],
+        total: 5,
+      },
+    }
+    const fetchMock = jest.fn()
+      .mockResolvedValueOnce(firstPage)
+      .mockRejectedValueOnce(new Error('page 2 down'))
+    applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+
+    const { useMemory } = await import(composablePath)
+    const mem = useMemory('acme')
+
+    await mem.loadMemory()
+    expect(mem.page.value).toBe(1)
+    expect(mem.hasMore.value).toBe(true)
+
+    try {
+      await mem.loadMore()
+    }
+    catch {
+      /* expected: page 2 fetch failed */
+    }
+
+    // The page counter was incremented before the fetch; on failure it
+    // must be decremented so the next retry fetches page 2 again instead
+    // of skipping straight to page 3.
+    expect(mem.page.value).toBe(1)
+
+    // And the next retry should go out with page=2 (NOT page=3).
+    fetchMock.mockResolvedValueOnce({
+      data: {
+        items: [
+          { id: 'mem-2', subject: 'd', predicate: 'e', object: 'f', kind: 'FACT', confidence: 0.7, status: 'active' },
+        ],
+        total: 5,
+      },
+    })
+    await mem.loadMore()
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    const [, opts] = fetchMock.mock.calls[2]
+    const query = (opts as { query?: Record<string, string> }).query
+    expect(query.page).toBe('2')
+  })
+
+  test('when loadMore fails, the already-loaded items are preserved (not wiped)', async () => {
+    const firstPage = {
+      data: {
+        items: [
+          { id: 'mem-1', subject: 'a', predicate: 'b', object: 'c', kind: 'FACT', confidence: 0.9, status: 'active' },
+        ],
+        total: 5,
+      },
+    }
+    const fetchMock = jest.fn()
+      .mockResolvedValueOnce(firstPage)
+      .mockRejectedValueOnce(new Error('page 2 down'))
+    applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+
+    const { useMemory } = await import(composablePath)
+    const mem = useMemory('acme')
+
+    await mem.loadMemory()
+    const itemsBeforeFailure = mem.items.value
+    expect(itemsBeforeFailure).toHaveLength(1)
+
+    try {
+      await mem.loadMore()
+    }
+    catch {
+      /* expected */
+    }
+
+    // The user must still see their already-loaded rows after a failed
+    // append — only an initial-load failure clears items.
+    expect(mem.items.value).toHaveLength(1)
+    expect(mem.items.value[0].id).toBe('mem-1')
+  })
+
+  test('when the INITIAL loadMemory fails, items ARE cleared (empty state is correct)', async () => {
+    const fetchMock = jest.fn(() => Promise.reject(new Error('boom')))
+    applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+
+    const { useMemory } = await import(composablePath)
+    const mem = useMemory('acme')
+
+    await expect(mem.loadMemory()).rejects.toThrow('boom')
+
+    // Initial load failure: items are cleared so the empty-state copy
+    // doesn't show stale rows.
+    expect(mem.items.value).toEqual([])
+  })
+})

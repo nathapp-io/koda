@@ -77,13 +77,18 @@ function formatConfidence(value: number) {
     <LoadingState v-if="isLoading" />
 
     <div
+      v-else-if="error"
+      class="rounded-lg border border-dashed border-border py-16 text-center"
+    >
+      <p class="text-sm font-medium text-muted-foreground">{{ t('memory.error') }}</p>
+    </div>
+
+    <div
       v-else-if="items.length === 0"
       class="rounded-lg border border-dashed border-border py-16 text-center"
     >
       <p class="text-sm font-medium text-muted-foreground">{{ t('memory.empty') }}</p>
     </div>
-
-    <div v-else-if="error" />
 
     <div v-else class="overflow-hidden rounded-lg border border-border">
       <table class="w-full text-sm">

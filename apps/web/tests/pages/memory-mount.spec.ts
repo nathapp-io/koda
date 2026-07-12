@@ -1,11 +1,45 @@
 import { describe, test, expect, jest } from '@jest/globals'
-import { readFileSync } from 'fs'
+import { existsSync, readFileSync, statSync } from 'fs'
 import { join } from 'path'
 import vm from 'vm'
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Resolve Bun-hoisted dev-tooling packages (e.g. @vue/compiler-sfc, esbuild)
+// by walking up from __dirname to find a node_modules/.bun/<encoded-name>@*
+// directory. This avoids hardcoded absolute machine paths and the
+// version+content-hash suffix in Bun's hoisted layout.
+function resolveBunPackage(pkgName: string): string {
+  let dir: string = __dirname
+  // Bun encodes scoped package names by replacing '/' with '+' in the
+  // .bun folder name (e.g. "@vue/compiler-sfc" → "@vue+compiler-sfc").
+  const bunName = pkgName.startsWith('@') ? pkgName.replace('/', '+') : pkgName
+  // Walk up the directory tree until we either find the package or hit
+  // the filesystem root. dir === join(dir, '..') at the root is the
+  // termination condition (no parent directory exists).
+  for (let i = 0; i < 100; i++) {
+    const bunRoot = join(dir, 'node_modules', '.bun')
+    if (existsSync(bunRoot) && statSync(bunRoot).isDirectory()) {
+      const entries = (require('fs') as typeof import('fs')).readdirSync(bunRoot)
+      const matches = entries
+        .filter(e => e.startsWith(`${bunName}@`))
+        .sort()
+        .reverse() // pick the newest version when multiple are hoisted
+      for (const entry of matches) {
+        const inner = join(bunRoot, entry, 'node_modules', pkgName)
+        if (existsSync(inner)) return inner
+      }
+    }
+    const parent = join(dir, '..')
+    if (parent === dir) break
+    dir = parent
+  }
+  throw new Error(`Could not locate ${pkgName} in any node_modules/.bun/ from ${__dirname}`)
+}
+
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const sfc = require('/Users/williamkhoo/workspace/subrina-coder/projects/koda/repos/koda/node_modules/.bun/@vue+compiler-sfc@3.5.39/node_modules/@vue/compiler-sfc')
+const sfc = require(resolveBunPackage('@vue/compiler-sfc'))
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const esbuild = require('/Users/williamkhoo/workspace/subrina-coder/projects/koda/repos/koda/node_modules/.bun/esbuild@0.25.12/node_modules/esbuild')
+const esbuild = require(resolveBunPackage('esbuild'))
 
 const webDir = join(__dirname, '../..')
 const pagePath = join(webDir, 'pages', '[project]', 'memory.vue')

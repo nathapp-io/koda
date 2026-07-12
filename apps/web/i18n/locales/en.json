@@ -230,6 +230,7 @@
   },
   "memory": {
     "empty": "No memory items yet.",
+    "error": "Failed to load memory items.",
     "loadMore": "Load more",
     "filter": {
       "kind": "Kind",
