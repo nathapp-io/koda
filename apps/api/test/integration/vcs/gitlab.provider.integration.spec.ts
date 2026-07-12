@@ -226,7 +226,7 @@ describe('GitLabProvider (Integration)', () => {
         number: 5,
         url: 'https://gitlab.com/test/repo/-/merge_requests/5',
         branchName: 'feature-branch',
-        state: 'opened',
+        state: 'open',
         draft: true,
       });
     });

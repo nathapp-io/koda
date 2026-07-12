@@ -176,7 +176,8 @@ export class GitLabProvider implements IVcsProvider {
     } catch (error: unknown) {
       const errorObj = error as Record<string, unknown>;
       const status = (errorObj?.response as Record<string, unknown>)?.status;
-      if (status === 400) {
+      const message = typeof errorObj?.message === 'string' ? errorObj.message : '';
+      if (status === 400 && /already exists/i.test(message)) {
         // Branch already exists, proceed to MR creation
       } else {
         throw error;
@@ -202,7 +203,7 @@ export class GitLabProvider implements IVcsProvider {
       number: mrData.iid,
       url: mrData.web_url,
       branchName,
-      state: mrData.state,
+      state: mrData.state === 'opened' ? 'open' : mrData.state,
       draft: mrData.draft ?? draft,
     };
   }
