@@ -52,7 +52,10 @@ function createDefaultHttpClient(): HttpClient {
     async post(url: string, config: { headers: Record<string, string>; body: unknown }): Promise<{ data: unknown }> {
       const response = await fetch(url, {
         method: 'POST',
-        headers: config.headers,
+        headers: {
+          'Content-Type': 'application/json',
+          ...config.headers,
+        },
         body: JSON.stringify(config.body),
       });
 

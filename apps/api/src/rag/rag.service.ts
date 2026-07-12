@@ -323,10 +323,16 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
   private async runExclusive<T>(tableName: string, fn: () => Promise<T>): Promise<T> {
     const previous = this.writeLocks.get(tableName) ?? Promise.resolve();
     const run = previous.then(fn, fn);
-    this.writeLocks.set(
-      tableName,
-      run.catch(() => undefined),
-    );
+    const tracked = run.catch(() => undefined);
+    this.writeLocks.set(tableName, tracked);
+    // Once this write settles, drop the entry if no later write has queued
+    // behind it, so the map only holds currently in-flight/queued chains
+    // instead of growing forever with one entry per project ever written to.
+    tracked.finally(() => {
+      if (this.writeLocks.get(tableName) === tracked) {
+        this.writeLocks.delete(tableName);
+      }
+    });
     return run;
   }
 
