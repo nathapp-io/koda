@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2 } from 'lucide-vue-next'
+import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2, Activity } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const auth = useAuth()
@@ -81,6 +81,8 @@ const backTo = computed(() => {
         </NuxtLink>
 
         <NuxtLink to="/agents" :class="navLinkClass" :active-class="activeClass"><Bot class="h-4 w-4 shrink-0" />{{ t('nav.agents') }}</NuxtLink>
+
+        <NuxtLink to="/admin/slos" :class="navLinkClass" :active-class="activeClass"><Activity class="h-4 w-4 shrink-0" />{{ t('nav.slos') }}</NuxtLink>
 
         <!-- Project-scoped links -->
         <template v-if="projectSlug">

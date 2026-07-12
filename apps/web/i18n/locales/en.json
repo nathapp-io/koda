@@ -65,7 +65,8 @@
     "labels": "Labels",
     "tickets": "Tickets",
     "toggleSidebar": "Toggle sidebar",
-    "settings": "Settings"
+    "settings": "Settings",
+    "slos": "SLOs"
   },
   "projects": {
     "title": "Projects",
@@ -536,5 +537,14 @@
   },
   "toast": {
     "loggedIn": "Logged in successfully"
+  },
+  "slos": {
+    "title": "SLO Dashboard",
+    "empty": "No SLO metrics available for the selected window.",
+    "adminOnly": "Admin only operation",
+    "window": {
+      "from": "From",
+      "to": "To"
+    }
   }
 }
