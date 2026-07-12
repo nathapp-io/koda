@@ -201,11 +201,13 @@ describe('MemoryReadController', () => {
         );
       });
 
-      it('response items are at most 50 when limit=1000 is requested', async () => {
-        const fiftyItems = Array.from({ length: 50 }, (_, i) => makeMemoryItem({ id: `mem-${i}` }));
+      it('AC6: response items are at most 50 when limit=1000 is requested — mock returns 51 to make the cap non-vacuous', async () => {
+        // Pre-seeding exactly 50 items would make the assertion trivially true even without
+        // clamping. Use 51 items so the test fails if the cap is not enforced.
+        const fiftyOneItems = Array.from({ length: 51 }, (_, i) => makeMemoryItem({ id: `mem-${i}` }));
         mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-123');
         mockProjectsService.assertProjectMembership.mockResolvedValue(undefined);
-        mockGovernanceService.getProjectMemory.mockResolvedValue({ items: fiftyItems, total: 200 });
+        mockGovernanceService.getProjectMemory.mockResolvedValue({ items: fiftyOneItems, total: 200 });
 
         const result = await controller.getMemory('my-project', principal, undefined, undefined, undefined, undefined, '1000');
 
