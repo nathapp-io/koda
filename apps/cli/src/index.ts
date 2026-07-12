@@ -62,6 +62,10 @@ program.hook('preAction', (thisCommand) => {
 // --json is declared per-command, not globally, so handleApiError (called
 // from ~160 sites without access to that command's local options) can't
 // see it directly. Read it off the matched command here instead.
+// actionCommand.opts() (not optsWithGlobals()) only sees the leaf command's
+// own --json flag, not one inherited from a parent group — fine today since
+// every --json is declared on a leaf, but keep that in mind if one is ever
+// added to a parent command expecting inheritance.
 program.hook('preAction', (_thisCommand, actionCommand) => {
   const opts = actionCommand.opts() as { json?: boolean };
   setJsonMode(!!opts.json);
