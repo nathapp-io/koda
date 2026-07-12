@@ -65,7 +65,8 @@
     "labels": "标签",
     "tickets": "工单",
     "toggleSidebar": "切换侧栏",
-    "settings": "设置"
+    "settings": "设置",
+    "slos": "SLO 指标"
   },
   "projects": {
     "title": "项目",
@@ -536,5 +537,14 @@
   },
   "toast": {
     "loggedIn": "登录成功"
+  },
+  "slos": {
+    "title": "SLO 仪表盘",
+    "empty": "所选时间范围内没有可用的 SLO 指标。",
+    "adminOnly": "仅限管理员操作",
+    "window": {
+      "from": "开始",
+      "to": "结束"
+    }
   }
 }
