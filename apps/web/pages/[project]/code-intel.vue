@@ -78,15 +78,17 @@ async function toggleSymbol(id: string) {
   isLoadingDetail.value = true
   detailState.value = null
   try {
+    const encodedId = encodeURIComponent(id)
     const [detail, callers, callees] = await Promise.all([
-      $api.get<CodeIntelSymbolDetail>(`/code-intel/symbols/${id}`, { query: { projectSlug: slug } }),
-      $api.get<CallerInfo[]>(`/code-intel/symbols/${id}/callers`, { query: { projectSlug: slug } }),
-      $api.get<CallerInfo[]>(`/code-intel/symbols/${id}/callees`, { query: { projectSlug: slug } }),
+      $api.get<CodeIntelSymbolDetail>(`/code-intel/symbols/${encodedId}`, { query: { projectSlug: slug } }),
+      $api.get<CallerInfo[]>(`/code-intel/symbols/${encodedId}/callers`, { query: { projectSlug: slug } }),
+      $api.get<CallerInfo[]>(`/code-intel/symbols/${encodedId}/callees`, { query: { projectSlug: slug } }),
     ])
     if (expandedSymbolId.value !== id) return
     detailState.value = { detail, callers, callees }
   }
   catch (err) {
+    if (expandedSymbolId.value !== id) return
     detailState.value = null
     expandedSymbolId.value = null
     toast.error(extractApiError(err))

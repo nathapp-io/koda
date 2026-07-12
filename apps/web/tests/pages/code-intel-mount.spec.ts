@@ -303,6 +303,60 @@ describe('Code-intel AC5 (Behavioral SFC mount): toggleSymbol rejection surfaces
     const detailState = bindings.detailState as { value: unknown }
     expect(detailState.value).toBeNull()
   })
+
+  test('stale rejection does not clear the current selection', async () => {
+    // A rejects after user clicks B — B's selection must survive A's rejection.
+    const searchItemA = { id: 'A', name: 'fnA', kind: 'function', file: 'a.ts', signature: 'fnA()' }
+    const searchItemB = { id: 'B', name: 'fnB', kind: 'function', file: 'b.ts', signature: 'fnB()' }
+    const detailB = { id: 'B', name: 'fnB', kind: 'function', file: 'b.ts', signature: 'fnB()', docComment: 'B doc' }
+    const callersB = [{ id: 'c1', name: 'callerB', file: 'c.ts' }]
+    const calleesB = [{ id: 'd1', name: 'calleeB', file: 'd.ts' }]
+
+    let resolveA: (() => void) | null = null
+    const fetchMock = jest.fn(async (url: string) => {
+      if (url === '/code-intel/symbols') return { data: { items: [searchItemA, searchItemB], total: 2 } }
+      if (url.includes('/code-intel/symbols/A')) {
+        return new Promise((resolve, reject) => { resolveA = () => reject(new Error('A failed')) })
+      }
+      if (url === '/code-intel/symbols/B') return { data: detailB }
+      if (url === '/code-intel/symbols/B/callers') return { data: callersB }
+      if (url === '/code-intel/symbols/B/callees') return { data: calleesB }
+      throw new Error('unexpected url')
+    })
+
+    const { bindings } = await mountCodeIntelPage({ slug: 'acme', fetchMock })
+
+    const handleSearch = bindings.handleSearch as () => Promise<void>
+    const searchQuery = bindings.searchQuery as { value: string }
+    searchQuery.value = 'any'
+    await handleSearch()
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    const toggleSymbol = bindings.toggleSymbol as (id: string) => Promise<void>
+
+    // Click A — it will hang waiting for resolveA
+    const aPromise = toggleSymbol('A')
+    await new Promise(resolve => setTimeout(resolve, 10))
+
+    // Click B — it resolves successfully
+    await toggleSymbol('B')
+    await new Promise(resolve => setTimeout(resolve, 30))
+
+    // B should be selected
+    let expandedSymbolId = bindings.expandedSymbolId as { value: string | null }
+    expect(expandedSymbolId.value).toBe('B')
+
+    // Now A's rejection fires
+    if (resolveA) resolveA()
+    await aPromise.catch(() => {})
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    // B must still be selected — A's stale rejection was ignored
+    expandedSymbolId = bindings.expandedSymbolId as { value: string | null }
+    expect(expandedSymbolId.value).toBe('B')
+    const expandedSymbol = bindings.expandedSymbol as { value: { docComment: string } | null }
+    expect(expandedSymbol.value?.docComment).toBe('B doc')
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -477,5 +531,40 @@ describe('Code-intel AC6 (Behavioral SFC mount): toggleSymbol fetches detail + c
     expect(symbols.value[0]).not.toHaveProperty('docComment')
     expect(symbols.value[0]).not.toHaveProperty('callers')
     expect(symbols.value[0]).not.toHaveProperty('callees')
+  })
+
+  test('detail URLs encode symbol ids containing / and :', async () => {
+    const rawId = 'repo:src/auth.ts::authenticate'
+    const encodedId = encodeURIComponent(rawId)
+
+    const fetchMock = jest.fn(async (url: string) => {
+      if (url === '/code-intel/symbols') {
+        return { data: { items: [{ id: rawId, name: 'authenticate', kind: 'function', file: 'src/auth.ts', signature: 'authenticate()' }], total: 1 } }
+      }
+      if (url === `/code-intel/symbols/${encodedId}`) return { data: { id: rawId, name: 'authenticate', kind: 'function', file: 'src/auth.ts', docComment: 'Auth fn' } }
+      if (url === `/code-intel/symbols/${encodedId}/callers`) return { data: [] }
+      if (url === `/code-intel/symbols/${encodedId}/callees`) return { data: [] }
+      throw new Error(`unexpected url: ${url}`)
+    })
+
+    const { bindings, fetchCalls } = await mountCodeIntelPage({ slug: 'acme', fetchMock })
+
+    const handleSearch = bindings.handleSearch as () => Promise<void>
+    const searchQuery = bindings.searchQuery as { value: string }
+    searchQuery.value = 'auth'
+    await handleSearch()
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    const toggleSymbol = bindings.toggleSymbol as (id: string) => Promise<void>
+    await toggleSymbol(rawId)
+    await new Promise(resolve => setTimeout(resolve, 30))
+
+    // Verify the URLs used the encoded form, not the raw id
+    const detailUrls = fetchCalls.filter(c => c.url.startsWith('/code-intel/symbols/') && c.url !== '/code-intel/symbols')
+    expect(detailUrls.length).toBe(3)
+    for (const call of detailUrls) {
+      expect(call.url).toContain(encodedId)
+      expect(call.url).not.toContain('/src/')  // unencoded slash would appear here
+    }
   })
 })
