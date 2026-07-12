@@ -47,6 +47,18 @@ describe('Timeline AC9: default layout has a /<slug>/timeline project nav link',
     expect(kbIdx).toBeGreaterThan(-1)
     expect(timelineIdx).toBeGreaterThan(kbIdx)
   })
+
+  test('Clock icon is imported from lucide-vue-next and rendered inside the timeline NuxtLink', () => {
+    const source = readFileSync(layoutPath, 'utf-8')
+    // Clock must be imported from lucide-vue-next in the script
+    expect(source).toMatch(/import\s*\{[^}]*\bClock\b[^}]*\}\s*from\s*['"]lucide-vue-next['"]/)
+
+    // Extract the timeline NuxtLink block to verify Clock is used there
+    const timelineLink = source.match(/<NuxtLink[\s\S]*?\/timeline[\s\S]*?<\/NuxtLink>/)
+    expect(timelineLink).not.toBeNull()
+    const linkText = timelineLink?.[0] ?? ''
+    expect(linkText).toContain('<Clock')
+  })
 })
 
 describe('Timeline AC9: nav.timeline present in both en.json and zh.json', () => {

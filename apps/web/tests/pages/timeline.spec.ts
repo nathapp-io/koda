@@ -65,9 +65,16 @@ describe('Timeline AC1: page pattern + composable delegation', () => {
   test('source triggers the initial fetch on mount (onMounted invokes the loadEvents wrapper)', () => {
     const source = readFileSync(pagePath, 'utf-8')
     // The page must wire an onMounted hook that triggers loading.
-    const hasOnMounted = /\bonMounted\s*\(/.test(source)
-    const callsLoadInMount = /\bonMounted\s*\([\s\S]{0,400}(loadEvents|load[A-Z][A-Za-z]+\(\))[\s\S]{0,40}\)/.test(source)
-    expect(hasOnMounted && callsLoadInMount).toBe(true)
+    // Extract the onMounted callback body and verify it contains a call
+    // that chains through withToastError -> loadEvents.
+    const onMountedMatch = source.match(/\bonMounted\s*\([\s\S]{0,400}\)/)
+    expect(onMountedMatch).not.toBeNull()
+    const mountedBlock = onMountedMatch?.[0] ?? ''
+
+    // Must contain one of the wrapper functions that ultimately calls loadEvents
+    const triggersLoad =
+      /\b(loadAndToast|loadEvents|withToastError\s*\(\s*loadEvents)/.test(mountedBlock)
+    expect(triggersLoad).toBe(true)
   })
 })
 
@@ -125,6 +132,38 @@ describe('Timeline AC3: shows loading indicator when pending', () => {
     const vElseBeforeTable = /v-else(?!\s*-if)/.test(source.slice(Math.max(0, tableIdx - 400), tableIdx))
     expect(vElseBeforeTable).toBe(true)
   })
+
+  test('template uses Complete v-if/v-else-if/v-else chain: isLoading -> empty -> error -> table', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    // Extract the template section
+    const templateStart = source.indexOf('<template>')
+    const templateEnd = source.indexOf('</template>', templateStart)
+    const template = source.slice(templateStart, templateEnd)
+
+    // Assertions that each guard appears in order (maintaining exclusivity)
+    const loadingGuardMatch = template.match(/v-if=["']isLoading["']/)
+    const emptyGuardMatch = template.match(/v-else-if=["']events\.length\s*===\s*0["']/)
+    const errorGuardMatch = template.match(/v-else-if=["']error["']/)
+    const tableGuardMatch = template.match(/v-else(?!\s*-if)/)
+
+    expect(loadingGuardMatch).not.toBeNull()
+    expect(emptyGuardMatch).not.toBeNull()
+    expect(errorGuardMatch).not.toBeNull()
+    expect(tableGuardMatch).not.toBeNull()
+
+    // Verify ordering: loading -> empty -> error -> table
+    const loadingIdx = loadingGuardMatch?.index ?? -1
+    const emptyIdx = emptyGuardMatch?.index ?? -1
+    const errorIdx = errorGuardMatch?.index ?? -1
+    const tableIdx = tableGuardMatch?.index ?? -1
+    expect(loadingIdx).toBeGreaterThan(-1)
+    expect(emptyIdx).toBeGreaterThan(-1)
+    expect(errorIdx).toBeGreaterThan(-1)
+    expect(tableIdx).toBeGreaterThan(-1)
+    expect(loadingIdx).toBeLessThan(emptyIdx)
+    expect(emptyIdx).toBeLessThan(errorIdx)
+    expect(errorIdx).toBeLessThan(tableIdx)
+  })
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -177,7 +216,11 @@ describe('Timeline AC5: page-level error wrapper uses extractApiError and toast'
     const hasWrapperCalledWith = /\bwithToast[A-Za-z]*\s*\(/.test(source)
       && /extractApiError/.test(source)
       && /loadEvents|loadMore|applyFilters/.test(source)
-    expect(inlineTryCatch || hasWrapperCalledWith).toBe(true)
+    // Also verify that loadEvents, applyFilters, and loadMore are each passed through the wrapper
+    const loadAndToastWired = /loadAndToast\b/.test(source) && /withToastError\s*\(\s*loadEvents\s*\)/.test(source)
+    const applyAndToastWired = /applyAndToast\b/.test(source) && /withToastError\s*\(\s*applyFilters\s*\)/.test(source)
+    const loadMoreAndToastWired = /loadMoreAndToast\b/.test(source) && /withToastError\s*\(\s*loadMore\s*\)/.test(source)
+    expect(inlineTryCatch || (hasWrapperCalledWith && loadAndToastWired && applyAndToastWired && loadMoreAndToastWired)).toBe(true)
   })
 
   test('composable re-throws so the page wrapper receives the error', () => {
@@ -193,10 +236,18 @@ describe('Timeline AC5: page-level error wrapper uses extractApiError and toast'
     const source = readFileSync(pagePath, 'utf-8')
     // The template must have a `v-if="error"` (or v-else-if) branch BEFORE
     // the event table block, so a failed load shows nothing.
-    const errorGuardIdx = source.search(/v-if=["']error["']|v-else-if=["']error["']/)
+    const errorGuardIdx = source.search(/v-else-if=["']error["']/)
     const tableIdx = source.indexOf('<table')
     expect(errorGuardIdx).toBeGreaterThan(-1)
     expect(tableIdx).toBeGreaterThan(errorGuardIdx)
+
+    // The error div itself must NOT render any event rows (no v-for inside it)
+    const errorDivStart = errorGuardIdx
+    const nextVGuardIdx = source.indexOf('v-else', errorDivStart)
+    const errorBlock = source.slice(errorDivStart, nextVGuardIdx !== -1 ? nextVGuardIdx : undefined)
+    // Error block should be self-closing or empty — it should not contain a v-for over events
+    expect(errorBlock).not.toMatch(/v-for\s*=\s*['"]event\s+in\s+events['"]/)
+    expect(errorBlock).not.toMatch(/event\.eventType/)
   })
 })
 

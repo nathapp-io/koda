@@ -4,6 +4,7 @@ import { ref } from 'vue'
 
 const webDir = join(__dirname, '../..')
 const composablePath = join(webDir, 'composables', 'useTimelineEvents.ts')
+const useApiModulePath = join(webDir, 'composables', 'useApi.ts')
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers — same Nuxt-globals pattern as tests/composables/useApi.spec.ts
@@ -219,5 +220,103 @@ describe('AC8: cursor pagination', () => {
     const page2Query = (page2Opts as { query?: Record<string, string> }).query
     expect(page2Query).toEqual({ eventTypes: 'ticket_event' })
     expect(page2Query?.cursor).toBeUndefined()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AC2/AC5 page contract — sidebar behavioral tests that verify the composable's
+// data flow conforms to what the page template expects at render time.
+// These bridge the gap between composable unit tests and page source-scans.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('AC2 page contract: composable exposes render-ready event fields', () => {
+  beforeEach(resetGlobals)
+
+  test('on successful load, events array items carry eventType, actorId, and action for template interpolation', async () => {
+    const fetched = [
+      { id: 'e1', eventType: 'ticket_event', actorId: 'usr-1', action: 'created ticket #42', createdAt: '2026-06-01T12:00:00Z' },
+      { id: 'e2', eventType: 'agent_event',  actorId: 'ag-7',  action: 'paused',              createdAt: '2026-06-02T08:30:00Z' },
+    ]
+    const fetchMock = jest.fn(() => Promise.resolve({ data: { events: fetched, nextCursor: undefined } }))
+    applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+
+    const { useTimelineEvents } = await import(composablePath)
+    const tl = useTimelineEvents('acme')
+
+    await tl.loadEvents()
+
+    expect(tl.events.value).toHaveLength(fetched.length)
+    for (const ev of tl.events.value) {
+      expect(ev).toHaveProperty('id')
+      expect(typeof ev.eventType).toBe('string')
+      expect(typeof ev.actorId).toBe('string')
+      expect(typeof ev.action).toBe('string')
+      expect(typeof ev.createdAt).toBe('string')
+    }
+  })
+
+  test('when isLoading transitions to false and events are non-empty, page should render the table (not loading/empty/error)', async () => {
+    const fetchMock = jest.fn(() =>
+      Promise.resolve({ data: { events: [{ id: 'e1', eventType: 't', actorId: 'u', action: 'a', createdAt: 'now' }], nextCursor: undefined } }),
+    )
+    applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+
+    const { useTimelineEvents } = await import(composablePath)
+    const tl = useTimelineEvents('acme')
+
+    expect(tl.isLoading.value).toBe(false)
+    expect(tl.events.value).toHaveLength(0)
+
+    const promise = tl.loadEvents()
+    // isLoading must be true while the request is in flight
+    expect(tl.isLoading.value).toBe(true)
+    await promise
+
+    // After load: not loading, has events, no error — template should show the table
+    expect(tl.isLoading.value).toBe(false)
+    expect(tl.events.value).toHaveLength(1)
+    expect(tl.error.value).toBeNull()
+  })
+})
+
+describe('AC5 page contract: error propagates so page-level catch can feed extractApiError + toast', () => {
+  beforeEach(resetGlobals)
+
+  test('when loadEvents rejects, the thrown error is extractable by extractApiError', async () => {
+    const { extractApiError } = await import(useApiModulePath)
+
+    const networkError = Object.assign(new Error('boom'), {
+      data: { ret: 1, message: 'Timeline service unavailable' },
+    })
+    const fetchMock = jest.fn(() => Promise.reject(networkError))
+    applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+
+    const { useTimelineEvents } = await import(composablePath)
+    const tl = useTimelineEvents('acme')
+
+    let caught: unknown = null
+    try {
+      await tl.loadEvents()
+    } catch (err) {
+      caught = err
+    }
+
+    expect(caught).not.toBeNull()
+    const msg = extractApiError(caught)
+    expect(msg).toBe('Timeline service unavailable')
+    expect(tl.events.value).toEqual([])
+    expect(tl.isLoading.value).toBe(false)
+  })
+
+  test('when loadEvents rejects, isLoading resets to false so the page does not render the loading indicator', async () => {
+    const fetchMock = jest.fn(() => Promise.reject(new Error('fail')))
+    applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+
+    const { useTimelineEvents } = await import(composablePath)
+    const tl = useTimelineEvents('acme')
+
+    try { await tl.loadEvents() } catch { /* page wrapper catches */ }
+
+    expect(tl.isLoading.value).toBe(false)
   })
 })
