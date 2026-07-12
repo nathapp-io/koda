@@ -248,6 +248,7 @@
     }
   },
   "codeIntel": {
+    "prompt": "输入搜索关键词以查找符号。",
     "search": {
       "placeholder": "按名称搜索符号...",
       "button": "搜索"

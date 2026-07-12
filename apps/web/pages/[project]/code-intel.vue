@@ -41,30 +41,40 @@ interface CodeIntelDetailState {
 
 const searchQuery = ref('')
 const isSearching = ref(false)
+const hasSearched = ref(false)
 const symbols = ref<CodeIntelSymbol[]>([])
 const expandedSymbolId = ref<string | null>(null)
 const detailState = ref<CodeIntelDetailState | null>(null)
 const isLoadingDetail = ref(false)
 
+let searchRequestId = 0
+let detailRequestId = 0
+
 async function handleSearch() {
   if (!searchQuery.value.trim()) return
   isSearching.value = true
+  hasSearched.value = true
   symbols.value = []
   expandedSymbolId.value = null
   detailState.value = null
+  const requestId = ++searchRequestId
   try {
     const res = await $api.get<{ items: CodeIntelSymbol[]; total: number }>(
       '/code-intel/symbols',
       { query: { projectSlug: slug, q: searchQuery.value } },
     )
+    if (requestId !== searchRequestId) return
     symbols.value = res.items ?? []
   }
   catch (err) {
+    if (requestId !== searchRequestId) return
     symbols.value = []
     toast.error(extractApiError(err))
   }
   finally {
-    isSearching.value = false
+    if (requestId === searchRequestId) {
+      isSearching.value = false
+    }
   }
 }
 
@@ -77,6 +87,7 @@ async function toggleSymbol(id: string) {
   expandedSymbolId.value = id
   isLoadingDetail.value = true
   detailState.value = null
+  const requestId = ++detailRequestId
   try {
     const encodedId = encodeURIComponent(id)
     const [detail, callers, callees] = await Promise.all([
@@ -84,17 +95,21 @@ async function toggleSymbol(id: string) {
       $api.get<CallerInfo[]>(`/code-intel/symbols/${encodedId}/callers`, { query: { projectSlug: slug } }),
       $api.get<CallerInfo[]>(`/code-intel/symbols/${encodedId}/callees`, { query: { projectSlug: slug } }),
     ])
+    if (requestId !== detailRequestId) return
     if (expandedSymbolId.value !== id) return
     detailState.value = { detail, callers, callees }
   }
   catch (err) {
+    if (requestId !== detailRequestId) return
     if (expandedSymbolId.value !== id) return
     detailState.value = null
     expandedSymbolId.value = null
     toast.error(extractApiError(err))
   }
   finally {
-    isLoadingDetail.value = false
+    if (requestId === detailRequestId) {
+      isLoadingDetail.value = false
+    }
   }
 }
 
@@ -124,6 +139,13 @@ const expandedCallees = computed(() => detailState.value?.callees ?? [])
     </div>
 
     <LoadingState v-if="isSearching" />
+
+    <div
+      v-else-if="!hasSearched"
+      class="py-12 text-center text-sm text-muted-foreground"
+    >
+      {{ t('codeIntel.prompt') }}
+    </div>
 
     <div
       v-else-if="symbols.length === 0"
