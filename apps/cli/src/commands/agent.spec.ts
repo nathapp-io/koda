@@ -28,6 +28,11 @@ jest.mock('conf', () => {
 jest.mock('../generated', () => ({
   agentsControllerFindMe: jest.fn(),
   agentsControllerSuggestTicket: jest.fn(),
+  agentsControllerFindAll: jest.fn(),
+  agentsControllerGenerateApiKey: jest.fn(),
+  agentsControllerUpdate: jest.fn(),
+  agentsControllerRemove: jest.fn(),
+  agentsControllerRotateApiKey: jest.fn(),
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
@@ -57,7 +62,15 @@ jest.mock('../config', () => ({
 
 import { Command } from 'commander';
 import { agentCommand } from './agent';
-import { agentsControllerFindMe, agentsControllerSuggestTicket } from '../generated';
+import {
+  agentsControllerFindMe,
+  agentsControllerSuggestTicket,
+  agentsControllerFindAll,
+  agentsControllerGenerateApiKey,
+  agentsControllerUpdate,
+  agentsControllerRemove,
+  agentsControllerRotateApiKey,
+} from '../generated';
 import { resolveContext } from '../config';
 
 describe('agentCommand', () => {
@@ -397,6 +410,138 @@ describe('agentCommand', () => {
         expect.stringContaining('"matchScore"')
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+  });
+
+  describe('agent list', () => {
+    it('lists agents in a table', async () => {
+      (agentsControllerFindAll as jest.Mock).mockResolvedValue({
+        ret: 0,
+        data: [{ name: 'Agent One', slug: 'agent-one', status: 'ACTIVE', maxConcurrentTickets: 3 }],
+      });
+
+      const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
+      const listCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'list');
+
+      await listCmd?.parseAsync(['node', 'test']);
+
+      expect(agentsControllerFindAll).toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('outputs JSON with --json flag', async () => {
+      (agentsControllerFindAll as jest.Mock).mockResolvedValue({ ret: 0, data: [] });
+
+      const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
+      const listCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'list');
+
+      await listCmd?.parseAsync(['node', 'test', '--json']);
+
+      expect(logSpy).toHaveBeenCalledWith('[]');
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+  });
+
+  describe('agent create', () => {
+    it('creates an agent and prints the generated API key', async () => {
+      (agentsControllerGenerateApiKey as jest.Mock).mockResolvedValue({
+        ret: 0,
+        data: { name: 'New Agent', slug: 'new-agent', apiKey: 'sk-generated-key' },
+      });
+
+      const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
+      const createCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'create');
+
+      await createCmd?.parseAsync(['node', 'test', '--name', 'New Agent', '--roles', 'DEVELOPER,AGENT']);
+
+      expect(agentsControllerGenerateApiKey).toHaveBeenCalledWith({
+        requestBody: expect.objectContaining({
+          name: 'New Agent',
+          roles: ['DEVELOPER', 'AGENT'],
+        }),
+      });
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('sk-generated-key'));
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('defaults roles to an empty array when --roles is omitted', async () => {
+      (agentsControllerGenerateApiKey as jest.Mock).mockResolvedValue({
+        ret: 0,
+        data: { name: 'New Agent', slug: 'new-agent' },
+      });
+
+      const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
+      const createCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'create');
+
+      await createCmd?.parseAsync(['node', 'test', '--name', 'New Agent']);
+
+      expect(agentsControllerGenerateApiKey).toHaveBeenCalledWith({
+        requestBody: expect.objectContaining({ roles: [] }),
+      });
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+  });
+
+  describe('agent update', () => {
+    it('updates an agent by slug', async () => {
+      (agentsControllerUpdate as jest.Mock).mockResolvedValue({ ret: 0, data: { name: 'Renamed' } });
+
+      const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
+      const updateCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'update');
+
+      await updateCmd?.parseAsync(['node', 'test', 'agent-one', '--status', 'PAUSED']);
+
+      expect(agentsControllerUpdate).toHaveBeenCalledWith({
+        slug: 'agent-one',
+        requestBody: expect.objectContaining({ status: 'PAUSED' }),
+      });
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+  });
+
+  describe('agent rotate-key', () => {
+    it('rotates the API key and prints the new key', async () => {
+      (agentsControllerRotateApiKey as jest.Mock).mockResolvedValue({ ret: 0, data: { apiKey: 'sk-rotated' } });
+
+      const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
+      const rotateCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'rotate-key');
+
+      await rotateCmd?.parseAsync(['node', 'test', 'agent-one']);
+
+      expect(agentsControllerRotateApiKey).toHaveBeenCalledWith({ slug: 'agent-one' });
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('sk-rotated'));
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+  });
+
+  describe('agent delete', () => {
+    it('deletes an agent by slug', async () => {
+      (agentsControllerRemove as jest.Mock).mockResolvedValue({ ret: 0, data: undefined });
+
+      const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
+      const deleteCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'delete');
+
+      await deleteCmd?.parseAsync(['node', 'test', 'agent-one']);
+
+      expect(agentsControllerRemove).toHaveBeenCalledWith({ slug: 'agent-one' });
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('surfaces a not-found error for a missing agent', async () => {
+      const notFoundErr: any = new Error('Not found');
+      notFoundErr.response = { status: 404 };
+      (agentsControllerRemove as jest.Mock).mockRejectedValue(notFoundErr);
+
+      const agentCmd = program.commands.find((cmd) => cmd.name() === 'agent');
+      const deleteCmd = agentCmd?.commands.find((cmd) => cmd.name() === 'delete');
+
+      try {
+        await deleteCmd?.parseAsync(['node', 'test', 'missing-agent']);
+      } catch {
+        // Expected
+      }
+
+      expect(exitSpy).toHaveBeenCalled();
     });
   });
 });

@@ -5,7 +5,8 @@ import { readFileSync } from 'fs';
 import { join, resolve } from 'path';
 import { loginCommand } from './commands/login';
 import { initCommand } from './commands/init';
-import { configShow, configSet } from './commands/config';
+import { configShow, configSet, configProfileListAction, configProfileAddAction, configProfileRemoveAction } from './commands/config';
+import { getProfiles, setProfile, removeProfile } from './config';
 import { projectCommand } from './commands/project';
 import { ticketCommand } from './commands/ticket';
 import { commentCommand } from './commands/comment';
@@ -134,6 +135,45 @@ program
           process.exit(2);
         }
       })
+  )
+  .addCommand(
+    new Command('profile')
+      .description('Manage named API credential profiles')
+      .addCommand(
+        new Command('list')
+          .description('List configured profiles')
+          .action(() => {
+            configProfileListAction({ getProfiles, setProfile, removeProfile });
+          })
+      )
+      .addCommand(
+        new Command('add')
+          .description('Add or update a profile')
+          .argument('<name>', 'Profile name')
+          .requiredOption('--api-url <url>', 'API URL for this profile')
+          .requiredOption('--api-key <key>', 'API key for this profile')
+          .action((name, options) => {
+            try {
+              configProfileAddAction(name, options.apiUrl, options.apiKey, { getProfiles, setProfile, removeProfile });
+              console.log(`Profile '${name}' saved.`);
+              process.exit(0);
+            } catch (error) {
+              const errorMessage = error instanceof Error ? error.message : String(error);
+              console.error(`Error: ${errorMessage}`);
+              process.exit(2);
+            }
+          })
+      )
+      .addCommand(
+        new Command('remove')
+          .description('Remove a profile')
+          .argument('<name>', 'Profile name')
+          .action((name) => {
+            configProfileRemoveAction(name, { getProfiles, setProfile, removeProfile });
+            console.log(`Profile '${name}' removed.`);
+            process.exit(0);
+          })
+      )
   );
 
 // Version command
