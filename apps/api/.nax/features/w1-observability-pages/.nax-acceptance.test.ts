@@ -112,7 +112,7 @@ describe('US-001: Memory read endpoint (GET /projects/:slug/memory)', () => {
     const items = [makeMemoryItem({ id: 'mem-1' }), makeMemoryItem({ id: 'mem-2' })];
     (mockGovernanceService.getProjectMemory as jest.Mock).mockResolvedValue({ items, total: 2 });
 
-    const result = await controller.list('my-project', undefined, undefined, undefined, undefined, undefined, makeUser());
+    const result = await controller.getMemory('my-project', makeUser());
 
     expect(result).toHaveProperty('data');
     expect(result.data).toHaveProperty('items');
@@ -129,7 +129,7 @@ describe('US-001: Memory read endpoint (GET /projects/:slug/memory)', () => {
     ];
     (mockGovernanceService.getProjectMemory as jest.Mock).mockResolvedValue({ items, total: 2 });
 
-    const result = await controller.list('my-project', MemoryKind.DECISION, undefined, undefined, undefined, undefined, makeUser());
+    const result = await controller.getMemory('my-project', makeUser(), MemoryKind.DECISION);
 
     expect(result.data.items.length).toBeGreaterThan(0);
     for (const item of result.data.items) {
@@ -147,7 +147,7 @@ describe('US-001: Memory read endpoint (GET /projects/:slug/memory)', () => {
     ];
     (mockGovernanceService.getProjectMemory as jest.Mock).mockResolvedValue({ items, total: 2 });
 
-    const result = await controller.list('my-project', undefined, undefined, undefined, undefined, undefined, makeUser());
+    const result = await controller.getMemory('my-project', makeUser());
 
     expect(result.data.items.length).toBeGreaterThan(0);
     for (const item of result.data.items) {
@@ -167,7 +167,7 @@ describe('US-001: Memory read endpoint (GET /projects/:slug/memory)', () => {
     ];
     (mockGovernanceService.getProjectMemory as jest.Mock).mockResolvedValue({ items, total: 2 });
 
-    const result = await controller.list('my-project', undefined, 'superseded', undefined, undefined, undefined, makeUser());
+    const result = await controller.getMemory('my-project', makeUser(), undefined, undefined, 'superseded');
 
     expect(result.data.items.length).toBeGreaterThan(0);
     for (const item of result.data.items) {
@@ -180,7 +180,7 @@ describe('US-001: Memory read endpoint (GET /projects/:slug/memory)', () => {
     const pageItems = Array.from({ length: 10 }, (_, i) => makeMemoryItem({ id: `mem-${i + 11}` }));
     (mockGovernanceService.getProjectMemory as jest.Mock).mockResolvedValue({ items: pageItems, total: 25 });
 
-    const result = await controller.list('my-project', undefined, undefined, 2, 10, undefined, makeUser());
+    const result = await controller.getMemory('my-project', makeUser(), undefined, undefined, undefined, '2', '10');
 
     expect(result.data.items.length).toBeLessThanOrEqual(10);
     expect(result.data.total).toBe(25);
@@ -194,7 +194,7 @@ describe('US-001: Memory read endpoint (GET /projects/:slug/memory)', () => {
     const items = Array.from({ length: 50 }, (_, i) => makeMemoryItem({ id: `mem-${i}` }));
     (mockGovernanceService.getProjectMemory as jest.Mock).mockResolvedValue({ items, total: 120 });
 
-    const result = await controller.list('my-project', undefined, undefined, 1, 50, undefined, makeUser());
+    const result = await controller.getMemory('my-project', makeUser(), undefined, undefined, undefined, undefined, '50');
 
     expect(result.data.items.length).toBeLessThanOrEqual(50);
     expect(result.data.total).toBe(120);
@@ -207,7 +207,7 @@ describe('US-001: Memory read endpoint (GET /projects/:slug/memory)', () => {
     mockFindProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
 
     await expect(
-      controller.list('nonexistent-slug', undefined, undefined, undefined, undefined, undefined, makeUser()),
+      controller.getMemory('nonexistent-slug', makeUser()),
     ).rejects.toBeInstanceOf(NotFoundAppException);
   });
 
@@ -215,7 +215,7 @@ describe('US-001: Memory read endpoint (GET /projects/:slug/memory)', () => {
     mockAssertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'memory'));
 
     await expect(
-      controller.list('my-project', undefined, undefined, undefined, undefined, undefined, makeUser('VIEWER')),
+      controller.getMemory('my-project', makeUser('VIEWER')),
     ).rejects.toBeInstanceOf(ForbiddenAppException);
   });
 
@@ -223,7 +223,7 @@ describe('US-001: Memory read endpoint (GET /projects/:slug/memory)', () => {
     const items = [makeMemoryItem()];
     (mockGovernanceService.getProjectMemory as jest.Mock).mockResolvedValue({ items, total: 1 });
 
-    const result = await controller.list('my-project', undefined, undefined, undefined, undefined, undefined, makeUser());
+    const result = await controller.getMemory('my-project', makeUser());
 
     expect(typeof result).toBe('object');
     expect(result).toHaveProperty('data');
@@ -313,10 +313,11 @@ describe('US-002: Code-intel symbol search (GET /code-intel/symbols)', () => {
     ];
     mockSearchSymbols.mockResolvedValue({ items, total: 2 });
 
-    const result = await controller.searchSymbols('my-project', query, undefined, undefined, undefined, makeUser());
+    const result = await controller.searchSymbols({ projectSlug: 'my-project', q: query }, makeUser());
 
-    expect(result.data.items.length).toBeGreaterThan(0);
-    for (const item of result.data.items) {
+    const data = (result as { data: { items: SymbolSearchItem[]; total: number } }).data;
+    expect(data.items.length).toBeGreaterThan(0);
+    for (const item of data.items) {
       expect(item.name.toLowerCase()).toContain(query.toLowerCase());
       const keys = Object.keys(item).sort();
       expect(keys).toEqual(['file', 'id', 'kind', 'name', 'signature']);
@@ -334,11 +335,12 @@ describe('US-002: Code-intel symbol search (GET /code-intel/symbols)', () => {
       total: 42,
     });
 
-    const result = await controller.searchSymbols('my-project', 'foo', undefined, undefined, undefined, makeUser());
+    const result = await controller.searchSymbols({ projectSlug: 'my-project', q: 'foo' }, makeUser());
 
-    expect(typeof result.data.total).toBe('number');
-    expect(result.data.total).toBeGreaterThanOrEqual(0);
-    expect(result.data.total).toBe(42);
+    const data = (result as { data: { items: SymbolSearchItem[]; total: number } }).data;
+    expect(typeof data.total).toBe('number');
+    expect(data.total).toBeGreaterThanOrEqual(0);
+    expect(data.total).toBe(42);
   });
 
   it('AC-13: file filter — every item.file contains the fragment (case-insensitive); total equals count of all matching symbols', async () => {
@@ -349,13 +351,14 @@ describe('US-002: Code-intel symbol search (GET /code-intel/symbols)', () => {
     ];
     mockSearchSymbols.mockResolvedValue({ items, total: 2 });
 
-    const result = await controller.searchSymbols('my-project', undefined, fileFrag, undefined, undefined, makeUser());
+    const result = await controller.searchSymbols({ projectSlug: 'my-project', file: fileFrag }, makeUser());
 
-    expect(result.data.items.length).toBeGreaterThan(0);
-    for (const item of result.data.items) {
+    const data = (result as { data: { items: SymbolSearchItem[]; total: number } }).data;
+    expect(data.items.length).toBeGreaterThan(0);
+    for (const item of data.items) {
       expect(item.file.toLowerCase()).toContain(fileFrag.toLowerCase());
     }
-    expect(result.data.total).toBe(2);
+    expect(data.total).toBe(2);
   });
 
   it('AC-14: page=2 limit=20 with >20 total — items.length ≤ 20, total equals full match count', async () => {
@@ -364,11 +367,12 @@ describe('US-002: Code-intel symbol search (GET /code-intel/symbols)', () => {
     );
     mockSearchSymbols.mockResolvedValue({ items: pageItems, total: 55 });
 
-    const result = await controller.searchSymbols('my-project', 'sym', undefined, 2, 20, makeUser());
+    const result = await controller.searchSymbols({ projectSlug: 'my-project', q: 'sym', page: 2, limit: 20 }, makeUser());
 
-    expect(result.data.items.length).toBeLessThanOrEqual(20);
-    expect(result.data.total).toBe(55);
-    expect(result.data.total).toBeGreaterThan(result.data.items.length);
+    const data = (result as { data: { items: SymbolSearchItem[]; total: number } }).data;
+    expect(data.items.length).toBeLessThanOrEqual(20);
+    expect(data.total).toBe(55);
+    expect(data.total).toBeGreaterThan(data.items.length);
     expect(mockAstIndexService.searchSymbols).toHaveBeenCalledWith(
       'proj-1',
       expect.objectContaining({ page: 2, limit: 20 }),
@@ -382,11 +386,12 @@ describe('US-002: Code-intel symbol search (GET /code-intel/symbols)', () => {
     );
     mockSearchSymbols.mockResolvedValue({ items, total: 500 });
 
-    const result = await controller.searchSymbols('my-project', undefined, undefined, 1, 999, makeUser());
+    const result = await controller.searchSymbols({ projectSlug: 'my-project', page: 1, limit: 999 }, makeUser());
 
-    expect(result.data.items.length).toBeLessThanOrEqual(MAX_LIMIT);
-    expect(result.data.total).toBe(500);
-    expect(result.data.total).toBeGreaterThan(result.data.items.length);
+    const data = (result as { data: { items: SymbolSearchItem[]; total: number } }).data;
+    expect(data.items.length).toBeLessThanOrEqual(MAX_LIMIT);
+    expect(data.total).toBe(500);
+    expect(data.total).toBeGreaterThan(data.items.length);
   });
 
   it('AC-16: no q or file filter — returns items with deterministic order; page=1 is implicit', async () => {
@@ -397,18 +402,20 @@ describe('US-002: Code-intel symbol search (GET /code-intel/symbols)', () => {
     ];
     mockSearchSymbols.mockResolvedValue({ items, total: 3 });
 
-    const result1 = await controller.searchSymbols('my-project', undefined, undefined, undefined, undefined, makeUser());
+    const result1 = await controller.searchSymbols({ projectSlug: 'my-project' }, makeUser());
     mockSearchSymbols.mockResolvedValue({ items, total: 3 });
-    const result2 = await controller.searchSymbols('my-project', undefined, undefined, undefined, undefined, makeUser());
+    const result2 = await controller.searchSymbols({ projectSlug: 'my-project' }, makeUser());
 
-    expect(result1.data.items.map((i) => i.id)).toEqual(result2.data.items.map((i) => i.id));
+    const data1 = (result1 as { data: { items: SymbolSearchItem[]; total: number } }).data;
+    const data2 = (result2 as { data: { items: SymbolSearchItem[]; total: number } }).data;
+    expect(data1.items.map((i) => i.id)).toEqual(data2.items.map((i) => i.id));
   });
 
   it('AC-17: unknown project slug → throws NotFoundAppException (maps to HTTP 404)', async () => {
     mockFindProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
 
     await expect(
-      controller.searchSymbols('nonexistent-slug', undefined, undefined, undefined, undefined, makeUser()),
+      controller.searchSymbols({ projectSlug: 'nonexistent-slug' }, makeUser()),
     ).rejects.toBeInstanceOf(NotFoundAppException);
   });
 
@@ -416,7 +423,7 @@ describe('US-002: Code-intel symbol search (GET /code-intel/symbols)', () => {
     mockAssertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'code-intel'));
 
     await expect(
-      controller.searchSymbols('my-project', undefined, undefined, undefined, undefined, makeUser()),
+      controller.searchSymbols({ projectSlug: 'my-project' }, makeUser()),
     ).rejects.toBeInstanceOf(ForbiddenAppException);
   });
 });

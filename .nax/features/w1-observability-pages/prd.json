@@ -3,7 +3,7 @@
   "feature": "w1-observability-pages",
   "branchName": "feat/w1-observability-pages",
   "createdAt": "2026-07-12T05:36:29Z",
-  "updatedAt": "2026-07-12T15:07:14.016Z",
+  "updatedAt": "2026-07-12T15:18:04.762Z",
   "userStories": [
     {
       "id": "US-001",
@@ -403,8 +403,8 @@
         "i18n"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
