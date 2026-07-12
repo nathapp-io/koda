@@ -493,3 +493,88 @@ describe('AC10 HTTP routing: detail route is not shadowed by the search route', 
     expect(mockSearchForRouting).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// AC7 and AC8 HTTP status codes: verified at the Fastify route boundary.
+// The unit-test describe blocks above only assert on the exception type
+// thrown inside the controller method. These tests boot a real Fastify HTTP
+// server (mocked providers, no DB) so that NestJS's BaseExceptionFilter
+// runs the full dispatch path and we can assert on the response status code
+// the caller actually receives.
+// ---------------------------------------------------------------------------
+
+describe('AC7 and AC8 HTTP status codes at the route boundary', () => {
+  let statusApp: NestFastifyApplication;
+  let mockFindProjectIdHttp: jest.Mock;
+  let mockAssertMembershipHttp: jest.Mock;
+
+  beforeAll(async () => {
+    mockFindProjectIdHttp = jest.fn().mockResolvedValue('proj-1');
+    mockAssertMembershipHttp = jest.fn().mockResolvedValue(undefined);
+
+    const statusModule = await Test.createTestingModule({
+      controllers: [CodeIntelController],
+      providers: [
+        {
+          provide: AstIndexService,
+          useValue: {
+            indexCommit: jest.fn(),
+            getSymbol: jest.fn().mockResolvedValue(null),
+            getCallers: jest.fn().mockResolvedValue([]),
+            getCallees: jest.fn().mockResolvedValue([]),
+            searchSymbols: jest.fn().mockResolvedValue({ items: [], total: 0 }),
+          } as unknown as AstIndexService,
+        },
+        {
+          provide: ProjectsService,
+          useValue: {
+            findProjectIdBySlug: mockFindProjectIdHttp,
+            assertProjectMembership: mockAssertMembershipHttp,
+          } as unknown as ProjectsService,
+        },
+      ],
+    }).compile();
+
+    statusApp = statusModule.createNestApplication<NestFastifyApplication>(
+      new FastifyAdapter(),
+    );
+    await statusApp.init();
+    await statusApp.getHttpAdapter().getInstance().ready();
+  });
+
+  afterAll(async () => {
+    if (statusApp) await statusApp.close();
+  });
+
+  beforeEach(() => {
+    // Reset to happy-path defaults before each test so Once overrides don't leak.
+    mockFindProjectIdHttp.mockReset().mockResolvedValue('proj-1');
+    mockAssertMembershipHttp.mockReset().mockResolvedValue(undefined);
+  });
+
+  // -------------------------------------------------------------------------
+  // AC7: unknown projectSlug → HTTP 404
+  // -------------------------------------------------------------------------
+
+  it('AC7: GET /code-intel/symbols returns HTTP 404 when projectSlug does not resolve', async () => {
+    mockFindProjectIdHttp.mockRejectedValueOnce(new NotFoundAppException({}, 'projects'));
+
+    const res = await request(statusApp.getHttpServer())
+      .get('/code-intel/symbols?projectSlug=no-such-slug');
+
+    expect(res.status).toBe(404);
+  });
+
+  // -------------------------------------------------------------------------
+  // AC8: non-member principal → HTTP 403
+  // -------------------------------------------------------------------------
+
+  it('AC8: GET /code-intel/symbols returns HTTP 403 when principal is not a project member', async () => {
+    mockAssertMembershipHttp.mockRejectedValueOnce(new ForbiddenAppException({}, 'code-intel'));
+
+    const res = await request(statusApp.getHttpServer())
+      .get('/code-intel/symbols?projectSlug=my-project');
+
+    expect(res.status).toBe(403);
+  });
+});
