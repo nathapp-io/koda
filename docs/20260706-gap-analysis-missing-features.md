@@ -21,16 +21,18 @@ The codebase is in good shape overall — clean of TODO/stub markers, well-teste
 ## 1. Highest-impact defects (fix first)
 
 > **Update 2026-07-06:** Defects #1, #4, #5, and #7 are fixed on branch `fix/highest-impact-defects-20260706` (see status column). Defect #6 is now fully fixed on branch `fix/token-revocation-logout-20260706` (PR [#118](https://github.com/nathapp-io/koda/pull/118), not yet merged). #2 and #3 remain open.
+>
+> **Update 2026-07-12:** Defect #2 (GitLab provider) is now fixed on branch `fix/gitlab-provider-lancedb-mutex-hygiene`. Defect #7's original fix only serialized table *creation*; that branch additionally serializes table *writes* (`add`/`delete`/`optimize`), closing the remaining race window. #3 (webhook fire-and-forget) remains open.
 
 | # | Defect | Evidence | Status |
 |---|--------|----------|--------|
 | 1 | **No CORS / Helmet on the API.** `main.ts` never calls `.useServerSecurityConfig()` (the `@nathapp/nestjs-app` hook that enables CORS + `@fastify/helmet`). No security headers, effectively open CORS; `@fastify/helmet` isn't even a dependency. | `apps/api/src/main.ts:37-46` | ✅ Fixed — `ServerSecurityConfig` wired into `ConfigModule`, `useServerSecurityConfig()` called in `main.ts`, `@fastify/helmet` added as a dependency. |
-| 2 | **GitLab VCS provider is a hard stub.** Throws `ValidationAppException` immediately; only `github.provider.ts` exists, despite GitLab being advertised throughout (`detect-provider.util.ts`, `git-url.util.ts`). | `apps/api/src/vcs/factory.ts:101-103` | Open |
+| 2 | **GitLab VCS provider is a hard stub.** Throws `ValidationAppException` immediately; only `github.provider.ts` exists, despite GitLab being advertised throughout (`detect-provider.util.ts`, `git-url.util.ts`). | `apps/api/src/vcs/factory.ts:101-103` | ✅ Fixed — new `GitLabProvider` implements `IVcsProvider` against GitLab API v4 (issues, merge requests, branch creation, commits, file fetch), wired into `createVcsProvider`. Also fixed a latent bug in the shared default `HttpClient`: POST requests never set `Content-Type: application/json`, so `fetch` sent bodies as `text/plain` and GitLab (and GitHub) would silently fail to parse branch/PR-creation payloads. |
 | 3 | **Outbound webhooks are fire-and-forget.** No persistence, retry, dead-letter, or delivery record — at-most-once with silent failure. The outbox module already has claim-based concurrency + backoff + DLQ; route webhooks through it. | `apps/api/src/webhook/webhook-dispatcher.service.ts:19-23` | Open |
 | 4 | **Outbox backoff is dead code on the hot path.** `processPending()`'s catch calls `markFailed()`, which requeues instantly for the next 5s cron tick; `retry()`'s `BACKOFF_MS` exponential logic is never used → transient failures tight-loop. | `apps/api/src/outbox/outbox.service.ts` (~L57 vs ~L78-86), `outbox-processor.ts` | ✅ Fixed — added a `nextAttemptAt` column; `findPending` now skips events still in backoff and `markFailed` computes `nextAttemptAt` via the existing exponential formula. `OutboxService.retry()` is left in place (still unused in production) since removing it was out of scope for this fix. |
 | 5 | **CLI env-var overrides silently don't work.** `KODA_API_KEY`/`KODA_API_URL` are honored by `utils/auth.ts` `resolveAuth()`, but `config.ts` `resolveContext()` (used by 14 of 17 command modules, incl. `ticket`) never reads `process.env`. Two divergent auth-resolution code paths. | `apps/cli/src/config.ts`, `apps/cli/src/utils/auth.ts` | ✅ Fixed — `resolveContext()` now reads `KODA_API_KEY`/`KODA_API_URL`/`KODA_PROJECT_SLUG` with the same flag-then-env precedence as `resolveAuth()`. |
 | 6 | **No token revocation or logout.** Refresh tokens are stateless 30-day JWTs with no revocation store; `revoked: false` hardcoded in both auth providers; no `POST /auth/logout`. Root `.env`/`.env.example` ship `JWT_EXPIRES_IN=7d` while the code default is a safer `15m`. | `apps/api/src/auth/auth.service.ts:75-88`, `jwt-auth.provider.ts:27-28`, `agent-auth.provider.ts:31-32` | ✅ Fixed — added `User.tokenVersion`, embedded in access/refresh JWT payloads; `JwtAuthProvider` and a new `KodaJwtRefreshStrategyProvider` check it to mark tokens revoked; added `POST /auth/logout` (bumps `tokenVersion`, revoking all outstanding sessions for the user) and a `koda auth logout` CLI command. Revokes all sessions at once, not per-device (no sessions table). `.env.example` also corrected to `JWT_EXPIRES_IN=15m`. |
-| 7 | **No LanceDB write serialization.** Table open/create with no mutex; concurrent ingestion from multiple agents risks races on the embedded file-based store. | `apps/api/src/rag/rag.service.ts` (~L267-338) | ✅ Fixed — per-tableName in-flight promise lock serializes concurrent `getOrCreateTable` calls. |
+| 7 | **No LanceDB write serialization.** Table open/create with no mutex; concurrent ingestion from multiple agents risks races on the embedded file-based store. | `apps/api/src/rag/rag.service.ts` (~L267-338) | ✅ Fixed — per-tableName in-flight promise lock serializes concurrent `getOrCreateTable` calls (table *creation*). **2026-07-12:** table *writes* (`table.add` in `indexDocument`, `table.delete` in `deleteBySource`/`deleteAllBySourceType`, `table.optimize`) are now also serialized per project via a `runExclusive` write lock, since LanceDB has no built-in concurrent-writer protection — the earlier fix only covered the create-table race, not concurrent add/delete on an already-open table. |
 
 ---
 
@@ -99,10 +101,10 @@ Existing-page gaps:
 
 ### Repo hygiene
 
-- `TEST_SUMMARY.md` tracked at root (stale nax RED-phase artifact; `.gitignore` only covers `TEST_SUMMARY_*.md`); second copy under `apps/api/test/integration/koda-domain-writer/`.
-- `.nax-verifier-verdict.json` tracked despite matching `.gitignore` (committed before the rule).
-- `apps/api/src/state/` is an **empty dead module** (only an empty `dto/` folder, not imported in `app.module.ts`) — delete.
-- Oversized services worth splitting: `rag/rag.service.ts` (841 L), `vcs/vcs-webhook.service.ts` (652 L), `policy/policy-gate.service.ts` (597 L).
+- ~~`TEST_SUMMARY.md` tracked at root (stale nax RED-phase artifact; `.gitignore` only covers `TEST_SUMMARY_*.md`); second copy under `apps/api/test/integration/koda-domain-writer/`.~~ ✅ Fixed 2026-07-12 — both copies untracked, `.gitignore` widened to also match the bare `TEST_SUMMARY.md` filename.
+- ~~`.nax-verifier-verdict.json` tracked despite matching `.gitignore` (committed before the rule).~~ ✅ Fixed 2026-07-12 — untracked.
+- ~~`apps/api/src/state/` is an **empty dead module** (only an empty `dto/` folder, not imported in `app.module.ts`) — delete.~~ ✅ Fixed 2026-07-12 — removed (it was untracked/local-only, not committed).
+- Oversized services worth splitting: `rag/rag.service.ts` (859 L as of 2026-07-12, grew from 841 L), `vcs/vcs-webhook.service.ts` (652 L), `policy/policy-gate.service.ts` (597 L). Still open.
 
 ### Security posture confirmed good (no action)
 
@@ -112,7 +114,7 @@ Existing-page gaps:
 
 ## 4. Suggested priority order
 
-1. **Security/reliability defects** — CORS/Helmet, token revocation + logout, webhook→outbox unification, outbox backoff fix, LanceDB mutex, GitLab provider (or de-advertise).
+1. **Security/reliability defects** — CORS/Helmet ✅, token revocation + logout ✅, webhook→outbox unification (still open), outbox backoff fix ✅, LanceDB mutex ✅, GitLab provider ✅.
 2. **CLI agent-native promise** — env-var fix (unify `resolveContext`/`resolveAuth`), agent lifecycle commands, JSON errors under `--json`, register `config profile`.
 3. **Product features** — notifications, pagination + real-time board, due dates, ticket search.
 4. **Oversight visibility** — timeline/memory/code-intel web views (the differentiator for "humans oversee agents").
