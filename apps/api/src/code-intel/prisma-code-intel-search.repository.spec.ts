@@ -220,4 +220,28 @@ describe('PrismaCodeIntelRepository.searchSymbols()', () => {
       }),
     );
   });
+
+  // -------------------------------------------------------------------------
+  // AC6: deterministic ordering — repository must pass orderBy to Prisma
+  // -------------------------------------------------------------------------
+
+  it('AC6: applies a stable orderBy when no filters are provided', async () => {
+    await callSearchSymbols(repo, 'proj-1', { page: 1, limit: 20 });
+
+    expect(mockSymbolFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: expect.arrayContaining([expect.anything()]),
+      }),
+    );
+  });
+
+  it('AC6: applies a stable orderBy even when q filter is present', async () => {
+    await callSearchSymbols(repo, 'proj-1', { q: 'Foo', page: 1, limit: 20 });
+
+    expect(mockSymbolFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: expect.arrayContaining([expect.anything()]),
+      }),
+    );
+  });
 });

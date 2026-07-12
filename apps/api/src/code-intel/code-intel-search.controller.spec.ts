@@ -1,5 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
+import request from 'supertest';
 import { CodeIntelController } from './code-intel.controller';
 import { AstIndexService } from './ast-index.service';
 import { ProjectsService } from '../projects/projects.service';
@@ -402,5 +404,92 @@ describe('CodeIntelController.searchSymbols()', () => {
       expect(mockSearchSymbols).not.toHaveBeenCalled();
       expect((result as { data?: { name?: string } })?.data?.name).toBe('Foo');
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC10 HTTP routing layer: verify at the Fastify dispatch level that
+// GET /code-intel/symbols/:symbolId does NOT get captured by the search route.
+// A decorator/path-order regression (e.g. wrong path string, wildcard route)
+// would cause the wrong mock to be called and fail these tests.
+// ---------------------------------------------------------------------------
+
+describe('AC10 HTTP routing: detail route is not shadowed by the search route', () => {
+  let routingApp: NestFastifyApplication;
+  let mockSearchForRouting: jest.Mock;
+  let mockGetSymbolForRouting: jest.Mock;
+
+  const stubbedSymbol = {
+    id: 'repo:src/a.ts::Sym',
+    symbolId: 'repo:src/a.ts::Sym',
+    projectId: 'proj-1',
+    repoId: 'repo-1',
+    commitHash: 'abc',
+    name: 'Sym',
+    kind: 'function' as const,
+    file: 'src/a.ts',
+    startLine: 1,
+    endLine: 5,
+    callers: [],
+    callees: [],
+  };
+
+  beforeAll(async () => {
+    mockSearchForRouting = jest.fn().mockResolvedValue({ items: [], total: 0 });
+    mockGetSymbolForRouting = jest.fn().mockResolvedValue(stubbedSymbol);
+
+    const routingModule = await Test.createTestingModule({
+      controllers: [CodeIntelController],
+      providers: [
+        {
+          provide: AstIndexService,
+          useValue: {
+            indexCommit: jest.fn(),
+            getSymbol: mockGetSymbolForRouting,
+            getCallers: jest.fn().mockResolvedValue([]),
+            getCallees: jest.fn().mockResolvedValue([]),
+            searchSymbols: mockSearchForRouting,
+          } as unknown as AstIndexService,
+        },
+        {
+          provide: ProjectsService,
+          useValue: {
+            findProjectIdBySlug: jest.fn().mockResolvedValue('proj-1'),
+            assertProjectMembership: jest.fn().mockResolvedValue(undefined),
+          } as unknown as ProjectsService,
+        },
+      ],
+    }).compile();
+
+    routingApp = routingModule.createNestApplication<NestFastifyApplication>(
+      new FastifyAdapter(),
+    );
+    await routingApp.init();
+    await routingApp.getHttpAdapter().getInstance().ready();
+  });
+
+  afterAll(async () => {
+    if (routingApp) await routingApp.close();
+  });
+
+  beforeEach(() => {
+    mockSearchForRouting.mockClear();
+    mockGetSymbolForRouting.mockClear();
+  });
+
+  it('AC10: GET /code-intel/symbols dispatches to the search handler', async () => {
+    await request(routingApp.getHttpServer())
+      .get('/code-intel/symbols?projectSlug=my-project');
+
+    expect(mockSearchForRouting).toHaveBeenCalledTimes(1);
+    expect(mockGetSymbolForRouting).not.toHaveBeenCalled();
+  });
+
+  it('AC10: GET /code-intel/symbols/:symbolId dispatches to getSymbol, not searchSymbols', async () => {
+    await request(routingApp.getHttpServer())
+      .get('/code-intel/symbols/some-symbol-id?projectSlug=my-project');
+
+    expect(mockGetSymbolForRouting).toHaveBeenCalledTimes(1);
+    expect(mockSearchForRouting).not.toHaveBeenCalled();
   });
 });
