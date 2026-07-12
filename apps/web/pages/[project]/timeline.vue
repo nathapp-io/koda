@@ -3,82 +3,41 @@ import { extractApiError } from '~/composables/useApi'
 
 definePageMeta({ layout: 'default' })
 
-interface TimelineEvent {
-  id: string
-  eventType: string
-  actorId: string
-  action: string
-  ticketId?: string
-  createdAt: string
-}
-
-interface TimelineResponse {
-  events: TimelineEvent[]
-  nextCursor?: string
-  total?: number
-}
-
 const route = useRoute()
 const slug = route.params.project as string
-const { $api } = useApi()
 const { t } = useI18n()
 const toast = useAppToast()
 
-const events = ref<TimelineEvent[]>([])
-const isLoading = ref(true)
-const error = ref<unknown>(null)
-const cursor = ref<string | undefined>(undefined)
-
-const eventTypeFilter = ref<string>('')
-const fromFilter = ref<string>('')
-const toFilter = ref<string>('')
+const {
+  events,
+  isLoading,
+  error,
+  hasMore,
+  eventTypeFilter,
+  fromFilter,
+  toFilter,
+  loadEvents,
+  applyFilters,
+  loadMore,
+} = useTimelineEvents(slug)
 
 const EVENT_TYPES = ['', 'ticket_event', 'agent_event', 'decision_event']
 
-function buildQuery() {
-  const query: Record<string, string> = {}
-  if (eventTypeFilter.value) query.eventTypes = eventTypeFilter.value
-  if (fromFilter.value) query.from = fromFilter.value
-  if (toFilter.value) query.to = toFilter.value
-  if (cursor.value) query.cursor = cursor.value
-  return query
-}
-
-async function loadEvents({ append = false }: { append?: boolean } = {}) {
-  isLoading.value = true
-  error.value = null
+async function withToastError(action: () => Promise<unknown>) {
   try {
-    const res = await $api.get<TimelineResponse>(
-      `/projects/${slug}/timeline`,
-      { query: buildQuery() },
-    )
-    const fetched = res.events ?? []
-    events.value = append ? [...events.value, ...fetched] : fetched
-    cursor.value = res.nextCursor
+    await action()
   }
   catch (err) {
-    error.value = err
-    events.value = []
-    cursor.value = undefined
     toast.error(extractApiError(err))
   }
-  finally {
-    isLoading.value = false
-  }
 }
 
-async function applyFilters() {
-  cursor.value = undefined
-  await loadEvents()
-}
-
-async function loadMore() {
-  if (!cursor.value) return
-  await loadEvents({ append: true })
-}
+const loadAndToast = () => withToastError(loadEvents)
+const applyAndToast = () => withToastError(applyFilters)
+const loadMoreAndToast = () => withToastError(loadMore)
 
 onMounted(() => {
-  loadEvents()
+  loadAndToast()
 })
 
 function formatDate(dateStr: string) {
@@ -93,7 +52,7 @@ function formatDate(dateStr: string) {
     <div class="flex flex-wrap items-end gap-3">
       <div class="flex flex-col gap-1">
         <label class="text-xs font-medium text-muted-foreground">{{ t('timeline.filter.eventType') }}</label>
-        <select v-model="eventTypeFilter" class="rounded-md border border-border bg-background px-2 py-1 text-sm" @change="applyFilters">
+        <select v-model="eventTypeFilter" class="rounded-md border border-border bg-background px-2 py-1 text-sm" @change="applyAndToast">
           <option v-for="opt in EVENT_TYPES" :key="opt" :value="opt">
             {{ opt || t('timeline.filter.all') }}
           </option>
@@ -102,12 +61,12 @@ function formatDate(dateStr: string) {
 
       <div class="flex flex-col gap-1">
         <label class="text-xs font-medium text-muted-foreground">{{ t('timeline.filter.from') }}</label>
-        <Input v-model="fromFilter" type="date" @change="applyFilters" />
+        <Input v-model="fromFilter" type="date" @change="applyAndToast" />
       </div>
 
       <div class="flex flex-col gap-1">
         <label class="text-xs font-medium text-muted-foreground">{{ t('timeline.filter.to') }}</label>
-        <Input v-model="toFilter" type="date" @change="applyFilters" />
+        <Input v-model="toFilter" type="date" @change="applyAndToast" />
       </div>
     </div>
 
@@ -143,8 +102,8 @@ function formatDate(dateStr: string) {
       </table>
     </div>
 
-    <div v-if="cursor" class="flex justify-center">
-      <Button variant="outline" :disabled="isLoading" @click="loadMore">
+    <div v-if="hasMore" class="flex justify-center">
+      <Button variant="outline" :disabled="isLoading" @click="loadMoreAndToast">
         {{ isLoading ? t('common.loading') : t('timeline.loadMore') }}
       </Button>
     </div>
