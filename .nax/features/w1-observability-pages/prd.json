@@ -3,7 +3,7 @@
   "feature": "w1-observability-pages",
   "branchName": "feat/w1-observability-pages",
   "createdAt": "2026-07-12T05:36:29Z",
-  "updatedAt": "2026-07-12T09:55:33.892Z",
+  "updatedAt": "2026-07-12T11:51:24.561Z",
   "userStories": [
     {
       "id": "US-001",
@@ -294,8 +294,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -354,7 +354,16 @@
       "status": "pending",
       "passes": false,
       "attempts": 0,
-      "escalations": [],
+      "escalations": [
+        {
+          "fromTier": "balanced",
+          "toTier": "powerful",
+          "fromAgent": "opencode",
+          "toAgent": "opencode",
+          "reason": "Rectification exhausted with unfixed findings",
+          "timestamp": "2026-07-12T11:51:10.729Z"
+        }
+      ],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
@@ -364,7 +373,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "opencode",
         "initialProfileId": "opencode-medium",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "powerful"
       },
       "workdir": "apps/web",
       "contextFiles": [
@@ -378,9 +389,23 @@
         "apps/web/pages/[project]/code-intel.vue",
         "apps/web/tests/pages/code-intel.spec.ts"
       ],
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1
+      "priorErrors": [
+        "Attempt 1 failed with model tier: balanced: Rectification exhausted with unfixed findings"
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "balanced",
+          "stage": "escalation",
+          "summary": "Tier balanced: Rectification exhausted with unfixed findings",
+          "cost": 5.462868499999999,
+          "timestamp": "2026-07-12T11:51:10.729Z",
+          "agent": "opencode",
+          "agentProfileId": "opencode-medium"
+        }
+      ],
+      "storyPoints": 1,
+      "storyGitRef": "cea31d12ad57fc8b9c3030abe41b84a3706a4bcb"
     },
     {
       "id": "US-006",
