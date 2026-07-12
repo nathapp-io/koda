@@ -61,6 +61,7 @@
     "kb": "知识库",
     "timeline": "时间线",
     "memory": "记忆",
+    "codeIntel": "代码智能",
     "labels": "标签",
     "tickets": "工单",
     "toggleSidebar": "切换侧栏",
@@ -244,6 +245,24 @@
       "kind": "类型",
       "confidence": "置信度",
       "status": "状态"
+    }
+  },
+  "codeIntel": {
+    "search": {
+      "placeholder": "按名称搜索符号...",
+      "button": "搜索"
+    },
+    "empty": "未找到符号。",
+    "columns": {
+      "name": "名称",
+      "kind": "类型",
+      "file": "文件"
+    },
+    "detail": {
+      "signature": "签名",
+      "docComment": "文档注释",
+      "callers": "调用方",
+      "callees": "被调用方"
     }
   },
   "comments": {
