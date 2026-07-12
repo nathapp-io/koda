@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LayoutDashboard, Kanban, Bot, Tag, BookOpen } from 'lucide-vue-next'
+import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const auth = useAuth()
@@ -108,6 +108,14 @@ const backTo = computed(() => {
           >
             <BookOpen class="h-4 w-4 shrink-0" />
             {{ t('nav.kb') }}
+          </NuxtLink>
+          <NuxtLink
+            :to="`/${projectSlug}/timeline`"
+            :class="navLinkClass"
+            :active-class="activeClass"
+          >
+            <Clock class="h-4 w-4 shrink-0" />
+            {{ t('nav.timeline') }}
           </NuxtLink>
           <NuxtLink
             :to="`/${projectSlug}/settings`"

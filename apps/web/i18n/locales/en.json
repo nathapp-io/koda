@@ -59,6 +59,7 @@
     "board": "Board",
     "agents": "Agents",
     "kb": "Knowledge Base",
+    "timeline": "Timeline",
     "labels": "Labels",
     "tickets": "Tickets",
     "toggleSidebar": "Toggle sidebar",
@@ -186,10 +187,6 @@
       "assign": "Assign",
       "unassign": "Unassign"
     },
-    "labels": {
-      "select": "Select label",
-      "add": "Add Label"
-    },
     "links": {
       "title": "Links",
       "placeholder": "https://...",
@@ -212,6 +209,22 @@
       "actionFailed": "Action failed",
       "assigned": "Ticket assigned",
       "unassigned": "Ticket unassigned"
+    }
+  },
+  "timeline": {
+    "empty": "No timeline events yet.",
+    "loadMore": "Load more",
+    "filter": {
+      "eventType": "Event Type",
+      "all": "All",
+      "from": "From",
+      "to": "To"
+    },
+    "columns": {
+      "eventType": "Event",
+      "actorId": "Actor",
+      "action": "Action",
+      "created": "When"
     }
   },
   "comments": {
