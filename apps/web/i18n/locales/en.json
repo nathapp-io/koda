@@ -248,6 +248,7 @@
     }
   },
   "codeIntel": {
+    "prompt": "Enter a search query to find symbols.",
     "search": {
       "placeholder": "Search symbols by name...",
       "button": "Search"

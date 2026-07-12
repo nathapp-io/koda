@@ -476,6 +476,7 @@ function createRenderContext(overrides: Record<string, unknown> = {}) {
     // Search state
     searchQuery: ref(''),
     isSearching: ref(false),
+    hasSearched: ref(false),
     symbols: ref<CodeIntelSymbol[]>([]),
     expandedSymbolId: ref<string | null>(null),
     isLoadingDetail: ref(false),
@@ -518,6 +519,7 @@ describe('Code-intel AC2 (Behavioral SSR): page renders one row per symbol', () 
   test('AC2: renders one <tr> per symbol showing name, kind, file columns', async () => {
     const ctx = createRenderContext({
       isSearching: VueFull.ref(false),
+      hasSearched: VueFull.ref(true),
       symbols: VueFull.ref([
         { id: 's1', name: 'handleSearch', kind: 'function', file: 'pages/[project]/code-intel.vue' },
         { id: 's2', name: 'toggleSymbol', kind: 'function', file: 'pages/[project]/code-intel.vue' },
@@ -605,6 +607,7 @@ describe('Code-intel AC4 (Behavioral SSR): empty state when no symbols', () => {
   test('AC4: shows empty-state message instead of the table when symbols array is empty', async () => {
     const ctx = createRenderContext({
       isSearching: VueFull.ref(false),
+      hasSearched: VueFull.ref(true),
       symbols: VueFull.ref([]),
     })
 
@@ -656,6 +659,7 @@ describe('Code-intel AC6 (Behavioral SSR): click row → rendered detail panel w
   test('before any row is clicked, the detail panel markup is NOT rendered', async () => {
     const ctx = createRenderContext({
       isSearching: VueFull.ref(false),
+      hasSearched: VueFull.ref(true),
       symbols: VueFull.ref([
         { id: 's1', name: 'handleSearch', kind: 'function', file: 'pages/[project]/code-intel.vue' },
       ]),
@@ -704,6 +708,7 @@ describe('Code-intel AC6 (Behavioral SSR): click row → rendered detail panel w
 
     const ctx = createRenderContext({
       isSearching: VueFull.ref(false),
+      hasSearched: VueFull.ref(true),
       symbols: VueFull.ref([
         { id: 's1', name: 'handleSearch', kind: 'function', file: 'pages/[project]/code-intel.vue' },
       ]),
@@ -760,6 +765,7 @@ describe('Code-intel AC6 (Behavioral SSR): click row → rendered detail panel w
 
     const ctx = createRenderContext({
       isSearching: VueFull.ref(false),
+      hasSearched: VueFull.ref(true),
       symbols: VueFull.ref([
         { id: 's1', name: 'handleSearch', kind: 'function', file: 'pages/[project]/code-intel.vue' },
       ]),
@@ -835,6 +841,7 @@ describe('Code-intel AC6 (Behavioral SSR): click row → rendered detail panel w
 
     const ctx = createRenderContext({
       isSearching: VueFull.ref(false),
+      hasSearched: VueFull.ref(true),
       symbols: VueFull.ref([
         { id: 's1', name: 'handleSearch', kind: 'function', file: 'pages/[project]/code-intel.vue' },
       ]),
