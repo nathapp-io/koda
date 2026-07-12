@@ -61,6 +61,7 @@
     "kb": "Knowledge Base",
     "timeline": "Timeline",
     "memory": "Memory",
+    "codeIntel": "Code Intel",
     "labels": "Labels",
     "tickets": "Tickets",
     "toggleSidebar": "Toggle sidebar",
@@ -244,6 +245,24 @@
       "kind": "Kind",
       "confidence": "Confidence",
       "status": "Status"
+    }
+  },
+  "codeIntel": {
+    "search": {
+      "placeholder": "Search symbols by name...",
+      "button": "Search"
+    },
+    "empty": "No symbols found.",
+    "columns": {
+      "name": "Name",
+      "kind": "Kind",
+      "file": "File"
+    },
+    "detail": {
+      "signature": "Signature",
+      "docComment": "Doc Comment",
+      "callers": "Callers",
+      "callees": "Callees"
     }
   },
   "comments": {

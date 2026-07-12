@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain } from 'lucide-vue-next'
+import { LayoutDashboard, Kanban, Bot, Tag, BookOpen, Clock, Brain, Code2 } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const auth = useAuth()
@@ -124,6 +124,14 @@ const backTo = computed(() => {
           >
             <Brain class="h-4 w-4 shrink-0" />
             {{ t('nav.memory') }}
+          </NuxtLink>
+          <NuxtLink
+            :to="`/${projectSlug}/code-intel`"
+            :class="navLinkClass"
+            :active-class="activeClass"
+          >
+            <Code2 class="h-4 w-4 shrink-0" />
+            {{ t('nav.codeIntel') }}
           </NuxtLink>
           <NuxtLink
             :to="`/${projectSlug}/settings`"
