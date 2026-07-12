@@ -20,6 +20,7 @@ import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/ne
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { AstIndexService } from './ast-index.service';
 import { IndexCommitDto } from './dto/index-commit.dto';
+import { SearchSymbolsQueryDto } from './dto/search-symbols.dto';
 import { ProjectsService } from '../projects/projects.service';
 
 @ApiTags('code-intel')
@@ -75,24 +76,19 @@ export class CodeIntelController {
   @ApiResponse({ status: 200, description: 'Symbol search results' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  @ApiQuery({ name: 'projectSlug', required: true })
-  @ApiQuery({ name: 'q', required: false })
-  @ApiQuery({ name: 'file', required: false })
-  @ApiQuery({ name: 'page', required: false })
-  @ApiQuery({ name: 'limit', required: false })
   @RequiredPermission([CaslPermissionAction.READ, 'CodeIntel'])
   async searchSymbols(
-    @Query() query: { projectSlug: string; q?: string; file?: string; page?: number; limit?: number },
+    @Query() query: SearchSymbolsQueryDto,
     @Principal() principal: KodaPrincipal,
   ) {
     const { projectSlug, q, file, page = 1, limit: rawLimit = 20 } = query;
     const MAX_LIMIT = 100;
-    const limit = Math.min(Number(rawLimit), MAX_LIMIT);
+    const limit = Math.min(rawLimit, MAX_LIMIT);
 
     const project = await this.resolveProject(projectSlug);
     await this.checkProjectMembership(project.id, principal);
 
-    const { items, total } = await this.astIndexService.searchSymbols(project.id, { q, file, page: Number(page), limit });
+    const { items, total } = await this.astIndexService.searchSymbols(project.id, { q, file, page, limit });
     return JsonResponse.Ok({ items, total });
   }
 

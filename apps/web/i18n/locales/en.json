@@ -190,6 +190,10 @@
       "assign": "Assign",
       "unassign": "Unassign"
     },
+    "labels": {
+      "select": "Select label",
+      "add": "Add Label"
+    },
     "links": {
       "title": "Links",
       "placeholder": "https://...",

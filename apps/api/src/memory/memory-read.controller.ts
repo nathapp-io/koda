@@ -1,6 +1,6 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { JsonResponse } from '@nathapp/nestjs-common';
+import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
 import { Principal } from '@nathapp/nestjs-auth';
 import { MemoryGovernanceService } from './memory-governance.service';
 import type { MemoryItem, ProjectMemoryQuery } from './memory-item-repository';
@@ -20,6 +20,15 @@ export class MemoryReadController {
     private readonly governance: MemoryGovernanceService,
     private readonly projects: ProjectsService,
   ) {}
+
+  private parseIntParam(value: string | undefined, field: string): number | undefined {
+    if (value === undefined) return undefined;
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isNaN(parsed)) {
+      throw new ValidationAppException({ [field]: `Invalid ${field}` });
+    }
+    return parsed;
+  }
 
   @Get()
   @ApiOperation({ summary: 'Get project memory items' })
@@ -44,8 +53,8 @@ export class MemoryReadController {
       ...(kind !== undefined && { kind: kind as ProjectMemoryQuery['kind'] }),
       ...(subject !== undefined && { subject }),
       ...(status !== undefined && { status }),
-      ...(page !== undefined && { page: parseInt(page, 10) }),
-      ...(limit !== undefined && { limit: parseInt(limit, 10) }),
+      ...(page !== undefined && { page: this.parseIntParam(page, 'page') }),
+      ...(limit !== undefined && { limit: this.parseIntParam(limit, 'limit') }),
       ...(orderBy !== undefined && { orderBy: orderBy as ProjectMemoryQuery['orderBy'] }),
     };
 
