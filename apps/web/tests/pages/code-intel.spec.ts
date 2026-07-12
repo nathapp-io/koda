@@ -463,6 +463,12 @@ function stubDiv(tag: string): VueFull.Component {
 function createRenderContext(overrides: Record<string, unknown> = {}) {
   const { ref, computed } = VueFull
 
+  const detailStateRef = ref<{
+    detail: { id: string; signature?: string; docComment?: string } | null
+    callers: Array<{ id: string; name: string; file: string }>
+    callees: Array<{ id: string; name: string; file: string }>
+  } | null>(null)
+
   const ctx = {
     t: (key: string) => key,
     toast: { error: jest.fn(), success: jest.fn() },
@@ -472,14 +478,19 @@ function createRenderContext(overrides: Record<string, unknown> = {}) {
     isSearching: ref(false),
     symbols: ref<CodeIntelSymbol[]>([]),
     expandedSymbolId: ref<string | null>(null),
-    error: ref<unknown>(null),
+    isLoadingDetail: ref(false),
+    detailState: detailStateRef,
 
     // Functions
     handleSearch: jest.fn().mockResolvedValue(undefined),
     toggleSymbol: jest.fn(),
 
-    // Computeds
-    selectedSymbol: ref<CodeIntelSymbol | null>(null),
+    // Computeds — match the page's binding names so the template renders from them.
+    // Wired AFTER overrides spread so that if the test passes its own
+    // detailState, the computed reads from that ref.
+    expandedSymbol: null as unknown as { value: unknown },
+    expandedCallers: null as unknown as { value: unknown },
+    expandedCallees: null as unknown as { value: unknown },
 
     // Utility
     formatKind: (k: string) => k,
@@ -487,11 +498,10 @@ function createRenderContext(overrides: Record<string, unknown> = {}) {
     ...overrides,
   }
 
-  // Wire selectedSymbol computed-style so tests can drive it.
-  ctx.selectedSymbol = computed(() => {
-    if (!ctx.expandedSymbolId.value) return null
-    return ctx.symbols.value.find(s => s.id === ctx.expandedSymbolId.value) ?? null
-  }) as unknown as typeof ctx.selectedSymbol
+  const effectiveDetailState = (ctx.detailState as typeof detailStateRef)
+  ctx.expandedSymbol = computed(() => effectiveDetailState.value?.detail ?? null)
+  ctx.expandedCallers = computed(() => effectiveDetailState.value?.callers ?? [])
+  ctx.expandedCallees = computed(() => effectiveDetailState.value?.callees ?? [])
 
   return ctx
 }
@@ -623,5 +633,241 @@ describe('Code-intel AC4 (Behavioral SSR): empty state when no symbols', () => {
     expect(html).not.toContain('<table')
     expect(html).not.toContain('<tbody')
     expect(html).not.toContain('<tr')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AC6 (Behavioral SSR) — rendered interaction test:
+//   (a) before any row is clicked the detail panel markup must NOT appear;
+//   (b) after a row is "clicked" (driven via the same refs the page uses,
+//       including the detailState ref populated from /symbols/:id and the
+//       callers/callees endpoints), the rendered HTML must contain the
+//       selected symbol's signature, docComment, callers, and callees as
+//       plain text — never as interactive links.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Code-intel AC6 (Behavioral SSR): click row → rendered detail panel with plain-text signature/docComment/callers/callees', () => {
+  let pageTemplate: string
+
+  beforeAll(() => {
+    pageTemplate = extractTemplateSfc(readFileSync(pagePath, 'utf-8'))
+  })
+
+  test('before any row is clicked, the detail panel markup is NOT rendered', async () => {
+    const ctx = createRenderContext({
+      isSearching: VueFull.ref(false),
+      symbols: VueFull.ref([
+        { id: 's1', name: 'handleSearch', kind: 'function', file: 'pages/[project]/code-intel.vue' },
+      ]),
+    })
+    // expandedSymbolId stays null and detailState stays null — no row clicked.
+
+    const app = VueFull.createSSRApp({
+      template: pageTemplate,
+      setup: () => ctx,
+      components: {
+        PageHeader: stubDiv('PageHeader'),
+        LoadingState: stubDiv('LoadingState'),
+        Input: stubDiv('Input'),
+        Button: stubDiv('Button'),
+      },
+      directives: { model: {} },
+    })
+
+    const html = await renderToString(app)
+
+    // The detail panel is identified by the i18n keys it renders. They
+    // must NOT appear before a click.
+    expect(html).not.toContain('codeIntel.detail.signature')
+    expect(html).not.toContain('codeIntel.detail.docComment')
+    expect(html).not.toContain('codeIntel.detail.callers')
+    expect(html).not.toContain('codeIntel.detail.callees')
+    // The actual detail content also must not appear.
+    expect(html).not.toContain('Runs the symbol search.')
+    expect(html).not.toMatch(/async function handleSearch\(\): Promise(&lt;|<)void(&gt;|>)/)
+  })
+
+  test('after a row is "clicked" (detailState populated), the rendered HTML contains signature/docComment as plain text', async () => {
+    const detailRef = VueFull.ref({
+      detail: {
+        id: 's1',
+        signature: 'async function handleSearch(): Promise<void>',
+        docComment: 'Runs the symbol search.',
+      },
+      callers: [
+        { id: 'caller-1', name: 'onSearchSubmit', file: 'pages/[project]/code-intel.vue' },
+      ],
+      callees: [
+        { id: 'callee-1', name: '$api.get', file: 'composables/useApi.ts' },
+      ],
+    })
+
+    const ctx = createRenderContext({
+      isSearching: VueFull.ref(false),
+      symbols: VueFull.ref([
+        { id: 's1', name: 'handleSearch', kind: 'function', file: 'pages/[project]/code-intel.vue' },
+      ]),
+      expandedSymbolId: VueFull.ref('s1'),
+      detailState: detailRef,
+    })
+
+    const app = VueFull.createSSRApp({
+      template: pageTemplate,
+      setup: () => ctx,
+      components: {
+        PageHeader: stubDiv('PageHeader'),
+        LoadingState: stubDiv('LoadingState'),
+        Input: stubDiv('Input'),
+        Button: stubDiv('Button'),
+      },
+      directives: { model: {} },
+    })
+
+    const html = await renderToString(app)
+
+    // i18n keys for the detail panel appear.
+    expect(html).toContain('codeIntel.detail.signature')
+    expect(html).toContain('codeIntel.detail.docComment')
+    expect(html).toContain('codeIntel.detail.callers')
+    expect(html).toContain('codeIntel.detail.callees')
+
+    // The actual data from the detail endpoint is interpolated as plain text.
+    // (Vue escapes '<' in text nodes, so the rendered HTML may show
+    // 'Promise&lt;void&gt;' instead of 'Promise<void>'.)
+    expect(html).toMatch(/async function handleSearch\(\): Promise(&lt;|<)void(&gt;|>)/)
+    expect(html).toContain('Runs the symbol search.')
+    expect(html).toContain('onSearchSubmit')
+    expect(html).toContain('pages/[project]/code-intel.vue')
+    expect(html).toContain('$api.get')
+    expect(html).toContain('composables/useApi.ts')
+  })
+
+  test('detail panel renders callers and callees as plain text — never inside <a> or NuxtLink', async () => {
+    const detailRef = VueFull.ref({
+      detail: {
+        id: 's1',
+        signature: 'async function handleSearch(): Promise<void>',
+        docComment: 'Runs the symbol search.',
+      },
+      callers: [
+        { id: 'caller-1', name: 'onSearchSubmit', file: 'pages/[project]/code-intel.vue' },
+        { id: 'caller-2', name: 'mountCodeIntelPage', file: 'tests/pages/code-intel-mount.spec.ts' },
+      ],
+      callees: [
+        { id: 'callee-1', name: '$api.get', file: 'composables/useApi.ts' },
+      ],
+    })
+
+    const ctx = createRenderContext({
+      isSearching: VueFull.ref(false),
+      symbols: VueFull.ref([
+        { id: 's1', name: 'handleSearch', kind: 'function', file: 'pages/[project]/code-intel.vue' },
+      ]),
+      expandedSymbolId: VueFull.ref('s1'),
+      detailState: detailRef,
+    })
+
+    const app = VueFull.createSSRApp({
+      template: pageTemplate,
+      setup: () => ctx,
+      components: {
+        PageHeader: stubDiv('PageHeader'),
+        LoadingState: stubDiv('LoadingState'),
+        Input: stubDiv('Input'),
+        Button: stubDiv('Button'),
+      },
+      directives: { model: {} },
+    })
+
+    const html = await renderToString(app)
+
+    // The caller names appear in the rendered output.
+    expect(html).toContain('onSearchSubmit')
+    expect(html).toContain('mountCodeIntelPage')
+
+    // Find each <li> in the callers/callees section and assert it is plain text.
+    // The list items must not contain an <a> tag or any interactive element.
+    // The detail panel is identifiable by the i18n keys it renders.
+    // Grab the chunk between the callers i18n key and the closing </dl> of the panel.
+    const callersKeyIdx = html.indexOf('codeIntel.detail.callers')
+    const calleesKeyIdx = html.indexOf('codeIntel.detail.callees')
+    expect(callersKeyIdx).toBeGreaterThan(-1)
+    expect(calleesKeyIdx).toBeGreaterThan(-1)
+
+    // Extract the callers <ul> block and verify it contains the names without any anchor.
+    const callersListMatch = html.slice(callersKeyIdx, calleesKeyIdx).match(/<ul[^>]*>([\s\S]*?)<\/ul>/)
+    expect(callersListMatch).not.toBeNull()
+    const callersListBody = callersListMatch?.[1] ?? ''
+    expect(callersListBody).toContain('onSearchSubmit')
+    expect(callersListBody).toContain('mountCodeIntelPage')
+    // No anchor inside the callers list — they must be plain text only.
+    expect(callersListBody).not.toMatch(/<a\b/i)
+    expect(callersListBody).not.toMatch(/<NuxtLink\b/i)
+    expect(callersListBody).not.toMatch(/href=/i)
+
+    // Extract the callees <ul> block (from callees key to the closing </dl>).
+    const calleesListMatch = html.slice(calleesKeyIdx).match(/<ul[^>]*>([\s\S]*?)<\/ul>/)
+    expect(calleesListMatch).not.toBeNull()
+    const calleesListBody = calleesListMatch?.[1] ?? ''
+    expect(calleesListBody).toContain('$api.get')
+    expect(calleesListBody).not.toMatch(/<a\b/i)
+    expect(calleesListBody).not.toMatch(/<NuxtLink\b/i)
+    expect(calleesListBody).not.toMatch(/href=/i)
+  })
+
+  test('detail panel renders one <li> per caller and one <li> per callee', async () => {
+    const detailRef = VueFull.ref({
+      detail: {
+        id: 's1',
+        signature: 'async function handleSearch(): Promise<void>',
+        docComment: 'Runs the symbol search.',
+      },
+      callers: [
+        { id: 'caller-1', name: 'onSearchSubmit', file: 'pages/[project]/code-intel.vue' },
+        { id: 'caller-2', name: 'mountCodeIntelPage', file: 'tests/pages/code-intel-mount.spec.ts' },
+        { id: 'caller-3', name: 'mountTimelinePage', file: 'tests/pages/timeline.spec.ts' },
+      ],
+      callees: [
+        { id: 'callee-1', name: '$api.get', file: 'composables/useApi.ts' },
+        { id: 'callee-2', name: 'extractApiError', file: 'composables/useApi.ts' },
+      ],
+    })
+
+    const ctx = createRenderContext({
+      isSearching: VueFull.ref(false),
+      symbols: VueFull.ref([
+        { id: 's1', name: 'handleSearch', kind: 'function', file: 'pages/[project]/code-intel.vue' },
+      ]),
+      expandedSymbolId: VueFull.ref('s1'),
+      detailState: detailRef,
+    })
+
+    const app = VueFull.createSSRApp({
+      template: pageTemplate,
+      setup: () => ctx,
+      components: {
+        PageHeader: stubDiv('PageHeader'),
+        LoadingState: stubDiv('LoadingState'),
+        Input: stubDiv('Input'),
+        Button: stubDiv('Button'),
+      },
+      directives: { model: {} },
+    })
+
+    const html = await renderToString(app)
+
+    // The callers <ul> block has exactly 3 <li>s (matching the 3 callers).
+    const callersKeyIdx = html.indexOf('codeIntel.detail.callers')
+    const calleesKeyIdx = html.indexOf('codeIntel.detail.callees')
+    const callersListMatch = html.slice(callersKeyIdx, calleesKeyIdx).match(/<ul[^>]*>([\s\S]*?)<\/ul>/)
+    expect(callersListMatch).not.toBeNull()
+    const callerLis = (callersListMatch?.[1] ?? '').match(/<li\b/g) || []
+    expect(callerLis).toHaveLength(3)
+
+    // The callees <ul> block has exactly 2 <li>s.
+    const calleesListMatch = html.slice(calleesKeyIdx).match(/<ul[^>]*>([\s\S]*?)<\/ul>/)
+    expect(calleesListMatch).not.toBeNull()
+    const calleeLis = (calleesListMatch?.[1] ?? '').match(/<li\b/g) || []
+    expect(calleeLis).toHaveLength(2)
   })
 })
