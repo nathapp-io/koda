@@ -3,7 +3,7 @@
   "feature": "w1-observability-pages",
   "branchName": "feat/w1-observability-pages",
   "createdAt": "2026-07-12T05:36:29Z",
-  "updatedAt": "2026-07-12T07:31:26.836Z",
+  "updatedAt": "2026-07-12T09:55:33.892Z",
   "userStories": [
     {
       "id": "US-001",
@@ -92,8 +92,8 @@
         "security"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [
         {
@@ -175,20 +175,47 @@
         "i18n"
       ],
       "dependencies": [],
-      "status": "pending",
+      "status": "failed",
       "passes": false,
-      "attempts": 0,
-      "escalations": [],
+      "attempts": 1,
+      "escalations": [
+        {
+          "fromTier": "balanced",
+          "toTier": "powerful",
+          "fromAgent": "opencode",
+          "toAgent": "opencode",
+          "reason": "agent session failed (exit 0); phases=adversarial-review,rectification",
+          "timestamp": "2026-07-12T09:12:23.844Z"
+        },
+        {
+          "fromTier": "powerful",
+          "toTier": "balanced",
+          "fromAgent": "opencode",
+          "toAgent": "claude",
+          "reason": "Rectification exhausted with unfixed findings",
+          "timestamp": "2026-07-12T09:54:55.610Z"
+        },
+        {
+          "fromTier": "balanced",
+          "toTier": "powerful",
+          "fromAgent": "claude",
+          "toAgent": "claude",
+          "reason": "agent session failed (exit 1); phases=implementer",
+          "timestamp": "2026-07-12T09:55:13.167Z"
+        }
+      ],
       "routing": {
         "complexity": "medium",
         "testStrategy": "tdd-simple",
         "reasoning": "This is a standard Nuxt page addition touching one new page, layout navigation, and locale files with no new backend contracts or security-sensitive logic.",
         "agentProfileId": "opencode-medium",
-        "agent": "opencode",
+        "agent": "claude",
         "profileModelTier": "balanced",
         "initialAgent": "opencode",
         "initialProfileId": "opencode-medium",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "powerful"
       },
       "workdir": "apps/web",
       "contextFiles": [
@@ -202,9 +229,45 @@
         "apps/web/pages/[project]/timeline.vue",
         "apps/web/tests/pages/timeline.spec.ts"
       ],
-      "priorErrors": [],
-      "priorFailures": [],
-      "storyPoints": 1
+      "priorErrors": [
+        "Attempt 1 failed with model tier: balanced: agent session failed (exit 0); phases=adversarial-review,rectification",
+        "Attempt 1 failed with model tier: powerful: Rectification exhausted with unfixed findings",
+        "Attempt 1 failed with model tier: balanced: agent session failed (exit 1); phases=implementer"
+      ],
+      "priorFailures": [
+        {
+          "attempt": 1,
+          "modelTier": "balanced",
+          "stage": "escalation",
+          "summary": "Tier balanced: agent session failed (exit 0); phases=adversarial-review,rectification",
+          "cost": 6.494807539999999,
+          "timestamp": "2026-07-12T09:12:23.844Z",
+          "agent": "opencode",
+          "agentProfileId": "opencode-medium"
+        },
+        {
+          "attempt": 1,
+          "modelTier": "powerful",
+          "stage": "escalation",
+          "summary": "Tier powerful: Rectification exhausted with unfixed findings",
+          "cost": 2.6357418279999996,
+          "timestamp": "2026-07-12T09:54:55.611Z",
+          "agent": "opencode",
+          "agentProfileId": "opencode-medium"
+        },
+        {
+          "attempt": 1,
+          "modelTier": "balanced",
+          "stage": "escalation",
+          "summary": "Tier balanced: agent session failed (exit 1); phases=implementer",
+          "cost": 0,
+          "timestamp": "2026-07-12T09:55:13.167Z",
+          "agent": "claude",
+          "agentProfileId": "opencode-medium"
+        }
+      ],
+      "storyPoints": 1,
+      "storyGitRef": "898108211f5f37380b150aaf63a82b2b15eed30c"
     },
     {
       "id": "US-004",
@@ -244,7 +307,9 @@
         "profileModelTier": "balanced",
         "initialAgent": "opencode",
         "initialProfileId": "opencode-medium",
-        "initialModelTier": "balanced"
+        "initialModelTier": "balanced",
+        "initialComplexity": "medium",
+        "modelTier": "balanced"
       },
       "workdir": "apps/web",
       "contextFiles": [
@@ -260,7 +325,8 @@
       ],
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "9ee45eaf1c763f42aeb5e856377b3decbaffb8e4"
     },
     {
       "id": "US-005",
