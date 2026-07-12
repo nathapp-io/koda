@@ -334,6 +334,137 @@ describe('RagService.getOrCreateTable — FTS index creation', () => {
   });
 });
 
+describe('RagService — write mutex serialization (LanceDB has no built-in concurrent-writer lock)', () => {
+  const mockRagConfig = makeRagConfig();
+
+  const mockEmbeddingService = {
+    embed: jest.fn().mockResolvedValue([0.1, 0.2, 0.3]),
+    providerName: 'test-provider',
+    modelName: 'test-model',
+    dimensions: 3,
+  };
+
+  it('serializes concurrent indexDocument writes against the same project table', async () => {
+    const ragService = new RagService(mockRagConfig, mockEmbeddingService as never);
+
+    let resolveFirstAdd: () => void = () => {};
+    const firstAddPromise = new Promise<void>((resolve) => {
+      resolveFirstAdd = resolve;
+    });
+    const addSpy = jest.fn().mockReturnValueOnce(firstAddPromise).mockResolvedValueOnce(undefined);
+    const mockTable = { add: addSpy };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    const first = ragService.indexDocument('test-project', {
+      source: 'ticket',
+      sourceId: 'ticket-001',
+      content: 'first',
+      metadata: {},
+    });
+    const second = ragService.indexDocument('test-project', {
+      source: 'ticket',
+      sourceId: 'ticket-002',
+      content: 'second',
+      metadata: {},
+    });
+
+    // Let both calls' preceding awaits (validateProjectId, embed) flush before
+    // asserting the second write hasn't started — it must wait on the first.
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(addSpy).toHaveBeenCalledTimes(1);
+
+    resolveFirstAdd();
+    await Promise.all([first, second]);
+
+    expect(addSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('never runs indexDocument and deleteBySource writes concurrently on the same table', async () => {
+    // indexDocument and deleteBySource have different numbers of awaits before
+    // reaching the write lock, so which one acquires it first isn't guaranteed —
+    // what the mutex guarantees is that only one write is ever in flight at a time.
+    const ragService = new RagService(mockRagConfig, mockEmbeddingService as never);
+
+    let resolveAdd: () => void = () => {};
+    const addPromise = new Promise<void>((resolve) => {
+      resolveAdd = resolve;
+    });
+    const addSpy = jest.fn().mockReturnValue(addPromise);
+
+    let resolveDelete: () => void = () => {};
+    const deletePromiseGate = new Promise<void>((resolve) => {
+      resolveDelete = resolve;
+    });
+    const deleteSpy = jest.fn().mockReturnValue(deletePromiseGate);
+
+    const mockTable = { add: addSpy, delete: deleteSpy };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([['project_test-project', mockTable]]);
+
+    const indexPromise = ragService.indexDocument('test-project', {
+      source: 'ticket',
+      sourceId: 'ticket-001',
+      content: 'first',
+      metadata: {},
+    });
+    const deletePromise = ragService.deleteBySource('test-project', 'ticket-001');
+
+    for (let i = 0; i < 5; i++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    // Only one of the two writes may be in flight at a time.
+    expect(addSpy.mock.calls.length + deleteSpy.mock.calls.length).toBe(1);
+
+    resolveAdd();
+    resolveDelete();
+    await Promise.all([indexPromise, deletePromise]);
+
+    expect(addSpy).toHaveBeenCalledTimes(1);
+    expect(deleteSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let one project table lock block writes to a different project table', async () => {
+    const ragService = new RagService(mockRagConfig, mockEmbeddingService as never);
+
+    let resolveAddA: () => void = () => {};
+    const addAPromise = new Promise<void>((resolve) => {
+      resolveAddA = resolve;
+    });
+    const addASpy = jest.fn().mockReturnValue(addAPromise);
+    const addBSpy = jest.fn().mockResolvedValue(undefined);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (ragService as any).tableCache = new Map([
+      ['project_project-a', { add: addASpy }],
+      ['project_project-b', { add: addBSpy }],
+    ]);
+
+    const pendingA = ragService.indexDocument('project-a', {
+      source: 'ticket',
+      sourceId: 'a-1',
+      content: 'a',
+      metadata: {},
+    });
+    await ragService.indexDocument('project-b', {
+      source: 'ticket',
+      sourceId: 'b-1',
+      content: 'b',
+      metadata: {},
+    });
+
+    expect(addBSpy).toHaveBeenCalledTimes(1);
+
+    resolveAddA();
+    await pendingA;
+  });
+});
+
 describe('reciprocalRankFusion — export (US-003-2 AC-3)', () => {
   it('is exported from rag.service.ts', () => {
     expect(reciprocalRankFusion).toBeDefined();

@@ -1,6 +1,7 @@
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { createVcsProvider, VcsProviderConfig } from './factory';
 import { GitHubProvider } from './providers/github.provider';
+import { GitLabProvider } from './providers/gitlab.provider';
 import { IVcsProvider } from './vcs-provider';
 
 describe('createVcsProvider factory', () => {
@@ -85,19 +86,64 @@ describe('createVcsProvider factory', () => {
     });
   });
 
+  describe('GitLab provider creation', () => {
+    const validGitLabConfig: VcsProviderConfig = {
+      provider: 'gitlab',
+      token: 'test-token',
+      repoUrl: 'https://gitlab.com/owner/repo',
+    };
+
+    it('should return a GitLabProvider instance when provider type is "gitlab"', () => {
+      const provider = createVcsProvider('gitlab', validGitLabConfig);
+
+      expect(provider).toBeInstanceOf(GitLabProvider);
+      expect(provider).toBeDefined();
+    });
+
+    it('should return an IVcsProvider when provider type is "gitlab"', () => {
+      const provider = createVcsProvider('gitlab', validGitLabConfig);
+
+      expect(provider).toBeDefined();
+      expect(typeof provider.fetchIssues).toBe('function');
+      expect(typeof provider.fetchIssue).toBe('function');
+      expect(typeof provider.testConnection).toBe('function');
+    });
+
+    it('should handle "gitlab" in different cases', () => {
+      const testCases = ['gitlab', 'GITLAB', 'GitLab', 'GiTlAb'];
+
+      testCases.forEach((providerType) => {
+        const provider = createVcsProvider(providerType, validGitLabConfig);
+        expect(provider).toBeInstanceOf(GitLabProvider);
+      });
+    });
+
+    it('should throw ValidationAppException when repo URL is invalid', () => {
+      const invalidConfig: VcsProviderConfig = {
+        provider: 'gitlab',
+        token: 'test-token',
+        repoUrl: 'https://invalid-url.com/repo',
+      };
+
+      expect(() => createVcsProvider('gitlab', invalidConfig)).toThrow(
+        ValidationAppException,
+      );
+    });
+
+    it('should throw ValidationAppException when repoUrl is missing repo name', () => {
+      const invalidConfig: VcsProviderConfig = {
+        provider: 'gitlab',
+        token: 'test-token',
+        repoUrl: 'https://gitlab.com/owner',
+      };
+
+      expect(() => createVcsProvider('gitlab', invalidConfig)).toThrow(
+        ValidationAppException,
+      );
+    });
+  });
+
   describe('Unsupported provider handling', () => {
-    it('should throw ValidationAppException for "gitlab" provider type', () => {
-      expect(() => createVcsProvider('gitlab', validConfig)).toThrow(
-        ValidationAppException,
-      );
-    });
-
-    it('should throw ValidationAppException for gitlab provider', () => {
-      expect(() => createVcsProvider('gitlab', validConfig)).toThrow(
-        ValidationAppException,
-      );
-    });
-
     it('should throw ValidationAppException for unrecognized provider types', () => {
       const unrecognizedProviders = ['bitbucket', 'gitea', 'unknown', 'xyz'];
 

@@ -144,6 +144,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
   private db: LanceConnection = null;
   private readonly tableCache = new Map<string, LanceTable>();
   private readonly tableCreationLocks = new Map<string, Promise<LanceTable>>();
+  private readonly writeLocks = new Map<string, Promise<unknown>>();
   private readonly TABLE_CACHE_MAX_SIZE = 50;
   private lanceAvailable = true;
   private readonly lancedbPath: string;
@@ -313,6 +314,22 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     return creation;
   }
 
+  /**
+   * Serializes LanceDB writes (add/delete/optimize) per table. LanceDB has no
+   * built-in mutex for concurrent writers against the same table, so without
+   * this, interleaved indexDocument/deleteBySource calls can race each other
+   * and corrupt table state.
+   */
+  private async runExclusive<T>(tableName: string, fn: () => Promise<T>): Promise<T> {
+    const previous = this.writeLocks.get(tableName) ?? Promise.resolve();
+    const run = previous.then(fn, fn);
+    this.writeLocks.set(
+      tableName,
+      run.catch(() => undefined),
+    );
+    return run;
+  }
+
   private async createOrOpenTable(projectId: string, tableName: string): Promise<LanceTable> {
     const cached = this.tableCache.get(tableName);
     if (cached) return cached;
@@ -387,6 +404,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     }
 
     const table = await this.getOrCreateTable(projectId);
+    const tableName = `project_${projectId}`;
     try {
       const vector = await this.embeddingService.embed(doc.content);
       const record: LanceRecord = {
@@ -400,7 +418,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         provider: this.embeddingService.providerName,
         model: this.embeddingService.modelName,
       };
-      await table.add([record]);
+      await this.runExclusive(tableName, () => table.add([record]));
       if (this.lanceAvailable && this.optimizeStrategy) {
         await this.optimizeStrategy.onInsert(projectId, table);
       }
@@ -422,7 +440,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
         provider: this.embeddingService?.providerName ?? 'unknown',
         model: this.embeddingService?.modelName ?? 'unknown',
       };
-      await table.add([record]);
+      await this.runExclusive(tableName, () => table.add([record]));
       if (this.lanceAvailable && this.optimizeStrategy) {
         await this.optimizeStrategy.onInsert(projectId, table);
       }
@@ -669,7 +687,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
       throw new ValidationAppException();
     }
     const table = await this.getOrCreateTable(projectId);
-    await table.delete(`source_id = '${sourceId}'`);
+    await this.runExclusive(`project_${projectId}`, () => table.delete(`source_id = '${sourceId}'`));
     if (this.lexicalIndex) {
       this.lexicalIndex.removeDocument(projectId, sourceId);
     }
@@ -728,7 +746,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     }
 
     const table = await this.getOrCreateTable(projectId);
-    await table.optimize();
+    await this.runExclusive(`project_${projectId}`, () => table.optimize());
   }
 
   /**
@@ -747,7 +765,7 @@ export class RagService implements OnModuleInit, OnModuleDestroy {
     const countBefore = await table.countRows();
     if (countBefore === 0) return 0;
 
-    await table.delete(`source = '${sourceType}'`);
+    await this.runExclusive(`project_${projectId}`, () => table.delete(`source = '${sourceType}'`));
 
     const countAfter = await table.countRows();
     return countBefore - countAfter;

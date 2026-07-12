@@ -1,6 +1,7 @@
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { IVcsProvider } from './vcs-provider';
 import { GitHubProvider } from './providers/github.provider';
+import { GitLabProvider } from './providers/gitlab.provider';
 
 /**
  * HTTP client interface for making requests
@@ -99,7 +100,22 @@ export function createVcsProvider(
   }
 
   if (providerType.toLowerCase() === 'gitlab') {
-    throw new ValidationAppException({}, 'vcs');
+    // Parse repoUrl to extract owner and repo
+    // Expected format: https://gitlab.com/owner/repo
+    const urlMatch = config.repoUrl?.match(/gitlab\.com\/([^/]+)\/([^/]+)/) || [];
+    const repoOwner = urlMatch[1];
+    const repoName = urlMatch[2];
+
+    if (!repoOwner || !repoName) {
+      throw new ValidationAppException({}, 'vcs');
+    }
+
+    let httpClient = config.httpClient;
+    if (!httpClient) {
+      httpClient = createDefaultHttpClient();
+    }
+
+    return new GitLabProvider(repoOwner, repoName, config.token, httpClient);
   }
 
   throw new ValidationAppException({}, 'vcs');

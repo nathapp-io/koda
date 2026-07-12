@@ -56,6 +56,7 @@ nax.lock
 .nax-wt/
 .nax-pids
 .nax-verifier-verdict.json
+TEST_SUMMARY.md
 TEST_SUMMARY_*.md
 test/tmp/
 apps/api/smoke-result.txt
