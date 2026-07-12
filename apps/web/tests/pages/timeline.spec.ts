@@ -133,7 +133,7 @@ describe('Timeline AC3: shows loading indicator when pending', () => {
     expect(vElseBeforeTable).toBe(true)
   })
 
-  test('template uses Complete v-if/v-else-if/v-else chain: isLoading -> empty -> error -> table', () => {
+  test('template uses Complete v-if/v-else-if/v-else chain: isLoading -> error -> empty -> table', () => {
     const source = readFileSync(pagePath, 'utf-8')
     // Extract the template section
     const templateStart = source.indexOf('<template>')
@@ -142,27 +142,29 @@ describe('Timeline AC3: shows loading indicator when pending', () => {
 
     // Assertions that each guard appears in order (maintaining exclusivity)
     const loadingGuardMatch = template.match(/v-if=["']isLoading["']/)
-    const emptyGuardMatch = template.match(/v-else-if=["']events\.length\s*===\s*0["']/)
     const errorGuardMatch = template.match(/v-else-if=["']error["']/)
+    const emptyGuardMatch = template.match(/v-else-if=["']events\.length\s*===\s*0["']/)
     const tableGuardMatch = template.match(/v-else(?!\s*-if)/)
 
     expect(loadingGuardMatch).not.toBeNull()
-    expect(emptyGuardMatch).not.toBeNull()
     expect(errorGuardMatch).not.toBeNull()
+    expect(emptyGuardMatch).not.toBeNull()
     expect(tableGuardMatch).not.toBeNull()
 
-    // Verify ordering: loading -> empty -> error -> table
+    // Verify ordering: loading -> error -> empty -> table
+    // Error must come BEFORE empty so a failed request doesn't render the
+    // empty-state copy (which would otherwise hide the error condition).
     const loadingIdx = loadingGuardMatch?.index ?? -1
-    const emptyIdx = emptyGuardMatch?.index ?? -1
     const errorIdx = errorGuardMatch?.index ?? -1
+    const emptyIdx = emptyGuardMatch?.index ?? -1
     const tableIdx = tableGuardMatch?.index ?? -1
     expect(loadingIdx).toBeGreaterThan(-1)
-    expect(emptyIdx).toBeGreaterThan(-1)
     expect(errorIdx).toBeGreaterThan(-1)
+    expect(emptyIdx).toBeGreaterThan(-1)
     expect(tableIdx).toBeGreaterThan(-1)
-    expect(loadingIdx).toBeLessThan(emptyIdx)
-    expect(emptyIdx).toBeLessThan(errorIdx)
-    expect(errorIdx).toBeLessThan(tableIdx)
+    expect(loadingIdx).toBeLessThan(errorIdx)
+    expect(errorIdx).toBeLessThan(emptyIdx)
+    expect(emptyIdx).toBeLessThan(tableIdx)
   })
 })
 
@@ -642,6 +644,9 @@ describe('Timeline AC1/AC3/AC4/AC5 (Behavioral SSR): page renders correctly with
     expect(html).not.toContain('<tr')
     // Loading state should not show (isLoading is false)
     expect(html).not.toContain('loading-indicator')
+    // The error branch must render (not the empty-state copy) — proves the
+    // template checks `error` before `events.length === 0`.
+    expect(html).toContain('timeline.error')
   })
 })
 

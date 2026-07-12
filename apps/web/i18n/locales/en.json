@@ -216,6 +216,7 @@
   },
   "timeline": {
     "empty": "No timeline events yet.",
+    "error": "Failed to load timeline events.",
     "loadMore": "Load more",
     "filter": {
       "eventType": "Event Type",

@@ -216,6 +216,7 @@
   },
   "timeline": {
     "empty": "暂无时间线事件。",
+    "error": "加载时间线事件失败。",
     "loadMore": "加载更多",
     "filter": {
       "eventType": "事件类型",

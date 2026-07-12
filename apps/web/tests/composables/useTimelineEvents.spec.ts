@@ -320,3 +320,73 @@ describe('AC5 page contract: error propagates so page-level catch can feed extra
     expect(tl.isLoading.value).toBe(false)
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Adversarial finding: overlapping initial/filter requests must not let a stale
+// response overwrite a newer one. If the user changes a filter while the
+// initial request is pending, only the most-recent request's result should be
+// visible.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Stale-response guard: newer request wins over older one', () => {
+  beforeEach(resetGlobals)
+
+  test('a stale response does not overwrite events from a newer successful request', async () => {
+    const initialEvents = [
+      { id: 'stale-1', eventType: 'ticket_event', actorId: 'u', action: 'old', createdAt: '2026-01-01T00:00:00Z' },
+    ]
+    const freshEvents = [
+      { id: 'fresh-1', eventType: 'agent_event', actorId: 'a', action: 'new', createdAt: '2026-02-01T00:00:00Z' },
+    ]
+
+    let resolveInitial!: (value: unknown) => void
+    const initialPromise = new Promise<unknown>((resolve) => { resolveInitial = resolve })
+    const fetchMock = jest.fn()
+      .mockReturnValueOnce(initialPromise)
+      .mockResolvedValueOnce({ data: { events: freshEvents, nextCursor: undefined } })
+    applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+
+    const { useTimelineEvents } = await import(composablePath)
+    const tl = useTimelineEvents('acme')
+
+    const initialCall = tl.loadEvents()
+    // Simulate user changing filter and triggering a new request before the
+    // initial one resolves.
+    tl.eventTypeFilter.value = 'agent_event'
+    const secondCall = tl.loadEvents()
+
+    // Resolve the second request first; then resolve the (now stale) initial.
+    await secondCall
+    resolveInitial({ data: { events: initialEvents, nextCursor: undefined } })
+    await initialCall
+
+    // Stale response must NOT have overwritten the fresh events.
+    expect(tl.events.value.map(e => e.id)).toEqual(['fresh-1'])
+    expect(tl.error.value).toBeNull()
+    expect(tl.isLoading.value).toBe(false)
+  })
+
+  test('a stale rejection does not surface as the active error after a newer success', async () => {
+    let rejectInitial!: (err: unknown) => void
+    const initialPromise = new Promise<unknown>((_resolve, reject) => { rejectInitial = reject })
+    const fetchMock = jest.fn()
+      .mockReturnValueOnce(initialPromise)
+      .mockResolvedValueOnce({ data: { events: [{ id: 'fresh', eventType: 't', actorId: 'u', action: 'a', createdAt: 'now' }], nextCursor: undefined } })
+    applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+
+    const { useTimelineEvents } = await import(composablePath)
+    const tl = useTimelineEvents('acme')
+
+    const initialCall = tl.loadEvents()
+    tl.eventTypeFilter.value = 'x'
+    const secondCall = tl.loadEvents()
+
+    await secondCall
+    rejectInitial(new Error('stale boom'))
+    await initialCall.catch(() => { /* swallow — this is the stale request */ })
+
+    expect(tl.error.value).toBeNull()
+    expect(tl.events.value.map(e => e.id)).toEqual(['fresh'])
+    expect(tl.isLoading.value).toBe(false)
+  })
+})

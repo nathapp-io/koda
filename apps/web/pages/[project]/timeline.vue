@@ -73,13 +73,18 @@ function formatDate(dateStr: string) {
     <LoadingState v-if="isLoading" />
 
     <div
+      v-else-if="error"
+      class="rounded-lg border border-dashed border-border py-16 text-center"
+    >
+      <p class="text-sm font-medium text-muted-foreground">{{ t('timeline.error') }}</p>
+    </div>
+
+    <div
       v-else-if="events.length === 0"
       class="rounded-lg border border-dashed border-border py-16 text-center"
     >
       <p class="text-sm font-medium text-muted-foreground">{{ t('timeline.empty') }}</p>
     </div>
-
-    <div v-else-if="error" />
 
     <div v-else class="overflow-hidden rounded-lg border border-border">
       <table class="w-full text-sm">
