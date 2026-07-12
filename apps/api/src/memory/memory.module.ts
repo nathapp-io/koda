@@ -10,13 +10,14 @@ import { MemoryGovernanceService } from './memory-governance.service';
 import { MemoryGovernanceProcessor } from './memory-governance.processor';
 import { ExtractionService } from './extraction.service';
 import { MemoryController } from './memory.controller';
+import { MemoryReadController } from './memory-read.controller';
 import { CanonicalStateService } from './canonical-state.service';
 import { PrismaCanonicalStateRepository } from './prisma-canonical-state.repository';
 import { CANONICAL_STATE_REPOSITORY } from './domain/canonical-state.domain';
 
 @Module({
   imports: [PrismaModule, forwardRef(() => ProjectsModule)],
-  controllers: [TimelineController, MemoryController],
+  controllers: [TimelineController, MemoryController, MemoryReadController],
   providers: [
     PrismaTimelineRepository,
     TimelineService,
