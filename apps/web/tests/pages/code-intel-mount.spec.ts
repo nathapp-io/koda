@@ -267,6 +267,45 @@ describe('Code-intel AC5 (Behavioral SFC mount): $api.get rejection surfaces ext
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
+// AC5 — toggleSymbol rejection path: when detail/callers/callees fetch
+//        rejects, toast.error(extractApiError(err)) is called and detail
+//        state is reset.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Code-intel AC5 (Behavioral SFC mount): toggleSymbol rejection surfaces extractApiError via toast', () => {
+  test('when the detail fetch rejects, toast.error is called and expandedSymbolId is reset', async () => {
+    const searchItem = { id: 's1', name: 'handleSearch', kind: 'function', file: 'pages/code-intel.vue', signature: 'async function handleSearch(): Promise<void>' }
+    const fetchMock = jest.fn(async (url: string) => {
+      if (url === '/code-intel/symbols') return { data: { items: [searchItem], total: 1 } }
+      throw new Error('detail fetch failed')
+    })
+
+    const { toast, bindings } = await mountCodeIntelPage({ slug: 'acme', fetchMock })
+
+    const handleSearch = bindings.handleSearch as () => Promise<void>
+    const searchQuery = bindings.searchQuery as { value: string }
+    searchQuery.value = 'handleSearch'
+    await handleSearch()
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    const toggleSymbol = bindings.toggleSymbol as (id: string) => Promise<void>
+    await toggleSymbol('s1')
+    await new Promise(resolve => setTimeout(resolve, 30))
+
+    expect(toast.error).toHaveBeenCalled()
+    const calledWith = (toast.error as jest.Mock).mock.calls.find(
+      (c: unknown[]) => typeof c[0] === 'string' && c[0].length > 0,
+    )
+    expect(calledWith).toBeDefined()
+
+    const expandedSymbolId = bindings.expandedSymbolId as { value: string | null }
+    expect(expandedSymbolId.value).toBeNull()
+    const detailState = bindings.detailState as { value: unknown }
+    expect(detailState.value).toBeNull()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
 // AC6 — Clicking a result row fetches the symbol detail, callers, and callees
 //        from the existing detail endpoints, then renders them as plain text.
 //        The search response itself is intentionally lightweight and does NOT

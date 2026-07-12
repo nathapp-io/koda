@@ -83,6 +83,7 @@ async function toggleSymbol(id: string) {
       $api.get<CallerInfo[]>(`/code-intel/symbols/${id}/callers`, { query: { projectSlug: slug } }),
       $api.get<CallerInfo[]>(`/code-intel/symbols/${id}/callees`, { query: { projectSlug: slug } }),
     ])
+    if (expandedSymbolId.value !== id) return
     detailState.value = { detail, callers, callees }
   }
   catch (err) {
