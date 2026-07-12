@@ -546,6 +546,16 @@
     "window": {
       "from": "开始",
       "to": "结束"
+    },
+    "metrics": {
+      "retrievalLatencyP50": "检索延迟 p50",
+      "retrievalLatencyP95": "检索延迟 p95",
+      "retrievalLatencyP99": "检索延迟 p99",
+      "retrievalLatencySamples": "检索延迟样本数",
+      "staleHitRate": "过期命中率",
+      "provenanceCoverage": "来源覆盖率",
+      "leakageIncidents": "泄漏事件数",
+      "memoryGrowthRate": "内存增长率"
     }
   }
 }

@@ -546,6 +546,16 @@
     "window": {
       "from": "From",
       "to": "To"
+    },
+    "metrics": {
+      "retrievalLatencyP50": "Retrieval latency p50",
+      "retrievalLatencyP95": "Retrieval latency p95",
+      "retrievalLatencyP99": "Retrieval latency p99",
+      "retrievalLatencySamples": "Retrieval latency samples",
+      "staleHitRate": "Stale hit rate",
+      "provenanceCoverage": "Provenance coverage",
+      "leakageIncidents": "Leakage incidents",
+      "memoryGrowthRate": "Memory growth rate"
     }
   }
 }
