@@ -1,0 +1,328 @@
+{
+  "project": "koda",
+  "feature": "w1-observability-pages",
+  "branchName": "feat/w1-observability-pages",
+  "createdAt": "2026-07-12T05:36:29Z",
+  "updatedAt": "2026-07-12T05:43:42.996Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Add memory read endpoint in the memory module",
+      "description": "**Goal** — Move the project memory read route into the memory module using the existing read path and preserve the HTTP contract at `GET /projects/:slug/memory`.\n\n**Motivation** — Koda's API records rich observability data (memory items, AST symbols, project timeline events, SLO metrics) but the web app exposes almost none of it — humans must use the CLI or query the DB directly.\n\n**Approach** — New project-scoped controller `apps/api/src/memory/memory-read.controller.ts`, `@Controller('projects/:slug/memory')`, mirroring the existing `apps/api/src/memory/timeline.controller.ts` (same folder, same `@Controller('projects/:slug/…')` shape, same `resolveProject(slug)` via `ProjectsService.findProjectIdBySlug`).\n- Reuses the **already-existing** read path — no new service/repo logic:\n  `MemoryGovernanceService.getProjectMemory(query: ProjectMemoryQuery): Promise<{ items: MemoryItem[]; total: number }>`\n  (`apps/api/src/memory/memory-governance.service.ts`), backed by\n  `PrismaMemoryItemRepository.findByProjectMemory` (page/`limit` pagination, `limit`\n  clamped to 50; default `status='active'` with non-expired TTL; `kind` filter;\n  `orderBy` confidence|updatedAt|createdAt).\n- `ProjectMemoryQuery` (`apps/api/src/memory/memory-item-repository.ts`):\n  `{ projectId; kind?; subject?; status?; page?; limit?; orderBy? }`.\n- Auth: **fail-closed project membership** via\n  `ProjectsService.assertProjectMembership(projectId, principal)` (throws\n  `ForbiddenAppException`). This is a **deliberate divergence** from\n  `TimelineController`, which only resolves the slug without a membership check —\n  memory items are more sensitive than the timeline, so this endpoint gates on\n  membership like `CodeIntelController` does.\n- Register the controller in `apps/api/src/memory/memory.module.ts`.\n- Response: `JsonResponse.Ok({ items, total })`.\n\n**Scope** — In: `apps/api/src/memory/memory-read.controller.ts`, memory-module registration, Swagger metadata, preservation of the existing route behavior, and unit/integration coverage for the route. Out: new repository logic, mutations, CLI commands, graph navigation, or realtime.\n\n**Interface**\n```typescript\nMemoryGovernanceService.getProjectMemory(query: ProjectMemoryQuery): Promise<{ items: MemoryItem[]; total: number }>\n```\n```typescript\n{ projectId; kind?; subject?; status?; page?; limit?; orderBy? }\n```",
+      "acceptanceCriteria": [
+        "Given a project that has active memory items, when `GET /projects/:slug/memory` is called, then it returns HTTP 200 and a body whose `data.items` contains those items and whose `data.total` equals the total active count.",
+        "Given memory items of multiple kinds, when `GET /projects/:slug/memory?kind=DECISION` is called, then the response contains only items whose `kind` equals `DECISION`.",
+        "Given active, superseded, and expired memory items, when `GET /projects/:slug/memory` is called without a `status` param, then the response contains only items with `status` `active` and a null-or-future `ttlAt`.",
+        "Given superseded memory items, when `GET /projects/:slug/memory?status=superseded` is called, then the response contains only items whose `status` is `superseded`.",
+        "Given more than ten matching memory items, when `GET /projects/:slug/memory?page=2&limit=10` is called, then it returns the second page of at most 10 items.",
+        "Given a request with `limit=1000`, when `GET /projects/:slug/memory` is called, then it returns at most 50 items.",
+        "Given a slug that does not resolve because the project is unknown or soft-deleted, when `GET /projects/:slug/memory` is called, then it returns HTTP 404.",
+        "Given a principal who is not a member of the project, when `GET /projects/:slug/memory` is called, then it returns HTTP 403.",
+        "Given the route is implemented in the memory module, when `GET /projects/:slug/memory` returns a successful response, then the body is still wrapped as `JsonResponse.Ok({ items, total })` rather than changing the existing envelope shape.",
+        "Given `Test.createTestingModule({ imports: [MemoryModule] })` with external collaborators mocked, when the module is compiled, then the new memory-read controller plus its dependencies `MemoryGovernanceService` and `ProjectsService` resolve from DI."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "observability",
+        "memory",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The implementation is an additive controller/module change on established patterns, but it is security-critical because project-membership enforcement must fail closed.",
+        "agentProfileId": "claude-final",
+        "agent": "claude",
+        "profileModelTier": "balanced",
+        "initialAgent": "claude",
+        "initialProfileId": "claude-final",
+        "initialModelTier": "balanced"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/memory/timeline.controller.ts",
+        "apps/api/src/memory/memory-governance.service.ts",
+        "apps/api/src/memory/memory.module.ts",
+        "apps/api/src/memory/memory-item-repository.ts",
+        "apps/api/src/projects/projects.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/memory/memory-read.controller.ts",
+        "apps/api/src/memory/memory-read.controller.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "Given a subject prefix filter, when `GET /projects/:slug/memory` is called with `subject=<prefix>`, then it returns only memory items whose subject starts with that prefix.",
+        "Given `orderBy=updatedAt` or `orderBy=createdAt`, when `GET /projects/:slug/memory` is called, then it returns items in the repository's deterministic descending sort order for that field."
+      ]
+    },
+    {
+      "id": "US-002",
+      "title": "Add code-intel symbol search endpoint",
+      "description": "**Goal** — Add the read-only symbol search route to the existing code-intel controller and extend the existing service chain to support paginated search.\n\n**Motivation** — Koda's API records rich observability data (memory items, AST symbols, project timeline events, SLO metrics) but the web app exposes almost none of it — humans must use the CLI or query the DB directly.\n\n**Approach** — New `@Get('symbols')` on the existing\n`apps/api/src/code-intel/code-intel.controller.ts` (distinct from the existing\n`@Get('symbols/:symbolId')`). Query: `projectSlug` (required), `q?` (name\ncontains), `file?` (file contains), `page?`, `limit?`.\n- Reuses the controller's existing `resolveProject(slug)` and\n  `checkProjectMembership(projectId, principal)` private helpers (fail-closed).\n- Search is added along the existing retrieval chain\n  `AstIndexService → SymbolStore → PrismaCodeIntelRepository` (mirroring how\n  `AstIndexService.getSymbol` delegates to `SymbolStore.findBySymbolId`, which\n  reads `this.codeIntelRepository`): new `PrismaCodeIntelRepository.searchSymbols`\n  (precedent: `findSymbolsByFallback` / `findSymbolsByFiles`\n  in `apps/api/src/code-intel/prisma-code-intel.repository.ts`, which already use\n  `symbol.findMany` with `name`/`file` predicates — new method adds\n  `name: { contains: q }` + `file: { contains: file }` + `take`/`skip` + a `count`),\n  wrapped by new `SymbolStore.searchSymbols`, exposed by new\n  `AstIndexService.searchSymbols(projectId, opts)`.\n- Returns lightweight rows (`id, name, kind, file, signature`) + `total` via\n  `JsonResponse.Ok({ items, total })`.\n\n**Scope** — In: controller route, query DTO, repository/store/service search methods, Swagger metadata, and unit/integration coverage. Out: AST indexing changes, mutations, graph UI, or new modules.\n\n**Interface**\n```typescript\nPrismaCodeIntelRepository.searchSymbols(projectId, { q, file, page, limit })\nSymbolStore.searchSymbols(projectId, opts)\nAstIndexService.searchSymbols(projectId, opts)\n```\n```typescript\nGET /code-intel/symbols?projectSlug=<slug>&q=<name>&file=<frag>&page=<n>&limit=<n>\n```",
+      "acceptanceCriteria": [
+        "Given a project slug and a `q` fragment, when `GET /code-intel/symbols?projectSlug=<slug>&q=<name>` is called, then it returns HTTP 200 with `data.items` containing only symbols whose `name` contains the `q` value and each item exposes `id`, `name`, `kind`, `file`, and `signature`.",
+        "Given a project slug and a `q` fragment, when `GET /code-intel/symbols?projectSlug=<slug>&q=<name>` is called, then `data.total` equals the match count.",
+        "Given a project slug and a `file` fragment, when `GET /code-intel/symbols?projectSlug=<slug>&file=<frag>` is called, then it returns only symbols whose `file` contains `<frag>`.",
+        "Given more than twenty matching symbols, when `GET /code-intel/symbols?projectSlug=<slug>&q=<name>&page=2&limit=20` is called, then it returns the second page of at most 20 items.",
+        "Given a request with `limit` above the supported maximum, when `GET /code-intel/symbols` is called, then the effective limit is clamped to the maximum.",
+        "Given a project slug and neither `q` nor `file`, when `GET /code-intel/symbols?projectSlug=<slug>` is called, then it returns the first page of the project's symbols in a deterministic order.",
+        "Given a `projectSlug` that does not resolve, when `GET /code-intel/symbols` is called, then it returns HTTP 404.",
+        "Given a principal who is not a member of the project, when `GET /code-intel/symbols` is called, then it returns HTTP 403.",
+        "Given a mocked Prisma client, when `searchSymbols(projectId, { q, file, page, limit })` is called on the repository, then it issues a `symbol.findMany` whose `where` filters by `projectId` and, when provided, `name`-contains and `file`-contains, applies `take` and `skip` derived from `page` and `limit`, and returns `{ items, total }`.",
+        "Given the new search route exists beside the existing detail route, when `GET /code-intel/symbols/:symbolId?projectSlug=<slug>` is called, then symbol detail lookup still resolves through the existing detail handler instead of being shadowed by the search route.",
+        "Given `Test.createTestingModule({ imports: [CodeIntelModule] })` with stubbed external collaborators, when the module is compiled, then the search service and repository dependencies resolve from DI."
+      ],
+      "tags": [
+        "feature",
+        "api",
+        "observability",
+        "code-intel",
+        "security"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The change extends existing controller, service, store, and repository seams with standard paginated search, but it is security-critical because project membership must still be enforced.",
+        "agentProfileId": "claude-final",
+        "agent": "claude",
+        "profileModelTier": "balanced",
+        "initialAgent": "claude",
+        "initialProfileId": "claude-final",
+        "initialModelTier": "balanced"
+      },
+      "workdir": "apps/api",
+      "contextFiles": [
+        "apps/api/src/code-intel/code-intel.controller.ts",
+        "apps/api/src/code-intel/ast-index.service.ts",
+        "apps/api/src/code-intel/symbol-store.ts",
+        "apps/api/src/code-intel/prisma-code-intel.repository.ts",
+        "apps/api/src/projects/projects.service.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/code-intel/dto/search-symbols.dto.ts",
+        "apps/api/src/code-intel/dto/search-symbols.dto.spec.ts"
+      ],
+      "suggestedCriteria": [
+        "Given both `q` and `file`, when `GET /code-intel/symbols` is called, then it applies both filters before pagination.",
+        "Given two identical search requests, when `GET /code-intel/symbols?projectSlug=<slug>` is called twice, then the item ordering is stable across calls."
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "Build timeline page",
+      "description": "**Goal** — Add the read-only Timeline page and its project navigation entry in `apps/web`.\n\n**Motivation** — Koda's API records rich observability data (memory items, AST symbols, project timeline events, SLO metrics) but the web app exposes almost none of it — humans must use the CLI or query the DB directly.\n\n**Approach** — All four follow the existing page pattern in `apps/web/pages/[project]/kb.vue`:\n`<script setup>`, `useApi().$api.get`, `route.params.project`, `useI18n()`,\n`useAppToast()`, and `extractApiError()` for error presentation (per `web.md`).\n- Data access strictly through `$api.get` with string paths — no `$fetch`, no\n  generated client (web does not use it).\n- Nav links added to `apps/web/layouts/default.vue`: Timeline/Memory/Code-intel in\n  the project-nav section; SLO as a top-level link (shown to all authenticated\n  users, matching the existing unconditional `/agents` link — the web has no admin\n  role signal; access is enforced server-side, see US-006 grounding note).\n- i18n keys added to **both** `apps/web/i18n/locales/en.json` and `zh.json`\n  (`nav.*` + per-page strings); English is source-of-truth (per `common.md`).\n- Component specs mock the `$api` boundary (per `web.md` testing + api-testing\n  pagination-aware mock guidance); no Playwright e2e in W1.\n\n**Scope** — In: `apps/web/pages/[project]/timeline.vue`, layout navigation, page-local filters and pagination UI, locale entries, and mounted page tests. Out: timeline mutations, ticket deep links, charts, realtime, or backend route changes.\n\n**Interface**\n```typescript\n$api.get(`/projects/${slug}/timeline`, { query: { eventTypes, from, to, cursor } })\n```",
+      "acceptanceCriteria": [
+        "Given `$api.get` is stubbed to resolve a list of timeline events, when the Timeline page is mounted, then it renders one row per event showing its `eventType`, `actorId`, and `action`.",
+        "Given a route whose `project` param is `<slug>`, when the Timeline page mounts, then it calls `$api.get` with the path `/projects/<slug>/timeline`.",
+        "Given the `$api.get` promise is pending, when the Timeline page is rendered, then it shows a loading indicator and does not render the event table.",
+        "Given the response contains zero events, when the Timeline page finishes loading, then it renders an empty-state message instead of the table.",
+        "Given `$api.get` rejects, when the Timeline page handles the error, then it passes the error through `extractApiError` and shows the result via the app toast while rendering no rows.",
+        "Given a chosen event-type filter, when the user applies it, then the Timeline page re-invokes `$api.get` with the `eventTypes` query param set to the chosen value.",
+        "Given chosen from and to date filters, when the user applies them, then the Timeline page re-invokes `$api.get` with `from` and `to` query params carrying the chosen dates.",
+        "Given the previous response returned a `cursor`, when the user activates `load more`, then the Timeline page re-invokes `$api.get` with that `cursor` and appends the newly returned events to the existing list.",
+        "Given the default layout is rendered on a route with a `project` slug, when navigation links are shown, then it includes a link targeting `/<slug>/timeline` whose label resolves from `nav.timeline`."
+      ],
+      "tags": [
+        "feature",
+        "web",
+        "observability",
+        "timeline",
+        "i18n"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "This is a standard Nuxt page addition touching one new page, layout navigation, and locale files with no new backend contracts or security-sensitive logic.",
+        "agentProfileId": "opencode-medium",
+        "agent": "opencode",
+        "profileModelTier": "balanced",
+        "initialAgent": "opencode",
+        "initialProfileId": "opencode-medium",
+        "initialModelTier": "balanced"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/pages/[project]/kb.vue",
+        "apps/web/composables/useApi.ts",
+        "apps/web/layouts/default.vue",
+        "apps/web/i18n/locales/en.json",
+        "apps/web/i18n/locales/zh.json"
+      ],
+      "expectedFiles": [
+        "apps/web/pages/[project]/timeline.vue",
+        "apps/web/tests/pages/timeline.spec.ts"
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "Build memory page",
+      "description": "**Goal** — Add the read-only Memory page in `apps/web` on top of `GET /projects/:slug/memory`.\n\n**Motivation** — Koda's API records rich observability data (memory items, AST symbols, project timeline events, SLO metrics) but the web app exposes almost none of it — humans must use the CLI or query the DB directly.\n\n**Approach** — All four follow the existing page pattern in `apps/web/pages/[project]/kb.vue`:\n`<script setup>`, `useApi().$api.get`, `route.params.project`, `useI18n()`,\n`useAppToast()`, and `extractApiError()` for error presentation (per `web.md`).\n- Data access strictly through `$api.get` with string paths — no `$fetch`, no\n  generated client (web does not use it).\n- Nav links added to `apps/web/layouts/default.vue`: Timeline/Memory/Code-intel in\n  the project-nav section; SLO as a top-level link (shown to all authenticated\n  users, matching the existing unconditional `/agents` link — the web has no admin\n  role signal; access is enforced server-side, see US-006 grounding note).\n- i18n keys added to **both** `apps/web/i18n/locales/en.json` and `zh.json`\n  (`nav.*` + per-page strings); English is source-of-truth (per `common.md`).\n- Component specs mock the `$api` boundary (per `web.md` testing + api-testing\n  pagination-aware mock guidance); no Playwright e2e in W1.\n\n**Scope** — In: `apps/web/pages/[project]/memory.vue`, project navigation, page-local filters and load-more behavior, locale entries, and mounted page tests. Out: memory mutations, graph navigation, supersession drill-down, or backend route implementation beyond consuming the HTTP contract.\n\n**Interface**\n```typescript\n$api.get(`/projects/${slug}/memory`, { query: { kind, status, page } })\n```",
+      "acceptanceCriteria": [
+        "Given `$api.get` is stubbed to resolve `{ items, total }`, when the Memory page is mounted, then it renders one row per item showing its `subject`, `predicate`, `object`, `kind`, `confidence`, and `status`.",
+        "Given a route whose `project` param is `<slug>`, when the Memory page mounts, then it calls `$api.get` with the path `/projects/<slug>/memory`.",
+        "Given the request is pending, when the Memory page is rendered, then it shows a loading indicator and not the item table.",
+        "Given `items` is empty, when the Memory page finishes loading, then it renders an empty-state message.",
+        "Given `$api.get` rejects, when the Memory page handles the error, then it surfaces `extractApiError(err)` via the app toast and renders no rows.",
+        "Given a chosen `kind` filter, when the user applies it, then the Memory page re-invokes `$api.get` with the `kind` query param set to the chosen value.",
+        "Given a chosen `status` filter, when the user applies it, then the Memory page re-invokes `$api.get` with the `status` query param set to the chosen value.",
+        "Given more results are available, when the user activates `load more`, then the Memory page re-invokes `$api.get` with the next `page` value and appends the returned items to the existing list.",
+        "Given the default layout is rendered on a route with a `project` slug, when navigation links are shown, then it includes a project-nav link targeting `/<slug>/memory` whose label resolves from `nav.memory`."
+      ],
+      "tags": [
+        "feature",
+        "web",
+        "observability",
+        "memory",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "This is a conventional Nuxt page that consumes one HTTP endpoint with filters, pagination, layout, and locale updates but no new abstractions.",
+        "agentProfileId": "opencode-medium",
+        "agent": "opencode",
+        "profileModelTier": "balanced",
+        "initialAgent": "opencode",
+        "initialProfileId": "opencode-medium",
+        "initialModelTier": "balanced"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/pages/[project]/kb.vue",
+        "apps/web/composables/useApi.ts",
+        "apps/web/layouts/default.vue",
+        "apps/web/i18n/locales/en.json",
+        "apps/web/i18n/locales/zh.json"
+      ],
+      "expectedFiles": [
+        "apps/web/pages/[project]/memory.vue",
+        "apps/web/tests/pages/memory.spec.ts"
+      ]
+    },
+    {
+      "id": "US-005",
+      "title": "Build code-intel page",
+      "description": "**Goal** — Add the read-only Code-intel page in `apps/web` using symbol search plus non-interactive detail expansion.\n\n**Motivation** — Koda's API records rich observability data (memory items, AST symbols, project timeline events, SLO metrics) but the web app exposes almost none of it — humans must use the CLI or query the DB directly.\n\n**Approach** — All four follow the existing page pattern in `apps/web/pages/[project]/kb.vue`:\n`<script setup>`, `useApi().$api.get`, `route.params.project`, `useI18n()`,\n`useAppToast()`, and `extractApiError()` for error presentation (per `web.md`).\n- Data access strictly through `$api.get` with string paths — no `$fetch`, no\n  generated client (web does not use it).\n- Nav links added to `apps/web/layouts/default.vue`: Timeline/Memory/Code-intel in\n  the project-nav section; SLO as a top-level link (shown to all authenticated\n  users, matching the existing unconditional `/agents` link — the web has no admin\n  role signal; access is enforced server-side, see US-006 grounding note).\n- i18n keys added to **both** `apps/web/i18n/locales/en.json` and `zh.json`\n  (`nav.*` + per-page strings); English is source-of-truth (per `common.md`).\n- Component specs mock the `$api` boundary (per `web.md` testing + api-testing\n  pagination-aware mock guidance); no Playwright e2e in W1.\n\n**Scope** — In: `apps/web/pages/[project]/code-intel.vue`, project navigation, search and detail-expansion UI, locale entries, and mounted page tests. Out: interactive graph navigation, code viewers, symbol mutations, or backend search implementation beyond consuming the HTTP contract.\n\n**Interface**\n```typescript\n$api.get('/code-intel/symbols', { query: { projectSlug: slug, q: query } })\n```",
+      "acceptanceCriteria": [
+        "Given a project slug and a submitted query, when the user submits the search box, then the Code-intel page invokes `$api.get` with the path `/code-intel/symbols` and query params `projectSlug=<slug>` and `q=<query>`.",
+        "Given the search resolves with symbols, when the Code-intel page renders results, then it shows one result row per symbol showing `name`, `kind`, and `file`.",
+        "Given the search request is pending, when the Code-intel page is rendered, then it shows a loading indicator and not the results table.",
+        "Given the search resolves with zero symbols, when the Code-intel page finishes loading, then it renders an empty or `no matches` state.",
+        "Given `$api.get` rejects, when the Code-intel page handles the error, then it surfaces `extractApiError(err)` via the app toast.",
+        "Given a rendered result row, when the user clicks it, then the Code-intel page expands a detail panel that renders that symbol's `signature`, `docComment`, and its `callers` and `callees` as text lists rather than interactive links.",
+        "Given the default layout is rendered on a route with a `project` slug, when navigation links are shown, then it includes a project-nav link targeting `/<slug>/code-intel` whose label resolves from `nav.codeIntel`."
+      ],
+      "tags": [
+        "feature",
+        "web",
+        "observability",
+        "code-intel",
+        "i18n"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "This is a standard Nuxt search/results page with one dependent HTTP contract, layout navigation, and locale updates but no cross-cutting backend work.",
+        "agentProfileId": "opencode-medium",
+        "agent": "opencode",
+        "profileModelTier": "balanced",
+        "initialAgent": "opencode",
+        "initialProfileId": "opencode-medium",
+        "initialModelTier": "balanced"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/pages/[project]/kb.vue",
+        "apps/web/composables/useApi.ts",
+        "apps/web/layouts/default.vue",
+        "apps/web/i18n/locales/en.json",
+        "apps/web/i18n/locales/zh.json"
+      ],
+      "expectedFiles": [
+        "apps/web/pages/[project]/code-intel.vue",
+        "apps/web/tests/pages/code-intel.spec.ts"
+      ]
+    },
+    {
+      "id": "US-006",
+      "title": "Build SLO dashboard page",
+      "description": "**Goal** — Add the read-only SLO dashboard page and top-level admin navigation link in `apps/web`.\n\n**Motivation** — Koda's API records rich observability data (memory items, AST symbols, project timeline events, SLO metrics) but the web app exposes almost none of it — humans must use the CLI or query the DB directly.\n\n**Approach** — All four follow the existing page pattern in `apps/web/pages/[project]/kb.vue`:\n`<script setup>`, `useApi().$api.get`, `useI18n()`, `useAppToast()`, and\n`extractApiError()` for error presentation (per `web.md`).\n- Data access strictly through `$api.get` with string paths — no `$fetch`, no\n  generated client (web does not use it).\n- Nav links added to `apps/web/layouts/default.vue`: Timeline/Memory/Code-intel in\n  the project-nav section; SLO as a top-level link (shown to all authenticated\n  users, matching the existing unconditional `/agents` link — the web has no admin\n  role signal; access is enforced server-side, see US-006 grounding note).\n- i18n keys added to **both** `apps/web/i18n/locales/en.json` and `zh.json`\n  (`nav.*` + per-page strings); English is source-of-truth (per `common.md`).\n- Component specs mock the `$api` boundary (per `web.md` testing + api-testing\n  pagination-aware mock guidance); no Playwright e2e in W1.\n\n**Scope** — In: `apps/web/pages/admin/slos.vue`, top-level navigation, date-window controls, locale entries, and mounted page tests. Out: charts, realtime, client-side role gating, or backend SLO computation changes.\n\n**Interface**\n```typescript\n$api.get('/admin/slos', { query: { from, to } })\n```",
+      "acceptanceCriteria": [
+        "Given `$api.get` is stubbed to resolve SLO metrics, when the SLO page is mounted, then it renders a metric card per returned metric showing its label and value.",
+        "Given the SLO page mounts, when it requests data, then it calls `$api.get` with the path `/admin/slos`.",
+        "Given selected date-window controls, when the user changes them, then the SLO page re-invokes `$api.get` with `from` and `to` query params carrying the selected window.",
+        "Given the request is pending, when the SLO page is rendered, then it shows a loading indicator and not the metric cards.",
+        "Given `$api.get` rejects with a 403 `ApiError` code, when the SLO page handles the response, then it renders a friendly `admin only` state rather than a generic error toast.",
+        "Given `$api.get` rejects with a non-403 error, when the SLO page handles the response, then it surfaces `extractApiError(err)` via the app toast.",
+        "Given the default layout is rendered for an authenticated user, when top-level navigation links are shown, then it includes a link to `/admin/slos` whose label resolves from `nav.slos`."
+      ],
+      "tags": [
+        "feature",
+        "web",
+        "observability",
+        "slo",
+        "i18n"
+      ],
+      "dependencies": [],
+      "status": "pending",
+      "passes": false,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "tdd-simple",
+        "reasoning": "This is a conventional read-only Nuxt page with one existing endpoint, explicit 403 handling, and layout and locale updates only.",
+        "agentProfileId": "opencode-medium",
+        "agent": "opencode",
+        "profileModelTier": "balanced",
+        "initialAgent": "opencode",
+        "initialProfileId": "opencode-medium",
+        "initialModelTier": "balanced"
+      },
+      "workdir": "apps/web",
+      "contextFiles": [
+        "apps/web/pages/[project]/kb.vue",
+        "apps/web/composables/useApi.ts",
+        "apps/web/layouts/default.vue",
+        "apps/web/i18n/locales/en.json",
+        "apps/web/i18n/locales/zh.json"
+      ],
+      "expectedFiles": [
+        "apps/web/pages/admin/slos.vue",
+        "apps/web/tests/pages/slos.spec.ts"
+      ]
+    }
+  ],
+  "analysis": "This feature stays within existing Koda architecture: `apps/api` remains the system of record and `apps/web` remains a Nuxt 3 client over API endpoints. The API already exposes two of the four required read endpoints: timeline is implemented by `TimelineController` at `apps/api/src/memory/timeline.controller.ts:10` and SLO metrics are implemented by `SloDashboardController` at `apps/api/src/monitoring/slo-dashboard.controller.ts:11`. The web package is Nuxt 3 rather than Next.js: existing pages use `definePageMeta`, `useRoute`, `useApi`, `useI18n`, `useAppToast`, and `extractApiError` as shown in `apps/web/pages/[project]/kb.vue:2` and `apps/web/composables/useApi.ts:68`, and navigation is owned by `apps/web/layouts/default.vue:1`.\n\nThe highest-risk backend seam is memory: the spec asks for a new `apps/api/src/memory/memory-read.controller.ts`, but the repo already has `GET :slug/memory` on `ProjectsController` at `apps/api/src/projects/projects.controller.ts:104`. That existing route already asserts membership and maps a memory response shape. Implementation must converge ownership without leaving duplicate handlers for the same path. The read logic itself already exists and should be reused, not reimplemented: `MemoryGovernanceService.getProjectMemory()` delegates to `PrismaMemoryItemRepository.findByProjectMemory()` at `apps/api/src/memory/memory-governance.service.ts:24`, and that repository already enforces most spec semantics including `limit <= 50`, `page >= 1`, default `status='active'`, TTL filtering, subject prefix filtering, and supported orderings at `apps/api/src/memory/memory-item-repository.ts:208`. `MemoryModule` currently wires `TimelineController` and `MemoryController` only at `apps/api/src/memory/memory.module.ts:17`, so US-001 needs controller registration plus unit DI coverage. Existing tests around the current memory route live in `apps/api/src/projects/projects.controller.spec.ts:172`, which is relevant for preserving behavior while moving the route.\n\nCode-intel also already has the needed controller/module/service seams. `CodeIntelController` exposes `GET symbols/:symbolId`, `GET symbols/:symbolId/callers`, and `GET symbols/:symbolId/callees`, reusing `resolveProject(slug)` and `checkProjectMembership(projectId, principal)` at `apps/api/src/code-intel/code-intel.controller.ts:28`. The read chain the spec wants to extend is already `AstIndexService -> SymbolStore -> PrismaCodeIntelRepository`, visible in `apps/api/src/code-intel/ast-index.service.ts:122`, `apps/api/src/code-intel/symbol-store.ts:48`, and `apps/api/src/code-intel/prisma-code-intel.repository.ts:104`. `CodeIntelModule` is already wired and compile-tested at `apps/api/src/code-intel/code-intel.module.ts:16` and `apps/api/src/code-intel/code-intel.module.spec.ts:11`. This means US-002 is an additive extension to standard patterns rather than a new abstraction.\n\nOn the web side, every new page should follow the existing page pattern in `apps/web/pages/[project]/kb.vue:1`: string-path `$api.get` calls, route-derived slug, i18n keys in both `apps/web/i18n/locales/en.json` and `apps/web/i18n/locales/zh.json`, and toast error handling through `extractApiError(err)`. The layout currently shows top-level Dashboard and Agents links plus project-scoped Board, Labels, KB, and Settings links at `apps/web/layouts/default.vue:71`; the new pages need to extend that navigation without breaking existing links or breadcrumb behavior. The SLO nav link must be shown unconditionally to authenticated users because the client has no admin role signal; server-side access control remains on `GET /admin/slos` via `@RequiredPermission('ADMIN')` in `apps/api/src/monitoring/slo-dashboard.controller.ts:19`.\n\nTesting conventions in the repo are mixed. Existing web tests often inspect source files directly, for example `apps/web/tests/pages/labels.spec.ts:25` and `apps/web/tests/layouts/default.spec.ts:13`, but the spec explicitly calls for page/component tests that mock the `$api` boundary and assert loading, empty, error, filtering, and pagination behavior. For this feature, implementation should prefer mounted Jest component/page tests under `apps/web/tests/pages/`. For API work, controller/module compile tests already exist in place, and the spec also requires integration-style endpoint behavior tests. No schema migration or new packages are needed. Root-level generated artifacts do matter for US-001 and US-002 because contract changes must refresh committed `openapi.json` and the generated CLI client via `bun run generate`; that is a verification note, not a story in itself.",
+  "routingProfile": "cross-agent"
+}
