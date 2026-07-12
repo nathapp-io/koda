@@ -5,12 +5,11 @@ import { ProjectsService } from './projects.service';
 import { PrismaProjectRepository } from './prisma-project.repository';
 import { PROJECT_REPOSITORY } from './domain/project.domain';
 import { RagModule } from '../rag/rag.module';
-import { MemoryModule } from '../memory/memory.module';
 import { CodeIntelModule } from '../code-intel/code-intel.module';
 import { AgentsModule } from '../agents/agents.module';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => RagModule), forwardRef(() => MemoryModule), forwardRef(() => CodeIntelModule), forwardRef(() => AgentsModule)],
+  imports: [PrismaModule, forwardRef(() => RagModule), forwardRef(() => CodeIntelModule), forwardRef(() => AgentsModule)],
   controllers: [ProjectsController],
   providers: [
     PrismaProjectRepository,
