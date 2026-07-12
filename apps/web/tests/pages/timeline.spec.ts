@@ -1,4 +1,4 @@
-import { describe, test, expect } from '@jest/globals'
+import { describe, test, expect, jest } from '@jest/globals'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 
@@ -415,5 +415,271 @@ describe('Timeline: pages/[project]/timeline.vue has no console.log statements',
   test('source does not contain console.log', () => {
     const source = readFileSync(pagePath, 'utf-8')
     expect(source).not.toContain('console.log')
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Behavioral SSR tests — mount the page component with stubbed $api.get and
+// verify the rendered HTML matches expected output for each acceptance criterion.
+// Uses vue/dist/vue.cjs.js (full build with template compiler) so renderToString
+// works in Node without a browser DOM.
+// ──────────────────────────────────────────────────────────────────────────────
+
+const VueFull = require('vue/dist/vue.cjs.js')
+const { renderToString } = require('vue/server-renderer')
+
+function extractTemplateSfc(sfcSource: string): string {
+  const m = sfcSource.match(/<template>([\s\S]*)<\/template>/)
+  if (!m) throw new Error('No template found in SFC source')
+  return m[1]
+}
+
+function stubDiv(tag: string): VueFull.Component {
+  const { h } = VueFull
+  return {
+    name: `Stub${tag}`,
+    // Pass through children and all props as data attributes
+    render() {
+      const slots = this.$slots.default?.()
+      const attrs: Record<string, unknown> = {}
+      for (const key of Object.keys(this.$attrs ?? {})) {
+        const val = (this.$attrs as Record<string, unknown>)?.[key]
+        if (val !== undefined) attrs[`data-${key}`] = val
+      }
+      return h('div', { ...attrs, class: 'stub' }, slots)
+    },
+  }
+}
+
+function createRenderContext(overrides: Record<string, unknown> = {}) {
+  const { ref } = VueFull
+
+  const ctx = {
+    // i18n
+    t: (key: string) => key,
+
+    // Toast
+    toast: { error: jest.fn(), success: jest.fn() },
+
+    // Timeline composable defaults
+    events: ref<TimelineEvent[]>([]),
+    isLoading: ref(false),
+    error: ref<unknown>(null),
+    hasMore: ref(false),
+    eventTypeFilter: ref(''),
+    fromFilter: ref(''),
+    toFilter: ref(''),
+    loadEvents: jest.fn(),
+    applyFilters: jest.fn(),
+    loadMore: jest.fn(),
+
+    // Helper wrappers
+    loadAndToast: jest.fn().mockResolvedValue(undefined),
+    applyAndToast: jest.fn().mockResolvedValue(undefined),
+    loadMoreAndToast: jest.fn().mockResolvedValue(undefined),
+
+    // Utility
+    formatDate: (d: string) => d,
+    EVENT_TYPES: ['', 'ticket_event', 'agent_event', 'decision_event'],
+
+    ...overrides,
+  }
+
+  return ctx
+}
+
+interface TimelineEvent {
+  id: string
+  eventType: string
+  actorId: string
+  action: string
+  createdAt: string
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('Timeline AC1/AC3/AC4/AC5 (Behavioral SSR): page renders correctly with stubbed data', () => {
+  let pageTemplate: string
+
+  beforeAll(() => {
+    pageTemplate = extractTemplateSfc(readFileSync(pagePath, 'utf-8'))
+  })
+
+  test('AC1: renders one <tr> per event showing eventType, actorId, and action columns', async () => {
+    const ctx = createRenderContext({
+      events: VueFull.ref([
+        { id: 'e1', eventType: 'ticket_event', actorId: 'user-1', action: 'created ticket #42', createdAt: '2026-01-01T00:00:00Z' },
+        { id: 'e2', eventType: 'agent_event', actorId: 'agent-7', action: 'paused', createdAt: '2026-01-02T00:00:00Z' },
+        { id: 'e3', eventType: 'decision_event', actorId: 'admin', action: 'approved', createdAt: '2026-01-03T00:00:00Z' },
+      ]),
+      isLoading: VueFull.ref(false),
+      error: VueFull.ref(null),
+    })
+
+    const app = VueFull.createSSRApp({
+      template: pageTemplate,
+      setup: () => ctx,
+      components: {
+        PageHeader: stubDiv('PageHeader'),
+        LoadingState: stubDiv('LoadingState'),
+        Input: stubDiv('Input'),
+        Button: stubDiv('Button'),
+      },
+      directives: { model: {} }, // stub v-model for SSR
+    })
+
+    const html = await renderToString(app)
+
+    // Verify one <tr> per event (3 events = 3 <tr> elements in <tbody>)
+    const tbodyMatch = html.match(/<tbody[^>]*>([\s\S]*)<\/tbody>/)
+    expect(tbodyMatch).not.toBeNull()
+    const tbodyContent = tbodyMatch?.[1] ?? ''
+    const rows = (tbodyContent.match(/<tr\b/g) || [])
+    expect(rows).toHaveLength(3)
+
+    // Verify each event's fields appear in the HTML
+    expect(html).toContain('ticket_event')
+    expect(html).toContain('user-1')
+    expect(html).toContain('created ticket #42')
+    expect(html).toContain('agent_event')
+    expect(html).toContain('agent-7')
+    expect(html).toContain('paused')
+    expect(html).toContain('decision_event')
+    expect(html).toContain('admin')
+    expect(html).toContain('approved')
+  })
+
+  test('AC3: shows loading indicator and does NOT render the event table when isLoading is true', async () => {
+    const ctx = createRenderContext({
+      isLoading: VueFull.ref(true),
+      events: VueFull.ref([]),
+      error: VueFull.ref(null),
+    })
+
+    const app = VueFull.createSSRApp({
+      template: pageTemplate,
+      setup: () => ctx,
+      components: {
+        PageHeader: stubDiv('PageHeader'),
+        LoadingState: {
+          name: 'MockLoadingState',
+          render(this: { title: string }) { return VueFull.h('div', { class: 'loading-indicator' }, this.title || 'Loading...') },
+        },
+        Input: stubDiv('Input'),
+        Button: stubDiv('Button'),
+      },
+      directives: { model: {} },
+    })
+
+    const html = await renderToString(app)
+
+    // Loading indicator must be present (rendered by LoadingState stub)
+    expect(html).toContain('loading-indicator')
+    // Table must NOT be rendered while loading
+    expect(html).not.toContain('<table')
+    expect(html).not.toContain('<tbody')
+    expect(html).not.toContain('<tr')
+  })
+
+  test('AC4: shows empty-state message instead of the table when events array is empty (and not loading, no error)', async () => {
+    const ctx = createRenderContext({
+      isLoading: VueFull.ref(false),
+      events: VueFull.ref([]),
+      error: VueFull.ref(null),
+    })
+
+    const app = VueFull.createSSRApp({
+      template: pageTemplate,
+      setup: () => ctx,
+      components: {
+        PageHeader: stubDiv('PageHeader'),
+        LoadingState: stubDiv('LoadingState'),
+        Input: stubDiv('Input'),
+        Button: stubDiv('Button'),
+      },
+      directives: { model: {} },
+    })
+
+    const html = await renderToString(app)
+
+    // Empty-state i18n key must appear
+    expect(html).toContain('timeline.empty')
+    // Table must NOT be rendered
+    expect(html).not.toContain('<table')
+    expect(html).not.toContain('<tbody')
+    expect(html).not.toContain('<tr')
+  })
+
+  test('AC5: when error is set (non-null), the page renders no rows and no table', async () => {
+    const ctx = createRenderContext({
+      isLoading: VueFull.ref(false),
+      events: VueFull.ref([]),
+      error: VueFull.ref(new Error('Timeline service unavailable')),
+    })
+
+    const app = VueFull.createSSRApp({
+      template: pageTemplate,
+      setup: () => ctx,
+      components: {
+        PageHeader: stubDiv('PageHeader'),
+        LoadingState: {
+          name: 'MockLoadingState',
+          render(this: { title: string }) { return VueFull.h('div', { class: 'loading-indicator' }, this.title || 'Loading...') },
+        },
+        Input: stubDiv('Input'),
+        Button: stubDiv('Button'),
+      },
+      directives: { model: {} },
+    })
+
+    const html = await renderToString(app)
+
+    // Table rows and table must NOT be present regardless of whether error
+    // is checked before or after the empty-state branch — the page must not
+    // render any event rows when an error has occurred.
+    expect(html).not.toContain('<table')
+    expect(html).not.toContain('<tbody')
+    expect(html).not.toContain('<tr')
+    // Loading state should not show (isLoading is false)
+    expect(html).not.toContain('loading-indicator')
+  })
+})
+
+describe('Timeline AC3/AC5 composable contract (SSR-verified reactive transitions)', () => {
+  let pageTemplate: string
+
+  beforeAll(() => {
+    pageTemplate = extractTemplateSfc(readFileSync(pagePath, 'utf-8'))
+  })
+
+  test('isLoading transitions from true to false: SSR shows table after load completes', async () => {
+    // Simulate the page after loadEvents resolves: isLoading=false, events populated, error=null
+    const ctx = createRenderContext({
+      isLoading: VueFull.ref(false),
+      events: VueFull.ref([
+        { id: 'e1', eventType: 't', actorId: 'a', action: 'x', createdAt: 'now' },
+      ]),
+      error: VueFull.ref(null),
+    })
+
+    const app = VueFull.createSSRApp({
+      template: pageTemplate,
+      setup: () => ctx,
+      components: {
+        PageHeader: stubDiv('PageHeader'),
+        LoadingState: {
+          name: 'MockLoadingState',
+          render(this: { title: string }) { return VueFull.h('div', { class: 'loading-indicator' }, this.title || 'Loading...') },
+        },
+        Input: stubDiv('Input'),
+        Button: stubDiv('Button'),
+      },
+      directives: { model: {} },
+    })
+
+    const html = await renderToString(app)
+    expect(html).toContain('<table')
+    expect(html).not.toContain('loading-indicator')
+    expect(html).not.toContain('timeline.empty')
   })
 })
