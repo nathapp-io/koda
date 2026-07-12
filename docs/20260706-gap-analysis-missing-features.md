@@ -50,12 +50,12 @@ The codebase is in good shape overall — clean of TODO/stub markers, well-teste
 
 ### CLI (undermines the "agent-native" pitch)
 
-- **Agent lifecycle commands entirely missing** — no `agent create/list/update/rotate-key/delete`, even though the generated client functions already exist in `apps/cli/src/generated/services.gen.ts`. Agents cannot be provisioned from the CLI at all.
-- **Memory write commands missing** — only `memory timeline` is wired; `extract`/`decisions`/`create` have generated-client support but no command.
-- **Errors are never JSON under `--json`** — `utils/error.ts:41-70` always prints colorized text to stderr; only exit codes (0/1/2/3/4) are machine-reliable.
-- **Profile management is dead code** — `config profile list/add/remove` implemented and tested in `commands/config.ts:44-77` but never registered in `index.ts`.
-- No `--watch`/poll mode, no bulk ops, no shell completion, plaintext credential store (`conf` without `encryptionKey`).
-- Coverage matrix: tickets/comments/labels/kb/vcs/webhooks/admin/context/code-intel are **full**; agents/memory are the gaps; project↔agent role assignment missing.
+- ~~**Agent lifecycle commands entirely missing** — no `agent create/list/update/rotate-key/delete`, even though the generated client functions already exist in `apps/cli/src/generated/services.gen.ts`. Agents cannot be provisioned from the CLI at all.~~ ✅ Fixed 2026-07-12 — `agent list/create/update/rotate-key/delete` added, wired to the existing generated client functions.
+- ~~**Memory write commands missing** — only `memory timeline` is wired; `extract`/`decisions`/`create` have generated-client support but no command.~~ ✅ Fixed 2026-07-12 — `memory decisions`/`memory create` added. `extract` was deliberately left uncovered: it's only ever invoked internally (outbox fan-out → `extractionService.extractFromEvent()` directly), never over HTTP, so no CLI consumer needs it. Doing this surfaced that `recordDecision`/`createMemory` had no documented request body (inline types, not DTOs) — added `RecordDecisionDto`/`CreateMemoryDto` and regenerated `openapi.json`/the CLI client so a body could be sent at all. That in turn surfaced two real authz gaps the new CLI commands would otherwise have made exploitable: `createMemory` returned `{error: 'ACCESS_DENIED'}` inside a 200 envelope instead of throwing (CLI read it as success), and `recordDecision` had no role check at all plus a spoofable caller-supplied `actorId` — both fixed (throws `ForbiddenAppException`; only admins may attribute a decision to someone else).
+- **Errors are never JSON under `--json`** — `utils/error.ts:41-70` always prints colorized text to stderr; only exit codes (0/1/2/3/4) are machine-reliable. Still open.
+- ~~**Profile management is dead code** — `config profile list/add/remove` implemented and tested in `commands/config.ts:44-77` but never registered in `index.ts`.~~ ✅ Fixed 2026-07-12 — registered in `index.ts`; verified via a smoke test of the built CLI (no automated regression test — `index.ts` calls `program.parse()` at module load, making it import-unsafe to unit test without a refactor).
+- No `--watch`/poll mode, no bulk ops, no shell completion, plaintext credential store (`conf` without `encryptionKey`). Still open.
+- Coverage matrix update: agent/memory write commands and config profile are no longer gaps; remaining CLI gaps are `--json` errors, watch mode, bulk ops, shell completion, and credential encryption. Also noted in review but out of scope here: `GET /agents` (`agent list`) has no server-side permission check even though other agent-admin routes do — `apps/web/pages/agents.vue` already relies on it being unrestricted, so tightening it is a separate, higher-blast-radius change.
 
 ### Web UI (large API surfaces with zero UI)
 
@@ -115,7 +115,7 @@ Existing-page gaps:
 ## 4. Suggested priority order
 
 1. **Security/reliability defects** — CORS/Helmet ✅, token revocation + logout ✅, webhook→outbox unification (still open), outbox backoff fix ✅, LanceDB mutex ✅, GitLab provider ✅.
-2. **CLI agent-native promise** — env-var fix (unify `resolveContext`/`resolveAuth`), agent lifecycle commands, JSON errors under `--json`, register `config profile`.
+2. **CLI agent-native promise** — env-var fix ✅, agent lifecycle commands ✅, register `config profile` ✅, JSON errors under `--json` (still open), watch mode / bulk ops / shell completion / credential encryption (still open).
 3. **Product features** — notifications, pagination + real-time board, due dates, ticket search.
 4. **Oversight visibility** — timeline/memory/code-intel web views (the differentiator for "humans oversee agents").
 5. **CI hardening + docs sweep** — Playwright in CI, coverage gate, OpenAPI drift check, wire Changesets; fix README, archive stale violation doc, correct multi-DB claim.
