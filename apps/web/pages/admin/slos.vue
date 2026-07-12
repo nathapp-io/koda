@@ -26,17 +26,17 @@ interface SloResponse {
   memoryGrowthRate: number
 }
 
-function flattenSloMetrics(response: SloResponse): SloMetric[] {
+function flattenSloMetrics(response: SloResponse, t: (key: string) => string): SloMetric[] {
   const lat = response.retrievalLatency ?? { p50: 0, p95: 0, p99: 0, sampleCount: 0 }
   return [
-    { label: 'Retrieval latency p50', value: lat.p50 },
-    { label: 'Retrieval latency p95', value: lat.p95 },
-    { label: 'Retrieval latency p99', value: lat.p99 },
-    { label: 'Retrieval latency samples', value: lat.sampleCount },
-    { label: 'Stale hit rate', value: response.staleHitRate },
-    { label: 'Provenance coverage', value: response.provenanceCoverage },
-    { label: 'Leakage incidents', value: response.leakageIncidents },
-    { label: 'Memory growth rate', value: response.memoryGrowthRate },
+    { label: t('slos.metrics.retrievalLatencyP50'), value: lat.p50 },
+    { label: t('slos.metrics.retrievalLatencyP95'), value: lat.p95 },
+    { label: t('slos.metrics.retrievalLatencyP99'), value: lat.p99 },
+    { label: t('slos.metrics.retrievalLatencySamples'), value: lat.sampleCount },
+    { label: t('slos.metrics.staleHitRate'), value: response.staleHitRate },
+    { label: t('slos.metrics.provenanceCoverage'), value: response.provenanceCoverage },
+    { label: t('slos.metrics.leakageIncidents'), value: response.leakageIncidents },
+    { label: t('slos.metrics.memoryGrowthRate'), value: response.memoryGrowthRate },
   ]
 }
 
@@ -57,26 +57,32 @@ const to = ref(initialWindow.to)
 const metrics = ref<SloMetric[]>([])
 const pending = ref(false)
 const adminOnly = ref(false)
+let latestRequestId = 0
 
 async function reload() {
+  const requestId = ++latestRequestId
   pending.value = true
   adminOnly.value = false
+  metrics.value = []
   try {
     const response = await $api.get<SloResponse>('/admin/slos', {
       query: { from: from.value, to: to.value },
     })
-    metrics.value = flattenSloMetrics(response)
+    if (requestId !== latestRequestId) return
+    metrics.value = flattenSloMetrics(response, t)
   }
   catch (err: unknown) {
+    if (requestId !== latestRequestId) return
     if (err instanceof ApiError && err.code === 403) {
       adminOnly.value = true
-      metrics.value = []
       return
     }
     toast.error(extractApiError(err))
   }
   finally {
-    pending.value = false
+    if (requestId === latestRequestId) {
+      pending.value = false
+    }
   }
 }
 

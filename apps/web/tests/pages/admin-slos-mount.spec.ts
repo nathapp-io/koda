@@ -168,20 +168,20 @@ describe('US-006 AC1 (Behavioral SFC mount): page renders one metric card per re
     expect(Array.isArray(metrics.value)).toBe(true)
     expect(metrics.value).toHaveLength(8)
     const labels = metrics.value.map(m => m.label)
-    expect(labels).toContain('Retrieval latency p50')
-    expect(labels).toContain('Retrieval latency p95')
-    expect(labels).toContain('Retrieval latency p99')
-    expect(labels).toContain('Retrieval latency samples')
-    expect(labels).toContain('Stale hit rate')
-    expect(labels).toContain('Provenance coverage')
-    expect(labels).toContain('Leakage incidents')
-    expect(labels).toContain('Memory growth rate')
+    expect(labels).toContain('slos.metrics.retrievalLatencyP50')
+    expect(labels).toContain('slos.metrics.retrievalLatencyP95')
+    expect(labels).toContain('slos.metrics.retrievalLatencyP99')
+    expect(labels).toContain('slos.metrics.retrievalLatencySamples')
+    expect(labels).toContain('slos.metrics.staleHitRate')
+    expect(labels).toContain('slos.metrics.provenanceCoverage')
+    expect(labels).toContain('slos.metrics.leakageIncidents')
+    expect(labels).toContain('slos.metrics.memoryGrowthRate')
 
-    const p50 = metrics.value.find(m => m.label === 'Retrieval latency p50')
+    const p50 = metrics.value.find(m => m.label === 'slos.metrics.retrievalLatencyP50')
     expect(p50?.value).toBe(80)
-    const samples = metrics.value.find(m => m.label === 'Retrieval latency samples')
+    const samples = metrics.value.find(m => m.label === 'slos.metrics.retrievalLatencySamples')
     expect(samples?.value).toBe(1000)
-    const stale = metrics.value.find(m => m.label === 'Stale hit rate')
+    const stale = metrics.value.find(m => m.label === 'slos.metrics.staleHitRate')
     expect(stale?.value).toBe(0.05)
   })
 
@@ -404,6 +404,168 @@ describe('US-006 AC6 (Behavioral SFC mount): non-403 error surfaces extractApiEr
 
     const adminOnly = bindings.adminOnly as { value: boolean }
     expect(adminOnly.value).toBe(false)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Adversarial finding: overlapping date-window requests must not let a stale
+// response overwrite metrics from the newer request. Each reload() carries its
+// own request id and ignores late resolutions from prior requests.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('US-006 (Adversarial): overlapping reload() requests are sequenced by request id', () => {
+  test('a stale response does not overwrite metrics from the newer successful request', async () => {
+    let resolveFirst: ((value: unknown) => void) | null = null
+    let resolveSecond: ((value: unknown) => void) | null = null
+
+    const fetchMock = jest.fn(async (_url: string, fetchOpts?: Record<string, unknown>) => {
+      const query = (fetchOpts?.query ?? {}) as Record<string, string>
+      const isFirst = query.from === '2026-01-01' && query.to === '2026-01-31'
+      if (isFirst) {
+        return new Promise(resolve => { resolveFirst = resolve })
+      }
+      return new Promise(resolve => { resolveSecond = resolve })
+    })
+
+    const { fetchCalls, bindings } = await mountSlosPage({ fetchMock })
+
+    const from = bindings.from as { value: string }
+    const to = bindings.to as { value: string }
+    const reload = bindings.reload as () => Promise<void>
+
+    // First request already in flight. Start a second reload with a new window.
+    from.value = '2026-02-01'
+    to.value = '2026-02-28'
+    const reloadPromise = reload()
+
+    // The newest request must have been issued.
+    expect(fetchCalls.length).toBeGreaterThanOrEqual(2)
+
+    // Resolve the SECOND (newest) request first with newer-window data.
+    const p50New = bindings.metrics as { value: Array<{ label: string; value: number }> }
+    expect(p50New.value).toEqual([])
+    resolveSecond?.({
+      data: {
+        retrievalLatency: { p50: 250, p95: 0, p99: 0, sampleCount: 0 },
+        staleHitRate: 0, provenanceCoverage: 0, leakageIncidents: 0, memoryGrowthRate: 0,
+      },
+    })
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    // Now resolve the FIRST (stale) request with older-window data — this must
+    // NOT overwrite the newer window's p50 value.
+    resolveFirst?.({
+      data: {
+        retrievalLatency: { p50: 80, p95: 0, p99: 0, sampleCount: 0 },
+        staleHitRate: 0, provenanceCoverage: 0, leakageIncidents: 0, memoryGrowthRate: 0,
+      },
+    })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    await reloadPromise
+
+    const p50 = p50New.value.find(m => m.label === 'slos.metrics.retrievalLatencyP50')
+    expect(p50?.value).toBe(250)
+
+    const pending = bindings.pending as { value: boolean }
+    expect(pending.value).toBe(false)
+  })
+
+  test('a stale rejection does not surface as the active error after a newer success', async () => {
+    let rejectFirst: ((err: unknown) => void) | null = null
+    let resolveSecond: ((value: unknown) => void) | null = null
+
+    const fetchMock = jest.fn(async (_url: string, fetchOpts?: Record<string, unknown>) => {
+      const query = (fetchOpts?.query ?? {}) as Record<string, string>
+      const isFirst = query.from === '2026-01-01' && query.to === '2026-01-31'
+      if (isFirst) {
+        return new Promise<unknown>((_resolve, reject) => {
+          rejectFirst = reject
+        })
+      }
+      return new Promise(resolve => { resolveSecond = resolve })
+    })
+
+    const { bindings, toast } = await mountSlosPage({ fetchMock })
+
+    const from = bindings.from as { value: string }
+    const to = bindings.to as { value: string }
+    const reload = bindings.reload as () => Promise<void>
+
+    // Start a second (newer) reload while the first is in flight.
+    from.value = '2026-03-01'
+    to.value = '2026-03-31'
+    const reloadPromise = reload()
+
+    // Resolve the second request first.
+    resolveSecond?.({ data: emptySloResponse() })
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    // Now reject the first (stale) request — must NOT call toast.error.
+    const { ApiError } = require(join(webDir, 'composables/useApi'))
+    rejectFirst?.(new ApiError(500, 'stale failure'))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    await reloadPromise
+
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  test('on a non-403 reload failure the displayed metrics are not stale from the prior successful window', async () => {
+    // First reload succeeds with window A. A second reload fails with a
+    // non-403 error on window B; metrics from window A must NOT remain on
+    // screen misleadingly labeled as window B.
+    let callCount = 0
+    let resolveFirst: ((value: unknown) => void) | null = null
+    let rejectSecond: ((err: unknown) => void) | null = null
+
+    const fetchMock = jest.fn(async (_url: string, fetchOpts?: Record<string, unknown>) => {
+      callCount++
+      const query = (fetchOpts?.query ?? {}) as Record<string, string>
+      const isSecond = query.from === '2026-02-01' && query.to === '2026-02-28'
+      if (callCount === 1) {
+        return new Promise(resolve => { resolveFirst = resolve })
+      }
+      if (isSecond) {
+        return new Promise<unknown>((resolve, reject) => {
+          resolveSecond = resolve
+          rejectSecond = reject
+        })
+      }
+      return { data: emptySloResponse() }
+    })
+
+    const { bindings } = await mountSlosPage({ fetchMock })
+
+    const from = bindings.from as { value: string }
+    const to = bindings.to as { value: string }
+    const reload = bindings.reload as () => Promise<void>
+
+    // Window A resolves successfully.
+    resolveFirst?.({
+      data: {
+        retrievalLatency: { p50: 100, p95: 0, p99: 0, sampleCount: 0 },
+        staleHitRate: 0, provenanceCoverage: 0, leakageIncidents: 0, memoryGrowthRate: 0,
+      },
+    })
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    const metrics = bindings.metrics as { value: Array<{ label: string; value: number }> }
+    const p50Before = metrics.value.find(m => m.label === 'slos.metrics.retrievalLatencyP50')
+    expect(p50Before?.value).toBe(100)
+
+    // User picks a new window; that reload errors.
+    from.value = '2026-02-01'
+    to.value = '2026-02-28'
+    const reloadPromise = reload()
+    const { ApiError } = require(join(webDir, 'composables/useApi'))
+    rejectSecond?.(new ApiError(500, 'boom'))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    await reloadPromise
+
+    // The page must NOT display the prior window's p50 value as if it
+    // belonged to the newly selected dates.
+    const p50After = metrics.value.find(m => m.label === 'slos.metrics.retrievalLatencyP50')
+    expect(p50After?.value).toBeUndefined()
+    expect(metrics.value).toEqual([])
   })
 })
 
