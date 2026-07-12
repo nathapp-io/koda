@@ -235,6 +235,70 @@ describe('US-006 AC3 (Behavioral SFC mount): changing the date window re-invokes
   })
 })
 
+// The script-mock tests above prove that the page re-invokes $api.get with
+// from/to when reload() runs. The AC additionally requires that the
+// date-window *controls* (the rendered <input type="date"> elements) drive
+// that flow — i.e. v-model must bind the inputs to from/to and @change
+// must invoke reload on user interaction. These SSR + source-wiring tests
+// guard that contract so a broken v-model or @change wouldn't leave the
+// suite green.
+
+describe('US-006 AC3 (Behavioral SSR): template renders two date inputs bound to from and to', () => {
+  let pageTemplate: string
+
+  beforeAll(() => {
+    pageTemplate = extractTemplateSfc(readFileSync(pagePath, 'utf-8'))
+  })
+
+  test('rendering with from=2026-01-01 and to=2026-01-31 produces two date inputs whose value attributes match the refs', async () => {
+    const ctx = createRenderContext({
+      from: VueFull.ref('2026-01-01'),
+      to: VueFull.ref('2026-01-31'),
+    })
+
+    const app = VueFull.createSSRApp({
+      template: pageTemplate,
+      setup: () => ctx,
+      components: {
+        PageHeader: stubDiv('PageHeader'),
+        LoadingState: stubDiv('LoadingState'),
+      },
+      directives: { model: {} },
+    })
+
+    const html = await renderToString(app)
+
+    const dateInputs = html.match(/<input[^>]*type="date"[^>]*>/g) ?? []
+    expect(dateInputs).toHaveLength(2)
+
+    // The Vue compiler turns v-model="from" into a `value` attribute bound
+    // to the ref. Verifying the rendered value attributes match the ref
+    // contents proves v-model is wired (the wiring test below separately
+    // asserts the literal v-model/@change directive strings in the SFC
+    // source, so a fully broken template cannot regress silently).
+    expect(html).toMatch(/<input[^>]*value="2026-01-01"[^>]*type="date"[^>]*>/)
+    expect(html).toMatch(/<input[^>]*value="2026-01-31"[^>]*type="date"[^>]*>/)
+  })
+})
+
+describe('US-006 AC3 (Wiring): each date input triggers reload on change', () => {
+  test('the from input has v-model="from" and @change="reload" wired in the SFC source', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    // Match the from <input type="date" ...> block and assert both directives
+    // appear in the same tag attributes.
+    const fromInput = source.match(/<input[^>]*v-model="from"[^>]*>/)
+    expect(fromInput).not.toBeNull()
+    expect(fromInput?.[0]).toContain('@change="reload"')
+  })
+
+  test('the to input has v-model="to" and @change="reload" wired in the SFC source', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    const toInput = source.match(/<input[^>]*v-model="to"[^>]*>/)
+    expect(toInput).not.toBeNull()
+    expect(toInput?.[0]).toContain('@change="reload"')
+  })
+})
+
 // ─────────────────────────────────────────────────────────────────────────────
 // AC4 — While the request is pending, the page shows a loading indicator and
 //       not the metric cards.
@@ -478,13 +542,41 @@ describe('US-006 AC4 (Behavioral SSR): pending renders the loading indicator and
 
 describe('US-006 AC5 (Behavioral SSR): adminOnly renders the friendly admin-only state instead of metric cards or loading', () => {
   let pageTemplate: string
+  const enLocale = JSON.parse(readFileSync(join(webDir, 'i18n', 'locales', 'en.json'), 'utf-8')) as {
+    slos?: { adminOnly?: string }
+  }
+  const friendlyAdminOnly = enLocale.slos?.adminOnly ?? ''
 
   beforeAll(() => {
     pageTemplate = extractTemplateSfc(readFileSync(pagePath, 'utf-8'))
   })
 
-  test('when adminOnly=true the rendered HTML contains the admin-only message and no metric cards', async () => {
+  test('the locale entry for slos.adminOnly is a non-empty friendly message (not the raw key)', () => {
+    // Guard the SSR test below: if en.json ever loses slos.adminOnly or
+    // regresses to the raw key, the SSR assertion would silently degrade
+    // into a tautology. This precheck fails fast with a clear message.
+    expect(typeof friendlyAdminOnly).toBe('string')
+    expect(friendlyAdminOnly.length).toBeGreaterThan(0)
+    expect(friendlyAdminOnly).not.toBe('slos.adminOnly')
+  })
+
+  test('when adminOnly=true the rendered HTML contains the friendly message and no metric cards', async () => {
+    // Resolve t() against the actual en locale so the assertion checks the
+    // user-facing string, not the raw i18n key.
     const ctx = createRenderContext({
+      t: (key: string) => {
+        const parts = key.split('.')
+        let cur: unknown = enLocale
+        for (const part of parts) {
+          if (cur && typeof cur === 'object' && part in (cur as Record<string, unknown>)) {
+            cur = (cur as Record<string, unknown>)[part]
+          }
+          else {
+            return key
+          }
+        }
+        return typeof cur === 'string' ? cur : key
+      },
       adminOnly: VueFull.ref(true),
       metrics: VueFull.ref([{ label: 'Availability', value: 99.95 }]),
     })
@@ -501,7 +593,11 @@ describe('US-006 AC5 (Behavioral SSR): adminOnly renders the friendly admin-only
 
     const html = await renderToString(app)
 
-    expect(html).toContain('slos.adminOnly')
+    // The friendly resolved message must be present in the rendered HTML.
+    expect(html).toContain(friendlyAdminOnly)
+    // The raw i18n key must NOT leak through (it should have been resolved).
+    expect(html).not.toContain('slos.adminOnly')
+    // The other terminal branches must be absent.
     expect(html).not.toContain('data-testid="slo-metric-card"')
     expect(html).not.toContain('loading-indicator')
     expect(html).not.toContain('slos.empty')
