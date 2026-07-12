@@ -1,0 +1,373 @@
+[
+  {
+    "acId": "AC-1",
+    "original": "Given a project that has active memory items, when `GET /projects/:slug/memory` is called, then it returns HTTP 200 and a body whose `data.items` contains those items and whose `data.total` equals the total active count.",
+    "refined": "HTTP response status is 200. Response body has structure `{ data: { items: Array<MemoryItem>, total: number } }`. The `items` array contains all active MemoryItem records for the project. The `total` value equals the count of all active MemoryItem records for the project.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-2",
+    "original": "Given memory items of multiple kinds, when `GET /projects/:slug/memory?kind=DECISION` is called, then the response contains only items whose `kind` equals `DECISION`.",
+    "refined": "HTTP response status is 200. Every item in `response.data.items` has `kind === 'DECISION'`. The `total` equals the count of DECISION items matching other filters.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-3",
+    "original": "Given active, superseded, and expired memory items, when `GET /projects/:slug/memory` is called without a `status` param, then the response contains only items with `status` `active` and a null-or-future `ttlAt`.",
+    "refined": "HTTP response status is 200. Every item in `response.data.items` satisfies `item.status === 'active' AND (item.ttlAt === null OR item.ttlAt > currentTimestamp)`. No items with status 'superseded' or expired ttlAt are present.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-4",
+    "original": "Given superseded memory items, when `GET /projects/:slug/memory?status=superseded` is called, then the response contains only items whose `status` is `superseded`.",
+    "refined": "HTTP response status is 200. Every item in `response.data.items` has `status === 'superseded'`. The `total` equals the count of superseded items matching other filters.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-5",
+    "original": "Given more than ten matching memory items, when `GET /projects/:slug/memory?page=2&limit=10` is called, then it returns the second page of at most 10 items.",
+    "refined": "HTTP response status is 200. `response.data.items` has length <= 10. `response.data.total` equals total count of all matching items (not just this page). The items returned are the items at positions 11-20 of the full sorted result set.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-6",
+    "original": "Given a request with `limit=1000`, when `GET /projects/:slug/memory` is called, then it returns at most 50 items.",
+    "refined": "HTTP response status is 200. `response.data.items.length <= 50`. The `total` reflects actual matching count, not capped.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-7",
+    "original": "Given a slug that does not resolve because the project is unknown or soft-deleted, when `GET /projects/:slug/memory` is called, then it returns HTTP 404.",
+    "refined": "HTTP response status is 404. Response body contains error with code 'PROJECT_NOT_FOUND' or message indicating project does not exist or is deleted.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-8",
+    "original": "Given a principal who is not a member of the project, when `GET /projects/:slug/memory` is called, then it returns HTTP 403.",
+    "refined": "HTTP response status is 403. Response body contains `ForbiddenAppException` error. The error message or code indicates insufficient project membership.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-9",
+    "original": "Given the route is implemented in the memory module, when `GET /projects/:slug/memory` returns a successful response, then the body is still wrapped as `JsonResponse.Ok({ items, total })` rather than changing the existing envelope shape.",
+    "refined": "HTTP response status is 200. Response body structure is exactly `{ data: { items: Array, total: number } }`. The wrapper key is 'data' and inner keys are 'items' and 'total', matching the JsonResponse.Ok envelope pattern.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-10",
+    "original": "Given `Test.createTestingModule({ imports: [MemoryModule] })` with external collaborators mocked, when the module is compiled, then the new memory-read controller plus its dependencies `MemoryGovernanceService` and `ProjectsService` resolve from DI.",
+    "refined": "Module compilation does not throw. `MemoryReadController`, `MemoryGovernanceService`, and `ProjectsService` are all retrievable from the testing module's DI container via `get()`. Controller can be instantiated without constructor errors.",
+    "testable": true,
+    "storyId": "US-001"
+  },
+  {
+    "acId": "AC-11",
+    "original": "Given a project slug and a `q` fragment, when `GET /code-intel/symbols?projectSlug=<slug>&q=<name>` is called, then it returns HTTP 200 with `data.items` containing only symbols whose `name` contains the `q` value and each item exposes `id`, `name`, `kind`, `file`, and `signature`.",
+    "refined": "When GET /code-intel/symbols?projectSlug=<slug>&q=<name> returns HTTP 200, then response.body.data.items is an array where every symbol.name includes <name> as case-insensitive substring, and every item has properties: id (string), name (string), kind (string), file (string), signature (string) — with no additional keys.",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-12",
+    "original": "Given a project slug and a `q` fragment, when `GET /code-intel/symbols?projectSlug=<slug>&q=<name>` is called, then `data.total` equals the match count.",
+    "refined": "When GET /code-intel/symbols?projectSlug=<slug>&q=<name> returns HTTP 200, then response.body.data.total is a non-negative integer equal to the total count of symbols in the project whose name contains <name> (without pagination).",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-13",
+    "original": "Given a project slug and a `file` fragment, when `GET /code-intel/symbols?projectSlug=<slug>&file=<frag>` is called, then it returns only symbols whose `file` contains `<frag>`.",
+    "refined": "When GET /code-intel/symbols?projectSlug=<slug>&file=<frag> returns HTTP 200, then every item in response.body.data.items has file property containing <frag> as case-insensitive substring, and response.body.data.total equals count of all matching symbols.",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-14",
+    "original": "Given more than twenty matching symbols, when `GET /code-intel/symbols?projectSlug=<slug>&q=<name>&page=2&limit=20` is called, then it returns the second page of at most 20 items.",
+    "refined": "When GET /code-intel/symbols?projectSlug=<slug>&q=<name>&page=2&limit=20 returns HTTP 200 with >20 total matches, then response.body.data.items has length ≤ 20, and response.body.data.total equals the full match count (not the page count).",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-15",
+    "original": "Given a request with `limit` above the supported maximum, when `GET /code-intel/symbols` is called, then the effective limit is clamped to the maximum.",
+    "refined": "When GET /code-intel/symbols?projectSlug=<slug>&limit=<valueAboveMax> returns HTTP 200, then response.body.data.items has length ≤ MAX_LIMIT (where MAX_LIMIT is the configured maximum, e.g. 100), and if total matches > MAX_LIMIT, total > items.length.",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-16",
+    "original": "Given a project slug and neither `q` nor `file`, when `GET /code-intel/symbols?projectSlug=<slug>` is called, then it returns the first page of the project's symbols in a deterministic order.",
+    "refined": "When GET /code-intel/symbols?projectSlug=<slug> returns HTTP 200 (no q or file param), then response.body.data.items contains symbols belonging to the project ordered deterministically (by id ASC or createdAt ASC — must be consistent across calls), and page=1 implicitly.",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-17",
+    "original": "Given a `projectSlug` that does not resolve, when `GET /code-intel/symbols` is called, then it returns HTTP 404.",
+    "refined": "When GET /code-intel/symbols?projectSlug=nonexistent-slug is called, then response.statusCode equals 404.",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-18",
+    "original": "Given a principal who is not a member of the project, when `GET /code-intel/symbols` is called, then it returns HTTP 403.",
+    "refined": "When GET /code-intel/symbols?projectSlug=<slug> is called with a valid auth token belonging to a user/principal who is not a project member, then response.statusCode equals 403.",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-19",
+    "original": "Given a mocked Prisma client, when `searchSymbols(projectId, { q, file, page, limit })` is called on the repository, then it issues a `symbol.findMany` whose `where` filters by `projectId` and, when provided, `name`-contains and `file`-contains, applies `take` and `skip` derived from `page` and `limit`, and returns `{ items, total }`.",
+    "refined": "When repository.searchSymbols(projectId, { q, file, page, limit }) is called, then prismaClient.symbol.findMany is invoked exactly once with { where: { projectId, name: { contains: q }, file: { contains: file } }, take: limit, skip: (page - 1) * limit }, and the method returns { items: findMany result, total: count result }.",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-20",
+    "original": "Given the new search route exists beside the existing detail route, when `GET /code-intel/symbols/:symbolId?projectSlug=<slug>` is called, then symbol detail lookup still resolves through the existing detail handler instead of being shadowed by the search route.",
+    "refined": "When GET /code-intel/symbols/:symbolId?projectSlug=<slug> is called with a valid symbolId, then response matches the existing detail endpoint contract (returns symbol by id, not a search result list), and the route does not return a list or apply search query params.",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-21",
+    "original": "Given `Test.createTestingModule({ imports: [CodeIntelModule] })` with stubbed external collaborators, when the module is compiled, then the search service and repository dependencies resolve from DI.",
+    "refined": "When Test.createTestingModule({ imports: [CodeIntelModule] }) is executed with all external dependencies stubbed (PrismaService, ProjectService), then module compilation succeeds without throwing, and container.get(AstIndexService) returns an instance (not null/undefined).",
+    "testable": true,
+    "storyId": "US-002"
+  },
+  {
+    "acId": "AC-22",
+    "original": "Given `$api.get` is stubbed to resolve a list of timeline events, when the Timeline page is mounted, then it renders one row per event showing its `eventType`, `actorId`, and `action`.",
+    "refined": "When the Timeline page mounts with a mocked `$api.get` returning `[{eventType: 'EventA', actorId: 'user1', action: 'created'}, {eventType: 'EventB', actorId: 'user2', action: 'updated'}]`, then the rendered table contains exactly 2 rows, the first row displays 'EventA' in the eventType column, 'user1' in the actorId column, and 'created' in the action column; the second row displays 'EventB', 'user2', and 'updated' respectively.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-23",
+    "original": "Given a route whose `project` param is `<slug>`, when the Timeline page mounts, then it calls `$api.get` with the path `/projects/<slug>/timeline`.",
+    "refined": "When the Timeline page is navigated to via route with `params.project = 'my-project'` and the component mounts, then `$api.get` is invoked exactly once with the string argument '/projects/my-project/timeline' (using any query object).",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-24",
+    "original": "Given the `$api.get` promise is pending, when the Timeline page is rendered, then it shows a loading indicator and does not render the event table.",
+    "refined": "When `$api.get` returns a Promise that never resolves (or is mock-stalled), then the component renders a loading/skeleton indicator element and the event table element is absent from the DOM.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-25",
+    "original": "Given the response contains zero events, when the Timeline page finishes loading, then it renders an empty-state message instead of the table.",
+    "refined": "When `$api.get` resolves to an empty array `[]`, then the component renders an empty-state message element and the event table element is absent from the DOM.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-26",
+    "original": "Given `$api.get` rejects, when the Timeline page handles the error, then it passes the error through `extractApiError` and shows the result via the app toast while rendering no rows.",
+    "refined": "When `$api.get` rejects with an Error object, then `extractApiError` is called with that Error as its first argument, `useAppToast().error` (or equivalent) is invoked with the result of `extractApiError`, and the event table renders with zero rows.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-27",
+    "original": "Given a chosen event-type filter, when the user applies it, then the Timeline page re-invokes `$api.get` with the `eventTypes` query param set to the chosen value.",
+    "refined": "When the user selects event-type filter value 'build' and triggers the apply action, then `$api.get` is called with path `/projects/<slug>/timeline` and query object containing `eventTypes: 'build'`.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-28",
+    "original": "Given chosen from and to date filters, when the user applies them, then the Timeline page re-invokes `$api.get` with `from` and `to` query params carrying the chosen dates.",
+    "refined": "When the user sets 'from' date to '2026-01-01' and 'to' date to '2026-01-31' and triggers the apply action, then `$api.get` is called with path `/projects/<slug>/timeline` and query object containing `from: '2026-01-01'` and `to: '2026-01-31'.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-29",
+    "original": "Given the previous response returned a `cursor`, when the user activates `load more`, then the Timeline page re-invokes `$api.get` with that `cursor` and appends the newly returned events to the existing list.",
+    "refined": "When the first `$api.get` call returns `{events: [...], cursor: 'abc123'}` and the user clicks 'load more', then `$api.get` is called again with query containing `cursor: 'abc123'`, and the rendered event list contains the original events plus the newly returned events (total length = original.length + new.length).",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-30",
+    "original": "Given the default layout is rendered on a route with a `project` slug, when navigation links are shown, then it includes a link targeting `/<slug>/timeline` whose label resolves from `nav.timeline`.",
+    "refined": "When `default.vue` layout renders with route params containing `project: 'test-slug'`, then a `<a>` or `<NuxtLink>` element exists with `href` or `to` attribute equal to '/test-slug/timeline', and its visible text content matches the `nav.timeline` i18n string value.",
+    "testable": true,
+    "storyId": "US-003"
+  },
+  {
+    "acId": "AC-31",
+    "original": "Given `$api.get` is stubbed to resolve `{ items, total }`, when the Memory page is mounted, then it renders one row per item showing its `subject`, `predicate`, `object`, `kind`, `confidence`, and `status`.",
+    "refined": "When the Memory page mounts with a stubbed `$api.get` resolving `{ items: [{subject, predicate, object, kind, confidence, status}], total: 1 }`, then the rendered table contains exactly 1 row with cells matching each item's `subject`, `predicate`, `object`, `kind`, `confidence`, and `status` values.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-32",
+    "original": "Given a route whose `project` param is `<slug>`, when the Memory page mounts, then it calls `$api.get` with the path `/projects/<slug>/memory`.",
+    "refined": "When the Memory page mounts on a route with `params.project = 'my-project'`, then `$api.get` is called exactly once with the path string `/projects/my-project/memory` and no additional path arguments.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-33",
+    "original": "Given the request is pending, when the Memory page is rendered, then it shows a loading indicator and not the item table.",
+    "refined": "When `$api.get` is called but has not yet resolved or rejected, then the Memory page renders a loading indicator element and does not render the item table element.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-34",
+    "original": "Given `items` is empty, when the Memory page finishes loading, then it renders an empty-state message.",
+    "refined": "When `$api.get` resolves with `{ items: [], total: 0 }`, then the Memory page renders an empty-state message element and does not render an item table.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-35",
+    "original": "Given `$api.get` rejects, when the Memory page handles the error, then it surfaces `extractApiError(err)` via the app toast and renders no rows.",
+    "refined": "When `$api.get` rejects with an error object `err`, then `extractApiError` is called with `err` as argument, `useAppToast().error` is invoked with the result, and the item table renders zero rows.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-36",
+    "original": "Given a chosen `kind` filter, when the user applies it, then the Memory page re-invokes `$api.get` with the `kind` query param set to the chosen value.",
+    "refined": "When the user selects a `kind` filter value `'event'` and triggers apply, then `$api.get` is called again with path containing `query: { kind: 'event' }`. Subsequent calls preserve the previously applied filter unless changed.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-37",
+    "original": "Given a chosen `status` filter, when the user applies it, then the Memory page re-invokes `$api.get` with the `status` query param set to the chosen value.",
+    "refined": "When the user selects a `status` filter value `'active'` and triggers apply, then `$api.get` is called again with path containing `query: { status: 'active' }`. Subsequent calls preserve the previously applied filter unless changed.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-38",
+    "original": "Given more results are available, when the user activates `load more`, then the Memory page re-invokes `$api.get` with the next `page` value and appends the returned items to the existing list.",
+    "refined": "When the Memory page has loaded page 1 with `items.length < total` and the user activates load-more, then `$api.get` is called with `query: { page: 2 }` and the returned items are appended to the existing items array, yielding `items.length === initialItems.length + newItems.length`.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-39",
+    "original": "Given the default layout is rendered on a route with a `project` slug, when navigation links are shown, then it includes a project-nav link targeting `/<slug>/memory` whose label resolves from `nav.memory`.",
+    "refined": "When `default.vue` layout renders on a route with `params.project = 'my-project'` and navigation links are visible, then there exists a project-nav anchor element with `href === '/my-project/memory'` and its inner text matches the resolved value of `useI18n()` with key `nav.memory`.",
+    "testable": true,
+    "storyId": "US-004"
+  },
+  {
+    "acId": "AC-40",
+    "original": "Given a project slug and a submitted query, when the user submits the search box, then the Code-intel page invokes `$api.get` with the path `/code-intel/symbols` and query params `projectSlug=<slug>` and `q=<query>`.",
+    "refined": "When the search form is submitted with query 'test' on project slug 'my-project', then $api.get must be called exactly once with path '/code-intel/symbols' and query object { projectSlug: 'my-project', q: 'test' }.",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-41",
+    "original": "Given the search resolves with symbols, when the Code-intel page renders results, then it shows one result row per symbol showing `name`, `kind`, and `file`.",
+    "refined": "When the API returns an array of 3 symbols with fields { name: 'foo', kind: 'function', file: 'src/a.ts' }, then the rendered page must contain 3 result rows and each row must contain text nodes matching the symbol's name, kind, and file values.",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-42",
+    "original": "Given the search request is pending, when the Code-intel page is rendered, then it shows a loading indicator and not the results table.",
+    "refined": "When isLoading is true, the rendered page must contain a loading indicator element and must not contain the results table element.",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-43",
+    "original": "Given the search resolves with zero symbols, when the Code-intel page finishes loading, then it renders an empty or `no matches` state.",
+    "refined": "When the API returns an empty symbols array and isLoading becomes false, then the rendered page must display a 'no matches' or empty state message and must not render any result rows.",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-44",
+    "original": "Given `$api.get` rejects, when the Code-intel page handles the error, then it surfaces `extractApiError(err)` via the app toast.",
+    "refined": "When $api.get('/code-intel/symbols', ...) rejects with an error object, then useAppToast().error must be called with the return value of extractApiError(err) and the search results section must not be rendered.",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-45",
+    "original": "Given a rendered result row, when the user clicks it, then the Code-intel page expands a detail panel that renders that symbol's `signature`, `docComment`, and its `callers` and `callees` as text lists rather than interactive links.",
+    "refined": "When a result row is clicked, then a detail panel must be rendered containing: the symbol's signature as text, the docComment as text, and callers/callees arrays rendered as unordered lists where each list item is a plain text string (no anchor tags).",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-46",
+    "original": "Given the default layout is rendered on a route with a `project` slug, when navigation links are shown, then it includes a project-nav link targeting `/<slug>/code-intel` whose label resolves from `nav.codeIntel`.",
+    "refined": "When default layout renders with route params.project set to 'my-project', then there must exist a nav link element with href '/my-project/code-intel' and the link text must equal the i18n value at key 'nav.codeIntel'.",
+    "testable": true,
+    "storyId": "US-005"
+  },
+  {
+    "acId": "AC-47",
+    "original": "Given `$api.get` is stubbed to resolve SLO metrics, when the SLO page is mounted, then it renders a metric card per returned metric showing its label and value.",
+    "refined": "When the SLO page component mounts with `$api.get('/admin/slos')` stubbed to resolve an array of N metrics, the rendered output contains N elements each containing text matching a metric's `label` property and the corresponding `value` property.",
+    "testable": true,
+    "storyId": "US-006"
+  },
+  {
+    "acId": "AC-48",
+    "original": "Given the SLO page mounts, when it requests data, then it calls `$api.get` with the path `/admin/slos`.",
+    "refined": "When the SLO page component is mounted, the `$api.get` function is called exactly once with the string argument '/admin/slos' as its first parameter.",
+    "testable": true,
+    "storyId": "US-006"
+  },
+  {
+    "acId": "AC-49",
+    "original": "Given selected date-window controls, when the user changes them, then the SLO page re-invokes `$api.get` with `from` and `to` query params carrying the selected window.",
+    "refined": "After a date-window change event is emitted with a from timestamp T1 and to timestamp T2, `$api.get` is called a second time with '/admin/slos' as first argument and an object containing `query: { from: T1, to: T2 }` as second argument.",
+    "testable": true,
+    "storyId": "US-006"
+  },
+  {
+    "acId": "AC-50",
+    "original": "Given the request is pending, when the SLO page is rendered, then it shows a loading indicator and not the metric cards.",
+    "refined": "While the `$api.get('/admin/slos')` promise is unresolved, the rendered output contains a loading-state UI element (isLoading === true or equivalent Pending/Loading indicator) and contains zero metric card elements.",
+    "testable": true,
+    "storyId": "US-006"
+  },
+  {
+    "acId": "AC-51",
+    "original": "Given `$api.get` rejects with a 403 `ApiError` code, when the SLO page handles the response, then it renders a friendly `admin only` state rather than a generic error toast.",
+    "refined": "When `$api.get('/admin/slos')` rejects with an object having `code: 'ApiError'` and `status: 403`, the rendered output contains a visible 'admin only' or equivalent forbidden message element, and `useAppToast().error` is never called.",
+    "testable": true,
+    "storyId": "US-006"
+  },
+  {
+    "acId": "AC-52",
+    "original": "Given `$api.get` rejects with a non-403 error, when the SLO page handles the response, then it surfaces `extractApiError(err)` via the app toast.",
+    "refined": "When `$api.get('/admin/slos')` rejects with any error where `status !== 403`, `extractApiError` is called with the error as argument, and `useAppToast().error` is subsequently called with the return value of `extractApiError(err)`.",
+    "testable": true,
+    "storyId": "US-006"
+  },
+  {
+    "acId": "AC-53",
+    "original": "Given the default layout is rendered for an authenticated user, when top-level navigation links are shown, then it includes a link to `/admin/slos` whose label resolves from `nav.slos`.",
+    "refined": "When the default layout renders with an authenticated user context, the navigation output contains a link element with `href` or `to` attribute equal to '/admin/slos', and the inner text of that link matches the value of the `nav.slos` key in the currently active locale file (en.json or zh.json).",
+    "testable": true,
+    "storyId": "US-006"
+  }
+]
