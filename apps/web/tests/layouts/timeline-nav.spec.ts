@@ -15,8 +15,13 @@ const zhLocalePath = join(webDir, 'i18n', 'locales', 'zh.json')
 describe('Timeline AC9: default layout has a /<slug>/timeline project nav link', () => {
   test('source contains a NuxtLink targeting /<slug>/timeline', () => {
     const source = readFileSync(layoutPath, 'utf-8')
-    expect(source).toMatch(/\/\$\{projectSlug\}\/timeline/)
+    // The link must be rendered by NuxtLink (not just an anchor or text)
+    // and must include the project-scoped path.
+    const linkMatch = source.match(/<NuxtLink[\s\S]*?\/?\{`\/\$\{projectSlug\}\/timeline`\}[\s\S]*?<\/NuxtLink>/)
+      ?? source.match(/<NuxtLink[\s\S]*?\$\{projectSlug\}\/timeline[\s\S]*?<\/NuxtLink>/)
+    expect(linkMatch).not.toBeNull()
   })
+
 
   test('source uses nav.timeline i18n key for the link label', () => {
     const source = readFileSync(layoutPath, 'utf-8')
@@ -25,7 +30,6 @@ describe('Timeline AC9: default layout has a /<slug>/timeline project nav link',
 
   test('source places the timeline link inside the project-scoped nav block', () => {
     const source = readFileSync(layoutPath, 'utf-8')
-    // Find the project-scoped block and confirm the timeline link is inside it
     const scopedStart = source.indexOf('projectSlug')
     const scopedEnd = source.indexOf('</template>', scopedStart)
     expect(scopedStart).toBeGreaterThan(-1)
@@ -33,6 +37,15 @@ describe('Timeline AC9: default layout has a /<slug>/timeline project nav link',
     const scopedSection = source.slice(scopedStart, scopedEnd)
     expect(scopedSection).toMatch(/\/timeline/)
     expect(scopedSection).toMatch(/nav\.timeline/)
+  })
+
+  test('Timeline NuxtLink appears after the KB NuxtLink in the project nav', () => {
+    const source = readFileSync(layoutPath, 'utf-8')
+    const kbIdx = source.indexOf('/kb')
+    const timelineIdx = source.indexOf('/timeline')
+    // Timeline link must come after KB link in the sidebar order
+    expect(kbIdx).toBeGreaterThan(-1)
+    expect(timelineIdx).toBeGreaterThan(kbIdx)
   })
 })
 

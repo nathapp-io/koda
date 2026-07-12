@@ -77,6 +77,10 @@ async function loadMore() {
   await loadEvents({ append: true })
 }
 
+onMounted(() => {
+  loadEvents()
+})
+
 function formatDate(dateStr: string) {
   return new Date(dateStr).toLocaleString()
 }

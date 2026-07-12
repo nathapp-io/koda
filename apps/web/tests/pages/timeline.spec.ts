@@ -70,6 +70,15 @@ describe('Timeline AC2: calls $api.get with /projects/<slug>/timeline', () => {
     const matched = source.match(/\$api\.get[\s<(][^,;]*[`'"]\/projects\/\$\{slug\}\/timeline/)
     expect(matched).not.toBeNull()
   })
+
+  test('source triggers the initial fetch on mount (onMounted calls loadEvents)', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    // The page must wire an onMounted hook that invokes loadEvents,
+    // otherwise AC1/AC2 (events rendered after mount, $api.get called on mount) cannot hold.
+    const hasOnMounted = /\bonMounted\s*\(/.test(source)
+    const callsLoadEventsInMount = /\bonMounted\s*\([\s\S]{0,200}loadEvents\s*\(\s*\)/.test(source)
+    expect(hasOnMounted && callsLoadEventsInMount).toBe(true)
+  })
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
