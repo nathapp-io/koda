@@ -110,6 +110,14 @@ Existing-page gaps:
 
 `.env` untracked (placeholders only), agent API keys HMAC-hashed (`Agent.apiKeyHash`), bcrypt cost 12 + password complexity, AES-256-GCM with random IV/auth-tag for VCS tokens (key rotation unaddressed), timing-safe CI-webhook signature comparison, class-validator + global validation pipes.
 
+### Dependency vulnerabilities (`bun audit`)
+
+**2026-07-12:** `bun audit` reported 113 vulnerabilities (2 critical, 45 high, 58 moderate, 8 low). Fixed the direct dependencies with a safe, non-breaking patch available: `axios` (CLI, ^1.7.0→^1.18.1, closes 9 CVEs), `@nestjs/common`/`core`/`platform-fastify`/`swagger`/`testing`/`cli` (API, bumped in lockstep to latest 11.x), `joi` (API, ^18.0.2→^18.2.3). Now 86 remain, none of them koda-controlled direct deps with an in-range fix left on the table (independently verified). **Still open, needs dedicated follow-up (not bundled into the audit sweep — each needs its own testing):**
+- `nuxt` (web) stuck at `^3.21.2` — bumping to `^3.21.8` (needed to fix 8 nuxt CVEs, incl. one high-severity route-rule middleware bypass) breaks `nuxt typecheck`: a `watch()` callback's parameter type regresses to `Ref<T>` instead of the unwrapped `T` in `apps/web/pages/[project]/settings.vue` (~L72-77).
+- `@nestjs/core`'s injection advisory (GHSA-36xv-jgw5-4q75, <=11.1.17) persists via a nested copy bundled as a *real* (non-peer) dependency of `@nestjs/schedule@4.1.2` (used for the outbox cron scheduler) — the fix requires a `@nestjs/schedule` 5.x/6.x jump whose peer-dependency ranges don't yet officially list NestJS 11 support.
+- 2 critical findings (`handlebars`, `shell-quote`) are dev/build-tool-only (pulled by `@hey-api/openapi-ts` codegen and `ts-jest`, not any runtime path) — no production exposure, but still flagged by `bun audit` and worth clearing eventually.
+- Remaining ~80 are dominated by nuxt/vite build-toolchain internals, `@nuxt/devtools`, eslint's dependency tree, and prisma CLI — dev-only, each needs an individually-tested major bump.
+
 ---
 
 ## 4. Suggested priority order
