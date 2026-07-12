@@ -152,6 +152,21 @@ describe('memoryCommand', () => {
 
       expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ id: 'decision-2' }, null, 2));
     });
+
+    it('omits actorId when --actor-id is not provided (server attributes it to the caller)', async () => {
+      mockRecordDecision.mockResolvedValue({ ret: 0, data: { id: 'decision-3' } });
+
+      await program.parseAsync([
+        'node', 'koda', 'memory', 'decisions',
+        '--topic', 't',
+        '--decision', 'd',
+      ]);
+
+      expect(mockRecordDecision).toHaveBeenCalledWith({
+        requestBody: expect.objectContaining({ actorId: undefined }),
+      });
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
   });
 
   describe('create', () => {
@@ -200,6 +215,19 @@ describe('memoryCommand', () => {
       ]);
 
       expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ id: 'mem-2' }, null, 2));
+    });
+
+    it('exits with code 3 on a non-numeric --confidence instead of silently defaulting', async () => {
+      await program.parseAsync([
+        'node', 'koda', 'memory', 'create',
+        '--kind', 'FACT',
+        '--subject', 's',
+        '--predicate', 'p',
+        '--confidence', 'not-a-number',
+      ]);
+
+      expect(mockCreateMemory).not.toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(3);
     });
   });
 });

@@ -11,9 +11,13 @@ import { handleApiError } from '../utils/error';
  * of the API which resolves the slug server-side from the URL path.
  */
 async function resolveProjectId(slug: string): Promise<string> {
-  const response = await projectsControllerFindBySlug({ slug });
-  const project = unwrap<{ id: string }>(response);
-  return project.id;
+  try {
+    const response = await projectsControllerFindBySlug({ slug });
+    const project = unwrap<{ id: string }>(response);
+    return project.id;
+  } catch (err: unknown) {
+    handleApiError(err, { notFoundMessage: `Project not found: ${slug}` });
+  }
 }
 
 export function memoryCommand(program: Command): void {
@@ -79,7 +83,7 @@ export function memoryCommand(program: Command): void {
     .command('decisions')
     .description('Record a decision to project memory')
     .option('--project <slug>', 'Project slug')
-    .requiredOption('--actor-id <id>', 'ID of the user or agent making the decision')
+    .option('--actor-id <id>', 'ID to attribute the decision to (admin callers only — everyone else always records as themselves)')
     .requiredOption('--topic <topic>', 'Short topic/subject of the decision')
     .requiredOption('--decision <text>', 'The decision that was made')
     .option('--rationale <text>', 'Why the decision was made')
@@ -146,6 +150,15 @@ export function memoryCommand(program: Command): void {
           handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
+        let confidence: number | undefined;
+        if (options.confidence !== undefined) {
+          confidence = Number(options.confidence);
+          if (!Number.isFinite(confidence)) {
+            handleApiError(new Error(`Invalid --confidence value: ${options.confidence}`), { validationError: true });
+            return;
+          }
+        }
+
         OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
         OpenAPI.TOKEN = ctx.apiKey;
 
@@ -160,7 +173,7 @@ export function memoryCommand(program: Command): void {
             object: options.object,
             sourceType: options.sourceType,
             sourceId: options.sourceId,
-            confidence: options.confidence !== undefined ? Number(options.confidence) : undefined,
+            confidence,
             ownerId: options.ownerId,
           },
         });

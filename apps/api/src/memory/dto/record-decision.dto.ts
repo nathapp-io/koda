@@ -7,10 +7,13 @@ export class RecordDecisionDto {
   @MinLength(1)
   projectId!: string;
 
-  @ApiProperty({ description: 'ID of the user or agent making the decision' })
+  @ApiProperty({
+    required: false,
+    description: 'ID to attribute the decision to. Only honored for admin callers — every other caller always records the decision as themselves, regardless of this value.',
+  })
+  @IsOptional()
   @IsString()
-  @MinLength(1)
-  actorId!: string;
+  actorId?: string;
 
   @ApiProperty({ description: 'Short topic/subject of the decision' })
   @IsString()

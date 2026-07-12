@@ -3978,8 +3978,7 @@
           },
           "actorId": {
             "type": "string",
-            "minLength": 1,
-            "description": "ID of the user or agent making the decision"
+            "description": "ID to attribute the decision to. Only honored for admin callers — every other caller always records the decision as themselves, regardless of this value."
           },
           "topic": {
             "type": "string",
@@ -4002,7 +4001,6 @@
         },
         "required": [
           "projectId",
-          "actorId",
           "topic",
           "decision"
         ]
