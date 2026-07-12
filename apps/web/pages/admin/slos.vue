@@ -14,7 +14,30 @@ interface SloMetric {
 }
 
 interface SloResponse {
-  metrics: SloMetric[]
+  retrievalLatency: {
+    p50: number
+    p95: number
+    p99: number
+    sampleCount: number
+  }
+  staleHitRate: number
+  provenanceCoverage: number
+  leakageIncidents: number
+  memoryGrowthRate: number
+}
+
+function flattenSloMetrics(response: SloResponse): SloMetric[] {
+  const lat = response.retrievalLatency ?? { p50: 0, p95: 0, p99: 0, sampleCount: 0 }
+  return [
+    { label: 'Retrieval latency p50', value: lat.p50 },
+    { label: 'Retrieval latency p95', value: lat.p95 },
+    { label: 'Retrieval latency p99', value: lat.p99 },
+    { label: 'Retrieval latency samples', value: lat.sampleCount },
+    { label: 'Stale hit rate', value: response.staleHitRate },
+    { label: 'Provenance coverage', value: response.provenanceCoverage },
+    { label: 'Leakage incidents', value: response.leakageIncidents },
+    { label: 'Memory growth rate', value: response.memoryGrowthRate },
+  ]
 }
 
 function toIsoDate(d: Date): string {
@@ -42,7 +65,7 @@ async function reload() {
     const response = await $api.get<SloResponse>('/admin/slos', {
       query: { from: from.value, to: to.value },
     })
-    metrics.value = response.metrics
+    metrics.value = flattenSloMetrics(response)
   }
   catch (err: unknown) {
     if (err instanceof ApiError && err.code === 403) {

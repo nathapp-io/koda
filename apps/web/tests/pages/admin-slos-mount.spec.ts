@@ -41,6 +41,19 @@ const Vue = require(resolveBunPackage('vue'))
 const webDir = join(__dirname, '../..')
 const pagePath = join(webDir, 'pages', 'admin', 'slos.vue')
 
+// Minimal stub of the real API response shape (apps/api SloMetrics) used
+// for tests that don't care about the metric contents — the page flattens
+// this object into the `metrics` array via flattenSloMetrics().
+function emptySloResponse() {
+  return {
+    retrievalLatency: { p50: 0, p95: 0, p99: 0, sampleCount: 0 },
+    staleHitRate: 0,
+    provenanceCoverage: 0,
+    leakageIncidents: 0,
+    memoryGrowthRate: 0,
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers — compile the real SFC and mount it with stubbed globals.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -138,13 +151,14 @@ async function mountSlosPage(opts: MountOptions) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('US-006 AC1 (Behavioral SFC mount): page renders one metric card per returned metric', () => {
-  test('mounting with two metrics produces two metric cards with label and value bindings', async () => {
+  test('mounting with a SloMetrics payload produces one card per flattened metric with label and value bindings', async () => {
     const fetchMock = jest.fn(async () => ({
       data: {
-        metrics: [
-          { label: 'Availability', value: 99.95 },
-          { label: 'Latency p95', value: 120 },
-        ],
+        retrievalLatency: { p50: 80, p95: 120, p99: 200, sampleCount: 1000 },
+        staleHitRate: 0.05,
+        provenanceCoverage: 0.92,
+        leakageIncidents: 1,
+        memoryGrowthRate: 0.02,
       },
     }))
 
@@ -152,20 +166,41 @@ describe('US-006 AC1 (Behavioral SFC mount): page renders one metric card per re
 
     const metrics = bindings.metrics as { value: Array<{ label: string; value: number }> }
     expect(Array.isArray(metrics.value)).toBe(true)
-    expect(metrics.value).toHaveLength(2)
-    expect(metrics.value[0].label).toBe('Availability')
-    expect(metrics.value[0].value).toBe(99.95)
-    expect(metrics.value[1].label).toBe('Latency p95')
-    expect(metrics.value[1].value).toBe(120)
+    expect(metrics.value).toHaveLength(8)
+    const labels = metrics.value.map(m => m.label)
+    expect(labels).toContain('Retrieval latency p50')
+    expect(labels).toContain('Retrieval latency p95')
+    expect(labels).toContain('Retrieval latency p99')
+    expect(labels).toContain('Retrieval latency samples')
+    expect(labels).toContain('Stale hit rate')
+    expect(labels).toContain('Provenance coverage')
+    expect(labels).toContain('Leakage incidents')
+    expect(labels).toContain('Memory growth rate')
+
+    const p50 = metrics.value.find(m => m.label === 'Retrieval latency p50')
+    expect(p50?.value).toBe(80)
+    const samples = metrics.value.find(m => m.label === 'Retrieval latency samples')
+    expect(samples?.value).toBe(1000)
+    const stale = metrics.value.find(m => m.label === 'Stale hit rate')
+    expect(stale?.value).toBe(0.05)
   })
 
-  test('mounting with an empty metrics list produces zero metric cards', async () => {
-    const fetchMock = jest.fn(async () => ({ data: { metrics: [] } }))
+  test('mounting with a SloMetrics payload whose numeric fields are zero produces eight zero-valued cards', async () => {
+    const fetchMock = jest.fn(async () => ({
+      data: {
+        retrievalLatency: { p50: 0, p95: 0, p99: 0, sampleCount: 0 },
+        staleHitRate: 0,
+        provenanceCoverage: 0,
+        leakageIncidents: 0,
+        memoryGrowthRate: 0,
+      },
+    }))
 
     const { bindings } = await mountSlosPage({ fetchMock })
 
-    const metrics = bindings.metrics as { value: Array<unknown> }
-    expect(metrics.value).toEqual([])
+    const metrics = bindings.metrics as { value: Array<{ label: string; value: number }> }
+    expect(metrics.value).toHaveLength(8)
+    expect(metrics.value.every(m => m.value === 0)).toBe(true)
   })
 })
 
@@ -175,7 +210,7 @@ describe('US-006 AC1 (Behavioral SFC mount): page renders one metric card per re
 
 describe('US-006 AC2 (Behavioral SFC mount): page calls $api.get with /admin/slos on mount', () => {
   test('mounting triggers $api.get("/admin/slos") at least once', async () => {
-    const fetchMock = jest.fn(async () => ({ data: { metrics: [] } }))
+    const fetchMock = jest.fn(async () => ({ data: emptySloResponse() }))
 
     const { fetchCalls } = await mountSlosPage({ fetchMock })
 
@@ -191,7 +226,7 @@ describe('US-006 AC2 (Behavioral SFC mount): page calls $api.get with /admin/slo
 
 describe('US-006 AC3 (Behavioral SFC mount): changing the date window re-invokes $api.get with from/to query', () => {
   test('mutating the from ref and triggering reload re-invokes $api.get with from and to set', async () => {
-    const fetchMock = jest.fn(async () => ({ data: { metrics: [] } }))
+    const fetchMock = jest.fn(async () => ({ data: emptySloResponse() }))
 
     const { fetchCalls, bindings } = await mountSlosPage({ fetchMock })
     expect(fetchCalls.length).toBeGreaterThanOrEqual(1)
@@ -215,7 +250,7 @@ describe('US-006 AC3 (Behavioral SFC mount): changing the date window re-invokes
   })
 
   test('the second invocation carries the new window values, not the previous ones', async () => {
-    const fetchMock = jest.fn(async () => ({ data: { metrics: [] } }))
+    const fetchMock = jest.fn(async () => ({ data: emptySloResponse() }))
 
     const { fetchCalls, bindings } = await mountSlosPage({ fetchMock })
 
@@ -316,7 +351,7 @@ describe('US-006 AC4 (Behavioral SFC mount): pending state exposes a loading fla
     const pending = bindings.pending as { value: boolean }
     expect(pending.value).toBe(true)
 
-    resolveFetch?.({ data: { metrics: [] } })
+    resolveFetch?.({ data: emptySloResponse() })
     await new Promise(resolve => setTimeout(resolve, 20))
 
     expect(pending.value).toBe(false)
