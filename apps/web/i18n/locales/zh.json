@@ -60,6 +60,7 @@
     "agents": "代理",
     "kb": "知识库",
     "timeline": "时间线",
+    "memory": "记忆",
     "labels": "标签",
     "tickets": "工单",
     "toggleSidebar": "切换侧栏",
@@ -225,6 +226,23 @@
       "actorId": "操作者",
       "action": "动作",
       "created": "时间"
+    }
+  },
+  "memory": {
+    "empty": "暂无记忆项。",
+    "loadMore": "加载更多",
+    "filter": {
+      "kind": "类型",
+      "status": "状态",
+      "all": "全部"
+    },
+    "columns": {
+      "subject": "主体",
+      "predicate": "谓词",
+      "object": "客体",
+      "kind": "类型",
+      "confidence": "置信度",
+      "status": "状态"
     }
   },
   "comments": {

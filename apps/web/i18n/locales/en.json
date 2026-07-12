@@ -60,6 +60,7 @@
     "agents": "Agents",
     "kb": "Knowledge Base",
     "timeline": "Timeline",
+    "memory": "Memory",
     "labels": "Labels",
     "tickets": "Tickets",
     "toggleSidebar": "Toggle sidebar",
@@ -225,6 +226,23 @@
       "actorId": "Actor",
       "action": "Action",
       "created": "When"
+    }
+  },
+  "memory": {
+    "empty": "No memory items yet.",
+    "loadMore": "Load more",
+    "filter": {
+      "kind": "Kind",
+      "status": "Status",
+      "all": "All"
+    },
+    "columns": {
+      "subject": "Subject",
+      "predicate": "Predicate",
+      "object": "Object",
+      "kind": "Kind",
+      "confidence": "Confidence",
+      "status": "Status"
     }
   },
   "comments": {
