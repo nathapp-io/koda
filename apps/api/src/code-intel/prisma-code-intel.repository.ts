@@ -165,7 +165,7 @@ export class PrismaCodeIntelRepository implements ICodeIntelRepository {
         where,
         take: limit,
         skip,
-        orderBy: { name: 'asc' },
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
         select: { id: true, name: true, kind: true, file: true, signature: true },
       }),
       this.prisma.client.symbol.count({ where }),
