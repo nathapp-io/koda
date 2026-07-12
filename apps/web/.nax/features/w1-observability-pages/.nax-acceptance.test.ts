@@ -7,9 +7,25 @@ const timelinePath = join(webDir, 'pages', '[project]', 'timeline.vue')
 const memoryPath = join(webDir, 'pages', '[project]', 'memory.vue')
 const codeIntelPath = join(webDir, 'pages', '[project]', 'code-intel.vue')
 const slosPath = join(webDir, 'pages', 'admin', 'slos.vue')
+const timelineComposablePath = join(webDir, 'composables', 'useTimelineEvents.ts')
+const memoryComposablePath = join(webDir, 'composables', 'useMemory.ts')
 const layoutPath = join(webDir, 'layouts', 'default.vue')
 const enJsonPath = join(webDir, 'i18n', 'locales', 'en.json')
 const zhJsonPath = join(webDir, 'i18n', 'locales', 'zh.json')
+
+// Read the timeline page + its composable together — the page delegates the
+// $api.get call to useTimelineEvents, so the actual fetch + query construction
+// lives in the composable, not the .vue file.
+function readTimelineSource(): string {
+  return `${readFileSync(timelinePath, 'utf-8')}\n${readFileSync(timelineComposablePath, 'utf-8')}`
+}
+
+// Read the memory page + its composable together — the page delegates the
+// $api.get call to useMemory, so the actual fetch + query construction lives
+// in the composable, not the .vue file.
+function readMemorySource(): string {
+  return `${readFileSync(memoryPath, 'utf-8')}\n${readFileSync(memoryComposablePath, 'utf-8')}`
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AC-1: Timeline page renders one row per event with eventType, actorId, action
@@ -47,12 +63,12 @@ describe('AC-1: Timeline page renders event rows with eventType, actorId, action
 
 describe('AC-2: Timeline page calls $api.get with /projects/<slug>/timeline', () => {
   test('source uses $api.get for data fetching', () => {
-    const source = readFileSync(timelinePath, 'utf-8')
+    const source = readTimelineSource()
     expect(source).toContain('$api.get')
   })
 
   test('source fetches from /projects/${slug}/timeline endpoint', () => {
-    const source = readFileSync(timelinePath, 'utf-8')
+    const source = readTimelineSource()
     expect(source).toMatch(/\/projects\/\$\{[^}]+\}\/timeline|\/projects\/\`[^`]*\`\/timeline|projects.*timeline/)
   })
 
@@ -122,6 +138,8 @@ describe('AC-4: Timeline page renders empty-state when API returns empty array',
     const hasConditionalTable =
       source.match(/v-if=["'][^"']*length[^"']*["']/) ||
       source.match(/v-if=["'][^"']*events[^"']*["']/) ||
+      source.match(/v-else-if=["'][^"']*length[^"']*["']/) ||
+      source.match(/v-else-if=["'][^"']*events[^"']*["']/) ||
       source.includes('EmptyState') ||
       source.includes('empty-state')
     expect(hasConditionalTable).toBeTruthy()
@@ -173,12 +191,12 @@ describe('AC-5: Timeline page surfaces extractApiError via toast on error', () =
 
 describe('AC-6: Timeline page passes eventTypes query param when filter is applied', () => {
   test('source references eventTypes in query params', () => {
-    const source = readFileSync(timelinePath, 'utf-8')
+    const source = readTimelineSource()
     expect(source).toContain('eventTypes')
   })
 
   test('source passes query object with eventTypes to $api.get', () => {
-    const source = readFileSync(timelinePath, 'utf-8')
+    const source = readTimelineSource()
     expect(source).toContain('$api.get')
     expect(source).toContain('eventTypes')
   })
@@ -200,7 +218,7 @@ describe('AC-7: Timeline page passes from and to query params for date range fil
   })
 
   test('source builds query object with from and to for $api.get', () => {
-    const source = readFileSync(timelinePath, 'utf-8')
+    const source = readTimelineSource()
     expect(source).toContain('from')
     expect(source).toContain('$api.get')
   })
@@ -212,12 +230,12 @@ describe('AC-7: Timeline page passes from and to query params for date range fil
 
 describe('AC-8: Timeline load-more passes cursor and appends returned events', () => {
   test('source references cursor for pagination', () => {
-    const source = readFileSync(timelinePath, 'utf-8')
+    const source = readTimelineSource()
     expect(source).toContain('cursor')
   })
 
   test('source appends new events to existing list (push, spread, or concat)', () => {
-    const source = readFileSync(timelinePath, 'utf-8')
+    const source = readTimelineSource()
     const hasAppend =
       source.includes('.push(') ||
       source.includes('...events') ||
@@ -330,12 +348,12 @@ describe('AC-10: Memory page renders rows with subject, predicate, object, kind,
 
 describe('AC-11: Memory page calls $api.get with /projects/<slug>/memory', () => {
   test('source calls $api.get', () => {
-    const source = readFileSync(memoryPath, 'utf-8')
+    const source = readMemorySource()
     expect(source).toContain('$api.get')
   })
 
   test('source fetches from /projects/${slug}/memory endpoint', () => {
-    const source = readFileSync(memoryPath, 'utf-8')
+    const source = readMemorySource()
     expect(source).toMatch(/\/projects\/\$\{[^}]+\}\/memory|projects.*memory/)
   })
 
@@ -392,6 +410,8 @@ describe('AC-13: Memory page renders empty-state when items array is empty', () 
     const hasConditional =
       source.match(/v-if=["'][^"']*length[^"']*["']/) ||
       source.match(/v-if=["'][^"']*items[^"']*["']/) ||
+      source.match(/v-else-if=["'][^"']*length[^"']*["']/) ||
+      source.match(/v-else-if=["'][^"']*items[^"']*["']/) ||
       source.includes('EmptyState') ||
       source.includes('empty-state')
     expect(hasConditional).toBeTruthy()
@@ -438,7 +458,7 @@ describe('AC-15: Memory page passes kind query param on filter apply, preserving
   })
 
   test('source builds query containing kind for $api.get', () => {
-    const source = readFileSync(memoryPath, 'utf-8')
+    const source = readMemorySource()
     expect(source).toContain('$api.get')
     expect(source).toContain('kind')
   })
@@ -455,7 +475,7 @@ describe('AC-16: Memory page passes status query param on filter apply, preservi
   })
 
   test('source builds query containing status for $api.get', () => {
-    const source = readFileSync(memoryPath, 'utf-8')
+    const source = readMemorySource()
     expect(source).toContain('$api.get')
     expect(source).toContain('status')
   })
@@ -467,12 +487,12 @@ describe('AC-16: Memory page passes status query param on filter apply, preservi
 
 describe('AC-17: Memory load-more invokes $api.get with page and appends items', () => {
   test('source references page param for pagination', () => {
-    const source = readFileSync(memoryPath, 'utf-8')
+    const source = readMemorySource()
     expect(source).toMatch(/\bpage\b/)
   })
 
   test('source appends new items to existing list', () => {
-    const source = readFileSync(memoryPath, 'utf-8')
+    const source = readMemorySource()
     const hasAppend =
       source.includes('.push(') ||
       source.includes('concat(') ||
