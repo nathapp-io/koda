@@ -2,7 +2,7 @@ import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
 import { TimelineService } from './timeline.service';
-import { ProjectsService } from '../projects/projects.service';
+import { ProjectAccessService } from '../projects/project-access.service';
 
 @ApiTags('memory')
 @ApiBearerAuth()
@@ -10,11 +10,11 @@ import { ProjectsService } from '../projects/projects.service';
 export class TimelineController {
   constructor(
     private readonly timelineService: TimelineService,
-    private readonly projectsService: ProjectsService,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   private async resolveProject(slug: string): Promise<{ id: string }> {
-    const id = await this.projectsService.findProjectIdBySlug(slug);
+    const id = await this.projectAccess.findProjectIdBySlug(slug);
     return { id };
   }
 

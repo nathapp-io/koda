@@ -3,6 +3,7 @@ import { MemoryModule } from './memory.module';
 import { MemoryReadController } from './memory-read.controller';
 import { MemoryGovernanceService } from './memory-governance.service';
 import { ProjectsService } from '../projects/projects.service';
+import { ProjectAccessService } from '../projects/project-access.service';
 import { GlobalStubsModule } from '../common/test-helpers/global-stubs.module';
 
 describe('MemoryModule (DI wiring)', () => {
@@ -38,8 +39,12 @@ describe('MemoryModule (DI wiring)', () => {
       expect(moduleRef.get(MemoryGovernanceService)).toBeInstanceOf(MemoryGovernanceService);
     });
 
-    it('resolves ProjectsService (imported via ProjectsModule)', () => {
+    it('resolves ProjectsService (imported via ProjectsModule, still needed by MemoryGovernanceProcessor)', () => {
       expect(moduleRef.get(ProjectsService)).toBeInstanceOf(ProjectsService);
+    });
+
+    it('resolves ProjectAccessService (imported via ProjectAccessModule)', () => {
+      expect(moduleRef.get(ProjectAccessService)).toBeInstanceOf(ProjectAccessService);
     });
   });
 });

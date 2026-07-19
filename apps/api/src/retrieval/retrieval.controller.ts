@@ -1,10 +1,10 @@
 import { Controller, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { ForbiddenAppException, NotFoundAppException, JsonResponse } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, JsonResponse } from '@nathapp/nestjs-common';
 import { Principal } from '@nathapp/nestjs-auth';
 import { EvaluationService } from './evaluation.service';
-import { PrismaRagRepository } from '../rag/prisma-rag.repository';
-import { KodaPrincipal, isAgentPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
+import { ProjectAccessService } from '../projects/project-access.service';
+import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 @ApiTags('knowledge-base')
 @ApiBearerAuth()
@@ -12,13 +12,13 @@ import { KodaPrincipal, isAgentPrincipal, isUserPrincipal } from '../auth/princi
 export class RetrievalController {
   constructor(
     private readonly evaluationService: EvaluationService,
-    private readonly ragRepository: PrismaRagRepository,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
-  private async resolveProject(slug: string) {
-    const project = await this.ragRepository.findProjectBySlug(slug);
-    if (!project || project.deletedAt) throw new NotFoundAppException({}, 'rag');
-    return project;
+  private async resolveProject(slug: string): Promise<{ id: string }> {
+    // findProjectIdBySlug throws NotFoundAppException if missing or soft-deleted
+    const id = await this.projectAccess.findProjectIdBySlug(slug);
+    return { id };
   }
 
   private async checkProjectMembership(
@@ -28,32 +28,9 @@ export class RetrievalController {
     if (!principal) {
       throw new ForbiddenAppException({}, 'rag');
     }
-
-    // Agent principals are cross-project (their API key is their credential).
-    // Actor shape is normalized in CombinedAuthGuard and read through principal type guards.
-    if (isAgentPrincipal(principal)) {
-      return;
-    }
-
-    if (!isUserPrincipal(principal)) {
-      throw new ForbiddenAppException({}, 'rag');
-    }
-
-    // ADMIN users have global permissions and do not need project membership.
-    if (principal.role === 'ADMIN') {
-      return;
-    }
-
-    const membership = await this.ragRepository.findProjectMembership(projectId, principal.id);
-
-    if (!membership) {
-      throw new ForbiddenAppException({}, 'rag');
-    }
-
-    const allowedRoles = ['ADMIN', 'DEVELOPER', 'AGENT', 'VIEWER'];
-    if (!allowedRoles.includes(membership.role)) {
-      throw new ForbiddenAppException({}, 'rag');
-    }
+    // assertProjectMembership throws ForbiddenAppException when access is denied;
+    // agent and ADMIN-user bypass semantics are preserved inside the shared service.
+    await this.projectAccess.assertProjectMembership(projectId, principal);
   }
 
   @Post('evaluate/retrieval')

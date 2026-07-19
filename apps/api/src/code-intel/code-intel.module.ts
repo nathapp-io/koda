@@ -9,14 +9,14 @@ import { CodeCommitOutboxHandler } from './code-commit-outbox-handler';
 import { ImpactAnalysisService } from './impact-analysis.service';
 import { EntityGraphModule } from '../entity-graph/entity-graph.module';
 import { RagModule } from '../rag/rag.module';
-import { ProjectsModule } from '../projects/projects.module';
+import { ProjectAccessModule } from '../projects/project-access.module';
 import { PrismaCodeIntelRepository } from './prisma-code-intel.repository';
 import { CODE_INTEL_REPOSITORY } from './domain/code-intel.domain';
 import { OutboxModule } from '../outbox/outbox.module';
 import { CodeIntelOutboxSubscriber } from './code-intel-outbox.subscriber';
 
 @Module({
-  imports: [PrismaModule, ConfigModule, EntityGraphModule, OutboxModule, forwardRef(() => RagModule), forwardRef(() => ProjectsModule)],
+  imports: [PrismaModule, ConfigModule, EntityGraphModule, OutboxModule, forwardRef(() => RagModule), ProjectAccessModule],
   controllers: [CodeIntelController],
   providers: [
     PrismaCodeIntelRepository,

@@ -4,7 +4,7 @@ import { MemoryKind } from '../common/enums';
 import { MemoryGovernanceService } from './memory-governance.service';
 import { MemoryItem } from './memory-item-repository';
 import { MemoryReadController } from './memory-read.controller';
-import { ProjectsService } from '../projects/projects.service';
+import { ProjectAccessService } from '../projects/project-access.service';
 
 const makeMemoryItem = (overrides: Partial<MemoryItem> = {}): MemoryItem => ({
   id: 'mem-1',
@@ -38,7 +38,7 @@ describe('MemoryReadController', () => {
     getProjectMemory: jest.fn(),
   };
 
-  const mockProjectsService = {
+  const mockProjectAccessService = {
     findProjectIdBySlug: jest.fn(),
     assertProjectMembership: jest.fn(),
   };
@@ -49,7 +49,7 @@ describe('MemoryReadController', () => {
     jest.clearAllMocks();
     controller = new MemoryReadController(
       mockGovernanceService as unknown as MemoryGovernanceService,
-      mockProjectsService as unknown as ProjectsService,
+      mockProjectAccessService as unknown as ProjectAccessService,
     );
   });
 
@@ -57,8 +57,8 @@ describe('MemoryReadController', () => {
     describe('AC1: returns 200 with items and total for active memory items', () => {
       it('returns items array matching the service result', async () => {
         const items = [makeMemoryItem(), makeMemoryItem({ id: 'mem-2' })];
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-123');
-        mockProjectsService.assertProjectMembership.mockResolvedValue(undefined);
+        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
+        mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
         mockGovernanceService.getProjectMemory.mockResolvedValue({ items, total: 2 });
 
         const result = await controller.getMemory('my-project', principal);
@@ -69,8 +69,8 @@ describe('MemoryReadController', () => {
 
       it('returns total equal to the service total', async () => {
         const items = [makeMemoryItem()];
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-123');
-        mockProjectsService.assertProjectMembership.mockResolvedValue(undefined);
+        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
+        mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
         mockGovernanceService.getProjectMemory.mockResolvedValue({ items, total: 42 });
 
         const result = await controller.getMemory('my-project', principal);
@@ -80,8 +80,8 @@ describe('MemoryReadController', () => {
       });
 
       it('calls service with the projectId resolved from the slug', async () => {
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-resolved-id');
-        mockProjectsService.assertProjectMembership.mockResolvedValue(undefined);
+        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-resolved-id');
+        mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
         mockGovernanceService.getProjectMemory.mockResolvedValue({ items: [], total: 0 });
 
         await controller.getMemory('my-project', principal);
@@ -95,8 +95,8 @@ describe('MemoryReadController', () => {
     describe('AC2: kind filter', () => {
       it('passes kind=DECISION to the service when kind query param is provided', async () => {
         const items = [makeMemoryItem({ kind: MemoryKind.DECISION })];
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-123');
-        mockProjectsService.assertProjectMembership.mockResolvedValue(undefined);
+        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
+        mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
         mockGovernanceService.getProjectMemory.mockResolvedValue({ items, total: 1 });
 
         await controller.getMemory('my-project', principal, 'DECISION');
@@ -107,8 +107,8 @@ describe('MemoryReadController', () => {
       });
 
       it('does not include kind in the service query when kind is not provided', async () => {
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-123');
-        mockProjectsService.assertProjectMembership.mockResolvedValue(undefined);
+        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
+        mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
         mockGovernanceService.getProjectMemory.mockResolvedValue({ items: [], total: 0 });
 
         await controller.getMemory('my-project', principal);
@@ -121,8 +121,8 @@ describe('MemoryReadController', () => {
 
     describe('AC3: default status filters to active with non-expired ttlAt', () => {
       it('calls service without a status field when no status param is provided', async () => {
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-123');
-        mockProjectsService.assertProjectMembership.mockResolvedValue(undefined);
+        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
+        mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
         mockGovernanceService.getProjectMemory.mockResolvedValue({ items: [], total: 0 });
 
         await controller.getMemory('my-project', principal);
@@ -136,8 +136,8 @@ describe('MemoryReadController', () => {
     describe('AC4: status=superseded filter', () => {
       it('passes status=superseded to service when status query param is superseded', async () => {
         const items = [makeMemoryItem({ status: 'superseded' })];
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-123');
-        mockProjectsService.assertProjectMembership.mockResolvedValue(undefined);
+        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
+        mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
         mockGovernanceService.getProjectMemory.mockResolvedValue({ items, total: 1 });
 
         await controller.getMemory('my-project', principal, undefined, undefined, 'superseded');
@@ -148,8 +148,8 @@ describe('MemoryReadController', () => {
       });
 
       it('does not include status in the service query when status is omitted', async () => {
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-123');
-        mockProjectsService.assertProjectMembership.mockResolvedValue(undefined);
+        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
+        mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
         mockGovernanceService.getProjectMemory.mockResolvedValue({ items: [], total: 0 });
 
         await controller.getMemory('my-project', principal, undefined, undefined, undefined);
@@ -163,8 +163,8 @@ describe('MemoryReadController', () => {
     describe('AC5: pagination', () => {
       it('passes page=2 and limit=10 as parsed numbers to the service', async () => {
         const page2Items = Array.from({ length: 10 }, (_, i) => makeMemoryItem({ id: `mem-${i + 11}` }));
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-123');
-        mockProjectsService.assertProjectMembership.mockResolvedValue(undefined);
+        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
+        mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
         mockGovernanceService.getProjectMemory.mockResolvedValue({ items: page2Items, total: 25 });
 
         const result = await controller.getMemory('my-project', principal, undefined, undefined, undefined, '2', '10');
@@ -177,8 +177,8 @@ describe('MemoryReadController', () => {
 
       it('returns only the items provided by the service for the requested page', async () => {
         const page2Items = [makeMemoryItem({ id: 'mem-11' })];
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-123');
-        mockProjectsService.assertProjectMembership.mockResolvedValue(undefined);
+        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
+        mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
         mockGovernanceService.getProjectMemory.mockResolvedValue({ items: page2Items, total: 11 });
 
         const result = await controller.getMemory('my-project', principal, undefined, undefined, undefined, '2', '10');
@@ -190,8 +190,8 @@ describe('MemoryReadController', () => {
 
     describe('AC6: limit clamped to 50', () => {
       it('passes the parsed limit=1000 to the service (repository enforces the 50-item cap)', async () => {
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-123');
-        mockProjectsService.assertProjectMembership.mockResolvedValue(undefined);
+        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
+        mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
         mockGovernanceService.getProjectMemory.mockResolvedValue({ items: [], total: 0 });
 
         await controller.getMemory('my-project', principal, undefined, undefined, undefined, undefined, '1000');
@@ -205,8 +205,8 @@ describe('MemoryReadController', () => {
         // Pre-seeding exactly 50 items would make the assertion trivially true even without
         // clamping. Use 51 items so the test fails if the cap is not enforced.
         const fiftyOneItems = Array.from({ length: 51 }, (_, i) => makeMemoryItem({ id: `mem-${i}` }));
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-123');
-        mockProjectsService.assertProjectMembership.mockResolvedValue(undefined);
+        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
+        mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
         mockGovernanceService.getProjectMemory.mockResolvedValue({ items: fiftyOneItems, total: 200 });
 
         const result = await controller.getMemory('my-project', principal, undefined, undefined, undefined, undefined, '1000');
@@ -218,7 +218,7 @@ describe('MemoryReadController', () => {
 
     describe('AC7: 404 for unknown or soft-deleted project', () => {
       it('throws NotFoundAppException when the slug does not resolve to any project', async () => {
-        mockProjectsService.findProjectIdBySlug.mockRejectedValue(
+        mockProjectAccessService.findProjectIdBySlug.mockRejectedValue(
           new NotFoundAppException({}, 'projects'),
         );
 
@@ -228,7 +228,7 @@ describe('MemoryReadController', () => {
       });
 
       it('throws NotFoundAppException when the project has been soft-deleted', async () => {
-        mockProjectsService.findProjectIdBySlug.mockRejectedValue(
+        mockProjectAccessService.findProjectIdBySlug.mockRejectedValue(
           new NotFoundAppException({}, 'projects'),
         );
 
@@ -238,21 +238,21 @@ describe('MemoryReadController', () => {
       });
 
       it('does not call assertProjectMembership or getProjectMemory when the slug fails to resolve', async () => {
-        mockProjectsService.findProjectIdBySlug.mockRejectedValue(
+        mockProjectAccessService.findProjectIdBySlug.mockRejectedValue(
           new NotFoundAppException({}, 'projects'),
         );
 
         await expect(controller.getMemory('unknown-slug', principal)).rejects.toThrow();
 
-        expect(mockProjectsService.assertProjectMembership).not.toHaveBeenCalled();
+        expect(mockProjectAccessService.assertProjectMembership).not.toHaveBeenCalled();
         expect(mockGovernanceService.getProjectMemory).not.toHaveBeenCalled();
       });
     });
 
     describe('AC8: 403 for non-member principal', () => {
       it('throws ForbiddenAppException when the principal is not a project member', async () => {
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-123');
-        mockProjectsService.assertProjectMembership.mockRejectedValue(
+        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
+        mockProjectAccessService.assertProjectMembership.mockRejectedValue(
           new ForbiddenAppException({}, 'projects'),
         );
 
@@ -262,8 +262,8 @@ describe('MemoryReadController', () => {
       });
 
       it('does not call getProjectMemory when the membership check rejects', async () => {
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-123');
-        mockProjectsService.assertProjectMembership.mockRejectedValue(
+        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
+        mockProjectAccessService.assertProjectMembership.mockRejectedValue(
           new ForbiddenAppException({}, 'projects'),
         );
 
@@ -273,13 +273,13 @@ describe('MemoryReadController', () => {
       });
 
       it('calls assertProjectMembership with the resolved projectId and principal', async () => {
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-123');
-        mockProjectsService.assertProjectMembership.mockResolvedValue(undefined);
+        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
+        mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
         mockGovernanceService.getProjectMemory.mockResolvedValue({ items: [], total: 0 });
 
         await controller.getMemory('my-project', principal);
 
-        expect(mockProjectsService.assertProjectMembership).toHaveBeenCalledWith(
+        expect(mockProjectAccessService.assertProjectMembership).toHaveBeenCalledWith(
           'project-123',
           principal,
         );
@@ -289,8 +289,8 @@ describe('MemoryReadController', () => {
     describe('AC9: response envelope shape', () => {
       it('wraps the service result in JsonResponse.Ok with items and total at data root', async () => {
         const items = [makeMemoryItem()];
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-123');
-        mockProjectsService.assertProjectMembership.mockResolvedValue(undefined);
+        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
+        mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
         mockGovernanceService.getProjectMemory.mockResolvedValue({ items, total: 1 });
 
         const result = await controller.getMemory('my-project', principal);
@@ -301,8 +301,8 @@ describe('MemoryReadController', () => {
 
       it('data.items and data.total are present at the top level of data, not nested further', async () => {
         const items = [makeMemoryItem()];
-        mockProjectsService.findProjectIdBySlug.mockResolvedValue('project-123');
-        mockProjectsService.assertProjectMembership.mockResolvedValue(undefined);
+        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
+        mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
         mockGovernanceService.getProjectMemory.mockResolvedValue({ items, total: 1 });
 
         const result = await controller.getMemory('my-project', principal);

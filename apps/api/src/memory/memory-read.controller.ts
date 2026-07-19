@@ -4,7 +4,7 @@ import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
 import { Principal } from '@nathapp/nestjs-auth';
 import { MemoryGovernanceService } from './memory-governance.service';
 import type { MemoryItem, ProjectMemoryQuery } from './memory-item-repository';
-import { ProjectsService } from '../projects/projects.service';
+import { ProjectAccessService } from '../projects/project-access.service';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 interface MemoryPageResult {
@@ -18,7 +18,7 @@ interface MemoryPageResult {
 export class MemoryReadController {
   constructor(
     private readonly governance: MemoryGovernanceService,
-    private readonly projects: ProjectsService,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   private parseIntParam(value: string | undefined, field: string): number | undefined {
@@ -45,8 +45,8 @@ export class MemoryReadController {
     @Query('limit') limit?: string,
     @Query('orderBy') orderBy?: string,
   ): Promise<JsonResponse<MemoryPageResult>> {
-    const projectId = await this.projects.findProjectIdBySlug(slug);
-    await this.projects.assertProjectMembership(projectId, principal);
+    const projectId = await this.projectAccess.findProjectIdBySlug(slug);
+    await this.projectAccess.assertProjectMembership(projectId, principal);
 
     const query: ProjectMemoryQuery = {
       projectId,

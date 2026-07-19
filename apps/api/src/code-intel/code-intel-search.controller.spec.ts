@@ -4,7 +4,7 @@ import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-com
 import request from 'supertest';
 import { CodeIntelController } from './code-intel.controller';
 import { AstIndexService } from './ast-index.service';
-import { ProjectsService } from '../projects/projects.service';
+import { ProjectAccessService } from '../projects/project-access.service';
 import { UserPrincipal } from '../auth/principal/koda-principal.types';
 
 // ---------------------------------------------------------------------------
@@ -112,11 +112,11 @@ describe('CodeIntelController.searchSymbols()', () => {
           } as unknown as AstIndexService,
         },
         {
-          provide: ProjectsService,
+          provide: ProjectAccessService,
           useValue: {
             findProjectIdBySlug: mockFindProjectIdBySlug,
             assertProjectMembership: mockAssertProjectMembership,
-          } as unknown as ProjectsService,
+          } as unknown as ProjectAccessService,
         },
       ],
     }).compile();
@@ -452,11 +452,11 @@ describe('AC10 HTTP routing: detail route is not shadowed by the search route', 
           } as unknown as AstIndexService,
         },
         {
-          provide: ProjectsService,
+          provide: ProjectAccessService,
           useValue: {
             findProjectIdBySlug: jest.fn().mockResolvedValue('proj-1'),
             assertProjectMembership: jest.fn().mockResolvedValue(undefined),
-          } as unknown as ProjectsService,
+          } as unknown as ProjectAccessService,
         },
       ],
     }).compile();
@@ -526,11 +526,11 @@ describe('AC7 and AC8 HTTP status codes at the route boundary', () => {
           } as unknown as AstIndexService,
         },
         {
-          provide: ProjectsService,
+          provide: ProjectAccessService,
           useValue: {
             findProjectIdBySlug: mockFindProjectIdHttp,
             assertProjectMembership: mockAssertMembershipHttp,
-          } as unknown as ProjectsService,
+          } as unknown as ProjectAccessService,
         },
       ],
     }).compile();

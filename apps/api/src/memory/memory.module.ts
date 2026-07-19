@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { ProjectsModule } from '../projects/projects.module';
+import { ProjectAccessModule } from '../projects/project-access.module';
 import { TimelineService } from './timeline.service';
 import { PrismaTimelineRepository } from './prisma-timeline.repository';
 import { TimelineController } from './timeline.controller';
@@ -18,7 +19,10 @@ import { OutboxModule } from '../outbox/outbox.module';
 import { MemoryOutboxSubscriber } from './memory-outbox.subscriber';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => ProjectsModule), OutboxModule],
+  // ProjectsModule stays forwardRef-imported for MemoryGovernanceProcessor, which uses
+  // ProjectsService.findAllProjectIds — a method outside the ProjectAccessModule leaf.
+  // TimelineController and MemoryReadController were repointed to ProjectAccessModule.
+  imports: [PrismaModule, forwardRef(() => ProjectsModule), ProjectAccessModule, OutboxModule],
   controllers: [TimelineController, MemoryController, MemoryReadController],
   providers: [
     PrismaTimelineRepository,

@@ -1,19 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { RetrievalController } from './retrieval.controller';
 import { EvaluationService } from './evaluation.service';
-import { PrismaRagRepository } from '../rag/prisma-rag.repository';
+import { ProjectAccessService } from '../projects/project-access.service';
 import { NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
-
-const mockProject = {
-  id: 'proj-1',
-  slug: 'alpha',
-  name: 'Alpha',
-  key: 'ALP',
-  graphifyEnabled: false,
-  deletedAt: null,
-  createdAt: new Date(),
-  updatedAt: new Date(),
-};
 
 const mockAdminUser = {
   actorType: 'user' as const,
@@ -43,12 +32,12 @@ describe('RetrievalController', () => {
   let controller: RetrievalController;
   let evaluationService: jest.Mocked<EvaluationService>;
 
-  const mockFindProjectBySlug = jest.fn();
-  const mockFindProjectMembership = jest.fn();
+  const mockFindProjectIdBySlug = jest.fn();
+  const mockAssertProjectMembership = jest.fn();
 
-  const mockRagRepository: Partial<PrismaRagRepository> = {
-    findProjectBySlug: mockFindProjectBySlug,
-    findProjectMembership: mockFindProjectMembership,
+  const mockProjectAccessService: Partial<ProjectAccessService> = {
+    findProjectIdBySlug: mockFindProjectIdBySlug,
+    assertProjectMembership: mockAssertProjectMembership,
   };
 
   beforeEach(async () => {
@@ -60,7 +49,7 @@ describe('RetrievalController', () => {
       controllers: [RetrievalController],
       providers: [
         { provide: EvaluationService, useValue: evaluationService },
-        { provide: PrismaRagRepository, useValue: mockRagRepository },
+        { provide: ProjectAccessService, useValue: mockProjectAccessService },
       ],
     }).compile();
 
@@ -73,7 +62,8 @@ describe('RetrievalController', () => {
 
   describe('evaluateRetrieval', () => {
     it('delegates to EvaluationService.runQueries and returns its result', async () => {
-      mockFindProjectBySlug.mockResolvedValue(mockProject);
+      mockFindProjectIdBySlug.mockResolvedValue('proj-1');
+      mockAssertProjectMembership.mockResolvedValue(undefined);
 
       const result = await controller.evaluateRetrieval('alpha', mockAdminUser);
 
@@ -82,7 +72,7 @@ describe('RetrievalController', () => {
     });
 
     it('throws NotFoundAppException when project not found', async () => {
-      mockFindProjectBySlug.mockResolvedValue(null);
+      mockFindProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
 
       await expect(
         controller.evaluateRetrieval('missing', mockAdminUser),
@@ -90,8 +80,8 @@ describe('RetrievalController', () => {
     });
 
     it('forbids user without membership', async () => {
-      mockFindProjectBySlug.mockResolvedValue(mockProject);
-      mockFindProjectMembership.mockResolvedValue(null);
+      mockFindProjectIdBySlug.mockResolvedValue('proj-1');
+      mockAssertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'projects'));
 
       await expect(
         controller.evaluateRetrieval('alpha', mockMemberUser),
