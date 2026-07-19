@@ -14,9 +14,11 @@ import { MemoryReadController } from './memory-read.controller';
 import { CanonicalStateService } from './canonical-state.service';
 import { PrismaCanonicalStateRepository } from './prisma-canonical-state.repository';
 import { CANONICAL_STATE_REPOSITORY } from './domain/canonical-state.domain';
+import { OutboxModule } from '../outbox/outbox.module';
+import { MemoryOutboxSubscriber } from './memory-outbox.subscriber';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => ProjectsModule)],
+  imports: [PrismaModule, forwardRef(() => ProjectsModule), OutboxModule],
   controllers: [TimelineController, MemoryController, MemoryReadController],
   providers: [
     PrismaTimelineRepository,
@@ -29,6 +31,7 @@ import { CANONICAL_STATE_REPOSITORY } from './domain/canonical-state.domain';
     MemoryGovernanceService,
     MemoryGovernanceProcessor,
     ExtractionService,
+    MemoryOutboxSubscriber,
   ],
   exports: [
     TimelineService,
