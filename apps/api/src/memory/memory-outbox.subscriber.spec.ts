@@ -1,4 +1,3 @@
-import { Test } from '@nestjs/testing';
 import { MemoryOutboxSubscriber } from './memory-outbox.subscriber';
 import { ExtractionService } from './extraction.service';
 import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
