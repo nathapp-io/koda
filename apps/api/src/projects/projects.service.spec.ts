@@ -1,4 +1,5 @@
 import { ProjectsService } from './projects.service';
+import { ProjectAccessService } from './project-access.service';
 import { RagService } from '../rag/rag.service';
 import { NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import type { IProjectRepository } from './domain/project.domain';
@@ -24,7 +25,12 @@ describe('ProjectsService', () => {
       deleteAllBySourceType: jest.fn(),
     } as any;
 
-    service = new ProjectsService(mockProjectRepo as any, ragService);
+    service = new ProjectsService(
+      mockProjectRepo as any,
+      ragService,
+      undefined,
+      new ProjectAccessService(mockProjectRepo as any)
+    );
   });
 
   afterEach(() => {
