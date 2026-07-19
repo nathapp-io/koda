@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { ContextController } from './context.controller';
 import { ContextBuilderService } from './context-builder.service';
-import { ProjectsService } from '../projects/projects.service';
+import { ProjectAccessService } from '../projects/project-access.service';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 const makeContextResponse = () => ({
@@ -51,7 +51,7 @@ const agentPrincipal: KodaPrincipal = {
 describe('ContextController', () => {
   let controller: ContextController;
   let contextBuilderService: { getProjectContext: jest.Mock };
-  let projectsService: {
+  let projectAccess: {
     findProjectIdBySlug: jest.Mock;
     assertProjectMembership: jest.Mock;
   };
@@ -61,7 +61,7 @@ describe('ContextController', () => {
       getProjectContext: jest.fn().mockResolvedValue(makeContextResponse()),
     };
 
-    projectsService = {
+    projectAccess = {
       findProjectIdBySlug: jest.fn().mockResolvedValue('project-1'),
       assertProjectMembership: jest.fn().mockResolvedValue(undefined),
     };
@@ -70,7 +70,7 @@ describe('ContextController', () => {
       controllers: [ContextController],
       providers: [
         { provide: ContextBuilderService, useValue: contextBuilderService },
-        { provide: ProjectsService, useValue: projectsService },
+        { provide: ProjectAccessService, useValue: projectAccess },
       ],
     }).compile();
 
@@ -78,8 +78,8 @@ describe('ContextController', () => {
     jest.clearAllMocks();
 
     // Default: project found, membership ok
-    projectsService.findProjectIdBySlug.mockResolvedValue('project-1');
-    projectsService.assertProjectMembership.mockResolvedValue(undefined);
+    projectAccess.findProjectIdBySlug.mockResolvedValue('project-1');
+    projectAccess.assertProjectMembership.mockResolvedValue(undefined);
     contextBuilderService.getProjectContext.mockResolvedValue(makeContextResponse());
   });
 
@@ -87,7 +87,7 @@ describe('ContextController', () => {
     it('resolves slug to projectId before building context (getContext)', async () => {
       const result = await controller.getContext('my-project', { intent: 'answer' }, adminUser);
 
-      expect(projectsService.findProjectIdBySlug).toHaveBeenCalledWith('my-project');
+      expect(projectAccess.findProjectIdBySlug).toHaveBeenCalledWith('my-project');
       expect(contextBuilderService.getProjectContext).toHaveBeenCalledWith(
         expect.objectContaining({ projectId: 'project-1' }),
       );
@@ -95,7 +95,7 @@ describe('ContextController', () => {
     });
 
     it('throws NotFoundAppException for unknown slug (getContext)', async () => {
-      projectsService.findProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
+      projectAccess.findProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
 
       await expect(
         controller.getContext('nonexistent', { intent: 'answer' }, adminUser),
@@ -103,7 +103,7 @@ describe('ContextController', () => {
     });
 
     it('throws NotFoundAppException for soft-deleted project (getContext)', async () => {
-      projectsService.findProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
+      projectAccess.findProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
 
       await expect(
         controller.getContext('deleted-project', { intent: 'answer' }, adminUser),
@@ -113,7 +113,7 @@ describe('ContextController', () => {
     it('resolves slug to projectId before building context (queryContext)', async () => {
       const result = await controller.queryContext('my-project', { intent: 'plan' }, adminUser);
 
-      expect(projectsService.findProjectIdBySlug).toHaveBeenCalledWith('my-project');
+      expect(projectAccess.findProjectIdBySlug).toHaveBeenCalledWith('my-project');
       expect(contextBuilderService.getProjectContext).toHaveBeenCalledWith(
         expect.objectContaining({ projectId: 'project-1' }),
       );
@@ -121,7 +121,7 @@ describe('ContextController', () => {
     });
 
     it('throws NotFoundAppException for unknown slug (queryContext)', async () => {
-      projectsService.findProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
+      projectAccess.findProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
 
       await expect(
         controller.queryContext('nonexistent', { intent: 'answer' }, adminUser),
@@ -140,19 +140,19 @@ describe('ContextController', () => {
       test('allows ADMIN user and calls assertProjectMembership', async () => {
         const result = await controller.getContext('my-project', { intent: 'answer' }, adminUser);
 
-        expect(projectsService.assertProjectMembership).toHaveBeenCalledWith('project-1', adminUser);
+        expect(projectAccess.assertProjectMembership).toHaveBeenCalledWith('project-1', adminUser);
         expect(result).toMatchObject({ data: expect.objectContaining({ projectId: 'project-1' }) });
       });
 
       test('allows agent principal and calls assertProjectMembership', async () => {
         const result = await controller.getContext('my-project', { intent: 'answer' }, agentPrincipal);
 
-        expect(projectsService.assertProjectMembership).toHaveBeenCalledWith('project-1', agentPrincipal);
+        expect(projectAccess.assertProjectMembership).toHaveBeenCalledWith('project-1', agentPrincipal);
         expect(result).toBeDefined();
       });
 
       test('throws ForbiddenAppException when member has no project membership', async () => {
-        projectsService.assertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'projects'));
+        projectAccess.assertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'projects'));
 
         await expect(
           controller.getContext('my-project', { intent: 'answer' }, memberUser),
@@ -160,7 +160,7 @@ describe('ContextController', () => {
       });
 
       test('allows member with valid membership', async () => {
-        projectsService.assertProjectMembership.mockResolvedValue(undefined);
+        projectAccess.assertProjectMembership.mockResolvedValue(undefined);
 
         const result = await controller.getContext('my-project', { intent: 'answer' }, memberUser);
 
@@ -169,10 +169,10 @@ describe('ContextController', () => {
       });
 
       test('calls assertProjectMembership with resolved projectId and principal for member user', async () => {
-        projectsService.assertProjectMembership.mockResolvedValue(undefined);
+        projectAccess.assertProjectMembership.mockResolvedValue(undefined);
         await controller.getContext('my-project', { intent: 'answer' }, memberUser);
 
-        expect(projectsService.assertProjectMembership).toHaveBeenCalledWith('project-1', memberUser);
+        expect(projectAccess.assertProjectMembership).toHaveBeenCalledWith('project-1', memberUser);
       });
     });
 
@@ -255,7 +255,7 @@ describe('ContextController', () => {
     });
 
     test('throws ForbiddenAppException when member has no project membership', async () => {
-      projectsService.assertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'projects'));
+      projectAccess.assertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'projects'));
 
       await expect(
         controller.queryContext('my-project', { intent: 'answer' }, memberUser),
@@ -263,7 +263,7 @@ describe('ContextController', () => {
     });
 
     test('allows member with valid membership and passes body fields', async () => {
-      projectsService.assertProjectMembership.mockResolvedValue(undefined);
+      projectAccess.assertProjectMembership.mockResolvedValue(undefined);
       const body = { intent: 'search' as const, query: 'ticket bugs', ticketIds: ['t-2'] };
 
       await controller.queryContext('my-project', body, memberUser);

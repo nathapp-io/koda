@@ -21,7 +21,7 @@ import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { AstIndexService } from './ast-index.service';
 import { IndexCommitDto } from './dto/index-commit.dto';
 import { SearchSymbolsQueryDto } from './dto/search-symbols.dto';
-import { ProjectsService } from '../projects/projects.service';
+import { ProjectAccessService } from '../projects/project-access.service';
 
 @ApiTags('code-intel')
 @ApiBearerAuth()
@@ -31,12 +31,12 @@ export class CodeIntelController {
 
   constructor(
     private readonly astIndexService: AstIndexService,
-    private readonly projectsService: ProjectsService,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   private async resolveProject(slug: string): Promise<{ id: string }> {
     // findProjectIdBySlug throws NotFoundAppException if missing or soft-deleted
-    const id = await this.projectsService.findProjectIdBySlug(slug);
+    const id = await this.projectAccess.findProjectIdBySlug(slug);
     return { id };
   }
 
@@ -45,7 +45,7 @@ export class CodeIntelController {
     principal: KodaPrincipal,
   ): Promise<void> {
     // assertProjectMembership throws ForbiddenAppException when access is denied
-    await this.projectsService.assertProjectMembership(projectId, principal);
+    await this.projectAccess.assertProjectMembership(projectId, principal);
   }
 
   @Post('index')

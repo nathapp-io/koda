@@ -13,7 +13,7 @@ import { JsonResponse, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { KodaAction } from '../auth/casl/koda-action.enum';
 import { ContextBuilderService, GetProjectContextQuery, ContextIntent } from './context-builder.service';
-import { ProjectsService } from '../projects/projects.service';
+import { ProjectAccessService } from '../projects/project-access.service';
 
 class GetContextQueryDto {
   intent!: ContextIntent;
@@ -31,11 +31,11 @@ class GetContextQueryDto {
 export class ContextController {
   constructor(
     private readonly contextBuilderService: ContextBuilderService,
-    private readonly projectsService: ProjectsService,
+    private readonly projectAccess: ProjectAccessService,
   ) {}
 
   private async resolveProjectId(slug: string): Promise<string> {
-    return this.projectsService.findProjectIdBySlug(slug);
+    return this.projectAccess.findProjectIdBySlug(slug);
   }
 
   private async checkProjectMembership(
@@ -45,7 +45,7 @@ export class ContextController {
     if (!principal) {
       throw new ForbiddenAppException({}, 'context');
     }
-    await this.projectsService.assertProjectMembership(projectId, principal);
+    await this.projectAccess.assertProjectMembership(projectId, principal);
   }
 
   private buildQuery(

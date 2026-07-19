@@ -5,7 +5,7 @@ import { AstIndexService, SymbolIndexResult, Symbol } from './ast-index.service'
 import { CallerInfo, CalleeInfo } from './symbol-store';
 import { UserPrincipal, AgentPrincipal, KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { IndexCommitDto, SourceFileDto } from './dto/index-commit.dto';
-import { ProjectsService } from '../projects/projects.service';
+import { ProjectAccessService } from '../projects/project-access.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -100,16 +100,16 @@ describe('CodeIntelController', () => {
   let controller: CodeIntelController;
   let astIndexService: jest.Mocked<Pick<AstIndexService, 'indexCommit' | 'getSymbol' | 'getCallers' | 'getCallees'>>;
 
-  // ProjectsService mock — provides findProjectIdBySlug and assertProjectMembership
+  // ProjectAccessService mock — provides findProjectIdBySlug and assertProjectMembership
   let mockFindProjectIdBySlug: jest.Mock;
   let mockAssertProjectMembership: jest.Mock;
-  let mockProjectsService: jest.Mocked<Pick<ProjectsService, 'findProjectIdBySlug' | 'assertProjectMembership'>>;
+  let mockProjectAccessService: jest.Mocked<Pick<ProjectAccessService, 'findProjectIdBySlug' | 'assertProjectMembership'>>;
 
   beforeEach(async () => {
     mockFindProjectIdBySlug = jest.fn();
     mockAssertProjectMembership = jest.fn();
 
-    mockProjectsService = {
+    mockProjectAccessService = {
       findProjectIdBySlug: mockFindProjectIdBySlug,
       assertProjectMembership: mockAssertProjectMembership,
     };
@@ -125,7 +125,7 @@ describe('CodeIntelController', () => {
       controllers: [CodeIntelController],
       providers: [
         { provide: AstIndexService, useValue: astIndexService },
-        { provide: ProjectsService, useValue: mockProjectsService },
+        { provide: ProjectAccessService, useValue: mockProjectAccessService },
       ],
     }).compile();
 
