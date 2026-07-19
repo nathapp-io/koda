@@ -9,7 +9,7 @@ import { EventsModule } from '../events/events.module';
 import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => RagModule), forwardRef(() => OutboxModule), EventsModule, AuthModule],
+  imports: [PrismaModule, forwardRef(() => RagModule), OutboxModule, EventsModule, AuthModule],
   providers: [
     PrismaKodaDomainWriterRepository,
     { provide: KODA_DOMAIN_WRITER_REPOSITORY, useExisting: PrismaKodaDomainWriterRepository },
