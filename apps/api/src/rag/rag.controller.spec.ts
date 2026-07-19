@@ -2,7 +2,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { RagController } from './rag.controller';
 import { RagService } from './rag.service';
 import { HybridRetrieverService } from './hybrid-retriever.service';
-import { EvaluationService } from '../retrieval/evaluation.service';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { PrismaRagRepository } from './prisma-rag.repository';
 
@@ -58,7 +57,6 @@ describe('RagController', () => {
   let controller: RagController;
   let ragService: jest.Mocked<RagService>;
   let hybridRetrieverService: jest.Mocked<HybridRetrieverService>;
-  let evaluationService: jest.Mocked<EvaluationService>;
 
   const mockFindProjectBySlug = jest.fn();
   const mockFindProjectMembership = jest.fn();
@@ -84,16 +82,11 @@ describe('RagController', () => {
       search: jest.fn(),
     } as unknown as jest.Mocked<HybridRetrieverService>;
 
-    evaluationService = {
-      runQueries: jest.fn(),
-    } as unknown as jest.Mocked<EvaluationService>;
-
     const module: TestingModule = await Test.createTestingModule({
       controllers: [RagController],
       providers: [
         { provide: RagService, useValue: ragService },
         { provide: HybridRetrieverService, useValue: hybridRetrieverService },
-        { provide: EvaluationService, useValue: evaluationService },
         { provide: PrismaRagRepository, useValue: mockRagRepository },
       ],
     }).compile();

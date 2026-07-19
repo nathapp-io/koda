@@ -16,6 +16,7 @@ import { LabelsModule } from './labels/labels.module';
 import { TicketLinksModule } from './ticket-links/ticket-links.module';
 import { HealthModule } from './health/health.module';
 import { RagModule } from './rag/rag.module';
+import { RetrievalModule } from './retrieval/retrieval.module';
 import { WebhookModule } from './webhook/webhook.module';
 import { CiWebhookModule } from './ci-webhook/ci-webhook.module';
 import { VcsModule } from './vcs/vcs.module';
@@ -79,6 +80,7 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
     TicketLinksModule,
     HealthModule,
     RagModule,
+    RetrievalModule,
     WebhookModule,
     CiWebhookModule,
     VcsModule,

@@ -13,7 +13,6 @@ import { ApiOperation, ApiResponse, ApiTags, ApiBearerAuth } from '@nestjs/swagg
 import { ForbiddenAppException, JsonResponse, NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { RagService } from './rag.service';
 import { HybridRetrieverService } from './hybrid-retriever.service';
-import { EvaluationService } from '../retrieval/evaluation.service';
 import { AddDocumentDto } from './dto/add-document.dto';
 import { SearchKbDto } from './dto/search-kb.dto';
 import { ImportGraphifyDto } from './dto/import-graphify.dto';
@@ -31,7 +30,6 @@ export class RagController {
     private readonly ragService: RagService,
     private readonly hybridRetrieverService: HybridRetrieverService,
     private readonly ragRepository: PrismaRagRepository,
-    private readonly evaluationService: EvaluationService,
   ) {}
 
   private async resolveProject(slug: string) {
@@ -204,25 +202,5 @@ export class RagController {
     const project = await this.resolveProject(slug);
     await this.ragService.optimizeTable(project.id);
     return JsonResponse.Ok({ optimized: true });
-  }
-
-  @Post('evaluate/retrieval')
-  @HttpCode(HttpStatus.OK)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Run the retrieval evaluation harness with seeded queries' })
-  @ApiResponse({ status: 200, description: 'Evaluation results with precision@5 metrics' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - no project role' })
-  async evaluateRetrieval(
-    @Param('slug') slug: string,
-    @Principal() principal: KodaPrincipal,
-  ) {
-    const project = await this.resolveProject(slug);
-    await this.checkProjectMembership(project.id, principal);
-    const { loadEvalQueries } = await import('../retrieval/load-queries');
-    const queries = loadEvalQueries();
-    const projectQueries = queries.filter((q) => q.projectId === project.id);
-    const summary = await this.evaluationService.runQueries(projectQueries);
-    return JsonResponse.Ok(summary);
   }
 }
