@@ -1,4 +1,4 @@
-import { Injectable, Logger, Module, OnModuleInit, Optional, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, Module, OnModuleInit, Optional } from '@nestjs/common';
 import { ScheduleModule, SchedulerRegistry } from '@nestjs/schedule';
 import { RAG_CFG, IRagConfig } from '../config/rag.config';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
@@ -18,7 +18,6 @@ import { CronOptimizeStrategy } from './strategies/cron-optimize.strategy';
 import { ManualOptimizeStrategy } from './strategies/manual-optimize.strategy';
 import { OutboxModule } from '../outbox/outbox.module';
 import { OutboxFanOutRegistry } from '../outbox/outbox-fan-out-registry';
-import { RetrievalModule } from '../retrieval/retrieval.module';
 
 @Injectable()
 class LexicalIndexWarmup implements OnModuleInit {
@@ -120,7 +119,7 @@ class EntityStoreWarmup implements OnModuleInit {
 }
 
 @Module({
-  imports: [ScheduleModule.forRoot(), OutboxModule, PrismaModule, forwardRef(() => RetrievalModule)],
+  imports: [ScheduleModule.forRoot(), OutboxModule, PrismaModule],
   controllers: [RagController],
   providers: [
     PrismaRagRepository,
@@ -152,6 +151,6 @@ class EntityStoreWarmup implements OnModuleInit {
       inject: [RAG_CFG, SchedulerRegistry],
     },
   ],
-  exports: [RagService, HybridRetrieverService, LexicalIndex, EntityStore, GraphStoreService, FTS_OPTIMIZE_STRATEGY, IncrementalGraphDiffService],
+  exports: [RagService, HybridRetrieverService, LexicalIndex, EntityStore, GraphStoreService, FTS_OPTIMIZE_STRATEGY, IncrementalGraphDiffService, PrismaRagRepository],
 })
 export class RagModule {}

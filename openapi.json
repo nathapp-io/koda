@@ -774,44 +774,6 @@
         ]
       }
     },
-    "/api/projects/{slug}/kb/evaluate/retrieval": {
-      "post": {
-        "operationId": "RagController_evaluateRetrieval",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Evaluation results with precision@5 metrics"
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Forbidden - no project role"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          },
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Run the retrieval evaluation harness with seeded queries",
-        "tags": [
-          "knowledge-base"
-        ]
-      }
-    },
     "/api/admin/outbox": {
       "get": {
         "operationId": "AdminController_getOutbox",
@@ -876,6 +838,92 @@
         "summary": "Retry a dead-letter outbox event",
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/api/context/{slug}": {
+      "get": {
+        "operationId": "ContextController_getContext",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project context retrieved"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get project context for agent use",
+        "tags": [
+          "context"
+        ]
+      }
+    },
+    "/api/context/{slug}/query": {
+      "post": {
+        "operationId": "ContextController_queryContext",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetContextQueryDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Project context retrieved"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Query project context with request body",
+        "tags": [
+          "context"
         ]
       }
     },
@@ -1708,92 +1756,6 @@
         ]
       }
     },
-    "/api/context/{slug}": {
-      "get": {
-        "operationId": "ContextController_getContext",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Project context retrieved"
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Forbidden"
-          },
-          "404": {
-            "description": "Project not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Get project context for agent use",
-        "tags": [
-          "context"
-        ]
-      }
-    },
-    "/api/context/{slug}/query": {
-      "post": {
-        "operationId": "ContextController_queryContext",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GetContextQueryDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Project context retrieved"
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Forbidden"
-          },
-          "404": {
-            "description": "Project not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Query project context with request body",
-        "tags": [
-          "context"
-        ]
-      }
-    },
     "/api/admin/slos": {
       "get": {
         "operationId": "SloDashboardController_getSloMetrics",
@@ -1831,125 +1793,6 @@
         "summary": "Get SLO dashboard metrics for a time window",
         "tags": [
           "admin"
-        ]
-      }
-    },
-    "/api/projects/{slug}/webhooks": {
-      "post": {
-        "operationId": "WebhookController_register",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateWebhookDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Webhook registered"
-          },
-          "400": {
-            "description": "Invalid request data"
-          },
-          "404": {
-            "description": "Project not found"
-          }
-        },
-        "summary": "Register a webhook for a project",
-        "tags": [
-          "webhooks"
-        ]
-      },
-      "get": {
-        "operationId": "WebhookController_list",
-        "parameters": [
-          {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "List of webhooks"
-          },
-          "404": {
-            "description": "Project not found"
-          }
-        },
-        "summary": "List all webhooks for a project",
-        "tags": [
-          "webhooks"
-        ]
-      }
-    },
-    "/api/webhooks/{id}": {
-      "delete": {
-        "operationId": "WebhookController_remove",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Webhook deleted"
-          },
-          "404": {
-            "description": "Webhook not found"
-          }
-        },
-        "summary": "Remove a webhook",
-        "tags": [
-          "webhooks"
-        ]
-      }
-    },
-    "/api/projects/{slug}/webhooks/{id}": {
-      "delete": {
-        "operationId": "WebhookController_removeByProject",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Webhook deleted"
-          },
-          "404": {
-            "description": "Webhook not found"
-          }
-        },
-        "summary": "Remove a webhook (project-scoped)",
-        "tags": [
-          "webhooks"
         ]
       }
     },
@@ -2652,6 +2495,125 @@
         "summary": "Reject a ticket (CREATED or VERIFIED → REJECTED)",
         "tags": [
           "tickets"
+        ]
+      }
+    },
+    "/api/projects/{slug}/webhooks": {
+      "post": {
+        "operationId": "WebhookController_register",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWebhookDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Webhook registered"
+          },
+          "400": {
+            "description": "Invalid request data"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "summary": "Register a webhook for a project",
+        "tags": [
+          "webhooks"
+        ]
+      },
+      "get": {
+        "operationId": "WebhookController_list",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of webhooks"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "summary": "List all webhooks for a project",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
+    "/api/webhooks/{id}": {
+      "delete": {
+        "operationId": "WebhookController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Webhook deleted"
+          },
+          "404": {
+            "description": "Webhook not found"
+          }
+        },
+        "summary": "Remove a webhook",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
+    "/api/projects/{slug}/webhooks/{id}": {
+      "delete": {
+        "operationId": "WebhookController_removeByProject",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Webhook deleted"
+          },
+          "404": {
+            "description": "Webhook not found"
+          }
+        },
+        "summary": "Remove a webhook (project-scoped)",
+        "tags": [
+          "webhooks"
         ]
       }
     },
@@ -3639,6 +3601,44 @@
         ]
       }
     },
+    "/api/projects/{slug}/kb/evaluate/retrieval": {
+      "post": {
+        "operationId": "RetrievalController_evaluateRetrieval",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Evaluation results with precision@5 metrics"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - no project role"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Run the retrieval evaluation harness with seeded queries",
+        "tags": [
+          "knowledge-base"
+        ]
+      }
+    },
     "/api/projects/{slug}/ci-webhook": {
       "post": {
         "operationId": "CiWebhookController_handleCiWebhook",
@@ -4043,6 +4043,10 @@
           "nodes"
         ]
       },
+      "GetContextQueryDto": {
+        "type": "object",
+        "properties": {}
+      },
       "RecordDecisionDto": {
         "type": "object",
         "properties": {
@@ -4294,33 +4298,6 @@
           "commitHash",
           "projectSlug",
           "files"
-        ]
-      },
-      "GetContextQueryDto": {
-        "type": "object",
-        "properties": {}
-      },
-      "CreateWebhookDto": {
-        "type": "object",
-        "properties": {
-          "url": {
-            "type": "string",
-            "format": "uri"
-          },
-          "secret": {
-            "type": "string",
-            "minLength": 32
-          },
-          "events": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "url",
-          "events"
         ]
       },
       "CreateTicketDto": {
@@ -4643,6 +4620,29 @@
             "example": "This ticket has been verified and is ready to work on"
           }
         }
+      },
+      "CreateWebhookDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "secret": {
+            "type": "string",
+            "minLength": 32
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "url",
+          "events"
+        ]
       },
       "CreateVcsConnectionDto": {
         "type": "object",
