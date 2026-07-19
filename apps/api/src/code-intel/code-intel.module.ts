@@ -12,9 +12,11 @@ import { RagModule } from '../rag/rag.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { PrismaCodeIntelRepository } from './prisma-code-intel.repository';
 import { CODE_INTEL_REPOSITORY } from './domain/code-intel.domain';
+import { OutboxModule } from '../outbox/outbox.module';
+import { CodeIntelOutboxSubscriber } from './code-intel-outbox.subscriber';
 
 @Module({
-  imports: [PrismaModule, ConfigModule, EntityGraphModule, forwardRef(() => RagModule), forwardRef(() => ProjectsModule)],
+  imports: [PrismaModule, ConfigModule, EntityGraphModule, OutboxModule, forwardRef(() => RagModule), forwardRef(() => ProjectsModule)],
   controllers: [CodeIntelController],
   providers: [
     PrismaCodeIntelRepository,
@@ -24,6 +26,7 @@ import { CODE_INTEL_REPOSITORY } from './domain/code-intel.domain';
     CodeGraphService,
     CodeCommitOutboxHandler,
     ImpactAnalysisService,
+    CodeIntelOutboxSubscriber,
   ],
   exports: [AstIndexService, SymbolStore, CodeGraphService, CodeCommitOutboxHandler, ImpactAnalysisService],
 })
