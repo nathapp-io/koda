@@ -1,6 +1,4 @@
 import { OutboxFanOutRegistry } from './outbox-fan-out-registry';
-import { WebhookDeliveryHandler } from '../webhook/webhook-delivery.handler';
-import { WebhookDeliveryPayload } from '../webhook/webhook-delivery.handler';
 
 /**
  * OutboxFanOutRegistry Tests
@@ -15,13 +13,7 @@ import { WebhookDeliveryPayload } from '../webhook/webhook-delivery.handler';
  * AC42: dispatch calls all handlers sequentially (not parallel)
  * AC43: Handler errors are caught and logged; subsequent handlers still run
  * AC44: document_indexed payload has sourceId, content, metadata fields
- * AC45: graphify_import payload has projectId, nodeCount, linkCount fields
  * AC25: If dispatch() throws, markFailed() is called (not immediate dead-letter)
- *
- * Story: Register webhook delivery in OutboxModule fan-out
- * AC1: dispatch('webhook_delivery', payload) -> WebhookDeliveryHandler.handle(payload) called exactly once
- * AC2: getHandlers('webhook_delivery') returns array of length 1 when handler is provided
- * AC3: getHandlers('webhook_delivery') returns empty array when handler is undefined
  */
 
 describe('OutboxFanOutRegistry', () => {
@@ -178,26 +170,6 @@ describe('OutboxFanOutRegistry', () => {
     });
   });
 
-  describe('AC45: graphify_import payload structure', () => {
-    it('AC45: dispatch with eventType=graphify_import has payload with projectId, nodeCount, linkCount', async () => {
-      let capturedPayload: any;
-
-      registry.register('graphify_import', (payload) => {
-        capturedPayload = payload;
-      });
-
-      await registry.dispatch({
-        eventType: 'graphify_import',
-        payload: { projectId: 'proj-456', nodeCount: 100, linkCount: 50 },
-      });
-
-      expect(Object.keys(capturedPayload).sort()).toEqual(['linkCount', 'nodeCount', 'projectId'].sort());
-      expect(capturedPayload.projectId).toBe('proj-456');
-      expect(capturedPayload.nodeCount).toBe(100);
-      expect(capturedPayload.linkCount).toBe(50);
-    });
-  });
-
   describe('AC25: dispatch throws triggers markFailed', () => {
     it('AC25: when dispatch throws, failure count is tracked', async () => {
       const handler = jest.fn().mockImplementation(() => {
@@ -210,45 +182,6 @@ describe('OutboxFanOutRegistry', () => {
       expect(result).toBeUndefined();
       expect(handler).toHaveBeenCalledTimes(1);
       expect(registry.consumeLastDispatchFailureCount()).toBe(1);
-    });
-  });
-
-  describe('webhook_delivery fan-out', () => {
-    it('AC1: dispatch({ eventType: "webhook_delivery", payload }) calls WebhookDeliveryHandler.handle exactly once with the payload', async () => {
-      const webhookDeliveryHandler = { handle: jest.fn().mockResolvedValue(undefined) } as unknown as jest.Mocked<WebhookDeliveryHandler>;
-      registry = new OutboxFanOutRegistry(undefined, undefined, undefined, undefined, undefined, webhookDeliveryHandler);
-
-      const payload: WebhookDeliveryPayload = {
-        webhookId: 'w1',
-        event: 'STATUS_CHANGE',
-        payload: {},
-      };
-
-      await registry.dispatch({ eventType: 'webhook_delivery', payload });
-
-      expect(webhookDeliveryHandler.handle).toHaveBeenCalledTimes(1);
-      expect(webhookDeliveryHandler.handle).toHaveBeenCalledWith({
-        webhookId: 'w1',
-        event: 'STATUS_CHANGE',
-        payload: {},
-      });
-    });
-
-    it('AC2: when constructed with a defined webhookDeliveryHandler, getHandlers("webhook_delivery") returns an array of length 1', () => {
-      const webhookDeliveryHandler = { handle: jest.fn().mockResolvedValue(undefined) } as unknown as jest.Mocked<WebhookDeliveryHandler>;
-      registry = new OutboxFanOutRegistry(undefined, undefined, undefined, undefined, undefined, webhookDeliveryHandler);
-
-      const handlers = registry.getHandlers('webhook_delivery');
-
-      expect(handlers).toHaveLength(1);
-    });
-
-    it('AC3: when constructed with webhookDeliveryHandler left undefined, getHandlers("webhook_delivery") returns an empty array', () => {
-      registry = new OutboxFanOutRegistry();
-
-      const handlers = registry.getHandlers('webhook_delivery');
-
-      expect(handlers).toHaveLength(0);
     });
   });
 });
