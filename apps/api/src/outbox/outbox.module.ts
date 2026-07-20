@@ -15,9 +15,9 @@ import { OUTBOX_REPOSITORY } from './domain/outbox-event.domain';
   // (see memory.module.ts, entity-graph.module.ts, code-intel.module.ts,
   // webhook-outbox.subscriber.ts), which import OutboxModule directly. Keeping
   // those consumer imports here as well would recreate an ESM temporal-dead-zone
-  // cycle (OutboxModule -> consumer -> ... -> OutboxModule). OutboxFanOutRegistry's
-  // @Optional() injections for the corresponding handlers simply resolve to undefined,
-  // which is expected: the subscribers register the equivalent behavior instead.
+  // cycle (OutboxModule -> consumer -> ... -> OutboxModule). OutboxFanOutRegistry
+  // no longer takes any cross-module injections; the subscribers register the
+  // equivalent handler behavior directly against it via onModuleInit().
   imports: [PrismaModule, ScheduleModule],
   controllers: [AdminController],
   providers: [

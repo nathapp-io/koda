@@ -26,7 +26,7 @@ export class RetrievalController {
     principal: KodaPrincipal | null,
   ): Promise<void> {
     if (!principal) {
-      throw new ForbiddenAppException({}, 'rag');
+      throw new ForbiddenAppException({}, 'projects');
     }
     // assertProjectMembership throws ForbiddenAppException when access is denied;
     // agent and ADMIN-user bypass semantics are preserved inside the shared service.
