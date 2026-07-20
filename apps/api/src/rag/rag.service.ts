@@ -1,4 +1,4 @@
-import { Injectable, Optional, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Optional, Inject } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { PrismaRagRepository } from './prisma-rag.repository';
 import { GraphStoreService } from './graph-store.service';
@@ -84,7 +84,7 @@ export class RagService {
     @Optional() private readonly ragRepository?: PrismaRagRepository,
     @Optional() @Inject(TRANSACTION_MANAGER) private readonly txManager?: ITransactionManager,
     @Optional() private readonly graphStore?: GraphStoreService,
-    @Optional() @Inject(forwardRef(() => IncrementalGraphDiffService)) private readonly incrementalDiff?: IncrementalGraphDiffService,
+    @Optional() private readonly incrementalDiff?: IncrementalGraphDiffService,
   ) {}
 
   clearProjectCaches(projectId: string): void {
