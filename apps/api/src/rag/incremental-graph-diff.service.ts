@@ -1,8 +1,8 @@
-import { Injectable, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { GraphifyNodeDto, GraphifyLinkDto } from './dto/import-graphify.dto';
 import { GraphStoreService, StoredGraph } from './graph-store.service';
-import { RagService } from './rag.service';
+import { VectorStore } from './vector-store.service';
 
 export interface DiffResult {
   added: number;
@@ -16,7 +16,7 @@ export interface DiffResult {
 export class IncrementalGraphDiffService {
   constructor(
     private readonly graphStore: GraphStoreService,
-    @Inject(forwardRef(() => RagService)) private readonly rag: RagService,
+    private readonly vectorStore: VectorStore,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
 
@@ -80,11 +80,11 @@ export class IncrementalGraphDiffService {
 
     // LanceDB operations (outside Prisma transaction)
     for (const nodeId of removedNodeIds) {
-      await this.rag.deleteBySource(projectId, nodeId);
+      await this.vectorStore.deleteBySource(projectId, nodeId);
     }
 
     for (const node of updatedNodes) {
-      await this.rag.deleteBySource(projectId, node.id);
+      await this.vectorStore.deleteBySource(projectId, node.id);
     }
 
     const nodesToIndex = [...addedNodes, ...updatedNodes];
@@ -172,7 +172,7 @@ export class IncrementalGraphDiffService {
     if (sourceFile) metadata.source_file = sourceFile;
     if (community !== undefined) metadata.community = community;
 
-    await this.rag.indexDocument(projectId, {
+    await this.vectorStore.indexDocument(projectId, {
       source: 'code',
       sourceId: node.id,
       content,

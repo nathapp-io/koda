@@ -57,7 +57,7 @@ function storedGraphFromNodes(
 describe('IncrementalGraphDiffService', () => {
   let service: IncrementalGraphDiffService;
   let mockGraphStore: jest.Mocked<Pick<GraphStoreService, 'getStoredGraph' | 'upsertNodes' | 'deleteNodes'>>;
-  let mockRagService: { indexDocument: jest.Mock; deleteBySource: jest.Mock };
+  let mockVectorStore: { indexDocument: jest.Mock; deleteBySource: jest.Mock };
   let mockTxManager: { run: jest.Mock };
 
   beforeEach(() => {
@@ -71,14 +71,14 @@ describe('IncrementalGraphDiffService', () => {
       deleteNodes: jest.fn(),
     };
 
-    mockRagService = {
+    mockVectorStore = {
       indexDocument: jest.fn().mockResolvedValue(undefined),
       deleteBySource: jest.fn().mockResolvedValue(undefined),
     };
 
     service = new IncrementalGraphDiffService(
       mockGraphStore as unknown as GraphStoreService,
-      mockRagService as never,
+      mockVectorStore as never,
       mockTxManager as never,
     );
   });
@@ -105,7 +105,7 @@ describe('IncrementalGraphDiffService', () => {
       expect(result.added).toBe(1);
       expect(result.removed).toBe(1);
       expect(mockGraphStore.deleteNodes).toHaveBeenCalledWith(projectId, ['node-2']);
-      expect(mockRagService.deleteBySource).toHaveBeenCalledWith(projectId, 'node-2');
+      expect(mockVectorStore.deleteBySource).toHaveBeenCalledWith(projectId, 'node-2');
     });
 
     it('deletes node-2 which is absent from incoming nodes', async () => {
@@ -124,7 +124,7 @@ describe('IncrementalGraphDiffService', () => {
 
       expect(result.removed).toBe(1);
       expect(mockGraphStore.deleteNodes).toHaveBeenCalledWith(projectId, ['node-2']);
-      expect(mockRagService.deleteBySource).toHaveBeenCalledWith(projectId, 'node-2');
+      expect(mockVectorStore.deleteBySource).toHaveBeenCalledWith(projectId, 'node-2');
     });
 
     it('does not re-process unchanged nodes', async () => {
@@ -145,7 +145,7 @@ describe('IncrementalGraphDiffService', () => {
       expect(result.removed).toBe(0);
       expect(result.indexed).toBe(0);
       expect(mockGraphStore.upsertNodes).not.toHaveBeenCalled();
-      expect(mockRagService.indexDocument).not.toHaveBeenCalled();
+      expect(mockVectorStore.indexDocument).not.toHaveBeenCalled();
     });
   });
 
@@ -184,7 +184,7 @@ describe('IncrementalGraphDiffService', () => {
 
       expect(result.added).toBe(10);
       expect(result.removed).toBe(0);
-      expect(mockRagService.indexDocument).toHaveBeenCalledTimes(10);
+      expect(mockVectorStore.indexDocument).toHaveBeenCalledTimes(10);
     });
   });
 
@@ -202,7 +202,7 @@ describe('IncrementalGraphDiffService', () => {
 
       expect(result.removed).toBe(3);
       expect(mockGraphStore.deleteNodes).toHaveBeenCalledWith(projectId, ['node-1', 'node-2', 'node-3']);
-      expect(mockRagService.deleteBySource).toHaveBeenCalledTimes(3);
+      expect(mockVectorStore.deleteBySource).toHaveBeenCalledTimes(3);
     });
   });
 
@@ -225,7 +225,7 @@ describe('IncrementalGraphDiffService', () => {
       const result = await service.diffAndApply(projectId, newNodes, newLinks);
 
       expect(result.indexed).toBe(0);
-      expect(mockRagService.indexDocument).not.toHaveBeenCalled();
+      expect(mockVectorStore.indexDocument).not.toHaveBeenCalled();
     });
 
     it('re-indexes node when label changes', async () => {
@@ -243,7 +243,7 @@ describe('IncrementalGraphDiffService', () => {
 
       expect(result.updated).toBe(1);
       expect(result.indexed).toBe(1);
-      expect(mockRagService.indexDocument).toHaveBeenCalledTimes(1);
+      expect(mockVectorStore.indexDocument).toHaveBeenCalledTimes(1);
     });
 
     it('re-indexes node when outgoing links change', async () => {
@@ -265,7 +265,7 @@ describe('IncrementalGraphDiffService', () => {
 
       expect(result.updated).toBe(1);
       expect(result.indexed).toBe(1);
-      expect(mockRagService.indexDocument).toHaveBeenCalledTimes(1);
+      expect(mockVectorStore.indexDocument).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -368,7 +368,7 @@ describe('IncrementalGraphDiffService', () => {
 
       expect(mockGraphStore.getStoredGraph).toHaveBeenCalledWith(projectId);
       expect(mockGraphStore.upsertNodes).toHaveBeenCalledWith(projectId, newNodes, []);
-      expect(mockRagService.indexDocument).toHaveBeenCalledWith(projectId, expect.objectContaining({ source: 'code', sourceId: 'node-1' }));
+      expect(mockVectorStore.indexDocument).toHaveBeenCalledWith(projectId, expect.objectContaining({ source: 'code', sourceId: 'node-1' }));
       expect(result.added).toBe(1);
     });
 
@@ -416,10 +416,10 @@ describe('IncrementalGraphDiffService', () => {
       mockGraphStore.upsertNodes.mockImplementation(async () => {
         calls.push('upsertNodes');
       });
-      mockRagService.deleteBySource.mockImplementation(async () => {
+      mockVectorStore.deleteBySource.mockImplementation(async () => {
         calls.push('deleteBySource');
       });
-      mockRagService.indexDocument.mockImplementation(async () => {
+      mockVectorStore.indexDocument.mockImplementation(async () => {
         calls.push('indexDocument');
       });
 
