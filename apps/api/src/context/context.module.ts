@@ -12,7 +12,12 @@ import { CONTEXT_REPOSITORY } from './domain/context.domain';
 import { ProjectAccessModule } from '../projects/project-access.module';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => MemoryModule), forwardRef(() => RagModule), EntityGraphModule, forwardRef(() => CodeIntelModule), MonitoringModule, ProjectAccessModule],
+  // MemoryModule stays forwardRef-imported: it sits on the real cycle
+  // Memory -> Projects -> Agents -> Context -> Memory. See memory.module.ts
+  // (ProjectsModule edge) and projects.module.ts (AgentsModule edge) for the
+  // other two edges kept forwardRef to break this same cycle. Rag/CodeIntel
+  // are not on this cycle and can stay plain.
+  imports: [PrismaModule, forwardRef(() => MemoryModule), RagModule, EntityGraphModule, CodeIntelModule, MonitoringModule, ProjectAccessModule],
   controllers: [ContextController],
   providers: [
     PrismaContextRepository,

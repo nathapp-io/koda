@@ -1,4 +1,4 @@
-import { Injectable, Logger, forwardRef, Inject } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ValidationAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
@@ -16,7 +16,7 @@ export class ProjectsService {
   constructor(
     private projectRepo: PrismaProjectRepository,
     private ragService: RagService,
-    @Inject(forwardRef(() => HybridRetrieverService))
+    @Optional()
     private hybridRetrieverService: HybridRetrieverService | undefined,
     private access: ProjectAccessService,
   ) {}

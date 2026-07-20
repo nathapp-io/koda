@@ -1,4 +1,4 @@
-import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
@@ -14,7 +14,7 @@ import { PrismaAgentRepository } from './prisma-agent.repository';
 import { AGENT_REPOSITORY } from './domain/agent.domain';
 
 @Module({
-  imports: [PrismaModule, KodaDomainWriterModule, AuthModule, forwardRef(() => ContextModule)],
+  imports: [PrismaModule, KodaDomainWriterModule, AuthModule, ContextModule],
   controllers: [AgentsController],
   providers: [
     PrismaAgentRepository,

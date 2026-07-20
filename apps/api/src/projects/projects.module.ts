@@ -13,8 +13,13 @@ import { AgentsModule } from '../agents/agents.module';
   imports: [
     PrismaModule,
     ProjectAccessModule,
-    forwardRef(() => RagModule),
-    forwardRef(() => CodeIntelModule),
+    RagModule,
+    CodeIntelModule,
+    // AgentsModule stays forwardRef-imported: it sits on the real cycle
+    // Memory -> Projects -> Agents -> Context -> Memory. See memory.module.ts
+    // for the ProjectsModule edge and context.module.ts for the MemoryModule edge.
+    // Converting this single edge to plain (while the others on the cycle stayed
+    // forwardRef) reproduces a circular-dependency e2e failure.
     forwardRef(() => AgentsModule),
   ],
   controllers: [ProjectsController],

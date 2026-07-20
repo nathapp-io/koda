@@ -22,6 +22,11 @@ import { MemoryOutboxSubscriber } from './memory-outbox.subscriber';
   // ProjectsModule stays forwardRef-imported for MemoryGovernanceProcessor, which uses
   // ProjectsService.findAllProjectIds — a method outside the ProjectAccessModule leaf.
   // TimelineController and MemoryReadController were repointed to ProjectAccessModule.
+  // This edge closes the real cycle Memory -> Projects -> Agents -> Context -> Memory
+  // (Projects -> Agents forwardRef in projects.module.ts, Context -> Memory forwardRef
+  // in context.module.ts); attempts to make any single edge on this cycle plain while
+  // keeping the others as forwardRef reproduce a circular-dependency failure, so this
+  // forwardRef is left in place.
   imports: [PrismaModule, forwardRef(() => ProjectsModule), ProjectAccessModule, OutboxModule],
   controllers: [TimelineController, MemoryController, MemoryReadController],
   providers: [
