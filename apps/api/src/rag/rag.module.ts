@@ -4,6 +4,7 @@ import { RAG_CFG, IRagConfig } from '../config/rag.config';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { RagController } from './rag.controller';
 import { RagService } from './rag.service';
+import { VectorStore } from './vector-store.service';
 import { EmbeddingService } from './embedding.service';
 import { HybridRetrieverService } from './hybrid-retriever.service';
 import { LexicalIndex } from './lexical-index';
@@ -125,6 +126,7 @@ class EntityStoreWarmup implements OnModuleInit {
     PrismaRagRepository,
     { provide: RAG_REPOSITORY, useExisting: PrismaRagRepository },
     RagService,
+    VectorStore,
     EmbeddingService,
     HybridRetrieverService,
     LexicalIndex,
