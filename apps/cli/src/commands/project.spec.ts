@@ -43,7 +43,18 @@ jest.mock('../config', () => ({
   getConfig: jest.fn(() => ({
     apiKey: mockData.apiKey || '',
     apiUrl: mockData.apiUrl || '',
+    profiles: {},
   })),
+  // The CLI-02 fix made resolveAuth delegate to resolveContext, so
+  // tests must supply a resolveContext mock that mirrors getConfig.
+  resolveContext: jest.fn(async (flags: any) => {
+    const fromFlag = (value: unknown, fallback: string) => value ?? fallback
+    return {
+      projectSlug: fromFlag(flags.projectSlug, undefined),
+      apiKey: fromFlag(flags.apiKey, process.env.KODA_API_KEY ?? mockData.apiKey ?? ''),
+      apiUrl: fromFlag(flags.apiUrl, process.env.KODA_API_URL ?? mockData.apiUrl ?? ''),
+    }
+  }),
   setConfig: jest.fn(),
   validateApiKey: jest.fn((key: string) => key && key.length >= 10),
   maskApiKey: jest.fn((key: string) => {
@@ -112,7 +123,7 @@ describe('projectCommand', () => {
       const projectCmd = program.commands.find((cmd) => cmd.name() === 'project');
       const listCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'list');
 
-      await listCmd?.parse(['node', 'test']);
+      await listCmd?.parseAsync(['node', 'test']);
 
       expect(projectsControllerFindAll).toHaveBeenCalled();
     });
@@ -131,7 +142,7 @@ describe('projectCommand', () => {
       const listCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'list');
 
       try {
-        await listCmd?.parse(['node', 'test', '--json']);
+        await listCmd?.parseAsync(['node', 'test', '--json']);
       } catch {
         // Expected
       }
@@ -149,7 +160,7 @@ describe('projectCommand', () => {
       const listCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'list');
 
       try {
-        await listCmd?.parse(['node', 'test']);
+        await listCmd?.parseAsync(['node', 'test']);
       } catch {
         // Expected
       }
@@ -176,7 +187,7 @@ describe('projectCommand', () => {
       const listCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'list');
 
       try {
-        await listCmd?.parse(['node', 'test']);
+        await listCmd?.parseAsync(['node', 'test']);
       } catch {
         // Expected
       }
@@ -203,7 +214,7 @@ describe('projectCommand', () => {
       const listCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'list');
 
       try {
-        await listCmd?.parse(['node', 'test']);
+        await listCmd?.parseAsync(['node', 'test']);
       } catch {
         // Expected
       }
@@ -221,7 +232,7 @@ describe('projectCommand', () => {
       const listCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'list');
 
       try {
-        await listCmd?.parse(['node', 'test']);
+        await listCmd?.parseAsync(['node', 'test']);
       } catch {
         // Expected
       }
@@ -239,7 +250,7 @@ describe('projectCommand', () => {
       const listCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'list');
 
       try {
-        await listCmd?.parse(['node', 'test']);
+        await listCmd?.parseAsync(['node', 'test']);
       } catch {
         // Expected
       }
@@ -404,7 +415,7 @@ describe('projectCommand', () => {
       const showCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'show');
 
       try {
-        await showCmd?.parse(['node', 'test', 'project-a']);
+        await showCmd?.parseAsync(['node', 'test', 'project-a']);
       } catch {
         // Expected
       }
@@ -426,7 +437,7 @@ describe('projectCommand', () => {
       const showCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'show');
 
       try {
-        await showCmd?.parse(['node', 'test', 'project-a', '--json']);
+        await showCmd?.parseAsync(['node', 'test', 'project-a', '--json']);
       } catch {
         // Expected
       }
@@ -446,7 +457,7 @@ describe('projectCommand', () => {
       const showCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'show');
 
       try {
-        await showCmd?.parse(['node', 'test', 'nonexistent']);
+        await showCmd?.parseAsync(['node', 'test', 'nonexistent']);
       } catch {
         // Expected
       }
@@ -461,7 +472,7 @@ describe('projectCommand', () => {
       const showCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'show');
 
       try {
-        await showCmd?.parse(['node', 'test', 'project-a']);
+        await showCmd?.parseAsync(['node', 'test', 'project-a']);
       } catch {
         // Expected
       }
@@ -484,7 +495,7 @@ describe('projectCommand', () => {
       const showCmd = projectCmd?.commands.find((cmd) => cmd.name() === 'show');
 
       try {
-        await showCmd?.parse(['node', 'test', 'project-a']);
+        await showCmd?.parseAsync(['node', 'test', 'project-a']);
       } catch {
         // Expected
       }

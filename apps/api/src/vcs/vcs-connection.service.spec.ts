@@ -215,7 +215,25 @@ describe('VcsConnectionService', () => {
       expect(result).not.toHaveProperty('encryptedToken');
     });
 
-    it('should throw NotFoundAppException when no connection exists for the project', async () => {
+    it('omits webhookSecret and reports webhookSecretConfigured=true when a secret exists', async () => {
+      mockRepo.findVcsConnectionByProjectId.mockResolvedValue(makeConnection({ webhookSecret: 'super-secret-key' }));
+
+      const result = await service.findByProject('proj-1');
+
+      expect(result).not.toHaveProperty('webhookSecret');
+      expect(result).toHaveProperty('webhookSecretConfigured', true);
+    });
+
+    it('reports webhookSecretConfigured=false when no secret is set', async () => {
+      mockRepo.findVcsConnectionByProjectId.mockResolvedValue(makeConnection({ webhookSecret: null }));
+
+      const result = await service.findByProject('proj-1');
+
+      expect(result).not.toHaveProperty('webhookSecret');
+      expect(result).toHaveProperty('webhookSecretConfigured', false);
+    });
+
+    it('throws NotFoundAppException when no connection exists for the project', async () => {
       mockRepo.findVcsConnectionByProjectId.mockResolvedValue(null);
 
       await expect(service.findByProject('proj-1')).rejects.toThrow(NotFoundAppException);

@@ -3,6 +3,7 @@ import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { MemoryController } from './memory.controller';
 import { ExtractionService } from './extraction.service';
 import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
+import { ProjectAccessService } from '../projects/project-access.service';
 import { MemoryKind, ActorRole } from '../common/enums';
 import { MemoryItem } from './memory-item-repository';
 import type { KodaPrincipal, UserPrincipal, AgentPrincipal } from '../auth/principal/koda-principal.types';
@@ -49,6 +50,7 @@ describe('MemoryController', () => {
   let controller: MemoryController;
   let extractionService: jest.Mocked<Partial<ExtractionService>>;
   let repository: jest.Mocked<Partial<PrismaMemoryItemRepository>>;
+  let projectAccess: jest.Mocked<Partial<ProjectAccessService>>;
 
   beforeEach(async () => {
     extractionService = {
@@ -60,17 +62,23 @@ describe('MemoryController', () => {
       upsert: jest.fn(),
     };
 
+    projectAccess = {
+      assertProjectMembership: jest.fn().mockResolvedValue(undefined),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MemoryController,
         { provide: ExtractionService, useValue: extractionService },
         { provide: PrismaMemoryItemRepository, useValue: repository },
+        { provide: ProjectAccessService, useValue: projectAccess },
       ],
     }).compile();
 
     controller = module.get<MemoryController>(MemoryController);
 
     jest.clearAllMocks();
+    (projectAccess.assertProjectMembership as jest.Mock).mockResolvedValue(undefined);
   });
 
   describe('extractFromEvent', () => {
@@ -184,6 +192,7 @@ describe('MemoryController', () => {
 
       const result = await controller.recordDecision(input, principal);
 
+      expect(projectAccess.assertProjectMembership).toHaveBeenCalledWith('project-123', principal);
       expect(extractionService.recordDecision).toHaveBeenCalledWith(
         {
           projectId: 'project-123',
@@ -204,6 +213,20 @@ describe('MemoryController', () => {
       await expect(
         controller.recordDecision(
           { projectId: 'project-123', topic: 't', decision: 'd' },
+          principal,
+        ),
+      ).rejects.toThrow(ForbiddenAppException);
+      expect(extractionService.recordDecision).not.toHaveBeenCalled();
+      expect(projectAccess.assertProjectMembership).not.toHaveBeenCalled();
+    });
+
+    it('throws ForbiddenAppException when the caller is not a member of the named project', async () => {
+      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
+      (projectAccess.assertProjectMembership as jest.Mock).mockRejectedValue(new ForbiddenAppException({}, 'projects'));
+
+      await expect(
+        controller.recordDecision(
+          { projectId: 'project-other', topic: 't', decision: 'd' },
           principal,
         ),
       ).rejects.toThrow(ForbiddenAppException);
@@ -257,6 +280,7 @@ describe('MemoryController', () => {
 
       const result = await controller.createMemory(input, principal);
 
+      expect(projectAccess.assertProjectMembership).toHaveBeenCalledWith('project-123', principal);
       expect(repository.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           projectId: 'project-123',
@@ -287,6 +311,7 @@ describe('MemoryController', () => {
         ),
       ).rejects.toThrow(ForbiddenAppException);
       expect(repository.upsert).not.toHaveBeenCalled();
+      expect(projectAccess.assertProjectMembership).not.toHaveBeenCalled();
     });
 
     it('throws ForbiddenAppException for VIEWER user', async () => {
@@ -303,6 +328,24 @@ describe('MemoryController', () => {
           principal,
         ),
       ).rejects.toThrow(ForbiddenAppException);
+    });
+
+    it('throws ForbiddenAppException when the caller is not a member of the named project', async () => {
+      const principal = makeUserPrincipal(ActorRole.DEVELOPER);
+      (projectAccess.assertProjectMembership as jest.Mock).mockRejectedValue(new ForbiddenAppException({}, 'projects'));
+
+      await expect(
+        controller.createMemory(
+          {
+            projectId: 'project-other',
+            kind: MemoryKind.FACT,
+            subject: 'ticket:1',
+            predicate: 'status',
+          },
+          principal,
+        ),
+      ).rejects.toThrow(ForbiddenAppException);
+      expect(repository.upsert).not.toHaveBeenCalled();
     });
 
     it('uses provided ownerId over principal id', async () => {

@@ -25,6 +25,7 @@ describe('AuthService', () => {
   const mockAuthRepository = {
     findAnyUser: jest.fn(),
     createUser: jest.fn(),
+    findAnyUserAndCreate: jest.fn(),
     findUserByEmail: jest.fn(),
     findUserById: jest.fn(),
     bumpTokenVersion: jest.fn(),
@@ -65,6 +66,7 @@ describe('AuthService', () => {
     mockJwtStrategyProvider.sign.mockReturnValue('mock-token');
     mockJwtRefreshStrategyProvider.sign.mockReturnValue('mock-token');
     mockAuthRepository.findAnyUser.mockResolvedValue(null);
+    mockAuthRepository.findAnyUserAndCreate.mockImplementation(async (data) => ({ user: { ...mockUser, ...data, role: 'ADMIN' }, firstUser: true }));
   });
 
   afterEach(() => {
@@ -79,12 +81,15 @@ describe('AuthService', () => {
         password: 'Password123!',
       };
 
-      mockAuthRepository.createUser.mockResolvedValue(mockUser);
+      mockAuthRepository.findAnyUserAndCreate.mockResolvedValueOnce({
+        user: mockUser,
+        firstUser: true,
+      });
 
       const result = await service.register(registerDto);
 
-      expect(authRepo.createUser).toHaveBeenCalled();
-      const createCall = (authRepo.createUser as jest.Mock).mock.calls[0][0];
+      expect(authRepo.findAnyUserAndCreate).toHaveBeenCalled();
+      const createCall = (authRepo.findAnyUserAndCreate as jest.Mock).mock.calls[0][0];
       expect(createCall.email).toBe(registerDto.email);
       expect(createCall.name).toBe(registerDto.name);
 
@@ -105,7 +110,10 @@ describe('AuthService', () => {
         password: 'Password123!',
       };
 
-      mockAuthRepository.createUser.mockResolvedValue(mockUser);
+      mockAuthRepository.findAnyUserAndCreate.mockResolvedValueOnce({
+        user: mockUser,
+        firstUser: false,
+      });
 
       const result = await service.register(registerDto);
 
@@ -115,6 +123,28 @@ describe('AuthService', () => {
       expect(result.user.name).toBe(mockUser.name);
       expect(result.accessToken).toBe('mock-token');
       expect(result.refreshToken).toBe('mock-token');
+    });
+
+    it('trusts the repository to handle the existence-check + create atomically', async () => {
+      const registerDto = {
+        email: 'race@example.com',
+        name: 'Race User',
+        password: 'Password123!',
+      };
+
+      mockAuthRepository.findAnyUserAndCreate.mockResolvedValueOnce({
+        user: { ...mockUser, role: 'ADMIN' },
+        firstUser: true,
+      });
+
+      await service.register(registerDto);
+
+      // The service must NOT do its own existence check followed by create —
+      // doing both outside one transaction is exactly the race the new
+      // repository method serializes.
+      expect(authRepo.findAnyUser).not.toHaveBeenCalled();
+      expect(authRepo.createUser).not.toHaveBeenCalled();
+      expect(authRepo.findAnyUserAndCreate).toHaveBeenCalledTimes(1);
     });
   });
 

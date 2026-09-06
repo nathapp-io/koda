@@ -1,23 +1,24 @@
-import { getConfig } from '../config';
+import { resolveContext } from '../config';
 
 export interface AuthResolution {
   apiKey: string;
   apiUrl: string;
 }
 
-export function resolveAuth(options: {
+/**
+ * @deprecated Use `resolveContext` from `config.ts` for full precedence
+ * (flags → env → local `.koda/config.json` → profile → global). This shim
+ * remains so existing call sites keep working, but its precedence is now
+ * identical to `resolveContext` — fixing CLI-02 where it previously
+ * skipped project config and profiles.
+ */
+export async function resolveAuth(options: {
   apiKey?: string;
   apiUrl?: string;
-}): AuthResolution {
-  const config = getConfig();
-
-  const apiKey = options.apiKey || process.env.KODA_API_KEY || config.apiKey || '';
-
-  const apiUrl =
-    options.apiUrl ||
-    process.env.KODA_API_URL ||
-    config.apiUrl ||
-    'http://localhost:3100/api';
-
+}): Promise<AuthResolution> {
+  const { apiKey, apiUrl } = await resolveContext({
+    apiKey: options.apiKey,
+    apiUrl: options.apiUrl,
+  });
   return { apiKey, apiUrl };
 }

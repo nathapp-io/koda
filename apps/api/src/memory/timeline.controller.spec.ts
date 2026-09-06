@@ -2,8 +2,19 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { TimelineController } from './timeline.controller';
 import { TimelineService } from './timeline.service';
 import { ProjectAccessService } from '../projects/project-access.service';
-import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
-import { JsonResponse } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, NotFoundAppException, ValidationAppException, JsonResponse } from '@nathapp/nestjs-common';
+import type { KodaPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
+
+const makeUserPrincipal = (role: UserPrincipal['role'] = 'MEMBER'): UserPrincipal => ({
+  actorType: 'user',
+  id: 'user-1',
+  name: undefined,
+  blacklisted: false,
+  revoked: false,
+  authorities: [],
+  role,
+  email: 'test@example.com',
+});
 
 const makeTimelineResponse = () => ({
   events: [
@@ -23,11 +34,14 @@ describe('TimelineController', () => {
 
   const mockProjectAccessService = {
     findProjectIdBySlug: jest.fn(),
+    assertProjectMembership: jest.fn(),
   };
 
   const mockTimelineService = {
     getProjectTimeline: jest.fn(),
   };
+
+  const memberPrincipal: KodaPrincipal = makeUserPrincipal('MEMBER');
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -40,28 +54,45 @@ describe('TimelineController', () => {
 
     controller = module.get<TimelineController>(TimelineController);
 
+    mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-1');
+    mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
     jest.clearAllMocks();
   });
 
   describe('getTimeline', () => {
+    describe('membership check', () => {
+      it('throws ForbiddenAppException when caller is not a project member', async () => {
+        mockProjectAccessService.assertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'projects'));
+
+        await expect(controller.getTimeline('my-project', memberPrincipal)).rejects.toThrow(ForbiddenAppException);
+        expect(mockTimelineService.getProjectTimeline).not.toHaveBeenCalled();
+      });
+
+      it('passes when caller is a project member', async () => {
+        mockTimelineService.getProjectTimeline.mockResolvedValue(makeTimelineResponse());
+
+        await expect(controller.getTimeline('my-project', memberPrincipal)).resolves.toBeDefined();
+        expect(mockProjectAccessService.assertProjectMembership).toHaveBeenCalledWith('project-1', memberPrincipal);
+      });
+    });
+
     describe('project resolution', () => {
       it('throws NotFoundAppException when project does not exist', async () => {
         mockProjectAccessService.findProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
 
-        await expect(controller.getTimeline('nonexistent')).rejects.toThrow(NotFoundAppException);
+        await expect(controller.getTimeline('nonexistent', memberPrincipal)).rejects.toThrow(NotFoundAppException);
       });
 
       it('throws NotFoundAppException when project is soft-deleted', async () => {
         mockProjectAccessService.findProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
 
-        await expect(controller.getTimeline('deleted-project')).rejects.toThrow(NotFoundAppException);
+        await expect(controller.getTimeline('deleted-project', memberPrincipal)).rejects.toThrow(NotFoundAppException);
       });
 
       it('resolves project by slug', async () => {
-        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-1');
         mockTimelineService.getProjectTimeline.mockResolvedValue(makeTimelineResponse());
 
-        await controller.getTimeline('my-project');
+        await controller.getTimeline('my-project', memberPrincipal);
 
         expect(mockProjectAccessService.findProjectIdBySlug).toHaveBeenCalledWith('my-project');
       });
@@ -69,27 +100,22 @@ describe('TimelineController', () => {
 
     describe('date parsing', () => {
       it('throws ValidationAppException for invalid from date', async () => {
-        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-1');
-
         await expect(
-          controller.getTimeline('my-project', undefined, undefined, undefined, 'not-a-date'),
+          controller.getTimeline('my-project', memberPrincipal, undefined, undefined, undefined, 'not-a-date'),
         ).rejects.toThrow(ValidationAppException);
       });
 
       it('throws ValidationAppException for invalid to date', async () => {
-        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-1');
-
         await expect(
-          controller.getTimeline('my-project', undefined, undefined, undefined, undefined, 'not-a-date'),
+          controller.getTimeline('my-project', memberPrincipal, undefined, undefined, undefined, undefined, 'not-a-date'),
         ).rejects.toThrow(ValidationAppException);
       });
 
       it('throws ValidationAppException when from is after to', async () => {
-        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-1');
-
         await expect(
           controller.getTimeline(
             'my-project',
+            memberPrincipal,
             undefined,
             undefined,
             undefined,
@@ -102,20 +128,17 @@ describe('TimelineController', () => {
 
     describe('limit parsing', () => {
       it('throws ValidationAppException for invalid limit string', async () => {
-        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-1');
-
         await expect(
-          controller.getTimeline('my-project', undefined, undefined, undefined, undefined, undefined, 'abc'),
+          controller.getTimeline('my-project', memberPrincipal, undefined, undefined, undefined, undefined, undefined, 'abc'),
         ).rejects.toThrow(ValidationAppException);
       });
     });
 
     describe('event types parsing', () => {
       it('parses comma-separated eventTypes string into array', async () => {
-        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-1');
         mockTimelineService.getProjectTimeline.mockResolvedValue(makeTimelineResponse());
 
-        await controller.getTimeline('my-project', undefined, undefined, 'ticket_event,agent_event');
+        await controller.getTimeline('my-project', memberPrincipal, undefined, undefined, 'ticket_event,agent_event');
 
         expect(mockTimelineService.getProjectTimeline).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -125,10 +148,9 @@ describe('TimelineController', () => {
       });
 
       it('passes array eventTypes through unchanged', async () => {
-        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-1');
         mockTimelineService.getProjectTimeline.mockResolvedValue(makeTimelineResponse());
 
-        await controller.getTimeline('my-project', undefined, undefined, ['ticket_event', 'decision_event']);
+        await controller.getTimeline('my-project', memberPrincipal, undefined, undefined, ['ticket_event', 'decision_event']);
 
         expect(mockTimelineService.getProjectTimeline).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -138,10 +160,9 @@ describe('TimelineController', () => {
       });
 
       it('passes undefined eventTypes when not provided', async () => {
-        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-1');
         mockTimelineService.getProjectTimeline.mockResolvedValue(makeTimelineResponse());
 
-        await controller.getTimeline('my-project');
+        await controller.getTimeline('my-project', memberPrincipal);
 
         expect(mockTimelineService.getProjectTimeline).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -156,7 +177,7 @@ describe('TimelineController', () => {
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-resolved');
         mockTimelineService.getProjectTimeline.mockResolvedValue(makeTimelineResponse());
 
-        await controller.getTimeline('my-project');
+        await controller.getTimeline('my-project', memberPrincipal);
 
         expect(mockTimelineService.getProjectTimeline).toHaveBeenCalledWith(
           expect.objectContaining({ projectId: 'project-resolved' }),
@@ -164,22 +185,21 @@ describe('TimelineController', () => {
       });
 
       it('returns JsonResponse.Ok wrapping timeline data', async () => {
-        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-1');
         const timeline = makeTimelineResponse();
         mockTimelineService.getProjectTimeline.mockResolvedValue(timeline);
 
-        const result = await controller.getTimeline('my-project');
+        const result = await controller.getTimeline('my-project', memberPrincipal);
 
         expect(result).toBeInstanceOf(JsonResponse);
         expect((result as JsonResponse<typeof timeline>).data).toEqual(timeline);
       });
 
       it('passes actorId, ticketId, from, to, limit and cursor to timeline service', async () => {
-        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-1');
         mockTimelineService.getProjectTimeline.mockResolvedValue(makeTimelineResponse());
 
         await controller.getTimeline(
           'my-project',
+          memberPrincipal,
           'actor-42',
           'ticket-99',
           undefined,

@@ -32,14 +32,13 @@ export class AuthService {
 
     const passwordHash = await bcrypt.hash(password, 12);
 
-    const anyUser = await this.authRepo.findAnyUser();
-    const role = anyUser === null ? 'ADMIN' : undefined;
-
-    const user = await this.authRepo.createUser({
+    // The existence-check + create are serialized inside a single transaction
+    // so two concurrent registrations against an empty DB cannot both
+    // receive the bootstrap ADMIN role.
+    const { user } = await this.authRepo.findAnyUserAndCreate({
       email,
       name,
       passwordHash,
-      ...(role ? { role } : {}),
     });
 
     const accessToken = this.generateAccessToken(user.id, user.email, user.role, user.tokenVersion);

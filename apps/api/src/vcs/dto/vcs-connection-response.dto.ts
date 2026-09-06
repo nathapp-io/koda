@@ -7,7 +7,7 @@ export class VcsConnectionResponseDto {
   syncMode: string;
   allowedAuthors: string[];
   pollingIntervalMs: number;
-  webhookSecret: string | null;
+  webhookSecretConfigured: boolean;
   lastSyncedAt: string | null;
   isActive: boolean;
   createdAt: string;

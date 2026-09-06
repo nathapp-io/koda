@@ -97,7 +97,7 @@ export function vcsCommand(program: Command): void {
           return;
         }
 
-        const auth = resolveAuth({});
+        const auth = await resolveAuth({});
         if (!auth.apiKey || !auth.apiUrl) {
           error(VCS_MESSAGES.MISSING_AUTH);
           process.exit(2);
@@ -151,7 +151,7 @@ export function vcsCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const auth = resolveAuth({});
+        const auth = await resolveAuth({});
         if (!auth.apiKey || !auth.apiUrl) {
           error(VCS_MESSAGES.MISSING_AUTH);
           process.exit(2);
@@ -199,7 +199,7 @@ export function vcsCommand(program: Command): void {
     .option('--project <slug>', 'Project slug (uses config if not provided)')
     .action(async (options) => {
       try {
-        const auth = resolveAuth({});
+        const auth = await resolveAuth({});
         if (!auth.apiKey || !auth.apiUrl) {
           error(VCS_MESSAGES.MISSING_AUTH);
           process.exit(2);
@@ -234,7 +234,7 @@ export function vcsCommand(program: Command): void {
     .option('--project <slug>', 'Project slug (uses config if not provided)')
     .action(async (options) => {
       try {
-        const auth = resolveAuth({});
+        const auth = await resolveAuth({});
         if (!auth.apiKey || !auth.apiUrl) {
           error(VCS_MESSAGES.MISSING_AUTH);
           process.exit(2);
@@ -283,7 +283,7 @@ export function vcsCommand(program: Command): void {
     .option('--project <slug>', 'Project slug (uses config if not provided)')
     .action(async (options) => {
       try {
-        const auth = resolveAuth({});
+        const auth = await resolveAuth({});
         if (!auth.apiKey || !auth.apiUrl) {
           error(VCS_MESSAGES.MISSING_AUTH);
           process.exit(2);
@@ -327,7 +327,7 @@ export function vcsCommand(program: Command): void {
     .option('--project <slug>', 'Project slug (uses config if not provided)')
     .action(async (options) => {
       try {
-        const auth = resolveAuth({});
+        const auth = await resolveAuth({});
         if (!auth.apiKey || !auth.apiUrl) {
           error(VCS_MESSAGES.MISSING_AUTH);
           process.exit(2);
@@ -374,7 +374,7 @@ export function vcsCommand(program: Command): void {
           return;
         }
 
-        const auth = resolveAuth({});
+        const auth = await resolveAuth({});
         if (!auth.apiKey || !auth.apiUrl) {
           error(VCS_MESSAGES.MISSING_AUTH);
           process.exit(2);
@@ -416,7 +416,7 @@ export function vcsCommand(program: Command): void {
     .option('--project <slug>', 'Project slug (uses config if not provided)')
     .action(async (options) => {
       try {
-        const auth = resolveAuth({});
+        const auth = await resolveAuth({});
         if (!auth.apiKey || !auth.apiUrl) {
           error(VCS_MESSAGES.MISSING_AUTH);
           process.exit(2);

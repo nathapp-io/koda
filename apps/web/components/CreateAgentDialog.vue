@@ -150,8 +150,19 @@ const availableRoles = AGENT_ROLES
 const capabilitiesInput = ref('')
 const capabilitiesTags = ref<string[]>([])
 
-// Track if slug was manually edited (to preserve user changes)
-const isSlugManuallyEdited = ref(false)
+// Track if slug was manually edited (to preserve user changes).
+//
+// We derive this rather than wire a watcher to the slug ref so the flag only
+// flips when the visible slug *diverges* from deriveSlug(name) — the previous
+// implementation flipped after the first programmatic auto-derive, which
+// permanently disabled the auto-derive watcher on subsequent name edits.
+const isSlugManuallyEdited = computed(() => {
+  const name = values.name
+  const slug = values.slug
+  if (typeof name !== 'string' || typeof slug !== 'string') return false
+  if (slug.length === 0) return false
+  return slug !== deriveSlug(name)
+})
 
 // Key-reveal state
 const apiKey = ref<string | null>(null)
@@ -183,11 +194,6 @@ watch(() => values.name, (name) => {
   if (name !== undefined && !isSlugManuallyEdited.value) {
     setFieldValue('slug', deriveSlug(name))
   }
-})
-
-// Track when user manually edits the slug
-watch(() => values.slug, () => {
-  isSlugManuallyEdited.value = true
 })
 
 // Sync capabilitiesTags to form field value

@@ -361,13 +361,24 @@ export function ticketCommand(program: Command): void {
 
   ticket
     .command('assign <ref>')
-    .description('Assign a ticket')
+    .description('Assign a ticket — self-assigns the caller; pass --to or --agent to express intent, but the runtime API does not currently support caller-supplied assignment targets (see KODA-16).')
     .option('--project <slug>', 'Project slug')
-    .option('--agent <agent-slug>', 'Agent to assign to')
-    .option('--to <agent-slug>', 'Agent to assign to (omit for self-assign)')
+    .option('--to <agent-slug>', 'Intended target agent slug — currently accepted as no-op info only; the runtime API self-assigns the caller.')
+    .option('--agent <agent-slug>', 'Deprecated alias for --to (kept for back-compat; ignored at runtime).')
     .option('--json', 'Output as JSON')
     .action(async (ref: string, options) => {
       try {
+        // KODA-16: the runtime API does not accept an assignment target body,
+        // so --agent/--to are no-ops here. We surface them in the warning
+        // below rather than silently swallowing them so callers don't think
+        // they reassigned the ticket to someone else.
+        const requestedTarget = options.to ?? options.agent;
+        if (requestedTarget) {
+          console.warn(
+            `Note: --agent/--to is currently a no-op; ticket ${ref} will be self-assigned to the caller (KODA-16).`,
+          );
+        }
+
         const ctx = await resolveContext({ projectSlug: options.project });
 
         if (!ctx.projectSlug) {

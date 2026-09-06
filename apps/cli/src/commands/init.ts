@@ -25,7 +25,7 @@ export interface InitDeps {
   writeFile: (path: string, content: string) => Promise<void>;
   mkdir: (path: string, opts: { recursive: boolean }) => Promise<void>;
   fetchProject: (apiUrl: string, apiKey: string, slug: string) => Promise<unknown>;
-  resolveAuth: (options: { apiKey?: string; apiUrl?: string }) => { apiKey: string; apiUrl: string };
+  resolveAuth: (options: { apiKey?: string; apiUrl?: string }) => Promise<{ apiKey: string; apiUrl: string }>;
   cwd: () => string;
 }
 
@@ -42,7 +42,7 @@ export const _initDeps: InitDeps = {
 };
 
 export async function initCommand(options: InitOptions, deps: InitDeps = _initDeps): Promise<void> {
-  const { apiKey, apiUrl } = deps.resolveAuth({ apiKey: options.apiKey, apiUrl: options.apiUrl });
+  const { apiKey, apiUrl } = await deps.resolveAuth({ apiKey: options.apiKey, apiUrl: options.apiUrl });
 
   if (!apiKey) {
     console.error('Not logged in. Run: koda login --api-key <key>');

@@ -54,7 +54,7 @@ function makeConnectionResponse(overrides?: Partial<VcsConnectionResponseDto>): 
     syncMode: 'off',
     allowedAuthors: [],
     pollingIntervalMs: 600000,
-    webhookSecret: null,
+    webhookSecretConfigured: false,
     lastSyncedAt: null,
     isActive: true,
     createdAt: new Date().toISOString(),

@@ -158,7 +158,7 @@ const formSchema = toTypedSchema(z.object({
   repo: z.string().min(1, t('vcs.validation.repoRequired')),
   token: z.string().optional(),
   syncMode: z.enum(['off', 'polling', 'webhook']),
-  pollingInterval: z.number().min(60000, t('vcs.validation.pollingIntervalMin')).max(86400000, t('vcs.validation.pollingIntervalMax')).optional(),
+  pollingInterval: z.coerce.number().min(60000, t('vcs.validation.pollingIntervalMin')).max(86400000, t('vcs.validation.pollingIntervalMax')).optional(),
   authors: z.string().optional(),
 }))
 
@@ -204,7 +204,9 @@ const onSubmit = handleSubmit(async (values) => {
       repoName: values.repo,
       ...(values.token ? { token: values.token } : {}),
       syncMode: values.syncMode,
-      pollingIntervalMs: values.syncMode === 'polling' ? values.pollingInterval : undefined,
+      pollingIntervalMs: values.syncMode === 'polling' && values.pollingInterval !== undefined && !Number.isNaN(values.pollingInterval)
+        ? Number(values.pollingInterval)
+        : undefined,
       allowedAuthors: values.authors
         ? values.authors.split(',').map(author => author.trim()).filter(Boolean)
         : undefined,
