@@ -1,11 +1,15 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
+import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { AgentDomain, UserDomain } from './domain/auth.domain';
 
 @Injectable()
 export class PrismaAuthRepository {
-  constructor(private readonly prisma: PrismaService<PrismaClient>) {}
+  constructor(
+    private readonly prisma: PrismaService<PrismaClient>,
+    @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
+  ) {}
 
   private get db() {
     return this.prisma.client;
@@ -37,6 +41,29 @@ export class PrismaAuthRepository {
   }): Promise<UserDomain> {
     const m = await this.db.user.create({ data });
     return this.toDomain(m);
+  }
+
+  /**
+   * Atomically checks if any user exists and creates a new user, optionally
+   * with the bootstrap ADMIN role. Serializing the existence-check and the
+   * create inside a single transaction prevents two concurrent registrations
+   * against an empty database from both becoming ADMIN.
+   */
+  async findAnyUserAndCreate(data: {
+    email: string;
+    name: string;
+    passwordHash: string;
+  }): Promise<{ user: UserDomain; firstUser: boolean }> {
+    return this.txManager.run(async () => {
+      const existing = await this.db.user.findFirst({ select: { id: true } });
+      const firstUser = existing === null;
+      const m = await this.db.user.create({
+        data: firstUser
+          ? { ...data, role: 'ADMIN' }
+          : data,
+      });
+      return { user: this.toDomain(m), firstUser };
+    });
   }
 
   async findUserByEmail(email: string): Promise<UserDomain | null> {
@@ -71,6 +98,6 @@ export class PrismaAuthRepository {
 
   async findAgentCapabilities(agentId: string): Promise<string[]> {
     const rows = await this.db.agentCapabilityEntry.findMany({ where: { agentId }, select: { capability: true } });
-    return rows.map((r) => r.capability);
+    return rows.map((c) => c.capability);
   }
 }

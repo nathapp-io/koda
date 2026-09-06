@@ -233,7 +233,9 @@ export class VcsConnectionService {
   }
 
   /**
-   * Map VcsConnectionDomain to response DTO (excludes encryptedToken)
+   * Map VcsConnectionDomain to response DTO (excludes encryptedToken and
+   * webhookSecret — the secret is the credential used to authenticate inbound
+   * GitHub webhook payloads, so it must never leave the server).
    */
   private mapToResponseDto(connection: VcsConnectionDomain): VcsConnectionResponseDto {
     return {
@@ -245,7 +247,7 @@ export class VcsConnectionService {
       syncMode: connection.syncMode,
       allowedAuthors: this.parseAllowedAuthors(connection.allowedAuthors),
       pollingIntervalMs: connection.pollingIntervalMs,
-      webhookSecret: connection.webhookSecret,
+      webhookSecretConfigured: connection.webhookSecret !== null && connection.webhookSecret !== undefined,
       lastSyncedAt: connection.lastSyncedAt?.toISOString() ?? null,
       isActive: connection.isActive,
       createdAt: connection.createdAt.toISOString(),

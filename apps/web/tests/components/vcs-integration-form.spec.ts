@@ -226,9 +226,11 @@ describe('VCS-P1-005-C: Polling interval number input field', () => {
     expect(fieldContent).toMatch(/type=["']number["']/)
   })
 
-  test('source includes z.number() validation for polling interval field', () => {
+  test('source uses z.coerce.number() validation for polling interval field', () => {
+    // The Shadcn Input emits a string, so the schema must coerce it before
+    // applying min/max — otherwise the numeric validation fails.
     const source = getSource()
-    expect(source).toMatch(/pollingInterval\s*:\s*z\.number\(\)/)
+    expect(source).toMatch(/pollingInterval\s*:\s*z\.coerce\.number\(\)/)
   })
 
   test('source includes FormMessage for pollingInterval field error display', () => {

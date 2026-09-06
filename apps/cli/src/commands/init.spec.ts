@@ -48,7 +48,7 @@ function makeDeps(overrides: Partial<InitDeps> = {}): InitDeps {
     writeFile: jest.fn().mockResolvedValue(undefined),
     mkdir: jest.fn().mockResolvedValue(undefined),
     fetchProject: jest.fn().mockResolvedValue({ data: { ret: 0, data: { slug: 'koda', name: 'Koda' } } }),
-    resolveAuth: jest.fn().mockReturnValue({ apiKey: 'sk-test-key-1234567890', apiUrl: 'http://localhost:3100/api' }),
+    resolveAuth: jest.fn().mockResolvedValue({ apiKey: 'sk-test-key-1234567890', apiUrl: 'http://localhost:3100/api' }),
     cwd: jest.fn().mockReturnValue('/fake/cwd'),
     ...overrides,
   };
@@ -167,7 +167,7 @@ describe('initCommand', () => {
   describe('AC6: no auth → exits 2', () => {
     it('exits with code 2 and prints login hint when no auth is configured', async () => {
       const deps = makeDeps({
-        resolveAuth: jest.fn().mockReturnValue({ apiKey: '', apiUrl: 'http://localhost:3100/api' }),
+        resolveAuth: jest.fn().mockResolvedValue({ apiKey: '', apiUrl: 'http://localhost:3100/api' }),
       });
 
       await initCommand({}, deps);
@@ -179,7 +179,7 @@ describe('initCommand', () => {
 
     it('exits with code 2 when no project is provided and no auth', async () => {
       const deps = makeDeps({
-        resolveAuth: jest.fn().mockReturnValue({ apiKey: '', apiUrl: '' }),
+        resolveAuth: jest.fn().mockResolvedValue({ apiKey: '', apiUrl: '' }),
       });
 
       await initCommand({}, deps);

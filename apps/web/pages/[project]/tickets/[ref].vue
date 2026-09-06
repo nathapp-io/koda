@@ -3,6 +3,7 @@ import { computed, reactive, ref as vueRef } from 'vue'
 import MarkdownEditor from '~/components/MarkdownEditor.vue'
 import { extractApiError } from '~/composables/useApi'
 import { renderSafeMarkdown } from '~/lib/markdown'
+import { safeHref } from '~/lib/safe-url'
 
 definePageMeta({ layout: 'default' })
 
@@ -406,7 +407,7 @@ async function removeLink(linkId: string) {
           </Badge>
           <template v-for="link in githubPrLinks" :key="link.id">
             <a
-              :href="link.url"
+              :href="safeHref(link.url)"
               target="_blank"
               rel="noopener noreferrer"
               class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md bg-github-link-bg text-gitHub-link-text hover:bg-gitHub-link-bg/80 border border-gitHub-link-border"
@@ -467,7 +468,7 @@ async function removeLink(linkId: string) {
             <h4 class="text-sm font-medium text-muted-foreground mb-2">{{ t('tickets.vcs.pullRequests') }}</h4>
             <div v-for="link in vcsPullRequestLinks" :key="link.id" class="flex items-center gap-2 mb-2">
               <a
-                :href="link.url"
+                :href="safeHref(link.url)"
                 target="_blank"
                 rel="noopener noreferrer"
                 class="text-blue-500 hover:underline"
@@ -485,7 +486,7 @@ async function removeLink(linkId: string) {
             <h4 class="text-sm font-medium text-muted-foreground mb-2">{{ t('tickets.vcs.branches') }}</h4>
             <div v-for="link in vcsBranchLinks" :key="link.id" class="mb-2">
               <a
-                :href="link.url"
+                :href="safeHref(link.url)"
                 target="_blank"
                 rel="noopener noreferrer"
                 class="text-blue-500 hover:underline"
@@ -500,7 +501,7 @@ async function removeLink(linkId: string) {
             <h4 class="text-sm font-medium text-muted-foreground mb-2">{{ t('tickets.vcs.commits') }}</h4>
             <div v-for="link in vcsCommitLinks" :key="link.id" class="mb-2">
               <a
-                :href="link.url"
+                :href="safeHref(link.url)"
                 target="_blank"
                 rel="noopener noreferrer"
                 class="text-blue-500 hover:underline font-mono text-sm"
@@ -557,7 +558,7 @@ async function removeLink(linkId: string) {
               <p class="text-xs text-muted-foreground mb-1">{{ t('tickets.detail.gitRef') }}</p>
               <a
                 v-if="ticket.gitRefUrl"
-                :href="ticket.gitRefUrl"
+                :href="safeHref(ticket.gitRefUrl)"
                 target="_blank"
                 rel="noopener noreferrer"
                 class="text-blue-500 hover:underline font-mono text-sm"
@@ -574,7 +575,7 @@ async function removeLink(linkId: string) {
             <div v-if="ticket.externalVcsUrl">
               <p class="text-xs text-muted-foreground mb-1">{{ t('common.details') }}</p>
               <a
-                :href="ticket.externalVcsUrl"
+                :href="safeHref(ticket.externalVcsUrl)"
                 target="_blank"
                 rel="noopener noreferrer"
                 class="text-blue-500 hover:underline text-sm"
@@ -621,7 +622,7 @@ async function removeLink(linkId: string) {
               <p class="text-xs text-muted-foreground">{{ t('tickets.links.title') }}</p>
               <div class="space-y-1">
                 <div v-for="link in ticketLinks" :key="link.id" class="flex items-center justify-between gap-2 text-sm">
-                  <a :href="link.url" target="_blank" rel="noopener noreferrer" class="truncate text-blue-500 hover:underline">
+                  <a :href="safeHref(link.url)" target="_blank" rel="noopener noreferrer" class="truncate text-blue-500 hover:underline">
                     {{ link.url }}
                   </a>
                   <Button size="sm" variant="ghost" class="text-destructive" @click="removeLink(link.id)">

@@ -1,8 +1,10 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Principal } from '@nathapp/nestjs-auth';
 import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
 import { TimelineService } from './timeline.service';
 import { ProjectAccessService } from '../projects/project-access.service';
+import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 @ApiTags('memory')
 @ApiBearerAuth()
@@ -13,8 +15,12 @@ export class TimelineController {
     private readonly projectAccess: ProjectAccessService,
   ) {}
 
-  private async resolveProject(slug: string): Promise<{ id: string }> {
+  private async assertMembership(
+    slug: string,
+    principal: KodaPrincipal,
+  ): Promise<{ id: string }> {
     const id = await this.projectAccess.findProjectIdBySlug(slug);
+    await this.projectAccess.assertProjectMembership(id, principal);
     return { id };
   }
 
@@ -46,9 +52,11 @@ export class TimelineController {
   @Get()
   @ApiOperation({ summary: 'Get a project timeline' })
   @ApiResponse({ status: 200, description: 'Project timeline' })
+  @ApiResponse({ status: 403, description: 'Not a project member' })
   @ApiResponse({ status: 404, description: 'Project not found' })
   async getTimeline(
     @Param('slug') slug: string,
+    @Principal() principal: KodaPrincipal,
     @Query('actorId') actorId?: string,
     @Query('ticketId') ticketId?: string,
     @Query('eventTypes') eventTypes?: string | string[],
@@ -57,7 +65,7 @@ export class TimelineController {
     @Query('limit') limit?: string,
     @Query('cursor') cursor?: string,
   ) {
-    const project = await this.resolveProject(slug);
+    const project = await this.assertMembership(slug, principal);
     const fromDate = this.parseDate(from);
     const toDate = this.parseDate(to);
 
