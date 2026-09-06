@@ -24,6 +24,15 @@ jest.mock('conf', () => {
   return jest.fn(() => mockStore);
 });
 
+/**
+ * CLI-01: wrap a mock payload in the JSON envelope `{ ret: 0, data }` that the
+ * CLI's `unwrap()` helper expects. The generated client now receives responses
+ * that match the runtime API contract, not the raw DTO shape.
+ */
+function envelope<T>(data: T): { ret: 0; data: T } {
+  return { ret: 0, data };
+}
+
 // Mock generated API client
 jest.mock('../generated/services.gen', () => ({
   vcsControllerUpdateConnection: jest.fn(),
@@ -293,9 +302,9 @@ describe('vcsCommand - update, test, sync, import', () => {
 
   describe('vcs test', () => {
     it('calls POST /projects/:slug/vcs/test and prints "Connection OK" on success', async () => {
-      (vcsControllerTestConnection as jest.Mock).mockResolvedValue({
+      (vcsControllerTestConnection as jest.Mock).mockResolvedValue(envelope({
         ok: true,
-      });
+      }));
 
       const vcsCmd = program.commands.find((cmd) => cmd.name() === 'vcs');
       const testCmd = vcsCmd?.commands.find((cmd) => cmd.name() === 'test');
@@ -311,10 +320,10 @@ describe('vcsCommand - update, test, sync, import', () => {
     });
 
     it('prints the provider error message and exits 1 when connection fails', async () => {
-      (vcsControllerTestConnection as jest.Mock).mockResolvedValue({
+      (vcsControllerTestConnection as jest.Mock).mockResolvedValue(envelope({
         ok: false,
         error: 'Authentication failed: invalid token',
-      });
+      }));
 
       const vcsCmd = program.commands.find((cmd) => cmd.name() === 'vcs');
       const testCmd = vcsCmd?.commands.find((cmd) => cmd.name() === 'test');
@@ -328,9 +337,9 @@ describe('vcsCommand - update, test, sync, import', () => {
     });
 
     it('resolves project slug from --project flag', async () => {
-      (vcsControllerTestConnection as jest.Mock).mockResolvedValue({
+      (vcsControllerTestConnection as jest.Mock).mockResolvedValue(envelope({
         ok: true,
-      });
+      }));
 
       const vcsCmd = program.commands.find((cmd) => cmd.name() === 'vcs');
       const testCmd = vcsCmd?.commands.find((cmd) => cmd.name() === 'test');
@@ -374,11 +383,11 @@ describe('vcsCommand - update, test, sync, import', () => {
 
   describe('vcs sync', () => {
     it('calls POST /projects/:slug/vcs/sync and prints SyncResultDto summary', async () => {
-      (vcsControllerSyncAll as jest.Mock).mockResolvedValue({
+      (vcsControllerSyncAll as jest.Mock).mockResolvedValue(envelope({
         issuesSynced: 5,
         issuesSkipped: 2,
         tickets: [],
-      });
+      }));
 
       const vcsCmd = program.commands.find((cmd) => cmd.name() === 'vcs');
       const syncCmd = vcsCmd?.commands.find((cmd) => cmd.name() === 'sync');
@@ -395,11 +404,11 @@ describe('vcsCommand - update, test, sync, import', () => {
     });
 
     it('prints created count in summary', async () => {
-      (vcsControllerSyncAll as jest.Mock).mockResolvedValue({
+      (vcsControllerSyncAll as jest.Mock).mockResolvedValue(envelope({
         issuesSynced: 10,
         issuesSkipped: 0,
         tickets: [],
-      });
+      }));
 
       const vcsCmd = program.commands.find((cmd) => cmd.name() === 'vcs');
       const syncCmd = vcsCmd?.commands.find((cmd) => cmd.name() === 'sync');
@@ -410,11 +419,11 @@ describe('vcsCommand - update, test, sync, import', () => {
     });
 
     it('prints updated count in summary', async () => {
-      (vcsControllerSyncAll as jest.Mock).mockResolvedValue({
+      (vcsControllerSyncAll as jest.Mock).mockResolvedValue(envelope({
         issuesSynced: 7,
         issuesSkipped: 0,
         tickets: [],
-      });
+      }));
 
       const vcsCmd = program.commands.find((cmd) => cmd.name() === 'vcs');
       const syncCmd = vcsCmd?.commands.find((cmd) => cmd.name() === 'sync');
@@ -425,11 +434,11 @@ describe('vcsCommand - update, test, sync, import', () => {
     });
 
     it('prints skipped count in summary', async () => {
-      (vcsControllerSyncAll as jest.Mock).mockResolvedValue({
+      (vcsControllerSyncAll as jest.Mock).mockResolvedValue(envelope({
         issuesSynced: 0,
         issuesSkipped: 4,
         tickets: [],
-      });
+      }));
 
       const vcsCmd = program.commands.find((cmd) => cmd.name() === 'vcs');
       const syncCmd = vcsCmd?.commands.find((cmd) => cmd.name() === 'sync');
@@ -440,11 +449,11 @@ describe('vcsCommand - update, test, sync, import', () => {
     });
 
     it('resolves project slug from --project flag', async () => {
-      (vcsControllerSyncAll as jest.Mock).mockResolvedValue({
+      (vcsControllerSyncAll as jest.Mock).mockResolvedValue(envelope({
         issuesSynced: 5,
         issuesSkipped: 2,
         tickets: [],
-      });
+      }));
 
       const vcsCmd = program.commands.find((cmd) => cmd.name() === 'vcs');
       const syncCmd = vcsCmd?.commands.find((cmd) => cmd.name() === 'sync');
@@ -488,11 +497,11 @@ describe('vcsCommand - update, test, sync, import', () => {
 
   describe('vcs import', () => {
     it('calls POST /projects/:slug/vcs/sync/:issueNumber with issue number and prints ticket ref', async () => {
-      (vcsControllerSyncIssue as jest.Mock).mockResolvedValue({
+      (vcsControllerSyncIssue as jest.Mock).mockResolvedValue(envelope({
         issuesSynced: 1,
         issuesSkipped: 0,
         tickets: [{ ref: 'PROJ-123', title: 'Issue 42' }],
-      });
+      }));
 
       const vcsCmd = program.commands.find((cmd) => cmd.name() === 'vcs');
       const importCmd = vcsCmd?.commands.find((cmd) => cmd.name() === 'import');
@@ -509,11 +518,11 @@ describe('vcsCommand - update, test, sync, import', () => {
     });
 
     it('prints the created ticket ref on success', async () => {
-      (vcsControllerSyncIssue as jest.Mock).mockResolvedValue({
+      (vcsControllerSyncIssue as jest.Mock).mockResolvedValue(envelope({
         issuesSynced: 1,
         issuesSkipped: 0,
         tickets: [{ ref: 'MYPROJ-456', title: 'Issue 99' }],
-      });
+      }));
 
       const vcsCmd = program.commands.find((cmd) => cmd.name() === 'vcs');
       const importCmd = vcsCmd?.commands.find((cmd) => cmd.name() === 'import');
@@ -544,11 +553,11 @@ describe('vcsCommand - update, test, sync, import', () => {
     });
 
     it('resolves project slug from --project flag', async () => {
-      (vcsControllerSyncIssue as jest.Mock).mockResolvedValue({
+      (vcsControllerSyncIssue as jest.Mock).mockResolvedValue(envelope({
         issuesSynced: 1,
         issuesSkipped: 0,
         tickets: [{ ref: 'PROJ-123', title: 'Issue 42' }],
-      });
+      }));
 
       const vcsCmd = program.commands.find((cmd) => cmd.name() === 'vcs');
       const importCmd = vcsCmd?.commands.find((cmd) => cmd.name() === 'import');

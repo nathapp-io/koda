@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '~/components/ui/tabs'
 import { Textarea } from '~/components/ui/textarea'
-import { marked } from 'marked'
+import { renderSafeMarkdown } from '~/lib/markdown'
 
 interface Props {
   modelValue: string
@@ -18,7 +18,7 @@ const activeTab = ref<'write' | 'preview'>('write')
 
 const renderedHtml = computed(() => {
   try {
-    return marked(props.modelValue || '')
+    return renderSafeMarkdown(props.modelValue || '')
   } catch {
     return props.modelValue || ''
   }

@@ -104,12 +104,16 @@ describe('RagController', () => {
       ragService.indexDocument.mockResolvedValue(undefined);
       hybridRetrieverService.indexDocument.mockResolvedValue(undefined);
 
-      const result = await controller.addDocument('alpha', {
-        source: 'doc',
-        sourceId: 'doc-1',
-        content: 'hello world',
-        metadata: {},
-      });
+      const result = await controller.addDocument(
+        'alpha',
+        {
+          source: 'doc',
+          sourceId: 'doc-1',
+          content: 'hello world',
+          metadata: {},
+        },
+        mockAdminUser,
+      );
 
       expect(ragService.indexDocument).toHaveBeenCalledWith('proj-1', expect.objectContaining({ sourceId: 'doc-1' }));
       expect(hybridRetrieverService.indexDocument).toHaveBeenCalledWith('proj-1', expect.objectContaining({ sourceId: 'doc-1' }));
@@ -120,7 +124,11 @@ describe('RagController', () => {
       mockFindProjectBySlug.mockResolvedValue(null);
 
       await expect(
-        controller.addDocument('missing', { source: 'doc', sourceId: 'x', content: 'y', metadata: {} }),
+        controller.addDocument(
+          'missing',
+          { source: 'doc', sourceId: 'x', content: 'y', metadata: {} },
+          mockAdminUser,
+        ),
       ).rejects.toThrow(NotFoundAppException);
     });
 
@@ -128,8 +136,43 @@ describe('RagController', () => {
       mockFindProjectBySlug.mockResolvedValue({ ...mockProject, deletedAt: new Date() });
 
       await expect(
-        controller.addDocument('alpha', { source: 'doc', sourceId: 'x', content: 'y', metadata: {} }),
+        controller.addDocument(
+          'alpha',
+          { source: 'doc', sourceId: 'x', content: 'y', metadata: {} },
+          mockAdminUser,
+        ),
       ).rejects.toThrow(NotFoundAppException);
+    });
+
+    it('allows agent principal to add a document', async () => {
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
+      ragService.indexDocument.mockResolvedValue(undefined);
+      hybridRetrieverService.indexDocument.mockResolvedValue(undefined);
+
+      const result = await controller.addDocument(
+        'alpha',
+        { source: 'doc', sourceId: 'doc-2', content: 'from agent', metadata: {} },
+        mockAgentPrincipal,
+      );
+
+      expect(mockFindProjectMembership).not.toHaveBeenCalled();
+      expect(ragService.indexDocument).toHaveBeenCalled();
+      expect((result as any).data).toEqual({ indexed: true });
+    });
+
+    it('forbids user without project membership', async () => {
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
+      mockFindProjectMembership.mockResolvedValue(null);
+
+      await expect(
+        controller.addDocument(
+          'alpha',
+          { source: 'doc', sourceId: 'x', content: 'y', metadata: {} },
+          mockMemberUser,
+        ),
+      ).rejects.toThrow(ForbiddenAppException);
+      expect(ragService.indexDocument).not.toHaveBeenCalled();
+      expect(hybridRetrieverService.indexDocument).not.toHaveBeenCalled();
     });
   });
 
@@ -138,7 +181,7 @@ describe('RagController', () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
       ragService.listDocuments.mockResolvedValue([]);
 
-      await controller.listDocuments('alpha');
+      await controller.listDocuments('alpha', mockAdminUser);
 
       expect(ragService.listDocuments).toHaveBeenCalledWith('proj-1', 100);
     });
@@ -147,7 +190,7 @@ describe('RagController', () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
       ragService.listDocuments.mockResolvedValue([]);
 
-      await controller.listDocuments('alpha', '1000');
+      await controller.listDocuments('alpha', mockAdminUser, '1000');
 
       expect(ragService.listDocuments).toHaveBeenCalledWith('proj-1', 500);
     });
@@ -156,9 +199,29 @@ describe('RagController', () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
       ragService.listDocuments.mockResolvedValue([]);
 
-      await controller.listDocuments('alpha', '25');
+      await controller.listDocuments('alpha', mockAdminUser, '25');
 
       expect(ragService.listDocuments).toHaveBeenCalledWith('proj-1', 25);
+    });
+
+    it('allows agent principal to list documents', async () => {
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
+      ragService.listDocuments.mockResolvedValue([]);
+
+      await controller.listDocuments('alpha', mockAgentPrincipal);
+
+      expect(mockFindProjectMembership).not.toHaveBeenCalled();
+      expect(ragService.listDocuments).toHaveBeenCalled();
+    });
+
+    it('forbids user without project membership', async () => {
+      mockFindProjectBySlug.mockResolvedValue(mockProject);
+      mockFindProjectMembership.mockResolvedValue(null);
+
+      await expect(
+        controller.listDocuments('alpha', mockMemberUser),
+      ).rejects.toThrow(ForbiddenAppException);
+      expect(ragService.listDocuments).not.toHaveBeenCalled();
     });
   });
 

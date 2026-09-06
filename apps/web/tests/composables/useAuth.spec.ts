@@ -6,29 +6,24 @@ import { ref, computed } from 'vue'
 const webDir = join(__dirname, '../..')
 const composablePath = join(webDir, 'composables', 'useAuth.ts')
 
-// beforeEach hook removed - Bun test runner doesn't support jest.resetModules()
-
 // ──────────────────────────────────────────────────────────────────────────────
 // Helpers to build a controllable fake Nuxt cookie/state environment
 // ──────────────────────────────────────────────────────────────────────────────
 
 function makeFakeEnv() {
-  const tokenRef = ref<string | null>(null)
   const userRef = ref<unknown>(null)
   const navigateToMock = jest.fn()
   const fakeRuntimeConfig = () => ({
     public: {
       apiBaseUrl: 'http://localhost:3000',
     },
+    apiInternalUrl: 'http://localhost:3100',
   })
   const fetchMock = jest.fn((_url: string, _opts?: Record<string, unknown>) =>
-    Promise.resolve({ accessToken: 'mock-jwt', user: { id: 1, email: 'a@b.com' } })
+    Promise.resolve({ user: { id: '1', email: 'a@b.com' } })
   )
 
-  const fakeCookie = (name: string, _opts?: unknown) => {
-    if (name === 'koda_token') return tokenRef
-    return ref<string | null>(null)
-  }
+  const fakeCookie = (_name: string, _opts?: unknown) => ref<string | null>(null)
 
   const fakeState = (key: string, init?: () => unknown) => {
     if (key === 'koda_user') return userRef
@@ -36,7 +31,6 @@ function makeFakeEnv() {
   }
 
   return {
-    tokenRef,
     userRef,
     fetchMock,
     fakeCookie,
@@ -66,21 +60,10 @@ describe('AC1: composables/useAuth.ts exists', () => {
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC2 — Token stored exclusively via useCookie('koda_token')
+// AC2 — User state managed via useState
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('AC2: token stored via useCookie("koda_token")', () => {
-  test('source calls useCookie with "koda_token"', () => {
-    const source = readFileSync(composablePath, 'utf-8')
-    expect(source).toContain("useCookie('koda_token'")
-  })
-})
-
-// ──────────────────────────────────────────────────────────────────────────────
-// AC3 — User stored via useState
-// ──────────────────────────────────────────────────────────────────────────────
-
-describe('AC3: user state managed via useState', () => {
+describe('AC2: user state managed via useState', () => {
   test('source calls useState for the current user', () => {
     const source = readFileSync(composablePath, 'utf-8')
     expect(source).toContain('useState')
@@ -88,13 +71,13 @@ describe('AC3: user state managed via useState', () => {
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC4 — login() calls POST /auth/login and stores accessToken
+// AC3 — login() proxies to /api/auth/login (server route handles httpOnly cookies)
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('AC4: login() calls POST /auth/login and stores accessToken', () => {
-  test('source references /auth/login endpoint', () => {
+describe('AC3: login() proxies to /api/auth/login and stores user', () => {
+  test('source references /api/auth/login endpoint', () => {
     const source = readFileSync(composablePath, 'utf-8')
-    expect(source).toContain('/auth/login')
+    expect(source).toContain('/api/auth/login')
   })
 
   test('source specifies POST method for the login call', () => {
@@ -102,32 +85,22 @@ describe('AC4: login() calls POST /auth/login and stores accessToken', () => {
     expect(source).toMatch(/POST/)
   })
 
-  test('source references accessToken from the response', () => {
-    const source = readFileSync(composablePath, 'utf-8')
-    expect(source).toContain('accessToken')
-  })
-
-  test('login() stores the returned accessToken into the cookie ref', async () => {
+  test('login() POSTs credentials to /api/auth/login', async () => {
     const env = makeFakeEnv()
-    const { tokenRef, fetchMock } = env
+    const { fetchMock } = env
 
-    // Inject Nuxt globals before importing the composable
     applyNuxtGlobals(env)
 
-    // Fresh import to pick up global mocks
     const mod = await import(`${composablePath}`)
     const { useAuth } = mod
 
     const auth = useAuth()
-    expect(tokenRef.value).toBeNull()
-
     await auth.login({ email: 'test@example.com', password: 'secret' })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [calledUrl, calledOpts] = fetchMock.mock.calls[0]
-    expect(calledUrl).toContain('/auth/login')
-    expect(calledOpts).toMatchObject({ method: 'POST' })
-    expect(tokenRef.value).toBe('mock-jwt')
+    expect(calledUrl).toBe('/api/auth/login')
+    expect(calledOpts).toMatchObject({ method: 'POST', body: { email: 'test@example.com', password: 'secret' } })
   })
 
   test('login() sets user state from the response', async () => {
@@ -141,71 +114,51 @@ describe('AC4: login() calls POST /auth/login and stores accessToken', () => {
 
     await auth.login({ email: 'test@example.com', password: 'secret' })
 
-    expect(userRef.value).toMatchObject({ id: 1, email: 'a@b.com' })
+    expect(userRef.value).toMatchObject({ id: '1', email: 'a@b.com' })
   })
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC5 — logout() clears token cookie and user state
+// AC4 — logout() clears user state and proxies to /api/auth/logout
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('AC5: logout() clears token and user state', () => {
+describe('AC4: logout() proxies to /api/auth/logout and clears user state', () => {
   test('source defines a logout function', () => {
     const source = readFileSync(composablePath, 'utf-8')
     expect(source).toContain('logout')
   })
 
-  test('logout() sets token ref to null', async () => {
+  test('logout() sets user ref to null and calls /api/auth/logout', async () => {
     const env = makeFakeEnv()
-    const { tokenRef, userRef } = env
+    const { userRef, fetchMock } = env
 
-    tokenRef.value = 'existing-jwt'
-    userRef.value = { id: 1, email: 'a@b.com' }
+    userRef.value = { id: '1', email: 'a@b.com' }
 
     applyNuxtGlobals(env)
 
     const mod = await import(`${composablePath}`)
     const auth = mod.useAuth()
 
-    auth.logout()
-
-    expect(tokenRef.value).toBeNull()
-  })
-
-  test('logout() sets user ref to null', async () => {
-    const env = makeFakeEnv()
-    const { tokenRef, userRef } = env
-
-    tokenRef.value = 'existing-jwt'
-    userRef.value = { id: 1, email: 'a@b.com' }
-
-    applyNuxtGlobals(env)
-
-    const mod = await import(`${composablePath}`)
-    const auth = mod.useAuth()
-
-    auth.logout()
+    await auth.logout()
 
     expect(userRef.value).toBeNull()
+    expect(fetchMock).toHaveBeenCalledWith('/api/auth/logout', expect.objectContaining({ method: 'POST' }))
   })
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC6 — isAuthenticated is a computed ref derived from token existence
+// AC5 — isAuthenticated is a computed ref derived from user existence
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('AC6: isAuthenticated is a computed ref', () => {
+describe('AC5: isAuthenticated is a computed ref', () => {
   test('source calls computed() for isAuthenticated', () => {
     const source = readFileSync(composablePath, 'utf-8')
     expect(source).toContain('isAuthenticated')
     expect(source).toContain('computed')
   })
 
-  test('isAuthenticated is false when token is null', async () => {
+  test('isAuthenticated is false when user is null', async () => {
     const env = makeFakeEnv()
-    const { tokenRef } = env
-
-    tokenRef.value = null
 
     applyNuxtGlobals(env)
 
@@ -215,11 +168,11 @@ describe('AC6: isAuthenticated is a computed ref', () => {
     expect(auth.isAuthenticated.value).toBe(false)
   })
 
-  test('isAuthenticated is true when token has a value', async () => {
+  test('isAuthenticated is true when user has a value', async () => {
     const env = makeFakeEnv()
-    const { tokenRef } = env
+    const { userRef } = env
 
-    tokenRef.value = 'some-jwt'
+    userRef.value = { id: '1', email: 'a@b.com' }
 
     applyNuxtGlobals(env)
 
@@ -244,9 +197,9 @@ describe('AC6: isAuthenticated is a computed ref', () => {
 
   test('isAuthenticated updates reactively after logout()', async () => {
     const env = makeFakeEnv()
-    const { tokenRef } = env
+    const { userRef } = env
 
-    tokenRef.value = 'some-jwt'
+    userRef.value = { id: '1', email: 'a@b.com' }
 
     applyNuxtGlobals(env)
 
@@ -254,58 +207,28 @@ describe('AC6: isAuthenticated is a computed ref', () => {
     const auth = mod.useAuth()
 
     expect(auth.isAuthenticated.value).toBe(true)
-    auth.logout()
+    await auth.logout()
     expect(auth.isAuthenticated.value).toBe(false)
   })
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC8 — useAuth baseURL computation based on import.meta.server
+// AC6 — fetchUser reads /api/auth/me (httpOnly cookie is sent by the browser)
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('AC8: useAuth baseURL uses import.meta.server for SSR', () => {
-  test('source uses import.meta.server instead of process.server', () => {
-    const source = readFileSync(composablePath, 'utf-8')
-    expect(source).toContain('import.meta.server')
-    // Verify it's not using the old process.server pattern
-    expect(source).not.toMatch(/process\.server\s*\?/)
-  })
-
-  test('source references apiInternalUrl config', () => {
-    const source = readFileSync(composablePath, 'utf-8')
-    expect(source).toContain('apiInternalUrl')
-  })
-
-  test('source references public.apiBaseUrl config', () => {
-    const source = readFileSync(composablePath, 'utf-8')
-    expect(source).toContain('public.apiBaseUrl')
-  })
-
-  test('source code conditionally assigns baseURL using import.meta.server', () => {
-    const source = readFileSync(composablePath, 'utf-8')
-    expect(source).toMatch(/const\s+baseURL\s*=\s*import\.meta\.server\s*\?\s*[^:]+:\s*config\.public\.apiBaseUrl/)
-  })
-})
-
-// ──────────────────────────────────────────────────────────────────────────────
-// AC7 — fetchUser() validates token and clears on failure
-// ──────────────────────────────────────────────────────────────────────────────
-
-describe('AC7: fetchUser validates token', () => {
+describe('AC6: fetchUser reads /api/auth/me and clears state on failure', () => {
   test('source defines a fetchUser function', () => {
     const source = readFileSync(composablePath, 'utf-8')
     expect(source).toContain('fetchUser')
-    expect(source).toContain('/auth/me')
+    expect(source).toContain('/api/auth/me')
   })
 
   test('fetchUser returns true and sets user on success', async () => {
     const env = makeFakeEnv()
-    const { tokenRef, userRef } = env
+    const { userRef } = env
 
-    tokenRef.value = 'valid-jwt'
     env.fetchMock.mockResolvedValueOnce({
-      ret: 0,
-      data: { id: '1', email: 'admin@koda.test', name: 'Admin' },
+      user: { id: '1', email: 'admin@koda.test', name: 'Admin' },
     })
 
     applyNuxtGlobals(env)
@@ -319,13 +242,12 @@ describe('AC7: fetchUser validates token', () => {
     expect(userRef.value).toMatchObject({ id: '1', email: 'admin@koda.test' })
   })
 
-  test('fetchUser returns false and clears token on failure', async () => {
+  test('fetchUser returns false and clears user on failure', async () => {
     const env = makeFakeEnv()
-    const { tokenRef, userRef } = env
+    const { userRef } = env
 
-    tokenRef.value = 'expired-jwt'
-    const authError = Object.assign(new Error('Unauthorized'), { statusCode: 401 })
-    env.fetchMock.mockRejectedValueOnce(authError)
+    userRef.value = { id: '1', email: 'old@koda.test' }
+    env.fetchMock.mockRejectedValueOnce(Object.assign(new Error('Unauthorized'), { statusCode: 401 }))
 
     applyNuxtGlobals(env)
 
@@ -335,12 +257,13 @@ describe('AC7: fetchUser validates token', () => {
     const result = await auth.fetchUser()
 
     expect(result).toBe(false)
-    expect(tokenRef.value).toBeNull()
     expect(userRef.value).toBeNull()
   })
 
-  test('fetchUser returns false when no token exists', async () => {
+  test('fetchUser returns false when /me reports no user', async () => {
     const env = makeFakeEnv()
+
+    env.fetchMock.mockResolvedValueOnce({ user: null })
 
     applyNuxtGlobals(env)
 
@@ -350,6 +273,24 @@ describe('AC7: fetchUser validates token', () => {
     const result = await auth.fetchUser()
 
     expect(result).toBe(false)
-    expect(env.fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// WEB-02 — Token never enters client-side JS
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('WEB-02: token material is never accessible to client JS', () => {
+  test('useAuth does not declare a koda_token cookie ref', () => {
+    const source = readFileSync(composablePath, 'utf-8')
+    expect(source).not.toMatch(/useCookie\(\s*['"]koda_token['"]/)
+  })
+
+  test('login() never stores an accessToken in JS state', () => {
+    const source = readFileSync(composablePath, 'utf-8')
+    // The composable should only consume `user` from the server response, not
+    // the raw accessToken. Anything that assigns accessToken to client state
+    // would defeat the httpOnly cookie storage.
+    expect(source).not.toMatch(/accessToken\s*=/)
   })
 })
