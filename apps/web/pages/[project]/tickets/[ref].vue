@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { marked } from 'marked'
 import { computed, reactive, ref as vueRef } from 'vue'
 import MarkdownEditor from '~/components/MarkdownEditor.vue'
 import { extractApiError } from '~/composables/useApi'
+import { renderSafeMarkdown } from '~/lib/markdown'
 
 definePageMeta({ layout: 'default' })
 
@@ -118,7 +118,7 @@ async function saveEdit() {
 const renderedDescription = computed(() => {
   if (!ticket.value?.description) return ''
   try {
-    return marked(ticket.value.description)
+    return renderSafeMarkdown(ticket.value.description)
   } catch {
     return ticket.value.description
   }

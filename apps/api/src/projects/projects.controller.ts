@@ -71,6 +71,7 @@ export class ProjectsController {
   }
 
   @Patch(':slug')
+  @RequiredPermission('ADMIN')
   @ApiOperation({ summary: 'Update a project (admin only)' })
   @ApiResponse({ status: 200, description: 'Project updated successfully' })
   @ApiResponse({ status: 400, description: 'Invalid request data' })

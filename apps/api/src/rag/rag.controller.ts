@@ -76,12 +76,15 @@ export class RagController {
   @Post('documents')
   @ApiOperation({ summary: 'Add a document to the project knowledge base' })
   @ApiResponse({ status: 201, description: 'Document indexed' })
+  @ApiResponse({ status: 403, description: 'Forbidden - no project role' })
   @ApiResponse({ status: 404, description: 'Project not found' })
   async addDocument(
     @Param('slug') slug: string,
     @Body() dto: AddDocumentDto,
+    @Principal() principal: KodaPrincipal,
   ) {
     const project = await this.resolveProject(slug);
+    await this.checkProjectMembership(project.id, principal);
     await Promise.all([
       this.ragService.indexDocument(project.id, {
         source: dto.source,
@@ -102,12 +105,15 @@ export class RagController {
   @Get('documents')
   @ApiOperation({ summary: 'List indexed documents in the project knowledge base' })
   @ApiResponse({ status: 200, description: 'Documents listed' })
+  @ApiResponse({ status: 403, description: 'Forbidden - no project role' })
   @ApiResponse({ status: 404, description: 'Project not found' })
   async listDocuments(
     @Param('slug') slug: string,
+    @Principal() principal: KodaPrincipal,
     @Query('limit') limitStr?: string,
   ) {
     const project = await this.resolveProject(slug);
+    await this.checkProjectMembership(project.id, principal);
     const limit = limitStr ? Math.min(parseInt(limitStr, 10), 500) : 100;
     const data = await this.ragService.listDocuments(project.id, limit);
     return JsonResponse.Ok(data);

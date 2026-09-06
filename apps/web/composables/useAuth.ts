@@ -13,89 +13,80 @@ interface AuthUser {
   id: string
   email: string
   name?: string
-}
-
-interface AuthResponse {
-  accessToken: string
-  refreshToken: string
-  user: AuthUser
+  role?: string
+  createdAt?: string
+  updatedAt?: string
+  [key: string]: unknown
 }
 
 /**
- * Note: useAuth uses $fetch directly (not useApi) to avoid circular dependency
- * since useApi depends on useAuth for the Authorization header.
- * Responses are unwrapped from the JsonResponse { ret, data } envelope here.
+ * Auth state lives entirely on the server. The access and refresh tokens are
+ * stored as httpOnly cookies set by the Nuxt server routes under /server/api/auth/*,
+ * which means JS — including any XSS payload — can never read the raw token.
+ *
+ * Client state is reduced to a small user profile so the auth middleware can
+ * answer "is this user authenticated" without leaking the secret material.
  */
 export function useAuth() {
-  const config = useRuntimeConfig()
-  // Server-side: ensure internal URL includes /api (E2E env provides host:port only)
-  const internalBaseUrl = String(config.apiInternalUrl).replace(/\/+$/, '')
-  const serverBaseUrl = internalBaseUrl.endsWith('/api')
-    ? internalBaseUrl
-    : `${internalBaseUrl}/api`
-  const baseURL = import.meta.server ? serverBaseUrl : config.public.apiBaseUrl
-  const normalizedBaseURL = baseURL.endsWith('/') ? baseURL.slice(0, -1) : baseURL
-  const authBaseURL = import.meta.server
-    ? (normalizedBaseURL.endsWith('/api') ? normalizedBaseURL : `${normalizedBaseURL}/api`)
-    : normalizedBaseURL
-  const authUrl = (path: string) => `${authBaseURL}${path}`
+  const user = useState<AuthUser | null>('koda_user', () => null)
 
-  const token = useCookie('koda_token', { secure: true, sameSite: 'strict', maxAge: 604800 })
-  const user = useState('koda_user', (): AuthUser | null => null)
-
-  const isAuthenticated = computed(() => !!token.value)
+  const isAuthenticated = computed(() => !!user.value)
 
   async function login(credentials: LoginCredentials): Promise<void> {
-    const response = await $fetch<{ ret: number; data: AuthResponse }>(authUrl('/auth/login'), {
+    const response = await $fetch<{ user: AuthUser }>('/api/auth/login', {
       method: 'POST',
       body: credentials,
     })
-    const data = response.data ?? (response as unknown as AuthResponse)
-    token.value = data.accessToken
-    user.value = data.user
+    user.value = response.user
   }
 
   async function register(credentials: RegisterCredentials): Promise<void> {
-    const response = await $fetch<{ ret: number; data: AuthResponse }>(authUrl('/auth/register'), {
+    const response = await $fetch<{ user: AuthUser }>('/api/auth/register', {
       method: 'POST',
       body: credentials,
     })
-    const data = response.data ?? (response as unknown as AuthResponse)
-    token.value = data.accessToken
-    user.value = data.user
+    user.value = response.user
   }
 
   async function logout(): Promise<void> {
-    token.value = null
+    try {
+      await $fetch('/api/auth/logout', { method: 'POST' })
+    } catch {
+      // Always clear local state, even if the server call fails.
+    }
     user.value = null
     await navigateTo('/login')
   }
 
   /**
-   * Validate the stored token by calling /auth/me.
-   * If the token is expired or invalid, clear it and return false.
-   * Called by the auth middleware on initial navigation when a cookie exists but user state is empty.
+   * Probe the upstream session via the httpOnly cookie. Returns true when
+   * the user is authenticated, false otherwise. Network failures resolve to
+   * false so the caller can re-route to /login without crashing the page.
    */
   async function fetchUser(): Promise<boolean> {
-    if (!token.value) return false
     try {
-      const response = await $fetch<{ ret: number; data: AuthUser }>(authUrl('/auth/me'), {
-        headers: { Authorization: `Bearer ${token.value}` },
-      })
-      const data = response.data ?? (response as unknown as AuthUser)
-      user.value = data
-      return true
-    } catch (e) {
-      // Only clear auth state for explicit rejection (401/403).
-      // Network errors or server failures should not log the user out.
-      const status = (e as { statusCode?: number })?.statusCode
-      if (status === 401 || status === 403) {
-        token.value = null
-        user.value = null
-      }
+      const response = await $fetch<{ user: AuthUser | null }>('/api/auth/me')
+      user.value = response.user
+      return !!response.user
+    } catch {
+      user.value = null
       return false
     }
   }
 
-  return { token, user, isAuthenticated, login, register, logout, fetchUser }
+  /**
+   * Refresh the access token using the server-stored refresh cookie. Returns
+   * true when the refresh succeeded. The refresh cookie is rotated server-side.
+   */
+  async function refresh(): Promise<boolean> {
+    try {
+      await $fetch('/api/auth/refresh', { method: 'POST' })
+      return true
+    } catch {
+      user.value = null
+      return false
+    }
+  }
+
+  return { user, isAuthenticated, login, register, logout, fetchUser, refresh }
 }

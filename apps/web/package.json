@@ -23,6 +23,7 @@
     "@vee-validate/zod": "^4.15.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "isomorphic-dompurify": "^2.16.0",
     "lucide-vue-next": "^0.400.0",
     "marked": "^17.0.5",
     "nuxt": "^3.21.2",
@@ -72,6 +73,9 @@
       "^~/(.*)$": "<rootDir>/$1",
       "^~$": "<rootDir>"
     },
+    "transformIgnorePatterns": [
+      "/node_modules/"
+    ],
     "transform": {
       "^.+\\.ts$": [
         "<rootDir>/jest-transform.cjs",

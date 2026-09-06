@@ -4,6 +4,10 @@ import { CiWebhookService } from './ci-webhook.service';
 import { CiWebhookPayloadDto } from './ci-webhook.dto';
 import { createHmac } from 'node:crypto';
 
+function rawRequestOf(body: string): { rawBody: Buffer } {
+  return { rawBody: Buffer.from(body) };
+}
+
 describe('CiWebhookController', () => {
   let controller: CiWebhookController;
 
@@ -38,6 +42,10 @@ describe('CiWebhookController', () => {
       ],
     };
 
+    function sign(rawBody: string): string {
+      return `sha256=${createHmac('sha256', secret).update(rawBody).digest('hex')}`;
+    }
+
     it('should return JsonResponse with success result', async () => {
       const expectedResult = {
         success: true,
@@ -48,8 +56,14 @@ describe('CiWebhookController', () => {
       mockCiWebhookService.getWebhookSecret.mockResolvedValue(secret);
       mockCiWebhookService.processCiWebhook.mockResolvedValue(expectedResult);
 
-      const signature = `sha256=${createHmac('sha256', secret).update(JSON.stringify(validPayload)).digest('hex')}`;
-      const result = await controller.handleCiWebhook('koda', validPayload, signature);
+      const rawBody = JSON.stringify(validPayload);
+      const signature = sign(rawBody);
+      const result = await controller.handleCiWebhook(
+        'koda',
+        validPayload,
+        rawRequestOf(rawBody),
+        signature,
+      );
 
       expect(result).toHaveProperty('data');
       expect(result.data).toEqual(expectedResult);
@@ -64,8 +78,9 @@ describe('CiWebhookController', () => {
         message: 'ignored',
       });
 
-      const signature = `sha256=${createHmac('sha256', secret).update(JSON.stringify(validPayload)).digest('hex')}`;
-      await controller.handleCiWebhook('my-project', validPayload, signature);
+      const rawBody = JSON.stringify(validPayload);
+      const signature = sign(rawBody);
+      await controller.handleCiWebhook('my-project', validPayload, rawRequestOf(rawBody), signature);
 
       expect(mockCiWebhookService.getWebhookSecret).toHaveBeenCalledWith('my-project');
       expect(mockCiWebhookService.processCiWebhook).toHaveBeenCalledWith(
@@ -81,8 +96,9 @@ describe('CiWebhookController', () => {
         message: 'Created ticket',
       });
 
-      const signature = `sha256=${createHmac('sha256', secret).update(JSON.stringify(validPayload)).digest('hex')}`;
-      await controller.handleCiWebhook('koda', validPayload, signature);
+      const rawBody = JSON.stringify(validPayload);
+      const signature = sign(rawBody);
+      await controller.handleCiWebhook('koda', validPayload, rawRequestOf(rawBody), signature);
 
       expect(mockCiWebhookService.processCiWebhook).toHaveBeenCalledWith('koda', validPayload);
     });
@@ -101,8 +117,14 @@ describe('CiWebhookController', () => {
       mockCiWebhookService.getWebhookSecret.mockResolvedValue(secret);
       mockCiWebhookService.processCiWebhook.mockResolvedValue(expectedResult);
 
-      const signature = `sha256=${createHmac('sha256', secret).update(JSON.stringify(successPayload)).digest('hex')}`;
-      const result = await controller.handleCiWebhook('koda', successPayload, signature);
+      const rawBody = JSON.stringify(successPayload);
+      const signature = sign(rawBody);
+      const result = await controller.handleCiWebhook(
+        'koda',
+        successPayload,
+        rawRequestOf(rawBody),
+        signature,
+      );
 
       expect(result.data).toEqual(expectedResult);
     });
@@ -110,31 +132,88 @@ describe('CiWebhookController', () => {
     it('should throw when service throws NotFoundAppException', async () => {
       mockCiWebhookService.getWebhookSecret.mockResolvedValue(secret);
       mockCiWebhookService.processCiWebhook.mockRejectedValue(new Error('Not found'));
-      const signature = `sha256=${createHmac('sha256', secret).update(JSON.stringify(validPayload)).digest('hex')}`;
+      const rawBody = JSON.stringify(validPayload);
+      const signature = sign(rawBody);
 
-      await expect(controller.handleCiWebhook('nonexistent', validPayload, signature)).rejects.toThrow('Not found');
+      await expect(
+        controller.handleCiWebhook('nonexistent', validPayload, rawRequestOf(rawBody), signature),
+      ).rejects.toThrow('Not found');
     });
 
     it('should throw when service throws ValidationAppException', async () => {
       mockCiWebhookService.getWebhookSecret.mockResolvedValue(secret);
       mockCiWebhookService.processCiWebhook.mockRejectedValue(new Error('Validation error'));
-      const signature = `sha256=${createHmac('sha256', secret).update(JSON.stringify(validPayload)).digest('hex')}`;
+      const rawBody = JSON.stringify(validPayload);
+      const signature = sign(rawBody);
 
-      await expect(controller.handleCiWebhook('koda', validPayload, signature)).rejects.toThrow('Validation error');
+      await expect(
+        controller.handleCiWebhook('koda', validPayload, rawRequestOf(rawBody), signature),
+      ).rejects.toThrow('Validation error');
     });
 
     it('should throw when webhook secret is missing', async () => {
       mockCiWebhookService.getWebhookSecret.mockResolvedValue(null);
 
-      await expect(controller.handleCiWebhook('koda', validPayload, '')).rejects.toThrow();
+      await expect(
+        controller.handleCiWebhook('koda', validPayload, rawRequestOf('{}'), ''),
+      ).rejects.toThrow();
       expect(mockCiWebhookService.processCiWebhook).not.toHaveBeenCalled();
+    });
+
+    it('should fall back to JSON.stringify(payload) when rawBody is absent (test/Express compatibility)', async () => {
+      mockCiWebhookService.getWebhookSecret.mockResolvedValue(secret);
+      mockCiWebhookService.processCiWebhook.mockResolvedValue({ success: true, message: 'ok' });
+
+      // Sign over JSON.stringify(validPayload) — the same bytes the controller
+      // falls back to when no rawBody is available.
+      const fallbackSignature = sign(JSON.stringify(validPayload));
+
+      await controller.handleCiWebhook(
+        'koda',
+        validPayload,
+        {} as { rawBody?: Buffer },
+        fallbackSignature,
+      );
+
+      expect(mockCiWebhookService.processCiWebhook).toHaveBeenCalledWith('koda', validPayload);
     });
 
     it('should throw when signature is invalid', async () => {
       mockCiWebhookService.getWebhookSecret.mockResolvedValue(secret);
 
-      await expect(controller.handleCiWebhook('koda', validPayload, 'sha256=invalid')).rejects.toThrow();
+      await expect(
+        controller.handleCiWebhook(
+          'koda',
+          validPayload,
+          rawRequestOf('{}'),
+          'sha256=invalid',
+        ),
+      ).rejects.toThrow();
       expect(mockCiWebhookService.processCiWebhook).not.toHaveBeenCalled();
+    });
+
+    it('should verify against raw bytes, not JSON.stringify(parsed) (KODA-02)', async () => {
+      mockCiWebhookService.getWebhookSecret.mockResolvedValue(secret);
+      mockCiWebhookService.processCiWebhook.mockResolvedValue({ success: true, message: 'ok' });
+
+      // The client sends this exact byte sequence, with this whitespace and ordering.
+      const rawBody = '{"event":"pipeline_failed","pipeline":{"id":"1","url":"u"},"commit":{"sha":"abc","message":"m"},"failures":[]}';
+      const signature = sign(rawBody);
+
+      const mutatedPayload: CiWebhookPayloadDto = JSON.parse(rawBody);
+      // Mutate the parsed object's key ordering (TypeScript preserves insertion order).
+      // Even if the server-side JSON.stringify produced a different byte stream,
+      // the HMAC must still validate because we verify against rawBody.
+      const reordered: Record<string, unknown> = {
+        failures: mutatedPayload.failures,
+        commit: mutatedPayload.commit,
+        pipeline: mutatedPayload.pipeline,
+        event: mutatedPayload.event,
+      };
+
+      await controller.handleCiWebhook('koda', reordered as unknown as CiWebhookPayloadDto, rawRequestOf(rawBody), signature);
+
+      expect(mockCiWebhookService.processCiWebhook).toHaveBeenCalled();
     });
   });
 });

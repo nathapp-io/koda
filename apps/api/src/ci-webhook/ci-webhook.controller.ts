@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Param, HttpCode, Headers } from '@nestjs/common';
+import { Controller, Post, Body, Param, HttpCode, Headers, Req } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { Public } from '@nathapp/nestjs-auth';
 import { AuthException } from '@nathapp/nestjs-common';
@@ -6,6 +6,8 @@ import { CiWebhookService } from './ci-webhook.service';
 import { CiWebhookPayloadDto, CiWebhookResponseDto } from './ci-webhook.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { createHmac, timingSafeEqual } from 'node:crypto';
+
+type RawBodyRequest = { rawBody?: Buffer };
 
 @ApiTags('ci-webhooks')
 @Controller()
@@ -22,6 +24,7 @@ export class CiWebhookController {
   async handleCiWebhook(
     @Param('slug') slug: string,
     @Body() payload: CiWebhookPayloadDto,
+    @Req() request: RawBodyRequest,
     @Headers('x-ci-signature') signature?: string,
   ) {
     const secret = await this.ciWebhookService.getWebhookSecret(slug);
@@ -29,7 +32,14 @@ export class CiWebhookController {
       throw new AuthException({}, 'ci_webhook');
     }
 
-    const isValid = this.verifySignature(JSON.stringify(payload), signature ?? '', secret);
+    const rawBody = request.rawBody;
+    // Prefer the raw bytes captured by the Fastify preParsing hook (KODA-02).
+    // Fall back to the re-serialized JSON when the hook is unavailable (e.g.
+    // older test setups using Express, where the JSON body is round-tripped
+    // by the platform anyway).
+    const bodyBytes = rawBody ? rawBody.toString('utf8') : JSON.stringify(payload);
+
+    const isValid = this.verifySignature(bodyBytes, signature ?? '', secret);
     if (!isValid) {
       throw new AuthException({}, 'ci_webhook');
     }

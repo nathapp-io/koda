@@ -72,6 +72,11 @@ function makePushPayload(overrides?: Partial<GitHubWebhookPayload>): GitHubWebho
   };
 }
 
+function makeRawRequest(rawBody: string | Buffer): { rawBody: Buffer } {
+  const buf = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(rawBody);
+  return { rawBody: buf };
+}
+
 describe('VcsWebhookController', () => {
   let controller: VcsWebhookController;
   let mockProjectsService: jest.Mocked<Pick<ProjectsService, 'findBySlug'>>;
@@ -111,17 +116,23 @@ describe('VcsWebhookController', () => {
   describe('handleWebhook', () => {
     it('should resolve the project and connection and forward a valid push webhook', async () => {
       const payload = makePushPayload();
+      const request = makeRawRequest(JSON.stringify(payload));
 
       const result = await controller.handleWebhook(
         'test-project',
         'sha256=valid-signature',
         payload,
+        request,
         'push',
       );
 
       expect(mockProjectsService.findBySlug).toHaveBeenCalledWith('test-project');
       expect(mockVcsConnectionService.getFullByProject).toHaveBeenCalledWith('proj-1');
-      expect(mockWebhookService.verifySignature).toHaveBeenCalled();
+      expect(mockWebhookService.verifySignature).toHaveBeenCalledWith(
+        request.rawBody.toString('utf8'),
+        'sha256=valid-signature',
+        'super-secret-webhook-key',
+      );
       expect(mockWebhookService.handleWebhook).toHaveBeenCalledWith(
         expect.objectContaining({ id: 'conn-1', project: expect.objectContaining({ id: 'proj-1' }) }),
         'push',
@@ -130,11 +141,73 @@ describe('VcsWebhookController', () => {
       expect(result).toEqual({ success: true });
     });
 
+    it('should verify against the raw request body bytes, not JSON.stringify of the parsed object (KODA-02)', async () => {
+      // GitHub may send JSON in a different byte-order/whitespace than the
+      // server-side re-serialization produces. The HMAC must be verified
+      // against the raw bytes received, never against the parsed object.
+      const canonicalJson = '{"action":"","ref":"refs/heads/main","commits":[]}';
+      const payload: GitHubWebhookPayload = {
+        action: '',
+        ref: 'refs/heads/main',
+        commits: [],
+        repository: {
+          id: 12345,
+          full_name: 'owner/repo',
+          name: 'repo',
+          owner: { login: 'owner', id: 1 },
+        },
+        sender: { id: 1, login: 'dev', type: 'User' },
+      };
+      const request = makeRawRequest(canonicalJson);
+
+      await controller.handleWebhook(
+        'test-project',
+        'sha256=sig',
+        payload,
+        request,
+        'push',
+      );
+
+      expect(mockWebhookService.verifySignature).toHaveBeenCalledWith(
+        canonicalJson,
+        'sha256=sig',
+        'super-secret-webhook-key',
+      );
+      // The body fed to verifySignature MUST NOT be the re-serialized JSON
+      // of the parsed payload object (which would have different key order).
+      const calledWith = mockWebhookService.verifySignature.mock.calls[0]?.[0] ?? '';
+      expect(calledWith).not.toBe(JSON.stringify(payload));
+    });
+
+    it('should fall back to JSON.stringify(payload) when rawBody is absent (test/Express compatibility)', async () => {
+      const payload = makePushPayload();
+
+      await controller.handleWebhook(
+        'test-project',
+        'sha256=sig',
+        payload,
+        {} as { rawBody?: Buffer },
+        'push',
+      );
+
+      expect(mockWebhookService.verifySignature).toHaveBeenCalledWith(
+        JSON.stringify(payload),
+        'sha256=sig',
+        'super-secret-webhook-key',
+      );
+    });
+
     it('should throw AuthException when connection has no webhookSecret', async () => {
       mockVcsConnectionService.getFullByProject.mockResolvedValue(makeFullConnection({ webhookSecret: null }));
 
       await expect(
-        controller.handleWebhook('test-project', 'sha256=sig', makePushPayload(), 'push'),
+        controller.handleWebhook(
+          'test-project',
+          'sha256=sig',
+          makePushPayload(),
+          makeRawRequest('{}'),
+          'push',
+        ),
       ).rejects.toThrow(AuthException);
     });
 
@@ -142,7 +215,13 @@ describe('VcsWebhookController', () => {
       mockWebhookService.verifySignature.mockReturnValue(false);
 
       await expect(
-        controller.handleWebhook('test-project', 'sha256=bad-signature', makePushPayload(), 'push'),
+        controller.handleWebhook(
+          'test-project',
+          'sha256=bad-signature',
+          makePushPayload(),
+          makeRawRequest('{}'),
+          'push',
+        ),
       ).rejects.toThrow(AuthException);
 
       expect(mockWebhookService.handleWebhook).not.toHaveBeenCalled();
@@ -161,7 +240,13 @@ describe('VcsWebhookController', () => {
         sender: { id: 1, login: 'dev', type: 'User' },
       };
 
-      await controller.handleWebhook('test-project', 'sha256=sig', issuePayload, undefined);
+      await controller.handleWebhook(
+        'test-project',
+        'sha256=sig',
+        issuePayload,
+        makeRawRequest('{}'),
+        undefined,
+      );
 
       expect(mockWebhookService.handleWebhook).toHaveBeenCalledWith(
         expect.anything(),
@@ -173,7 +258,13 @@ describe('VcsWebhookController', () => {
     it('should pass the x-github-event header as event type when provided', async () => {
       const payload = makePushPayload();
 
-      await controller.handleWebhook('test-project', 'sha256=sig', payload, 'ping');
+      await controller.handleWebhook(
+        'test-project',
+        'sha256=sig',
+        payload,
+        makeRawRequest('{}'),
+        'ping',
+      );
 
       expect(mockWebhookService.handleWebhook).toHaveBeenCalledWith(
         expect.anything(),
@@ -209,7 +300,13 @@ describe('VcsWebhookController', () => {
         sender: { id: 1, login: 'dev', type: 'User' },
       };
 
-      await controller.handleWebhook('test-project', 'sha256=sig', prPayload, undefined);
+      await controller.handleWebhook(
+        'test-project',
+        'sha256=sig',
+        prPayload,
+        makeRawRequest('{}'),
+        undefined,
+      );
 
       expect(mockWebhookService.handleWebhook).toHaveBeenCalledWith(
         expect.anything(),

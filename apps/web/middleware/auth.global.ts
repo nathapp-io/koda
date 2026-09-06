@@ -4,8 +4,9 @@ export default defineNuxtRouteMiddleware(async (to, _from) => {
   // Guest-only routes where authenticated users should be redirected
   const guestOnlyRoutes = ['/login', '/register']
 
-  // If we have a token cookie but no user loaded yet, validate it
-  if (auth.token.value && !auth.user.value) {
+  // We only know the user is authenticated once /api/auth/me succeeds.
+  // That endpoint uses the httpOnly cookie, so JS can probe it safely.
+  if (!auth.user.value) {
     await auth.fetchUser()
   }
 
