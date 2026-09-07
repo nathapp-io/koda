@@ -32,17 +32,17 @@ export function evaluateCommand(program: Command): void {
         process.exit(2);
       }
 
-      let ragControllerEvaluateRetrieval: (arg: { slug: string }) => Promise<unknown>;
+      let retrievalControllerEvaluateRetrieval: (arg: { slug: string }) => Promise<unknown>;
       try {
         const generated = await import('../generated');
-        ragControllerEvaluateRetrieval = generated.ragControllerEvaluateRetrieval;
+        retrievalControllerEvaluateRetrieval = generated.retrievalControllerEvaluateRetrieval;
       } catch {
         console.error('Error: generated client not available');
         process.exit(2);
       }
 
       try {
-        const result = await ragControllerEvaluateRetrieval({
+        const result = await retrievalControllerEvaluateRetrieval({
           slug: ctx.projectSlug,
         }) as unknown as { data: { precisionAt5_avg: number; precisionAt5_p50: number; precisionAt5_p95: number; totalQueries: number; results: Array<{ query: string; intent: string; precisionAt5: number }> } };
 
