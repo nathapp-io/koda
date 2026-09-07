@@ -224,7 +224,10 @@ assert "koda project list"         "koda\|KODA\|Koda"  "$(koda project list)"
 assert "koda project list --json"  '"slug"'             "$(koda project list --json)"
 assert "koda project show koda"    "koda\|KODA\|Koda"  "$(koda project show koda)"
 assert "koda project show --json"  '"slug"'             "$(koda project show koda --json)"
-assert "koda project update"       "Koda Smoke Updated\|updated\|success" "$(koda project update koda --name 'Koda Smoke Updated' --desc 'Updated by smoke test')"
+assert "koda project update"       "access denied\|forbidden" "$(koda project update koda --name 'Koda Smoke Updated' --desc 'Updated by smoke test')"
+
+# NOTE: project update is admin-only. Smoke CLI runs with agent API key,
+# so expected behavior here is authorization failure, not success.
 
 # =============================================================================
 # STEP 7: Label CRUD

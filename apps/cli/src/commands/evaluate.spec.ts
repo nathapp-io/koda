@@ -35,7 +35,7 @@ jest.mock('../generated', () => ({
   ragControllerDeleteDocument: jest.fn(),
   ragControllerOptimizeTable: jest.fn(),
   ragControllerImportGraphify: jest.fn(),
-  ragControllerEvaluateRetrieval: jest.fn(),
+  retrievalControllerEvaluateRetrieval: jest.fn(),
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
@@ -213,8 +213,8 @@ describe('evaluateCommand', () => {
 
   describe('AC3: table output to stdout', () => {
     it('prints results table to stdout when evaluation succeeds', async () => {
-      const { ragControllerEvaluateRetrieval } = require('../generated');
-      (ragControllerEvaluateRetrieval as jest.Mock).mockResolvedValue({
+      const { retrievalControllerEvaluateRetrieval } = require('../generated');
+      (retrievalControllerEvaluateRetrieval as jest.Mock).mockResolvedValue({
         ret: 0,
         data: {
           precisionAt5_avg: 0.75,
@@ -258,8 +258,8 @@ describe('evaluateCommand', () => {
 
   describe('AC4: --json output', () => {
     it('outputs JSON with --json flag', async () => {
-      const { ragControllerEvaluateRetrieval } = require('../generated');
-      (ragControllerEvaluateRetrieval as jest.Mock).mockResolvedValue({
+      const { retrievalControllerEvaluateRetrieval } = require('../generated');
+      (retrievalControllerEvaluateRetrieval as jest.Mock).mockResolvedValue({
         ret: 0,
         data: {
           precisionAt5_avg: 0.75,
@@ -317,8 +317,8 @@ describe('evaluateCommand', () => {
 
   describe('AC5: CI threshold failure exits 1', () => {
     it('exits 1 when precisionAt5_avg < 0.70', async () => {
-      const { ragControllerEvaluateRetrieval } = require('../generated');
-      (ragControllerEvaluateRetrieval as jest.Mock).mockResolvedValue({
+      const { retrievalControllerEvaluateRetrieval } = require('../generated');
+      (retrievalControllerEvaluateRetrieval as jest.Mock).mockResolvedValue({
         ret: 0,
         data: {
           precisionAt5_avg: 0.5,
@@ -341,8 +341,8 @@ describe('evaluateCommand', () => {
     });
 
     it('exits 0 when precisionAt5_avg >= 0.70', async () => {
-      const { ragControllerEvaluateRetrieval } = require('../generated');
-      (ragControllerEvaluateRetrieval as jest.Mock).mockResolvedValue({
+      const { retrievalControllerEvaluateRetrieval } = require('../generated');
+      (retrievalControllerEvaluateRetrieval as jest.Mock).mockResolvedValue({
         ret: 0,
         data: {
           precisionAt5_avg: 0.85,
@@ -367,8 +367,8 @@ describe('evaluateCommand', () => {
 
   describe('AC2: successful evaluation exits 0', () => {
     it('exits 0 when evaluation succeeds and precisionAt5_avg >= threshold', async () => {
-      const { ragControllerEvaluateRetrieval } = require('../generated');
-      (ragControllerEvaluateRetrieval as jest.Mock).mockResolvedValue({
+      const { retrievalControllerEvaluateRetrieval } = require('../generated');
+      (retrievalControllerEvaluateRetrieval as jest.Mock).mockResolvedValue({
         ret: 0,
         data: {
           precisionAt5_avg: 0.80,
@@ -393,8 +393,8 @@ describe('evaluateCommand', () => {
 
   describe('API errors', () => {
     it('exits 1 when API call fails', async () => {
-      const { ragControllerEvaluateRetrieval } = require('../generated');
-      (ragControllerEvaluateRetrieval as jest.Mock).mockRejectedValue(
+      const { retrievalControllerEvaluateRetrieval } = require('../generated');
+      (retrievalControllerEvaluateRetrieval as jest.Mock).mockRejectedValue(
         new Error('Internal Server Error')
       );
 
@@ -410,10 +410,10 @@ describe('evaluateCommand', () => {
     });
 
     it('exits 1 on 5xx server error', async () => {
-      const { ragControllerEvaluateRetrieval } = require('../generated');
+      const { retrievalControllerEvaluateRetrieval } = require('../generated');
       const serverError = new Error('Service Unavailable');
       (serverError as any).response = { status: 503, data: { message: 'Service Unavailable' } };
-      (ragControllerEvaluateRetrieval as jest.Mock).mockRejectedValue(serverError);
+      (retrievalControllerEvaluateRetrieval as jest.Mock).mockRejectedValue(serverError);
 
       const evaluateCmd = program.commands.find((cmd) => cmd.name() === 'evaluate');
 
@@ -427,10 +427,10 @@ describe('evaluateCommand', () => {
     });
 
     it('exits 2 on 401 auth error', async () => {
-      const { ragControllerEvaluateRetrieval } = require('../generated');
+      const { retrievalControllerEvaluateRetrieval } = require('../generated');
       const apiError = new Error('Unauthorized');
       (apiError as any).response = { status: 401 };
-      (ragControllerEvaluateRetrieval as jest.Mock).mockRejectedValue(apiError);
+      (retrievalControllerEvaluateRetrieval as jest.Mock).mockRejectedValue(apiError);
 
       const evaluateCmd = program.commands.find((cmd) => cmd.name() === 'evaluate');
 
