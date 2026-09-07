@@ -68,6 +68,7 @@
     "@nathapp/eslint-config": "workspace:*",
     "@nathapp/typescript-config": "workspace:*",
     "@nestjs/cli": "^11.0.24",
+    "@nestjs/platform-express": "^11.1.28",
     "@nestjs/testing": "^11.1.28",
     "@types/bcrypt": "^5.0.0",
     "@types/jest": "^29.0.0",
