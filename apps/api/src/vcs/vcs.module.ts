@@ -13,9 +13,10 @@ import { ProjectsModule } from '../projects/projects.module';
 import { RagModule } from '../rag/rag.module';
 import { VCS_REPOSITORY } from './domain/vcs.repository';
 import { OutboxModule } from '../outbox/outbox.module';
+import { WebhookSecurityModule } from '../webhook-security/webhook-security.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), RagModule, OutboxModule, ProjectsModule],
+  imports: [ScheduleModule.forRoot(), RagModule, OutboxModule, ProjectsModule, WebhookSecurityModule],
   controllers: [VcsController, VcsWebhookController],
   providers: [
     PrismaVcsRepository,

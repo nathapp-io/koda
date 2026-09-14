@@ -1,6 +1,4 @@
 import { Command } from 'commander';
-import { resolveContext } from '../config';
-import { OpenAPI } from '../generated/core/OpenAPI';
 import {
   adminControllerGetOutbox,
   adminControllerRetryOutboxEvent,
@@ -9,6 +7,7 @@ import {
 import { table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
+import { withContext } from '../utils/context';
 
 export function adminCommand(program: Command): void {
   const admin = program.command('admin');
@@ -24,13 +23,7 @@ export function adminCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const ctx = await resolveContext({});
-        if (!ctx.apiKey || !ctx.apiUrl) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        await withContext({}, { requireProject: false });
 
         const response = await adminControllerGetOutbox({ status: options.status });
         const raw = unwrap<{ items?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>>(response);
@@ -62,13 +55,7 @@ export function adminCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const ctx = await resolveContext({});
-        if (!ctx.apiKey || !ctx.apiUrl) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        await withContext({}, { requireProject: false });
 
         const response = await adminControllerRetryOutboxEvent({ eventId: options.eventId });
         const data = unwrap<Record<string, unknown>>(response);
@@ -92,13 +79,7 @@ export function adminCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const ctx = await resolveContext({});
-        if (!ctx.apiKey || !ctx.apiUrl) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        await withContext({}, { requireProject: false });
 
         const response = await sloDashboardControllerGetSloMetrics({ from: options.from, to: options.to });
         const data = unwrap<Record<string, unknown>>(response);

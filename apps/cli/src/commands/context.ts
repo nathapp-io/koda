@@ -1,13 +1,11 @@
 import { Command } from 'commander';
-import { resolveContext } from '../config';
-import { OpenAPI } from '../generated/core/OpenAPI';
 import {
   contextControllerGetContext,
   contextControllerQueryContext,
 } from '../generated';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
-import { error } from '../utils/output';
+import { withContext } from '../utils/context';
 
 export function contextCommand(program: Command): void {
   const ctx = program.command('context');
@@ -20,19 +18,7 @@ export function contextCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const context = await resolveContext({ projectSlug: options.project });
-
-        if (!context.projectSlug) {
-          error('Project not configured. Run: koda init');
-          process.exit(2);
-        }
-
-        if (!context.apiKey || !context.apiUrl) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = context.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = context.apiKey;
+        const context = await withContext({ projectSlug: options.project });
 
         const response = await contextControllerGetContext({ slug: context.projectSlug });
         const data = unwrap<Record<string, unknown>>(response);
@@ -55,19 +41,7 @@ export function contextCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const context = await resolveContext({ projectSlug: options.project });
-
-        if (!context.projectSlug) {
-          error('Project not configured. Run: koda init');
-          process.exit(2);
-        }
-
-        if (!context.apiKey || !context.apiUrl) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = context.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = context.apiKey;
+        const context = await withContext({ projectSlug: options.project });
 
         const requestBody: Record<string, unknown> = {};
         if (options.query) requestBody['query'] = options.query;

@@ -77,6 +77,9 @@ export class VcsWebhookService implements OnModuleDestroy {
   private readonly logger = new Logger(VcsWebhookService.name);
   private readonly recentCommitHashes = new Map<string, number>();
   private readonly dedupWindowMs = 5 * 60 * 1000;
+  // BUG-11: hard cap so the map can never grow unboundedly even if the
+  // cleanup cadence (currently == dedupWindowMs) drifts from the window.
+  private static readonly MAX_DEDUP_ENTRIES = 10_000;
   private readonly cleanupInterval: ReturnType<typeof setInterval>;
   private dbDedupVerified = false;
   private dbDedupWorks = false;
@@ -103,6 +106,16 @@ export class VcsWebhookService implements OnModuleDestroy {
     for (const [key, timestamp] of this.recentCommitHashes) {
       if (now - timestamp > this.dedupWindowMs) {
         this.recentCommitHashes.delete(key);
+      }
+    }
+  }
+
+  private rememberCommitHash(key: string, now: number): void {
+    this.recentCommitHashes.set(key, now);
+    if (this.recentCommitHashes.size > VcsWebhookService.MAX_DEDUP_ENTRIES) {
+      const oldest = this.recentCommitHashes.keys().next().value;
+      if (oldest !== undefined) {
+        this.recentCommitHashes.delete(oldest);
       }
     }
   }
@@ -618,7 +631,7 @@ export class VcsWebhookService implements OnModuleDestroy {
           eventId: commitHash,
           payload: eventPayload,
         });
-        this.recentCommitHashes.set(recentKey, now);
+        this.rememberCommitHash(recentKey, now);
         enqueuedCount++;
 
         // Verify that the DB delegate actually tracks enqueued events.

@@ -4,9 +4,10 @@ import { CiWebhookController } from './ci-webhook.controller';
 import { CiWebhookService } from './ci-webhook.service';
 import { PrismaCiWebhookRepository } from './prisma-ci-webhook.repository';
 import { CI_WEBHOOK_REPOSITORY } from './domain/ci-webhook.domain';
+import { WebhookSecurityModule } from '../webhook-security/webhook-security.module';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, WebhookSecurityModule],
   controllers: [CiWebhookController],
   providers: [
     PrismaCiWebhookRepository,

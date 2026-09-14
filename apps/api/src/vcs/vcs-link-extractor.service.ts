@@ -7,18 +7,22 @@
  * - Upserts on @@unique([ticketId, url]) to avoid duplicates
  * - Gracefully handles GitHub API failures during commit listing
  */
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import type { VcsConnectionDomain, VcsTicketDomain } from './domain/vcs.domain';
 import { PrismaVcsRepository } from './prisma-vcs.repository';
 import { decryptToken } from '../common/utils/encryption.util';
 import { createVcsProvider } from './factory';
 import { containsTicketRef } from './ticket-ref-matcher.util';
+import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 
 @Injectable()
 export class VcsLinkExtractorService {
   private readonly logger = new Logger(VcsLinkExtractorService.name);
 
-  constructor(private readonly vcsRepo: PrismaVcsRepository) {}
+  constructor(
+    private readonly vcsRepo: PrismaVcsRepository,
+    @Optional() @Inject(VCS_CFG) private readonly vcsConfig?: IVcsConfig,
+  ) {}
 
   /**
    * Extract branch and commit links from a pull request and create TicketLink entries.
@@ -41,6 +45,7 @@ export class VcsLinkExtractorService {
       provider: connection.provider,
       token: decryptToken(connection.encryptedToken, encryptionKey),
       repoUrl: `https://github.com/${connection.repoOwner}/${connection.repoName}`,
+      githubApiUrl: this.vcsConfig?.githubApiUrl,
     });
 
     // Get PR number from externalVcsId (format: "owner/repo#123" or just "123")

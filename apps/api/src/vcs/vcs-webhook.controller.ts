@@ -5,6 +5,7 @@ import { AuthException } from '@nathapp/nestjs-common';
 import { ProjectsService } from '../projects/projects.service';
 import { VcsConnectionService } from './vcs-connection.service';
 import { VcsWebhookService, GitHubWebhookPayload } from './vcs-webhook.service';
+import { WebhookReplayGuard } from '../webhook-security/webhook-replay.guard';
 
 type RawBodyRequest = { rawBody?: Buffer };
 
@@ -15,6 +16,7 @@ export class VcsWebhookController {
     private readonly projectsService: ProjectsService,
     private readonly vcsConnectionService: VcsConnectionService,
     private readonly webhookService: VcsWebhookService,
+    private readonly replayGuard: WebhookReplayGuard,
   ) {}
 
   @Post('/projects/:slug/vcs-webhook')
@@ -29,6 +31,8 @@ export class VcsWebhookController {
     @Body() payload: GitHubWebhookPayload,
     @Req() request: RawBodyRequest,
     @Headers('x-github-event') githubEvent?: string,
+    @Headers('x-github-delivery') deliveryId?: string,
+    @Headers('date') dateHeader?: string,
   ): Promise<{ ignored?: boolean; success: boolean; reason?: string }> {
     const project = await this.projectsService.findBySlug(slug);
     const connection = await this.vcsConnectionService.getFullByProject(project.id);
@@ -57,16 +61,25 @@ export class VcsWebhookController {
       throw new AuthException({}, 'vcs_webhook');
     }
 
+    // SEC-1: reject replayed deliveries; forget on failure so GitHub's retry
+    // with the same X-GitHub-Delivery id is accepted.
+    await this.replayGuard.assertFresh({ projectId: project.id, source: 'github', deliveryId, dateHeader });
+
     const eventType = githubEvent
       || (payload.pull_request ? 'pull_request' : payload.issue ? 'issues' : 'unknown');
     const event = eventType === 'issues'
       ? `issues.${payload.action || 'unknown'}`
       : eventType;
 
-    return this.webhookService.handleWebhook(
-      { ...connection, project } as Parameters<typeof this.webhookService.handleWebhook>[0],
-      event,
-      payload,
-    );
+    try {
+      return await this.webhookService.handleWebhook(
+        { ...connection, project } as Parameters<typeof this.webhookService.handleWebhook>[0],
+        event,
+        payload,
+      );
+    } catch (err) {
+      await this.replayGuard.forget({ projectId: project.id, source: 'github', deliveryId });
+      throw err;
+    }
   }
 }

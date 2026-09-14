@@ -21,6 +21,7 @@ import { VcsSyncService } from '../../../src/vcs/vcs-sync.service';
 import { VcsWebhookService } from '../../../src/vcs/vcs-webhook.service';
 import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
 import { ProjectsService } from '../../../src/projects/projects.service';
+import { WebhookReplayGuard } from '../../../src/webhook-security/webhook-replay.guard';
 import { ConfigService } from '@nestjs/config';
 import { AuthException } from '@nathapp/nestjs-common';
 
@@ -154,6 +155,13 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
           provide: ProjectsService,
           useValue: {
             findBySlug: mockFindBySlug,
+          },
+        },
+        {
+          provide: WebhookReplayGuard,
+          useValue: {
+            assertFresh: jest.fn().mockResolvedValue(undefined),
+            forget: jest.fn(),
           },
         },
         {

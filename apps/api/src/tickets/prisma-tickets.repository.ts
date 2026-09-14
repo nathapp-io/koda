@@ -264,6 +264,22 @@ export class PrismaTicketsRepository implements ITicketRepository {
     return this.toDomain(row);
   }
 
+  async findUserById(id: string): Promise<{ id: string; role: string } | null> {
+    return this.db.user.findUnique({ where: { id }, select: { id: true, role: true } });
+  }
+
+  async findAgentById(id: string): Promise<{ id: string } | null> {
+    return this.db.agent.findUnique({ where: { id }, select: { id: true } });
+  }
+
+  async findProjectMemberRole(projectId: string, userId: string): Promise<string | null> {
+    const member = await this.db.projectMember.findUnique({
+      where: { projectId_userId: { projectId, userId } },
+      select: { role: true },
+    });
+    return member?.role ?? null;
+  }
+
   async findTicketByRefRaw(projectSlug: string, ref: string): Promise<TicketDomain | null> {
     const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
@@ -335,6 +351,9 @@ export class PrismaTicketsRepository implements ITicketRepository {
     provider: string;
     externalRef: string;
     linkType: string;
+    prNumber?: number | null;
+    prState?: string | null;
+    prUpdatedAt?: Date | null;
   }): Promise<{ id: string }> {
     return this.db.ticketLink.create({ data });
   }

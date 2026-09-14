@@ -4,6 +4,7 @@ import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { TICKET_REPOSITORY } from './domain/ticket.domain';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
+import { NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import type { KodaAgentRole } from '../auth/principal/koda-principal.types';
 import { TicketEventService } from '../events/ticket-event.service';
 import { OutboxService } from '../outbox/outbox.service';
@@ -107,6 +108,9 @@ describe('TicketsService', () => {
     assignTicket: jest.fn(),
     softDeleteTicket: jest.fn(),
     findTicketByRefRaw: jest.fn(),
+    findUserById: jest.fn(),
+    findAgentById: jest.fn(),
+    findProjectMemberRole: jest.fn(),
   };
 
   const mockTxManager = {
@@ -804,6 +808,8 @@ describe('TicketsService', () => {
     it('should assign ticket to user', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(mockTicket);
+      mockTicketRepo.findUserById.mockResolvedValue({ id: 'user-456', role: 'MEMBER' });
+      mockTicketRepo.findProjectMemberRole.mockResolvedValue('DEVELOPER');
       mockTicketRepo.assignTicket.mockResolvedValue({
         ...mockTicket,
         assignedToUserId: 'user-456',
@@ -814,11 +820,14 @@ describe('TicketsService', () => {
 
       expect(result.assignedToUserId).toBe('user-456');
       expect(result.assignedToAgentId).toBeNull();
+      expect(mockTicketRepo.findUserById).toHaveBeenCalledWith('user-456');
+      expect(mockTicketRepo.findProjectMemberRole).toHaveBeenCalledWith('proj-123', 'user-456');
     });
 
     it('should assign ticket to agent', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(mockTicket);
+      mockTicketRepo.findAgentById.mockResolvedValue({ id: 'agent-456' });
       mockTicketRepo.assignTicket.mockResolvedValue({
         ...mockTicket,
         assignedToAgentId: 'agent-456',
@@ -829,6 +838,7 @@ describe('TicketsService', () => {
 
       expect(result.assignedToAgentId).toBe('agent-456');
       expect(result.assignedToUserId).toBeNull();
+      expect(mockTicketRepo.findAgentById).toHaveBeenCalledWith('agent-456');
     });
 
     it('should unassign ticket when neither userId nor agentId provided', async () => {
@@ -844,6 +854,8 @@ describe('TicketsService', () => {
 
       expect(result.assignedToUserId).toBeNull();
       expect(result.assignedToAgentId).toBeNull();
+      expect(mockTicketRepo.findUserById).not.toHaveBeenCalled();
+      expect(mockTicketRepo.findAgentById).not.toHaveBeenCalled();
     });
 
     it('should not allow both userId and agentId', async () => {
@@ -861,6 +873,56 @@ describe('TicketsService', () => {
       await expect(
         service.assign('koda', 'KODA-999', { userId: 'user-456' })
       ).rejects.toThrow();
+    });
+
+    it('should return 404 when the assigned user does not exist (BUG-2)', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(mockTicket);
+      mockTicketRepo.findUserById.mockResolvedValue(null);
+
+      await expect(
+        service.assign('koda', 'KODA-1', { userId: 'user-missing' })
+      ).rejects.toThrow(NotFoundAppException);
+      expect(mockTicketRepo.assignTicket).not.toHaveBeenCalled();
+    });
+
+    it('should return 404 when the assigned agent does not exist (BUG-2)', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(mockTicket);
+      mockTicketRepo.findAgentById.mockResolvedValue(null);
+
+      await expect(
+        service.assign('koda', 'KODA-1', { agentId: 'agent-missing' })
+      ).rejects.toThrow(NotFoundAppException);
+      expect(mockTicketRepo.assignTicket).not.toHaveBeenCalled();
+    });
+
+    it('should return 403 when the assigned user is not a project member (BUG-2)', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(mockTicket);
+      mockTicketRepo.findUserById.mockResolvedValue({ id: 'user-456', role: 'MEMBER' });
+      mockTicketRepo.findProjectMemberRole.mockResolvedValue(null);
+
+      await expect(
+        service.assign('koda', 'KODA-1', { userId: 'user-456' })
+      ).rejects.toThrow(ForbiddenAppException);
+      expect(mockTicketRepo.assignTicket).not.toHaveBeenCalled();
+    });
+
+    it('should skip the membership check for ADMIN assignees (BUG-17)', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(mockTicket);
+      mockTicketRepo.findUserById.mockResolvedValue({ id: 'admin-1', role: 'ADMIN' });
+      mockTicketRepo.assignTicket.mockResolvedValue({
+        ...mockTicket,
+        assignedToUserId: 'admin-1',
+        assignedToAgentId: null,
+      });
+
+      const result = await service.assign('koda', 'KODA-1', { userId: 'admin-1' });
+
+      expect(result.assignedToUserId).toBe('admin-1');
+      expect(mockTicketRepo.findProjectMemberRole).not.toHaveBeenCalled();
     });
   });
 });

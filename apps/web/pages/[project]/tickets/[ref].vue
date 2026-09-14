@@ -173,9 +173,9 @@ function onCommentAdded() {
   toast.success(t('comments.toast.added'))
 }
 
-function extractIssueNumber(url: string): string {
+function extractIssueNumber(url: string): string | null {
   const parts = url.split('/')
-  return parts[parts.length - 1] || ''
+  return parts[parts.length - 1] || null
 }
 
 const githubPrLinks = computed(() => {
@@ -183,10 +183,10 @@ const githubPrLinks = computed(() => {
   return ticketLinks.value.filter(link => link.linkType === 'pr' || (!link.linkType && link.provider === 'github' && link.prNumber))
 })
 
-function extractPrNumber(externalRef: string | null): string {
-  if (!externalRef) return ''
+function extractPrNumber(externalRef: string | null): string | null {
+  if (!externalRef) return null
   const parts = externalRef.split('#')
-  return parts[parts.length - 1] || ''
+  return parts[parts.length - 1] || null
 }
 
 function extractRepoRef(externalRef: string | null): string {
@@ -239,6 +239,11 @@ function extractCommitSha(url: string): string {
 
 const assigneeUserId = vueRef('')
 const assigning = vueRef(false)
+
+// ENH-4: the assign route requires UPDATE Ticket permission (ADMIN/agent);
+// hide the controls from members/viewers so the 403 toast never happens.
+const { user: currentUser } = useAuth()
+const canAssign = computed(() => currentUser.value?.role === 'ADMIN')
 
 async function assignTicket() {
   if (!assigneeUserId.value.trim()) return
@@ -412,7 +417,7 @@ async function removeLink(linkId: string) {
               rel="noopener noreferrer"
               class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md bg-github-link-bg text-gitHub-link-text hover:bg-gitHub-link-bg/80 border border-gitHub-link-border"
             >
-              <span>{{ t('tickets.pr.badge', { number: extractPrNumber(link.externalRef) }) }}</span>
+              <span>{{ t('tickets.pr.badge', { number: extractPrNumber(link.externalRef) ?? 'unknown' }) }}</span>
             </a>
             <Badge v-if="link.prState" variant="outline" :class="prStateClass(link.prState)">
               {{ t(`tickets.pr.status.${link.prState}`) }}
@@ -428,7 +433,7 @@ async function removeLink(linkId: string) {
               <span class="text-sm font-medium">{{ t('tickets.pr.status.merged') }}</span>
             </div>
             <p class="text-sm text-muted-foreground">
-              {{ t('tickets.pr.mergedActivity', { repo: link.externalRef?.split('#')[0] || '', number: link.prNumber || extractPrNumber(link.externalRef), author: 'system' }) }}
+              {{ t('tickets.pr.mergedActivity', { repo: link.externalRef?.split('#')[0] || '', number: (link.prNumber || extractPrNumber(link.externalRef)) ?? 'unknown', author: 'system' }) }}
             </p>
           </div>
         </div>
@@ -449,7 +454,7 @@ async function removeLink(linkId: string) {
             :key="`pr-created-${link.id}`"
             class="text-sm text-muted-foreground"
           >
-            {{ t('tickets.pr.created', { repo: extractRepoRef(link.externalRef), number: extractPrNumber(link.externalRef) }) }}
+            {{ t('tickets.pr.created', { repo: extractRepoRef(link.externalRef), number: extractPrNumber(link.externalRef) ?? 'unknown' }) }}
           </p>
         </div>
 
@@ -473,7 +478,7 @@ async function removeLink(linkId: string) {
                 rel="noopener noreferrer"
                 class="text-blue-500 hover:underline"
               >
-                {{ t('tickets.pr.badge', { number: link.prNumber || extractPrNumber(link.externalRef) }) }}
+                {{ t('tickets.pr.badge', { number: (link.prNumber || extractPrNumber(link.externalRef)) ?? 'unknown' }) }}
               </a>
               <Badge v-if="link.prState" variant="outline" :class="prStateClass(link.prState)">
                 {{ t(`tickets.pr.status.${link.prState}`) }}
@@ -532,7 +537,7 @@ async function removeLink(linkId: string) {
                 <span class="text-sm">{{ ticket.assignee.name }}</span>
               </div>
               <p v-else class="text-sm text-muted-foreground">{{ t('common.unassigned') }}</p>
-              <div class="mt-2 space-y-2">
+              <div v-if="canAssign" class="mt-2 space-y-2">
                 <Input v-model="assigneeUserId" :placeholder="t('tickets.assign.userIdPlaceholder')" />
                 <div class="flex items-center gap-2">
                   <Button size="sm" :disabled="assigning || !assigneeUserId.trim()" @click="assignTicket">
@@ -580,7 +585,7 @@ async function removeLink(linkId: string) {
                 rel="noopener noreferrer"
                 class="text-blue-500 hover:underline text-sm"
               >
-                {{ t('tickets.detail.syncedFromGithub', { issue: extractIssueNumber(ticket.externalVcsUrl) }) }}
+                {{ t('tickets.detail.syncedFromGithub', { issue: extractIssueNumber(ticket.externalVcsUrl) ?? 'unknown' }) }}
               </a>
             </div>
 

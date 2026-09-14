@@ -2,6 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { CiWebhookController } from './ci-webhook.controller';
 import { CiWebhookService } from './ci-webhook.service';
 import { CiWebhookPayloadDto } from './ci-webhook.dto';
+import { WebhookReplayGuard } from '../webhook-security/webhook-replay.guard';
+import { HttpException, HttpStatus } from '@nestjs/common';
 import { createHmac } from 'node:crypto';
 
 function rawRequestOf(body: string): { rawBody: Buffer } {
@@ -14,13 +16,22 @@ describe('CiWebhookController', () => {
   const mockCiWebhookService = {
     getWebhookSecret: jest.fn(),
     processCiWebhook: jest.fn(),
+    resolveProject: jest.fn(),
+  };
+
+  const mockReplayGuard = {
+    assertFresh: jest.fn().mockResolvedValue(undefined),
+    forget: jest.fn().mockResolvedValue(undefined),
   };
 
   beforeEach(async () => {
+    mockCiWebhookService.resolveProject.mockReset().mockResolvedValue({ id: 'proj-1' });
+
     const module: TestingModule = await Test.createTestingModule({
       controllers: [CiWebhookController],
       providers: [
         { provide: CiWebhookService, useValue: mockCiWebhookService },
+        { provide: WebhookReplayGuard, useValue: mockReplayGuard },
       ],
     }).compile();
 
@@ -214,6 +225,75 @@ describe('CiWebhookController', () => {
       await controller.handleCiWebhook('koda', reordered as unknown as CiWebhookPayloadDto, rawRequestOf(rawBody), signature);
 
       expect(mockCiWebhookService.processCiWebhook).toHaveBeenCalled();
+    });
+
+    it('should check replay protection after signature verification (SEC-1)', async () => {
+      mockCiWebhookService.getWebhookSecret.mockResolvedValue(secret);
+      mockCiWebhookService.processCiWebhook.mockResolvedValue({ success: true, message: 'ok' });
+
+      const rawBody = JSON.stringify(validPayload);
+      const signature = sign(rawBody);
+
+      await controller.handleCiWebhook(
+        'koda',
+        validPayload,
+        rawRequestOf(rawBody),
+        signature,
+        'delivery-abc-123',
+      );
+
+      expect(mockReplayGuard.assertFresh).toHaveBeenCalledWith({
+        projectId: 'proj-1',
+        source: 'ci',
+        deliveryId: 'delivery-abc-123',
+        dateHeader: undefined,
+      });
+    });
+
+    it('should reject a replayed delivery with 409 and not process it (SEC-1)', async () => {
+      mockCiWebhookService.getWebhookSecret.mockResolvedValue(secret);
+      mockReplayGuard.assertFresh.mockRejectedValueOnce(
+        new HttpException('Webhook already processed', HttpStatus.CONFLICT),
+      );
+
+      const rawBody = JSON.stringify(validPayload);
+      const signature = sign(rawBody);
+
+      await expect(
+        controller.handleCiWebhook(
+          'koda',
+          validPayload,
+          rawRequestOf(rawBody),
+          signature,
+          'delivery-dup',
+        ),
+      ).rejects.toMatchObject({ status: HttpStatus.CONFLICT });
+
+      expect(mockCiWebhookService.processCiWebhook).not.toHaveBeenCalled();
+    });
+
+    it('should forget the delivery when processing fails so sender retries are accepted (SEC-1)', async () => {
+      mockCiWebhookService.getWebhookSecret.mockResolvedValue(secret);
+      mockCiWebhookService.processCiWebhook.mockRejectedValue(new Error('boom'));
+
+      const rawBody = JSON.stringify(validPayload);
+      const signature = sign(rawBody);
+
+      await expect(
+        controller.handleCiWebhook(
+          'koda',
+          validPayload,
+          rawRequestOf(rawBody),
+          signature,
+          'delivery-retry-1',
+        ),
+      ).rejects.toThrow('boom');
+
+      expect(mockReplayGuard.forget).toHaveBeenCalledWith({
+        projectId: 'proj-1',
+        source: 'ci',
+        deliveryId: 'delivery-retry-1',
+      });
     });
   });
 });

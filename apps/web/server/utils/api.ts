@@ -16,6 +16,12 @@ interface UnwrappedAuth {
 
 type AuthEvent = Parameters<typeof getCookie>[0]
 
+// httpOnly auth cookies set by the Nuxt server routes (WEB-02). These were
+// referenced but never declared since the WEB-02 commit — restored so the
+// Nuxt server build resolves them.
+const ACCESS_COOKIE = 'koda_access_token'
+const REFRESH_COOKIE = 'koda_refresh_token'
+
 function unwrapAuth(envelope: AuthEnvelope | undefined): UnwrappedAuth {
   if (!envelope) return {}
   if (typeof envelope.ret === 'number' && envelope.ret !== 0) {

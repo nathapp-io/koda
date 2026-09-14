@@ -17,6 +17,11 @@ export interface JwtPayload {
   tokenVersion: number;
 }
 
+// BUG-12: same-cost bcrypt hash compared against when the email is unknown,
+// so unregistered-email logins take as long as registered ones.
+// The value itself is never used for authentication.
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync('koda-timing-equalizer', 12);
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -28,7 +33,8 @@ export class AuthService {
 
   async register(registerDto: RegisterDto) {
     const { email, password } = registerDto;
-    const name = registerDto.name ?? email.split('@')[0];
+    // BUG-8: never leak the email local-part into the display name
+    const name = registerDto.name ?? 'User';
 
     const passwordHash = await bcrypt.hash(password, 12);
 
@@ -57,6 +63,9 @@ export class AuthService {
     const user = await this.authRepo.findUserByEmail(email);
 
     if (!user) {
+      // BUG-12: burn the same bcrypt CPU as a real login so response
+      // timing cannot enumerate registered emails.
+      await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
       throw new AuthException({}, 'auth');
     }
 
@@ -93,9 +102,8 @@ export class AuthService {
     };
   }
 
-  async validateUser(payload: JwtPayload) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const user = await this.authRepo.findUserById(payload.sub ?? (payload as any).id);
+  async validateUser(principal: IPrincipal) {
+    const user = await this.authRepo.findUserById(principal.id);
 
     return user || null;
   }

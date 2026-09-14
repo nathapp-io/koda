@@ -1,6 +1,4 @@
 import { Command } from 'commander';
-import { resolveContext } from '../config';
-import { OpenAPI } from '../generated/core/OpenAPI';
 import {
   webhookControllerRegister,
   webhookControllerList,
@@ -9,6 +7,7 @@ import {
 import { table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
+import { withContext } from '../utils/context';
 
 export function webhookCommand(program: Command): void {
   const webhook = program.command('webhook');
@@ -28,16 +27,7 @@ export function webhookCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-        if (!ctx.apiKey || !ctx.apiUrl) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         const events = (options.events as string).split(',').map((e: string) => e.trim()).filter(Boolean);
         const response = await webhookControllerRegister({
@@ -69,16 +59,7 @@ export function webhookCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-        if (!ctx.apiKey || !ctx.apiUrl) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         const response = await webhookControllerList({ slug: ctx.projectSlug });
         const raw = unwrap<{ items?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>>(response);
@@ -109,13 +90,7 @@ export function webhookCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const ctx = await resolveContext({});
-        if (!ctx.apiKey || !ctx.apiUrl) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        await withContext({}, { requireProject: false });
 
         await webhookControllerRemove({ id: options.id });
 

@@ -19,6 +19,16 @@ export class CiWebhookService {
     return project.ciWebhookToken ?? null;
   }
 
+  async resolveProject(projectSlug: string): Promise<{ id: string } | null> {
+    const project = await this.repo.findProjectBySlug(projectSlug);
+
+    if (!project || project.deletedAt) {
+      return null;
+    }
+
+    return { id: project.id };
+  }
+
   async processCiWebhook(projectSlug: string, payload: CiWebhookPayloadDto) {
     const project = await this.repo.findProjectBySlug(projectSlug);
 

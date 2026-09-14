@@ -6,12 +6,10 @@
  * See .claude/rules/cli.md for rationale.
  */
 import { Command } from 'commander';
-import { resolveAuth } from '../utils/auth';
-import { resolveContext } from '../config';
-import { OpenAPI } from '../generated/core/OpenAPI';
 import { table, error } from '../utils/output';
 import { handleApiError } from '../utils/error';
 import { unwrap } from '../utils/api';
+import { withContext } from '../utils/context';
 import { VCS_MESSAGES } from './vcs-messages';
 import {
   vcsControllerCreateConnection,
@@ -97,22 +95,7 @@ export function vcsCommand(program: Command): void {
           return;
         }
 
-        const auth = await resolveAuth({});
-        if (!auth.apiKey || !auth.apiUrl) {
-          error(VCS_MESSAGES.MISSING_AUTH);
-          process.exit(2);
-          return;
-        }
-
-        const ctx = await resolveContext({ projectSlug: options.project });
-        if (!ctx.projectSlug) {
-          error(VCS_MESSAGES.MISSING_PROJECT);
-          process.exit(3);
-          return;
-        }
-
-        OpenAPI.BASE = auth.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = auth.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         const requestBody = {
           provider: options.provider,
@@ -151,22 +134,7 @@ export function vcsCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const auth = await resolveAuth({});
-        if (!auth.apiKey || !auth.apiUrl) {
-          error(VCS_MESSAGES.MISSING_AUTH);
-          process.exit(2);
-          return;
-        }
-
-        const ctx = await resolveContext({ projectSlug: options.project });
-        if (!ctx.projectSlug) {
-          error(VCS_MESSAGES.MISSING_PROJECT);
-          process.exit(3);
-          return;
-        }
-
-        OpenAPI.BASE = auth.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = auth.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         const response = await vcsControllerGetConnection({ slug: ctx.projectSlug });
         const data = unwrap<ConnectionRecord>(response);
@@ -199,22 +167,7 @@ export function vcsCommand(program: Command): void {
     .option('--project <slug>', 'Project slug (uses config if not provided)')
     .action(async (options) => {
       try {
-        const auth = await resolveAuth({});
-        if (!auth.apiKey || !auth.apiUrl) {
-          error(VCS_MESSAGES.MISSING_AUTH);
-          process.exit(2);
-          return;
-        }
-
-        const ctx = await resolveContext({ projectSlug: options.project });
-        if (!ctx.projectSlug) {
-          error(VCS_MESSAGES.MISSING_PROJECT);
-          process.exit(3);
-          return;
-        }
-
-        OpenAPI.BASE = auth.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = auth.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         await vcsControllerDeleteConnection({ slug: ctx.projectSlug });
 
@@ -234,22 +187,7 @@ export function vcsCommand(program: Command): void {
     .option('--project <slug>', 'Project slug (uses config if not provided)')
     .action(async (options) => {
       try {
-        const auth = await resolveAuth({});
-        if (!auth.apiKey || !auth.apiUrl) {
-          error(VCS_MESSAGES.MISSING_AUTH);
-          process.exit(2);
-          return;
-        }
-
-        const ctx = await resolveContext({ projectSlug: options.project });
-        if (!ctx.projectSlug) {
-          error(VCS_MESSAGES.MISSING_PROJECT);
-          process.exit(3);
-          return;
-        }
-
-        OpenAPI.BASE = auth.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = auth.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         const requestBody: Record<string, unknown> = {};
         if (options.syncMode) {
@@ -283,22 +221,7 @@ export function vcsCommand(program: Command): void {
     .option('--project <slug>', 'Project slug (uses config if not provided)')
     .action(async (options) => {
       try {
-        const auth = await resolveAuth({});
-        if (!auth.apiKey || !auth.apiUrl) {
-          error(VCS_MESSAGES.MISSING_AUTH);
-          process.exit(2);
-          return;
-        }
-
-        const ctx = await resolveContext({ projectSlug: options.project });
-        if (!ctx.projectSlug) {
-          error(VCS_MESSAGES.MISSING_PROJECT);
-          process.exit(3);
-          return;
-        }
-
-        OpenAPI.BASE = auth.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = auth.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         const response = await vcsControllerTestConnection({
           slug: ctx.projectSlug,
@@ -327,22 +250,7 @@ export function vcsCommand(program: Command): void {
     .option('--project <slug>', 'Project slug (uses config if not provided)')
     .action(async (options) => {
       try {
-        const auth = await resolveAuth({});
-        if (!auth.apiKey || !auth.apiUrl) {
-          error(VCS_MESSAGES.MISSING_AUTH);
-          process.exit(2);
-          return;
-        }
-
-        const ctx = await resolveContext({ projectSlug: options.project });
-        if (!ctx.projectSlug) {
-          error(VCS_MESSAGES.MISSING_PROJECT);
-          process.exit(3);
-          return;
-        }
-
-        OpenAPI.BASE = auth.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = auth.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         const response = await vcsControllerSyncAll({
           slug: ctx.projectSlug,
@@ -374,22 +282,7 @@ export function vcsCommand(program: Command): void {
           return;
         }
 
-        const auth = await resolveAuth({});
-        if (!auth.apiKey || !auth.apiUrl) {
-          error(VCS_MESSAGES.MISSING_AUTH);
-          process.exit(2);
-          return;
-        }
-
-        const ctx = await resolveContext({ projectSlug: options.project });
-        if (!ctx.projectSlug) {
-          error(VCS_MESSAGES.MISSING_PROJECT);
-          process.exit(3);
-          return;
-        }
-
-        OpenAPI.BASE = auth.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = auth.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         const response = await vcsControllerSyncIssue({
           slug: ctx.projectSlug,
@@ -416,22 +309,7 @@ export function vcsCommand(program: Command): void {
     .option('--project <slug>', 'Project slug (uses config if not provided)')
     .action(async (options) => {
       try {
-        const auth = await resolveAuth({});
-        if (!auth.apiKey || !auth.apiUrl) {
-          error(VCS_MESSAGES.MISSING_AUTH);
-          process.exit(2);
-          return;
-        }
-
-        const ctx = await resolveContext({ projectSlug: options.project });
-        if (!ctx.projectSlug) {
-          error(VCS_MESSAGES.MISSING_PROJECT);
-          process.exit(3);
-          return;
-        }
-
-        OpenAPI.BASE = auth.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = auth.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         const response = await vcsControllerSyncPr({
           slug: ctx.projectSlug,

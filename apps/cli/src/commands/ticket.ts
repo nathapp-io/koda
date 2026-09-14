@@ -1,6 +1,4 @@
 import { Command } from 'commander';
-import { resolveContext } from '../config';
-import { OpenAPI } from '../generated/core/OpenAPI';
 import {
   ticketsControllerCreate,
   ticketsControllerFindAll,
@@ -19,10 +17,13 @@ import {
   ticketLinksControllerRemove,
   labelsControllerAssignLabelFromHttp,
   labelsControllerRemoveLabelFromHttp,
+  agentsControllerFindBySlug,
 } from '../generated';
+import type { AssignTicketDto } from '../generated';
 import { table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
+import { withContext } from '../utils/context';
 
 type TicketRow = {
   ref?: string;
@@ -71,15 +72,7 @@ export function ticketCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-
-        if (!ctx.apiKey) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
+        const ctx = await withContext({ projectSlug: options.project });
 
         if (!options.type || !options.title) {
           handleApiError(new Error('Missing required options: --type and --title are required'), { validationError: true });
@@ -94,9 +87,6 @@ export function ticketCommand(program: Command): void {
         if (options.priority && !validPriorities.includes(options.priority)) {
           handleApiError(new Error(`Invalid priority ${options.priority}. Valid values: ${validPriorities.join(', ')}`), { validationError: true });
         }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
 
         const response = await ticketsControllerCreate({
           slug: ctx.projectSlug,
@@ -135,18 +125,7 @@ export function ticketCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-
-        if (!ctx.apiKey) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         const response = await ticketsControllerFindAll({
           slug: ctx.projectSlug,
@@ -189,18 +168,7 @@ export function ticketCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-
-        if (!ctx.apiKey) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         const response = await ticketsControllerFindAll({
           slug: ctx.projectSlug,
@@ -237,18 +205,7 @@ export function ticketCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (ref: string, options) => {
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-
-        if (!ctx.apiKey) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         const response = await ticketsControllerFindByRef({ slug: ctx.projectSlug, ref });
         const ticketData = unwrap<TicketDetail>(response);
@@ -334,18 +291,7 @@ export function ticketCommand(program: Command): void {
           handleApiError(new Error('Comment is required'), { validationError: true });
         }
 
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-
-        if (!ctx.apiKey) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         await ticketsControllerVerify({
           slug: ctx.projectSlug,
@@ -361,44 +307,53 @@ export function ticketCommand(program: Command): void {
 
   ticket
     .command('assign <ref>')
-    .description('Assign a ticket — self-assigns the caller; pass --to or --agent to express intent, but the runtime API does not currently support caller-supplied assignment targets (see KODA-16).')
+    .description('Assign a ticket to an agent (--to/--agent) or user (--user), or unassign with --unassign')
     .option('--project <slug>', 'Project slug')
-    .option('--to <agent-slug>', 'Intended target agent slug — currently accepted as no-op info only; the runtime API self-assigns the caller.')
-    .option('--agent <agent-slug>', 'Deprecated alias for --to (kept for back-compat; ignored at runtime).')
+    .option('--to <agent-slug>', 'Assign to agent by slug')
+    .option('--agent <agent-slug>', 'Deprecated alias for --to')
+    .option('--user <user-id>', 'Assign to user by ID (CUID)')
+    .option('--unassign', 'Remove the current assignee')
     .option('--json', 'Output as JSON')
     .action(async (ref: string, options) => {
       try {
-        // KODA-16: the runtime API does not accept an assignment target body,
-        // so --agent/--to are no-ops here. We surface them in the warning
-        // below rather than silently swallowing them so callers don't think
-        // they reassigned the ticket to someone else.
         const requestedTarget = options.to ?? options.agent;
+
+        if (requestedTarget && options.user) {
+          handleApiError(new Error('Specify only one of --to/--agent or --user'), { validationError: true });
+        }
+        if (options.unassign && (requestedTarget || options.user)) {
+          handleApiError(new Error('--unassign cannot be combined with --to/--agent/--user'), { validationError: true });
+        }
+
+        const ctx = await withContext({ projectSlug: options.project });
+
+        // BUG-10: resolve the agent slug to its ID so the runtime API
+        // (which only accepts agentId/userId) actually assigns the target.
+        const requestBody: AssignTicketDto = {};
         if (requestedTarget) {
-          console.warn(
-            `Note: --agent/--to is currently a no-op; ticket ${ref} will be self-assigned to the caller (KODA-16).`,
+          const agent = unwrap<{ id: string }>(
+            await agentsControllerFindBySlug({ slug: requestedTarget }),
           );
+          requestBody.agentId = agent.id;
+        } else if (options.user) {
+          requestBody.userId = options.user;
         }
 
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-
-        if (!ctx.apiKey) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
-
-        const response = await ticketsControllerAssign({ slug: ctx.projectSlug, ref });
+        const response = await ticketsControllerAssign({
+          slug: ctx.projectSlug,
+          ref,
+          requestBody,
+        });
         const ticketData = unwrap<TicketRow>(response);
 
         if (options.json) {
           console.log(JSON.stringify(ticketData, null, 2));
+        } else if (requestedTarget) {
+          console.log(`✓ Ticket assigned to agent '${requestedTarget}'`);
+        } else if (options.user) {
+          console.log(`✓ Ticket assigned to user '${options.user}'`);
         } else {
-          console.log(`✓ Ticket assigned successfully`);
+          console.log(`✓ Ticket unassigned`);
         }
 
         process.exit(0);
@@ -414,18 +369,7 @@ export function ticketCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (ref: string, options) => {
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-
-        if (!ctx.apiKey) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         await ticketsControllerStart({ slug: ctx.projectSlug, ref });
         console.log(`✓ Ticket started successfully`);
@@ -448,18 +392,7 @@ export function ticketCommand(program: Command): void {
           handleApiError(new Error('Comment is required'), { validationError: true });
         }
 
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-
-        if (!ctx.apiKey) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         await ticketsControllerFix({
           slug: ctx.projectSlug,
@@ -495,18 +428,7 @@ export function ticketCommand(program: Command): void {
           handleApiError(new Error('Specify only one of --pass or --fail'), { validationError: true });
         }
 
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-
-        if (!ctx.apiKey) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         await ticketsControllerVerifyFix({
           slug: ctx.projectSlug,
@@ -535,18 +457,7 @@ export function ticketCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (ref: string, options) => {
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-
-        if (!ctx.apiKey) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         await ticketsControllerClose({ slug: ctx.projectSlug, ref });
         console.log(`✓ Ticket closed successfully`);
@@ -568,18 +479,7 @@ export function ticketCommand(program: Command): void {
           handleApiError(new Error('Comment is required'), { validationError: true });
         }
 
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-
-        if (!ctx.apiKey) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         await ticketsControllerReject({
           slug: ctx.projectSlug,
@@ -603,18 +503,7 @@ export function ticketCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (ref: string, options) => {
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-
-        if (!ctx.apiKey) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         const requestBody: { title?: string; description?: string; priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' } = {};
         if (options.title) requestBody.title = options.title;
@@ -647,18 +536,7 @@ export function ticketCommand(program: Command): void {
           handleApiError(new Error('Deletion requires --force flag.'), { validationError: true });
         }
 
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-
-        if (!ctx.apiKey) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         await ticketsControllerSoftDelete({ slug: ctx.projectSlug, ref });
 
@@ -677,18 +555,7 @@ export function ticketCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (ref: string, options) => {
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-
-        if (!ctx.apiKey) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         const response = await ticketLinksControllerCreate({
           slug: ctx.projectSlug,
@@ -717,18 +584,7 @@ export function ticketCommand(program: Command): void {
     .requiredOption('--url <url>', 'External URL to unlink')
     .action(async (ref: string, options) => {
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-
-        if (!ctx.apiKey) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         const listResponse = await ticketLinksControllerFindAll({ slug: ctx.projectSlug, ref });
         const links = unwrap<TicketLink[]>(listResponse);
@@ -755,18 +611,7 @@ export function ticketCommand(program: Command): void {
     .requiredOption('--label <id>', 'Label ID')
     .action(async (ref: string, options) => {
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-
-        if (!ctx.apiKey) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         await labelsControllerAssignLabelFromHttp({
           slug: ctx.projectSlug,
@@ -789,18 +634,7 @@ export function ticketCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (ref: string, options) => {
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-
-        if (!ctx.apiKey) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         await labelsControllerRemoveLabelFromHttp({
           slug: ctx.projectSlug,

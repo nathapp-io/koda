@@ -4,12 +4,19 @@ import { TicketsService } from './tickets.service';
 import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
+import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { PERMISSION_KEY, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { KodaAction } from '../auth/casl/koda-action.enum';
+import { ProjectsService } from '../projects/projects.service';
 
 describe('TicketsController', () => {
   let controller: TicketsController;
   let service: TicketsService;
+
+  const mockProjectsService = {
+    findProjectIdBySlug: jest.fn().mockResolvedValue('proj-123'),
+    assertProjectMembership: jest.fn().mockResolvedValue(undefined),
+  };
 
   const _mockProject = {
     id: 'proj-123',
@@ -112,6 +119,7 @@ describe('TicketsController', () => {
       providers: [
         { provide: TicketsService, useValue: mockTicketsService },
         { provide: TicketTransitionsService, useValue: mockTransitionsService },
+        { provide: ProjectsService, useValue: mockProjectsService },
       ],
     }).compile();
 
@@ -559,6 +567,27 @@ describe('TicketsController', () => {
         controller.assignTicket('koda', 'KODA-999', { userId: 'user-456' })
       ).rejects.toThrow();
     });
+
+    it('should check project membership via findProjectIdBySlug + assertProjectMembership (BUG-2)', async () => {
+      mockProjectsService.findProjectIdBySlug.mockResolvedValue('proj-123');
+      mockTicketsService.assign.mockResolvedValue(mockTicket);
+
+      await controller.assign('koda', 'KODA-1', {} as AssignTicketDto, mockAdminUser);
+
+      expect(mockProjectsService.findProjectIdBySlug).toHaveBeenCalledWith('koda');
+      expect(mockProjectsService.assertProjectMembership).toHaveBeenCalledWith('proj-123', mockAdminUser);
+      expect(service.assign).toHaveBeenCalledWith('koda', 'KODA-1', {});
+    });
+
+    it('should not assign when the caller is not a project member (BUG-2)', async () => {
+      mockProjectsService.assertProjectMembership.mockRejectedValueOnce(new Error('Forbidden'));
+
+      await expect(
+        controller.assign('koda', 'KODA-1', {} as AssignTicketDto, mockMemberUser)
+      ).rejects.toThrow('Forbidden');
+
+      expect(service.assign).not.toHaveBeenCalled();
+    });
   });
 
   describe('ticket transition route permissions', () => {
@@ -571,6 +600,12 @@ describe('TicketsController', () => {
       expect(Reflect.getMetadata(PERMISSION_KEY, controller.verifyFix)).toEqual(transitionPermission);
       expect(Reflect.getMetadata(PERMISSION_KEY, controller.close)).toEqual(transitionPermission);
       expect(Reflect.getMetadata(PERMISSION_KEY, controller.reject)).toEqual(transitionPermission);
+    });
+
+    it('requires UPDATE Ticket permission on the assign HTTP route (BUG-2)', () => {
+      expect(Reflect.getMetadata(PERMISSION_KEY, controller.assign)).toEqual([
+        [KodaAction.UPDATE as CaslPermissionAction, 'Ticket'],
+      ]);
     });
   });
 });

@@ -201,6 +201,7 @@ export class VcsConnectionService {
         provider: connection.provider,
         token: decryptedToken,
         repoUrl: `https://github.com/${connection.repoOwner}/${connection.repoName}`,
+        githubApiUrl: this.vcsConfig?.githubApiUrl,
       });
 
       const result = await provider.testConnection();

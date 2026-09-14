@@ -20,6 +20,7 @@ import { RetrievalModule } from './retrieval/retrieval.module';
 import { WebhookModule } from './webhook/webhook.module';
 import { CiWebhookModule } from './ci-webhook/ci-webhook.module';
 import { VcsModule } from './vcs/vcs.module';
+import { WebhookSecurityModule } from './webhook-security/webhook-security.module';
 import { KodaDomainWriterModule } from './koda-domain-writer/koda-domain-writer.module';
 import { OutboxModule } from './outbox/outbox.module';
 import { MemoryModule } from './memory/memory.module';
@@ -84,6 +85,7 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
     WebhookModule,
     CiWebhookModule,
     VcsModule,
+    WebhookSecurityModule,
     OutboxModule,
     KodaDomainWriterModule,
     MemoryModule,

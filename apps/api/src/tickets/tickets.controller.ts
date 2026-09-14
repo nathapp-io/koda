@@ -22,11 +22,13 @@ import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TicketResponseDto } from './dto/ticket-response.dto';
 import { TransitionWithCommentDto } from './dto/transition-with-comment.dto';
+import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { TicketType, TicketStatus, Priority } from '../common/enums';
 import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { KodaAction } from '../auth/casl/koda-action.enum';
+import { ProjectsService } from '../projects/projects.service';
 
 @ApiTags('tickets')
 @ApiBearerAuth()
@@ -35,6 +37,7 @@ export class TicketsController {
   constructor(
     private ticketsService: TicketsService,
     private transitionsService: TicketTransitionsService,
+    private readonly projectsService: ProjectsService,
   ) {}
 
   // Public methods for testing (called directly in tests)
@@ -71,7 +74,7 @@ export class TicketsController {
     return this.ticketsService.softDelete(slug, ref, principal);
   }
 
-  async assignTicket(slug: string, ref: string, assignInput: Record<string, unknown>) {
+  async assignTicket(slug: string, ref: string, assignInput: AssignTicketDto) {
     return this.ticketsService.assign(slug, ref, assignInput);
   }
 
@@ -228,24 +231,18 @@ export class TicketsController {
   @ApiResponse({ status: 200, type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Cannot assign to both user and agent' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  @RequiredPermission([KodaAction.UPDATE as CaslPermissionAction, 'Ticket'])
   async assign(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    @Body() assignInput: Record<string, any>,
+    @Body() assignInput: AssignTicketDto,
+    @Principal() principal: KodaPrincipal,
   ) {
-    const normalized: Record<string, unknown> = { ...assignInput };
-    if ('assignedUserId' in normalized) {
-      normalized.userId = normalized.assignedUserId;
-      delete normalized.assignedUserId;
-    }
-    if ('assignedAgentId' in normalized) {
-      normalized.agentId = normalized.assignedAgentId;
-      delete normalized.assignedAgentId;
-    }
-    const data = await this.assignTicket(slug, ref, normalized);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // BUG-2: match getChangeImpact — require project membership on top of CASL.
+    const projectId = await this.projectsService.findProjectIdBySlug(slug);
+    await this.projectsService.assertProjectMembership(projectId, principal);
+
+    const data = await this.assignTicket(slug, ref, assignInput);
     return JsonResponse.Ok(data);
   }
 

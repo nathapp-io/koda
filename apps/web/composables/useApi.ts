@@ -26,11 +26,13 @@ export class ApiError extends Error {
     this.errors = errors
   }
 
-  /** First field-level validation error, or the top-level message */
+  /** First non-empty field-level validation error, or the top-level message */
   get firstError(): string {
     if (this.errors) {
-      const firstField = Object.values(this.errors)[0]
-      if (firstField?.[0]) return firstField[0]
+      for (const messages of Object.values(this.errors)) {
+        const first = messages.find((msg) => msg && msg.trim().length > 0)
+        if (first) return first
+      }
     }
     return this.message
   }

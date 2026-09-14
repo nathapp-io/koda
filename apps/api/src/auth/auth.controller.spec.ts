@@ -194,10 +194,11 @@ describe('AuthController', () => {
   describe('GET /auth/me', () => {
     it('should return current authenticated user', async () => {
       const user = {
-        sub: mockUser.id,
-        email: mockUser.email,
-        role: mockUser.role,
-        tokenVersion: 0,
+        id: mockUser.id,
+        name: mockUser.email,
+        blacklisted: false,
+        revoked: false,
+        authorities: ['MEMBER'],
       };
 
       mockAuthService.validateUser.mockResolvedValue(mockUser);
@@ -219,10 +220,11 @@ describe('AuthController', () => {
 
     it('should include all user fields in response', async () => {
       const user = {
-        sub: mockUser.id,
-        email: mockUser.email,
-        role: mockUser.role,
-        tokenVersion: 0,
+        id: mockUser.id,
+        name: mockUser.email,
+        blacklisted: false,
+        revoked: false,
+        authorities: ['MEMBER'],
       };
 
       mockAuthService.validateUser.mockResolvedValue(mockUser);
@@ -241,10 +243,11 @@ describe('AuthController', () => {
   describe('POST /auth/logout', () => {
     it('should revoke tokens for the current user', async () => {
       const user = {
-        sub: mockUser.id,
-        email: mockUser.email,
-        role: mockUser.role,
-        tokenVersion: 0,
+        id: mockUser.id,
+        name: mockUser.email,
+        blacklisted: false,
+        revoked: false,
+        authorities: ['MEMBER'],
       };
 
       mockAuthService.logout.mockResolvedValue(undefined);
@@ -255,15 +258,21 @@ describe('AuthController', () => {
       expect(authService.logout).toHaveBeenCalledWith(mockUser.id);
     });
 
-    it('should fall back to principal.id when sub is absent', async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const user = { id: mockUser.id } as any;
+    it('should use principal.id when sub is absent (BUG-1)', async () => {
+      const user = {
+        id: mockUser.id,
+        name: mockUser.email,
+        blacklisted: false,
+        revoked: false,
+        authorities: ['MEMBER'],
+      };
 
       mockAuthService.logout.mockResolvedValue(undefined);
 
       await controller.logout(user);
 
       expect(authService.logout).toHaveBeenCalledWith(mockUser.id);
+      expect(authService.logout).not.toHaveBeenCalledWith(undefined);
     });
   });
 });

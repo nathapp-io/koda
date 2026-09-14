@@ -1,5 +1,5 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
@@ -298,6 +298,28 @@ export class TicketsService {
     const ticket = await this.findByRef(projectSlug, ref);
     if (!ticket) {
       throw new NotFoundAppException({}, 'tickets');
+    }
+
+    // Existence + project membership checks so FK violations surface as 404/403
+    // instead of a raw Prisma 500 (BUG-2).
+    if (assignInput.userId) {
+      const user = await this.ticketRepo.findUserById(assignInput.userId);
+      if (!user) {
+        throw new NotFoundAppException({}, 'tickets');
+      }
+      // BUG-17: ADMIN-role assignees are implicit members (mirrors
+      // ProjectAccessService.assertProjectMembership's admin exemption).
+      if (user.role !== 'ADMIN') {
+        const role = await this.ticketRepo.findProjectMemberRole(project.id, assignInput.userId);
+        if (!role) {
+          throw new ForbiddenAppException({}, 'tickets');
+        }
+      }
+    } else if (assignInput.agentId) {
+      const agent = await this.ticketRepo.findAgentById(assignInput.agentId);
+      if (!agent) {
+        throw new NotFoundAppException({}, 'tickets');
+      }
     }
 
     const assignData = {
