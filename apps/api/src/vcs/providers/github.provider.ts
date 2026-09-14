@@ -87,12 +87,18 @@ interface GitHubCommitResponse {
  * GitHub VCS provider implementation
  */
 export class GitHubProvider implements IVcsProvider {
+  private readonly apiBaseUrl: string;
+
   constructor(
     private readonly repoOwner: string,
     private readonly repoName: string,
     private readonly token: string,
     private readonly httpClient: HttpClient,
-  ) {}
+    apiBaseUrl?: string,
+  ) {
+    // BUG-14: GHES installs configure GITHUB_API_URL; default to GitHub.com.
+    this.apiBaseUrl = (apiBaseUrl ?? 'https://api.github.com').replace(/\/+$/, '');
+  }
 
   async fetchIssues(since?: Date): Promise<VcsIssue[]> {
     const params: Record<string, unknown> = {
@@ -105,7 +111,7 @@ export class GitHubProvider implements IVcsProvider {
       params.since = since.toISOString();
     }
 
-    const url = `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/issues`;
+    const url = `${this.apiBaseUrl}/repos/${this.repoOwner}/${this.repoName}/issues`;
 
     const response = await this.httpClient.get(url, {
       headers: {
@@ -122,7 +128,7 @@ export class GitHubProvider implements IVcsProvider {
   }
 
   async fetchIssue(issueNumber: number): Promise<VcsIssue> {
-    const url = `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/issues/${issueNumber}`;
+    const url = `${this.apiBaseUrl}/repos/${this.repoOwner}/${this.repoName}/issues/${issueNumber}`;
 
     try {
       const response = await this.httpClient.get(url, {
@@ -143,7 +149,7 @@ export class GitHubProvider implements IVcsProvider {
 
   async testConnection(): Promise<{ ok: boolean; error?: string }> {
     try {
-      const url = `https://api.github.com/repos/${this.repoOwner}/${this.repoName}`;
+      const url = `${this.apiBaseUrl}/repos/${this.repoOwner}/${this.repoName}`;
 
       await this.httpClient.get(url, {
         headers: {
@@ -159,7 +165,7 @@ export class GitHubProvider implements IVcsProvider {
   }
 
   async getDefaultBranch(): Promise<string> {
-    const url = `https://api.github.com/repos/${this.repoOwner}/${this.repoName}`;
+    const url = `${this.apiBaseUrl}/repos/${this.repoOwner}/${this.repoName}`;
 
     const response = await this.httpClient.get(url, {
       headers: {
@@ -178,7 +184,7 @@ export class GitHubProvider implements IVcsProvider {
     }
 
     const repoResponse = await this.httpClient.get(
-      `https://api.github.com/repos/${this.repoOwner}/${this.repoName}`,
+      `${this.apiBaseUrl}/repos/${this.repoOwner}/${this.repoName}`,
       {
         headers: {
           Authorization: `Bearer ${this.token}`,
@@ -191,7 +197,7 @@ export class GitHubProvider implements IVcsProvider {
     const baseBranch = params.baseBranch ?? defaultBranch;
 
     const defaultBranchRefResponse = await this.httpClient.get(
-      `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/git/ref/heads/${defaultBranch}`,
+      `${this.apiBaseUrl}/repos/${this.repoOwner}/${this.repoName}/git/ref/heads/${defaultBranch}`,
       {
         headers: {
           Authorization: `Bearer ${this.token}`,
@@ -203,7 +209,7 @@ export class GitHubProvider implements IVcsProvider {
 
     try {
       await this.httpClient.post(
-        `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/git/refs`,
+        `${this.apiBaseUrl}/repos/${this.repoOwner}/${this.repoName}/git/refs`,
         {
           headers: {
             Authorization: `Bearer ${this.token}`,
@@ -225,7 +231,7 @@ export class GitHubProvider implements IVcsProvider {
     }
 
     const prResponse = await this.httpClient.post(
-      `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/pulls`,
+      `${this.apiBaseUrl}/repos/${this.repoOwner}/${this.repoName}/pulls`,
       {
         headers: {
           Authorization: `Bearer ${this.token}`,
@@ -252,7 +258,7 @@ export class GitHubProvider implements IVcsProvider {
   }
 
   async getPullRequestStatus(prNumber: number): Promise<VcsPrStatus> {
-    const url = `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/pulls/${prNumber}`;
+    const url = `${this.apiBaseUrl}/repos/${this.repoOwner}/${this.repoName}/pulls/${prNumber}`;
 
     try {
       const response = await this.httpClient.get(url, {
@@ -272,7 +278,7 @@ export class GitHubProvider implements IVcsProvider {
   }
 
   async listPullRequests(state: 'open' | 'closed' | 'all' = 'open'): Promise<VcsPrStatus[]> {
-    const url = `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/pulls`;
+    const url = `${this.apiBaseUrl}/repos/${this.repoOwner}/${this.repoName}/pulls`;
 
     const response = await this.httpClient.get(url, {
       headers: {
@@ -288,7 +294,7 @@ export class GitHubProvider implements IVcsProvider {
   }
 
   async listPrCommits(prNumber: number): Promise<VcsCommit[]> {
-    const url = `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/pulls/${prNumber}/commits`;
+    const url = `${this.apiBaseUrl}/repos/${this.repoOwner}/${this.repoName}/pulls/${prNumber}/commits`;
 
     try {
       const response = await this.httpClient.get(url, {
@@ -354,7 +360,7 @@ export class GitHubProvider implements IVcsProvider {
 
     for (const filePath of changedFiles) {
       try {
-        const url = `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/contents/${encodeURIComponent(filePath)}?ref=${commitHash}`;
+        const url = `${this.apiBaseUrl}/repos/${this.repoOwner}/${this.repoName}/contents/${encodeURIComponent(filePath)}?ref=${commitHash}`;
         const response = await this.httpClient.get(url, {
           headers: {
             Authorization: `Bearer ${this.token}`,

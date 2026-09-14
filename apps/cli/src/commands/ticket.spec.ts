@@ -43,6 +43,7 @@ jest.mock('../generated', () => ({
   ticketLinksControllerRemove: jest.fn(),
   labelsControllerAssignLabelFromHttp: jest.fn(),
   labelsControllerRemoveLabelFromHttp: jest.fn(),
+  agentsControllerFindBySlug: jest.fn(),
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
@@ -82,6 +83,7 @@ import {
   ticketsControllerReject,
   labelsControllerAssignLabelFromHttp,
   labelsControllerRemoveLabelFromHttp,
+  agentsControllerFindBySlug,
 } from '../generated';
 import { resolveContext } from '../config';
 
@@ -129,6 +131,10 @@ describe('ticketCommand', () => {
     (ticketsControllerReject as jest.Mock).mockReset();
     (labelsControllerAssignLabelFromHttp as jest.Mock).mockReset();
     (labelsControllerRemoveLabelFromHttp as jest.Mock).mockReset();
+    (agentsControllerFindBySlug as jest.Mock).mockReset().mockResolvedValue({
+      ret: 0,
+      data: { id: 'agent-123', slug: 'agent-123' },
+    });
   });
 
   afterEach(() => {
@@ -1359,16 +1365,18 @@ describe('ticketCommand', () => {
         'agent-123',
       ]);
 
+      expect(agentsControllerFindBySlug).toHaveBeenCalledWith({ slug: 'agent-123' });
       expect(ticketsControllerAssign).toHaveBeenCalledWith(
         expect.objectContaining({
           slug: 'koda',
           ref: 'KODA-1',
+          requestBody: { agentId: 'agent-123' },
         })
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });
 
-    it('self-assigns ticket when --to is omitted', async () => {
+    it('unassigns ticket when --to is omitted', async () => {
       const mockTicket = {
         id: 'ticket-1',
         number: 1,
@@ -1376,7 +1384,7 @@ describe('ticketCommand', () => {
         title: 'Test bug',
         status: 'verified',
         priority: 'HIGH',
-        assignee: { slug: 'me', name: 'Me' },
+        assignee: null,
       };
 
       (ticketsControllerAssign as jest.Mock).mockResolvedValue({
@@ -1389,10 +1397,12 @@ describe('ticketCommand', () => {
 
       await assignCmd?.parseAsync(['node', 'test', 'KODA-1']);
 
+      expect(agentsControllerFindBySlug).not.toHaveBeenCalled();
       expect(ticketsControllerAssign).toHaveBeenCalledWith(
         expect.objectContaining({
           slug: 'koda',
           ref: 'KODA-1',
+          requestBody: {},
         })
       );
     });
@@ -2046,8 +2056,9 @@ describe('ticketCommand', () => {
 
       await assignCmd?.parseAsync(['node', 'test', 'KODA-1', '--project', 'koda', '--agent', 'subrina-coder']);
 
+      expect(agentsControllerFindBySlug).toHaveBeenCalledWith({ slug: 'subrina-coder' });
       expect(ticketsControllerAssign).toHaveBeenCalledWith(
-        expect.objectContaining({ slug: 'koda', ref: 'KODA-1' })
+        expect.objectContaining({ slug: 'koda', ref: 'KODA-1', requestBody: { agentId: 'agent-123' } })
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });
@@ -2056,7 +2067,7 @@ describe('ticketCommand', () => {
       const mockError = new Error('Not found');
       (mockError as any).response = { status: 404, data: { message: 'Agent not found' } };
 
-      (ticketsControllerAssign as jest.Mock).mockRejectedValue(mockError);
+      (agentsControllerFindBySlug as jest.Mock).mockRejectedValue(mockError);
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
       const assignCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'assign');
@@ -2064,6 +2075,7 @@ describe('ticketCommand', () => {
       await assignCmd?.parseAsync(['node', 'test', 'KODA-1', '--project', 'koda', '--agent', 'nonexistent']);
 
       expect(processExitSpy).toHaveBeenCalledWith(4);
+      expect(ticketsControllerAssign).not.toHaveBeenCalled();
       expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('not found'));
     });
   });

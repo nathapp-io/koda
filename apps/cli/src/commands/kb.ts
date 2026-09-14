@@ -1,8 +1,6 @@
 import { Command } from 'commander';
 import { readFile } from 'fs/promises';
 import { basename } from 'path';
-import { resolveContext } from '../config';
-import { OpenAPI } from '../generated/core/OpenAPI';
 import {
   ragControllerSearch,
   ragControllerListDocuments,
@@ -14,6 +12,7 @@ import {
 import { error } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
+import { withContext } from '../utils/context';
 
 function scoreLabel(score: number): string {
   if (score >= 0.8) return 'HIGH';
@@ -38,22 +37,7 @@ export function kbCommand(program: Command): void {
       }
 
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          error('Project not configured. Run: koda init');
-          process.exit(2);
-          return;
-        }
-
-        if (!ctx.apiKey) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
-          process.exit(2);
-          return;
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         const response = await ragControllerSearch({
           slug: ctx.projectSlug,
@@ -102,22 +86,7 @@ export function kbCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          error('Project not configured. Run: koda init');
-          process.exit(2);
-          return;
-        }
-
-        if (!ctx.apiKey) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
-          process.exit(2);
-          return;
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         const response = await ragControllerListDocuments({ slug: ctx.projectSlug, limit: '100' });
         const data = unwrap<{ items: Array<{ id: string; source: string; createdAt: string }>; total: number }>(response);
@@ -162,25 +131,10 @@ export function kbCommand(program: Command): void {
       }
 
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          error('Project not configured. Run: koda init');
-          process.exit(2);
-          return;
-        }
-
-        if (!ctx.apiKey) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
-          process.exit(2);
-          return;
-        }
+        const ctx = await withContext({ projectSlug: options.project });
 
         const content = await readFile(options.file, 'utf-8');
         const fileName = basename(options.file);
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
 
         const response = await ragControllerAddDocument({
           slug: ctx.projectSlug,
@@ -215,22 +169,7 @@ export function kbCommand(program: Command): void {
       }
 
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          error('Project not configured. Run: koda init');
-          process.exit(2);
-          return;
-        }
-
-        if (!ctx.apiKey) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
-          process.exit(2);
-          return;
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         const response = await ragControllerDeleteDocument({
           slug: ctx.projectSlug,
@@ -257,22 +196,7 @@ export function kbCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          error('Project not configured. Run: koda init');
-          process.exit(2);
-          return;
-        }
-
-        if (!ctx.apiKey) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
-          process.exit(2);
-          return;
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         const response = await ragControllerOptimizeTable({
           slug: ctx.projectSlug,
@@ -311,19 +235,7 @@ export function kbCommand(program: Command): void {
       }
 
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          error('Project not configured. Run: koda init');
-          process.exit(2);
-          return;
-        }
-
-        if (!ctx.apiKey || !ctx.apiUrl) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
-          process.exit(2);
-          return;
-        }
+        const ctx = await withContext({ projectSlug: options.project });
 
         let fileContent: string;
         try {
@@ -356,9 +268,6 @@ export function kbCommand(program: Command): void {
           process.exit(1);
           return;
         }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
 
         const response = await ragControllerImportGraphify({
           slug: ctx.projectSlug,

@@ -7,10 +7,13 @@ import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse } from '@ne
 import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
 import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
+import { Throttle } from '@nathapp/nestjs-throttler';
 
+// SEC-3: targeted throttle on agent-credential routes (10/min vs 100/min global)
 @ApiTags('agents')
 @ApiBearerAuth()
 @Controller('agents')
+@Throttle({ default: { limit: 10, ttl: 60000 } })
 export class AgentsController {
   constructor(private agentsService: AgentsService) {}
 

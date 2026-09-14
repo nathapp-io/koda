@@ -210,14 +210,15 @@ describe('AuthService', () => {
   });
 
   describe('validateUser', () => {
-    it('should return user for valid JWT payload', async () => {
+    it('should return user for valid principal', async () => {
       mockAuthRepository.findUserById.mockResolvedValue(mockUser);
 
       const result = await service.validateUser({
-        sub: mockUser.id,
-        email: mockUser.email,
-        role: mockUser.role,
-        tokenVersion: mockUser.tokenVersion,
+        id: mockUser.id,
+        name: mockUser.name,
+        blacklisted: false,
+        revoked: false,
+        authorities: ['MEMBER'],
       });
 
       expect(result).toEqual(mockUser);
@@ -228,10 +229,11 @@ describe('AuthService', () => {
       mockAuthRepository.findUserById.mockResolvedValue(null);
 
       const result = await service.validateUser({
-        sub: 'nonexistent-id',
-        email: 'nonexistent@example.com',
-        role: 'MEMBER',
-        tokenVersion: 0,
+        id: 'nonexistent-id',
+        name: 'nonexistent',
+        blacklisted: false,
+        revoked: false,
+        authorities: ['MEMBER'],
       });
 
       expect(result).toBeNull();

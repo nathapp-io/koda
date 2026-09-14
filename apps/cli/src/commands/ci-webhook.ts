@@ -1,9 +1,8 @@
 import { Command } from 'commander';
-import { resolveContext } from '../config';
-import { OpenAPI } from '../generated/core/OpenAPI';
 import { ciWebhookControllerHandleCiWebhook } from '../generated';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
+import { withContext } from '../utils/context';
 
 export function ciWebhookCommand(program: Command): void {
   const ciWebhook = program.command('ci-webhook');
@@ -23,16 +22,7 @@ export function ciWebhookCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-        if (!ctx.apiKey || !ctx.apiUrl) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         let failures: Array<{ test: string; file?: string; line?: number }> = [];
         if (options.failures) {
@@ -46,6 +36,10 @@ export function ciWebhookCommand(program: Command): void {
         const response = await ciWebhookControllerHandleCiWebhook({
           slug: ctx.projectSlug,
           xCiSignature: options.signature,
+          // SEC-1: the API requires a unique delivery id and a fresh Date header
+          // to reject replayed deliveries.
+          xCiDelivery: `cli-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+          date: new Date().toUTCString(),
           requestBody: {
             event: options.event as 'pipeline_failed' | 'pipeline_success',
             pipeline: { id: options.pipelineId, url: options.pipelineUrl },

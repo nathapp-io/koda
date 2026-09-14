@@ -74,6 +74,7 @@ export class TicketTransitionsService {
    */
   private dispatchStatusChangeWebhook(
     projectId: string,
+    projectKey: string,
     ticket: TicketDomain,
     fromStatus: string,
     toStatus: string,
@@ -85,7 +86,8 @@ export class TicketTransitionsService {
       .dispatch(projectId, 'STATUS_CHANGE', {
         event: 'STATUS_CHANGE',
         timestamp: new Date().toISOString(),
-        ticket: { id: ticket.id, ref: ticket.id, status: toStatus },
+        // BUG-15: report the human-readable ref (KODA-42), not the DB CUID
+        ticket: { id: ticket.id, ref: `${projectKey}-${ticket.number}`, status: toStatus },
         from: fromStatus,
         to: toStatus,
       })
@@ -167,6 +169,7 @@ export class TicketTransitionsService {
           provider: connection.provider,
           token,
           repoUrl,
+          githubApiUrl: this.vcsConfig?.githubApiUrl,
         });
 
         return provider.getDefaultBranch().then((baseBranch): Promise<void> => {
@@ -174,29 +177,27 @@ export class TicketTransitionsService {
           const prTitle = `${projectKey}-${ticket.number}: ${ticket.title}`;
           const prBody = ticket.description ?? '';
 
-          return repo.createTicketLink({
-            ticketId,
-            url: `https://github.com/${connection.repoOwner}/${connection.repoName}/pulls/pending`,
-            provider: 'github',
-            externalRef: `${connection.repoOwner}/${connection.repoName}#pending`,
-            linkType: 'pr',
-          }).then((link): Promise<void> => {
-            return provider.createPullRequest({
-              title: prTitle,
-              body: prBody,
-              branchName,
-              baseBranch,
-              draft: true,
-            }).then((pr): Promise<void> => {
-              return repo.updateTicketLink(link.id, {
-                url: pr.url,
-                externalRef: `${connection.repoOwner}/${connection.repoName}#${pr.number}`,
-                prNumber: pr.number,
-                prState: 'draft',
-                prUpdatedAt: new Date(),
-                linkType: 'pr',
-              }) as unknown as Promise<void>;
-            });
+          // BUG-13: create the PR first and persist the TicketLink only on
+          // success. The old flow wrote a `.../pulls/pending` placeholder
+          // before creating the PR, leaving a dead link behind whenever the
+          // provider call failed.
+          return provider.createPullRequest({
+            title: prTitle,
+            body: prBody,
+            branchName,
+            baseBranch,
+            draft: true,
+          }).then((pr): Promise<void> => {
+            return repo.createTicketLink({
+              ticketId,
+              url: pr.url,
+              provider: 'github',
+              externalRef: `${connection.repoOwner}/${connection.repoName}#${pr.number}`,
+              prNumber: pr.number,
+              prState: 'draft',
+              prUpdatedAt: new Date(),
+              linkType: 'pr',
+            }) as unknown as Promise<void>;
           }).then((): Promise<void> => {
             return repo.createTicketActivity({
               ticketId,
@@ -370,7 +371,7 @@ export class TicketTransitionsService {
     });
 
     this.autoIndexTicket(project, transaction.ticket as unknown as TicketDomain);
-    this.dispatchStatusChangeWebhook(project.id, transaction.ticket as unknown as TicketDomain, ticket.status, TicketStatus.CLOSED);
+    this.dispatchStatusChangeWebhook(project.id, project.key, transaction.ticket as unknown as TicketDomain, ticket.status, TicketStatus.CLOSED);
 
     return transaction;
   }
@@ -461,7 +462,7 @@ export class TicketTransitionsService {
     if (toStatus === TicketStatus.CLOSED) {
       this.autoIndexTicket(project, result.ticket as unknown as TicketDomain);
     }
-    this.dispatchStatusChangeWebhook(project.id, result.ticket as unknown as TicketDomain, ticket.status, toStatus);
+    this.dispatchStatusChangeWebhook(project.id, project.key, result.ticket as unknown as TicketDomain, ticket.status, toStatus);
     if (toStatus === TicketStatus.VERIFIED) {
       await this.createPrForTicket(project, result.ticket as unknown as TicketDomain);
     }

@@ -9,7 +9,6 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
-import type { JwtPayload } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto, UserResponseDto } from './dto/auth-response.dto';
@@ -66,7 +65,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Get current authenticated user' })
   @ApiResponse({ status: 200, type: UserResponseDto })
   @ApiResponse({ status: 401, description: 'Missing or invalid token' })
-  async me(@Principal() user: JwtPayload) {
+  async me(@Principal() user: IPrincipal) {
     const validatedUser = await this.authService.validateUser(user);
     if (!validatedUser) {
       throw new AuthException({}, 'auth');
@@ -80,9 +79,8 @@ export class AuthController {
   @ApiOperation({ summary: 'Revoke all outstanding access and refresh tokens for the current user' })
   @ApiResponse({ status: 200, description: 'Tokens revoked' })
   @ApiResponse({ status: 401, description: 'Missing or invalid token' })
-  async logout(@Principal() user: JwtPayload) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await this.authService.logout(user.sub ?? (user as any).id);
+  async logout(@Principal() user: IPrincipal) {
+    await this.authService.logout(user.id);
     return JsonResponse.Ok({});
   }
 }

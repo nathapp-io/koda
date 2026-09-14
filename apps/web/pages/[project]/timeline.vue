@@ -5,7 +5,9 @@ definePageMeta({ layout: 'default' })
 
 const route = useRoute()
 const slug = route.params.project as string
-const { t } = useI18n()
+
+const i18n = useI18n()
+const { locale, t } = i18n
 const toast = useAppToast()
 
 const {
@@ -41,7 +43,13 @@ onMounted(() => {
 })
 
 function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleString()
+  return new Date(dateStr).toLocaleString(locale.value, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 </script>
 

@@ -550,6 +550,9 @@
           "201": {
             "description": "Document indexed"
           },
+          "403": {
+            "description": "Forbidden - no project role"
+          },
           "404": {
             "description": "Project not found"
           }
@@ -587,6 +590,9 @@
         "responses": {
           "200": {
             "description": "Documents listed"
+          },
+          "403": {
+            "description": "Forbidden - no project role"
           },
           "404": {
             "description": "Project not found"
@@ -998,6 +1004,9 @@
           "200": {
             "description": "Project timeline"
           },
+          "403": {
+            "description": "Not a project member"
+          },
           "404": {
             "description": "Project not found"
           }
@@ -1050,6 +1059,9 @@
         "responses": {
           "201": {
             "description": "Decision recorded"
+          },
+          "403": {
+            "description": "Not a project member"
           }
         },
         "security": [
@@ -1080,6 +1092,9 @@
         "responses": {
           "201": {
             "description": "Memory item created"
+          },
+          "403": {
+            "description": "Not a project member"
           }
         },
         "security": [
@@ -2129,6 +2144,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignTicketDto"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "",
@@ -2650,6 +2675,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - admin role or project membership required"
           }
         },
         "security": [
@@ -2684,6 +2715,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - admin role or project membership required"
           }
         },
         "security": [
@@ -2728,6 +2765,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - admin role or project membership required"
           }
         },
         "security": [
@@ -2755,6 +2798,12 @@
         "responses": {
           "204": {
             "description": ""
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - admin role or project membership required"
           }
         },
         "security": [
@@ -2791,6 +2840,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - admin role or project membership required"
           }
         },
         "security": [
@@ -2836,6 +2891,12 @@
               }
             }
           },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - admin role or project membership required"
+          },
           "404": {
             "description": "Project or VCS connection not found"
           },
@@ -2878,6 +2939,12 @@
               }
             }
           },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - admin role or project membership required"
+          },
           "404": {
             "description": "Project or VCS connection not found"
           }
@@ -2917,6 +2984,12 @@
               }
             }
           },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - admin role or project membership required"
+          },
           "404": {
             "description": "Project or VCS connection not found"
           }
@@ -2954,6 +3027,22 @@
           },
           {
             "name": "x-github-event",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-github-delivery",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "date",
             "required": true,
             "in": "header",
             "schema": {
@@ -3030,6 +3119,9 @@
           "400": {
             "description": "Invalid URL"
           },
+          "403": {
+            "description": "Not a project member"
+          },
           "404": {
             "description": "Ticket not found"
           }
@@ -3078,6 +3170,9 @@
               }
             }
           },
+          "403": {
+            "description": "Not a project member"
+          },
           "404": {
             "description": "Ticket not found"
           }
@@ -3125,6 +3220,9 @@
         "responses": {
           "204": {
             "description": "Link deleted"
+          },
+          "403": {
+            "description": "Not a project member"
           },
           "404": {
             "description": "Link not found"
@@ -3653,6 +3751,22 @@
           },
           {
             "name": "x-ci-signature",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-ci-delivery",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "date",
             "required": true,
             "in": "header",
             "schema": {
@@ -4611,6 +4725,19 @@
           }
         }
       },
+      "AssignTicketDto": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "description": "User ID (CUID) to assign the ticket to"
+          },
+          "agentId": {
+            "type": "string",
+            "description": "Agent ID (CUID) to assign the ticket to"
+          }
+        }
+      },
       "TransitionWithCommentDto": {
         "type": "object",
         "properties": {
@@ -4716,9 +4843,8 @@
           "pollingIntervalMs": {
             "type": "number"
           },
-          "webhookSecret": {
-            "type": "string",
-            "nullable": true
+          "webhookSecretConfigured": {
+            "type": "boolean"
           },
           "lastSyncedAt": {
             "type": "string",
@@ -4743,7 +4869,7 @@
           "syncMode",
           "allowedAuthors",
           "pollingIntervalMs",
-          "webhookSecret",
+          "webhookSecretConfigured",
           "lastSyncedAt",
           "isActive",
           "createdAt",

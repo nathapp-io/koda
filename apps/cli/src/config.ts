@@ -1,7 +1,7 @@
 import Conf from 'conf';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
-import { promises as fs } from 'fs';
+import { promises as fs, chmodSync } from 'fs';
 
 const schema = {
   apiKey: {
@@ -23,6 +23,19 @@ const store = new Conf({
   configName: 'config',
   schema,
 });
+
+// SEC-2: `conf` writes with default mode 0o666 (umask → 0o644), which puts the
+// API key at ~/.koda/config.json within reach of every local user on
+// multi-user workstations. Force 0600 after every write and defensively on read.
+function secureConfigFile(): void {
+  const path = (store as { path?: string }).path;
+  if (!path) return;
+  try {
+    chmodSync(path, 0o600);
+  } catch {
+    // Best-effort: if the file does not exist yet (first write), skip.
+  }
+}
 
 export interface Profile {
   apiKey: string;
@@ -87,6 +100,7 @@ export function validateApiKey(apiKey: string | undefined): boolean {
 }
 
 export function getConfig(): Config {
+  secureConfigFile();
   return {
     apiKey: (store.get('apiKey') as string) || '',
     apiUrl: (store.get('apiUrl') as string) || '',
@@ -109,6 +123,8 @@ export function setConfig(partial: Partial<Config>): void {
   if (partial.profiles !== undefined) {
     store.set('profiles', partial.profiles);
   }
+
+  secureConfigFile();
 }
 
 export const _defaultResolveContextDeps: ResolveContextDeps = {
@@ -169,11 +185,13 @@ export function maskApiKey(apiKey: string): string {
 
 export function clearApiKey(): void {
   store.delete('apiKey');
+  secureConfigFile();
 }
 
 export function setProfile(name: string, profile: Profile): void {
   const profiles = (store.get('profiles') as Record<string, Profile>) || {};
   store.set('profiles', { ...profiles, [name]: profile });
+  secureConfigFile();
 }
 
 export function getProfiles(): Array<{ name: string; apiUrl: string }> {
@@ -188,6 +206,7 @@ export function removeProfile(name: string): void {
   }
   const { [name]: _removed, ...remaining } = profiles;
   store.set('profiles', remaining);
+  secureConfigFile();
 }
 
 export async function findProjectConfig(dir?: string, deps: ConfigDeps = _configDeps): Promise<ProjectConfig | null> {

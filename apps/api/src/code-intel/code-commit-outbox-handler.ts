@@ -59,6 +59,7 @@ export class CodeCommitOutboxHandler {
       provider: connection.provider,
       token,
       repoUrl: `https://github.com/${connection.repoOwner}/${connection.repoName}`,
+      githubApiUrl: this.vcsConfig?.githubApiUrl,
     };
     const provider = createVcsProvider(connection.provider, providerConfig);
 

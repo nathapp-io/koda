@@ -109,6 +109,9 @@ model Project {
   entityNodes   EntityNode[]
   entityLinks   EntityLink[]
   memoryQueryMetrics MemoryQueryMetric[]
+  webhookDeliveries WebhookDelivery[]
+
+  @@index([deletedAt])
 }
 
 model ProjectMember {
@@ -162,6 +165,7 @@ model Ticket {
   @@index([projectId, assignedToUserId])
   @@index([projectId, assignedToAgentId])
   @@index([externalVcsId])
+  @@index([deletedAt])
 }
 
 model Comment {
@@ -499,6 +503,23 @@ model MemoryItem {
   @@index([projectId, kind, subject, predicate])
   @@index([projectId, deletedAt])
   @@index([projectId, sourceType, sourceId])
+}
+
+// ---------------------------------------------------------------------------
+// Webhook Replay Protection (SEC-1)
+// ---------------------------------------------------------------------------
+
+model WebhookDelivery {
+  id         String   @id @default(cuid())
+  projectId  String
+  source     String   // github | ci
+  deliveryId String   // sender-provided delivery id (X-GitHub-Delivery / X-CI-Delivery)
+  receivedAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, source, deliveryId])
+  @@index([receivedAt])
 }
 
 // ---------------------------------------------------------------------------

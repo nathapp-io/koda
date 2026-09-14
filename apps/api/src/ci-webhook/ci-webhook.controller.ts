@@ -1,10 +1,11 @@
 import { Controller, Post, Body, Param, HttpCode, Headers, Req } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { Public } from '@nathapp/nestjs-auth';
-import { AuthException } from '@nathapp/nestjs-common';
+import { AuthException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { CiWebhookService } from './ci-webhook.service';
 import { CiWebhookPayloadDto, CiWebhookResponseDto } from './ci-webhook.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
+import { WebhookReplayGuard } from '../webhook-security/webhook-replay.guard';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 type RawBodyRequest = { rawBody?: Buffer };
@@ -12,7 +13,10 @@ type RawBodyRequest = { rawBody?: Buffer };
 @ApiTags('ci-webhooks')
 @Controller()
 export class CiWebhookController {
-  constructor(private ciWebhookService: CiWebhookService) {}
+  constructor(
+    private ciWebhookService: CiWebhookService,
+    private readonly replayGuard: WebhookReplayGuard,
+  ) {}
 
   @Post('projects/:slug/ci-webhook')
   @HttpCode(200)
@@ -26,7 +30,14 @@ export class CiWebhookController {
     @Body() payload: CiWebhookPayloadDto,
     @Req() request: RawBodyRequest,
     @Headers('x-ci-signature') signature?: string,
+    @Headers('x-ci-delivery') deliveryId?: string,
+    @Headers('date') dateHeader?: string,
   ) {
+    const project = await this.ciWebhookService.resolveProject(slug);
+    if (!project) {
+      throw new NotFoundAppException({}, 'projects');
+    }
+
     const secret = await this.ciWebhookService.getWebhookSecret(slug);
     if (!secret) {
       throw new AuthException({}, 'ci_webhook');
@@ -44,8 +55,17 @@ export class CiWebhookController {
       throw new AuthException({}, 'ci_webhook');
     }
 
-    const result = await this.ciWebhookService.processCiWebhook(slug, payload);
-    return JsonResponse.Ok(result);
+    // SEC-1: reject replayed deliveries; forget on failure so the sender's
+    // retry with the same delivery id is accepted.
+    await this.replayGuard.assertFresh({ projectId: project.id, source: 'ci', deliveryId, dateHeader });
+
+    try {
+      const result = await this.ciWebhookService.processCiWebhook(slug, payload);
+      return JsonResponse.Ok(result);
+    } catch (err) {
+      await this.replayGuard.forget({ projectId: project.id, source: 'ci', deliveryId });
+      throw err;
+    }
   }
 
   private verifySignature(payload: string, signature: string, secret: string): boolean {

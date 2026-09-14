@@ -1,6 +1,4 @@
 import { Command } from 'commander';
-import { resolveContext } from '../config';
-import { OpenAPI } from '../generated/core/OpenAPI';
 import {
   agentsControllerFindMe,
   agentsControllerSuggestTicket,
@@ -13,6 +11,7 @@ import {
 import { table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
+import { withContext } from '../utils/context';
 
 function maskApiKey(apiKey: string): string {
   if (apiKey.length <= 8) {
@@ -30,16 +29,8 @@ export function agentCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const ctx = await resolveContext({});
-
-        if (!ctx.apiKey || !ctx.apiUrl) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
-
-        const response = await agentsControllerFindMe();
+        await withContext({}, { requireProject: false });
+const response = await agentsControllerFindMe();
         const agentData = unwrap<{ name: string; slug: string; apiKey?: string }>(response);
 
         if (options.json) {
@@ -64,18 +55,7 @@ export function agentCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-
-        if (!ctx.apiKey || !ctx.apiUrl) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         const meResponse = await agentsControllerFindMe();
         const agentData = unwrap<{ name: string; slug: string; apiKey?: string }>(meResponse);
@@ -113,16 +93,8 @@ export function agentCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const ctx = await resolveContext({});
-
-        if (!ctx.apiKey || !ctx.apiUrl) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
-
-        const response = await agentsControllerFindAll();
+        await withContext({}, { requireProject: false });
+const response = await agentsControllerFindAll();
         const raw = unwrap<{ items?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>>(response);
         const items: Array<Record<string, unknown>> = Array.isArray(raw)
           ? raw
@@ -155,16 +127,8 @@ export function agentCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const ctx = await resolveContext({});
-
-        if (!ctx.apiKey || !ctx.apiUrl) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
-
-        const response = await agentsControllerGenerateApiKey({
+        await withContext({}, { requireProject: false });
+const response = await agentsControllerGenerateApiKey({
           requestBody: {
             name: options.name,
             slug: options.slug,
@@ -199,16 +163,8 @@ export function agentCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (slug: string, options) => {
       try {
-        const ctx = await resolveContext({});
-
-        if (!ctx.apiKey || !ctx.apiUrl) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
-
-        const response = await agentsControllerUpdate({
+        await withContext({}, { requireProject: false });
+const response = await agentsControllerUpdate({
           slug,
           requestBody: {
             name: options.name,
@@ -236,16 +192,8 @@ export function agentCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (slug: string, options) => {
       try {
-        const ctx = await resolveContext({});
-
-        if (!ctx.apiKey || !ctx.apiUrl) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
-
-        const response = await agentsControllerRotateApiKey({ slug });
+        await withContext({}, { requireProject: false });
+const response = await agentsControllerRotateApiKey({ slug });
         const result = unwrap<{ apiKey?: string }>(response);
 
         if (options.json) {
@@ -269,16 +217,8 @@ export function agentCommand(program: Command): void {
     .argument('<slug>', 'Agent slug')
     .action(async (slug: string) => {
       try {
-        const ctx = await resolveContext({});
-
-        if (!ctx.apiKey || !ctx.apiUrl) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
-
-        await agentsControllerRemove({ slug });
+        await withContext({}, { requireProject: false });
+await agentsControllerRemove({ slug });
         console.log(`Agent '${slug}' deleted.`);
         process.exit(0);
       } catch (err: unknown) {

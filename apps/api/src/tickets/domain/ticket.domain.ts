@@ -102,4 +102,7 @@ export interface ITicketRepository {
   assignTicket(id: string, data: AssignTicketData): Promise<TicketDomain>;
   softDeleteTicket(id: string): Promise<TicketDomain>;
   findTicketByRefRaw(projectSlug: string, ref: string): Promise<TicketDomain | null>;
+  findUserById(id: string): Promise<{ id: string; role: string } | null>;
+  findAgentById(id: string): Promise<{ id: string } | null>;
+  findProjectMemberRole(projectId: string, userId: string): Promise<string | null>;
 }

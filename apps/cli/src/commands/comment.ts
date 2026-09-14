@@ -1,6 +1,4 @@
 import { Command } from 'commander';
-import { resolveContext } from '../config';
-import { OpenAPI } from '../generated/core/OpenAPI';
 import {
   commentsControllerCreateFromHttp,
   commentsControllerListByTicketFromHttp,
@@ -10,6 +8,7 @@ import {
 import { success, error, table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
+import { withContext } from '../utils/context';
 
 export function commentCommand(program: Command): void {
   const comment = program.command('comment');
@@ -23,26 +22,13 @@ export function commentCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (ref: string, options) => {
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          error('Project not configured. Run: koda init');
-          process.exit(2);
-        }
-
-        if (!ctx.apiKey) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
-          process.exit(2);
-        }
+        const ctx = await withContext({ projectSlug: options.project });
 
         const validTypes = ['GENERAL', 'VERIFICATION', 'FIX_REPORT', 'REVIEW'];
         if (!validTypes.includes(options.type)) {
           error(`Invalid type ${options.type}. Valid values: ${validTypes.join(', ')}`);
           process.exit(3);
         }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
 
         const response = await commentsControllerCreateFromHttp({
           slug: ctx.projectSlug,
@@ -76,20 +62,7 @@ export function commentCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (ref: string, options) => {
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-
-        if (!ctx.projectSlug) {
-          error('Project not configured. Run: koda init');
-          process.exit(2);
-        }
-
-        if (!ctx.apiKey) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
-          process.exit(2);
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         const response = await commentsControllerListByTicketFromHttp({
           slug: ctx.projectSlug,
@@ -125,15 +98,7 @@ export function commentCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const ctx = await resolveContext({});
-
-        if (!ctx.apiKey) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
-          process.exit(2);
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        await withContext({}, { requireProject: false });
 
         const response = await commentsControllerUpdateFromHttp({
           id: options.id,
@@ -166,15 +131,7 @@ export function commentCommand(program: Command): void {
       }
 
       try {
-        const ctx = await resolveContext({});
-
-        if (!ctx.apiKey) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
-          process.exit(2);
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        await withContext({}, { requireProject: false });
 
         const response = await commentsControllerDeleteFromHttp({ id: options.id });
         const deleted = unwrap<Record<string, unknown> | undefined>(response);

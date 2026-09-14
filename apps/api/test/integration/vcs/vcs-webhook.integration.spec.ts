@@ -21,6 +21,7 @@ import { VcsConnectionService } from '../../../src/vcs/vcs-connection.service';
 import { VcsSyncService } from '../../../src/vcs/vcs-sync.service';
 import { VcsWebhookService, GitHubWebhookPayload } from '../../../src/vcs/vcs-webhook.service';
 import { ProjectsService } from '../../../src/projects/projects.service';
+import { WebhookReplayGuard } from '../../../src/webhook-security/webhook-replay.guard';
 import { AuthException, NotFoundAppException } from '@nathapp/nestjs-common';
 
 describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
@@ -147,6 +148,10 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
         { provide: VcsSyncService, useValue: mockSyncServiceInstance },
         { provide: VcsWebhookService, useValue: mockWebhookServiceInstance },
         { provide: ProjectsService, useValue: mockProjectsServiceInstance },
+        {
+          provide: WebhookReplayGuard,
+          useValue: { assertFresh: jest.fn().mockResolvedValue(undefined), forget: jest.fn() },
+        },
       ],
     }).compile();
 

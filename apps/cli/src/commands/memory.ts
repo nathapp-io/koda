@@ -1,10 +1,9 @@
 import { Command } from 'commander';
-import { resolveContext } from '../config';
-import { OpenAPI } from '../generated/core/OpenAPI';
 import { timelineControllerGetTimeline, memoryControllerRecordDecision, memoryControllerCreateMemory, projectsControllerFindBySlug } from '../generated';
 import { table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
+import { withContext } from '../utils/context';
 
 /**
  * The memory write endpoints take a project *ID*, not a slug — unlike most
@@ -37,16 +36,7 @@ export function memoryCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-        if (!ctx.apiKey || !ctx.apiUrl) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         const response = await timelineControllerGetTimeline({
           slug: ctx.projectSlug,
@@ -91,16 +81,7 @@ export function memoryCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-        if (!ctx.apiKey || !ctx.apiUrl) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
+        const ctx = await withContext({ projectSlug: options.project });
 
         const projectId = await resolveProjectId(ctx.projectSlug);
 
@@ -142,13 +123,7 @@ export function memoryCommand(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const ctx = await resolveContext({ projectSlug: options.project });
-        if (!ctx.projectSlug) {
-          handleApiError(new Error('Project not configured. Run: koda init'), { configError: true });
-        }
-        if (!ctx.apiKey || !ctx.apiUrl) {
-          handleApiError(new Error('API key or URL not configured. Run: koda login --api-key <key>'), { configError: true });
-        }
+        const ctx = await withContext({ projectSlug: options.project });
 
         let confidence: number | undefined;
         if (options.confidence !== undefined) {
@@ -158,9 +133,6 @@ export function memoryCommand(program: Command): void {
             return;
           }
         }
-
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = ctx.apiKey;
 
         const projectId = await resolveProjectId(ctx.projectSlug);
 

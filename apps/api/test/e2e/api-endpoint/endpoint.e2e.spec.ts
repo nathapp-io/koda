@@ -43,6 +43,7 @@ describeIntegration('API Integration Tests', () => {
   let nonAdminUserAccessToken: string;
   let agentApiKey: string;
   let agentSlug: string;
+  let agentId: string;
   let projectSlug: string;
   let bugTicketRef: string;
   let enhancementTicketRef: string;
@@ -199,13 +200,14 @@ describeIntegration('API Integration Tests', () => {
         })
         .expect(201);
 
-      const data = body<{ apiKey: string; agent: { name: string; slug: string } }>(res);
+      const data = body<{ apiKey: string; agent: { id: string; name: string; slug: string } }>(res);
       expect(data.agent.name).toBe('Subrina Coder');
       expect(data.agent.slug).toBe('subrina-coder');
       expect(data.apiKey).toBeTruthy();
 
       agentApiKey = data.apiKey;
       agentSlug = data.agent.slug;
+      agentId = data.agent.id;
     });
 
     it('GET /api/agents/me — agent profile via API key', async () => {
@@ -1116,19 +1118,37 @@ describeIntegration('API Integration Tests', () => {
       const res = await request(httpServer)
         .post(`/api/projects/${projectSlug}/tickets/${assignTicketRef}/assign`)
         .set('Authorization', `Bearer ${userAccessToken}`)
-        .send({ agentSlug })
+        .send({ agentId })
         .expect(200);
 
-      const data = body<{ assignedAgentId: string | null }>(res);
-      expect(data.assignedAgentId).not.toBeNull();
+      const data = body<{ assignedToAgentId: string | null }>(res);
+      expect(data.assignedToAgentId).toBe(agentId);
     });
 
     it('POST .../assign — 404 for nonexistent ticket', async () => {
       await request(httpServer)
         .post(`/api/projects/${projectSlug}/tickets/NONEXIST-999/assign`)
         .set('Authorization', `Bearer ${userAccessToken}`)
-        .send({ agentSlug })
+        .send({ agentId })
         .expect(404);
+    });
+
+    it('POST .../assign — 404 for nonexistent assignee (BUG-2, no more Prisma 500)', async () => {
+      const res = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets/${assignTicketRef}/assign`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ agentId: 'cdefghijklmnopqrstuvwxyz01' })
+        .expect(404);
+
+      expect(res.body).toHaveProperty('ret');
+    });
+
+    it('POST .../assign — rejects agent ID garbage with 400 (DTO validation)', async () => {
+      await request(httpServer)
+        .post(`/api/projects/${projectSlug}/tickets/${assignTicketRef}/assign`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ agentId: 'not-a-cuid!' })
+        .expect(400);
     });
   });
 
@@ -1893,6 +1913,7 @@ describeIntegration('API Integration Tests', () => {
       const res = await request(httpServer)
         .post(`/api/projects/${projectSlug}/ci-webhook`)
         .set('x-ci-signature', signature)
+        .set('x-ci-delivery', 'e2e-ci-delivery-001')
         .send(payload)
         .expect(200);
 
@@ -1900,6 +1921,32 @@ describeIntegration('API Integration Tests', () => {
       expect(data.success).toBe(true);
       expect(data.ticketRef).toMatch(/^KT-\d+$/);
       expect(data.message).toBeTruthy();
+    });
+
+    it('POST /api/projects/:slug/ci-webhook — rejects a replayed delivery with 409 (SEC-1)', async () => {
+      const payload = {
+        event: 'pipeline_failed',
+        pipeline: { id: '12346', url: 'https://github.com/org/repo/actions/runs/12346' },
+        commit: { sha: 'abc123def457', message: 'feat: replay test' },
+        failures: [
+          { test: 'ReplayService.validateToken', file: 'apps/api/src/auth/auth.service.ts', line: 91 },
+        ],
+      };
+      const signature = `sha256=${createHmac('sha256', ciWebhookSecret).update(JSON.stringify(payload)).digest('hex')}`;
+
+      await request(httpServer)
+        .post(`/api/projects/${projectSlug}/ci-webhook`)
+        .set('x-ci-signature', signature)
+        .set('x-ci-delivery', 'e2e-ci-delivery-replay')
+        .send(payload)
+        .expect(200);
+
+      await request(httpServer)
+        .post(`/api/projects/${projectSlug}/ci-webhook`)
+        .set('x-ci-signature', signature)
+        .set('x-ci-delivery', 'e2e-ci-delivery-replay')
+        .send(payload)
+        .expect(409);
     });
 
     it('POST /api/projects/:slug/ci-webhook — returns 400 for invalid payload', async () => {

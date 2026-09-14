@@ -10,9 +10,10 @@ import { VcsModule } from '../vcs/vcs.module';
 import { TicketLinksModule } from '../ticket-links/ticket-links.module';
 import { EventsModule } from '../events/events.module';
 import { OutboxModule } from '../outbox/outbox.module';
+import { ProjectsModule } from '../projects/projects.module';
 
 @Module({
-  imports: [RagModule, WebhookModule, VcsModule, TicketLinksModule, EventsModule, OutboxModule],
+  imports: [RagModule, WebhookModule, VcsModule, TicketLinksModule, EventsModule, OutboxModule, ProjectsModule],
   controllers: [TicketsController],
   providers: [
     PrismaTicketsRepository,

@@ -72,6 +72,8 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(HybridRetrieverService.name);
   private db: LanceConnection = null;
   private readonly tableCache = new Map<string, LanceTable>();
+  private readonly tableCreationLocks = new Map<string, Promise<LanceTable>>();
+  private readonly writeLocks = new Map<string, Promise<unknown>>();
   private readonly graphifyEnabledCache = new Map<string, { value: boolean; expiresAt: number }>();
   private lanceAvailable = true;
   private readonly lancedbPath: string;
@@ -112,6 +114,8 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
   async onModuleDestroy(): Promise<void> {
     this.tableCache.clear();
     this.graphifyEnabledCache.clear();
+    this.tableCreationLocks.clear();
+    this.writeLocks.clear();
     if (this.db && typeof this.db.close === 'function') {
       try {
         const result = this.db.close();
@@ -145,13 +149,15 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     projectId: string,
     doc: { source: string; sourceId: string; content: string; metadata: Record<string, unknown> },
   ): Promise<void> {
+    const tableName = `project_${projectId}`;
     const table = await this.getOrCreateTable(projectId);
     const createdAtOverride = doc.metadata?.['createdAtOverride'];
     const createdAt =
       typeof createdAtOverride === 'string' ? createdAtOverride : new Date().toISOString();
+    let record: LanceRecord | null = null;
     try {
       const vector = await this.embeddingService.embed(doc.content);
-      const record: LanceRecord = {
+      record = {
         id: generateId(),
         source: doc.source,
         source_id: doc.sourceId,
@@ -162,11 +168,10 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
         provider: this.embeddingService.providerName,
         model: this.embeddingService.modelName,
       };
-      await table.add([record]);
     } catch (err) {
       this.logger.warn({ storyId: 'US-004', msg: `Embedding failed: ${(err as Error).message}` });
       const dims = this.embeddingService.dimensions ?? 768;
-      const record: LanceRecord = {
+      record = {
         id: generateId(),
         source: doc.source,
         source_id: doc.sourceId,
@@ -177,12 +182,51 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
         provider: this.embeddingService.providerName,
         model: this.embeddingService.modelName,
       };
-      await table.add([record]);
     }
+    if (!record) return;
+
+    // BUG-4: serialize writes per table so interleaved add/delete calls
+    // cannot race LanceDB (same pattern as VectorStore.runExclusive).
+    await this.runExclusive(tableName, () => table.add([record as LanceRecord]));
+  }
+
+  /**
+   * Serializes LanceDB writes (add/delete) per table. LanceDB has no built-in
+   * mutex for concurrent writers, so interleaved writes against the same
+   * table can corrupt table state.
+   */
+  private async runExclusive<T>(tableName: string, fn: () => Promise<T>): Promise<T> {
+    const previous = this.writeLocks.get(tableName) ?? Promise.resolve();
+    const run = previous.then(fn, fn);
+    const tracked = run.catch(() => undefined);
+    this.writeLocks.set(tableName, tracked);
+    tracked.finally(() => {
+      if (this.writeLocks.get(tableName) === tracked) {
+        this.writeLocks.delete(tableName);
+      }
+    });
+    return run;
   }
 
   private async getOrCreateTable(projectId: string): Promise<LanceTable> {
     const tableName = `project_${projectId}`;
+    const cached = this.tableCache.get(tableName);
+    if (cached) return cached;
+
+    // BUG-4: serialize table open/create per project — concurrent callers
+    // await the same in-flight creation instead of racing LanceDB's
+    // check-then-create against each other.
+    const inFlight = this.tableCreationLocks.get(tableName);
+    if (inFlight) return inFlight;
+
+    const creation = this.createOrOpenTable(projectId, tableName).finally(() => {
+      this.tableCreationLocks.delete(tableName);
+    });
+    this.tableCreationLocks.set(tableName, creation);
+    return creation;
+  }
+
+  private async createOrOpenTable(projectId: string, tableName: string): Promise<LanceTable> {
     const cached = this.tableCache.get(tableName);
     if (cached) return cached;
 

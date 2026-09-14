@@ -1,9 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { HttpException } from '@nestjs/common';
 import { AuthException } from '@nathapp/nestjs-common';
 import { VcsWebhookController } from './vcs-webhook.controller';
 import { ProjectsService } from '../projects/projects.service';
 import { VcsConnectionService } from './vcs-connection.service';
 import { VcsWebhookService, GitHubWebhookPayload } from './vcs-webhook.service';
+import { WebhookReplayGuard } from '../webhook-security/webhook-replay.guard';
 import type { VcsConnectionDomain } from './domain/vcs.domain';
 
 function makeProjectDto(overrides?: object) {
@@ -82,6 +84,7 @@ describe('VcsWebhookController', () => {
   let mockProjectsService: jest.Mocked<Pick<ProjectsService, 'findBySlug'>>;
   let mockVcsConnectionService: jest.Mocked<Pick<VcsConnectionService, 'getFullByProject'>>;
   let mockWebhookService: jest.Mocked<Pick<VcsWebhookService, 'verifySignature' | 'handleWebhook'>>;
+  let mockReplayGuard: { assertFresh: jest.Mock; forget: jest.Mock };
 
   beforeEach(async () => {
     mockProjectsService = {
@@ -97,12 +100,18 @@ describe('VcsWebhookController', () => {
       handleWebhook: jest.fn().mockResolvedValue({ success: true }),
     };
 
+    mockReplayGuard = {
+      assertFresh: jest.fn().mockResolvedValue(undefined),
+      forget: jest.fn().mockResolvedValue(undefined),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       controllers: [VcsWebhookController],
       providers: [
         { provide: ProjectsService, useValue: mockProjectsService },
         { provide: VcsConnectionService, useValue: mockVcsConnectionService },
         { provide: VcsWebhookService, useValue: mockWebhookService },
+        { provide: WebhookReplayGuard, useValue: mockReplayGuard },
       ],
     }).compile();
 
@@ -313,6 +322,66 @@ describe('VcsWebhookController', () => {
         'pull_request',
         prPayload,
       );
+    });
+
+    it('should pass the delivery id to the replay guard (SEC-1)', async () => {
+      const payload = makePushPayload();
+
+      await controller.handleWebhook(
+        'test-project',
+        'sha256=sig',
+        payload,
+        makeRawRequest('{}'),
+        'push',
+        'delivery-uuid-001',
+      );
+
+      expect(mockReplayGuard.assertFresh).toHaveBeenCalledWith({
+        projectId: 'proj-1',
+        source: 'github',
+        deliveryId: 'delivery-uuid-001',
+        dateHeader: undefined,
+      });
+    });
+
+    it('should propagate 409 when the delivery is a replay and skip processing (SEC-1)', async () => {
+      mockReplayGuard.assertFresh.mockRejectedValueOnce(
+        new HttpException('Webhook already processed', 409),
+      );
+
+      await expect(
+        controller.handleWebhook(
+          'test-project',
+          'sha256=sig',
+          makePushPayload(),
+          makeRawRequest('{}'),
+          'push',
+          'delivery-dup',
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+
+      expect(mockWebhookService.handleWebhook).not.toHaveBeenCalled();
+    });
+
+    it('should forget the delivery when processing throws so GitHub retries are accepted (SEC-1)', async () => {
+      mockWebhookService.handleWebhook.mockRejectedValueOnce(new Error('db down'));
+
+      await expect(
+        controller.handleWebhook(
+          'test-project',
+          'sha256=sig',
+          makePushPayload(),
+          makeRawRequest('{}'),
+          'push',
+          'delivery-retry-1',
+        ),
+      ).rejects.toThrow('db down');
+
+      expect(mockReplayGuard.forget).toHaveBeenCalledWith({
+        projectId: 'proj-1',
+        source: 'github',
+        deliveryId: 'delivery-retry-1',
+      });
     });
   });
 });
