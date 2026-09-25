@@ -8,6 +8,8 @@
 **Prior reviews:** `20260615-review-apps-security-perf.md` (A-, 87/100) and `20260906-review-whole-repo.md` (C+, 70/100).
 **Revision:** Pass 2 of 2. Each finding below has been re-verified against the actual code at the cited line numbers. Findings that were over-stated, under-stated, or factually wrong have been revised. See "Revision Notes" at the end for a delta vs the first pass.
 
+**Fix status (2026-09-25):** PR [#127](https://github.com/nathapp-io/koda/pull/127) (`fix/review-2026-09-14-bugs`, head `fdd03059`, open/unmerged) fixes every finding below except: SEC-3's throttle is inert until the 09-25 H2 (throttler guard registration) is fixed, and BUG-14 stays partial (GitLab still cannot be configured end to end). See `docs/20260925-review-whole-repo.md` → **Fixes in flight: PR #127** for the verified per-finding mapping.
+
 ---
 
 ## Overall Grade: A- (88/100)

@@ -15,6 +15,8 @@
 - Verdicts below are **CONFIRMED**, **PARTIAL** (real defect; scope/lines corrected), **REFUTED**, or **UNVERIFIABLE** (needs runtime). Results: 13/13 HIGH confirmed; 26/28 MEDIUM confirmed, M12 and M15 partial; M6 and M23 upgraded from *PLAUSIBLE* to confirmed; LOW items confirmed except the `PolicyGateService` bullet (partial); prior-review rows all still open, with the BUG-10 label corrected.
 - The proof for every item is inline. The notable corrections are also listed under **Verification corrections applied**.
 
+**Fixes in flight:** PR [#127](https://github.com/nathapp-io/koda/pull/127) (`fix/review-2026-09-14-bugs`, head `fdd03059`, open/unmerged) closes most 2026-09-14 findings and touches H7, H8, H11, M7, M8 and M12 below. Nothing is fixed on `main` until it merges; see **Fixes in flight: PR #127** for the verified mapping.
+
 ---
 
 ## Verification corrections applied
@@ -37,6 +39,23 @@
 | PolicyGate (LOW) | Partial: invoked by `scripts/policy-gates-runner.ts:145-146` from `ci.yml`; never called at runtime. |
 | BUG-10 (prior) | REFUTED as written: the CLI does not self-assign; it sends no body and unassigns (H11 is the accurate finding). |
 | BUG-3 (prior) | Schema ranges corrected to `schema.prisma:80-112` (Project) and `:127-165` (Ticket); the cited `:184-260` covers models without `deletedAt`. |
+
+---
+
+## Fixes in flight: PR #127 (unmerged)
+
+**PR:** [#127](https://github.com/nathapp-io/koda/pull/127) · `fix/review-2026-09-14-bugs` · head `fdd03059` (base `6f4420f8`) · open, not merged. Verified against the PR diff; `main` is unchanged until it lands.
+
+| Finding | PR #127 | Evidence (branch) |
+|:--|:--|:--|
+| H7 | **Partial** | `hybrid-retriever.service.ts` gains `tableCreationLocks`, `writeLocks` and `runExclusive`, fixing prior BUG-4. `rag.controller.ts:88-101` still calls both indexers and the two services keep separate locks/connections, so duplicate rows and the cross-service first-write race remain. |
+| H8 | **Fixed (build)** | `ACCESS_COOKIE`/`REFRESH_COOKIE` declared at `apps/web/server/utils/api.ts:19-21`, restoring the web build. H9/M22/M23 are untouched, so end-to-end auth is still non-functional. |
+| H11 | **Fixed** | CLI `assign` resolves `--to/--agent` slug → agent CUID, adds `--user` and `--unassign`, and prints the real outcome. With no target it still unassigns, but no longer claims success. |
+| M7 | **Partial** | `POST :ref/assign` now requires UPDATE Ticket + project membership. Tickets/comments/labels/`GET /projects` and `ProjectMember` creation are untouched. |
+| M8 | **Partial / inert** | `@Throttle(10/min)` added to `AgentsController`; H2 is unfixed, so it has no effect. P2002→500, missing `whitelist` and duplicate DTOs untouched. |
+| M12 | **Partial** | Delivery-id replay protection now wraps both inbound webhook paths (SEC-1 fix), but `merged` is still not terminal, so late/out-of-order events with fresh delivery ids still regress `prState`. |
+
+Everything else here is untouched: H1–H6, H9, H10, H12, H13; M1–M6, M9–M11, M13–M28 (except M7/M12); the CI row; and all remaining LOW bullets. The branch's own review doc (`docs/20260914-review-fixes-branch.md`) reports BUG-16/17/18 — the final head already fixes all three (only P2002 maps to 409, DB errors rethrow; ADMIN assignees are exempt from the membership check; the in-memory replay map is age-pruned).
 
 ---
 
@@ -129,14 +148,14 @@ The biggest themes:
   - **First-write race (prior BUG-4):** On a project's first document, both do check-then-`createTable`, and the loser 500s.
   - **In-memory mode:** HybridRetriever keeps its own store, so it never sees closed tickets or graphify nodes, and deletes do not reach it.
 - **Fix:** Give HybridRetriever a single write path. It should read through a table manager owned by VectorStore, with one connection and one `runExclusive`.
-- **Verified: CONFIRMED.** `rag.controller.ts:88-101` calls both services; VectorStore uses `lancedbPath`/`project_<id>`/random id + `table.add` under `runExclusive` (`vector-store.service.ts:94,229,346,356`); Hybrid uses the same path/table, random id, bare `table.add` with no lock (`hybrid-retriever.service.ts:90,155,165,180,185`). `InMemoryTable.delete` is a no-op in Hybrid (`:61`), so VectorStore deletes never reach it. The "loser 500s" sub-claim is structural: LanceDB was not executed during verification, so the exact failure mode is runtime-dependent.
+- **Verified: CONFIRMED.** `rag.controller.ts:88-101` calls both services; VectorStore uses `lancedbPath`/`project_<id>`/random id + `table.add` under `runExclusive` (`vector-store.service.ts:94,229,346,356`); Hybrid uses the same path/table, random id, bare `table.add` with no lock (`hybrid-retriever.service.ts:90,155,165,180,185`). `InMemoryTable.delete` is a no-op in Hybrid (`:61`), so VectorStore deletes never reach it. The "loser 500s" sub-claim is structural: LanceDB was not executed during verification, so the exact failure mode is runtime-dependent. **Fix in flight (PR #127):** HybridRetriever now has per-project creation/write locks and `runExclusive`, fixing prior BUG-4, but `rag.controller.ts:88-101` still double-indexes and the two services keep separate locks/connections, so duplicates and the cross-service first-write race remain.
 
 ### H8. Web: `ACCESS_COOKIE` / `REFRESH_COOKIE` are never declared ✔
 - **Where:** `apps/web/server/utils/api.ts:36,45,56,57,74,98`
 - **Defect:** Grep finds no definition anywhere in `apps/web`. The Nuxt server auth routes (login, register, refresh, logout, me) depend on these names. Depending on how Nitro resolves them, this is a build error, a runtime ReferenceError, or a cookie named `undefined`. The API only reads `koda_token` and `koda_refresh`.
 - **Why CI missed it:** CI never builds the web app (R1).
 - **Fix:** Declare the constants. Add `nuxt build` to CI.
-- **Verified: CONFIRMED.** No declaration exists in `apps/web` source (only `server/utils/api.ts` uses/exports them). The `.nuxt/types/nitro-imports.d.ts` globals are artifacts referencing the same module, and the stale `apps/web/.output/.../nitro.mjs:7017-7018` still contains `koda_access_token`/`koda_refresh_token` — which also disagree with the API's `koda_token`/`koda_refresh` (`auth.module.ts:15-16`). Failure-mode correction: a bare `export { X }` with no local binding is a hard ESM/compile error; the `undefined`-cookie outcome is the least likely. Cited lines exact.
+- **Verified: CONFIRMED.** No declaration exists in `apps/web` source (only `server/utils/api.ts` uses/exports them). The `.nuxt/types/nitro-imports.d.ts` globals are artifacts referencing the same module, and the stale `apps/web/.output/.../nitro.mjs:7017-7018` still contains `koda_access_token`/`koda_refresh_token` — which also disagree with the API's `koda_token`/`koda_refresh` (`auth.module.ts:15-16`). Failure-mode correction: a bare `export { X }` with no local binding is a hard ESM/compile error; the `undefined`-cookie outcome is the least likely. Cited lines exact. **Fix in flight (PR #127):** constants declared at `apps/web/server/utils/api.ts:19-21` (`koda_access_token`/`koda_refresh_token`), restoring the build; H9/M22/M23 are untouched, so end-to-end auth is still non-functional.
 
 ### H9. Web SSR drops the browser cookie, so deep links always bounce to `/`
 - **Where:** `composables/useApi.ts:115`, `composables/useAuth.ts:68`, `middleware/auth.global.ts:10`
@@ -159,7 +178,7 @@ The biggest themes:
 - **Where:** `cli/src/commands/ticket.ts:395` → `tickets.service.ts:303-314`
 - **Defect:** The command sends no body, so both assignee fields are set to null, while the CLI prints "✓ Ticket assigned successfully".
 - **Fix:** Send the caller's id (from `/agents/me`). Fix together with BUG-2: add a DTO and a permission check.
-- **Verified: CONFIRMED.** `ticket.ts:395` calls the generated `ticketsControllerAssign({ slug, ref })` with no body and prints success at `:401`; Fastify maps an absent body to `{}` (`raw-body.hook.ts:63`); `tickets.service.ts:303-312` initializes both assignee fields to `null` and only sets them when `userId`/`agentId` is present. Aside: the prior review's BUG-10 label ("still self-assigns") is wrong — the behavior is unassign; H11 is the accurate description.
+- **Verified: CONFIRMED.** `ticket.ts:395` calls the generated `ticketsControllerAssign({ slug, ref })` with no body and prints success at `:401`; Fastify maps an absent body to `{}` (`raw-body.hook.ts:63`); `tickets.service.ts:303-312` initializes both assignee fields to `null` and only sets them when `userId`/`agentId` is present. Aside: the prior review's BUG-10 label ("still self-assigns") is wrong — the behavior is unassign; H11 is the accurate description. **Fix in flight (PR #127):** CLI `assign` now resolves `--to/--agent` to an agent CUID, adds `--user` and `--unassign`, and prints the actual outcome; with no target it still unassigns, but no longer claims success.
 
 ### H12. Memory guardrail bypass: agents can forge other agents' decisions
 - **Where:** `memory/memory.controller.ts:46-78, 109-129`
@@ -205,7 +224,7 @@ The biggest themes:
 | M7 | `project-access.service.ts` + callers | Membership is enforced on links, vcs, memory, context and code-intel, but **not** on tickets, comments, labels or `GET /projects`. No API creates `ProjectMember` rows. | Pick one tenancy model and apply it everywhere. |
 | M8 | `agents.service.ts:145-148`; `prisma-agent.repository.ts:54` | A duplicate slug gives P2002 → 500. The global pipe has no `whitelist`, so `...scalarFields` persists arbitrary body fields (`status`, `id`). DTOs are duplicated in the service and in `dto/`. | Pick fields explicitly, validate the slug, map P2002 → 409, delete the duplicate DTOs. |
 
-**Verification:** Both CONFIRMED. M7 understates one consequence: because no `ProjectMember` rows are ever written, the modules that *do* check membership reject every non-global-ADMIN user — they are effectively admin-only. M8 details: `I18nValidationPipe` forwards options unchanged so `whitelist` stays false; the service `UpdateAgentDto` accepts any `status` while `agents/dto/update-agent.dto.ts:10-13` restricts to `ACTIVE|PAUSED|OFFLINE`; `agents/dto/create-agent.dto.ts` has zero importers.
+**Verification:** Both CONFIRMED. M7 understates one consequence: because no `ProjectMember` rows are ever written, the modules that *do* check membership reject every non-global-ADMIN user — they are effectively admin-only. M8 details: `I18nValidationPipe` forwards options unchanged so `whitelist` stays false; the service `UpdateAgentDto` accepts any `status` while `agents/dto/update-agent.dto.ts:10-13` restricts to `ACTIVE|PAUSED|OFFLINE`; `agents/dto/create-agent.dto.ts` has zero importers. **Fix in flight (PR #127):** `POST :ref/assign` now enforces UPDATE Ticket + membership, and `@Throttle(10/min)` was added to `AgentsController` — but H2 is unfixed so the throttle is inert; the other membership surfaces, P2002 mapping, `whitelist` and duplicate DTOs are untouched.
 
 ### API: VCS, code-intel
 
@@ -217,7 +236,7 @@ The biggest themes:
 | M12 | `vcs-webhook.service.ts:287,368,400,429,455` | Late or replayed `opened`/`ready_for_review` events regress `prState` from `merged`. | Treat `merged` as terminal; dedup on `X-GitHub-Delivery` (also closes SEC-1). |
 | M13 | `ast-index.service.ts:86-90`; `prisma-code-intel.repository.ts:84-95` | `Symbol.id` has no projectId, so two projects on the same repo overwrite each other's symbols. | Put projectId in the key; never update `projectId`. |
 
-**Verification:** M9, M10, M11, M13 CONFIRMED. **M12 PARTIAL — defect real, all originally cited lines were wrong** (`:357,472,501,527` are not regression sites); actual sites are in the table above, and `reopened`/`converted_to_draft`/`closed` also overwrite state unconditionally. M10 understated: `created asc` + stale/null `since` re-fetches the same oldest ≤30 issues, starving later ones; the 30-item cap is GitHub's default (not runtime-fetched). M11: the JSDoc at `:144-148` says it includes soft-deleted rows, but the code filters `deletedAt: null`; numbering still counts deleted rows.
+**Verification:** M9, M10, M11, M13 CONFIRMED. **M12 PARTIAL — defect real, all originally cited lines were wrong** (`:357,472,501,527` are not regression sites); actual sites are in the table above, and `reopened`/`converted_to_draft`/`closed` also overwrite state unconditionally. M10 understated: `created asc` + stale/null `since` re-fetches the same oldest ≤30 issues, starving later ones; the 30-item cap is GitHub's default (not runtime-fetched). M11: the JSDoc at `:144-148` says it includes soft-deleted rows, but the code filters `deletedAt: null`; numbering still counts deleted rows. **Fix in flight (PR #127):** delivery-id replay protection now wraps both inbound webhook paths (SEC-1), but `merged` is still not terminal, so late/out-of-order events with fresh delivery ids still regress `prState`.
 
 ### API: RAG, memory, entity-graph
 
@@ -321,31 +340,35 @@ The biggest themes:
 
 ## Status of 2026-09-14 findings
 
-All of them are **still open** at `6f4420f8`, verified against source:
+All of them are **still open on `main` at `6f4420f8`** (verified against source). PR #127 fixes most of them but is **unmerged**, so the fixes are not in `main` yet:
 
-| ID | Status | Note |
-|:--|:--|:--|
-| SEC-1 | Open | No delivery-id or timestamp handling on the CI webhook or VCS `pull_request`; verified on both inbound paths. See M12 for a concrete consequence. |
-| BUG-1 | Open | `auth.controller.ts:85`, `auth.service.ts:98` — `(payload as any).id` fallback is exercised on every call; runtime is correct, such as it is. |
-| BUG-2 | Open | Also see H11: the CLI sends an empty body, which unassigns. No permission/membership; FK violation → 500. |
-| SEC-2 | Open | `conf@13.1.0` defaults to `0o666` (installed code), no chmod in CLI → 0644 under umask 022. |
-| BUG-3 | Open | Schema ranges corrected: `schema.prisma:80-112` (Project), `:127-165` (Ticket). |
-| BUG-4 | Open | Worse than reported; see H7. |
-| SEC-3 | Open | Moot until H2 is fixed. |
-| BUG-5, BUG-7, BUG-8 | Open | BUG-5 functions live in web (`[ref].vue:176-190`, `TicketCard.vue:61`), display-only. |
-| ENH-1, ENH-2, ENH-3 | Open | ENH-1's 09-14 `.nuxt/components.d.ts:42` proof is stale; the component is still dead code. |
-| BUG-10 | Open | Description superseded by H11: the command unassigns; it does not self-assign. |
-| BUG-11 | Open | `vcs-webhook.service.ts:78-80,92-94,102-108,621`. |
-| BUG-12 | Open | No dummy bcrypt compare; with H2 enumeration is unthrottled. |
-| BUG-13 | Open | Placeholder `pulls/pending` link persists; `.catch` at `ticket-transitions.service.ts:214-219`. |
-| BUG-14 | Open | Broader than reported: GitLab is unreachable end to end. The DTO enum is `github`-only, every call site builds `github.com` URLs, `parseRepoUrl` is GitHub-only, and `GITHUB_API_URL` has no production consumer. |
-| BUG-15 | Open | `ref` is the DB id (`ticket-transitions.service.ts:88`). |
+| ID | Status on `main` | PR #127 (unmerged) | Note |
+|:--|:--|:--|:--|
+| SEC-1 | Open | Fixed | `WebhookDelivery` + `WebhookReplayGuard` on CI and VCS; only P2002 maps to 409, DB errors rethrow. CI contract now requires `X-CI-Delivery`. |
+| BUG-1 | Open | Fixed | `IPrincipal` typing; no `as any`. |
+| BUG-2 | Open | Fixed | `AssignTicketDto`; UPDATE Ticket + membership; 404/403 instead of Prisma 500. |
+| SEC-2 | Open | Fixed | CLI config chmod `0600` on write and defensively on read. |
+| BUG-3 | Open | Fixed | `@@index([deletedAt])` on Project and Ticket (migration `20260914010000`). |
+| BUG-4 | Open | Fixed | HybridRetriever creation/write locks. |
+| SEC-3 | Open | Partial — inert | `@Throttle(10/min)` on agents, but H2 leaves the throttler guard unregistered. |
+| BUG-5 | Open | Fixed | Extractors return `string \| null`. |
+| BUG-7 | Open | Fixed | `withContext` helper replaces the duplicated bootstrap blocks. |
+| BUG-8 | Open | Fixed | Register fallback is `'User'`. |
+| ENH-1, ENH-2, ENH-3 | Open | Fixed | Dead component removed; locale-aware timeline dates; `firstError` skips blanks. |
+| BUG-10 | Open | Fixed | CLI assign resolves agent slug → id. |
+| BUG-11 | Open | Fixed | 10k-entry cap on the dedup map. |
+| BUG-12 | Open | Fixed | Dummy bcrypt compare on unknown email. |
+| BUG-13 | Open | Fixed | PR link created only after PR creation succeeds. |
+| BUG-14 | Open | Partial | `githubApiUrl` consumed by the provider; GitLab subgroup regex fixed. The create DTO enum is still `github`-only, so GitLab is still unreachable end to end. |
+| BUG-15 | Open | Fixed | STATUS_CHANGE `ref` is `KEY-N`. |
 
-The 09-14 review said WEB-02 (logout/refresh wiring) was fixed. It is **not** effectively fixed: the httpOnly cookie wiring exists at the source level, but H8 (undefined constants), M23 (proxy shadows the auth routes) and H9 (SSR drops cookies) prevent a session from being established, and M22 means refresh is never invoked and would send the wrong cookie.
+The 09-14 review said WEB-02 (logout/refresh wiring) was fixed. It is **not** effectively fixed: the httpOnly cookie wiring exists at the source level, but H8 (undefined constants), M23 (proxy shadows the auth routes) and H9 (SSR drops cookies) prevent a session from being established, and M22 means refresh is never invoked and would send the wrong cookie. PR #127 declares the cookie constants (H8), restoring the build, but leaves H9/M22/M23 untouched, so WEB-02 remains unfixed end to end.
 
 ---
 
 ## Suggested fix order
+
+PR #127 already covers H8 (build restore), H11, and parts of H7/M7/M8/M12, plus most 2026-09-14 items, once it merges. The ordering below covers what remains on `main`:
 
 1. **H1, H2, H3:** small, isolated auth fixes with high impact.
 2. **H5 + BUG-2 + H11:** one shared `resolveTicket(project, ref)` helper that checks `projectId`, `deletedAt` and the key prefix, used by tickets, comments, labels and transitions. Add the assign DTO and permission.
