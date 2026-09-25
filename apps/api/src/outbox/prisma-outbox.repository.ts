@@ -2,7 +2,7 @@ import { Injectable, Inject } from '@nestjs/common';
 import { AbstractPrismaRepository, PrismaClientLike, PrismaModelDelegate, PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { OutboxEvent as OutboxEventModel, PrismaClient } from '@prisma/client';
-import { OutboxEventDomain, OutboxEventInput, OUTBOX_BACKOFF_MS } from './domain/outbox-event.domain';
+import { OutboxEventDomain } from './domain/outbox-event.domain';
 
 @Injectable()
 export class PrismaOutboxRepository extends AbstractPrismaRepository<OutboxEventDomain, OutboxEventModel, string> {
@@ -21,14 +21,17 @@ export class PrismaOutboxRepository extends AbstractPrismaRepository<OutboxEvent
     return {
       id: m.id,
       projectId: m.projectId,
-      eventType: m.eventType,
+      type: m.type,
       eventId: m.eventId,
       payload: m.payload,
+      headers: m.headers,
       status: m.status,
       attempts: m.attempts,
-      lastError: m.lastError,
       nextAttemptAt: m.nextAttemptAt,
-      processedAt: m.processedAt,
+      leaseUntil: m.leaseUntil,
+      owner: m.owner,
+      lastError: m.lastError,
+      publishedAt: m.publishedAt,
       createdAt: m.createdAt,
       updatedAt: m.updatedAt,
     };
@@ -37,54 +40,35 @@ export class PrismaOutboxRepository extends AbstractPrismaRepository<OutboxEvent
   protected toPersistenceCreate(d: OutboxEventDomain): Omit<OutboxEventModel, 'id' | 'createdAt' | 'updatedAt'> {
     return {
       projectId: d.projectId,
-      eventType: d.eventType,
+      type: d.type,
       eventId: d.eventId,
       payload: d.payload,
+      headers: d.headers ?? null,
       status: d.status,
       attempts: d.attempts,
+      nextAttemptAt: d.nextAttemptAt,
+      leaseUntil: d.leaseUntil ?? null,
+      owner: d.owner ?? null,
       lastError: d.lastError ?? null,
-      nextAttemptAt: d.nextAttemptAt ?? null,
-      processedAt: d.processedAt ?? null,
+      publishedAt: d.publishedAt ?? null,
     };
   }
 
   protected toPersistenceUpdate(patch: Partial<OutboxEventDomain>): Partial<Omit<OutboxEventModel, 'id' | 'createdAt' | 'updatedAt'>> {
     const data: Partial<Omit<OutboxEventModel, 'id' | 'createdAt' | 'updatedAt'>> = {};
     if (patch.projectId !== undefined) data.projectId = patch.projectId;
-    if (patch.eventType !== undefined) data.eventType = patch.eventType;
+    if (patch.type !== undefined) data.type = patch.type;
     if (patch.eventId !== undefined) data.eventId = patch.eventId;
     if (patch.payload !== undefined) data.payload = patch.payload;
+    if (patch.headers !== undefined) data.headers = patch.headers;
     if (patch.status !== undefined) data.status = patch.status;
     if (patch.attempts !== undefined) data.attempts = patch.attempts;
-    if (patch.lastError !== undefined) data.lastError = patch.lastError;
     if (patch.nextAttemptAt !== undefined) data.nextAttemptAt = patch.nextAttemptAt;
-    if (patch.processedAt !== undefined) data.processedAt = patch.processedAt;
+    if (patch.leaseUntil !== undefined) data.leaseUntil = patch.leaseUntil;
+    if (patch.owner !== undefined) data.owner = patch.owner;
+    if (patch.lastError !== undefined) data.lastError = patch.lastError;
+    if (patch.publishedAt !== undefined) data.publishedAt = patch.publishedAt;
     return data;
-  }
-
-  async enqueue(event: OutboxEventInput): Promise<OutboxEventDomain> {
-    const model = await this.prisma.client.outboxEvent.create({
-      data: {
-        projectId: event.projectId,
-        eventType: event.eventType,
-        eventId: event.eventId,
-        payload: JSON.stringify(event.payload),
-        status: 'pending',
-      },
-    });
-    return this.toDomain(model);
-  }
-
-  async findPending(limit: number): Promise<OutboxEventDomain[]> {
-    const models = await this.prisma.client.outboxEvent.findMany({
-      where: {
-        status: 'pending',
-        OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: new Date() } }],
-      },
-      orderBy: { createdAt: 'asc' },
-      take: limit,
-    });
-    return models.map((m) => this.toDomain(m));
   }
 
   async findByStatus(status: string, limit: number): Promise<OutboxEventDomain[]> {
@@ -96,39 +80,13 @@ export class PrismaOutboxRepository extends AbstractPrismaRepository<OutboxEvent
     return models.map((m) => this.toDomain(m));
   }
 
-  async claimForProcessing(id: string): Promise<number> {
+  /** Admin retry: back to pending, due now, lease and error cleared. Returns rows changed. */
+  async resetForRetry(id: string, now: Date): Promise<number> {
     const result = await this.prisma.client.outboxEvent.updateMany({
-      where: { id, status: 'pending' },
-      data: { status: 'processing' },
+      where: { id },
+      data: { status: 'pending', attempts: 0, nextAttemptAt: now, owner: null, leaseUntil: null, lastError: null },
     });
     return result.count;
-  }
-
-  async markCompleted(id: string): Promise<void> {
-    await this.prisma.client.outboxEvent.update({
-      where: { id },
-      data: {
-        status: 'completed',
-        processedAt: new Date(),
-        lastError: null,
-      },
-    });
-  }
-
-  async markFailed(id: string, error: string, nextAttempts: number, nextStatus: string): Promise<void> {
-    // nextAttempts is the post-increment attempt count; OUTBOX_BACKOFF_MS expects the
-    // pre-increment count (matching OutboxService.retry()'s schedule of 1s, 4s, 16s).
-    const nextAttemptAt = nextStatus === 'pending' ? new Date(Date.now() + OUTBOX_BACKOFF_MS(nextAttempts - 1)) : null;
-
-    await this.prisma.client.outboxEvent.update({
-      where: { id },
-      data: {
-        attempts: nextAttempts,
-        lastError: error,
-        status: nextStatus,
-        nextAttemptAt,
-      },
-    });
   }
 
   /** Writes the latest fan-out failure for the admin view. A missing row is a no-op. */
@@ -136,50 +94,6 @@ export class PrismaOutboxRepository extends AbstractPrismaRepository<OutboxEvent
     await this.prisma.client.outboxEvent.updateMany({
       where: { id },
       data: { lastError: message },
-    });
-  }
-
-  async markDeadLetter(id: string, reason: string): Promise<OutboxEventDomain> {
-    const model = await this.prisma.client.outboxEvent.update({
-      where: { id },
-      data: {
-        status: 'dead_letter',
-        lastError: reason,
-      },
-    });
-    return this.toDomain(model);
-  }
-
-  async retryEvent(id: string): Promise<void> {
-    await this.prisma.client.outboxEvent.update({
-      where: { id },
-      data: {
-        status: 'pending',
-        lastError: null,
-        nextAttemptAt: null,
-      },
-    });
-  }
-
-  async incrementAttemptsAndRequeue(id: string, nextAttempts: number): Promise<OutboxEventDomain> {
-    const model = await this.prisma.client.outboxEvent.update({
-      where: { id },
-      data: {
-        attempts: nextAttempts,
-        status: 'pending',
-        nextAttemptAt: null,
-      },
-    });
-    return this.toDomain(model);
-  }
-
-  async requeueStaleProcessing(staleThreshold: Date): Promise<void> {
-    await this.prisma.client.outboxEvent.updateMany({
-      where: {
-        status: 'processing',
-        updatedAt: { lt: staleThreshold },
-      },
-      data: { status: 'pending', nextAttemptAt: null },
     });
   }
 }

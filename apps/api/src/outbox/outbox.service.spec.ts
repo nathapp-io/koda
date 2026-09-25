@@ -1,47 +1,36 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { OutboxService } from './outbox.service';
-import { FanOutPublisher } from './fan-out-publisher';
 import { PrismaOutboxRepository } from './prisma-outbox.repository';
 
-function createMockFanOutRegistry() {
+function createMockNathappOutbox() {
   return {
-    publish: jest.fn().mockResolvedValue(undefined),
+    record: jest.fn().mockResolvedValue({ id: 'record-1' }),
   };
 }
 
 function createMockOutboxRepo() {
   return {
-    enqueue: jest.fn(),
-    findPending: jest.fn(),
-    findByStatus: jest.fn(),
-    claimForProcessing: jest.fn(),
-    markCompleted: jest.fn(),
-    markFailed: jest.fn(),
-    markDeadLetter: jest.fn(),
-    retryEvent: jest.fn(),
-    incrementAttemptsAndRequeue: jest.fn(),
-    requeueStaleProcessing: jest.fn(),
+    findByStatus: jest.fn().mockResolvedValue([]),
+    resetForRetry: jest.fn().mockResolvedValue(1),
+    recordLastError: jest.fn(),
   };
 }
 
-describe('OutboxService', () => {
+describe('OutboxService (transitional adapter)', () => {
   let service: OutboxService;
+  let mockOutbox: ReturnType<typeof createMockNathappOutbox>;
   let mockRepo: ReturnType<typeof createMockOutboxRepo>;
 
   beforeEach(async () => {
+    mockOutbox = createMockNathappOutbox();
     mockRepo = createMockOutboxRepo();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OutboxService,
-        {
-          provide: PrismaOutboxRepository,
-          useValue: mockRepo,
-        },
-        {
-          provide: FanOutPublisher,
-          useValue: createMockFanOutRegistry(),
-        },
+        { provide: NathappOutboxService, useValue: mockOutbox },
+        { provide: PrismaOutboxRepository, useValue: mockRepo },
       ],
     }).compile();
 
@@ -49,7 +38,7 @@ describe('OutboxService', () => {
   });
 
   describe('enqueue', () => {
-    it('should persist an outbox event with status pending', async () => {
+    it('records through the package with type, payload and projectId/eventId metadata', async () => {
       const event = {
         projectId: 'proj-123',
         eventType: 'ticket_event',
@@ -57,250 +46,45 @@ describe('OutboxService', () => {
         payload: { title: 'Test Ticket' },
       };
 
-      const created = {
-        id: 'outbox-1',
-        projectId: event.projectId,
-        eventType: event.eventType,
-        eventId: event.eventId,
-        payload: JSON.stringify(event.payload),
-        status: 'pending',
-        attempts: 0,
-        lastError: null,
-        processedAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
+      await service.enqueue(event);
 
-      mockRepo.enqueue.mockResolvedValue(created);
-
-      const result = await service.enqueue(event);
-
-      expect(result).toEqual(expect.objectContaining({
-        id: 'outbox-1',
-        status: 'pending',
-      }));
-
-      expect(mockRepo.enqueue).toHaveBeenCalledWith(event);
-    });
-
-    it('should return the created outbox event', async () => {
-      const event = {
-        projectId: 'proj-123',
-        eventType: 'agent_event',
-        eventId: 'agent-event-456',
-        payload: { status: 'ACTIVE' },
-      };
-
-      const createdEvent = {
-        id: 'outbox-2',
-        projectId: event.projectId,
-        eventType: event.eventType,
-        eventId: event.eventId,
-        payload: JSON.stringify(event.payload),
-        status: 'pending',
-        attempts: 0,
-        lastError: null,
-        processedAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-
-      mockRepo.enqueue.mockResolvedValue(createdEvent);
-
-      const result = await service.enqueue(event);
-
-      expect(result.id).toBe('outbox-2');
-      expect(result.status).toBe('pending');
+      expect(mockOutbox.record).toHaveBeenCalledWith({
+        type: 'ticket_event',
+        payload: { title: 'Test Ticket' },
+        metadata: { projectId: 'proj-123', eventId: 'ticket-event-123' },
+      });
     });
   });
 
-  describe('processPending', () => {
-    it('should select all pending records', async () => {
-      const pendingEvents = [
-        {
-          id: 'outbox-1',
-          projectId: 'proj-123',
-          eventType: 'ticket_event',
-          eventId: 'event-1',
-          payload: '{}',
-          status: 'pending',
-          attempts: 0,
-          lastError: null,
-          processedAt: null,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-        {
-          id: 'outbox-2',
-          projectId: 'proj-123',
-          eventType: 'ticket_event',
-          eventId: 'event-2',
-          payload: '{}',
-          status: 'pending',
-          attempts: 1,
-          lastError: null,
-          processedAt: null,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      ];
+  describe('getPendingEvents', () => {
+    it('delegates to findByStatus("pending") with the requested limit', async () => {
+      await service.getPendingEvents(7);
 
-      mockRepo.requeueStaleProcessing.mockResolvedValue(undefined);
-      mockRepo.findPending.mockResolvedValue(pendingEvents);
-      mockRepo.claimForProcessing.mockResolvedValue(1);
-      mockRepo.markCompleted.mockResolvedValue(undefined);
-
-      await service.processPending();
-
-      expect(mockRepo.findPending).toHaveBeenCalledWith(50);
-      expect(mockRepo.requeueStaleProcessing).toHaveBeenCalledWith(expect.any(Date));
+      expect(mockRepo.findByStatus).toHaveBeenCalledWith('pending', 7);
     });
 
-    it('should claim and mark processed records as completed', async () => {
-      const pendingEvents = [
-        {
-          id: 'outbox-1',
-          projectId: 'proj-123',
-          eventType: 'ticket_event',
-          eventId: 'event-1',
-          payload: '{}',
-          status: 'pending',
-          attempts: 0,
-          lastError: null,
-          processedAt: null,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      ];
+    it('defaults to limit 100 and clamps negatives to 0', async () => {
+      await service.getPendingEvents();
+      expect(mockRepo.findByStatus).toHaveBeenLastCalledWith('pending', 100);
 
-      mockRepo.requeueStaleProcessing.mockResolvedValue(undefined);
-      mockRepo.findPending.mockResolvedValue(pendingEvents);
-      mockRepo.claimForProcessing.mockResolvedValue(1);
-      mockRepo.markCompleted.mockResolvedValue(undefined);
-
-      await service.processPending();
-
-      expect(mockRepo.claimForProcessing).toHaveBeenCalledWith('outbox-1');
-      expect(mockRepo.markCompleted).toHaveBeenCalledWith('outbox-1');
-    });
-
-    it('should increment attempts and return failed records to pending', async () => {
-      const pendingEvents = [
-        {
-          id: 'outbox-1',
-          projectId: 'proj-123',
-          eventType: 'ticket_event',
-          eventId: 'event-1',
-          payload: '{}',
-          status: 'pending',
-          attempts: 0,
-          lastError: null,
-          processedAt: null,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      ];
-
-      mockRepo.requeueStaleProcessing.mockResolvedValue(undefined);
-      mockRepo.findPending.mockResolvedValue(pendingEvents);
-      mockRepo.claimForProcessing.mockResolvedValue(1);
-      mockRepo.markFailed.mockResolvedValue(undefined);
-
-      const processEventSpy = jest
-        .spyOn(service as unknown as { processEvent: (event: unknown) => Promise<void> }, 'processEvent')
-        .mockRejectedValue(new Error('boom'));
-
-      await service.processPending();
-
-      processEventSpy.mockRestore();
-
-      expect(mockRepo.markFailed).toHaveBeenCalledWith(
-        'outbox-1',
-        'boom',
-        1,
-        'pending',
-      );
+      await service.getPendingEvents(-5);
+      expect(mockRepo.findByStatus).toHaveBeenLastCalledWith('pending', 0);
     });
   });
 
-  describe('retry logic', () => {
-    beforeEach(async () => {
-      jest.spyOn(service as any, 'delay').mockResolvedValue(undefined);
+  describe('getEventsByStatus', () => {
+    it('delegates to findByStatus with the clamped limit', async () => {
+      await service.getEventsByStatus('dead', 2.9);
+
+      expect(mockRepo.findByStatus).toHaveBeenCalledWith('dead', 2);
     });
+  });
 
-    it('should retry failed events up to 3 times', async () => {
-      const event = {
-        id: 'outbox-1',
-        projectId: 'proj-123',
-        eventType: 'ticket_event',
-        eventId: 'event-1',
-        payload: '{}',
-        status: 'failed',
-        attempts: 0,
-        lastError: null,
-        nextAttemptAt: null,
-        processedAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
+  describe('retryEvent', () => {
+    it('resets the row for retry, due now', async () => {
+      await service.retryEvent('outbox-1');
 
-      mockRepo.incrementAttemptsAndRequeue.mockResolvedValue({
-        ...event,
-        attempts: 1,
-        status: 'pending',
-      });
-
-      const retry1 = await service.retry(event);
-      expect(retry1.attempts).toBe(1);
-
-      mockRepo.incrementAttemptsAndRequeue.mockResolvedValue({
-        ...event,
-        attempts: 2,
-        status: 'pending',
-      });
-
-      const retry2 = await service.retry({ ...event, attempts: 1 });
-      expect(retry2.attempts).toBe(2);
-
-      mockRepo.incrementAttemptsAndRequeue.mockResolvedValue({
-        ...event,
-        attempts: 3,
-        status: 'pending',
-      });
-
-      const retry3 = await service.retry({ ...event, attempts: 2 });
-      expect(retry3.attempts).toBe(3);
-    });
-
-    it('should move to dead_letter after 3 failed retries', async () => {
-      const event = {
-        id: 'outbox-1',
-        projectId: 'proj-123',
-        eventType: 'ticket_event',
-        eventId: 'event-1',
-        payload: '{}',
-        status: 'failed',
-        attempts: 3,
-        lastError: null,
-        nextAttemptAt: null,
-        processedAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-
-      mockRepo.markDeadLetter.mockResolvedValue({
-        ...event,
-        status: 'dead_letter',
-        lastError: 'Failed after 3 retries',
-      });
-
-      const result = await service.retry(event);
-
-      expect(result.status).toBe('dead_letter');
-      expect(mockRepo.markDeadLetter).toHaveBeenCalledWith(
-        event.id,
-        expect.any(String),
-      );
+      expect(mockRepo.resetForRetry).toHaveBeenCalledWith('outbox-1', expect.any(Date));
     });
   });
 });

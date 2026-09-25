@@ -1,32 +1,33 @@
 import { Module } from '@nestjs/common';
-import { ScheduleModule } from '@nestjs/schedule';
-import { OutboxService } from './outbox.service';
+import { ConfigService } from '@nestjs/config';
+import { OutboxModule as NathappOutboxModule, OutboxModuleOptions } from '@nathapp/nestjs-outbox';
+import { IOutboxConfig, OUTBOX_CFG } from '../config/outbox.config';
 import { FanOutPublisher } from './fan-out-publisher';
-import { OutboxProcessor } from './outbox-processor';
-import { AdminController } from './admin.controller';
-import { PrismaModule } from '@nathapp/nestjs-prisma';
-import { PrismaOutboxRepository } from './prisma-outbox.repository';
-import { OUTBOX_REPOSITORY } from './domain/outbox-event.domain';
+import { OutboxCoreModule } from './outbox-core.module';
+import { OutboxService } from './outbox.service';
+import { PrismaOutboxStore } from './prisma-outbox.store';
 
+// Consumers (memory, entity-graph, code-intel, webhook, rag) import this module
+// and register their handlers on FanOutPublisher in onModuleInit. It does not
+// import them back (that would recreate the ESM temporal-dead-zone cycle).
+// The package module is global: its OutboxService (record) and OutboxRelay are
+// injectable everywhere.
 @Module({
-  // MemoryModule, EntityGraphModule, CodeIntelModule, and WebhookModule are
-  // intentionally NOT imported here. Their outbox event handling is owned by
-  // per-consumer outbox-subscriber providers registered in each of those modules
-  // (see memory.module.ts, entity-graph.module.ts, code-intel.module.ts,
-  // webhook-outbox.subscriber.ts), which import OutboxModule directly. Keeping
-  // those consumer imports here as well would recreate an ESM temporal-dead-zone
-  // cycle (OutboxModule -> consumer -> ... -> OutboxModule). FanOutPublisher
-  // no longer takes any cross-module injections; the subscribers register the
-  // equivalent handler behavior directly against it via onModuleInit().
-  imports: [PrismaModule, ScheduleModule],
-  controllers: [AdminController],
-  providers: [
-    PrismaOutboxRepository,
-    { provide: OUTBOX_REPOSITORY, useExisting: PrismaOutboxRepository },
-    OutboxService,
-    FanOutPublisher,
-    OutboxProcessor,
+  imports: [
+    OutboxCoreModule,
+    NathappOutboxModule.registerAsync({
+      imports: [OutboxCoreModule],
+      inject: [PrismaOutboxStore, FanOutPublisher, ConfigService],
+      useFactory: (store: PrismaOutboxStore, publisher: FanOutPublisher, config: ConfigService): OutboxModuleOptions => {
+        const outbox = config.get<IOutboxConfig>(OUTBOX_CFG);
+        if (!outbox) {
+          throw new Error('OutboxModule: outbox config not loaded — ensure outboxConfig is in ConfigModule.forRoot load array');
+        }
+        return { store, publisher, relay: outbox.relay };
+      },
+    }),
   ],
-  exports: [OutboxService, FanOutPublisher],
+  providers: [OutboxService],
+  exports: [OutboxCoreModule, OutboxService],
 })
 export class OutboxModule {}

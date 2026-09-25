@@ -24,6 +24,7 @@ import { VcsModule } from './vcs/vcs.module';
 import { WebhookSecurityModule } from './webhook-security/webhook-security.module';
 import { KodaDomainWriterModule } from './koda-domain-writer/koda-domain-writer.module';
 import { OutboxModule } from './outbox/outbox.module';
+import { OutboxAdminModule } from './outbox/outbox-admin.module';
 import { MemoryModule } from './memory/memory.module';
 import { CodeIntelModule } from './code-intel/code-intel.module';
 import { EntityGraphModule } from './entity-graph/entity-graph.module';
@@ -89,6 +90,7 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
     VcsModule,
     WebhookSecurityModule,
     OutboxModule,
+    OutboxAdminModule,
     KodaDomainWriterModule,
     MemoryModule,
     CodeIntelModule,

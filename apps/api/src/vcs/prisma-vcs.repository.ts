@@ -375,7 +375,7 @@ export class PrismaVcsRepository implements IVcsRepository {
     return this.db.outboxEvent.findMany({
       where: {
         projectId: query.projectId,
-        eventType: query.eventType,
+        type: query.eventType,
         eventId: query.eventId,
         status: { in: query.statuses },
         createdAt: { gte: query.since },

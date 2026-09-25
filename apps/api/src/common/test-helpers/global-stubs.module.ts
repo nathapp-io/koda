@@ -7,6 +7,7 @@ import { AgentsService } from '../../agents/agents.service';
 import { AUTH_CFG, IAuthConfig, authConfig } from '../../config/auth.config';
 import { RAG_CFG, IRagConfig } from '../../config/rag.config';
 import { VCS_CFG, IVcsConfig, vcsConfig } from '../../config/vcs.config';
+import { outboxConfig } from '../../config/outbox.config';
 
 export const mockPrismaService = {
   client: {
@@ -75,7 +76,7 @@ export const mockVcsConfig: IVcsConfig = {
     // real ConfigService that can resolve the JWT config object structure.
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [authConfig, vcsConfig],
+      load: [authConfig, vcsConfig, outboxConfig],
       envFilePath: ['.env.test'],
     }),
   ],

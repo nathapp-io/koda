@@ -29,10 +29,11 @@
 import { PrismaClient } from '@prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { ITransactionManager } from '@nathapp/nestjs-data';
+import { OutboxRelay, OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { resetDb } from '../../helpers/reset-db';
 import { PrismaOutboxRepository } from '../../../src/outbox/prisma-outbox.repository';
 import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
-import { noopLastErrors } from '../../helpers/outbox-record';
+import { PrismaOutboxStore } from '../../../src/outbox/prisma-outbox.store';
 import { OutboxService } from '../../../src/outbox/outbox.service';
 import { PrismaEventsRepository } from '../../../src/events/prisma-events.repository';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
@@ -54,6 +55,7 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
   let prismaService: PrismaService<PrismaClient>;
   let prisma: PrismaClient;
   let outboxService: OutboxService;
+  let relay: OutboxRelay;
   let ticketsService: TicketsService;
   let transitionsService: TicketTransitionsService;
 
@@ -70,7 +72,7 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       const rows = await prisma.outboxEvent.findMany({
-        where: { eventType: 'ticket_event', status: 'pending' },
+        where: { type: 'ticket_event', status: 'pending' },
       });
       const match = rows.find((r) => {
         try {
@@ -116,14 +118,16 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
       isInTransaction: () => false,
     };
 
-    // Real outbox stack + real memory fan-out subscriber.
-    const outboxRepo = new PrismaOutboxRepository(txManager, prismaService);
-    const fanOutRegistry = new FanOutPublisher(noopLastErrors);
-    outboxService = new OutboxService(outboxRepo, fanOutRegistry);
+    // Real outbox stack (package relay) + real memory fan-out subscriber.
+    const store = new PrismaOutboxStore(prismaService);
+    const publisher = new FanOutPublisher(new PrismaOutboxRepository(txManager, prismaService));
+    const packageOutbox = new NathappOutboxService(store, txManager);
+    outboxService = new OutboxService(packageOutbox, new PrismaOutboxRepository(txManager, prismaService));
+    relay = new OutboxRelay({ store, publisher, relay: { enabled: false } }, store, publisher);
     const ticketEventService = new TicketEventService(new PrismaEventsRepository(prismaService));
     const memoryRepository = new PrismaMemoryItemRepository(txManager, prismaService);
     const memorySubscriber = new MemoryOutboxSubscriber(
-      fanOutRegistry,
+      publisher,
       new ExtractionService(),
       memoryRepository,
     );
@@ -220,7 +224,7 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
         data: {},
       },
     });
-    await outboxService.processPending();
+    await relay.dispatchPendingBatch();
 
     const items = await prisma.memoryItem.findMany({
       where: { projectId, subject: `ticket:${transitionTicketId}` },
@@ -228,7 +232,7 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
     expect(items).toHaveLength(0);
 
     const processed = await prisma.outboxEvent.findFirstOrThrow({ where: { eventId: 'legacy-evt-1' } });
-    expect(processed.status).toBe('completed');
+    expect(processed.status).toBe('published');
   });
 
   it('status transition enqueues a status_changed ticket_event whose full envelope yields a status MemoryItem', async () => {
@@ -258,7 +262,7 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
     expect(() => new Date(payload.timestamp)).not.toThrow();
 
     // GREEN: the full envelope drives real memory extraction end-to-end.
-    await outboxService.processPending();
+    await relay.dispatchPendingBatch();
 
     const items = await prisma.memoryItem.findMany({
       where: { projectId, subject: `ticket:${transitionTicketId}` },
@@ -273,7 +277,7 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
 
     // The outbox row was processed successfully.
     const processed = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: outboxRow.id } });
-    expect(processed.status).toBe('completed');
+    expect(processed.status).toBe('published');
   });
 
   it('assign enqueues an assigned ticket_event whose full envelope yields an assigned_to MemoryItem', async () => {
@@ -293,7 +297,7 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
       data: { assignedTo: adminUserId },
     });
 
-    await outboxService.processPending();
+    await relay.dispatchPendingBatch();
 
     const items = await prisma.memoryItem.findMany({
       where: { projectId, subject: `ticket:${assignTicketId}`, predicate: 'assigned_to' },
