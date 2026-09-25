@@ -71,7 +71,10 @@ export class AuthController {
     if (!validatedUser) {
       throw new AuthException({}, 'auth');
     }
-    return JsonResponse.Ok(validatedUser);
+    // Final-review Finding D: validateUser returns the full user row including
+    // passwordHash — map through UserResponseDto (the same DTO login/register
+    // use) so the hash is never serialized in the response.
+    return JsonResponse.Ok(UserResponseDto.from(validatedUser));
   }
 
   @Post('logout')

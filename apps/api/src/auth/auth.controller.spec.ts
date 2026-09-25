@@ -238,6 +238,34 @@ describe('AuthController', () => {
       expect(data.name).toBe(mockUser.name);
       expect(data.role).toBe(mockUser.role);
     });
+
+    // Final-review Finding D: validateUser returns the full user row including
+    // passwordHash — /auth/me must map through UserResponseDto so the hash is
+    // never serialized.
+    it('should never serialize passwordHash in the /auth/me response', async () => {
+      const user = {
+        id: mockUser.id,
+        name: mockUser.email,
+        blacklisted: false,
+        revoked: false,
+        authorities: ['MEMBER'],
+      };
+
+      mockAuthService.validateUser.mockResolvedValue({
+        ...mockUser,
+        passwordHash: '$2b$10$supersecret-hash',
+      });
+
+      const result = await controller.me(user);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = result.data as any;
+      expect(data).not.toHaveProperty('passwordHash');
+      expect(JSON.stringify(result)).not.toContain('supersecret-hash');
+      // Legitimate fields are still present
+      expect(data.email).toBe(mockUser.email);
+      expect(data.name).toBe(mockUser.name);
+    });
   });
 
   // Metadata keys confirmed in @nestjs/throttler@6.5.0 dist/throttler.constants.js:
