@@ -1371,6 +1371,44 @@
         ]
       }
     },
+    "/api/projects/{slug}/ci-webhook-token": {
+      "get": {
+        "operationId": "ProjectsController_getCiWebhookToken",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Token value"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - admin role required"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get the CI webhook HMAC secret (admin only)",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
     "/api/projects/{slug}/codeintel/impact": {
       "get": {
         "operationId": "ProjectsController_getChangeImpact",

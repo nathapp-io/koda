@@ -6,6 +6,7 @@ import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
 import { AgentsService } from '../agents/agents.service';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
+import { ProjectResponseDto } from './dto/project-response.dto';
 
 const mockProject = {
   id: 'proj-1',
@@ -75,6 +76,8 @@ describe('ProjectsController', () => {
       update: jest.fn(),
       softDelete: jest.fn(),
       assertProjectMembership: jest.fn(),
+      findMembershipRole: jest.fn(),
+      findCiWebhookToken: jest.fn(),
     } as unknown as jest.Mocked<ProjectsService>;
 
     impactAnalysisService = {
@@ -138,6 +141,49 @@ describe('ProjectsController', () => {
       projectsService.findBySlug.mockRejectedValue(new Error('Not found'));
 
       await expect(controller.findBySlug('missing')).rejects.toThrow();
+    });
+  });
+
+  describe('H3: ciWebhookToken exposure', () => {
+    const projectWithToken = { ...mockProject, ciWebhookToken: 'secret-token' };
+
+    it('H3: list responses do not contain ciWebhookToken', async () => {
+      projectsService.findAll.mockResolvedValue(
+        [ProjectResponseDto.from(projectWithToken)] as any,
+      );
+
+      const res = await controller.findAll();
+
+      expect(JSON.stringify(res)).not.toContain('ciWebhookToken');
+      expect(JSON.stringify(res)).not.toContain('secret-token');
+    });
+
+    it('H3: findBySlug response does not contain ciWebhookToken', async () => {
+      projectsService.findBySlug.mockResolvedValue(
+        ProjectResponseDto.from(projectWithToken) as any,
+      );
+
+      const res = await controller.findBySlug('alpha');
+
+      expect(JSON.stringify(res)).not.toContain('ciWebhookToken');
+      expect(JSON.stringify(res)).not.toContain('secret-token');
+    });
+
+    it('H3: admin-only token endpoint returns the token', async () => {
+      projectsService.findCiWebhookToken.mockResolvedValue('tok');
+
+      const res = await controller.getCiWebhookToken('alpha');
+
+      expect(projectsService.findCiWebhookToken).toHaveBeenCalledWith('alpha');
+      expect((res as any).data.ciWebhookToken).toBe('tok');
+    });
+
+    it('H3: admin-only token endpoint returns null when project has no token', async () => {
+      projectsService.findCiWebhookToken.mockResolvedValue(null);
+
+      const res = await controller.getCiWebhookToken('alpha');
+
+      expect((res as any).data.ciWebhookToken).toBeNull();
     });
   });
 
@@ -284,9 +330,21 @@ describe('ProjectsController', () => {
       updatedAt: new Date(),
     };
 
+    const makeAgentPrincipal = (id: string, slug: string): KodaPrincipal => ({
+      actorType: 'agent',
+      id,
+      name: slug,
+      slug,
+      status: 'ACTIVE',
+      agentRoles: ['DEVELOPER'],
+      capabilities: [],
+      blacklisted: false,
+      revoked: false,
+      authorities: ['WORKER'],
+    });
+
     it('updates agent status for admin principal', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      projectsService.assertProjectMembership.mockResolvedValue(undefined);
       agentsService.findByProject.mockResolvedValue([mockUpdatedAgent] as any);
       agentsService.update.mockResolvedValue(mockUpdatedAgent as any);
 
@@ -297,34 +355,65 @@ describe('ProjectsController', () => {
       expect((result as any).data.status).toBe('PAUSED');
     });
 
-    it('updates agent status for project member', async () => {
+    it('propagates 404 when the project does not exist', async () => {
+      projectsService.findBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
+
+      await expect(
+        controller.updateProjectAgent('missing', 'bot', { status: 'PAUSED' }, adminPrincipal),
+      ).rejects.toThrow(NotFoundAppException);
+    });
+
+    it('H4: allows a project-level ADMIN (global MEMBER with ProjectMember role ADMIN)', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      projectsService.assertProjectMembership.mockResolvedValue(undefined);
       agentsService.findByProject.mockResolvedValue([mockUpdatedAgent] as any);
       agentsService.update.mockResolvedValue(mockUpdatedAgent as any);
+      projectsService.findMembershipRole.mockResolvedValue('ADMIN');
 
       const result = await controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, memberPrincipal);
 
+      expect(projectsService.findMembershipRole).toHaveBeenCalledWith('proj-1', 'user-member');
+      expect(agentsService.update).toHaveBeenCalledWith('bot', { status: 'PAUSED' });
       expect((result as any).data.status).toBe('PAUSED');
     });
 
-    it('throws ForbiddenAppException for non-member', async () => {
+    it('H4: forbids a non-admin user (project member) from updating agent status', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      projectsService.assertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'projects'));
+      agentsService.findByProject.mockResolvedValue([mockUpdatedAgent] as any);
 
       await expect(
         controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, memberPrincipal),
       ).rejects.toThrow(ForbiddenAppException);
+      expect(agentsService.update).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundAppException when agent is not in the project', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      projectsService.assertProjectMembership.mockResolvedValue(undefined);
       agentsService.findByProject.mockResolvedValue([]);
 
       await expect(
         controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, memberPrincipal),
       ).rejects.toThrow(NotFoundAppException);
+    });
+
+    it('H4: another agent cannot change my status', async () => {
+      projectsService.findBySlug.mockResolvedValue(mockProject as any);
+      agentsService.findByProject.mockResolvedValue([{ ...mockUpdatedAgent, id: 'agent-b', slug: 'agent-b' }] as any);
+
+      await expect(
+        controller.updateProjectAgent('alpha', 'agent-b', { status: 'OFFLINE' }, makeAgentPrincipal('agent-a', 'agent-a')),
+      ).rejects.toThrow(ForbiddenAppException);
+      expect(agentsService.update).not.toHaveBeenCalled();
+    });
+
+    it('H4: an agent can set its own status to OFFLINE', async () => {
+      projectsService.findBySlug.mockResolvedValue(mockProject as any);
+      agentsService.findByProject.mockResolvedValue([{ ...mockUpdatedAgent, id: 'agent-a', slug: 'agent-a' }] as any);
+      agentsService.update.mockResolvedValue({ ...mockUpdatedAgent, id: 'agent-a', slug: 'agent-a', status: 'OFFLINE' } as any);
+
+      const result = await controller.updateProjectAgent('alpha', 'agent-a', { status: 'OFFLINE' }, makeAgentPrincipal('agent-a', 'agent-a'));
+
+      expect(agentsService.update).toHaveBeenCalledWith('agent-a', { status: 'OFFLINE' });
+      expect((result as any).data.status).toBe('OFFLINE');
     });
   });
 });

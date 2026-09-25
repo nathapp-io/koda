@@ -21,13 +21,18 @@ import {
   ApiResponse,
   ApiQuery,
 } from '@nestjs/swagger';
-import { NotFoundAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
-import { KodaPrincipal } from '../auth/principal/koda-principal.types';
+import {
+  KodaPrincipal,
+  isAgentPrincipal,
+  isUserPrincipal,
+} from '../auth/principal/koda-principal.types';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
 import { KodaAction } from '../auth/casl/koda-action.enum';
 import { AgentsService } from '../agents/agents.service';
 import { UpdateAgentDto } from '../agents/dto/update-agent.dto';
+import { ActorRole } from '../common/enums';
 
 @ApiTags('projects')
 @ApiBearerAuth()
@@ -68,6 +73,18 @@ export class ProjectsController {
   async findBySlug(@Param('slug') slug: string) {
     const data = await this.projectsService.findBySlug(slug);
     return JsonResponse.Ok(data);
+  }
+
+  @Get(':slug/ci-webhook-token')
+  @RequiredPermission('ADMIN')
+  @ApiOperation({ summary: 'Get the CI webhook HMAC secret (admin only)' })
+  @ApiResponse({ status: 200, description: 'Token value' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
+  @ApiResponse({ status: 404, description: 'Project not found' })
+  async getCiWebhookToken(@Param('slug') slug: string) {
+    const ciWebhookToken = await this.projectsService.findCiWebhookToken(slug);
+    return JsonResponse.Ok({ ciWebhookToken });
   }
 
   @Patch(':slug')
@@ -159,10 +176,10 @@ export class ProjectsController {
   }
 
   @Patch(':slug/agents/:agentSlug')
-  @ApiOperation({ summary: 'Update an agent status within a project context (admin or project member)' })
+  @ApiOperation({ summary: 'Update an agent status within a project context (admin or the agent itself)' })
   @ApiResponse({ status: 200, description: 'Agent updated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - no project access' })
+  @ApiResponse({ status: 403, description: 'Forbidden - admin or self only' })
   @ApiResponse({ status: 404, description: 'Project or agent not found' })
   async updateProjectAgent(
     @Param('slug') slug: string,
@@ -171,11 +188,23 @@ export class ProjectsController {
     @Principal() principal: KodaPrincipal,
   ) {
     const project = await this.projectsService.findBySlug(slug);
-    await this.projectsService.assertProjectMembership(project.id, principal);
     const projectAgents = await this.agentsService.findByProject(slug);
-    if (!projectAgents.some((a) => a.slug === agentSlug)) {
+    const target = projectAgents.find((a) => a.slug === agentSlug);
+    if (!target) {
       throw new NotFoundAppException({}, 'agents');
     }
+
+    // H4: only global or project ADMINs may change agent state; an agent may
+    // update only itself (graceful OFFLINE shutdown).
+    const isAdmin =
+      isUserPrincipal(principal) &&
+      (principal.role === 'ADMIN' ||
+        (await this.projectsService.findMembershipRole(project.id, principal.id)) === ActorRole.ADMIN);
+    const isSelf = isAgentPrincipal(principal) && principal.id === target.id;
+    if (!isAdmin && !isSelf) {
+      throw new ForbiddenAppException({}, 'projects');
+    }
+
     const data = await this.agentsService.update(agentSlug, updateDto);
     return JsonResponse.Ok(data);
   }

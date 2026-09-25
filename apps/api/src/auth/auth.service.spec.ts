@@ -4,7 +4,8 @@ import { CacheManager } from '@nathapp/nestjs-cache';
 import { AuthService } from './auth.service';
 import { PrismaAuthRepository } from './prisma-auth.repository';
 import { ConfigService } from '@nestjs/config';
-import { AppException } from '@nathapp/nestjs-common';
+import { AppException, AuthException } from '@nathapp/nestjs-common';
+import type { IPrincipal } from './types';
 import * as bcrypt from 'bcrypt';
 
 describe('AuthService', () => {
@@ -206,6 +207,25 @@ describe('AuthService', () => {
       expect(result).toHaveProperty('accessToken');
       expect(result).toHaveProperty('refreshToken');
       expect(result).toHaveProperty('user');
+    });
+  });
+
+  describe('refresh (H1)', () => {
+    it('throws AuthException when the refresh token is revoked (pre-logout tokenVersion)', async () => {
+      const principal = {
+        id: 'user-1', name: 'u', blacklisted: false, revoked: true, authorities: [],
+      } as unknown as IPrincipal;
+      await expect(service.refresh(principal)).rejects.toThrow(AuthException);
+    });
+
+    it('still refreshes for a non-revoked principal', async () => {
+      mockAuthRepository.findUserById.mockResolvedValue({ id: 'user-1', email: 'e@x', role: 'MEMBER', tokenVersion: 3, passwordHash: 'h' });
+      const principal = {
+        id: 'user-1', name: 'u', blacklisted: false, revoked: false, authorities: [],
+      } as unknown as IPrincipal;
+      const out = await service.refresh(principal);
+      expect(out.accessToken).toBeDefined();
+      expect(out.refreshToken).toBeDefined();
     });
   });
 
