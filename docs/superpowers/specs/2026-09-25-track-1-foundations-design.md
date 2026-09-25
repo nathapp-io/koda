@@ -62,10 +62,11 @@ start.
 
 ### Behavior changes handled deliberately
 
-**M6 — ticket-number race.** Two `max+1` allocators exist: `src/tickets/tickets.service.ts` (the `txManager.run` block that calls `findLastTicketInProject`) and `src/ci-webhook/prisma-ci-webhook.repository.ts` (`createTicket`). Both move to one shared helper that:
+**M6 — ticket-number race.** Three `max+1` allocators exist: `src/tickets/tickets.service.ts` (the `txManager.run` block that calls `findLastTicketInProject`), `src/ci-webhook/prisma-ci-webhook.repository.ts` (`createTicket`) and `src/vcs/prisma-vcs.repository.ts` (`createTicketFromIssue`, VCS issue import). All three move to one shared helper that:
 
 - runs the allocate-and-create in a fresh `txManager.run` per attempt (a P2002 aborts the Postgres transaction, so the retry must never be inside the failed transaction);
-- retries only on P2002 whose target is `(projectId, number)`, up to 5 attempts with 10-50 ms jitter;
+- retries only on P2002 whose target includes `number`, up to 10 attempts with jitter growing per attempt (`attempt × 10-50 ms`) — 10 concurrent creators need up to 10 rounds in the worst case;
+- when already inside an outer transaction (`PrismaTransactionManager.run` joins it, so a retry would reuse the aborted transaction) it runs once and maps a conflict straight to 409;
 - after the last attempt throws `new HttpException(..., HttpStatus.CONFLICT)` (409), never a 500. `@nathapp/nestjs-common` has no conflict `AppException`; this is koda's existing 409 convention (`ticket-transitions.service.ts:429`, `webhook-replay.guard.ts:149`).
 
 The false `@design` comment ("callers retry") is replaced with an accurate one.
@@ -103,7 +104,7 @@ CI currently never runs integration tests (`test` excludes `integration`; `evalu
 
 ### Tests
 
-- Integration: 10 concurrent ticket creates in one project → 10 distinct, gapless numbers; same for the CI-webhook allocator.
+- Integration: 10 concurrent ticket creates in one project → 10 distinct, gapless numbers, through each of the three allocators.
 - Integration: `graphify_import` path returns `GraphNode` rows (M14).
 - Integration: case-insensitive symbol search.
 - Integration: `reset-db` leaves every table empty and sequences reset.
