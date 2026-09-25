@@ -19,7 +19,7 @@ import { CounterOptimizeStrategy } from './strategies/counter-optimize.strategy'
 import { CronOptimizeStrategy } from './strategies/cron-optimize.strategy';
 import { ManualOptimizeStrategy } from './strategies/manual-optimize.strategy';
 import { OutboxModule } from '../outbox/outbox.module';
-import { OutboxFanOutRegistry } from '../outbox/outbox-fan-out-registry';
+import { FanOutPublisher } from '../outbox/fan-out-publisher';
 
 @Injectable()
 class LexicalIndexWarmup implements OnModuleInit {
@@ -28,7 +28,7 @@ class LexicalIndexWarmup implements OnModuleInit {
   constructor(
     private readonly lexicalIndex: LexicalIndex,
     private readonly ragService: RagService,
-    private readonly outboxFanOutRegistry: OutboxFanOutRegistry,
+    private readonly outboxFanOutRegistry: FanOutPublisher,
     @Optional() private readonly ragRepository?: PrismaRagRepository,
   ) {}
 
@@ -80,7 +80,7 @@ class EntityStoreWarmup implements OnModuleInit {
 
   constructor(
     private readonly entityStore: EntityStore,
-    private readonly outboxFanOutRegistry: OutboxFanOutRegistry,
+    private readonly outboxFanOutRegistry: FanOutPublisher,
     @Optional() private readonly ragRepository?: PrismaRagRepository,
   ) {}
 

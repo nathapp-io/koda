@@ -31,7 +31,8 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { ITransactionManager } from '@nathapp/nestjs-data';
 import { resetDb } from '../../helpers/reset-db';
 import { PrismaOutboxRepository } from '../../../src/outbox/prisma-outbox.repository';
-import { OutboxFanOutRegistry } from '../../../src/outbox/outbox-fan-out-registry';
+import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
+import { noopLastErrors } from '../../helpers/outbox-record';
 import { OutboxService } from '../../../src/outbox/outbox.service';
 import { PrismaEventsRepository } from '../../../src/events/prisma-events.repository';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
@@ -117,7 +118,7 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
 
     // Real outbox stack + real memory fan-out subscriber.
     const outboxRepo = new PrismaOutboxRepository(txManager, prismaService);
-    const fanOutRegistry = new OutboxFanOutRegistry();
+    const fanOutRegistry = new FanOutPublisher(noopLastErrors);
     outboxService = new OutboxService(outboxRepo, fanOutRegistry);
     const ticketEventService = new TicketEventService(new PrismaEventsRepository(prismaService));
     const memoryRepository = new PrismaMemoryItemRepository(txManager, prismaService);

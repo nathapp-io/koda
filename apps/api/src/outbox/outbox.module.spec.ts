@@ -1,38 +1,20 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { OutboxFanOutRegistry } from './outbox-fan-out-registry';
+import { FanOutPublisher } from './fan-out-publisher';
+import { PrismaOutboxRepository } from './prisma-outbox.repository';
+import { noopLastErrors } from '../../test/helpers/outbox-record';
 
-/**
- * OutboxModule DI wiring tests
- *
- * Story: Register webhook delivery in OutboxModule fan-out
- *
- * Acceptance Criteria:
- * AC4: When a Nest testing module is constructed with OutboxFanOutRegistry as the sole provider
- *     and no other constructor arguments supplied, then compilation succeeds and
- *     module.get(OutboxFanOutRegistry) returns a defined instance.
- *
- * Rationale: this is a DI smoke test for the webhook_delivery constructor argument
- * (which is `@Optional()`), so OutboxFanOutRegistry must compile even with no
- * constructor arguments supplied by the testing module.
- */
-
-describe('OutboxFanOutRegistry (DI wiring)', () => {
+describe('FanOutPublisher (DI wiring)', () => {
   let moduleRef: TestingModule;
 
   afterEach(async () => {
-    if (moduleRef) {
-      await moduleRef.close();
-      moduleRef = undefined as unknown as TestingModule;
-    }
+    await moduleRef?.close();
   });
 
-  it('AC4: Nest testing module with OutboxFanOutRegistry as the sole provider compiles and resolves a defined instance', async () => {
+  it('resolves with only its repository dependency supplied', async () => {
     moduleRef = await Test.createTestingModule({
-      providers: [OutboxFanOutRegistry],
+      providers: [FanOutPublisher, { provide: PrismaOutboxRepository, useValue: noopLastErrors }],
     }).compile();
 
-    const registry = moduleRef.get(OutboxFanOutRegistry);
-    expect(registry).toBeDefined();
-    expect(registry).toBeInstanceOf(OutboxFanOutRegistry);
+    expect(moduleRef.get(FanOutPublisher)).toBeInstanceOf(FanOutPublisher);
   });
 });

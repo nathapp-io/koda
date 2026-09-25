@@ -1,13 +1,13 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { EntityGraphService } from './entity-graph.service';
-import { OutboxFanOutRegistry } from '../outbox/outbox-fan-out-registry';
+import { FanOutPublisher } from '../outbox/fan-out-publisher';
 
 @Injectable()
 export class EntityGraphOutboxSubscriber implements OnModuleInit {
   private readonly logger = new Logger(EntityGraphOutboxSubscriber.name);
 
   constructor(
-    private readonly registry: OutboxFanOutRegistry,
+    private readonly registry: FanOutPublisher,
     private readonly entityGraphService: EntityGraphService,
   ) {}
 

@@ -131,6 +131,14 @@ export class PrismaOutboxRepository extends AbstractPrismaRepository<OutboxEvent
     });
   }
 
+  /** Writes the latest fan-out failure for the admin view. A missing row is a no-op. */
+  async recordLastError(id: string, message: string): Promise<void> {
+    await this.prisma.client.outboxEvent.updateMany({
+      where: { id },
+      data: { lastError: message },
+    });
+  }
+
   async markDeadLetter(id: string, reason: string): Promise<OutboxEventDomain> {
     const model = await this.prisma.client.outboxEvent.update({
       where: { id },

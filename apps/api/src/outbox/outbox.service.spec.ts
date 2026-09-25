@@ -1,13 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { OutboxService } from './outbox.service';
-import { OutboxFanOutRegistry } from './outbox-fan-out-registry';
+import { FanOutPublisher } from './fan-out-publisher';
 import { PrismaOutboxRepository } from './prisma-outbox.repository';
 
 function createMockFanOutRegistry() {
   return {
-    dispatch: jest.fn().mockResolvedValue(undefined),
-    register: jest.fn(),
-    getHandlers: jest.fn().mockReturnValue([]),
+    publish: jest.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -41,7 +39,7 @@ describe('OutboxService', () => {
           useValue: mockRepo,
         },
         {
-          provide: OutboxFanOutRegistry,
+          provide: FanOutPublisher,
           useValue: createMockFanOutRegistry(),
         },
       ],

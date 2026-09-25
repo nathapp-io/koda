@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { OutboxService } from './outbox.service';
-import { OutboxFanOutRegistry } from './outbox-fan-out-registry';
+import { FanOutPublisher } from './fan-out-publisher';
 import { OutboxProcessor } from './outbox-processor';
 import { AdminController } from './admin.controller';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
@@ -15,7 +15,7 @@ import { OUTBOX_REPOSITORY } from './domain/outbox-event.domain';
   // (see memory.module.ts, entity-graph.module.ts, code-intel.module.ts,
   // webhook-outbox.subscriber.ts), which import OutboxModule directly. Keeping
   // those consumer imports here as well would recreate an ESM temporal-dead-zone
-  // cycle (OutboxModule -> consumer -> ... -> OutboxModule). OutboxFanOutRegistry
+  // cycle (OutboxModule -> consumer -> ... -> OutboxModule). FanOutPublisher
   // no longer takes any cross-module injections; the subscribers register the
   // equivalent handler behavior directly against it via onModuleInit().
   imports: [PrismaModule, ScheduleModule],
@@ -24,9 +24,9 @@ import { OUTBOX_REPOSITORY } from './domain/outbox-event.domain';
     PrismaOutboxRepository,
     { provide: OUTBOX_REPOSITORY, useExisting: PrismaOutboxRepository },
     OutboxService,
-    OutboxFanOutRegistry,
+    FanOutPublisher,
     OutboxProcessor,
   ],
-  exports: [OutboxService, OutboxFanOutRegistry],
+  exports: [OutboxService, FanOutPublisher],
 })
 export class OutboxModule {}

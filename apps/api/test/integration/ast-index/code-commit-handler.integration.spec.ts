@@ -1,12 +1,14 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { OutboxFanOutRegistry } from '../../../src/outbox/outbox-fan-out-registry';
+import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
+import { PrismaOutboxRepository } from '../../../src/outbox/prisma-outbox.repository';
+import { noopLastErrors, outboxRecord } from '../../helpers/outbox-record';
 import { AstIndexService } from '../../../src/code-intel/ast-index.service';
 import { SymbolStore } from '../../../src/code-intel/symbol-store';
 import { CodeGraphService } from '../../../src/code-intel/code-graph.service';
 import { CodeIntelOutboxSubscriber } from '../../../src/code-intel/code-intel-outbox.subscriber';
 
 describe('code_commit outbox handler', () => {
-  let registry: OutboxFanOutRegistry;
+  let registry: FanOutPublisher;
   let astIndexService: jest.Mocked<AstIndexService>;
   let symbolStore: jest.Mocked<SymbolStore>;
   let codeGraph: jest.Mocked<CodeGraphService>;
@@ -36,7 +38,8 @@ describe('code_commit outbox handler', () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        OutboxFanOutRegistry,
+        FanOutPublisher,
+        { provide: PrismaOutboxRepository, useValue: noopLastErrors },
         CodeIntelOutboxSubscriber,
         { provide: AstIndexService, useValue: mockAstIndexService },
         { provide: SymbolStore, useValue: mockSymbolStore },
@@ -48,7 +51,7 @@ describe('code_commit outbox handler', () => {
     // what registers the code_commit handler on the registry.
     await module.init();
 
-    registry = module.get<OutboxFanOutRegistry>(OutboxFanOutRegistry);
+    registry = module.get<FanOutPublisher>(FanOutPublisher);
     astIndexService = module.get(AstIndexService);
     symbolStore = module.get(SymbolStore);
     codeGraph = module.get(CodeGraphService);
@@ -82,16 +85,13 @@ describe('code_commit outbox handler', () => {
       expect(handler).toBeDefined();
 
       const payload = {
-        eventType: 'code_commit',
-        payload: {
-          repoId,
-          commitHash,
-          projectId,
-          files,
-        },
+        repoId,
+        commitHash,
+        projectId,
+        files,
       };
 
-      await registry.dispatch(payload);
+      await registry.publish(outboxRecord('code_commit', payload));
 
       expect(mockAstIndexService.indexCommit).toHaveBeenCalledWith(
         repoId,
@@ -120,16 +120,13 @@ describe('code_commit outbox handler', () => {
       const handler = registry.getHandlers('code_commit')[0];
 
       const webhookPayload = {
-        eventType: 'code_commit',
-        payload: {
-          repoId,
-          commitHash,
-          projectId,
-          webhookOnly: true,
-        },
+        repoId,
+        commitHash,
+        projectId,
+        webhookOnly: true,
       };
 
-      await registry.dispatch(webhookPayload);
+      await registry.publish(outboxRecord('code_commit', webhookPayload));
 
       expect(mockAstIndexService.indexCommit).not.toHaveBeenCalledWith(
         repoId,

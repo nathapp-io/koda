@@ -15,13 +15,13 @@
  * AC7:  retryEvent(eventId) allows admin-only reset of dead-letter event back to pending
  * AC8:  KodaDomainWriter calls OutboxService.enqueue() after every canonical write
  * AC9:  Outbox processor job is idempotent for already completed/processing events
- * AC10: If OutboxFanOutRegistry.dispatch() throws, event is marked failed and retried (not dead-lettered immediately)
+ * AC10: If FanOutPublisher.publish() rejects, event is marked failed and retried (not dead-lettered immediately)
  * AC11: Dead-lettered events queryable via GET /admin/outbox?status=dead_letter with admin-only access
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { OutboxService, OutboxEventInput, OutboxEventData } from './outbox.service';
-import { OutboxFanOutRegistry } from './outbox-fan-out-registry';
+import { FanOutPublisher } from './fan-out-publisher';
 import { PrismaOutboxRepository } from './prisma-outbox.repository';
 
 const MAX_RETRIES = 3;
@@ -43,9 +43,7 @@ function createMockOutboxRepo() {
 
 function createMockFanOutRegistry() {
   return {
-    dispatch: jest.fn().mockResolvedValue(undefined),
-    register: jest.fn(),
-    getHandlers: jest.fn().mockReturnValue([]),
+    publish: jest.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -61,7 +59,7 @@ describe('OutboxService - AC1: enqueue persists pending OutboxEvent', () => {
       providers: [
         OutboxService,
         { provide: PrismaOutboxRepository, useValue: mockRepo },
-        { provide: OutboxFanOutRegistry, useValue: mockFanOutRegistry },
+        { provide: FanOutPublisher, useValue: mockFanOutRegistry },
       ],
     }).compile();
 
@@ -118,7 +116,7 @@ describe('OutboxService - AC2: processPending with default limit 50 ordered by c
       providers: [
         OutboxService,
         { provide: PrismaOutboxRepository, useValue: mockRepo },
-        { provide: OutboxFanOutRegistry, useValue: mockFanOutRegistry },
+        { provide: FanOutPublisher, useValue: mockFanOutRegistry },
       ],
     }).compile();
 
@@ -172,7 +170,7 @@ describe('OutboxService - AC3: markCompleted sets status=completed and processed
       providers: [
         OutboxService,
         { provide: PrismaOutboxRepository, useValue: mockRepo },
-        { provide: OutboxFanOutRegistry, useValue: mockFanOutRegistry },
+        { provide: FanOutPublisher, useValue: mockFanOutRegistry },
       ],
     }).compile();
 
@@ -202,7 +200,7 @@ describe('OutboxService - AC4: markFailed records failure details', () => {
       providers: [
         OutboxService,
         { provide: PrismaOutboxRepository, useValue: mockRepo },
-        { provide: OutboxFanOutRegistry, useValue: mockFanOutRegistry },
+        { provide: FanOutPublisher, useValue: mockFanOutRegistry },
       ],
     }).compile();
 
@@ -253,7 +251,7 @@ describe('OutboxService - AC5: markDeadLetter sets status=dead_letter and lastEr
       providers: [
         OutboxService,
         { provide: PrismaOutboxRepository, useValue: mockRepo },
-        { provide: OutboxFanOutRegistry, useValue: mockFanOutRegistry },
+        { provide: FanOutPublisher, useValue: mockFanOutRegistry },
       ],
     }).compile();
 
@@ -313,7 +311,7 @@ describe('OutboxService - AC6: Exponential backoff 1s, 4s, 16s before dead-lette
       providers: [
         OutboxService,
         { provide: PrismaOutboxRepository, useValue: mockRepo },
-        { provide: OutboxFanOutRegistry, useValue: mockFanOutRegistry },
+        { provide: FanOutPublisher, useValue: mockFanOutRegistry },
       ],
     }).compile();
 
@@ -429,7 +427,7 @@ describe('OutboxService - AC7: retryEvent allows admin reset of dead-letter to p
       providers: [
         OutboxService,
         { provide: PrismaOutboxRepository, useValue: mockRepo },
-        { provide: OutboxFanOutRegistry, useValue: mockFanOutRegistry },
+        { provide: FanOutPublisher, useValue: mockFanOutRegistry },
       ],
     }).compile();
 
@@ -459,7 +457,7 @@ describe('OutboxService - AC9: Idempotent processing for completed/processing ev
       providers: [
         OutboxService,
         { provide: PrismaOutboxRepository, useValue: mockRepo },
-        { provide: OutboxFanOutRegistry, useValue: mockFanOutRegistry },
+        { provide: FanOutPublisher, useValue: mockFanOutRegistry },
       ],
     }).compile();
 
@@ -530,7 +528,7 @@ describe('OutboxService - AC10: dispatch throws triggers markFailed not immediat
       providers: [
         OutboxService,
         { provide: PrismaOutboxRepository, useValue: mockRepo },
-        { provide: OutboxFanOutRegistry, useValue: mockFanOutRegistry },
+        { provide: FanOutPublisher, useValue: mockFanOutRegistry },
       ],
     }).compile();
 

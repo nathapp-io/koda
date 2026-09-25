@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { OutboxFanOutRegistry } from './outbox-fan-out-registry';
+import { OutboxStatus } from '@nathapp/nestjs-outbox';
+import { FanOutPublisher } from './fan-out-publisher';
 import { PrismaOutboxRepository } from './prisma-outbox.repository';
 import { OutboxEventDomain, OutboxEventInput, OUTBOX_BACKOFF_MS } from './domain/outbox-event.domain';
 
@@ -16,7 +17,7 @@ export class OutboxService {
 
   constructor(
     private readonly outboxRepo: PrismaOutboxRepository,
-    private readonly fanOutRegistry: OutboxFanOutRegistry,
+    private readonly publisher: FanOutPublisher,
   ) {}
 
   async enqueue(event: OutboxEventInput): Promise<OutboxEventData> {
@@ -49,7 +50,7 @@ export class OutboxService {
       }
 
       try {
-        await this.processEvent(event as unknown as Record<string, unknown>);
+        await this.processEvent(event);
         await this.markCompleted(event.id);
 
         this.logger.log(`Outbox event ${event.id} processed successfully`);
@@ -61,18 +62,16 @@ export class OutboxService {
     }
   }
 
-  async processEvent(event: Record<string, unknown>): Promise<void> {
-    const parsedPayload = JSON.parse(String(event.payload ?? '{}'));
-    await this.fanOutRegistry.dispatch({
-      eventType: String(event.eventType),
-      payload: parsedPayload,
+  async processEvent(event: OutboxEventData): Promise<void> {
+    await this.publisher.publish({
+      id: event.id,
+      type: event.eventType,
+      payload: JSON.parse(event.payload || '{}'),
+      status: OutboxStatus.PROCESSING,
+      attempts: event.attempts,
+      createdAt: event.createdAt,
+      nextAttemptAt: event.nextAttemptAt ?? new Date(),
     });
-    const failureCount = typeof this.fanOutRegistry.consumeLastDispatchFailureCount === 'function'
-      ? this.fanOutRegistry.consumeLastDispatchFailureCount()
-      : 0;
-    if (failureCount > 0) {
-      throw new Error(`One or more fan-out handlers failed for ${String(event.eventType)}`);
-    }
   }
 
   async retry(event: OutboxEventData): Promise<OutboxEventData> {
