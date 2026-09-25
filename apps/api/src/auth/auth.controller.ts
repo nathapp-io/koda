@@ -18,7 +18,6 @@ import { Throttle } from '@nathapp/nestjs-throttler';
 import { AuthException, JsonResponse } from '@nathapp/nestjs-common';
 
 @ApiTags('auth')
-@Throttle({ default: { limit: 5, ttl: 60000 } })
 @Controller('auth')
 export class AuthController {
   constructor(private authService: AuthService) {}
@@ -29,6 +28,7 @@ export class AuthController {
   @ApiResponse({ status: 201, type: AuthResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid input' })
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async register(@Body() registerDto: RegisterDto) {
     const data = await this.authService.register(registerDto);
     return JsonResponse.Ok(data);
@@ -40,6 +40,7 @@ export class AuthController {
   @ApiResponse({ status: 200, type: AuthResponseDto })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async login(@Body() loginDto: LoginDto) {
     const data = await this.authService.login(loginDto);
     return JsonResponse.Ok(data);
@@ -79,6 +80,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Revoke all outstanding access and refresh tokens for the current user' })
   @ApiResponse({ status: 200, description: 'Tokens revoked' })
   @ApiResponse({ status: 401, description: 'Missing or invalid token' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async logout(@Principal() user: IPrincipal) {
     await this.authService.logout(user.id);
     return JsonResponse.Ok({});

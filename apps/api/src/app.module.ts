@@ -1,11 +1,12 @@
 import { join } from 'path';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
 import { I18nCoreModule, ServerSecurityConfig } from '@nathapp/nestjs-common';
 import { CacheModule, CacheStrategy } from '@nathapp/nestjs-cache';
 import { LoggingModule } from '@nathapp/nestjs-logging';
 import { PrismaModule } from '@nathapp/nestjs-prisma';
-import { ThrottlerModule } from '@nathapp/nestjs-throttler';
+import { ThrottlerModule, DefaultThrottlerGuard } from '@nathapp/nestjs-throttler';
 import { PrismaClient } from '@prisma/client';
 import { AuthModule } from './auth/auth.module';
 import { AgentsModule } from './agents/agents.module';
@@ -94,6 +95,11 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
     ContextModule,
     PolicyModule,
     MonitoringModule,
+  ],
+  providers: [
+    // H2: register the throttler guard globally so @Throttle decorators are enforced.
+    // DefaultThrottlerGuard is exported (and injectable) via ThrottlerModule above.
+    { provide: APP_GUARD, useClass: DefaultThrottlerGuard },
   ],
 })
 export class AppModule {}

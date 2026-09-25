@@ -240,6 +240,33 @@ describe('AuthController', () => {
     });
   });
 
+  // Metadata keys confirmed in @nestjs/throttler@6.5.0 dist/throttler.constants.js:
+  // THROTTLER_LIMIT = 'THROTTLER:LIMIT', THROTTLER_TTL = 'THROTTLER:TTL',
+  // suffixed with the throttler name ('default').
+  describe('H2 throttle placement', () => {
+    const LIMIT_KEY = 'THROTTLER:LIMITdefault';
+    const TTL_KEY = 'THROTTLER:TTLdefault';
+
+    it('has no class-level @Throttle so /auth/me is not rate limited', () => {
+      expect(Reflect.getMetadata(LIMIT_KEY, AuthController)).toBeUndefined();
+      expect(Reflect.getMetadata(TTL_KEY, AuthController)).toBeUndefined();
+    });
+
+    it('throttles login, register, and logout at 5/min each', () => {
+      const proto = AuthController.prototype as unknown as Record<string, unknown>;
+      for (const handler of ['login', 'register', 'logout']) {
+        const handlerFn = proto[handler] as object;
+        expect(Reflect.getMetadata(LIMIT_KEY, handlerFn)).toBe(5);
+        expect(Reflect.getMetadata(TTL_KEY, handlerFn)).toBe(60000);
+      }
+    });
+
+    it('does not throttle refresh beyond the global default', () => {
+      const proto = AuthController.prototype as unknown as Record<string, unknown>;
+      expect(Reflect.getMetadata(LIMIT_KEY, proto['refresh'] as object)).toBeUndefined();
+    });
+  });
+
   describe('POST /auth/logout', () => {
     it('should revoke tokens for the current user', async () => {
       const user = {
