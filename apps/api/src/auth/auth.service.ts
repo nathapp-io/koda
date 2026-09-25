@@ -85,6 +85,11 @@ export class AuthService {
   }
 
   async refresh(principal: IPrincipal) {
+    // H1: the refresh strategy flags tokens issued before a logout
+    // (tokenVersion < current). Never mint a new pair from those.
+    if (principal.revoked) {
+      throw new AuthException({}, 'auth');
+    }
     // JwtRefreshStrategy returns IPrincipal (with .id), not JwtPayload (with .sub)
     const user = await this.authRepo.findUserById(principal.id);
 
