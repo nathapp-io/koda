@@ -6,8 +6,7 @@ services:
     ports:
       - "${API_PORT:-3100}:3100"
     environment:
-      DATABASE_PROVIDER: ${DATABASE_PROVIDER:-sqlite}
-      DATABASE_URL: ${DATABASE_URL:-file:/data/koda.db}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-koda}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-koda}
       JWT_SECRET: ${JWT_SECRET:-change-me}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-refresh}
@@ -19,12 +18,30 @@ services:
       LANCEDB_PATH: /data/lancedb
     volumes:
       - koda_data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3100/api/health"]
       interval: 30s
       timeout: 3s
       retries: 3
       start_period: 10s
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-koda}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-koda}
+    volumes:
+      - koda_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-koda} -d ${POSTGRES_DB:-koda}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     restart: unless-stopped
 
   web:
@@ -41,4 +58,6 @@ services:
 
 volumes:
   koda_data:
+    driver: local
+  koda_pg:
     driver: local

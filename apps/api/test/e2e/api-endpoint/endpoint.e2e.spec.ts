@@ -1,5 +1,5 @@
 /**
- * API E2E Tests — Full lifecycle via supertest + real SQLite DB
+ * API E2E Tests — Full lifecycle via supertest + real Postgres DB
  *
  * Exercises:
  *   Human auth → Agent auth → Project CRUD → Label CRUD →
@@ -10,7 +10,7 @@
  * All responses are wrapped in JsonResponse.Ok({ ret: 0, data: T }).
  * Use `body(res)` helper to unwrap.
  *
- * Run:  DATABASE_URL=file:./koda-test.ephemeral.db bun run test:integration
+ * Run: cd apps/api && bun run test:db:up && bun run test:integration -- test/e2e/api-endpoint/endpoint.e2e.spec.ts
  * File: test/integration/api-e2e/api-e2e.integration.spec.ts
  */
 import { INestApplication } from '@nestjs/common';
@@ -24,7 +24,7 @@ import { createHmac } from 'node:crypto';
 import { resetDb } from '../../helpers/reset-db';
 
 const DATABASE_URL = process.env.DATABASE_URL;
-const describeIntegration = DATABASE_URL ? describe : describe.skip;
+const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 /** Unwrap JsonResponse { ret, data } → data */
 function body<T = unknown>(res: request.Response): T {
@@ -54,7 +54,7 @@ describeIntegration('API Integration Tests', () => {
   beforeAll(async () => {
     if (!DATABASE_URL) return;
 
-    // Reset SQLite test DB to clean state (schema pushed once by globalSetup)
+    // Reset Postgres test DB to clean state (schema pushed once by globalSetup)
     await resetDb();
 
     // Use AppFactory to get NathApplication with useAppGlobal* methods

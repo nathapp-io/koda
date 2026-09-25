@@ -327,7 +327,10 @@ describe('VcsConnectionService', () => {
       expect(result.repoOwner).toBe('owner');
       expect(result.repoName).toBe('repo');
       expect(result.syncMode).toBe('polling');
-      expect(result.webhookSecret).toBe('webhook-secret');
+      // The webhook secret is a credential and must never leave the server;
+      // the response only reports whether one is configured.
+      expect(result).not.toHaveProperty('webhookSecret');
+      expect(result.webhookSecretConfigured).toBe(true);
       expect(result.isActive).toBe(true);
     });
 
@@ -359,7 +362,7 @@ describe('VcsConnectionService', () => {
 
       const result = await service.findByProject(projectId);
 
-      expect(result.webhookSecret).toBeNull();
+      expect(result.webhookSecretConfigured).toBe(false);
       expect(result.lastSyncedAt).toBeNull();
     });
   });
@@ -668,6 +671,7 @@ describe('VcsConnectionService', () => {
         provider: 'github',
         token, // Decrypted token
         repoUrl: 'https://github.com/owner/repo',
+        githubApiUrl: 'https://api.github.com',
       });
 
       // Verify provider.testConnection() was called

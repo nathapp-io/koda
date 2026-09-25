@@ -24,7 +24,7 @@ import type { PrismaClient, ProjectMember } from '@prisma/client';
 import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
 
 const DATABASE_URL = process.env.DATABASE_URL;
-const describeIntegration = DATABASE_URL ? describe : describe.skip;
+const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 function body<T = unknown>(res: request.Response): T {
   expect(res.body).toHaveProperty('ret', 0);

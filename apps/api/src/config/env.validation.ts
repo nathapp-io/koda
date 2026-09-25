@@ -8,9 +8,6 @@ const envSchema = Joi.object({
   API_PORT: Joi.number().integer().default(3100),
   GLOBAL_PREFIX: Joi.string().default('api'),
   DATABASE_URL: Joi.string().required(),
-  DATABASE_PROVIDER: Joi.string()
-    .valid('sqlite', 'postgresql', 'mysql')
-    .default('sqlite'),
   JWT_SECRET: Joi.string().required(),
   JWT_EXPIRES_IN: Joi.string().default('15m'),
   JWT_REFRESH_SECRET: Joi.string().required(),

@@ -105,8 +105,11 @@ export class PrismaMemoryItemRepository
     if (query.sourceType) where.sourceType = query.sourceType;
     if (query.sourceId) where.sourceId = query.sourceId;
 
+    // Unique tiebreaker: rows created in the same burst share timestamps and
+    // Postgres does not guarantee a stable order among ties, which would
+    // shuffle items across pagination pages.
     const [models, total] = await Promise.all([
-      this.prisma.client.memoryItem.findMany({ where, skip, take: limit, orderBy: { createdAt: 'desc' } }),
+      this.prisma.client.memoryItem.findMany({ where, skip, take: limit, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] }),
       this.prisma.client.memoryItem.count({ where }),
     ]);
 
@@ -230,6 +233,10 @@ export class PrismaMemoryItemRepository
     } else {
       orderByClause.push({ createdAt: 'desc' }, { confidence: 'desc' }, { updatedAt: 'desc' });
     }
+    // Unique tiebreaker: rows created in the same burst share timestamps and
+    // confidence, and Postgres does not guarantee a stable order among ties,
+    // which would shuffle items across pagination pages.
+    orderByClause.push({ id: 'desc' });
 
     const [models, total] = await Promise.all([
       this.prisma.client.memoryItem.findMany({ where, skip, take: limit, orderBy: orderByClause }),

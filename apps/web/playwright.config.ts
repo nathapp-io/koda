@@ -6,8 +6,10 @@ const WEB_PORT = process.env['E2E_WEB_PORT'] ?? '3103';
 const API_URL = `http://localhost:${API_PORT}`;
 const WEB_URL = `http://localhost:${WEB_PORT}`;
 
-// Absolute path — avoids prisma/prisma/ nesting when cwd differs between commands
-const E2E_DB = path.resolve(__dirname, '../api/prisma/koda-e2e.db');
+// Postgres from docker-compose.test.yml (`bun run test:db:up` in apps/api).
+// `prisma migrate reset` creates the koda_e2e database if missing.
+const E2E_DATABASE_URL =
+  process.env['E2E_DATABASE_URL'] ?? 'postgresql://koda:koda@localhost:5433/koda_e2e';
 
 // Propagate resolved URLs to test worker processes (used by api-client.ts fixture)
 process.env['E2E_API_URL'] = API_URL;
@@ -31,7 +33,7 @@ export default defineConfig({
   webServer: [
     {
       // API
-      command: `bash -c "rm -f '${E2E_DB}' '${E2E_DB}-shm' '${E2E_DB}-wal' && bunx prisma migrate deploy && bun prisma/seed-e2e.ts && bunx nest start"`,
+      command: `bash -c "bunx prisma migrate reset --force --skip-seed --skip-generate && bun prisma/seed-e2e.ts && bunx nest start"`,
       url: `${API_URL}/api/health`,
       cwd: path.resolve(__dirname, '../api'),
       reuseExistingServer: false,
@@ -39,7 +41,7 @@ export default defineConfig({
       stdout: 'pipe',
       stderr: 'pipe',
       env: {
-        DATABASE_URL: `file:${E2E_DB}`,
+        DATABASE_URL: E2E_DATABASE_URL,
         API_PORT: String(API_PORT),
         VCS_ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
       },

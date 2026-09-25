@@ -7,7 +7,7 @@
  * - All operations have required Swagger decorators (tags, summary, responses)
  * - All auth routes are documented with security schemes
  *
- * Run: DATABASE_URL=file:../../prisma/koda.db bun run test:integration
+ * Run: cd apps/api && bun run test:db:up && bun run test:integration -- test/integration/openapi-spec/spec-integrity.integration.spec.ts
  */
 import * as fs from 'fs';
 import * as path from 'path';

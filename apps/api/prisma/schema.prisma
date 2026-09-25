@@ -6,15 +6,16 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
 // ---------------------------------------------------------------------------
-// Enums (mapped to String in SQLite)
+// Enums (mapped to String — historical SQLite constraint; conversion is tracked debt)
 // ---------------------------------------------------------------------------
 
-// SQLite doesn't support native enums — using @@map on String fields
+// historical SQLite constraint: Prisma enums are not used — enum-like fields are String columns
+// with allowed values documented in per-field comments (see src/common/enums.ts)
 
 // ---------------------------------------------------------------------------
 // Phase 1 models

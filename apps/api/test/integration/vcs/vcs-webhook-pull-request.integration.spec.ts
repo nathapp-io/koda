@@ -115,6 +115,14 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
     return `sha256=${hash}`;
   }
 
+  /**
+   * Helper: Build the request argument for handleWebhook. GitHub signs the raw
+   * bytes, so the request carries the rawBody captured by the preParsing hook.
+   */
+  function webhookRequest(payload: unknown): { rawBody: Buffer } {
+    return { rawBody: Buffer.from(JSON.stringify(payload), 'utf8') };
+  }
+
   beforeEach(async () => {
     mockVerifySignature = jest.fn();
     mockHandleWebhook = jest.fn();
@@ -204,7 +212,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         ignored: false,
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
       expect(mockHandleWebhook).toHaveBeenCalled();
       expect(mockHandleWebhook).toHaveBeenCalledWith(
@@ -228,7 +236,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         success: true,
       });
 
-      await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
       expect(payload.pull_request.number).toBe(prNumber);
       expect(mockHandleWebhook).toHaveBeenCalled();
@@ -251,7 +259,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         ignored: false,
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
       expect(result.success).toBe(true);
       expect(mockHandleWebhook).toHaveBeenCalled();
@@ -268,7 +276,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         ignored: false,
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
       expect(result.success).toBe(true);
     });
@@ -284,7 +292,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         ignored: false,
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
       expect(result.success).toBe(true);
     });
@@ -300,7 +308,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         ignored: false,
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
       expect(result.success).toBe(true);
     });
@@ -322,7 +330,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         ignored: false,
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
       expect(result.success).toBe(true);
       expect(mockHandleWebhook).toHaveBeenCalled();
@@ -340,7 +348,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         ignored: false,
       });
 
-      await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
       expect(mockHandleWebhook).toHaveBeenCalled();
     });
@@ -356,7 +364,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         ignored: false,
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
       expect(result.success).toBe(true);
     });
@@ -372,7 +380,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         ignored: false,
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
       expect(result.success).toBe(true);
       expect(payload.pull_request.merged).toBe(true);
@@ -396,7 +404,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         ignored: false,
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
       expect(result.success).toBe(true);
       // Verify the webhook handler was called with the payload
@@ -417,7 +425,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         ignored: false,
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
       expect(result.success).toBe(true);
     });
@@ -433,7 +441,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         ignored: false,
       });
 
-      await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
       expect(mockHandleWebhook).toHaveBeenCalled();
     });
@@ -455,7 +463,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         ignored: false,
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
       expect(result.success).toBe(true);
     });
@@ -471,7 +479,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         ignored: false,
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
       expect(result.success).toBe(true);
       expect(mockHandleWebhook).toHaveBeenCalled();
@@ -489,7 +497,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         ignored: false,
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
       expect(result.success).toBe(true);
     });
@@ -512,7 +520,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         reason: 'No TicketLink found for PR number',
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
       expect(result.success).toBe(true);
       expect(result.ignored).toBe(true);
@@ -531,7 +539,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
       });
 
       await expect(
-        controller.handleWebhook(mockProject.slug, validSignature, payload),
+        controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload)),
       ).resolves.not.toThrow();
     });
 
@@ -547,7 +555,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         reason: 'No TicketLink found for PR number',
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
       expect(result.ignored).toBe(true);
     });
@@ -570,7 +578,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         reason: "Action 'synchronize' is not processed",
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
       expect(result.success).toBe(true);
       expect(result.ignored).toBe(true);
@@ -588,7 +596,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         reason: "Action 'edited' is not processed",
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
       expect(result.success).toBe(true);
       expect(result.ignored).toBe(true);
@@ -606,7 +614,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         reason: "Action 'approved' is not processed",
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
       expect(result.success).toBe(true);
       expect(result.ignored).toBe(true);
@@ -624,7 +632,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         reason: "Action 'convert_to_draft' is not processed",
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
       expect(result.success).toBe(true);
       expect(result.ignored).toBe(true);
@@ -643,7 +651,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
       });
 
       await expect(
-        controller.handleWebhook(mockProject.slug, validSignature, payload),
+        controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload)),
       ).resolves.not.toThrow();
     });
   });
@@ -664,7 +672,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         ignored: false,
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
       expect(mockVerifySignature).toHaveBeenCalledWith(
         payloadString,
@@ -682,7 +690,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
       mockVerifySignature.mockReturnValue(false);
 
       await expect(
-        controller.handleWebhook(mockProject.slug, invalidSignature, payload),
+        controller.handleWebhook(mockProject.slug, invalidSignature, payload, webhookRequest(payload)),
       ).rejects.toThrow(AuthException);
 
       expect(mockHandleWebhook).not.toHaveBeenCalled();
@@ -721,7 +729,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         ignored: false,
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload as any);
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload as any, webhookRequest(payload));
 
       expect(result.success).toBe(true);
     });
@@ -749,7 +757,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
         ignored: false,
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload as any);
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload as any, webhookRequest(payload));
 
       expect(result.success).toBe(true);
     });
@@ -768,7 +776,7 @@ describe('VcsWebhookService pull_request Event Handler (VCS-P3-002-C AC2-AC8)', 
           ignored: false,
         });
 
-        const result = await controller.handleWebhook(mockProject.slug, validSignature, payload);
+        const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
 
         expect(result.success).toBe(true);
       }

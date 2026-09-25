@@ -176,9 +176,18 @@ export class PrismaRagRepository implements IRagRepository {
   }
 
   async getProjectCodeDocuments(projectId: string): Promise<RagCodeDocumentRow[]> {
-    return this.prisma.client.$queryRaw<RagCodeDocumentRow[]>(
-      Prisma.sql`SELECT id, label, type, source_file FROM code_document WHERE project_id = ${projectId}`,
-    );
+    // M14: graphify nodes live in GraphNode; the code_document table never existed.
+    const nodes = await this.prisma.client.graphNode.findMany({
+      where: { projectId },
+      select: { nodeId: true, label: true, type: true, sourceFile: true },
+      orderBy: { nodeId: 'asc' },
+    });
+    return nodes.map((node) => ({
+      id: node.nodeId,
+      label: node.label,
+      type: node.type ?? '',
+      source_file: node.sourceFile ?? undefined,
+    }));
   }
 
   async findTicketById(ticketId: string): Promise<RagTicketRecord | null> {

@@ -4,9 +4,9 @@ This example deploys Koda from published Docker images and includes a dedicated 
 
 ## Files
 
-- `docker-compose.yml` — `migrate`, `api`, `web` services
+- `docker-compose.yml` — `postgres`, `api`, `web` services
 - `deploy.sh` — one-command deploy wrapper (runs pre-deploy backup by default)
-- `backup-db.sh` — backup SQLite data volume before risky changes
+- `backup-db.sh` — backup the database before risky changes
 - `rollback.sh` — rollback app version (optionally restore DB backup)
 
 ## Why `migrate` is separate
@@ -24,6 +24,7 @@ Benefits:
 
 ```bash
 KODA_VERSION=v0.4.0
+POSTGRES_PASSWORD=replace-this   # required — compose fails closed without it
 JWT_SECRET=replace-this
 JWT_REFRESH_SECRET=replace-this
 API_KEY_SECRET=replace-this
@@ -39,9 +40,9 @@ chmod +x deploy.sh backup-db.sh rollback.sh
 
 This runs:
 1) pre-deploy safety checks
-2) backup SQLite volume (default)
+2) backup the database volume (default)
 3) `docker compose pull`
-4) `docker compose run --rm migrate`
+4) `docker compose run --rm api bunx --package prisma@6.19.2 prisma migrate deploy`
 5) `docker compose up -d api web`
 6) post-deploy health checks
 
@@ -54,10 +55,10 @@ To skip backup explicitly:
 ## Manual migration only
 
 ```bash
-docker compose -f deployments/example/docker-compose.yml run --rm migrate
+docker compose -f deployments/example/docker-compose.yml run --rm api bunx --package prisma@6.19.2 prisma migrate deploy
 ```
 
-## Backup strategy (SQLite volume)
+## Backup strategy (database volume)
 
 Create backup before migrations/releases:
 
@@ -66,7 +67,12 @@ cd deployments/example
 ./backup-db.sh
 ```
 
-Backup files are saved under `deployments/example/backups/`.
+Backup files are saved under `deployments/example/backups/`:
+- `koda-db-<ts>.sql.gz` — Postgres dump (`pg_dump`)
+- `koda_data-<ts>.tar.gz` — LanceDB volume tarball
+
+`rollback.sh --restore-db` restores only the LanceDB volume tarball; restore the Postgres
+dump with `gunzip -c koda-db-<ts>.sql.gz | docker compose exec -T postgres psql -U koda koda`.
 
 ## Rollback strategy
 
@@ -86,7 +92,8 @@ cd deployments/example
 
 ## Notes
 
-- Default DB is SQLite persisted in Docker volume `koda_data`.
-- For PostgreSQL/MySQL, set `DATABASE_PROVIDER` and `DATABASE_URL` in `.env`.
+- PostgreSQL is Koda's only database. This example's compose file predates the Postgres-only
+  switch and still carried the historical SQLite default; it now ships a `postgres:16` service.
+  Set `DATABASE_URL` in `.env` to point at an external Postgres instead if you prefer.
 - Use immutable tags in production (e.g. `KODA_VERSION=v0.4.0`) rather than `latest`.
 - `rollback.sh` updates `KODA_VERSION` in `deployments/example/.env`.

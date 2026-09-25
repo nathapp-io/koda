@@ -14,7 +14,7 @@ Usage:
   ./deploy.sh [--no-backup]
 
 Options:
-  --no-backup   Skip pre-deploy SQLite volume backup
+  --no-backup   Skip pre-deploy database backup
 EOF
 }
 

@@ -35,7 +35,7 @@ import type { VcsPrStatus } from '../../../src/vcs/types';
 import { resetDb } from '../../helpers/reset-db';
 
 const DATABASE_URL = process.env.DATABASE_URL;
-const describeIntegration = DATABASE_URL ? describe : describe.skip;
+const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 const ENCRYPTION_KEY = 'a'.repeat(64); // 32-byte hex key for AES-256-GCM
 const REPO_URL = 'https://github.com/koda-test/repo';
@@ -84,7 +84,7 @@ describeIntegration('VCS merged-PR auto-transition (H6)', () => {
 
     // Pass-through transaction manager. PrismaVcsRepository always issues its
     // statements on the ambient PrismaService.client (never the tx client), so
-    // on SQLite a real interactive transaction would just hold a write lock and
+    // on the historical SQLite backend a real interactive transaction would just hold a write lock and
     // time out against the pool writes. A pass-through is behaviorally
     // equivalent here while keeping the FK enforcement of the real database.
     const txManager: ITransactionManager = {

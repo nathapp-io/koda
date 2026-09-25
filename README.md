@@ -28,7 +28,7 @@ Koda is built from the ground up for human–agent collaboration.
 - **Per-project RAG** — LanceDB knowledge base per project. Closed tickets and docs are auto-indexed so agents can ask "how did we fix something similar?"
 - **Git references** — Link tickets to commits, file paths, and line numbers.
 - **Multi-project** — Independent projects, each with their own agents, tickets, and knowledge base.
-- **Multi-DB** — SQLite (default), PostgreSQL, MySQL via Prisma.
+- **PostgreSQL** via Prisma.
 - **OpenAPI-first** — NestJS exports the spec, `@hey-api/openapi-ts` generates typed clients for CLI and web. No drift.
 
 ---
@@ -52,7 +52,7 @@ koda/  (Turborepo + Bun)
 |:------|:-----|
 | Monorepo | Turborepo + Bun |
 | API | NestJS 11 + Fastify |
-| ORM | Prisma (SQLite / PostgreSQL / MySQL) |
+| ORM | Prisma (PostgreSQL) |
 | Auth | JWT (humans) + API key (agents) |
 | Web UI | Nuxt 3 + Shadcn-nuxt + Tailwind CSS |
 | CLI | Commander.js + `@hey-api/openapi-ts` generated client |
@@ -180,7 +180,8 @@ koda version
 
 ```bash
 # API (.env)
-DATABASE_URL="file:./dev.db"        # SQLite default
+DATABASE_URL="postgresql://koda:koda@localhost:5432/koda"
+# Tests: bun run test:db:up (Postgres on 5433), then bun run test:integration
 JWT_SECRET="your-secret"
 API_KEY_SECRET="your-hmac-secret"   # HMAC-SHA256 for API key hashing
 PORT=3100

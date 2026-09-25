@@ -180,10 +180,11 @@ Integration details:
 - they must NOT require a database: compile the module with `Test.createTestingModule({ imports: [FeatureModule] }).compile()` and mock external collaborators (`PrismaService`, `TRANSACTION_MANAGER`, `ConfigService`) via provider `useValue`
 - `test/integration/` is reserved for behavior that genuinely needs a real DB: repository round-trips, constraints, soft-delete semantics, transactions
 
-Rationale: `bun run test` runs without a database, so DI/module-registration breakage must surface there. `test:integration` requires a DB (`koda-test.ephemeral.db`) and is not always run, so module-wiring tests hidden inside it can mask failures.
+Rationale: `bun run test` runs without a database, so DI/module-registration breakage must surface there. `test:integration` requires a real Postgres (`bun run test:db:up` starts a disposable one on port 5433 from the root `docker-compose.test.yml`) and is not always run, so module-wiring tests hidden inside it can mask failures.
 
-Useful scripts:
+Useful scripts (run from `apps/api`):
 - `bun run test`
+- `bun run test:db:up` (start test Postgres on 5433; `test:db:down` stops it)
 - `bun run test:integration`
 - `bun run db:generate`
 - `bun run db:migrate`

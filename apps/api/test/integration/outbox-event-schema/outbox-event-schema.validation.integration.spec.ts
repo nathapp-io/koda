@@ -4,51 +4,36 @@
  * Validates that the Prisma schema exactly matches the Phase 1 contract
  * for OutboxEvent table with all required fields and indexes.
  *
- * Run: DATABASE_URL=file:./koda-test.ephemeral.db bun run test test/integration/outbox-event-schema/outbox-event-schema.validation.integration.spec.ts
+ * Run: cd apps/api && bun run test:db:up && bun run test:integration -- test/integration/outbox-event-schema/outbox-event-schema.validation.integration.spec.ts
  */
 
 import { PrismaClient } from '@prisma/client';
 import * as path from 'path';
-import * as fs from 'fs';
-import * as os from 'os';
+import { resetDb } from '../../helpers/reset-db';
 
 const DATABASE_URL = process.env.DATABASE_URL;
-const describeIntegration = DATABASE_URL ? describe : describe.skip;
+const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 describeIntegration('OutboxEvent Phase 1 Schema Validation', () => {
   let prisma: PrismaClient;
-  let tmpDbPath: string;
 
   beforeAll(async () => {
     if (!DATABASE_URL) return;
 
-    tmpDbPath = path.join(os.tmpdir(), `koda-outbox-test-${Date.now()}.db`);
-
     prisma = new PrismaClient({
       datasources: {
         db: {
-          url: `file:${tmpDbPath}`,
+          url: process.env.DATABASE_URL,
         },
       },
     });
 
-    try {
-      const { execSync } = await import('child_process');
-      execSync('bunx prisma db push --force-reset --skip-generate', {
-        stdio: 'pipe',
-        env: { ...process.env, DATABASE_URL: `file:${tmpDbPath}` },
-      });
-    } catch (error) {
-      // Migration may fail if DB is already initialized, which is OK
-    }
+    await resetDb();
   });
 
   afterAll(async () => {
     if (prisma) {
       await prisma.$disconnect();
-    }
-    if (tmpDbPath && fs.existsSync(tmpDbPath)) {
-      fs.unlinkSync(tmpDbPath);
     }
   });
 
@@ -443,12 +428,12 @@ describeIntegration('OutboxEvent Phase 1 Schema Validation', () => {
 
       execSync('bunx prisma db push --force-reset --skip-generate', {
         stdio: 'pipe',
-        env: { ...process.env, DATABASE_URL: `file:${tmpDbPath}` },
+        env: { ...process.env },
       });
 
       execSync('bunx prisma db push --force-reset --skip-generate', {
         stdio: 'pipe',
-        env: { ...process.env, DATABASE_URL: `file:${tmpDbPath}` },
+        env: { ...process.env },
       });
 
       const project = await prisma.project.create({

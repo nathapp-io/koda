@@ -15,7 +15,7 @@ Tests Prisma schema for VCS models:
 - Cascade delete behavior
 - Unique constraints (projectId unique on VcsConnection)
 
-**Run:** `DATABASE_URL=file:./koda-test.ephemeral.db npx jest test/integration/vcs/prisma-models.integration.spec.ts`
+**Run:** `cd apps/api && bun run test:db:up && bun run test:integration -- test/integration/vcs/prisma-models.integration.spec.ts`
 
 ### 2. `encryption.util.spec.ts` (in src/common/utils/)
 **Acceptance Criteria Covered:** AC5, AC6, AC7, AC8
@@ -79,7 +79,7 @@ Detailed schema validation tests verifying exact field compliance:
 - JSON string field validation
 - One-to-one relationship constraints
 
-**Run:** `DATABASE_URL=file:./koda-test.ephemeral.db npx jest test/integration/vcs/schema-validation.integration.spec.ts`
+**Run:** `cd apps/api && bun run test:db:up && bun run test:integration -- test/integration/vcs/schema-validation.integration.spec.ts`
 
 ### 7. `vcs-foundation-integration.integration.spec.ts` (NEW)
 **Acceptance Criteria Covered:** AC1-AC9 (All)
@@ -92,7 +92,7 @@ End-to-end integration test simulating real usage:
 - Ticket and Project extensions in context
 - Full workflow: create project → create VcsConnection → sync → log results
 
-**Run:** `DATABASE_URL=file:./koda-test.ephemeral.db npx jest test/integration/vcs/vcs-foundation-integration.integration.spec.ts`
+**Run:** `cd apps/api && bun run test:db:up && bun run test:integration -- test/integration/vcs/vcs-foundation-integration.integration.spec.ts`
 
 ## Acceptance Criteria Coverage Matrix
 
@@ -117,12 +117,13 @@ npx jest src/common/utils/encryption.util.spec.ts src/config/vcs.config.spec.ts
 
 **Integration tests only:**
 ```bash
-DATABASE_URL=file:./koda-test.ephemeral.db npx jest test/integration/vcs/
+cd apps/api && bun run test:db:up && bun run test:integration -- test/integration/vcs/
 ```
 
 **All tests:**
 ```bash
-DATABASE_URL=file:./koda-test.ephemeral.db npx jest src/common/utils/encryption.util.spec.ts src/config/vcs.config.spec.ts test/integration/vcs/
+cd apps/api && bun run test:db:up && bun run test:integration -- test/integration/vcs/
+npx jest src/common/utils/encryption.util.spec.ts src/config/vcs.config.spec.ts
 ```
 
 ## Test Statistics
@@ -139,8 +140,8 @@ DATABASE_URL=file:./koda-test.ephemeral.db npx jest src/common/utils/encryption.
 
 ## Notes
 
-- Integration tests require `DATABASE_URL` environment variable
+- Integration tests require the Postgres test database (`bun run test:db:up`) and `KODA_DB_TESTS=1` (set by `bun run test:integration`)
 - Encryption tests use randomly generated master keys
-- Schema tests create temporary SQLite databases
+- Schema tests run against the shared Postgres test database (reset per file via `resetDb()`)
 - All cleanup is automatic via afterAll hooks
 - Tests are hermetic (no external dependencies)

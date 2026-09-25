@@ -25,6 +25,11 @@ jest.mock('@lancedb/lancedb', () => ({
 import { Test, TestingModule } from '@nestjs/testing';
 import { RAG_CFG } from '../../../src/config/rag.config';
 import { RagService } from '../../../src/rag/rag.service';
+import { VectorStore } from '../../../src/rag/vector-store.service';
+import { IncrementalGraphDiffService } from '../../../src/rag/incremental-graph-diff.service';
+import { GraphStoreService } from '../../../src/rag/graph-store.service';
+import { PrismaRagRepository } from '../../../src/rag/prisma-rag.repository';
+import { PrismaService } from '@nathapp/nestjs-prisma';
 import { EmbeddingService } from '../../../src/rag/embedding.service';
 import type { ITransactionManager } from '@nathapp/nestjs-data';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
@@ -55,14 +60,45 @@ const mockTxManager = {
   isInTransaction: jest.fn(() => false),
 };
 
+/**
+ * RagService.importGraphify hard-validates projectId (CUID format + existence)
+ * through VectorStore.validateProjectId, so the fixture projects use
+ * CUID-shaped ids and are created as real Project rows in beforeAll.
+ */
+const PROJECT_IDS = [
+  'gdtprojectaaaaaaaa0000001', // first import
+  'gdtprojectaaaaaaaa0000002', // no-changes second import
+  'gdtprojectaaaaaaaa0000003', // added nodes
+  'gdtprojectaaaaaaaa0000004', // removed nodes
+  'gdtprojectaaaaaaaa0000005', // indexed count (50 nodes)
+  'gdtprojectbbbbbbbb0000001', // project isolation A
+  'gdtprojectbbbbbbbb0000002', // project isolation B
+];
+
 describe('IncrementalGraphDiffService integration', () => {
   let module: TestingModule;
   let ragService: RagService;
+  let graphStore: GraphStoreService;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let prisma: PrismaService<any>;
 
   beforeAll(async () => {
     module = await Test.createTestingModule({
       providers: [
         RagService,
+        VectorStore,
+        IncrementalGraphDiffService,
+        GraphStoreService,
+        PrismaRagRepository,
+        {
+          provide: PrismaService,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          useFactory: (): PrismaService<any> => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { PrismaClient } = require('@prisma/client') as any;
+            return new PrismaService({ client: PrismaClient, clientOptions: {} });
+          },
+        },
         { provide: EmbeddingService, useClass: FakeEmbeddingService },
         {
           provide: RAG_CFG,
@@ -88,16 +124,28 @@ describe('IncrementalGraphDiffService integration', () => {
     }).compile();
 
     ragService = module.get(RagService);
-    (ragService as unknown as { embeddingService: FakeEmbeddingService }).embeddingService = new FakeEmbeddingService();
+    graphStore = module.get(GraphStoreService);
+    prisma = module.get(PrismaService);
+    await prisma.client.$connect();
+    await prisma.client.project.createMany({
+      data: PROJECT_IDS.map((id, i) => ({
+        id,
+        name: `Graph Diff Test ${i + 1}`,
+        slug: `graph-diff-int-${i + 1}-${Date.now()}`,
+        key: `GDT${i + 1}`,
+      })),
+    });
   });
 
   afterAll(async () => {
+    await prisma.client.project.deleteMany({ where: { id: { in: PROJECT_IDS } } });
+    await prisma.client.$disconnect();
     await module.close();
   });
 
   describe('AC-6: importGraphify uses diffAndApply', () => {
     it('importGraphify endpoint calls diffAndApply instead of deleteAllBySourceType', async () => {
-      const projectId = 'graph-diff-test-project';
+      const projectId = PROJECT_IDS[0];
 
       const nodes: GraphifyNodeDto[] = [
         { id: 'node-1', label: 'AuthService', type: 'class' },
@@ -110,14 +158,20 @@ describe('IncrementalGraphDiffService integration', () => {
         { source: 'node-2', target: 'node-3', relation: 'uses' },
       ];
 
+      // diff path: nodes are persisted through GraphStoreService (which owns
+      // the Prisma transaction), not via the full-reimport delete+rewrite.
+      const upsertSpy = jest.spyOn(graphStore, 'upsertNodes');
+
       const firstResult = await ragService.importGraphify(projectId, nodes, links);
 
       expect(firstResult.imported).toBe(3);
-      expect(mockTxManager.run).toHaveBeenCalled();
+      expect(upsertSpy).toHaveBeenCalledTimes(1);
+      expect(upsertSpy.mock.calls[0][1]).toHaveLength(3);
+      upsertSpy.mockRestore();
     });
 
     it('second import with same nodes results in 0 indexed (no changes)', async () => {
-      const projectId = 'graph-diff-test-project-2';
+      const projectId = PROJECT_IDS[1];
 
       const nodes: GraphifyNodeDto[] = [
         { id: 'node-1', label: 'AuthService', type: 'class' },
@@ -131,7 +185,7 @@ describe('IncrementalGraphDiffService integration', () => {
     });
 
     it('incremental import with added nodes only indexes new nodes', async () => {
-      const projectId = 'graph-diff-test-project-3';
+      const projectId = PROJECT_IDS[2];
 
       const initialNodes: GraphifyNodeDto[] = [
         { id: 'node-1', label: 'AuthService', type: 'class' },
@@ -150,7 +204,7 @@ describe('IncrementalGraphDiffService integration', () => {
     });
 
     it('import with removed nodes clears deleted nodes', async () => {
-      const projectId = 'graph-diff-test-project-4';
+      const projectId = PROJECT_IDS[3];
 
       const initialNodes: GraphifyNodeDto[] = [
         { id: 'node-1', label: 'AuthService', type: 'class' },
@@ -171,7 +225,7 @@ describe('IncrementalGraphDiffService integration', () => {
 
   describe('AC-7: indexed count reflects actual LanceDB writes', () => {
     it('result shows only indexed nodes, not total count', async () => {
-      const projectId = 'indexed-count-test';
+      const projectId = PROJECT_IDS[4];
 
       const unchangedNodes: GraphifyNodeDto[] = Array.from({ length: 50 }, (_, i) => ({
         id: `node-${i}`,
@@ -189,8 +243,8 @@ describe('IncrementalGraphDiffService integration', () => {
 
   describe('AC-10: project-scoped and graphifyEnabled honored', () => {
     it('imports are isolated per project', async () => {
-      const projectA = 'project-a-import';
-      const projectB = 'project-b-import';
+      const projectA = PROJECT_IDS[5];
+      const projectB = PROJECT_IDS[6];
 
       const nodesA: GraphifyNodeDto[] = [{ id: 'a-node', label: 'ProjectAService', type: 'class' }];
       const nodesB: GraphifyNodeDto[] = [{ id: 'b-node', label: 'ProjectBService', type: 'class' }];

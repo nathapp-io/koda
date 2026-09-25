@@ -3,14 +3,17 @@ import { RAG_CFG } from '../../../src/config/rag.config';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { RagService } from '../../../src/rag/rag.service';
+import { VectorStore } from '../../../src/rag/vector-store.service';
 import { EmbeddingService } from '../../../src/rag/embedding.service';
 import { PrismaRagRepository } from '../../../src/rag/prisma-rag.repository';
 
 /**
  * Project ID Hard Enforcement Tests
  *
- * These tests verify that the RagService strictly validates projectId values
- * at the service boundary before any data access occurs.
+ * These tests verify that the RAG stack strictly validates projectId values
+ * at the service boundary before any data access occurs. Table-level methods
+ * (getOrCreateTable, validateTableProvider) live on VectorStore; RagService
+ * methods delegate to it, so both layers are exercised.
  *
  * Acceptance Criteria:
  * 1. Empty projectId throws ForbiddenAppException with "Project ID is required"
@@ -25,6 +28,7 @@ import { PrismaRagRepository } from '../../../src/rag/prisma-rag.repository';
 describe('RagService — Project ID Hard Enforcement (projectIdValidation)', () => {
   let module: TestingModule;
   let ragService: RagService;
+  let vectorStore: VectorStore;
   let mockPrismaService: Record<string, unknown>;
 
   beforeAll(async () => {
@@ -47,6 +51,7 @@ describe('RagService — Project ID Hard Enforcement (projectIdValidation)', () 
     module = await Test.createTestingModule({
       providers: [
         RagService,
+        VectorStore,
         {
           provide: EmbeddingService,
           useValue: {
@@ -84,6 +89,7 @@ describe('RagService — Project ID Hard Enforcement (projectIdValidation)', () 
     }).compile();
 
     ragService = module.get(RagService);
+    vectorStore = module.get(VectorStore);
   });
 
   afterAll(async () => {
@@ -93,13 +99,13 @@ describe('RagService — Project ID Hard Enforcement (projectIdValidation)', () 
   describe('getOrCreateTable — AC1: Empty projectId requires validation', () => {
     it('throws ForbiddenAppException when projectId is empty string', async () => {
       // AC1: Empty projectId must throw ForbiddenAppException
-      await expect(ragService.getOrCreateTable('')).rejects.toThrow(ForbiddenAppException);
+      await expect(vectorStore.getOrCreateTable('')).rejects.toThrow(ForbiddenAppException);
     });
 
     it('throws ForbiddenAppException with message indicating "required" when projectId is empty', async () => {
       // AC1: Error message should indicate "Project ID is required"
       try {
-        await ragService.getOrCreateTable('');
+        await vectorStore.getOrCreateTable('');
         fail('Expected ForbiddenAppException to be thrown');
       } catch (error) {
         expect(error).toBeInstanceOf(ForbiddenAppException);
@@ -112,63 +118,63 @@ describe('RagService — Project ID Hard Enforcement (projectIdValidation)', () 
 
     it('throws ForbiddenAppException when projectId is whitespace only', async () => {
       // AC1: Whitespace-only strings should be treated as invalid
-      await expect(ragService.getOrCreateTable('   ')).rejects.toThrow(ForbiddenAppException);
-      await expect(ragService.getOrCreateTable('\t')).rejects.toThrow(ForbiddenAppException);
-      await expect(ragService.getOrCreateTable('\n')).rejects.toThrow(ForbiddenAppException);
+      await expect(vectorStore.getOrCreateTable('   ')).rejects.toThrow(ForbiddenAppException);
+      await expect(vectorStore.getOrCreateTable('\t')).rejects.toThrow(ForbiddenAppException);
+      await expect(vectorStore.getOrCreateTable('\n')).rejects.toThrow(ForbiddenAppException);
     });
 
     it('throws ForbiddenAppException when projectId is null', async () => {
       // AC1: null should be treated as invalid
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await expect(ragService.getOrCreateTable(null as any)).rejects.toThrow(ForbiddenAppException);
+      await expect(vectorStore.getOrCreateTable(null as any)).rejects.toThrow(ForbiddenAppException);
     });
 
     it('throws ForbiddenAppException when projectId is undefined', async () => {
       // AC1: undefined should be treated as invalid
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await expect(ragService.getOrCreateTable(undefined as any)).rejects.toThrow(ForbiddenAppException);
+      await expect(vectorStore.getOrCreateTable(undefined as any)).rejects.toThrow(ForbiddenAppException);
     });
   });
 
   describe('getOrCreateTable — AC2: Invalid projectId format validation', () => {
     it('throws ForbiddenAppException when projectId contains hyphens (not CUID format)', async () => {
       // AC2: Hyphens are not valid in CUID format; should be rejected
-      await expect(ragService.getOrCreateTable('not-a-project-id')).rejects.toThrow(ForbiddenAppException);
+      await expect(vectorStore.getOrCreateTable('not-a-project-id')).rejects.toThrow(ForbiddenAppException);
     });
 
     it('throws ForbiddenAppException for underscore-prefixed string (malformed CUID)', async () => {
       // AC2: Underscores indicate non-CUID format; should be rejected early
-      await expect(ragService.getOrCreateTable('cm_invalid_but_well_shaped')).rejects.toThrow(ForbiddenAppException);
+      await expect(vectorStore.getOrCreateTable('cm_invalid_but_well_shaped')).rejects.toThrow(ForbiddenAppException);
     });
 
     it('throws ForbiddenAppException when projectId is too short for CUID format', async () => {
       // AC2: CUIDs are 24-25 chars; single char should be invalid
-      await expect(ragService.getOrCreateTable('c')).rejects.toThrow(ForbiddenAppException);
-      await expect(ragService.getOrCreateTable('clg')).rejects.toThrow(ForbiddenAppException);
+      await expect(vectorStore.getOrCreateTable('c')).rejects.toThrow(ForbiddenAppException);
+      await expect(vectorStore.getOrCreateTable('clg')).rejects.toThrow(ForbiddenAppException);
     });
 
     it('throws ForbiddenAppException for projectId with spaces', async () => {
       // AC2: Spaces are invalid in CUID format
-      await expect(ragService.getOrCreateTable('c proj id')).rejects.toThrow(ForbiddenAppException);
-      await expect(ragService.getOrCreateTable('clgtz5zrp0000jvz4z6x8 id')).rejects.toThrow(ForbiddenAppException);
+      await expect(vectorStore.getOrCreateTable('c proj id')).rejects.toThrow(ForbiddenAppException);
+      await expect(vectorStore.getOrCreateTable('clgtz5zrp0000jvz4z6x8 id')).rejects.toThrow(ForbiddenAppException);
     });
 
     it('throws ForbiddenAppException for projectId with special characters', async () => {
       // AC2: Special characters (@, #, !, etc.) are invalid in CUID format
-      await expect(ragService.getOrCreateTable('c@proj#id!')).rejects.toThrow(ForbiddenAppException);
-      await expect(ragService.getOrCreateTable('clgtz5zrp0000jvz4z6x8y9z@')).rejects.toThrow(ForbiddenAppException);
+      await expect(vectorStore.getOrCreateTable('c@proj#id!')).rejects.toThrow(ForbiddenAppException);
+      await expect(vectorStore.getOrCreateTable('clgtz5zrp0000jvz4z6x8y9z@')).rejects.toThrow(ForbiddenAppException);
     });
 
     it('throws ForbiddenAppException for projectId with uppercase letters', async () => {
       // AC2: CUIDs use only lowercase letters; uppercase should be rejected
-      await expect(ragService.getOrCreateTable('CLGTZ5ZRP0000JVZ4Z6X8Y9Z0')).rejects.toThrow(ForbiddenAppException);
-      await expect(ragService.getOrCreateTable('ClGTZ5ZRP0000JVZ4Z6X8Y9Z0')).rejects.toThrow(ForbiddenAppException);
+      await expect(vectorStore.getOrCreateTable('CLGTZ5ZRP0000JVZ4Z6X8Y9Z0')).rejects.toThrow(ForbiddenAppException);
+      await expect(vectorStore.getOrCreateTable('ClGTZ5ZRP0000JVZ4Z6X8Y9Z0')).rejects.toThrow(ForbiddenAppException);
     });
 
     it('throws ForbiddenAppException for projectId that is too long', async () => {
       // AC2: CUIDs have a maximum length; excessively long strings should be rejected
       const tooLong = 'clgtz5zrp0000jvz4z6x8y9z0' + 'extra';
-      await expect(ragService.getOrCreateTable(tooLong)).rejects.toThrow(ForbiddenAppException);
+      await expect(vectorStore.getOrCreateTable(tooLong)).rejects.toThrow(ForbiddenAppException);
     });
   });
 
@@ -177,14 +183,14 @@ describe('RagService — Project ID Hard Enforcement (projectIdValidation)', () 
       // AC3: Format-valid CUID that doesn't exist in Prisma should throw ForbiddenAppException
       // Use a valid CUID format that is NOT in the mock database
       const validFormatButNonExistentId = 'clgtz5zrp0000jvz4z6x8y9z1';
-      await expect(ragService.getOrCreateTable(validFormatButNonExistentId)).rejects.toThrow(ForbiddenAppException);
+      await expect(vectorStore.getOrCreateTable(validFormatButNonExistentId)).rejects.toThrow(ForbiddenAppException);
     });
 
     it('throws ForbiddenAppException with message indicating project not found', async () => {
       // AC3: Error should clearly indicate the project doesn't exist
       const validFormatButNonExistentId = 'clgtz5zrp0000jvz4z6x8y9z2';
       try {
-        await ragService.getOrCreateTable(validFormatButNonExistentId);
+        await vectorStore.getOrCreateTable(validFormatButNonExistentId);
         fail('Expected ForbiddenAppException to be thrown');
       } catch (error) {
         expect(error).toBeInstanceOf(ForbiddenAppException);
@@ -195,7 +201,7 @@ describe('RagService — Project ID Hard Enforcement (projectIdValidation)', () 
       // AC3: Validation must happen BEFORE any data access
       const validFormatButNonExistentId = 'clgtz5zrp0000jvz4z6x8y9z3';
       // The rejection should happen synchronously or early, not after table creation attempts
-      const promise = ragService.getOrCreateTable(validFormatButNonExistentId);
+      const promise = vectorStore.getOrCreateTable(validFormatButNonExistentId);
       await expect(promise).rejects.toThrow(ForbiddenAppException);
     });
 
@@ -203,7 +209,7 @@ describe('RagService — Project ID Hard Enforcement (projectIdValidation)', () 
       // AC3: Service must call Prisma to verify project exists before touching LanceDB
       const validFormatButNonExistentId = 'clgtz5zrp0000jvz4z6x8y9z4';
       try {
-        await ragService.getOrCreateTable(validFormatButNonExistentId);
+        await vectorStore.getOrCreateTable(validFormatButNonExistentId);
       } catch (error) {
         // Should have called prisma.client.project.findUnique
         expect(error).toBeInstanceOf(ForbiddenAppException);
@@ -230,7 +236,7 @@ describe('RagService — Project ID Hard Enforcement (projectIdValidation)', () 
 
     it('performs projectId validation before attempting to access getOrCreateTable', async () => {
       // AC4: Validation MUST happen synchronously/early, not after table operations
-      const getOrCreateTableSpy = jest.spyOn(ragService, 'getOrCreateTable');
+      const getOrCreateTableSpy = jest.spyOn(vectorStore, 'getOrCreateTable');
       try {
         await ragService.search('invalid-format', 'query');
       } catch (error) {
@@ -365,18 +371,18 @@ describe('RagService — Project ID Hard Enforcement (projectIdValidation)', () 
   describe('validateTableProvider — AC: Invalid projectId rejection before validation', () => {
     it('throws ForbiddenAppException when validateTableProvider() is called with empty projectId', async () => {
       // Validation before provider checks
-      await expect(ragService.validateTableProvider('')).rejects.toThrow(ForbiddenAppException);
+      await expect(vectorStore.validateTableProvider('')).rejects.toThrow(ForbiddenAppException);
     });
 
     it('throws ForbiddenAppException when validateTableProvider() is called with invalid projectId format', async () => {
       // Format validation before provider operations
-      await expect(ragService.validateTableProvider('bad-format')).rejects.toThrow(ForbiddenAppException);
+      await expect(vectorStore.validateTableProvider('bad-format')).rejects.toThrow(ForbiddenAppException);
     });
 
     it('throws ForbiddenAppException when validateTableProvider() is called with non-existent projectId', async () => {
       // Existence validation before provider operations
       const validFormatButNonExistentId = 'clgtz5zrp0000jvz4z6x8y9zc';
-      await expect(ragService.validateTableProvider(validFormatButNonExistentId)).rejects.toThrow(ForbiddenAppException);
+      await expect(vectorStore.validateTableProvider(validFormatButNonExistentId)).rejects.toThrow(ForbiddenAppException);
     });
   });
 
@@ -410,7 +416,7 @@ describe('RagService — Project ID Hard Enforcement (projectIdValidation)', () 
 
     it('getOrCreateTable method exists (requires @throws doc in source)', () => {
       // AC5: Implementation must add @throws doc comment to getOrCreateTable
-      expect(typeof ragService.getOrCreateTable).toBe('function');
+      expect(typeof vectorStore.getOrCreateTable).toBe('function');
     });
 
     it('search method exists (requires @throws doc in source)', () => {
@@ -445,7 +451,7 @@ describe('RagService — Project ID Hard Enforcement (projectIdValidation)', () 
 
     it('validateTableProvider method exists (requires @throws doc in source)', () => {
       // AC5: Implementation must add @throws doc comment to validateTableProvider
-      expect(typeof ragService.validateTableProvider).toBe('function');
+      expect(typeof vectorStore.validateTableProvider).toBe('function');
     });
 
     it('optimizeTable method exists (requires @throws doc in source)', () => {

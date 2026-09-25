@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import { RagService } from '../../../src/rag/rag.service';
+import { VectorStore } from '../../../src/rag/vector-store.service';
 import { EmbeddingService } from '../../../src/rag/embedding.service';
 
 jest.setTimeout(30000);
@@ -32,6 +33,7 @@ class FakeEmbeddingService {
 describe('RagService integration', () => {
   let module: TestingModule;
   let ragService: RagService;
+  let vectorStore: VectorStore;
   let tmpDir: string;
 
   beforeAll(async () => {
@@ -40,6 +42,7 @@ describe('RagService integration', () => {
     module = await Test.createTestingModule({
       providers: [
         RagService,
+        VectorStore,
         {
           provide: EmbeddingService,
           useClass: FakeEmbeddingService,
@@ -67,6 +70,7 @@ describe('RagService integration', () => {
     }).compile();
 
     ragService = module.get(RagService);
+    vectorStore = module.get(VectorStore);
     // Inject fake embedding service
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (ragService as any).embeddingService = new FakeEmbeddingService();
@@ -150,8 +154,9 @@ describe('RagService integration', () => {
   });
 
   it('validateTableProvider detects provider mismatch', async () => {
-    // The table was created with the fake provider; now check with mismatched config
-    const result = await ragService.validateTableProvider(projectId);
+    // The table was created with the fake provider; now check with mismatched config.
+    // Provider validation lives on VectorStore (RagService delegates there).
+    const result = await vectorStore.validateTableProvider(projectId);
     // valid = true because the fake provider name matches what was stored
     expect(typeof result.valid).toBe('boolean');
   });

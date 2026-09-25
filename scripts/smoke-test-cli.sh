@@ -4,13 +4,13 @@
 # Usage: ./scripts/smoke-test-cli.sh [--keep-db]
 #
 # Starts the API, bootstraps test data, runs all CLI commands, reports results.
-# Safe to re-run: uses a fresh temp DB each run, cleaned up after.
+# Safe to re-run: resets the Postgres database at SMOKE_DATABASE_URL each run (default: the docker-compose.test.yml instance, db koda_smoke).
 # =============================================================================
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 API_DIR="$REPO_ROOT/apps/api"
 CLI_DIR="$REPO_ROOT/apps/cli"
-TEST_DB="/tmp/koda-smoke-$$.db"
+SMOKE_DATABASE_URL="${SMOKE_DATABASE_URL:-postgresql://koda:koda@localhost:5433/koda_smoke}"
 API_LOG="/tmp/koda-smoke-$$.log"
 API_URL="http://localhost:13100"
 API_PORT=13100
@@ -32,7 +32,7 @@ fail() { echo -e "${RED}  ✗${RESET} $*"; ((FAIL++)) || true; FAILURES+=("$*");
 cleanup() {
   [[ -n "$API_PID" ]] && kill "$API_PID" 2>/dev/null || true
   [[ -n "$SMOKE_HOME" ]] && rm -rf "$SMOKE_HOME"
-  [[ "$KEEP_DB" == false ]] && rm -f "$TEST_DB" "$API_LOG"
+  [[ "$KEEP_DB" == false ]] && rm -f "$API_LOG"
   echo ""
   echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
   echo -e "Results: ${GREEN}${PASS} passed${RESET}, ${RED}${FAIL} failed${RESET}"
@@ -84,23 +84,8 @@ fi
 # STEP 2: Migrate DB
 # =============================================================================
 log "Step 2: Running migrations..."
-if ! command -v sqlite3 >/dev/null 2>&1; then
-  fail "DB migrations failed (sqlite3 not found)"; exit 1
-fi
-
-MIGRATE_FAILED=false
-while IFS= read -r migration_file; do
-  if ! sqlite3 "$TEST_DB" < "$migration_file" > /tmp/koda-smoke-migrate-$$.log 2>&1; then
-    MIGRATE_FAILED=true
-    echo ""
-    echo "--- Migration log ($migration_file) ---"
-    cat "/tmp/koda-smoke-migrate-$$.log"
-    echo "--------------------------------------"
-    break
-  fi
-done < <(find "$API_DIR/prisma/migrations" -mindepth 2 -maxdepth 2 -name migration.sql | sort)
-
-if [[ "$MIGRATE_FAILED" == true ]]; then
+if ! (cd "$API_DIR" && DATABASE_URL="$SMOKE_DATABASE_URL" bunx prisma migrate reset --force --skip-seed --skip-generate > /tmp/koda-smoke-migrate-$$.log 2>&1); then
+  echo "--- Migration log ---"; cat "/tmp/koda-smoke-migrate-$$.log"; echo "---------------------"
   fail "DB migrations failed"; exit 1
 fi
 ok "DB migrations"
@@ -110,7 +95,7 @@ ok "DB migrations"
 # =============================================================================
 log "Step 3: Starting API on port $API_PORT..."
 cd "$API_DIR"
-DATABASE_URL="file:${TEST_DB}" \
+DATABASE_URL="$SMOKE_DATABASE_URL" \
 JWT_SECRET="smoke-secret" \
 JWT_REFRESH_SECRET="smoke-refresh-secret" \
 JWT_EXPIRES_IN="1h" \
@@ -165,10 +150,10 @@ fi
 JWT=$(echo "$REGISTER" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',d)['accessToken'])" 2>/dev/null)
 USER_ID=$(echo "$REGISTER" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',d)['user']['id'])" 2>/dev/null)
 
-# Promote user to ADMIN (first user is MEMBER by default)
-PROMOTE_OUT=$(sqlite3 "$TEST_DB" "UPDATE \"User\" SET \"role\" = 'ADMIN' WHERE \"id\" = '${USER_ID}'; SELECT changes();" 2>&1) || true
-if [[ "$PROMOTE_OUT" != *"1"* ]]; then
-  fail "ADMIN promotion failed: $PROMOTE_OUT"; exit 1
+# Promote user to ADMIN (idempotent; the first registered user is already ADMIN on a fresh DB)
+if ! (cd "$API_DIR" && echo "UPDATE \"User\" SET \"role\" = 'ADMIN' WHERE \"id\" = '${USER_ID}';" \
+    | bunx prisma db execute --stdin --url "$SMOKE_DATABASE_URL" > /tmp/koda-smoke-promote-$$.log 2>&1); then
+  fail "ADMIN promotion failed: $(cat /tmp/koda-smoke-promote-$$.log)"; exit 1
 fi
 
 # Re-login to get a fresh JWT with ADMIN role

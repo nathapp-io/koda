@@ -7,7 +7,7 @@
  * duplicate route registration, decorator/query-name mismatches, or a legacy
  * handler shadowing the new one — HTTP-level tests can.
  *
- * Requires a database: run with DATABASE_URL=file:./koda-test.ephemeral.db
+ * Run: cd apps/api && bun run test:db:up && bun run test:integration -- test/integration/projects/project-memory.integration.spec.ts
  */
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
@@ -19,7 +19,7 @@ import { CombinedAuthGuard } from '../../../src/auth/guards/combined-auth.guard'
 import { resetDb } from '../../helpers/reset-db';
 
 const DATABASE_URL = process.env.DATABASE_URL;
-const describeIntegration = DATABASE_URL ? describe : describe.skip;
+const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 const decisionCount = 20;
 const factCount = 35;

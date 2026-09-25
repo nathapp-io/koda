@@ -1,13 +1,13 @@
 # PostgreSQL Deployment Guide
 
-PostgreSQL is the **recommended production database** for Koda. It supports concurrent writes, horizontal read scaling, and enterprise-grade reliability.
+PostgreSQL is the **only supported database** for Koda. It supports concurrent writes, horizontal read scaling, and enterprise-grade reliability.
 
 ---
 
 ## Prerequisites
 
-- PostgreSQL 14+ (15 or 16 recommended)
-- Database and user created before running migrations
+- PostgreSQL 16 (the version shipped in the stock `docker-compose.yml`)
+- Database and user created before running migrations (skip if using the bundled container)
 
 ```sql
 -- Run as postgres superuser
@@ -24,7 +24,6 @@ GRANT ALL ON SCHEMA public TO koda_user;
 ## Environment Variables
 
 ```env
-DATABASE_PROVIDER=postgresql
 DATABASE_URL=postgresql://koda_user:your-strong-password@localhost:5432/koda
 ```
 
@@ -41,74 +40,40 @@ DATABASE_URL=postgresql://koda_user:password@localhost:5432/koda?connection_limi
 
 ---
 
-## Prisma Schema Change
+## Prisma Schema
 
-Switch the datasource provider in `apps/api/prisma/schema.prisma`:
-
-```prisma
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
-```
-
-Then regenerate the Prisma client and run migrations:
+The datasource provider is fixed to `postgresql` in `apps/api/prisma/schema.prisma`; no schema
+changes are needed to run on Postgres. Apply migrations with:
 
 ```bash
 cd apps/api
-bunx prisma generate
 bunx prisma migrate deploy
 ```
 
-> **Important:** SQLite and PostgreSQL migrations are not compatible. If migrating an existing SQLite database, export data first and reimport after running PostgreSQL migrations.
-
 ---
 
-## Docker Compose Override
+## Docker Compose (stock)
 
-Create `docker-compose.postgres.yml`:
-
-```yaml
-services:
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: koda
-      POSTGRES_USER: koda_user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U koda_user -d koda"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
-  api:
-    environment:
-      DATABASE_PROVIDER: postgresql
-      DATABASE_URL: postgresql://koda_user:${POSTGRES_PASSWORD}@postgres:5432/koda
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-volumes:
-  postgres_data:
-    driver: local
-```
-
-Start with the override:
+The stock `docker-compose.yml` at the repo root already ships a `postgres:16` service with a
+healthcheck, and the `api` service waits for it via `depends_on: { postgres: { condition:
+service_healthy } }`. No override file is needed:
 
 ```bash
-# .env — add your password
+# .env — POSTGRES_PASSWORD is required (the compose file fails closed without it)
 POSTGRES_PASSWORD=your-strong-password
 
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
+docker compose up -d
+```
 
-# Run migrations
+Migrations run automatically in the dev compose file (`docker-compose.dev.yml`). For the
+production compose, run them once after the stack is up:
+
+```bash
 docker compose exec api bunx prisma migrate deploy
 ```
+
+To point the API at an external Postgres instead of the bundled container, set `DATABASE_URL`
+for the `api` service (e.g. via an override file or environment) — no other changes required.
 
 ---
 
@@ -150,13 +115,14 @@ docker compose exec -T postgres psql -U koda_user koda < backups/koda-20260324.s
 
 ---
 
-## Migrating from SQLite
+## Migrating from a historical SQLite installation
+
+Koda's historical SQLite deployments stored all data in a single file. To bring that data forward:
 
 ```bash
-# 1. Export SQLite data (use a tool like pgloader or manual CSV export)
-# 2. Switch schema provider to postgresql and generate client
-# 3. Run: bunx prisma migrate deploy
-# 4. Import data
+# 1. Export the historical SQLite data (use a tool like pgloader or manual CSV export)
+# 2. Deploy against PostgreSQL and run: bunx prisma migrate deploy
+# 3. Import the data
 ```
 
-See the [pgloader docs](https://pgloader.io/) for automated SQLite → PostgreSQL migration.
+See the [pgloader docs](https://pgloader.io/) for automating the historical SQLite → PostgreSQL export/import.

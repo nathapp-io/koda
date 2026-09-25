@@ -33,7 +33,7 @@ import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.t
 import { resetDb } from '../../helpers/reset-db';
 
 const DATABASE_URL = process.env.DATABASE_URL;
-const describeIntegration = DATABASE_URL ? describe : describe.skip;
+const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 describeIntegration('H5 ticket tenancy', () => {
   let module: TestingModule;

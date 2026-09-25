@@ -122,7 +122,7 @@ Core entities:
 - `AgentRoleEntry` and `AgentCapabilityEntry`: normalized agent metadata
 
 Key data-model rules reflected in code/docs:
-- Prisma enums are not used because SQLite is the default provider; TypeScript enums/constants live in `apps/api/src/common/enums.ts`
+- Prisma enums are not used (historical SQLite constraint; conversion is tracked debt); TypeScript enums/constants live in `apps/api/src/common/enums.ts`
 - ticket numbers are project-scoped and allocated in an API transaction
 - soft deletes are used for projects and tickets
 - ticket references are human-readable as `<PROJECT_KEY>-<number>`

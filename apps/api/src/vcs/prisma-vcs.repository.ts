@@ -4,6 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import type { Ticket, VcsSyncLog } from '@prisma/client';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import type { VcsConnectionDomain, VcsConnectionWithProjectDomain, VcsSyncLogDomain, VcsProjectDomain, VcsTicketDomain } from './domain/vcs.domain';
+import { runWithTicketNumberRetry } from '../common/utils/ticket-number-retry';
 import { VcsIssue } from './types';
 import { TicketStatus, CommentType, ActivityType } from '../common/enums';
 import {
@@ -157,13 +158,13 @@ export class PrismaVcsRepository implements IVcsRepository {
 
   /**
    * Create a ticket from a VCS issue inside a transaction.
-   * Allocates ticket number as MAX(number)+1 scoped to the project.
+   * Allocates ticket number as MAX(number)+1 scoped to the project; retried on a concurrent-number conflict (M6).
    */
   async createTicketFromIssue(
     project: { id: string },
     issue: VcsIssue,
   ): Promise<CreateTicketFromIssueResult> {
-    return this.txManager.run(async () => {
+    return runWithTicketNumberRetry(this.txManager, async () => {
       const lastTicket = await this.db.ticket.findFirst({
         where: { projectId: project.id },
         orderBy: { number: 'desc' },
