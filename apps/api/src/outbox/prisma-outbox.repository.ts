@@ -71,6 +71,11 @@ export class PrismaOutboxRepository extends AbstractPrismaRepository<OutboxEvent
     return data;
   }
 
+  async findById(id: string): Promise<OutboxEventDomain | null> {
+    const model = await this.prisma.client.outboxEvent.findUnique({ where: { id } });
+    return model ? this.toDomain(model) : null;
+  }
+
   async findByStatus(status: string, limit: number): Promise<OutboxEventDomain[]> {
     const models = await this.prisma.client.outboxEvent.findMany({
       where: { status },
@@ -83,7 +88,7 @@ export class PrismaOutboxRepository extends AbstractPrismaRepository<OutboxEvent
   /** Admin retry: back to pending, due now, lease and error cleared. Returns rows changed. */
   async resetForRetry(id: string, now: Date): Promise<number> {
     const result = await this.prisma.client.outboxEvent.updateMany({
-      where: { id },
+      where: { id, status: { in: ['dead', 'pending'] } },
       data: { status: 'pending', attempts: 0, nextAttemptAt: now, owner: null, leaseUntil: null, lastError: null },
     });
     return result.count;

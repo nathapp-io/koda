@@ -780,73 +780,6 @@
         ]
       }
     },
-    "/api/admin/outbox": {
-      "get": {
-        "operationId": "AdminController_getOutbox",
-        "parameters": [
-          {
-            "name": "status",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Returns outbox events"
-          },
-          "403": {
-            "description": "Forbidden - requires admin role"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Get outbox events by status",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
-    "/api/admin/outbox/{eventId}/retry": {
-      "post": {
-        "operationId": "AdminController_retryOutboxEvent",
-        "parameters": [
-          {
-            "name": "eventId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Event reset to pending"
-          },
-          "403": {
-            "description": "Forbidden - requires admin role"
-          },
-          "404": {
-            "description": "Event not found"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Retry a dead-letter outbox event",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
     "/api/context/{slug}": {
       "get": {
         "operationId": "ContextController_getContext",
@@ -1569,7 +1502,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden - no project access"
+            "description": "Forbidden - admin or self only"
           },
           "404": {
             "description": "Project or agent not found"
@@ -1580,7 +1513,7 @@
             "bearer": []
           }
         ],
-        "summary": "Update an agent status within a project context (admin or project member)",
+        "summary": "Update an agent status within a project context (admin or the agent itself)",
         "tags": [
           "projects"
         ]
@@ -3853,6 +3786,86 @@
         "summary": "Receive CI pipeline failure webhook and auto-create ticket",
         "tags": [
           "ci-webhooks"
+        ]
+      }
+    },
+    "/api/admin/outbox": {
+      "get": {
+        "operationId": "AdminController_getOutbox",
+        "parameters": [
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": "pending",
+              "type": "string",
+              "enum": [
+                "pending",
+                "processing",
+                "published",
+                "dead"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns outbox events"
+          },
+          "400": {
+            "description": "Unknown status"
+          },
+          "403": {
+            "description": "Forbidden - requires admin role"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get outbox events by status",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/outbox/{eventId}/retry": {
+      "post": {
+        "operationId": "AdminController_retryOutboxEvent",
+        "parameters": [
+          {
+            "name": "eventId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event reset to pending"
+          },
+          "403": {
+            "description": "Forbidden - requires admin role"
+          },
+          "404": {
+            "description": "Event not found"
+          },
+          "409": {
+            "description": "Event is processing or already published"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Retry a dead outbox event",
+        "tags": [
+          "admin"
         ]
       }
     }

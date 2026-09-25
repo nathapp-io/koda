@@ -19,7 +19,7 @@ export function adminCommand(program: Command): void {
   outbox
     .command('list')
     .description('List outbox events')
-    .option('--status <status>', 'Filter by status (pending, failed, sent)')
+    .option('--status <status>', 'Filter by status (pending, processing, published, dead)')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
@@ -50,7 +50,7 @@ export function adminCommand(program: Command): void {
 
   outbox
     .command('retry')
-    .description('Retry a failed outbox event')
+    .description('Retry a dead outbox event')
     .requiredOption('--event-id <id>', 'Outbox event ID to retry')
     .option('--json', 'Output as JSON')
     .action(async (options) => {

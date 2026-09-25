@@ -10,7 +10,9 @@ import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { OutboxRelay, OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { outboxConfig } from '../../../src/config/outbox.config';
 import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
+import { OutboxAdminService } from '../../../src/outbox/outbox-admin.service';
 import { OutboxModule } from '../../../src/outbox/outbox.module';
+import { PrismaOutboxRepository } from '../../../src/outbox/prisma-outbox.repository';
 import { resetDb } from '../../helpers/reset-db';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
@@ -97,5 +99,20 @@ describeIntegration('outbox relay end to end', () => {
 
     const row = await prisma.client.outboxEvent.findUniqueOrThrow({ where: { id: record.id } });
     expect(row).toMatchObject({ status: 'dead', attempts: 8 });
+  });
+
+  it('admin retry resets a dead event so the relay delivers it again', async () => {
+    const admin = new OutboxAdminService(module.get(PrismaOutboxRepository));
+    const handler = jest.fn();
+    publisher.register('relay_revive', handler);
+    const record = await outbox.record({ type: 'relay_revive', payload: {}, metadata: { projectId, eventId: 'revive-1' } });
+    await prisma.client.outboxEvent.update({ where: { id: record.id }, data: { status: 'dead', attempts: 8, lastError: 'old' } });
+
+    await admin.retry(record.id);
+    await relay.dispatchPendingBatch();
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    const row = await prisma.client.outboxEvent.findUniqueOrThrow({ where: { id: record.id } });
+    expect(row).toMatchObject({ status: 'published', attempts: 0, lastError: null });
   });
 });

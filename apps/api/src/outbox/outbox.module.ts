@@ -4,7 +4,6 @@ import { OutboxModule as NathappOutboxModule, OutboxModuleOptions } from '@natha
 import { IOutboxConfig, OUTBOX_CFG } from '../config/outbox.config';
 import { FanOutPublisher } from './fan-out-publisher';
 import { OutboxCoreModule } from './outbox-core.module';
-import { OutboxService } from './outbox.service';
 import { PrismaOutboxStore } from './prisma-outbox.store';
 
 // Consumers (memory, entity-graph, code-intel, webhook, rag) import this module
@@ -27,7 +26,6 @@ import { PrismaOutboxStore } from './prisma-outbox.store';
       },
     }),
   ],
-  providers: [OutboxService],
-  exports: [OutboxCoreModule, OutboxService],
+  exports: [OutboxCoreModule],
 })
 export class OutboxModule {}

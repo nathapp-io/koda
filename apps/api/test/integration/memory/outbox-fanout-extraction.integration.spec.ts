@@ -9,7 +9,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { MemoryKind } from '../../../src/common/enums';
 
-describe('AC8: OutboxFanOutRegistry dispatches to ExtractionService', () => {
+describe('AC8: FanOutPublisher dispatches to ExtractionService', () => {
   let fanOutRegistry: FanOutPublisher;
   let extractionService: ExtractionService;
   let memoryRepository: PrismaMemoryItemRepository;

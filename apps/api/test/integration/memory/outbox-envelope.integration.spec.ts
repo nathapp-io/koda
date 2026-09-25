@@ -34,7 +34,6 @@ import { resetDb } from '../../helpers/reset-db';
 import { PrismaOutboxRepository } from '../../../src/outbox/prisma-outbox.repository';
 import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
 import { PrismaOutboxStore } from '../../../src/outbox/prisma-outbox.store';
-import { OutboxService } from '../../../src/outbox/outbox.service';
 import { PrismaEventsRepository } from '../../../src/events/prisma-events.repository';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
 import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-item.repository';
@@ -54,7 +53,7 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
 
   let prismaService: PrismaService<PrismaClient>;
   let prisma: PrismaClient;
-  let outboxService: OutboxService;
+  let packageOutbox: NathappOutboxService;
   let relay: OutboxRelay;
   let ticketsService: TicketsService;
   let transitionsService: TicketTransitionsService;
@@ -116,8 +115,7 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
     // Real outbox stack (package relay) + real memory fan-out subscriber.
     const store = new PrismaOutboxStore(prismaService);
     const publisher = new FanOutPublisher(new PrismaOutboxRepository(txManager, prismaService));
-    const packageOutbox = new NathappOutboxService(store, txManager);
-    outboxService = new OutboxService(packageOutbox, new PrismaOutboxRepository(txManager, prismaService));
+    packageOutbox = new NathappOutboxService(store, txManager);
     relay = new OutboxRelay({ store, publisher, relay: { enabled: false } }, store, publisher);
     const ticketEventService = new TicketEventService(new PrismaEventsRepository(prismaService));
     const memoryRepository = new PrismaMemoryItemRepository(txManager, prismaService);
@@ -128,8 +126,7 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
     );
     memorySubscriber.onModuleInit();
 
-    // Real producers. Producers take the package OutboxService (record()) —
-    // koda's transitional enqueue() adapter stays only for the RED baseline test.
+    // Real producers. Producers take the package OutboxService (record()).
     const ticketRepo = new PrismaTicketsRepository(prismaService);
     // The 5th ctor arg (transitionsService) arrived with the M2 fix on PR #129;
     // assign() does not delegate to it, so a minimal stub satisfies DI here.
@@ -206,19 +203,18 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
   });
 
   it('RED baseline: the legacy partial payload shape produces zero memory items', async () => {
-    // Before H13 producers enqueued {ticketId, projectId, actorId, data} with no
+    // Before H13 producers recorded {ticketId, projectId, actorId, data} with no
     // action/id/timestamp. The memory subscriber switches on `action`, so this
     // payload was silently ignored — this test pins that baseline at runtime.
-    await outboxService.enqueue({
-      projectId,
-      eventType: 'ticket_event',
-      eventId: 'legacy-evt-1',
+    await packageOutbox.record({
+      type: 'ticket_event',
       payload: {
         ticketId: transitionTicketId,
         projectId,
         actorId: adminUserId,
         data: {},
       },
+      metadata: { projectId, eventId: 'legacy-evt-1' },
     });
     await relay.dispatchPendingBatch();
 

@@ -25,7 +25,7 @@ describe('EntityGraphService AC9: Outbox fan-out integration', () => {
   });
 
   describe('AC9: Outbox fan-out handlers for entity_graph events', () => {
-    it('AC9: OutboxFanOutRegistry should have a handler for ticket_event that updates entity graph', async () => {
+    it('AC9: FanOutPublisher should have a handler for ticket_event that updates entity graph', async () => {
       const handlers = fanOutRegistry.getHandlers('ticket_event');
       expect(handlers.length).toBeGreaterThanOrEqual(0);
     });

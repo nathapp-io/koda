@@ -15,11 +15,3 @@ export interface OutboxEventDomain {
   createdAt: Date;
   updatedAt: Date;
 }
-
-/** Transitional producer input for OutboxService.enqueue() (deleted in Task 6). */
-export interface OutboxEventInput {
-  projectId: string;
-  eventType: string;
-  eventId: string;
-  payload: unknown;
-}
