@@ -23,7 +23,7 @@ import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TicketResponseDto } from './dto/ticket-response.dto';
 import { TransitionWithCommentDto } from './dto/transition-with-comment.dto';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
-import { JsonResponse } from '@nathapp/nestjs-common';
+import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
 import { TicketType, TicketStatus, Priority } from '../common/enums';
 import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
@@ -129,6 +129,16 @@ export class TicketsController {
     principal: KodaPrincipal,
   ) {
     return this.transitionsService.reject(slug, ref, body, principal);
+  }
+
+  // M1: a declared comment type on verify/fix/verify-fix/reject must not be
+  // silently skipped by a missing or whitespace-only body.
+  private requireCommentBody(body: string | undefined): string {
+    const trimmed = (body ?? '').trim();
+    if (!trimmed) {
+      throw new ValidationAppException({ body: 'body must not be blank' }, 'tickets');
+    }
+    return body as string;
   }
 
   // HTTP route handlers
@@ -259,7 +269,7 @@ export class TicketsController {
     @Body() dto: TransitionWithCommentDto,
     @Principal() principal: KodaPrincipal,
   ) {
-    const result = await this.verifyTicket(slug, ref, dto.body ?? '', principal);
+    const result = await this.verifyTicket(slug, ref, this.requireCommentBody(dto.body), principal);
     return JsonResponse.Ok(result.ticket);
   }
 
@@ -292,7 +302,7 @@ export class TicketsController {
     @Body() dto: TransitionWithCommentDto,
     @Principal() principal: KodaPrincipal,
   ) {
-    const result = await this.fixTicket(slug, ref, dto.body ?? '', principal);
+    const result = await this.fixTicket(slug, ref, this.requireCommentBody(dto.body), principal);
     return JsonResponse.Ok(result.ticket);
   }
 
@@ -310,8 +320,10 @@ export class TicketsController {
     @Query('approve') approve: boolean | string,
     @Principal() principal: KodaPrincipal,
   ) {
+    // M1: validate the required comment body before any approve/reject branching.
+    const commentBody = this.requireCommentBody(dto.body);
     const isApproved = approve === 'true' || approve === true;
-    const result = await this.verifyFixTicket(slug, ref, dto.body ?? '', isApproved, principal);
+    const result = await this.verifyFixTicket(slug, ref, commentBody, isApproved, principal);
     return JsonResponse.Ok(result.ticket);
   }
 
@@ -344,7 +356,7 @@ export class TicketsController {
     @Body() dto: TransitionWithCommentDto,
     @Principal() principal: KodaPrincipal,
   ) {
-    const result = await this.rejectTicket(slug, ref, dto.body ?? '', principal);
+    const result = await this.rejectTicket(slug, ref, this.requireCommentBody(dto.body), principal);
     return JsonResponse.Ok(result.ticket);
   }
 }
