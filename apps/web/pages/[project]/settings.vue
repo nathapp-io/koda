@@ -242,7 +242,7 @@ async function disconnect() {
     await $api.delete(`/projects/${slug}/vcs`)
     toast.success(t('vcs.toast.disconnectSuccess'))
     await refreshConnection()
-  } catch (err) {
+  } catch {
     toast.error(t('vcs.toast.disconnectFailed'))
   }
 }

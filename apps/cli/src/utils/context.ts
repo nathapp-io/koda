@@ -15,7 +15,8 @@ export interface WithContextOptions {
  *
  * Performs the canonical context resolution in a single place instead of
  * ~40 duplicated copies across command modules:
- * - resolves project/api key/api url (flags → env → project config → profile → global)
+ * - resolves project/api key/api url (flags → env → profile → global;
+ *   H10: apiUrl/apiKey from project-local `.koda/config.json` are ignored)
  * - short-circuits with the correct config error + exit code when project
  *   (default) or API key is missing
  * - wires the generated client (OpenAPI.BASE/TOKEN)

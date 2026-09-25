@@ -21,11 +21,21 @@ export default defineEventHandler(async (event) => {
   }
 
   const envelope = responseBody as
-    | { ret?: number; data?: { user?: Record<string, unknown> } }
+    | { ret?: number; data?: Record<string, unknown> | null }
     | Record<string, unknown>
     | undefined
   if (envelope && typeof envelope === 'object' && 'data' in envelope) {
-    return { user: (envelope as { data?: { user?: Record<string, unknown> } }).data?.user ?? null }
+    // The upstream API (JsonResponse.Ok(validatedUser)) returns the user
+    // object directly in `data`; support the nested `data.user` shape too.
+    const data = (envelope as { data?: Record<string, unknown> | null }).data
+    if (data && typeof data === 'object') {
+      const user = ((data as { user?: Record<string, unknown> }).user ?? data) as
+        | Record<string, unknown>
+        | null
+      if (user && typeof user.email === 'string') {
+        return { user }
+      }
+    }
   }
   return { user: null }
 })

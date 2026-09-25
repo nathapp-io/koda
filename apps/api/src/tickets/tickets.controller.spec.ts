@@ -6,8 +6,10 @@ import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { PERMISSION_KEY, CaslPermissionAction } from '@nathapp/nestjs-auth';
+import { ValidationAppException } from '@nathapp/nestjs-common';
 import { KodaAction } from '../auth/casl/koda-action.enum';
 import { ProjectsService } from '../projects/projects.service';
+import { TransitionWithCommentDto } from './dto/transition-with-comment.dto';
 
 describe('TicketsController', () => {
   let controller: TicketsController;
@@ -606,6 +608,63 @@ describe('TicketsController', () => {
       expect(Reflect.getMetadata(PERMISSION_KEY, controller.assign)).toEqual([
         [KodaAction.UPDATE as CaslPermissionAction, 'Ticket'],
       ]);
+    });
+  });
+
+  describe('comment-required transitions (M1)', () => {
+    const commentRequiredRoutes = ['verify', 'fix', 'verifyFix', 'reject'] as const;
+
+    it.each(commentRequiredRoutes)(
+      'M1: blank body on %s route throws ValidationAppException and never reaches the transitions service',
+      async (route) => {
+        await expect(
+          (controller as any)[route]('koda', 'KODA-1', { body: '   ' } as TransitionWithCommentDto, mockAdminUser),
+        ).rejects.toThrow(ValidationAppException);
+
+        expect(mockTransitionsService[route]).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(commentRequiredRoutes)(
+      'M1: missing body on %s route throws ValidationAppException and never reaches the transitions service',
+      async (route) => {
+        await expect(
+          (controller as any)[route]('koda', 'KODA-1', {} as TransitionWithCommentDto, mockAdminUser),
+        ).rejects.toThrow(ValidationAppException);
+
+        expect(mockTransitionsService[route]).not.toHaveBeenCalled();
+      },
+    );
+
+    it('M1: blank body on verify-fix throws before any approve/reject branching', async () => {
+      for (const approve of [true, false]) {
+        await expect(
+          controller.verifyFix('koda', 'KODA-1', { body: '  ' } as TransitionWithCommentDto, approve, mockAdminUser),
+        ).rejects.toThrow(ValidationAppException);
+      }
+
+      expect(mockTransitionsService.verifyFix).not.toHaveBeenCalled();
+    });
+
+    it('M1: non-blank body passes through to the transitions service (positive control)', async () => {
+      mockTransitionsService.verify.mockResolvedValue({ ticket: mockTicket });
+
+      await controller.verify('koda', 'KODA-1', { body: 'Verified against staging' }, mockAdminUser);
+
+      expect(mockTransitionsService.verify).toHaveBeenCalledWith(
+        'koda',
+        'KODA-1',
+        'Verified against staging',
+        mockAdminUser,
+      );
+    });
+
+    it('M1: start route has no required comment and still works without a body', async () => {
+      mockTransitionsService.start.mockResolvedValue({ ticket: mockTicket });
+
+      await controller.start('koda', 'KODA-1', mockAdminUser);
+
+      expect(mockTransitionsService.start).toHaveBeenCalledWith('koda', 'KODA-1', mockAdminUser);
     });
   });
 });

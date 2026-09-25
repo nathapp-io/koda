@@ -238,6 +238,61 @@ describe('AuthController', () => {
       expect(data.name).toBe(mockUser.name);
       expect(data.role).toBe(mockUser.role);
     });
+
+    // Final-review Finding D: validateUser returns the full user row including
+    // passwordHash — /auth/me must map through UserResponseDto so the hash is
+    // never serialized.
+    it('should never serialize passwordHash in the /auth/me response', async () => {
+      const user = {
+        id: mockUser.id,
+        name: mockUser.email,
+        blacklisted: false,
+        revoked: false,
+        authorities: ['MEMBER'],
+      };
+
+      mockAuthService.validateUser.mockResolvedValue({
+        ...mockUser,
+        passwordHash: '$2b$10$supersecret-hash',
+      });
+
+      const result = await controller.me(user);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = result.data as any;
+      expect(data).not.toHaveProperty('passwordHash');
+      expect(JSON.stringify(result)).not.toContain('supersecret-hash');
+      // Legitimate fields are still present
+      expect(data.email).toBe(mockUser.email);
+      expect(data.name).toBe(mockUser.name);
+    });
+  });
+
+  // Metadata keys confirmed in @nestjs/throttler@6.5.0 dist/throttler.constants.js:
+  // THROTTLER_LIMIT = 'THROTTLER:LIMIT', THROTTLER_TTL = 'THROTTLER:TTL',
+  // suffixed with the throttler name ('default').
+  describe('H2 throttle placement', () => {
+    const LIMIT_KEY = 'THROTTLER:LIMITdefault';
+    const TTL_KEY = 'THROTTLER:TTLdefault';
+
+    it('has no class-level @Throttle so /auth/me is not rate limited', () => {
+      expect(Reflect.getMetadata(LIMIT_KEY, AuthController)).toBeUndefined();
+      expect(Reflect.getMetadata(TTL_KEY, AuthController)).toBeUndefined();
+    });
+
+    it('throttles login, register, and logout at 5/min each', () => {
+      const proto = AuthController.prototype as unknown as Record<string, unknown>;
+      for (const handler of ['login', 'register', 'logout']) {
+        const handlerFn = proto[handler] as object;
+        expect(Reflect.getMetadata(LIMIT_KEY, handlerFn)).toBe(5);
+        expect(Reflect.getMetadata(TTL_KEY, handlerFn)).toBe(60000);
+      }
+    });
+
+    it('does not throttle refresh beyond the global default', () => {
+      const proto = AuthController.prototype as unknown as Record<string, unknown>;
+      expect(Reflect.getMetadata(LIMIT_KEY, proto['refresh'] as object)).toBeUndefined();
+    });
   });
 
   describe('POST /auth/logout', () => {

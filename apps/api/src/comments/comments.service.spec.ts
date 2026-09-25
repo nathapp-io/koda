@@ -149,8 +149,7 @@ describe('CommentsService', () => {
     update: jest.fn(),
     delete: jest.fn(),
     findProjectBySlug: jest.fn(),
-    findTicketByNumber: jest.fn(),
-    findTicketById: jest.fn(),
+    findTicketScoped: jest.fn(),
   };
 
   let mockCaslCan: jest.Mock;
@@ -181,7 +180,7 @@ describe('CommentsService', () => {
       };
 
       mockCommentRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockCommentRepo.findTicketByNumber.mockResolvedValue(mockTicket);
+      mockCommentRepo.findTicketScoped.mockResolvedValue(mockTicket);
       const createdComment = { ...mockComment, body: 'This is a test comment' };
       mockCommentRepo.create.mockResolvedValue(createdComment);
 
@@ -205,7 +204,7 @@ describe('CommentsService', () => {
       };
 
       mockCommentRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockCommentRepo.findTicketByNumber.mockResolvedValue(mockTicket);
+      mockCommentRepo.findTicketScoped.mockResolvedValue(mockTicket);
       const commentWithType = { ...mockComment, type: 'VERIFICATION' };
       mockCommentRepo.create.mockResolvedValue(commentWithType);
 
@@ -219,7 +218,7 @@ describe('CommentsService', () => {
 
       for (const commentType of types) {
         mockCommentRepo.findProjectBySlug.mockResolvedValue(mockProject);
-        mockCommentRepo.findTicketByNumber.mockResolvedValue(mockTicket);
+        mockCommentRepo.findTicketScoped.mockResolvedValue(mockTicket);
         const commentWithType = { ...mockComment, type: commentType };
         mockCommentRepo.create.mockResolvedValue(commentWithType);
 
@@ -241,7 +240,7 @@ describe('CommentsService', () => {
       };
 
       mockCommentRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockCommentRepo.findTicketByNumber.mockResolvedValue(mockTicket);
+      mockCommentRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockCommentRepo.create.mockResolvedValue({
         ...mockComment,
         authorUserId: 'user-456',
@@ -260,7 +259,7 @@ describe('CommentsService', () => {
       };
 
       mockCommentRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockCommentRepo.findTicketByNumber.mockResolvedValue(mockTicket);
+      mockCommentRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockCommentRepo.create.mockResolvedValue({
         ...mockComment,
         authorUserId: null,
@@ -293,7 +292,7 @@ describe('CommentsService', () => {
       };
 
       mockCommentRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockCommentRepo.findTicketByNumber.mockResolvedValue(null);
+      mockCommentRepo.findTicketScoped.mockResolvedValue(null);
 
       await expect(
         service.create('koda', 'KODA-999', createDto, mockUserPrincipal)
@@ -308,7 +307,7 @@ describe('CommentsService', () => {
 
       for (const invalidDto of invalidDtos) {
         mockCommentRepo.findProjectBySlug.mockResolvedValue(mockProject);
-        mockCommentRepo.findTicketByNumber.mockResolvedValue(mockTicket);
+        mockCommentRepo.findTicketScoped.mockResolvedValue(mockTicket);
 
         await expect(
           service.create('koda', 'KODA-1', invalidDto as CreateCommentDto, mockUserPrincipal)
@@ -325,7 +324,7 @@ describe('CommentsService', () => {
       ];
 
       mockCommentRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockCommentRepo.findTicketByNumber.mockResolvedValue(mockTicket);
+      mockCommentRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockCommentRepo.findByTicketId.mockResolvedValue(comments);
 
       const result = await service.findByTicket('koda', 'KODA-1');
@@ -337,7 +336,7 @@ describe('CommentsService', () => {
 
     it('should return empty array when no comments found', async () => {
       mockCommentRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockCommentRepo.findTicketByNumber.mockResolvedValue(mockTicket);
+      mockCommentRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockCommentRepo.findByTicketId.mockResolvedValue([]);
 
       const result = await service.findByTicket('koda', 'KODA-1');
@@ -353,7 +352,7 @@ describe('CommentsService', () => {
 
     it('should return 404 if ticket not found', async () => {
       mockCommentRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockCommentRepo.findTicketByNumber.mockResolvedValue(null);
+      mockCommentRepo.findTicketScoped.mockResolvedValue(null);
 
       await expect(service.findByTicket('koda', 'KODA-999')).rejects.toThrow();
     });

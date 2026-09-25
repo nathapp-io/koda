@@ -10,8 +10,7 @@ import type {
   TicketRow,
   TicketWithFlatLabels,
 } from './domain/label.domain';
-
-const REF_PATTERN = /^([A-Z]+)-(\d+)$/;
+import { parseTicketRef } from '../common/utils/ticket-ref.util';
 
 @Injectable()
 export class PrismaLabelRepository implements ILabelRepository {
@@ -38,7 +37,7 @@ export class PrismaLabelRepository implements ILabelRepository {
   async findProjectBySlug(slug: string): Promise<ProjectRow | null> {
     return this.db.project.findUnique({
       where: { slug },
-      select: { id: true, deletedAt: true },
+      select: { id: true, key: true, deletedAt: true },
     });
   }
 
@@ -67,30 +66,28 @@ export class PrismaLabelRepository implements ILabelRepository {
     return { id: row.id, projectId: row.projectId, name: row.name, color: row.color };
   }
 
-  async findTicketByRef(projectId: string, ticketRef: string): Promise<TicketRow | null> {
-    const match = ticketRef.match(REF_PATTERN);
+  // H5: scoped ticket resolution — a foreign KEY prefix never resolves
+  // locally and CUIDs are constrained to the project.
+  async findTicketScoped(projectId: string, projectKey: string, ticketRef: string): Promise<TicketRow | null> {
+    const match = parseTicketRef(ticketRef);
+    const select = {
+      id: true,
+      projectId: true,
+      number: true,
+      deletedAt: true,
+      labels: { include: { label: true } },
+    } as const;
+
     if (match) {
-      const number = parseInt(match[2], 10);
+      if (match.prefix !== projectKey) return null;
       return this.db.ticket.findUnique({
-        where: { projectId_number: { projectId, number } },
-        select: {
-          id: true,
-          projectId: true,
-          number: true,
-          deletedAt: true,
-          labels: { include: { label: true } },
-        },
+        where: { projectId_number: { projectId, number: match.number } },
+        select,
       });
     }
-    return this.db.ticket.findUnique({
-      where: { id: ticketRef },
-      select: {
-        id: true,
-        projectId: true,
-        number: true,
-        deletedAt: true,
-        labels: { include: { label: true } },
-      },
+    return this.db.ticket.findFirst({
+      where: { id: ticketRef, projectId },
+      select,
     });
   }
 

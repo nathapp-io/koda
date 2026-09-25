@@ -130,7 +130,8 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
 
     // Real producers.
     const ticketRepo = new PrismaTicketsRepository(prismaService);
-    ticketsService = new TicketsService(ticketRepo, txManager, ticketEventService, outboxService);
+    // The 5th ctor arg (transitionsService) arrived with the M2 fix on PR #129;
+    // assign() does not delegate to it, so a minimal stub satisfies DI here.
     transitionsService = new TicketTransitionsService(
       ticketRepo,
       txManager,
@@ -143,6 +144,7 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
       ticketEventService,
       outboxService,
     );
+    ticketsService = new TicketsService(ticketRepo, txManager, ticketEventService, outboxService, transitionsService);
 
     // Seed: project, ADMIN user (assignee), and two tickets.
     const project = await prisma.project.create({

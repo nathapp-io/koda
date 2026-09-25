@@ -65,14 +65,11 @@ export default defineNuxtConfig({
     classSuffix: '',
   },
 
-  // Proxy /api/** through Nuxt server → API container
-  // Solves the Docker SSR problem: browser + SSR both use relative /api path,
-  // Nuxt server proxies to the API service (http://api:3100 in Docker, localhost:3100 in dev)
-  routeRules: {
-    '/api/**': {
-      proxy: `${process.env.NUXT_API_INTERNAL_URL || 'http://localhost:3100'}/api/**`,
-    },
-  },
+  // Proxy /api/** through Nuxt server → API container is implemented by the
+  // Nitro catch-all handler at server/api/[...].ts (M23). It reads
+  // NUXT_API_INTERNAL_URL at runtime (a build-time routeRules proxy froze the
+  // target at build time) and never shadows server/api/auth/* filesystem
+  // routes, so the httpOnly cookie session can be established.
 
   runtimeConfig: {
     // Server-side only: internal URL for SSR → API calls

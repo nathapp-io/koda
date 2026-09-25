@@ -77,7 +77,6 @@ const { t } = useI18n()
 const toast = useAppToast()
 
 // Tag input state for capabilities
-const newCapabilityInput = ref('')
 const capabilitiesTags = ref<string[]>([...props.agent.capabilities])
 
 // Watch agent prop to update capabilities when agent changes
@@ -116,7 +115,7 @@ const onSubmit = handleSubmit(async () => {
     toast.success(t('agents.toast.capabilitiesUpdated'))
     emit('updated')
     emit('update:open', false)
-  } catch (error: unknown) {
+  } catch {
     toast.error(t('agents.toast.updateCapabilitiesFailed'))
   }
 })

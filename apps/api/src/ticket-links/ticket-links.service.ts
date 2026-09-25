@@ -3,6 +3,7 @@ import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { CreateTicketLinkDto } from './dto/create-ticket-link.dto';
 import { TicketLinkResponseDto } from './dto/ticket-link-response.dto';
 import { detectProvider } from '../common/utils/detect-provider.util';
+import { parseTicketRef } from '../common/utils/ticket-ref.util';
 import { PrismaTicketLinkRepository } from './prisma-ticket-link.repository';
 import { TicketLinkDomain } from './domain/ticket-link.domain';
 
@@ -25,12 +26,18 @@ export class TicketLinksService {
       throw new NotFoundAppException({}, 'ticket-links');
     }
 
-    const refMatch = ref.match(/^([A-Z]+)-(\d+)$/);
+    // H5: same scoped predicate as findTicketScoped — a KEY-N ref whose
+    // prefix differs from the project's key never resolves locally, even
+    // when the project happens to own the same ticket number. CUID refs are
+    // already project-scoped by findTicketById.
+    const parsed = parseTicketRef(ref);
     let ticket: { id: string } | null;
 
-    if (refMatch) {
-      const number = parseInt(refMatch[2], 10);
-      ticket = await this.repo.findTicketByNumber(project.id, number);
+    if (parsed) {
+      ticket =
+        parsed.prefix === project.key
+          ? await this.repo.findTicketByNumber(project.id, parsed.number)
+          : null;
     } else {
       ticket = await this.repo.findTicketById(ref, project.id);
     }

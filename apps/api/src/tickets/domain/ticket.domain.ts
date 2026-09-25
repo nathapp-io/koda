@@ -102,6 +102,23 @@ export interface ITicketRepository {
   assignTicket(id: string, data: AssignTicketData): Promise<TicketDomain>;
   softDeleteTicket(id: string): Promise<TicketDomain>;
   findTicketByRefRaw(projectSlug: string, ref: string): Promise<TicketDomain | null>;
+  /**
+   * H5: resolve a ticket ref (KEY-N or CUID) strictly within one project.
+   * KEY-N prefix must equal projectKey; CUIDs are looked up with a projectId
+   * constraint; soft-deleted tickets are excluded unless includeDeleted.
+   */
+  findTicketScoped(
+    projectId: string,
+    projectKey: string,
+    ref: string,
+    opts?: { includeDeleted?: boolean },
+  ): Promise<TicketDomain | null>;
+  /**
+   * M3: conditional status write. Updates the ticket to `to` only when its
+   * current status is still `from`; returns the fresh row, or null when no
+   * row matched (stale read — another writer transitioned the ticket).
+   */
+  updateTicketStatusIf(id: string, from: string, to: string): Promise<TicketDomain | null>;
   findUserById(id: string): Promise<{ id: string; role: string } | null>;
   findAgentById(id: string): Promise<{ id: string } | null>;
   findProjectMemberRole(projectId: string, userId: string): Promise<string | null>;

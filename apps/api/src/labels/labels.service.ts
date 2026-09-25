@@ -102,7 +102,7 @@ export class LabelsService {
       throw new NotFoundAppException({}, 'labels');
     }
 
-    const ticket = await this.repo.findTicketByRef(project.id, ticketRef);
+    const ticket = await this.repo.findTicketScoped(project.id, project.key, ticketRef);
     if (!ticket || ticket.deletedAt) {
       throw new NotFoundAppException({}, 'labels');
     }
@@ -159,7 +159,7 @@ export class LabelsService {
       throw new NotFoundAppException({}, 'labels');
     }
 
-    const ticket = await this.repo.findTicketByRef(project.id, ticketRef);
+    const ticket = await this.repo.findTicketScoped(project.id, project.key, ticketRef);
     if (!ticket || ticket.deletedAt) {
       throw new NotFoundAppException({}, 'labels');
     }

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
+import { parseTicketRef } from '../common/utils/ticket-ref.util';
 import type {
   ITicketRepository,
   TicketProject,
@@ -283,26 +284,50 @@ export class PrismaTicketsRepository implements ITicketRepository {
   async findTicketByRefRaw(projectSlug: string, ref: string): Promise<TicketDomain | null> {
     const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
-      select: { id: true },
+      select: { id: true, key: true },
     });
 
     if (!project) return null;
 
-    const refPattern = /^([A-Z]+)-(\d+)$/;
-    const match = ref.match(refPattern);
+    // H5: transitions resolve through the same scoped predicate as reads —
+    // cross-project CUIDs, foreign KEY prefixes and soft-deleted tickets all
+    // miss (deletedAt: null is applied by findTicketScoped by default).
+    return this.findTicketScoped(project.id, project.key, ref);
+  }
+
+  async findTicketScoped(
+    projectId: string,
+    projectKey: string,
+    ref: string,
+    opts: { includeDeleted?: boolean } = {},
+  ): Promise<TicketDomain | null> {
+    const match = parseTicketRef(ref);
 
     if (match) {
-      const number = parseInt(match[2], 10);
+      // H5: a foreign KEY prefix never resolves locally, even when the
+      // project happens to own the same ticket number.
+      if (match.prefix !== projectKey) return null;
+
       const row = await this.db.ticket.findUnique({
-        where: { projectId_number: { projectId: project.id, number } },
+        where: { projectId_number: { projectId, number: match.number } },
+        include: {
+          labels: { include: { label: true } },
+          links: true,
+        },
       });
-      return row ? this.toDomain(row) : null;
+      return row && (opts.includeDeleted || !row.deletedAt) ? this.toDomain(row) : null;
     }
 
-    const row = await this.db.ticket.findUnique({
-      where: { id: ref },
+    // H5: CUID refs are constrained to the caller's project — a valid CUID
+    // belonging to another project must not resolve.
+    const row = await this.db.ticket.findFirst({
+      where: { id: ref, projectId },
+      include: {
+        labels: { include: { label: true } },
+        links: true,
+      },
     });
-    return row ? this.toDomain(row) : null;
+    return row && (opts.includeDeleted || !row.deletedAt) ? this.toDomain(row) : null;
   }
 
   // Extra method used by ticket-transitions for full ticket with comments for RAG indexing
@@ -316,12 +341,20 @@ export class PrismaTicketsRepository implements ITicketRepository {
 
   // Transition-specific write methods (used inside txManager.run())
 
-  async updateTicketStatus(id: string, status: string): Promise<TicketDomain> {
-    const row = await this.db.ticket.update({
-      where: { id },
-      data: { status },
+  // M3: conditional status write — only updates when the row still holds
+  // `from`. Returns the fresh domain row, or null when 0 rows matched
+  // (another writer transitioned the ticket between read and write).
+  // Final-review hardening: `deletedAt: null` excludes soft-deleted rows, so a
+  // ticket deleted between the pre-read and this write can no longer be
+  // transitioned (callers' pre-reads already filter deleted tickets).
+  async updateTicketStatusIf(id: string, from: string, to: string): Promise<TicketDomain | null> {
+    const rows = await this.db.ticket.updateMany({
+      where: { id, status: from, deletedAt: null },
+      data: { status: to },
     });
-    return this.toDomain(row);
+    if (rows.count === 0) return null;
+    const row = await this.db.ticket.findUnique({ where: { id } });
+    return row ? this.toDomain(row) : null;
   }
 
   async createComment(data: {

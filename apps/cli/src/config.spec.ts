@@ -1,6 +1,14 @@
 // Mock conf before importing config module
 const mockData: Record<string, unknown> = { profiles: {} };
 
+// Partial mock of 'os': homedir is a jest.fn defaulting to the real home dir
+// so H10 tests can simulate an alternate home directory (homedir ceiling).
+jest.mock('os', () => {
+  const actual = jest.requireActual('os');
+  const realHomedir = actual.homedir();
+  return { ...actual, homedir: jest.fn(() => realHomedir) };
+});
+
 const mockStore = {
   get(key: string) {
     if (key in mockData) return mockData[key];
@@ -15,6 +23,7 @@ jest.mock('conf', () => {
   return jest.fn(() => mockStore);
 });
 
+import { homedir } from 'os';
 import {
   getConfig,
   setConfig,
@@ -228,6 +237,51 @@ describe('config', () => {
       expect(result).toEqual({ projectSlug: 'test-project' });
     });
 
+    it('H10: never returns ~/.koda/config.json — walk stops at the homedir ceiling', async () => {
+      // Simulate a home directory at /a so that /a/.koda/config.json is the
+      // "global" config. The walk starts below it (/a/b/c) and must stop
+      // before considering /a itself.
+      const homedirMock = homedir as unknown as jest.Mock;
+      homedirMock.mockReturnValue('/a');
+
+      const mockReadFile = jest.fn(async (path: string) => {
+        if (path === '/a/.koda/config.json') {
+          return JSON.stringify({ projectSlug: 'global-not-project' });
+        }
+        throw new Error('ENOENT');
+      });
+
+      const mockExists = jest.fn(async (path: string) => {
+        return path === '/a/.koda/config.json';
+      });
+
+      try {
+        const result = await findProjectConfig('/a/b/c', { readFile: mockReadFile, exists: mockExists });
+        expect(result).toBeNull();
+        expect(mockReadFile).not.toHaveBeenCalledWith('/a/.koda/config.json');
+      } finally {
+        homedirMock.mockClear();
+      }
+    });
+
+    it('H10: returns null when the starting directory is the home directory itself', async () => {
+      const homedirMock = homedir as unknown as jest.Mock;
+      homedirMock.mockReturnValue('/a');
+
+      const mockReadFile = jest.fn(async () => {
+        throw new Error('ENOENT');
+      });
+
+      const mockExists = jest.fn(async () => false);
+
+      try {
+        const result = await findProjectConfig('/a', { readFile: mockReadFile, exists: mockExists });
+        expect(result).toBeNull();
+      } finally {
+        homedirMock.mockClear();
+      }
+    });
+
     it('returns null when .koda/config.json contains invalid JSON', async () => {
       const mockReadFile = jest.fn(async (path: string) => {
         if (path === '/a/b/c/.koda/config.json') {
@@ -400,13 +454,49 @@ describe('config', () => {
       expect(result.apiKey).toBe('staging-key-abcdef');
     });
 
-    it('AC4: apiUrl comes from .koda/config.json when specified and no CLI flag overrides it', async () => {
+    it('H10: project config apiUrl is ignored with a warning', async () => {
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const deps: ResolveContextDeps = {
+          findProjectConfig: makeProjectConfigDep({ projectSlug: 'p', apiUrl: 'https://evil' }),
+          getConfig: makeGlobalConfig({ apiUrl: 'http://localhost:3100', apiKey: 'real-key' }),
+        };
+        const result = await resolveContext({}, deps);
+        expect(result.apiUrl).toBe('http://localhost:3100');
+        expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('ignored'));
+        expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('security'));
+      } finally {
+        errorSpy.mockRestore();
+      }
+    });
+
+    it('H10: project config apiKey is ignored', async () => {
+      const deps: ResolveContextDeps = {
+        findProjectConfig: makeProjectConfigDep({ projectSlug: 'p', apiKey: 'stolen' }),
+        getConfig: makeGlobalConfig({ apiUrl: 'http://localhost:3100', apiKey: 'real-key' }),
+      };
+      const result = await resolveContext({}, deps);
+      expect(result.apiKey).toBe('real-key');
+    });
+
+    it('H10: profile apiUrl and apiKey are still honored (positive control)', async () => {
+      const stagingProfile: Profile = { apiKey: 'profile-key-abcdef', apiUrl: 'https://profile.example.com' };
+      const deps: ResolveContextDeps = {
+        findProjectConfig: makeProjectConfigDep({ projectSlug: 'p', profile: 'staging' }),
+        getConfig: makeGlobalConfig({ profiles: { staging: stagingProfile } }),
+      };
+      const result = await resolveContext({}, deps);
+      expect(result.apiUrl).toBe('https://profile.example.com');
+      expect(result.apiKey).toBe('profile-key-abcdef');
+    });
+
+    it('H10: apiUrl falls back to global config when .koda/config.json specifies apiUrl (project apiUrl ignored)', async () => {
       const deps: ResolveContextDeps = {
         findProjectConfig: makeProjectConfigDep({ projectSlug: 'my-project', apiUrl: 'https://project-level.example.com' }),
         getConfig: makeGlobalConfig({ apiUrl: 'https://global.example.com' }),
       };
       const result = await resolveContext({}, deps);
-      expect(result.apiUrl).toBe('https://project-level.example.com');
+      expect(result.apiUrl).toBe('https://global.example.com');
     });
 
     it('AC5: apiKey comes from global conf store when .koda/config.json has no profile field', async () => {

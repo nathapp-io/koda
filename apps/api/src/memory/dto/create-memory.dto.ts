@@ -47,7 +47,7 @@ export class CreateMemoryDto {
   @Max(1)
   confidence?: number;
 
-  @ApiProperty({ required: false, description: 'ID of the user/agent who owns this memory item (defaults to the caller)' })
+  @ApiProperty({ required: false, description: 'ID of the user/agent who owns this memory item. Only honored for global admin callers — every other caller always owns the item themselves, regardless of this value.' })
   @IsOptional()
   @IsString()
   ownerId?: string;

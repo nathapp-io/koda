@@ -45,7 +45,7 @@ describe('TicketLinksService', () => {
         url: 'https://github.com/owner/repo/pull/1',
       };
 
-      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123', key: 'KODA' });
       mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
       mockTicketLinkRepo.findLinkByUrl.mockResolvedValue(null);
       mockTicketLinkRepo.createLink.mockResolvedValue(mockLink);
@@ -63,7 +63,7 @@ describe('TicketLinksService', () => {
         url: 'https://github.com/owner/repo/pull/1',
       };
 
-      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123', key: 'KODA' });
       mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
       mockTicketLinkRepo.findLinkByUrl.mockResolvedValue(null);
       mockTicketLinkRepo.createLink.mockResolvedValue(mockLink);
@@ -86,7 +86,7 @@ describe('TicketLinksService', () => {
         url: 'https://github.com/owner/repo/pull/1',
       };
 
-      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123', key: 'KODA' });
       mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
       mockTicketLinkRepo.findLinkByUrl.mockResolvedValue(mockLink);
 
@@ -105,7 +105,7 @@ describe('TicketLinksService', () => {
         url: 'https://github.com/owner/repo/pull/1',
       };
 
-      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123', key: 'KODA' });
       mockTicketLinkRepo.findTicketByNumber.mockResolvedValue(null);
 
       await expect(service.create('koda', 'KODA-999', dto)).rejects.toThrow();
@@ -135,7 +135,7 @@ describe('TicketLinksService', () => {
         externalRef: null,
       };
 
-      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123', key: 'KODA' });
       mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
       mockTicketLinkRepo.findLinkByUrl.mockResolvedValue(null);
       mockTicketLinkRepo.createLink.mockResolvedValue(unknownLink);
@@ -162,7 +162,7 @@ describe('TicketLinksService', () => {
         externalRef: 'owner/repo#7',
       };
 
-      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123', key: 'KODA' });
       mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
       mockTicketLinkRepo.findLinksByTicket.mockResolvedValue([mockLink, secondLink]);
 
@@ -180,7 +180,7 @@ describe('TicketLinksService', () => {
     });
 
     it('returns an empty array when ticket has no links', async () => {
-      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123', key: 'KODA' });
       mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
       mockTicketLinkRepo.findLinksByTicket.mockResolvedValue([]);
 
@@ -190,7 +190,7 @@ describe('TicketLinksService', () => {
     });
 
     it('throws NotFoundException when ticket ref does not exist', async () => {
-      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123', key: 'KODA' });
       mockTicketLinkRepo.findTicketByNumber.mockResolvedValue(null);
 
       await expect(
@@ -207,7 +207,7 @@ describe('TicketLinksService', () => {
     });
 
     it('queries links scoped to the resolved ticket', async () => {
-      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123', key: 'KODA' });
       mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
       mockTicketLinkRepo.findLinksByTicket.mockResolvedValue([mockLink]);
 
@@ -219,7 +219,7 @@ describe('TicketLinksService', () => {
 
   describe('remove', () => {
     it('deletes a link by id when it belongs to the ticket', async () => {
-      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123', key: 'KODA' });
       mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
       mockTicketLinkRepo.findLinkByIdAndTicket.mockResolvedValue(mockLink);
       mockTicketLinkRepo.deleteLink.mockResolvedValue(undefined);
@@ -230,7 +230,7 @@ describe('TicketLinksService', () => {
     });
 
     it('throws NotFoundException when linkId does not exist on that ticket', async () => {
-      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123', key: 'KODA' });
       mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
       mockTicketLinkRepo.findLinkByIdAndTicket.mockResolvedValue(null);
 
@@ -240,7 +240,7 @@ describe('TicketLinksService', () => {
     });
 
     it('does not delete when link belongs to a different ticket', async () => {
-      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123', key: 'KODA' });
       mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
       // findLinkByIdAndTicket scoped to ticketId returns null (link exists but for another ticket)
       mockTicketLinkRepo.findLinkByIdAndTicket.mockResolvedValue(null);
@@ -261,12 +261,58 @@ describe('TicketLinksService', () => {
     });
 
     it('throws NotFoundException when ticket ref does not exist', async () => {
-      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123' });
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123', key: 'KODA' });
       mockTicketLinkRepo.findTicketByNumber.mockResolvedValue(null);
 
       await expect(
         service.remove('koda', 'KODA-999', 'link-123'),
       ).rejects.toThrow();
+    });
+  });
+
+  // H5: a KEY-N ref whose prefix differs from the project's key must never
+  // resolve locally — not even to the project's own ticket with that number.
+  describe('H5 foreign KEY prefix (OTHER-5 against project key KODA)', () => {
+    const dto: CreateTicketLinkDto = {
+      url: 'https://github.com/owner/repo/pull/1',
+    };
+
+    beforeEach(() => {
+      // Project owns #5, so an unscoped number lookup WOULD resolve — the
+      // prefix check is what must make these 404.
+      mockTicketLinkRepo.findProjectBySlug.mockResolvedValue({ id: 'proj-123', key: 'KODA' });
+      mockTicketLinkRepo.findTicketByNumber.mockResolvedValue({ id: 'ticket-123' });
+    });
+
+    it('create → 404 and never looks up the ticket by bare number', async () => {
+      await expect(service.create('koda', 'OTHER-5', dto)).rejects.toThrow();
+      expect(mockTicketLinkRepo.findTicketByNumber).not.toHaveBeenCalled();
+      expect(mockTicketLinkRepo.createLink).not.toHaveBeenCalled();
+    });
+
+    it('findByTicket → 404', async () => {
+      await expect(service.findByTicket('koda', 'OTHER-5')).rejects.toThrow();
+      expect(mockTicketLinkRepo.findLinksByTicket).not.toHaveBeenCalled();
+    });
+
+    it('remove → 404 and never deletes', async () => {
+      mockTicketLinkRepo.findLinkByIdAndTicket.mockResolvedValue(mockLink);
+      mockTicketLinkRepo.deleteLink.mockResolvedValue(undefined);
+
+      await expect(service.remove('koda', 'OTHER-5', 'link-123')).rejects.toThrow();
+      expect(mockTicketLinkRepo.findLinkByIdAndTicket).not.toHaveBeenCalled();
+      expect(mockTicketLinkRepo.deleteLink).not.toHaveBeenCalled();
+    });
+
+    it('CUID refs are unaffected by the prefix rule (already project-scoped)', async () => {
+      mockTicketLinkRepo.findTicketById.mockResolvedValue({ id: 'ticket-123' });
+      mockTicketLinkRepo.findLinkByUrl.mockResolvedValue(null);
+      mockTicketLinkRepo.createLink.mockResolvedValue(mockLink);
+
+      const result = await service.create('koda', 'ticket-123', dto);
+
+      expect(result.status).toBe(201);
+      expect(mockTicketLinkRepo.findTicketById).toHaveBeenCalledWith('ticket-123', 'proj-123');
     });
   });
 });

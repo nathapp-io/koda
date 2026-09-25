@@ -94,7 +94,7 @@ describe('LabelsService', () => {
     findLabelById: jest.fn(),
     deleteLabel: jest.fn(),
     updateLabel: jest.fn(),
-    findTicketByRef: jest.fn(),
+    findTicketScoped: jest.fn(),
     findTicketLabelAssignment: jest.fn(),
     findTicketLabelWithLabel: jest.fn(),
     assignLabelToTicket: jest.fn(),
@@ -326,7 +326,7 @@ describe('LabelsService', () => {
       const assignDto = { labelId: 'label-123' };
 
       mockLabelRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockLabelRepo.findTicketByRef.mockResolvedValue(mockTicket);
+      mockLabelRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockLabelRepo.findLabelById.mockResolvedValue(mockLabel);
       mockLabelRepo.findTicketLabelAssignment.mockResolvedValue(null);
       mockLabelRepo.assignLabelToTicket.mockResolvedValue(undefined);
@@ -348,7 +348,7 @@ describe('LabelsService', () => {
       const assignDto = { labelId: 'label-123' };
 
       mockLabelRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockLabelRepo.findTicketByRef.mockResolvedValue(mockTicket);
+      mockLabelRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockLabelRepo.findLabelById.mockResolvedValue(mockLabel);
       mockLabelRepo.findTicketLabelAssignment.mockResolvedValue(null);
       mockLabelRepo.assignLabelToTicket.mockResolvedValue(undefined);
@@ -372,7 +372,7 @@ describe('LabelsService', () => {
       const assignDto = { labelId: 'label-123' };
 
       mockLabelRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockLabelRepo.findTicketByRef.mockResolvedValue(mockTicket);
+      mockLabelRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockLabelRepo.findLabelById.mockResolvedValue(mockLabel);
       mockLabelRepo.findTicketLabelAssignment.mockResolvedValue(null);
       mockLabelRepo.assignLabelToTicket.mockResolvedValue(undefined);
@@ -393,7 +393,7 @@ describe('LabelsService', () => {
       const assignDto = { labelId: 'label-123' };
 
       mockLabelRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockLabelRepo.findTicketByRef.mockResolvedValue(mockTicket);
+      mockLabelRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockLabelRepo.findLabelById.mockResolvedValue(mockLabel);
       mockLabelRepo.findTicketLabelAssignment.mockResolvedValue(null);
       mockLabelRepo.assignLabelToTicket.mockResolvedValue(undefined);
@@ -414,7 +414,7 @@ describe('LabelsService', () => {
       const assignDto = { labelId: 'label-123' };
 
       mockLabelRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockLabelRepo.findTicketByRef.mockResolvedValue(null);
+      mockLabelRepo.findTicketScoped.mockResolvedValue(null);
 
       await expect(
         service.assignToTicket(
@@ -430,7 +430,7 @@ describe('LabelsService', () => {
       const assignDto = { labelId: 'nonexistent' };
 
       mockLabelRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockLabelRepo.findTicketByRef.mockResolvedValue(mockTicket);
+      mockLabelRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockLabelRepo.findLabelById.mockResolvedValue(null);
 
       await expect(
@@ -448,7 +448,7 @@ describe('LabelsService', () => {
       const otherProjectLabel = { ...mockLabel, projectId: 'proj-456' };
 
       mockLabelRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockLabelRepo.findTicketByRef.mockResolvedValue(mockTicket);
+      mockLabelRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockLabelRepo.findLabelById.mockResolvedValue(otherProjectLabel);
 
       await expect(
@@ -466,7 +466,7 @@ describe('LabelsService', () => {
       const existingAssignment = { ticketId: 'ticket-123', labelId: 'label-123' };
 
       mockLabelRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockLabelRepo.findTicketByRef.mockResolvedValue(mockTicket);
+      mockLabelRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockLabelRepo.findLabelById.mockResolvedValue(mockLabel);
       mockLabelRepo.findTicketLabelAssignment.mockResolvedValue(existingAssignment);
 
@@ -484,7 +484,7 @@ describe('LabelsService', () => {
       const assignDto = { labelId: 'label-123' };
 
       mockLabelRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockLabelRepo.findTicketByRef.mockResolvedValue(mockTicket);
+      mockLabelRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockLabelRepo.findLabelById.mockResolvedValue(mockLabel);
       mockLabelRepo.findTicketLabelAssignment.mockResolvedValue(null);
       mockLabelRepo.assignLabelToTicket.mockResolvedValue(undefined);
@@ -520,7 +520,7 @@ describe('LabelsService', () => {
 
     it('should remove label from ticket and create TicketActivity', async () => {
       mockLabelRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockLabelRepo.findTicketByRef.mockResolvedValue(mockTicket);
+      mockLabelRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockLabelRepo.findTicketLabelWithLabel.mockResolvedValue(ticketLabelWithLabel);
       mockLabelRepo.removeLabelFromTicket.mockResolvedValue(undefined);
       mockLabelRepo.createTicketActivity.mockResolvedValue(mockActivity);
@@ -539,7 +539,7 @@ describe('LabelsService', () => {
 
     it('should create TicketActivity with action LABEL_CHANGE and oldValue as label name', async () => {
       mockLabelRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockLabelRepo.findTicketByRef.mockResolvedValue(mockTicket);
+      mockLabelRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockLabelRepo.findTicketLabelWithLabel.mockResolvedValue(ticketLabelWithLabel);
       mockLabelRepo.removeLabelFromTicket.mockResolvedValue(undefined);
       mockLabelRepo.createTicketActivity.mockResolvedValue(mockActivity);
@@ -560,7 +560,7 @@ describe('LabelsService', () => {
 
     it('should allow any authenticated user to remove label', async () => {
       mockLabelRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockLabelRepo.findTicketByRef.mockResolvedValue(mockTicket);
+      mockLabelRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockLabelRepo.findTicketLabelWithLabel.mockResolvedValue(ticketLabelWithLabel);
       mockLabelRepo.removeLabelFromTicket.mockResolvedValue(undefined);
       mockLabelRepo.createTicketActivity.mockResolvedValue(mockActivity);
@@ -578,7 +578,7 @@ describe('LabelsService', () => {
 
     it('should allow agent to remove label from ticket', async () => {
       mockLabelRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockLabelRepo.findTicketByRef.mockResolvedValue(mockTicket);
+      mockLabelRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockLabelRepo.findTicketLabelWithLabel.mockResolvedValue(ticketLabelWithLabel);
       mockLabelRepo.removeLabelFromTicket.mockResolvedValue(undefined);
       mockLabelRepo.createTicketActivity.mockResolvedValue(mockActivity);
@@ -596,7 +596,7 @@ describe('LabelsService', () => {
 
     it('should throw NotFoundException if ticket not found', async () => {
       mockLabelRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockLabelRepo.findTicketByRef.mockResolvedValue(null);
+      mockLabelRepo.findTicketScoped.mockResolvedValue(null);
 
       await expect(
         service.removeFromTicket(
@@ -610,7 +610,7 @@ describe('LabelsService', () => {
 
     it('should throw NotFoundException if label not assigned to ticket', async () => {
       mockLabelRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockLabelRepo.findTicketByRef.mockResolvedValue(mockTicket);
+      mockLabelRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockLabelRepo.findTicketLabelWithLabel.mockResolvedValue(null);
 
       await expect(
@@ -625,7 +625,7 @@ describe('LabelsService', () => {
 
     it('should return ticket with labels array after removal', async () => {
       mockLabelRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockLabelRepo.findTicketByRef.mockResolvedValue(mockTicket);
+      mockLabelRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockLabelRepo.findTicketLabelWithLabel.mockResolvedValue(ticketLabelWithLabel);
       mockLabelRepo.removeLabelFromTicket.mockResolvedValue(undefined);
       mockLabelRepo.createTicketActivity.mockResolvedValue(mockActivity);

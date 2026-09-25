@@ -9,6 +9,7 @@ export interface LabelDomain {
 
 export interface ProjectRow {
   id: string;
+  key: string;
   deletedAt: Date | null;
 }
 
@@ -35,7 +36,11 @@ export interface ILabelRepository {
   findLabelById(id: string): Promise<LabelDomain | null>;
   deleteLabel(id: string): Promise<void>;
   updateLabel(id: string, data: { name?: string; color?: string | null }): Promise<LabelDomain>;
-  findTicketByRef(projectId: string, ticketRef: string): Promise<TicketRow | null>;
+  /**
+   * H5: scoped ticket resolution — KEY-N prefix must equal projectKey and
+   * CUIDs are constrained to the project.
+   */
+  findTicketScoped(projectId: string, projectKey: string, ticketRef: string): Promise<TicketRow | null>;
   findTicketLabelAssignment(ticketId: string, labelId: string): Promise<{ ticketId: string; labelId: string } | null>;
   findTicketLabelWithLabel(ticketId: string, labelId: string): Promise<{ ticketId: string; labelId: string; label: LabelDomain } | null>;
   assignLabelToTicket(ticketId: string, labelId: string): Promise<void>;

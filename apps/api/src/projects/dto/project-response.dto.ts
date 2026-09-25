@@ -62,12 +62,6 @@ export class ProjectResponseDto {
   deletedAt?: Date | null;
 
   @ApiPropertyOptional({
-    description: 'CI webhook token for authentication',
-    required: false,
-  })
-  ciWebhookToken?: string | null;
-
-  @ApiPropertyOptional({
     description: 'Auto assign mode',
     required: false,
   })
@@ -98,7 +92,6 @@ export class ProjectResponseDto {
       createdAt: project.createdAt,
       updatedAt: project.updatedAt,
       deletedAt: project.deletedAt,
-      ciWebhookToken: project.ciWebhookToken,
       autoAssign: project.autoAssign,
       graphifyEnabled: project.graphifyEnabled,
       graphifyLastImportedAt: project.graphifyLastImportedAt,

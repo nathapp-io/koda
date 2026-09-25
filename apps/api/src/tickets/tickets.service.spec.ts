@@ -8,6 +8,7 @@ import { NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-com
 import type { KodaAgentRole } from '../auth/principal/koda-principal.types';
 import { TicketEventService } from '../events/ticket-event.service';
 import { OutboxService } from '../outbox/outbox.service';
+import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
 import { TicketType, TicketStatus, Priority } from '../common/enums';
 
 describe('TicketsService', () => {
@@ -102,8 +103,7 @@ describe('TicketsService', () => {
     createTicket: jest.fn(),
     findTicketsByProject: jest.fn(),
     countTicketsByProject: jest.fn(),
-    findTicketByProjectAndNumber: jest.fn(),
-    findTicketById: jest.fn(),
+    findTicketScoped: jest.fn(),
     updateTicket: jest.fn(),
     assignTicket: jest.fn(),
     softDeleteTicket: jest.fn(),
@@ -122,6 +122,11 @@ describe('TicketsService', () => {
   const mockTicketEventService = { create: jest.fn().mockResolvedValue({ id: 'evt-mock' }) };
   const mockOutboxService = { enqueue: jest.fn().mockResolvedValue(undefined) };
 
+  const mockTransitionsService = {
+    executeTransitionPublic: jest.fn(),
+    assertTransitionPermission: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -130,6 +135,7 @@ describe('TicketsService', () => {
         { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
         { provide: TicketEventService, useValue: mockTicketEventService },
         { provide: OutboxService, useValue: mockOutboxService },
+        { provide: TicketTransitionsService, useValue: mockTransitionsService },
       ],
     }).compile();
 
@@ -472,46 +478,51 @@ describe('TicketsService', () => {
   describe('findByRef', () => {
     it('should resolve ticket by KODA-42 format (projectKey-number)', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(mockTicket);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
 
       const result = await service.findByRef('koda', 'KODA-1');
 
       expect(result).toEqual({ ...mockTicket, ref: 'KODA-1', links: [] });
-      expect(mockTicketRepo.findTicketByProjectAndNumber).toHaveBeenCalledWith(
+      expect(mockTicketRepo.findTicketScoped).toHaveBeenCalledWith(
         mockProject.id,
-        1,
+        'KODA',
+        'KODA-1',
       );
     });
 
     it('should resolve ticket by CUID', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketById.mockResolvedValue(mockTicket);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
 
       const result = await service.findByRef('koda', 'ticket-123');
 
       expect(result).toEqual({ ...mockTicket, ref: 'KODA-1', links: [] });
-      expect(mockTicketRepo.findTicketById).toHaveBeenCalledWith('ticket-123');
+      expect(mockTicketRepo.findTicketScoped).toHaveBeenCalledWith(
+        mockProject.id,
+        'KODA',
+        'ticket-123',
+      );
     });
 
     it('should handle KODA-42 pattern case-insensitively', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketById.mockResolvedValue(null);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(null);
 
       // Lowercase 'koda-1' does not match the uppercase pattern, treated as CUID
       await expect(service.findByRef('koda', 'koda-1')).rejects.toThrow();
-      expect(mockTicketRepo.findTicketById).toHaveBeenCalled();
+      expect(mockTicketRepo.findTicketScoped).toHaveBeenCalled();
     });
 
     it('should throw when ticket not found', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(null);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(null);
 
       await expect(service.findByRef('koda', 'KODA-999')).rejects.toThrow();
     });
 
     it('should throw for soft-deleted ticket', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue({
+      mockTicketRepo.findTicketScoped.mockResolvedValue({
         ...mockTicket,
         deletedAt: new Date(),
       });
@@ -521,7 +532,7 @@ describe('TicketsService', () => {
 
     it('should validate KODA-42 format', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketById.mockResolvedValue(null);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(null);
 
       const invalidRefs = ['invalid', '123', 'KODA-abc', 'KODA--1'];
 
@@ -540,7 +551,7 @@ describe('TicketsService', () => {
       };
 
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(mockTicket);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockTicketRepo.updateTicket.mockResolvedValue({
         ...mockTicket,
         ...updateDto,
@@ -559,7 +570,7 @@ describe('TicketsService', () => {
       } as UpdateTicketDto;
 
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(mockTicket);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockTicketRepo.updateTicket.mockResolvedValue(mockTicket);
 
       const result = await service.update('koda', 'KODA-1', updateDto, mockUserPrincipal);
@@ -574,7 +585,7 @@ describe('TicketsService', () => {
       };
 
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(null);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(null);
 
       await expect(
         service.update('koda', 'KODA-999', updateDto, mockUserPrincipal)
@@ -587,7 +598,7 @@ describe('TicketsService', () => {
       };
 
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(mockTicket);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockTicketRepo.updateTicket.mockResolvedValue({
         ...mockTicket,
         title: 'Only update title',
@@ -598,13 +609,110 @@ describe('TicketsService', () => {
       expect(result.title).toBe('Only update title');
       expect(result.description).toBe(mockTicket.description); // Unchanged
     });
+
+    // M2: PATCH with status must go through the transition state machine
+    // (permission + activity + webhook) instead of a direct write.
+    it('M2: PATCH with status delegates to transitions service', async () => {
+      const updateDto: UpdateTicketDto = { status: TicketStatus.IN_PROGRESS };
+
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
+      mockTransitionsService.executeTransitionPublic.mockResolvedValue({
+        ticket: { ...mockTicket, status: TicketStatus.IN_PROGRESS },
+      });
+
+      const result = await service.update('koda', 'KODA-1', updateDto, mockUserPrincipal);
+
+      expect(mockTransitionsService.executeTransitionPublic).toHaveBeenCalledWith(
+        'koda',
+        'KODA-1',
+        TicketStatus.IN_PROGRESS,
+        mockUserPrincipal,
+      );
+      expect(result.status).toBe(TicketStatus.IN_PROGRESS);
+      // No direct status write through the repo
+      expect(mockTicketRepo.updateTicket).not.toHaveBeenCalled();
+    });
+
+    it('M2: PATCH without status does not call transitions', async () => {
+      const updateDto: UpdateTicketDto = { title: 'x' };
+
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
+      mockTicketRepo.updateTicket.mockResolvedValue({ ...mockTicket, title: 'x' });
+
+      await service.update('koda', 'KODA-1', updateDto, mockUserPrincipal);
+
+      expect(mockTransitionsService.executeTransitionPublic).not.toHaveBeenCalled();
+      expect(mockTicketRepo.updateTicket).toHaveBeenCalledWith(mockTicket.id, { title: 'x' });
+    });
+
+    it('M2: PATCH with status and other fields applies fields first, then transitions', async () => {
+      const updateDto: UpdateTicketDto = {
+        title: 'Renamed before transition',
+        status: TicketStatus.IN_PROGRESS,
+      };
+
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
+      mockTicketRepo.updateTicket.mockResolvedValue({
+        ...mockTicket,
+        title: 'Renamed before transition',
+      });
+      mockTransitionsService.executeTransitionPublic.mockResolvedValue({
+        ticket: { ...mockTicket, title: 'Renamed before transition', status: TicketStatus.IN_PROGRESS },
+      });
+
+      const result = await service.update('koda', 'KODA-1', updateDto, mockUserPrincipal);
+
+      expect(mockTicketRepo.updateTicket).toHaveBeenCalledWith(mockTicket.id, {
+        title: 'Renamed before transition',
+      });
+      expect(mockTransitionsService.executeTransitionPublic).toHaveBeenCalledWith(
+        'koda',
+        'KODA-1',
+        TicketStatus.IN_PROGRESS,
+        mockUserPrincipal,
+      );
+      // Field write happens before the transition
+      expect(mockTicketRepo.updateTicket.mock.invocationCallOrder[0]).toBeLessThan(
+        mockTransitionsService.executeTransitionPublic.mock.invocationCallOrder[0],
+      );
+      expect(result.status).toBe(TicketStatus.IN_PROGRESS);
+    });
+
+    // Final-review Finding B: a caller with UPDATE but no TRANSITION must be
+    // rejected 403 BEFORE any field write, so the PATCH is all-or-nothing.
+    it('M2/Final-review: PATCH {status, title} with UPDATE-but-no-TRANSITION → 403 and title NOT written', async () => {
+      const updateDto: UpdateTicketDto = {
+        title: 'Should never be written',
+        status: TicketStatus.IN_PROGRESS,
+      };
+
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
+      mockTicketRepo.updateTicket.mockResolvedValue({ ...mockTicket, title: 'Should never be written' });
+      mockTransitionsService.assertTransitionPermission.mockRejectedValue(
+        new ForbiddenAppException({}, 'tickets'),
+      );
+
+      await expect(
+        service.update('koda', 'KODA-1', updateDto, mockUserPrincipal),
+      ).rejects.toThrow(ForbiddenAppException);
+
+      // Permission check ran before anything else
+      expect(mockTransitionsService.assertTransitionPermission).toHaveBeenCalledWith(mockUserPrincipal);
+      // The partial field write must not have happened
+      expect(mockTicketRepo.updateTicket).not.toHaveBeenCalled();
+      expect(mockTransitionsService.executeTransitionPublic).not.toHaveBeenCalled();
+    });
   });
 
   describe('softDelete', () => {
     it('should set deletedAt to current timestamp', async () => {
       const now = new Date();
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(mockTicket);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockTicketRepo.softDeleteTicket.mockResolvedValue({
         ...mockTicket,
         deletedAt: now,
@@ -618,7 +726,7 @@ describe('TicketsService', () => {
 
     it('should not hard delete the ticket', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(mockTicket);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockTicketRepo.softDeleteTicket.mockResolvedValue({
         ...mockTicket,
         deletedAt: new Date(),
@@ -632,7 +740,7 @@ describe('TicketsService', () => {
 
     it('should allow non-ADMIN user (authorization at controller level)', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(mockTicket);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockTicketRepo.softDeleteTicket.mockResolvedValue({ ...mockTicket, deletedAt: new Date() });
 
       const result = await service.softDelete('koda', 'KODA-1', mockMemberPrincipal);
@@ -641,7 +749,7 @@ describe('TicketsService', () => {
 
     it('should return 404 if ticket not found', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(null);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(null);
 
       await expect(
         service.softDelete('koda', 'KODA-999', mockAdminPrincipal)
@@ -746,7 +854,7 @@ describe('TicketsService', () => {
     it('emits TicketEvent after update', async () => {
       const updatedTicket = { ...fakeTicket, title: 'Updated' };
       mockTicketRepo.findProjectBySlug.mockResolvedValue(fakeProject);
-      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(fakeTicket);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(fakeTicket);
       mockTicketRepo.updateTicket.mockResolvedValue(updatedTicket);
 
       await service.update('test-project', 'TST-1', { title: 'Updated' }, fakeUserPrincipal as any);
@@ -813,7 +921,7 @@ describe('TicketsService', () => {
     it('emits TicketEvent after softDelete', async () => {
       const deletedTicket = { ...fakeTicket, deletedAt: new Date() };
       mockTicketRepo.findProjectBySlug.mockResolvedValue(fakeProject);
-      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(fakeTicket);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(fakeTicket);
       mockTicketRepo.softDeleteTicket.mockResolvedValue(deletedTicket);
 
       await service.softDelete('test-project', 'TST-1', fakeUserPrincipal as any);
@@ -844,7 +952,7 @@ describe('TicketsService', () => {
   describe('assign', () => {
     it('should assign ticket to user', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(mockTicket);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockTicketRepo.findUserById.mockResolvedValue({ id: 'user-456', role: 'MEMBER' });
       mockTicketRepo.findProjectMemberRole.mockResolvedValue('DEVELOPER');
       mockTicketRepo.assignTicket.mockResolvedValue({
@@ -863,7 +971,7 @@ describe('TicketsService', () => {
 
     it('should assign ticket to agent', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(mockTicket);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockTicketRepo.findAgentById.mockResolvedValue({ id: 'agent-456' });
       mockTicketRepo.assignTicket.mockResolvedValue({
         ...mockTicket,
@@ -880,7 +988,7 @@ describe('TicketsService', () => {
 
     it('should unassign ticket when neither userId nor agentId provided', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(mockTicket);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockTicketRepo.assignTicket.mockResolvedValue({
         ...mockTicket,
         assignedToUserId: null,
@@ -905,7 +1013,7 @@ describe('TicketsService', () => {
 
     it('should return 404 if ticket not found', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(null);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(null);
 
       await expect(
         service.assign('koda', 'KODA-999', { userId: 'user-456' })
@@ -914,7 +1022,7 @@ describe('TicketsService', () => {
 
     it('should return 404 when the assigned user does not exist (BUG-2)', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(mockTicket);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockTicketRepo.findUserById.mockResolvedValue(null);
 
       await expect(
@@ -925,7 +1033,7 @@ describe('TicketsService', () => {
 
     it('should return 404 when the assigned agent does not exist (BUG-2)', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(mockTicket);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockTicketRepo.findAgentById.mockResolvedValue(null);
 
       await expect(
@@ -936,7 +1044,7 @@ describe('TicketsService', () => {
 
     it('should return 403 when the assigned user is not a project member (BUG-2)', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(mockTicket);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockTicketRepo.findUserById.mockResolvedValue({ id: 'user-456', role: 'MEMBER' });
       mockTicketRepo.findProjectMemberRole.mockResolvedValue(null);
 
@@ -948,7 +1056,7 @@ describe('TicketsService', () => {
 
     it('should skip the membership check for ADMIN assignees (BUG-17)', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(mockTicket);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockTicketRepo.findUserById.mockResolvedValue({ id: 'admin-1', role: 'ADMIN' });
       mockTicketRepo.assignTicket.mockResolvedValue({
         ...mockTicket,
@@ -975,7 +1083,7 @@ describe('TicketsService', () => {
         timestamp: new Date('2026-01-01T00:00:00Z'),
       });
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(mockTicket);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
       mockTicketRepo.findUserById.mockResolvedValue({ id: 'user-456', role: 'ADMIN' });
       mockTicketRepo.assignTicket.mockResolvedValue({
         ...mockTicket,

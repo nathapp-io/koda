@@ -27,10 +27,10 @@ export class PrismaTicketLinkRepository {
     };
   }
 
-  async findProjectBySlug(slug: string): Promise<{ id: string } | null> {
+  async findProjectBySlug(slug: string): Promise<{ id: string; key: string } | null> {
     return this.db.project.findFirst({
       where: { slug, deletedAt: null },
-      select: { id: true },
+      select: { id: true, key: true },
     });
   }
 

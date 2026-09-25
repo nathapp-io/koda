@@ -17,6 +17,15 @@ async function bootstrap() {
   const fastify = httpAdapter.getInstance();
   registerRawBodyHook(fastify);
 
+  // H2: the throttler guard's IP tracker (getClientIp) only honours forwarded
+  // headers when trust proxy is configured via configureTrustProxy(). Trust the
+  // loopback/private-network proxies (e.g. the Nuxt /api proxy) so rate limiting
+  // tracks real client IPs instead of collapsing all proxied traffic into one bucket.
+  app.configureTrustProxy({
+    enabled: true,
+    trustedProxies: ['127.0.0.1', '::1', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'],
+  });
+
   const { port, host } = app.get<IAppConfig>(APP_CFG);
 
   // DI container is ready right after createFastifyApp() — get the guard before

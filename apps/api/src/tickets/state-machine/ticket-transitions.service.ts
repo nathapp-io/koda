@@ -1,7 +1,10 @@
-import { Injectable, Optional, Logger, Inject } from '@nestjs/common';
+import { Injectable, Optional, Logger, Inject, HttpException, HttpStatus } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { TicketStatus, CommentType, ActivityType } from '../../common/enums';
+import { KodaAction } from '../../auth/casl/koda-action.enum';
+import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
 import { validateTransition } from './ticket-transitions';
 import { RagService } from '../../rag/rag.service';
 import { WebhookDispatcherService } from '../../webhook/webhook-dispatcher.service';
@@ -74,6 +77,10 @@ export class TicketTransitionsService {
     // service positionally keep working; emission is skipped when absent.
     @Optional() private readonly ticketEventService?: TicketEventService,
     @Optional() private readonly outboxService?: OutboxService,
+    // M2 fix: evaluates the TRANSITION permission for the PATCH status-delegation
+    // path. Optional only so legacy test harnesses can construct the service;
+    // executeTransitionPublic fails closed when it is absent.
+    @Optional() private readonly caslAbilityFactory?: KodaCaslAbilityFactory,
   ) {}
 
   /**
@@ -298,7 +305,7 @@ export class TicketTransitionsService {
   ): Promise<TransitionResultWithComment> {
     const ticket = await this.findTicketByRef(projectSlug, ticketRef);
     if (ticket?.status === TicketStatus.VERIFY_FIX) {
-      return this.executeTransition(
+      return this.executeTransitionInternal(
         projectSlug,
         ticketRef,
         TicketStatus.CLOSED,
@@ -307,7 +314,7 @@ export class TicketTransitionsService {
         principal,
       ) as Promise<TransitionResultWithComment>;
     }
-    return this.executeTransition(
+    return this.executeTransitionInternal(
       projectSlug,
       ticketRef,
       TicketStatus.VERIFIED,
@@ -325,7 +332,7 @@ export class TicketTransitionsService {
     ticketRef: string,
     principal: KodaPrincipal,
   ): Promise<TransitionResultWithoutComment> {
-    return this.executeTransition(
+    return this.executeTransitionInternal(
       projectSlug,
       ticketRef,
       TicketStatus.IN_PROGRESS,
@@ -344,7 +351,7 @@ export class TicketTransitionsService {
     commentBody: string,
     principal: KodaPrincipal,
   ): Promise<TransitionResultWithComment> {
-    return this.executeTransition(
+    return this.executeTransitionInternal(
       projectSlug,
       ticketRef,
       TicketStatus.VERIFY_FIX,
@@ -370,7 +377,7 @@ export class TicketTransitionsService {
       throw new ValidationAppException({}, 'tickets');
     }
     const toStatus = approve ? TicketStatus.CLOSED : TicketStatus.IN_PROGRESS;
-    return this.executeTransition(
+    return this.executeTransitionInternal(
       projectSlug,
       ticketRef,
       toStatus,
@@ -412,7 +419,15 @@ export class TicketTransitionsService {
     const transaction = await this.txManager.run(async () => {
       const actorFields = actorForeignKeys(principal, 'actor');
 
-      const updatedTicket = await repo.updateTicketStatus(ticket.id, TicketStatus.CLOSED);
+      // M3: conditional write — the pre-checked status is `from`, so a
+      // concurrent transition makes this update match 0 rows and fail closed.
+      const updatedTicket = await repo.updateTicketStatusIf(ticket.id, ticket.status, TicketStatus.CLOSED);
+      if (!updatedTicket) {
+        // 409 pattern copied from webhook-replay.guard.ts:148 (ConflictAppException
+        // does not exist in @nathapp/nestjs-common). Thrown inside the tx callback
+        // so PrismaTransactionManager.run propagates it and rolls back.
+        throw new HttpException('Ticket state changed concurrently', HttpStatus.CONFLICT);
+      }
 
       const activity = await repo.createTicketActivity({
         ticketId: ticket.id,
@@ -444,7 +459,7 @@ export class TicketTransitionsService {
     commentBody: string,
     principal: KodaPrincipal,
   ): Promise<TransitionResultWithComment> {
-    return this.executeTransition(
+    return this.executeTransitionInternal(
       projectSlug,
       ticketRef,
       TicketStatus.REJECTED,
@@ -455,9 +470,60 @@ export class TicketTransitionsService {
   }
 
   /**
+   * Final-review Finding B: exposes the TRANSITION permission check from
+   * executeTransitionPublic so callers that combine field writes with a status
+   * change (PATCH {status, title}) can verify permission BEFORE applying the
+   * field writes — a caller with UPDATE but no TRANSITION then gets a clean
+   * 403 instead of a partial write followed by 403.
+   *
+   * Same CASL logic executeTransitionPublic itself uses (single source of
+   * truth); executeTransitionPublic calls this method, so there is no
+   * duplication and no double DB work (the ability build is the only cost and
+   * it is per-call anyway).
+   *
+   * Fails closed: without the ability factory there is no way to verify
+   * TRANSITION, and the PATCH route only proves UPDATE.
+   */
+  async assertTransitionPermission(principal: KodaPrincipal): Promise<void> {
+    if (!this.caslAbilityFactory) {
+      throw new ForbiddenAppException({}, 'tickets');
+    }
+    const ability = await this.caslAbilityFactory.createForUser(principal);
+    if (!ability.can(KodaAction.TRANSITION as CaslPermissionAction, 'Ticket')) {
+      throw new ForbiddenAppException({}, 'tickets');
+    }
+  }
+
+  /**
+   * M2: public entry for status changes routed from PATCH /projects/:slug/tickets/:ref.
+   * Runs the full transition pipeline (TRANSITION state-machine validation,
+   * conditional status write, activity row, webhook dispatch) instead of the
+   * direct `status` write the PATCH route used before.
+   *
+   * M2 permission fix: the PATCH route only enforces UPDATE on Ticket, so the
+   * TRANSITION check is enforced here — this method is the only caller path
+   * that lacks decorator-level TRANSITION enforcement (the dedicated
+   * verify/start/fix/verify-fix/close/reject routes carry their own
+   * @RequiredPermission([TRANSITION, 'Ticket']) and never go through this
+   * wrapper). Mirrors DefaultPermissionProvider's evaluation of
+   * @RequiredPermission: build the CASL ability for the principal and check
+   * `can(TRANSITION, 'Ticket')`; failure throws the same 403-class
+   * ForbiddenAppException the permission guard raises.
+   */
+  async executeTransitionPublic(
+    projectSlug: string,
+    ticketRef: string,
+    toStatus: TicketStatus,
+    principal: KodaPrincipal,
+  ): Promise<TransitionResult> {
+    await this.assertTransitionPermission(principal);
+    return this.executeTransitionInternal(projectSlug, ticketRef, toStatus, undefined, undefined, principal);
+  }
+
+  /**
    * Core transition execution logic with validation and transaction handling
    */
-  private async executeTransition(
+  private async executeTransitionInternal(
     projectSlug: string,
     ticketRef: string,
     toStatus: TicketStatus,
@@ -494,7 +560,16 @@ export class TicketTransitionsService {
         });
       }
 
-      const updatedTicket = await repo.updateTicketStatus(ticket.id, toStatus);
+      // M3: conditional write keyed on the status read before the transaction —
+      // a concurrent writer (verify vs reject race) makes this match 0 rows and
+      // fail closed with 409 instead of double-committing.
+      const updatedTicket = await repo.updateTicketStatusIf(ticket.id, ticket.status, toStatus);
+      if (!updatedTicket) {
+        // 409 pattern copied from webhook-replay.guard.ts:148 (ConflictAppException
+        // does not exist in @nathapp/nestjs-common). Thrown inside the tx callback
+        // so PrismaTransactionManager.run propagates it and rolls back.
+        throw new HttpException('Ticket state changed concurrently', HttpStatus.CONFLICT);
+      }
 
       const activity = await repo.createTicketActivity({
         ticketId: ticket.id,

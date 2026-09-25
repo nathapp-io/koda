@@ -183,6 +183,42 @@ describeIntegration('API Integration Tests', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────
+  // 1b. H1 — Refresh token replay after logout must be rejected
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('1b. H1 — Refresh Token Replay After Logout', () => {
+    it('register → login → logout → refresh with old token → 401', async () => {
+      const registerRes = await request(httpServer)
+        .post('/api/auth/register')
+        .send({ email: 'logout-replay@koda.test', name: 'Logout Replay', password: 'Replay1234!Aa' })
+        .expect(201);
+      body<{ accessToken: string; refreshToken: string }>(registerRes);
+
+      const loginRes = await request(httpServer)
+        .post('/api/auth/login')
+        .send({ email: 'logout-replay@koda.test', password: 'Replay1234!Aa' })
+        .expect(200);
+
+      const loginData = body<{ accessToken: string; refreshToken: string }>(loginRes);
+      expect(loginData.accessToken).toBeTruthy();
+      expect(loginData.refreshToken).toBeTruthy();
+
+      await request(httpServer)
+        .post('/api/auth/logout')
+        .set('Authorization', `Bearer ${loginData.accessToken}`)
+        .expect(200);
+
+      // The refresh token issued before logout is signed with a stale
+      // tokenVersion — the refresh strategy marks it revoked and the
+      // service must refuse to mint a new pair from it.
+      await request(httpServer)
+        .post('/api/auth/refresh')
+        .set('Authorization', `Bearer ${loginData.refreshToken}`)
+        .expect(401);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
   // 2. Agent Registration & Auth
   // ─────────────────────────────────────────────────────────────────
 
