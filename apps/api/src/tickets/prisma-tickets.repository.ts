@@ -344,9 +344,12 @@ export class PrismaTicketsRepository implements ITicketRepository {
   // M3: conditional status write — only updates when the row still holds
   // `from`. Returns the fresh domain row, or null when 0 rows matched
   // (another writer transitioned the ticket between read and write).
+  // Final-review hardening: `deletedAt: null` excludes soft-deleted rows, so a
+  // ticket deleted between the pre-read and this write can no longer be
+  // transitioned (callers' pre-reads already filter deleted tickets).
   async updateTicketStatusIf(id: string, from: string, to: string): Promise<TicketDomain | null> {
     const rows = await this.db.ticket.updateMany({
-      where: { id, status: from },
+      where: { id, status: from, deletedAt: null },
       data: { status: to },
     });
     if (rows.count === 0) return null;
