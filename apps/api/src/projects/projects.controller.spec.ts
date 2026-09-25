@@ -329,9 +329,21 @@ describe('ProjectsController', () => {
       updatedAt: new Date(),
     };
 
+    const makeAgentPrincipal = (id: string, slug: string): KodaPrincipal => ({
+      actorType: 'agent',
+      id,
+      name: slug,
+      slug,
+      status: 'ACTIVE',
+      agentRoles: ['DEVELOPER'],
+      capabilities: [],
+      blacklisted: false,
+      revoked: false,
+      authorities: ['WORKER'],
+    });
+
     it('updates agent status for admin principal', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      projectsService.assertProjectMembership.mockResolvedValue(undefined);
       agentsService.findByProject.mockResolvedValue([mockUpdatedAgent] as any);
       agentsService.update.mockResolvedValue(mockUpdatedAgent as any);
 
@@ -342,34 +354,52 @@ describe('ProjectsController', () => {
       expect((result as any).data.status).toBe('PAUSED');
     });
 
-    it('updates agent status for project member', async () => {
-      projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      projectsService.assertProjectMembership.mockResolvedValue(undefined);
-      agentsService.findByProject.mockResolvedValue([mockUpdatedAgent] as any);
-      agentsService.update.mockResolvedValue(mockUpdatedAgent as any);
+    it('propagates 404 when the project does not exist', async () => {
+      projectsService.findBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
 
-      const result = await controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, memberPrincipal);
-
-      expect((result as any).data.status).toBe('PAUSED');
+      await expect(
+        controller.updateProjectAgent('missing', 'bot', { status: 'PAUSED' }, adminPrincipal),
+      ).rejects.toThrow(NotFoundAppException);
     });
 
-    it('throws ForbiddenAppException for non-member', async () => {
+    it('H4: forbids a non-admin user (project member) from updating agent status', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      projectsService.assertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'projects'));
+      agentsService.findByProject.mockResolvedValue([mockUpdatedAgent] as any);
 
       await expect(
         controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, memberPrincipal),
       ).rejects.toThrow(ForbiddenAppException);
+      expect(agentsService.update).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundAppException when agent is not in the project', async () => {
       projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      projectsService.assertProjectMembership.mockResolvedValue(undefined);
       agentsService.findByProject.mockResolvedValue([]);
 
       await expect(
         controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, memberPrincipal),
       ).rejects.toThrow(NotFoundAppException);
+    });
+
+    it('H4: another agent cannot change my status', async () => {
+      projectsService.findBySlug.mockResolvedValue(mockProject as any);
+      agentsService.findByProject.mockResolvedValue([{ ...mockUpdatedAgent, id: 'agent-b', slug: 'agent-b' }] as any);
+
+      await expect(
+        controller.updateProjectAgent('alpha', 'agent-b', { status: 'OFFLINE' }, makeAgentPrincipal('agent-a', 'agent-a')),
+      ).rejects.toThrow(ForbiddenAppException);
+      expect(agentsService.update).not.toHaveBeenCalled();
+    });
+
+    it('H4: an agent can set its own status to OFFLINE', async () => {
+      projectsService.findBySlug.mockResolvedValue(mockProject as any);
+      agentsService.findByProject.mockResolvedValue([{ ...mockUpdatedAgent, id: 'agent-a', slug: 'agent-a' }] as any);
+      agentsService.update.mockResolvedValue({ ...mockUpdatedAgent, id: 'agent-a', slug: 'agent-a', status: 'OFFLINE' } as any);
+
+      const result = await controller.updateProjectAgent('alpha', 'agent-a', { status: 'OFFLINE' }, makeAgentPrincipal('agent-a', 'agent-a'));
+
+      expect(agentsService.update).toHaveBeenCalledWith('agent-a', { status: 'OFFLINE' });
+      expect((result as any).data.status).toBe('OFFLINE');
     });
   });
 });

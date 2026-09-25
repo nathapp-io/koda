@@ -21,9 +21,13 @@ import {
   ApiResponse,
   ApiQuery,
 } from '@nestjs/swagger';
-import { NotFoundAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
-import { KodaPrincipal } from '../auth/principal/koda-principal.types';
+import {
+  KodaPrincipal,
+  isAgentPrincipal,
+  isUserPrincipal,
+} from '../auth/principal/koda-principal.types';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
 import { KodaAction } from '../auth/casl/koda-action.enum';
 import { AgentsService } from '../agents/agents.service';
@@ -171,10 +175,10 @@ export class ProjectsController {
   }
 
   @Patch(':slug/agents/:agentSlug')
-  @ApiOperation({ summary: 'Update an agent status within a project context (admin or project member)' })
+  @ApiOperation({ summary: 'Update an agent status within a project context (admin or the agent itself)' })
   @ApiResponse({ status: 200, description: 'Agent updated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - no project access' })
+  @ApiResponse({ status: 403, description: 'Forbidden - admin or self only' })
   @ApiResponse({ status: 404, description: 'Project or agent not found' })
   async updateProjectAgent(
     @Param('slug') slug: string,
@@ -182,12 +186,21 @@ export class ProjectsController {
     @Body() updateDto: UpdateAgentDto,
     @Principal() principal: KodaPrincipal,
   ) {
-    const project = await this.projectsService.findBySlug(slug);
-    await this.projectsService.assertProjectMembership(project.id, principal);
+    await this.projectsService.findBySlug(slug);
     const projectAgents = await this.agentsService.findByProject(slug);
-    if (!projectAgents.some((a) => a.slug === agentSlug)) {
+    const target = projectAgents.find((a) => a.slug === agentSlug);
+    if (!target) {
       throw new NotFoundAppException({}, 'agents');
     }
+
+    // H4: only ADMINs may change agent state; an agent may update only itself
+    // (graceful OFFLINE shutdown).
+    const isAdmin = isUserPrincipal(principal) && principal.role === 'ADMIN';
+    const isSelf = isAgentPrincipal(principal) && principal.id === target.id;
+    if (!isAdmin && !isSelf) {
+      throw new ForbiddenAppException({}, 'projects');
+    }
+
     const data = await this.agentsService.update(agentSlug, updateDto);
     return JsonResponse.Ok(data);
   }
