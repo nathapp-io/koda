@@ -74,8 +74,8 @@ export class TicketsController {
     return this.ticketsService.softDelete(slug, ref, principal);
   }
 
-  async assignTicket(slug: string, ref: string, assignInput: AssignTicketDto) {
-    return this.ticketsService.assign(slug, ref, assignInput);
+  async assignTicket(slug: string, ref: string, assignInput: AssignTicketDto, principal?: KodaPrincipal) {
+    return this.ticketsService.assign(slug, ref, assignInput, principal);
   }
 
   async verifyTicket(
@@ -242,7 +242,7 @@ export class TicketsController {
     const projectId = await this.projectsService.findProjectIdBySlug(slug);
     await this.projectsService.assertProjectMembership(projectId, principal);
 
-    const data = await this.assignTicket(slug, ref, assignInput);
+    const data = await this.assignTicket(slug, ref, assignInput, principal);
     return JsonResponse.Ok(data);
   }
 

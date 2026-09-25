@@ -425,6 +425,98 @@ describe('KodaDomainWriter Unit Tests', () => {
     });
   });
 
+  describe('H13: outbox payload carries the full event envelope', () => {
+    const fixedTimestamp = new Date('2026-01-01T00:00:00Z');
+
+    it('writeTicketEvent enqueues the full ticket_event envelope', async () => {
+      const data = {
+        ticketId: 'ticket-001',
+        projectId: 'proj-123',
+        action: 'status_changed',
+        actorId: 'agent-001',
+        actorType: 'agent' as const,
+        source: 'api' as const,
+        data: { newStatus: 'IN_PROGRESS' },
+      };
+
+      mockWriterRepo.findProjectById.mockResolvedValue({ id: 'proj-123', deletedAt: null });
+      mockTicketEventService.create.mockResolvedValue({
+        id: 'event-123',
+        ticketId: data.ticketId,
+        projectId: data.projectId,
+        action: data.action,
+        actorId: data.actorId,
+        actorType: data.actorType,
+        source: data.source,
+        data: '{}',
+        timestamp: fixedTimestamp,
+        createdAt: fixedTimestamp,
+      });
+
+      await service.writeTicketEvent(data);
+
+      expect(mockOutboxService.enqueue).toHaveBeenCalledWith({
+        projectId: 'proj-123',
+        eventType: 'ticket_event',
+        eventId: 'event-123',
+        payload: {
+          id: 'event-123',
+          type: 'ticket_event',
+          action: 'status_changed',
+          timestamp: '2026-01-01T00:00:00.000Z',
+          ticketId: 'ticket-001',
+          projectId: 'proj-123',
+          actorId: 'agent-001',
+          actorType: 'agent',
+          data: { newStatus: 'IN_PROGRESS' },
+        },
+      });
+    });
+
+    it('writeAgentAction enqueues the full agent_event envelope', async () => {
+      const data = {
+        agentId: 'agent-001',
+        projectId: 'proj-123',
+        action: 'decision_made',
+        actorId: 'agent-001',
+        source: 'internal' as const,
+        data: { decision: 'use_hot_path' },
+      };
+
+      mockWriterRepo.findProjectById.mockResolvedValue({ id: 'proj-123', deletedAt: null });
+      mockAgentEventService.create.mockResolvedValue({
+        id: 'event-agent-123',
+        agentId: data.agentId,
+        projectId: data.projectId,
+        action: data.action,
+        actorId: data.actorId,
+        source: data.source,
+        data: '{}',
+        timestamp: fixedTimestamp,
+        createdAt: fixedTimestamp,
+      });
+
+      await service.writeAgentAction(data);
+
+      expect(mockOutboxService.enqueue).toHaveBeenCalledWith({
+        projectId: 'proj-123',
+        eventType: 'agent_event',
+        eventId: 'event-agent-123',
+        payload: {
+          id: 'event-agent-123',
+          type: 'agent_event',
+          action: 'decision_made',
+          timestamp: '2026-01-01T00:00:00.000Z',
+          agentId: 'agent-001',
+          projectId: 'proj-123',
+          actorId: 'agent-001',
+          actorType: 'agent',
+          data: { decision: 'use_hot_path' },
+        },
+      });
+    });
+  });
+
   describe('WriteResult structure', () => {
     it('writeTicketEvent result should include all required fields', async () => {
       const data = {

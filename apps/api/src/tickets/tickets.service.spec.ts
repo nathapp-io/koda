@@ -773,6 +773,43 @@ describe('TicketsService', () => {
       );
     });
 
+    it('H13: ticket outbox payload carries the full event envelope', async () => {
+      mockTicketEventService.create.mockResolvedValue({
+        id: 'evt-1',
+        ticketId: 't1',
+        projectId: 'p1',
+        action: 'status_changed',
+        actorId: 'user-1',
+        actorType: 'user',
+        source: 'internal',
+        data: '{}',
+        timestamp: new Date('2026-01-01T00:00:00Z'),
+      });
+
+      await service['emitTicketEvent']('t1', 'p1', 'status_changed', fakeUserPrincipal as never, {
+        newStatus: 'IN_PROGRESS',
+      });
+
+      expect(mockOutboxService.enqueue).toHaveBeenCalledTimes(1);
+      const call = mockOutboxService.enqueue.mock.calls[0][0];
+      expect(call).toEqual({
+        projectId: 'p1',
+        eventType: 'ticket_event',
+        eventId: 'evt-1',
+        payload: {
+          id: 'evt-1',
+          type: 'ticket_event',
+          action: 'status_changed',
+          timestamp: '2026-01-01T00:00:00.000Z',
+          ticketId: 't1',
+          projectId: 'p1',
+          actorId: 'user-1',
+          actorType: 'user',
+          data: { newStatus: 'IN_PROGRESS' },
+        },
+      });
+    });
+
     it('emits TicketEvent after softDelete', async () => {
       const deletedTicket = { ...fakeTicket, deletedAt: new Date() };
       mockTicketRepo.findProjectBySlug.mockResolvedValue(fakeProject);
@@ -923,6 +960,61 @@ describe('TicketsService', () => {
 
       expect(result.assignedToUserId).toBe('admin-1');
       expect(mockTicketRepo.findProjectMemberRole).not.toHaveBeenCalled();
+    });
+
+    it('H13: assign emits an assigned ticket_event with the full envelope', async () => {
+      mockTicketEventService.create.mockResolvedValue({
+        id: 'evt-assign-1',
+        ticketId: 'ticket-123',
+        projectId: 'proj-123',
+        action: 'assigned',
+        actorId: 'user-123',
+        actorType: 'user',
+        source: 'internal',
+        data: '{}',
+        timestamp: new Date('2026-01-01T00:00:00Z'),
+      });
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByProjectAndNumber.mockResolvedValue(mockTicket);
+      mockTicketRepo.findUserById.mockResolvedValue({ id: 'user-456', role: 'ADMIN' });
+      mockTicketRepo.assignTicket.mockResolvedValue({
+        ...mockTicket,
+        assignedToUserId: 'user-456',
+        assignedToAgentId: null,
+      });
+
+      await service.assign('koda', 'KODA-1', { userId: 'user-456' }, mockUserPrincipal);
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(mockTicketEventService.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ticketId: 'ticket-123',
+          projectId: 'proj-123',
+          action: 'assigned',
+          actorId: 'user-123',
+          actorType: 'user',
+          source: 'internal',
+          data: { assignedTo: 'user-456' },
+        }),
+      );
+      expect(mockOutboxService.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: 'proj-123',
+          eventType: 'ticket_event',
+          eventId: 'evt-assign-1',
+          payload: {
+            id: 'evt-assign-1',
+            type: 'ticket_event',
+            action: 'assigned',
+            timestamp: '2026-01-01T00:00:00.000Z',
+            ticketId: 'ticket-123',
+            projectId: 'proj-123',
+            actorId: 'user-123',
+            actorType: 'user',
+            data: { assignedTo: 'user-456' },
+          },
+        }),
+      );
     });
   });
 });

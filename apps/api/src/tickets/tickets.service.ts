@@ -11,6 +11,7 @@ import { actorForeignKeys } from '../auth/principal/actor-foreign-keys';
 import { isUserPrincipal, KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { TICKET_REPOSITORY, ITicketRepository } from './domain/ticket.domain';
 import { TicketEventService } from '../events/ticket-event.service';
+import { buildTicketEventOutboxPayload } from '../events/outbox-envelope.util';
 import { OutboxService } from '../outbox/outbox.service';
 
 interface FindAllFilters {
@@ -61,7 +62,15 @@ export class TicketsService {
         projectId,
         eventType: 'ticket_event',
         eventId: event.id,
-        payload: { ticketId, projectId, actorId: principal.id, data: extra },
+        // H13: consumers switch on action/id/timestamp — enqueue the full event envelope
+        payload: buildTicketEventOutboxPayload({
+          event,
+          ticketId,
+          projectId,
+          actorId: principal.id,
+          actorType,
+          data: extra,
+        }),
       });
     } catch (err) {
       this.logger.warn(
@@ -284,7 +293,7 @@ export class TicketsService {
     return response;
   }
 
-  async assign(projectSlug: string, ref: string, assignInput: AssignInput) {
+  async assign(projectSlug: string, ref: string, assignInput: AssignInput, principal?: KodaPrincipal) {
     if (assignInput.userId && assignInput.agentId) {
       throw new ValidationAppException({}, 'tickets');
     }
@@ -334,6 +343,14 @@ export class TicketsService {
     }
 
     const updated = await this.ticketRepo.assignTicket(ticket.id, assignData);
+
+    // H13: emit an 'assigned' ticket_event so memory extraction and entity-graph
+    // updates run for assignment activity. Fire-and-forget; never fails the request.
+    if (principal) {
+      void this.emitTicketEvent(ticket.id, project.id, 'assigned', principal, {
+        assignedTo: assignInput.userId ?? assignInput.agentId ?? null,
+      });
+    }
 
     const gitRefUrl = this.computeGitRefUrl(
       project.gitRemoteUrl,

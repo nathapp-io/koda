@@ -13,9 +13,12 @@ import { VCS_CFG, IVcsConfig } from '../../config/vcs.config';
 import { decryptToken } from '../../common/utils/encryption.util';
 import { TicketLinksService } from '../../ticket-links/ticket-links.service';
 import { actorForeignKeys } from '../../auth/principal/actor-foreign-keys';
-import { KodaPrincipal } from '../../auth/principal/koda-principal.types';
+import { isUserPrincipal, KodaPrincipal } from '../../auth/principal/koda-principal.types';
 import { TICKET_REPOSITORY, ITicketRepository } from '../domain/ticket.domain';
 import type { TicketDomain } from '../domain/ticket.domain';
+import { TicketEventService } from '../../events/ticket-event.service';
+import { buildTicketEventOutboxPayload } from '../../events/outbox-envelope.util';
+import { OutboxService } from '../../outbox/outbox.service';
 
 export interface TransitionTicketShape {
   id: string;
@@ -67,7 +70,62 @@ export class TicketTransitionsService {
     @Optional() private readonly ticketLinksService?: TicketLinksService,
     @Optional() private readonly vcsLinkExtractorService?: VcsLinkExtractorService,
     @Optional() @Inject(VCS_CFG) private readonly vcsConfig?: IVcsConfig,
+    // H13: optional so the existing vcs integration tests that construct this
+    // service positionally keep working; emission is skipped when absent.
+    @Optional() private readonly ticketEventService?: TicketEventService,
+    @Optional() private readonly outboxService?: OutboxService,
   ) {}
+
+  /**
+   * Fire-and-forget (H13): emit a `status_changed` ticket_event through the
+   * outbox with the full event envelope so the memory extraction and
+   * entity-graph outbox consumers can act on status transitions.
+   */
+  private emitStatusChangedEvent(
+    projectId: string,
+    ticketId: string,
+    fromStatus: string,
+    toStatus: string,
+    principal: KodaPrincipal,
+  ): void {
+    if (!this.ticketEventService || !this.outboxService) return;
+
+    const ticketEventService = this.ticketEventService;
+    const outboxService = this.outboxService;
+    const actorType = isUserPrincipal(principal) ? 'user' : 'agent';
+    const data = { fromStatus, newStatus: toStatus };
+
+    void (async () => {
+      try {
+        const event = await ticketEventService.create({
+          ticketId,
+          projectId,
+          action: 'status_changed',
+          actorId: principal.id,
+          actorType,
+          source: 'internal',
+          data,
+        });
+        await outboxService.enqueue({
+          projectId,
+          eventType: 'ticket_event',
+          eventId: event.id,
+          payload: buildTicketEventOutboxPayload({
+            event,
+            ticketId,
+            projectId,
+            actorId: principal.id,
+            actorType,
+            data,
+          }),
+        });
+      } catch (err) {
+        this.logger.warn(
+          `[outbox] Failed to emit status_changed ticket_event for ticket ${ticketId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    })();
+  }
 
   /**
    * Fire-and-forget: dispatch STATUS_CHANGE webhook for a ticket.
@@ -372,6 +430,7 @@ export class TicketTransitionsService {
 
     this.autoIndexTicket(project, transaction.ticket as unknown as TicketDomain);
     this.dispatchStatusChangeWebhook(project.id, project.key, transaction.ticket as unknown as TicketDomain, ticket.status, TicketStatus.CLOSED);
+    this.emitStatusChangedEvent(project.id, ticket.id, ticket.status, TicketStatus.CLOSED, principal);
 
     return transaction;
   }
@@ -463,6 +522,7 @@ export class TicketTransitionsService {
       this.autoIndexTicket(project, result.ticket as unknown as TicketDomain);
     }
     this.dispatchStatusChangeWebhook(project.id, project.key, result.ticket as unknown as TicketDomain, ticket.status, toStatus);
+    this.emitStatusChangedEvent(project.id, ticket.id, ticket.status, toStatus, principal);
     if (toStatus === TicketStatus.VERIFIED) {
       await this.createPrForTicket(project, result.ticket as unknown as TicketDomain);
     }
