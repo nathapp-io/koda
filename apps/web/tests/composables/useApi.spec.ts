@@ -305,3 +305,169 @@ describe('H9: useApi routes server-side calls through useRequestFetch', () => {
     expect(headers['Accept-Language']).toBe('en')
   })
 })
+
+// ──────────────────────────────────────────────────────────────────────────────
+// M22 — one silent refresh + retry on 401 (client only)
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('M22: shouldRetryAfter401 retry decision helper', () => {
+  test('retries on 401 for a client-side call that has not been retried', async () => {
+    const mod = await import(`${composablePath}`)
+    expect(mod.shouldRetryAfter401(401, true, false)).toBe(true)
+  })
+
+  test('does not retry on other statuses', async () => {
+    const mod = await import(`${composablePath}`)
+    expect(mod.shouldRetryAfter401(403, true, false)).toBe(false)
+    expect(mod.shouldRetryAfter401(500, true, false)).toBe(false)
+  })
+
+  test('does not retry when the status is unknown', async () => {
+    const mod = await import(`${composablePath}`)
+    expect(mod.shouldRetryAfter401(undefined, true, false)).toBe(false)
+  })
+
+  test('does not retry on the server (SSR must not silently refresh)', async () => {
+    const mod = await import(`${composablePath}`)
+    expect(mod.shouldRetryAfter401(401, false, false)).toBe(false)
+  })
+
+  test('does not retry when the request was already retried (loop guard)', async () => {
+    const mod = await import(`${composablePath}`)
+    expect(mod.shouldRetryAfter401(401, true, true)).toBe(false)
+  })
+})
+
+describe('M22: extractErrorStatus helper', () => {
+  test('reads err.status first', async () => {
+    const mod = await import(`${composablePath}`)
+    expect(mod.extractErrorStatus({ status: 401 })).toBe(401)
+  })
+
+  test('falls back to err.response.status', async () => {
+    const mod = await import(`${composablePath}`)
+    expect(mod.extractErrorStatus({ response: { status: 401 } })).toBe(401)
+  })
+
+  test('returns undefined for non-object errors and missing fields', async () => {
+    const mod = await import(`${composablePath}`)
+    expect(mod.extractErrorStatus('boom')).toBeUndefined()
+    expect(mod.extractErrorStatus(null)).toBeUndefined()
+    expect(mod.extractErrorStatus({})).toBeUndefined()
+    expect(mod.extractErrorStatus({ status: '401' })).toBeUndefined()
+  })
+})
+
+describe('M22: useApi client wrapper retries once through /api/auth/refresh on 401', () => {
+  const g = globalThis as Record<string, unknown>
+
+  beforeEach(() => {
+    g.__JEST_IS_SERVER__ = false
+    g.useRuntimeConfig = () => ({
+      public: { apiBaseUrl: 'http://localhost:3100' },
+      apiInternalUrl: 'http://localhost:3100',
+    })
+    g.useI18n = () => ({ locale: ref('en') })
+  })
+
+  afterEach(() => {
+    g.__JEST_IS_SERVER__ = false
+    g.useAuth = undefined
+  })
+
+  function make401FetchMock(successBody: unknown = { ret: 0, data: 'ok' }) {
+    return jest.fn()
+      .mockRejectedValueOnce(Object.assign(new Error('Unauthorized'), { status: 401 }))
+      .mockResolvedValueOnce(successBody)
+  }
+
+  test('calls refresh once then retries the original request on 401', async () => {
+    const fetchMock = make401FetchMock()
+    const refreshMock = jest.fn(() => Promise.resolve(true))
+    g.$fetch = fetchMock
+    g.useAuth = () => ({ refresh: refreshMock })
+
+    const mod = await import(`${composablePath}`)
+    const { $api } = mod.useApi()
+
+    const result = await $api.get('/projects')
+
+    expect(result).toBe('ok')
+    expect(refreshMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[0][0]).toBe(fetchMock.mock.calls[1][0])
+  })
+
+  test('the retried request never leaks the __retried flag onto the wire', async () => {
+    const fetchMock = make401FetchMock()
+    g.$fetch = fetchMock
+    g.useAuth = () => ({ refresh: jest.fn(() => Promise.resolve(true)) })
+
+    const mod = await import(`${composablePath}`)
+    const { $api } = mod.useApi()
+
+    await $api.get('/projects')
+
+    const [, retryOpts] = fetchMock.mock.calls[1] as [string, Record<string, unknown>]
+    expect('__retried' in retryOpts).toBe(false)
+  })
+
+  test('does not retry when refresh fails — the original 401 surfaces', async () => {
+    const fetchMock = make401FetchMock()
+    g.$fetch = fetchMock
+    g.useAuth = () => ({ refresh: jest.fn(() => Promise.resolve(false)) })
+
+    const mod = await import(`${composablePath}`)
+    const { $api } = mod.useApi()
+
+    await expect($api.get('/projects')).rejects.toThrow()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  test('does not retry on non-401 failures', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('Forbidden'), { status: 403 }))
+    g.$fetch = fetchMock
+    const refreshMock = jest.fn(() => Promise.resolve(true))
+    g.useAuth = () => ({ refresh: refreshMock })
+
+    const mod = await import(`${composablePath}`)
+    const { $api } = mod.useApi()
+
+    await expect($api.get('/projects')).rejects.toThrow()
+    expect(refreshMock).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  test('does not retry on the server (SSR errors surface immediately)', async () => {
+    const requestFetchMock = jest
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('Unauthorized'), { status: 401 }))
+    const refreshMock = jest.fn(() => Promise.resolve(true))
+    g.__JEST_IS_SERVER__ = true
+    g.useRequestFetch = () => requestFetchMock
+    g.$fetch = makeFetchMock()
+    g.useAuth = () => ({ refresh: refreshMock })
+
+    const mod = await import(`${composablePath}`)
+    const { $api } = mod.useApi()
+
+    await expect($api.get('/projects')).rejects.toThrow()
+    expect(refreshMock).not.toHaveBeenCalled()
+    expect(requestFetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('M22: retry wiring source assertions', () => {
+  test('useApi.ts wires the refresh retry inside request()', () => {
+    const source = readFileSync(composablePath, 'utf-8')
+    expect(source).toContain('shouldRetryAfter401')
+    expect(source).toMatch(/__retried/)
+  })
+
+  test('the refresh call is made through useAuth (shared state, no duplicate refresh logic)', () => {
+    const source = readFileSync(composablePath, 'utf-8')
+    expect(source).toMatch(/useAuth\(\)/)
+  })
+})

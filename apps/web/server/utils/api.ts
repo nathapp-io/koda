@@ -66,18 +66,26 @@ export function clearAuthCookies(event: AuthEvent): void {
 /**
  * Build a FetchOptions payload that forwards the request body + cookies to the
  * upstream API. Used by the /server/api/auth/* server routes.
+ *
+ * `init.cookieName` selects which httpOnly auth cookie is forwarded as the
+ * Bearer token (M22): 'access' (default) sends the 15-minute access token,
+ * 'refresh' sends the 7-day refresh token (required by /auth/refresh, whose
+ * JwtRefreshGuard extracts the refresh token from the Bearer header first).
  */
 export function forwardToApi<T = unknown>(
   event: AuthEvent,
   path: string,
-  init: { method?: string; body?: unknown } = {},
+  init: { method?: string; body?: unknown; cookieName?: 'access' | 'refresh' } = {},
 ): Promise<{ status: number; body: T }> {
   const config = useRuntimeConfig(event)
   const internal = String(config.apiInternalUrl ?? '').replace(/\/+$/, '')
   const baseUrl = internal.endsWith('/api') ? internal : `${internal}/api`
   const url = `${baseUrl}${path}`
 
-  const cookieValue = getCookie(event, ACCESS_COOKIE)
+  const cookieValue = getCookie(
+    event,
+    init.cookieName === 'refresh' ? REFRESH_COOKIE : ACCESS_COOKIE,
+  )
   const headers: Record<string, string> = {
     Accept: 'application/json',
   }

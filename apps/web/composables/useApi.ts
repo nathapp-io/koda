@@ -102,6 +102,34 @@ export function mergeHeaders(
   return { ...base, ...caller }
 }
 
+/**
+ * Extract the HTTP status from a caught error (M22).
+ * $fetch FetchError exposes `status`; some wrapped errors only carry
+ * `response.status`. Non-numeric or missing statuses yield undefined.
+ * Pure and exported for unit testing.
+ */
+export function extractErrorStatus(err: unknown): number | undefined {
+  if (err === null || typeof err !== 'object') return undefined
+  const e = err as { status?: unknown; response?: { status?: unknown } }
+  if (typeof e.status === 'number') return e.status
+  if (typeof e.response?.status === 'number') return e.response.status
+  return undefined
+}
+
+/**
+ * Decide whether a failed request should be silently refreshed and retried
+ * (M22): only on 401, only on the client (SSR must surface errors directly),
+ * and never twice — the caller passes its `__retried` flag as the loop guard.
+ * Pure and exported for unit testing.
+ */
+export function shouldRetryAfter401(
+  status: number | undefined,
+  isClient: boolean,
+  alreadyRetried: boolean,
+): boolean {
+  return status === 401 && isClient && !alreadyRetried
+}
+
 export const useApi = () => {
   const config = useRuntimeConfig()
   // Server-side: ensure internal URL includes /api (E2E env provides host:port only)
@@ -140,14 +168,34 @@ export const useApi = () => {
     url: string,
     options: Record<string, unknown> = {},
   ): Promise<T> => {
+    // __retried is the M22 loop guard — destructured out so it never
+    // reaches the wire as a fetch option. Declared before the try so the
+    // catch block can read it.
+    const { headers: callerHeaders, __retried: alreadyRetried, ...rest } = options
     try {
-      const { headers: callerHeaders, ...rest } = options
       const response = await requestFetch(url, {
         ...rest,
         headers: getHeaders(callerHeaders as Record<string, string> | undefined),
       })
       return unwrap<T>(response)
     } catch (err: unknown) {
+      // M22: one silent refresh + retry on 401 before surfacing the error.
+      // The 15-minute access token expires mid-session; refresh() renews the
+      // httpOnly cookies via the server proxy and the original request is
+      // replayed exactly once (useAuth clears the stale user when refresh
+      // fails, so repeated 401s fall through to the auth middleware).
+      if (
+        shouldRetryAfter401(
+          extractErrorStatus(err),
+          import.meta.client === true,
+          alreadyRetried === true,
+        )
+      ) {
+        const { refresh } = useAuth()
+        if (await refresh()) {
+          return request<T>(url, { ...options, __retried: true })
+        }
+      }
       // Re-throw ApiError as-is (from unwrap)
       if (err instanceof ApiError) throw err
       // $fetch FetchError on non-2xx — try to extract JsonResponse body
