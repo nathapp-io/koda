@@ -4,7 +4,7 @@
  * Verifies that GitLabProvider correctly implements IVcsProvider interface
  * by making GitLab API (v4) calls with proper authentication, and response mapping.
  *
- * Run: DATABASE_URL=file:./koda-test.ephemeral.db npx jest test/integration/vcs/gitlab.provider.integration.spec.ts
+ * Run: cd apps/api && bun run test:db:up && bun run test:integration -- test/integration/vcs/gitlab.provider.integration.spec.ts
  */
 
 import { NotFoundAppException } from '@nathapp/nestjs-common';

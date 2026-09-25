@@ -19,7 +19,7 @@
  *    partial projection without `action`/`timestamp`, so the subscriber's
  *    extraction switches never matched and zero rows were produced.
  *
- * Run: cd apps/api && DATABASE_URL=file:./koda-test.ephemeral.db bunx jest test/integration/memory/outbox-envelope --forceExit
+ * Run: cd apps/api && bun run test:db:up && bun run test:integration -- test/integration/memory/outbox-envelope.integration.spec.ts
  *
  * Bootstrapping follows the resetDb()/DATABASE_URL pattern used by the other
  * DB-backed integration suites (see test/integration/vcs/vcs-merged-pr.integration.spec.ts).
@@ -45,7 +45,7 @@ import { MemoryKind, TicketStatus } from '../../../src/common/enums';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 
 const DATABASE_URL = process.env.DATABASE_URL;
-const describeIntegration = DATABASE_URL ? describe : describe.skip;
+const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 describeIntegration('H13: outbox ticket_event envelope drives memory extraction (real DB)', () => {
   jest.setTimeout(30000);

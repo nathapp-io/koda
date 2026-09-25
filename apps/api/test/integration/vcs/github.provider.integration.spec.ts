@@ -4,7 +4,7 @@
  * Verifies that GitHubProvider correctly implements IVcsProvider interface
  * by making GitHub API calls with proper authentication, filtering, and response mapping.
  *
- * Run: DATABASE_URL=file:./koda-test.ephemeral.db npx jest test/integration/vcs/github.provider.integration.spec.ts
+ * Run: cd apps/api && bun run test:db:up && bun run test:integration -- test/integration/vcs/github.provider.integration.spec.ts
  */
 
 import { NotFoundAppException } from '@nathapp/nestjs-common';

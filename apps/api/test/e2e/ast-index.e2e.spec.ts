@@ -8,7 +8,7 @@
  *   - Permission gating (ADMIN, DEVELOPER agent)
  *   - code_commit outbox event triggering
  *
- * Run:  DATABASE_URL=file:./koda-test.ephemeral.db bun run test:integration
+ * Run: cd apps/api && bun run test:db:up && bun run test:integration -- test/e2e/ast-index.e2e.spec.ts
  */
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
@@ -20,7 +20,7 @@ import { CombinedAuthGuard } from '../../src/auth/guards/combined-auth.guard';
 import { resetDb } from '../helpers/reset-db';
 
 const DATABASE_URL = process.env.DATABASE_URL;
-const describeE2E = DATABASE_URL ? describe : describe.skip;
+const describeE2E = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
 function body<T = unknown>(res: request.Response): T {
   expect(res.body).toHaveProperty('ret', 0);
