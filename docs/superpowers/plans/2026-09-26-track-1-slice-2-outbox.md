@@ -611,6 +611,8 @@ Apply the same two mechanical substitutions in each file below:
 1. `new OutboxFanOutRegistry()` → `new FanOutPublisher(noopLastErrors)`; a Nest provider `OutboxFanOutRegistry` → `FanOutPublisher` plus `{ provide: PrismaOutboxRepository, useValue: noopLastErrors }`. Import `noopLastErrors`/`outboxRecord` from `test/helpers/outbox-record` (relative path).
 2. `x.dispatch({ eventType: T, payload: P })` → `x.publish(outboxRecord(T, P))`.
 
+Also update the stale doc comment at `src/webhook/webhook-delivery.handler.spec.ts:25` that points at `src/outbox/outbox-fan-out-registry.spec.ts` (point it at `src/outbox/fan-out-publisher.spec.ts`).
+
 Files: `src/webhook/webhook-outbox.subscriber.spec.ts`, `src/memory/memory-outbox.subscriber.spec.ts`, `src/entity-graph/entity-graph-outbox.subscriber.spec.ts`, `src/code-intel/code-intel-outbox.subscriber.spec.ts`, `test/integration/ast-index/code-commit-handler.integration.spec.ts`, `test/integration/entity-graph/outbox-fanout-entity-graph.integration.spec.ts`, `test/integration/memory/outbox-envelope.integration.spec.ts`, `test/integration/memory/outbox-fanout-extraction.integration.spec.ts`.
 
 Behavior change to apply by hand: `dispatch()` swallowed handler errors, `publish()` rejects. Any assertion of the form "dispatch resolves even though the handler threw" becomes `await expect(x.publish(...)).rejects.toThrow(...)`.
@@ -2118,7 +2120,7 @@ git commit -m "fix(tickets): record ticket events and webhook rows inside the wr
 ### Task 5: Domain writer and VCS webhook record through the package
 
 **Files:**
-- Modify: `apps/api/src/koda-domain-writer/koda-domain-writer.service.ts`, `apps/api/src/koda-domain-writer/koda-domain-writer.service.spec.ts`, `apps/api/test/integration/koda-domain-writer/koda-domain-writer.integration.spec.ts`
+- Modify: `apps/api/src/koda-domain-writer/koda-domain-writer.service.ts`, `apps/api/src/koda-domain-writer/koda-domain-writer.service.spec.ts`, `apps/api/test/integration/koda-domain-writer/koda-domain-writer.integration.spec.ts`, `apps/api/test/integration/events/event-write-operations.integration.spec.ts`
 - Modify: `apps/api/src/vcs/vcs-webhook.service.ts`, `apps/api/src/vcs/vcs-webhook.service.spec.ts`
 - Modify: `apps/api/test/integration/outbox/producer-atomicity.integration.spec.ts` (add domain-writer cases)
 
@@ -2251,6 +2253,8 @@ it('writeAgentAction commits the AgentEvent and one agent_event row keyed by its
 (`agentActionInput` = `{ projectId, agentId, actorId: agentId, action: 'decision_made', source: 'api', data: {} }` using the seeded agent.)
 
 In `test/integration/koda-domain-writer/koda-domain-writer.integration.spec.ts`, replace the koda `OutboxService` mock with `{ provide: NathappOutboxService, useValue: { record: jest.fn().mockResolvedValue(undefined) } }` and add a pass-through `TRANSACTION_MANAGER` provider (`run: (fn) => fn()`, `getClient`, `isInTransaction: () => false`).
+
+Apply the same change to `apps/api/test/integration/events/event-write-operations.integration.spec.ts` (mocked Prisma, not DB-backed): delete the `import { OutboxService } from '../../../src/outbox/outbox.service';` line (line 28; the file is deleted in Task 6), replace `const mockOutboxService = { enqueue: jest.fn(), processPending: jest.fn() }` with `const mockOutbox = { record: jest.fn().mockResolvedValue(undefined) }`, swap the provider `{ provide: OutboxService, useValue: mockOutboxService }` for `{ provide: NathappOutboxService, useValue: mockOutbox }` plus the same pass-through `TRANSACTION_MANAGER` provider, and change the seven `mockOutboxService.enqueue.mockResolvedValue(...)` lines (~583-888) to `mockOutbox.record.mockResolvedValue(...)`; any assertion on `enqueue` arguments moves to the `record` shape `{ type, payload, metadata: { projectId, eventId } }`.
 
 - [ ] **Step 6: Verify and prove no producer still uses the adapter**
 
@@ -2468,7 +2472,7 @@ Expected: PASS (`admin.spec.ts` may need the retry description string updated).
 
 - [ ] **Step 6: Verify the old vocabulary is gone**
 
-Run: `grep -rn "dead_letter\|OutboxFanOutRegistry\|outbox.service'\|OUTBOX_BACKOFF_MS" apps/api/src apps/cli/src --include='*.ts' | grep -v generated`
+Run: `grep -rn "dead_letter\|OutboxFanOutRegistry\|outbox.service'\|OUTBOX_BACKOFF_MS\|\.enqueue(\|processPending" apps/api/src apps/api/test apps/cli/src --include='*.ts' | grep -v generated`
 Expected: no output.
 
 - [ ] **Step 7: Commit**
