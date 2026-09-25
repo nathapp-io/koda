@@ -1,5 +1,5 @@
 /**
- * API E2E Tests — Full lifecycle via supertest + real SQLite DB
+ * API E2E Tests — Full lifecycle via supertest + real Postgres DB
  *
  * Exercises:
  *   Human auth → Agent auth → Project CRUD → Label CRUD →
@@ -54,7 +54,7 @@ describeIntegration('API Integration Tests', () => {
   beforeAll(async () => {
     if (!DATABASE_URL) return;
 
-    // Reset SQLite test DB to clean state (schema pushed once by globalSetup)
+    // Reset Postgres test DB to clean state (schema pushed once by globalSetup)
     await resetDb();
 
     // Use AppFactory to get NathApplication with useAppGlobal* methods

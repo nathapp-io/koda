@@ -1,7 +1,8 @@
 /**
  * Local TypeScript enum definitions for the Koda API.
- * SQLite does not support native Prisma enums, so these are defined here
- * as const objects with string literal types.
+ * A historical SQLite constraint (no native Prisma enum support there) keeps these
+ * defined here as const objects with string literal types; conversion to native
+ * Postgres enums is tracked debt.
  */
 
 export const TicketStatus = {

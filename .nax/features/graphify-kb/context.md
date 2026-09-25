@@ -73,8 +73,8 @@ _Hand-authored after US-001 and US-002. Updated after US-003. Date: 2026-04-15. 
 - **Integration test location**: `apps/api/test/integration/graphify-kb-validation/graphify-kb-validation.integration.spec.ts` — all story integration tests for this feature go in the same file.
   _Source: US-001 diff (764cf3d)._
 
-- **Migration style is SQLite** (`PRAGMA defer_foreign_keys`). Existing table is rebuilt via CREATE+INSERT+DROP+RENAME. Do not write Postgres-style `ALTER TABLE ADD COLUMN` migrations.
-  _Source: US-001 migration diff._
+- **Migration style was SQLite** (`PRAGMA defer_foreign_keys`; historical SQLite constraint). Tables were rebuilt via CREATE+INSERT+DROP+RENAME. Obsolete under Postgres: standard Prisma SQL migrations are authoritative — do not apply this guidance to new migrations.
+  _Source: US-001 migration diff. historical SQLite guidance, superseded by the Postgres-only switch._
 
 ## Gotchas
 

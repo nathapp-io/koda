@@ -1,5 +1,5 @@
 /**
- * SQLite LIKE was ASCII case-insensitive; Postgres `contains` is not.
+ * The historical SQLite LIKE was ASCII case-insensitive; Postgres `contains` is not.
  * Symbol search must keep matching regardless of case.
  *
  * Run: cd apps/api && bun run test:integration -- test/integration/code-intel/symbol-search-case.integration.spec.ts

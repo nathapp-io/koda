@@ -8,8 +8,7 @@ services:
     ports:
       - "${API_PORT:-3100}:3101"
     environment:
-      DATABASE_PROVIDER: sqlite
-      DATABASE_URL: file:/data/koda.db
+      DATABASE_URL: postgresql://koda:${POSTGRES_PASSWORD:-koda}@postgres:5432/koda
       JWT_SECRET: ${JWT_SECRET:-change-me-dev}
       JWT_EXPIRES_IN: 7d
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-dev-refresh}
@@ -23,13 +22,33 @@ services:
       - /app/node_modules
       - /app/apps/api/node_modules
       - koda_data_dev:/data
-    command: sh -c "bun install --frozen-lockfile && bun run db:generate --filter=@nathapp/koda-api && bun run dev --filter=@nathapp/koda-api"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: sh -c "bun install --frozen-lockfile && bun run db:generate --filter=@nathapp/koda-api && (cd apps/api && bunx prisma migrate deploy) && bun run dev --filter=@nathapp/koda-api"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3101/api/health"]
       interval: 30s
       timeout: 3s
       retries: 3
     restart: no
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-koda}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-koda}
+      POSTGRES_DB: ${POSTGRES_DB:-koda}
+    ports:
+      - "5432:5432"
+    volumes:
+      - koda_pg_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-koda} -d ${POSTGRES_DB:-koda}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
 
   web:
     build:
@@ -57,4 +76,6 @@ services:
 
 volumes:
   koda_data_dev:
+    driver: local
+  koda_pg_dev:
     driver: local

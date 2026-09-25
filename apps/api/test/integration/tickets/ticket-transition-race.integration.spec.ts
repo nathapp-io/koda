@@ -15,7 +15,8 @@
  *
  * Note on seeding: verify is CREATED→VERIFIED and reject is CREATED|VERIFIED→
  * REJECTED, so the only status where BOTH are valid is CREATED — that is what
- * we seed. On SQLite writes serialize, so the race cannot always manifest
+ * we seed. On the historical SQLite backend writes serialized, so the race
+ * could not always manifest
  * naturally; a barrier on updateTicketStatusIf forces both writers to arrive
  * at the write phase with stale reads, pinning the conditional-update
  * contract deterministically: the loser gets 409, never a double commit.
@@ -114,8 +115,9 @@ describeIntegration('M3 ticket transition race (verify vs reject)', () => {
 
   it('concurrent verify + reject: exactly one 2xx, one 409, no double commit', async () => {    // Barrier on the READ phase: hold both callers until both reads have
     // COMPLETED, guaranteeing both transitions act on the same stale status
-    // even though SQLite serializes writes. (Gating the write phase instead
-    // deadlocks: the loser's open transaction holds SQLite's write lock while
+    // even though the historical SQLite backend serialized writes. (Gating the
+    // write phase instead
+    // deadlocks: the loser's open transaction holds the database's write lock while
     // the winner waits for a connection.) Both writes then race on the
     // conditional update: first commits, second matches 0 rows → 409.
     const original = repo.findTicketByRefRaw.bind(repo);

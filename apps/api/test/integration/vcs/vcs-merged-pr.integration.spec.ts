@@ -84,7 +84,7 @@ describeIntegration('VCS merged-PR auto-transition (H6)', () => {
 
     // Pass-through transaction manager. PrismaVcsRepository always issues its
     // statements on the ambient PrismaService.client (never the tx client), so
-    // on SQLite a real interactive transaction would just hold a write lock and
+    // on the historical SQLite backend a real interactive transaction would just hold a write lock and
     // time out against the pool writes. A pass-through is behaviorally
     // equivalent here while keeping the FK enforcement of the real database.
     const txManager: ITransactionManager = {

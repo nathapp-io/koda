@@ -106,8 +106,8 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
     prisma = prismaService.client;
 
     // Pass-through transaction manager: repositories always issue statements on
-    // the ambient PrismaService.client, so on SQLite a real interactive
-    // transaction would just hold a write lock. A pass-through is behaviorally
+    // the ambient PrismaService.client, so on the historical SQLite backend a
+    // real interactive transaction would just hold a write lock. A pass-through is behaviorally
     // equivalent here while keeping the FK enforcement of the real database.
     const txManager: ITransactionManager = {
       run: <T>(fn: () => Promise<T>): Promise<T> => fn(),
