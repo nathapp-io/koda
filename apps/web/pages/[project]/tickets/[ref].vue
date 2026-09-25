@@ -111,7 +111,7 @@ async function saveEdit() {
     await refresh()
     editState.isEditing = false
     toast.success(t('tickets.toast.updated'))
-  } catch (error: unknown) {
+  } catch {
     toast.error(t('tickets.toast.updateFailed'))
   }
 }

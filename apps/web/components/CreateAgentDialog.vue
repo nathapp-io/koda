@@ -147,7 +147,6 @@ const toast = useAppToast()
 const availableRoles = AGENT_ROLES
 
 // Tag input state for capabilities
-const capabilitiesInput = ref('')
 const capabilitiesTags = ref<string[]>([])
 
 // Track if slug was manually edited (to preserve user changes).
@@ -260,7 +259,7 @@ const onSubmit = handleSubmit(async (formValues) => {
   try {
     const response = await $api.post('/agents', formValues as Record<string, unknown>); const agentApiKey = (response as { apiKey: string }).apiKey; apiKey.value = agentApiKey
     toast.success(t('agents.toast.created'))
-  } catch (error: unknown) {
+  } catch {
     toast.error(t('agents.toast.createFailed'))
   }
 })

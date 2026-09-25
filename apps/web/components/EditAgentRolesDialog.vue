@@ -94,7 +94,7 @@ const onSubmit = handleSubmit(async (formValues) => {
     toast.success(t('agents.toast.rolesUpdated'))
     emit('updated')
     emit('update:open', false)
-  } catch (error: unknown) {
+  } catch {
     toast.error(t('agents.toast.updateRolesFailed'))
   }
 })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { TabsContent, TabsList, TabsRoot, TabsTrigger } from 'radix-vue'
+import { TabsRoot } from 'radix-vue'
 import { cn } from '~/lib/utils'
 
 const props = defineProps<{

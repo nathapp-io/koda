@@ -107,14 +107,14 @@ const formSchema = toTypedSchema(
     }),
     priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).default('MEDIUM'),
     description: z.string().optional(),
-  }) as any
+  })
 )
 
 const { handleSubmit, isSubmitting, resetForm } = useForm({
   validationSchema: formSchema,
   initialValues: {
     title: '',
-    type: '',
+    type: undefined,
     priority: 'MEDIUM',
     description: '',
   },

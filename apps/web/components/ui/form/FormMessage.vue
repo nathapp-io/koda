@@ -5,14 +5,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject } from 'vue'
+import { inject } from 'vue'
 import { cn } from '~/lib/utils'
 
 interface Props {
   name?: string
 }
 
-const props = defineProps<Props>()
+defineProps<Props>()
 
 // Get error message from parent FormField via provide/inject or use empty string
 const errorMessage = inject<string>('errorMessage', '')
