@@ -8,6 +8,7 @@ import { TicketType, TicketStatus, Priority } from '../common/enums';
 import { buildGitUrl } from '../common/utils/git-url.util';
 import { actorForeignKeys } from '../auth/principal/actor-foreign-keys';
 import { isUserPrincipal, KodaPrincipal } from '../auth/principal/koda-principal.types';
+import { runWithTicketNumberRetry } from '../common/utils/ticket-number-retry';
 import { TICKET_REPOSITORY, ITicketRepository } from './domain/ticket.domain';
 import { TicketEventService } from '../events/ticket-event.service';
 import { buildTicketEventOutboxPayload } from '../events/outbox-envelope.util';
@@ -111,8 +112,9 @@ export class TicketsService {
       throw new ValidationAppException({}, 'tickets');
     }
 
-    /** @design @@unique([projectId, number]) in schema is the safety net against concurrent duplicate numbers; txManager.run() serializes on SQLite and the constraint errors on PostgreSQL so callers retry. */
-    const ticket = await this.txManager.run(async () => {
+    // @@unique([projectId, number]) rejects concurrent duplicate numbers on
+    // Postgres; runWithTicketNumberRetry re-runs the whole transaction (M6).
+    const ticket = await runWithTicketNumberRetry(this.txManager, async () => {
       const lastTicket = await this.ticketRepo.findLastTicketInProject(project.id);
       const nextNumber = (lastTicket?.number ?? 0) + 1;
 

@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TicketsService } from './tickets.service';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { Prisma } from '@prisma/client';
 import { TICKET_REPOSITORY } from './domain/ticket.domain';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
@@ -221,6 +222,23 @@ describe('TicketsService', () => {
       // Numbers should be different and sequential
       expect(result1.number).not.toEqual(result2.number);
       expect(Math.abs(result1.number - result2.number)).toBe(1);
+    });
+
+    it('retries ticket creation on a concurrent-number conflict (M6)', async () => {
+      const conflict = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: 'test',
+        meta: { target: ['projectId', 'number'] },
+      });
+      mockTxManager.run
+        .mockImplementationOnce(() => Promise.reject(conflict))
+        .mockImplementation((fn: () => unknown) => fn());
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.createTicket.mockResolvedValue(mockTicket);
+
+      await service.create('koda', { type: 'TASK', title: 'x' } as CreateTicketDto, mockUserPrincipal);
+
+      expect(mockTxManager.run).toHaveBeenCalledTimes(2);
     });
 
     it('should return 404 if project not found', async () => {

@@ -2,6 +2,7 @@ import { Injectable, Inject } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { PrismaClient } from '@prisma/client';
+import { runWithTicketNumberRetry } from '../common/utils/ticket-number-retry';
 import { CiProjectDomain, CiTicketDomain } from './domain/ci-webhook.domain';
 
 @Injectable()
@@ -36,7 +37,7 @@ export class PrismaCiWebhookRepository {
       gitRefLine: number | null;
     },
   ): Promise<CiTicketDomain> {
-    return this.txManager.run(async () => {
+    return runWithTicketNumberRetry(this.txManager, async () => {
       const lastTicket = await this.prisma.client.ticket.findFirst({
         where: { projectId },
         orderBy: { number: 'desc' },
