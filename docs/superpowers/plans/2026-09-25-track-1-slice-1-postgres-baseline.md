@@ -170,7 +170,7 @@ Delete the `DATABASE_PROVIDER=...` line from `apps/api/.env.example` and `apps/a
 
 - [ ] **Step 4: Verify no other reader exists, then run the tests**
 
-Run: `grep -rn "DATABASE_PROVIDER\|\.provider\b" apps/api/src --include='*.ts' | grep -iv "vcs\|embedding\|llm\|rag"` — expected: no output.
+Run: `grep -rn "DATABASE_PROVIDER\|database\.provider\|IDatabaseConfig" apps/api/src apps/api/test --include='*.ts'` — expected: only `database.config.ts` and `database.config.spec.ts` (the `IDatabaseConfig` type itself).
 Run: `cd apps/api && bunx jest src/config`
 Expected: PASS.
 
@@ -415,20 +415,42 @@ Expected: PASS (2 tests).
 
 - [ ] **Step 6: Switch every DB-suite gate to `KODA_DB_TESTS`**
 
-The existing DB-backed specs gate on `process.env.DATABASE_URL ? describe : describe.skip`. With `.env.test` always setting `DATABASE_URL`, that gate no longer means "a DB is available". Find them:
+The DB-backed specs gate on `DATABASE_URL ? describe : describe.skip`. With `.env.test` always setting `DATABASE_URL`, that gate no longer means "a DB is available". These are exactly the files to change (verified at `eb18be6c`):
 
-Run: `cd apps/api && grep -rln "DATABASE_URL ? describe\|DATABASE_URL) ? describe\|describe.skip" test src | sort`
+```
+test/integration/tickets/ticket-tenancy.integration.spec.ts:36
+test/integration/tickets/ticket-transition-race.integration.spec.ts:35
+test/integration/memory/outbox-envelope.integration.spec.ts:48
+test/integration/projects/project-memory.integration.spec.ts:22
+test/integration/vcs/vcs-merged-pr.integration.spec.ts:38
+test/integration/vcs/schema-validation.integration.spec.ts:16
+test/integration/vcs/prisma-models.integration.spec.ts:18
+test/integration/outbox-event-schema/outbox-event-schema.validation.integration.spec.ts:16
+test/e2e/agents.e2e.spec.ts:11
+test/e2e/empty-description.spec.ts:18
+test/e2e/context.e2e.spec.ts:40
+test/e2e/ast-index.e2e.spec.ts:23
+test/e2e/api-endpoint/endpoint.e2e.spec.ts:27
+test/e2e/hybrid-retriever.e2e.spec.ts:27
+```
 
-In each listed file replace the gate expression with `process.env.KODA_DB_TESTS === '1'`, keeping the variable name the file already uses, e.g.:
+Confirm the list is still complete with `grep -rn "DATABASE_URL ? describe" apps/api/test apps/api/src`. In each file replace the gate expression, keeping the variable name the file uses, e.g.:
 
 ```typescript
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 ```
 
-Also update the `Run:` doc comments in those files that say `DATABASE_URL=file:./koda-test.ephemeral.db ...` to:
+**Do not touch** `test/integration/openapi-client/openapi-client.integration.spec.ts` (its `describe.skip` gates are about generated clients, not the DB) or `test/integration/code-intel/impact-analysis.service.integration.spec.ts:48` (unconditionally skipped today; out of scope).
+
+Update the `Run:` doc comments that say `DATABASE_URL=file:./koda-test.ephemeral.db ...` (grep `koda-test.ephemeral.db` under `apps/api/test`) to:
 ` * Run: cd apps/api && bun run test:db:up && bun run test:integration -- <this file>`
 
-Three specs push the schema themselves (`test/integration/vcs/schema-validation.integration.spec.ts:37`, `test/integration/vcs/prisma-models.integration.spec.ts:42`, `test/integration/outbox-event-schema/outbox-event-schema.validation.integration.spec.ts:37,444,449`). Leave the push calls (they work on PG) but make sure each passes `env: { ...process.env }` so it targets the same `DATABASE_URL`.
+**Three specs build their own throwaway SQLite database** and will fail outright on a `postgresql` client (a `file:` URL is rejected): `test/integration/vcs/schema-validation.integration.spec.ts`, `test/integration/vcs/prisma-models.integration.spec.ts`, `test/integration/outbox-event-schema/outbox-event-schema.validation.integration.spec.ts`. In each:
+
+1. Delete the `tmpDbPath` variable, the `os`/`path`/`fs` imports if they become unused, and the `afterAll` file-deletion block (keep the `$disconnect()`).
+2. Construct the client against the shared test database: `new PrismaClient({ datasources: { db: { url: process.env.DATABASE_URL } } })`.
+3. Replace the `beforeAll` `execSync('bunx prisma db push --force-reset ...', { env: { ...process.env, DATABASE_URL: \`file:${tmpDbPath}\` } })` try/catch with `await resetDb();` (import from `../../helpers/reset-db`). The schema is already pushed by `global-setup`.
+4. `outbox-event-schema.validation.integration.spec.ts:440-455` runs `prisma db push --force-reset` twice **as the subject of a test** (idempotent push). Keep those two calls but change their env to `{ ...process.env }` (the shared `DATABASE_URL`). This is safe because Jest runs with `maxWorkers: 1`; the spec's later tests must not depend on rows created before that test — if one does, move the seeding after it or add `await resetDb()` where needed.
 
 - [ ] **Step 7: Run the unit suite with the test DB stopped**
 
@@ -504,7 +526,7 @@ git commit -m "test(api): make integration and e2e suites deterministic on postg
 - Create: `apps/api/src/common/utils/ticket-number-retry.spec.ts`
 
 **Interfaces:**
-- Consumes: `ITransactionManager` from `@nathapp/nestjs-data` (`run<T>(fn: () => Promise<T>): Promise<T>`, `getClient<C>(): C`). The concrete `PrismaTransactionManager` also has `isInTransaction(): boolean`, which is not on the interface — detect it structurally.
+- Consumes: `ITransactionManager` from `@nathapp/nestjs-data` (`run<T>(fn: () => Promise<T>): Promise<T>`, `getClient<C>(): C`, `isInTransaction(): boolean`).
 - Produces:
   - `isTicketNumberConflict(error: unknown): boolean`
   - `runWithTicketNumberRetry<T>(txManager: ITransactionManager, work: () => Promise<T>, options?: TicketNumberRetryOptions): Promise<T>`
@@ -666,11 +688,6 @@ export function isTicketNumberConflict(error: unknown): boolean {
   return false;
 }
 
-function isInOuterTransaction(txManager: ITransactionManager): boolean {
-  const probe = (txManager as { isInTransaction?: () => boolean }).isInTransaction;
-  return typeof probe === 'function' && probe.call(txManager) === true;
-}
-
 export async function runWithTicketNumberRetry<T>(
   txManager: ITransactionManager,
   work: () => Promise<T>,
@@ -680,7 +697,7 @@ export async function runWithTicketNumberRetry<T>(
   const random = options.random ?? Math.random;
   // PrismaTransactionManager.run() joins an active transaction, so a retry
   // there would reuse the aborted transaction. Run once and report 409.
-  const maxAttempts = isInOuterTransaction(txManager)
+  const maxAttempts = txManager.isInTransaction()
     ? 1
     : (options.maxAttempts ?? TICKET_NUMBER_MAX_ATTEMPTS);
 
@@ -924,7 +941,7 @@ Run: `cd apps/api && bun run test:integration -- test/integration/tickets/ticket
 Expected: PASS (3 tests).
 
 Run: `cd apps/api && bunx jest src/tickets src/ci-webhook src/vcs`
-Expected: PASS. The unit mocks' `txManager` objects have no `isInTransaction`, so the helper treats them as "not in a transaction" and calls `run` once on success — existing `toHaveBeenCalled()` expectations hold. If an assertion expects an exact call count that now differs, fix the assertion to the helper's documented behavior.
+Expected: PASS. The unit mocks already define `isInTransaction: jest.fn(() => false)` (`tickets.service.spec.ts:118`, `prisma-vcs.repository.spec.ts:8`), so the helper calls `run` once on success and existing `toHaveBeenCalled()` expectations hold. If a mock lacks `isInTransaction` (the CI-webhook repository spec, if it has one), add `isInTransaction: jest.fn(() => false)` to it. If an assertion expects an exact call count that now differs, fix the assertion to the helper's documented behavior.
 
 - [ ] **Step 5: Add the unit test for the service's 409 path**
 
@@ -1293,7 +1310,7 @@ In `scripts/smoke-test-cli.sh`:
   ```bash
   # Promote user to ADMIN (idempotent; the first registered user is already ADMIN on a fresh DB)
   if ! (cd "$API_DIR" && echo "UPDATE \"User\" SET \"role\" = 'ADMIN' WHERE \"id\" = '${USER_ID}';" \
-      | DATABASE_URL="$SMOKE_DATABASE_URL" bunx prisma db execute --stdin > /tmp/koda-smoke-promote-$$.log 2>&1); then
+      | bunx prisma db execute --stdin --url "$SMOKE_DATABASE_URL" > /tmp/koda-smoke-promote-$$.log 2>&1); then
     fail "ADMIN promotion failed: $(cat /tmp/koda-smoke-promote-$$.log)"; exit 1
   fi
   ```
@@ -1335,6 +1352,7 @@ git commit -m "ci: run integration, eval and smoke against postgres"
 
 **Files:**
 - Modify: `apps/web/playwright.config.ts:9-10,31-46`
+- Modify: `apps/web/tests/e2e/global-teardown.ts` (deletes the SQLite `koda-e2e.db`; wired at `playwright.config.ts:64`)
 
 - [ ] **Step 1: Point the API web server at Postgres**
 
@@ -1355,6 +1373,19 @@ Replace the API `webServer.command` with:
 
 and its `env.DATABASE_URL` with `DATABASE_URL: E2E_DATABASE_URL,`.
 
+Replace `apps/web/tests/e2e/global-teardown.ts` with a no-op (the Postgres `koda_e2e` database is reset by the next run's `prisma migrate reset`):
+
+```typescript
+/**
+ * Global teardown — runs once after all E2E tests. The Postgres e2e database
+ * is reset by the next run's `prisma migrate reset`, so there is nothing to
+ * delete. Kept so playwright.config.ts globalTeardown stays stable.
+ */
+export default async function globalTeardown(): Promise<void> {
+  return;
+}
+```
+
 - [ ] **Step 2: Run the web e2e suite**
 
 ```bash
@@ -1366,7 +1397,7 @@ Expected: the same pass/fail set as on SQLite before this branch. To get that ba
 - [ ] **Step 3: Commit**
 
 ```bash
-git add apps/web/playwright.config.ts
+git add apps/web/playwright.config.ts apps/web/tests/e2e/global-teardown.ts
 git commit -m "test(web): run playwright e2e api against postgres"
 ```
 
