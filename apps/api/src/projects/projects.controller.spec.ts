@@ -6,6 +6,7 @@ import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
 import { AgentsService } from '../agents/agents.service';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
+import { ProjectResponseDto } from './dto/project-response.dto';
 
 const mockProject = {
   id: 'proj-1',
@@ -75,6 +76,7 @@ describe('ProjectsController', () => {
       update: jest.fn(),
       softDelete: jest.fn(),
       assertProjectMembership: jest.fn(),
+      findCiWebhookToken: jest.fn(),
     } as unknown as jest.Mocked<ProjectsService>;
 
     impactAnalysisService = {
@@ -138,6 +140,49 @@ describe('ProjectsController', () => {
       projectsService.findBySlug.mockRejectedValue(new Error('Not found'));
 
       await expect(controller.findBySlug('missing')).rejects.toThrow();
+    });
+  });
+
+  describe('H3: ciWebhookToken exposure', () => {
+    const projectWithToken = { ...mockProject, ciWebhookToken: 'secret-token' };
+
+    it('H3: list responses do not contain ciWebhookToken', async () => {
+      projectsService.findAll.mockResolvedValue(
+        [ProjectResponseDto.from(projectWithToken)] as any,
+      );
+
+      const res = await controller.findAll();
+
+      expect(JSON.stringify(res)).not.toContain('ciWebhookToken');
+      expect(JSON.stringify(res)).not.toContain('secret-token');
+    });
+
+    it('H3: findBySlug response does not contain ciWebhookToken', async () => {
+      projectsService.findBySlug.mockResolvedValue(
+        ProjectResponseDto.from(projectWithToken) as any,
+      );
+
+      const res = await controller.findBySlug('alpha');
+
+      expect(JSON.stringify(res)).not.toContain('ciWebhookToken');
+      expect(JSON.stringify(res)).not.toContain('secret-token');
+    });
+
+    it('H3: admin-only token endpoint returns the token', async () => {
+      projectsService.findCiWebhookToken.mockResolvedValue('tok');
+
+      const res = await controller.getCiWebhookToken('alpha');
+
+      expect(projectsService.findCiWebhookToken).toHaveBeenCalledWith('alpha');
+      expect((res as any).data.ciWebhookToken).toBe('tok');
+    });
+
+    it('H3: admin-only token endpoint returns null when project has no token', async () => {
+      projectsService.findCiWebhookToken.mockResolvedValue(null);
+
+      const res = await controller.getCiWebhookToken('alpha');
+
+      expect((res as any).data.ciWebhookToken).toBeNull();
     });
   });
 

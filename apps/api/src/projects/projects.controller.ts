@@ -70,6 +70,18 @@ export class ProjectsController {
     return JsonResponse.Ok(data);
   }
 
+  @Get(':slug/ci-webhook-token')
+  @RequiredPermission('ADMIN')
+  @ApiOperation({ summary: 'Get the CI webhook HMAC secret (admin only)' })
+  @ApiResponse({ status: 200, description: 'Token value' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
+  @ApiResponse({ status: 404, description: 'Project not found' })
+  async getCiWebhookToken(@Param('slug') slug: string) {
+    const ciWebhookToken = await this.projectsService.findCiWebhookToken(slug);
+    return JsonResponse.Ok({ ciWebhookToken });
+  }
+
   @Patch(':slug')
   @RequiredPermission('ADMIN')
   @ApiOperation({ summary: 'Update a project (admin only)' })

@@ -199,4 +199,32 @@ describe('ProjectsService', () => {
       expect(await service.findAllProjectIds()).toBe(ids);
     });
   });
+
+  describe('findCiWebhookToken (H3)', () => {
+    it('throws NotFoundAppException when project is null', async () => {
+      mockProjectRepo.findBySlug.mockResolvedValue(null);
+      await expect(service.findCiWebhookToken('missing')).rejects.toBeInstanceOf(NotFoundAppException);
+    });
+
+    it('throws NotFoundAppException when project is soft-deleted', async () => {
+      mockProjectRepo.findBySlug.mockResolvedValue({
+        id: 'p1', slug: 'proj', deletedAt: new Date(),
+      });
+      await expect(service.findCiWebhookToken('proj')).rejects.toBeInstanceOf(NotFoundAppException);
+    });
+
+    it('returns the token for an active project', async () => {
+      mockProjectRepo.findBySlug.mockResolvedValue({
+        id: 'p1', slug: 'proj', deletedAt: null, ciWebhookToken: 'tok',
+      });
+      expect(await service.findCiWebhookToken('proj')).toBe('tok');
+    });
+
+    it('returns null when project has no token', async () => {
+      mockProjectRepo.findBySlug.mockResolvedValue({
+        id: 'p1', slug: 'proj', deletedAt: null, ciWebhookToken: null,
+      });
+      expect(await service.findCiWebhookToken('proj')).toBeNull();
+    });
+  });
 });

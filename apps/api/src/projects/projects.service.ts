@@ -173,6 +173,17 @@ export class ProjectsService {
     return this.access.assertProjectMembership(projectId, principal);
   }
 
+  async findCiWebhookToken(slug: string): Promise<string | null> {
+    const project = await this.projectRepo.findBySlug(slug);
+
+    // Filter out soft-deleted projects
+    if (!project || project.deletedAt) {
+      throw new NotFoundAppException({}, 'projects');
+    }
+
+    return project.ciWebhookToken ?? null;
+  }
+
   async findAllProjectIds(): Promise<{ id: string }[]> {
     return this.projectRepo.findAllIds();
   }
