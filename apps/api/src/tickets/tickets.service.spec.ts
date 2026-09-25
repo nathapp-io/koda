@@ -8,7 +8,7 @@ import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import type { KodaAgentRole } from '../auth/principal/koda-principal.types';
 import { TicketEventService } from '../events/ticket-event.service';
-import { OutboxService } from '../outbox/outbox.service';
+import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
 import { TicketType, TicketStatus, Priority } from '../common/enums';
 
@@ -114,14 +114,22 @@ describe('TicketsService', () => {
     findProjectMemberRole: jest.fn(),
   };
 
+  let inTx = false;
   const mockTxManager = {
-    run: jest.fn((fn: () => unknown) => fn()),
+    run: jest.fn(async <T>(fn: () => Promise<T>): Promise<T> => {
+      inTx = true;
+      try {
+        return await fn();
+      } finally {
+        inTx = false;
+      }
+    }),
     getClient: jest.fn(),
-    isInTransaction: jest.fn(() => false),
+    isInTransaction: jest.fn(() => inTx),
   };
 
   const mockTicketEventService = { create: jest.fn().mockResolvedValue({ id: 'evt-mock' }) };
-  const mockOutboxService = { enqueue: jest.fn().mockResolvedValue(undefined) };
+  const mockOutbox = { record: jest.fn().mockResolvedValue(undefined) };
 
   const mockTransitionsService = {
     executeTransitionPublic: jest.fn(),
@@ -135,7 +143,7 @@ describe('TicketsService', () => {
         { provide: TICKET_REPOSITORY, useValue: mockTicketRepo },
         { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
         { provide: TicketEventService, useValue: mockTicketEventService },
-        { provide: OutboxService, useValue: mockOutboxService },
+        { provide: NathappOutboxService, useValue: mockOutbox },
         { provide: TicketTransitionsService, useValue: mockTransitionsService },
       ],
     }).compile();
@@ -230,9 +238,9 @@ describe('TicketsService', () => {
         clientVersion: 'test',
         meta: { target: ['projectId', 'number'] },
       });
-      mockTxManager.run
-        .mockImplementationOnce(() => Promise.reject(conflict))
-        .mockImplementation((fn: () => unknown) => fn());
+      // Only the first run() attempt hits the conflict; the retry falls through
+      // to the default in-transaction implementation above.
+      mockTxManager.run.mockImplementationOnce(() => Promise.reject(conflict));
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.createTicket.mockResolvedValue(mockTicket);
 
@@ -821,8 +829,14 @@ describe('TicketsService', () => {
     };
 
     beforeEach(() => {
-      mockTicketEventService.create.mockResolvedValue({ id: 'evt-1' });
-      mockOutboxService.enqueue.mockResolvedValue(undefined);
+      // The outbox envelope echoes the stored event's action/timestamp, so the
+      // mocked TicketEvent carries them from the create() input.
+      mockTicketEventService.create.mockImplementation(async (input: { action: string }) => ({
+        id: 'evt-1',
+        action: input.action,
+        timestamp: new Date('2026-01-01T00:00:00Z'),
+      }));
+      mockOutbox.record.mockResolvedValue(undefined);
     });
 
     it('emits TicketEvent after create', async () => {
@@ -831,9 +845,6 @@ describe('TicketsService', () => {
       mockTicketRepo.createTicket.mockResolvedValue(fakeTicket);
 
       await service.create('test-project', { type: TicketType.TASK, title: 'Hello' }, fakeUserPrincipal as any);
-
-      // Allow the void promise to resolve
-      await new Promise(resolve => setImmediate(resolve));
 
       expect(mockTicketEventService.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -845,28 +856,24 @@ describe('TicketsService', () => {
           source: 'internal',
         }),
       );
-      expect(mockOutboxService.enqueue).toHaveBeenCalledWith(
+      expect(mockOutbox.record).toHaveBeenCalledWith(
         expect.objectContaining({
-          projectId: 'proj-1',
-          eventType: 'ticket_event',
-          eventId: 'evt-1',
+          type: 'ticket_event',
+          payload: expect.objectContaining({ action: 'TICKET_CREATED', ticketId: 'ticket-1', projectId: 'proj-1' }),
+          metadata: { projectId: 'proj-1', eventId: 'evt-1' },
         }),
       );
     });
 
-    it('still returns the ticket even if event emission throws', async () => {
+    it('fails create() when event emission throws (no silent drop)', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(fakeProject);
       mockTicketRepo.findLastTicketInProject.mockResolvedValue(null);
       mockTicketRepo.createTicket.mockResolvedValue(fakeTicket);
       mockTicketEventService.create.mockRejectedValue(new Error('event store down'));
 
-      const result = await service.create('test-project', { type: TicketType.TASK, title: 'Hello' }, fakeUserPrincipal as any);
-
-      // Allow the void promise to settle
-      await new Promise(resolve => setImmediate(resolve));
-
-      expect(result).toBeDefined();
-      expect(result.id).toBe('ticket-1');
+      await expect(
+        service.create('test-project', { type: TicketType.TASK, title: 'Hello' }, fakeUserPrincipal as any),
+      ).rejects.toThrow('event store down');
     });
 
     it('emits TicketEvent after update', async () => {
@@ -876,9 +883,6 @@ describe('TicketsService', () => {
       mockTicketRepo.updateTicket.mockResolvedValue(updatedTicket);
 
       await service.update('test-project', 'TST-1', { title: 'Updated' }, fakeUserPrincipal as any);
-
-      // Allow the fire-and-forget void promise to resolve
-      await new Promise(resolve => setImmediate(resolve));
 
       expect(mockTicketEventService.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -890,11 +894,11 @@ describe('TicketsService', () => {
           source: 'internal',
         }),
       );
-      expect(mockOutboxService.enqueue).toHaveBeenCalledWith(
+      expect(mockOutbox.record).toHaveBeenCalledWith(
         expect.objectContaining({
-          projectId: fakeProject.id,
-          eventType: 'ticket_event',
-          eventId: 'evt-1',
+          type: 'ticket_event',
+          payload: expect.objectContaining({ action: 'TICKET_UPDATED', ticketId: fakeTicket.id, projectId: fakeProject.id }),
+          metadata: { projectId: fakeProject.id, eventId: 'evt-1' },
         }),
       );
     });
@@ -912,16 +916,14 @@ describe('TicketsService', () => {
         timestamp: new Date('2026-01-01T00:00:00Z'),
       });
 
-      await service['emitTicketEvent']('t1', 'p1', 'status_changed', fakeUserPrincipal as never, {
+      await service['recordTicketEvent']('t1', 'p1', 'status_changed', fakeUserPrincipal as never, {
         newStatus: 'IN_PROGRESS',
       });
 
-      expect(mockOutboxService.enqueue).toHaveBeenCalledTimes(1);
-      const call = mockOutboxService.enqueue.mock.calls[0][0];
+      expect(mockOutbox.record).toHaveBeenCalledTimes(1);
+      const call = mockOutbox.record.mock.calls[0][0];
       expect(call).toEqual({
-        projectId: 'p1',
-        eventType: 'ticket_event',
-        eventId: 'evt-1',
+        type: 'ticket_event',
         payload: {
           id: 'evt-1',
           type: 'ticket_event',
@@ -933,6 +935,7 @@ describe('TicketsService', () => {
           actorType: 'user',
           data: { newStatus: 'IN_PROGRESS' },
         },
+        metadata: { projectId: 'p1', eventId: 'evt-1' },
       });
     });
 
@@ -944,9 +947,6 @@ describe('TicketsService', () => {
 
       await service.softDelete('test-project', 'TST-1', fakeUserPrincipal as any);
 
-      // Allow the fire-and-forget void promise to resolve
-      await new Promise(resolve => setImmediate(resolve));
-
       expect(mockTicketEventService.create).toHaveBeenCalledWith(
         expect.objectContaining({
           ticketId: fakeTicket.id,
@@ -957,13 +957,63 @@ describe('TicketsService', () => {
           source: 'internal',
         }),
       );
-      expect(mockOutboxService.enqueue).toHaveBeenCalledWith(
+      expect(mockOutbox.record).toHaveBeenCalledWith(
         expect.objectContaining({
-          projectId: fakeProject.id,
-          eventType: 'ticket_event',
-          eventId: 'evt-1',
+          type: 'ticket_event',
+          payload: expect.objectContaining({ action: 'TICKET_DELETED', ticketId: fakeTicket.id, projectId: fakeProject.id }),
+          metadata: { projectId: fakeProject.id, eventId: 'evt-1' },
         }),
       );
+    });
+  });
+
+  describe('outbox atomicity (record inside the write transaction)', () => {
+    beforeEach(() => {
+      mockOutbox.record.mockReset();
+      mockOutbox.record.mockResolvedValue(undefined);
+    });
+
+    it('create() records the TICKET_CREATED event inside the ticket-create transaction', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findLastTicketInProject.mockResolvedValue(null);
+      mockTicketRepo.createTicket.mockResolvedValue(mockTicket);
+      mockOutbox.record.mockImplementation(async () => {
+        expect(inTx).toBe(true);
+      });
+
+      await service.create('koda', { type: 'BUG', title: 'Fix login bug' } as CreateTicketDto, mockUserPrincipal);
+
+      expect(mockOutbox.record).toHaveBeenCalledTimes(1);
+    });
+
+    it('create() fails when the outbox record fails (no silent drop)', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findLastTicketInProject.mockResolvedValue(null);
+      mockTicketRepo.createTicket.mockResolvedValue(mockTicket);
+      mockOutbox.record.mockRejectedValue(new Error('outbox down'));
+
+      await expect(
+        service.create('koda', { type: 'BUG', title: 'Fix login bug' } as CreateTicketDto, mockUserPrincipal),
+      ).rejects.toThrow('outbox down');
+    });
+
+    it('update(), softDelete() and assign() record inside their transactions', async () => {
+      const seen: boolean[] = [];
+      mockOutbox.record.mockImplementation(async () => {
+        seen.push(inTx);
+      });
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
+      mockTicketRepo.updateTicket.mockResolvedValue(mockTicket);
+      mockTicketRepo.softDeleteTicket.mockResolvedValue(mockTicket);
+      mockTicketRepo.findUserById.mockResolvedValue({ id: 'user-1', role: 'ADMIN' });
+      mockTicketRepo.assignTicket.mockResolvedValue(mockTicket);
+
+      await service.update('koda', 'KODA-1', { title: 'New' }, mockUserPrincipal);
+      await service.softDelete('koda', 'KODA-1', mockUserPrincipal);
+      await service.assign('koda', 'KODA-1', { userId: 'user-1' }, mockUserPrincipal);
+
+      expect(seen).toEqual([true, true, true]);
     });
   });
 
@@ -1110,7 +1160,6 @@ describe('TicketsService', () => {
       });
 
       await service.assign('koda', 'KODA-1', { userId: 'user-456' }, mockUserPrincipal);
-      await new Promise(resolve => setImmediate(resolve));
 
       expect(mockTicketEventService.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1123,22 +1172,11 @@ describe('TicketsService', () => {
           data: { assignedTo: 'user-456' },
         }),
       );
-      expect(mockOutboxService.enqueue).toHaveBeenCalledWith(
+      expect(mockOutbox.record).toHaveBeenCalledWith(
         expect.objectContaining({
-          projectId: 'proj-123',
-          eventType: 'ticket_event',
-          eventId: 'evt-assign-1',
-          payload: {
-            id: 'evt-assign-1',
-            type: 'ticket_event',
-            action: 'assigned',
-            timestamp: '2026-01-01T00:00:00.000Z',
-            ticketId: 'ticket-123',
-            projectId: 'proj-123',
-            actorId: 'user-123',
-            actorType: 'user',
-            data: { assignedTo: 'user-456' },
-          },
+          type: 'ticket_event',
+          payload: expect.objectContaining({ action: 'assigned', ticketId: 'ticket-123', projectId: 'proj-123' }),
+          metadata: { projectId: 'proj-123', eventId: 'evt-assign-1' },
         }),
       );
     });

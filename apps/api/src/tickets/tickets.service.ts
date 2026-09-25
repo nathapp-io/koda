@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { CreateTicketDto } from './dto/create-ticket.dto';
@@ -12,7 +12,7 @@ import { runWithTicketNumberRetry } from '../common/utils/ticket-number-retry';
 import { TICKET_REPOSITORY, ITicketRepository } from './domain/ticket.domain';
 import { TicketEventService } from '../events/ticket-event.service';
 import { buildTicketEventOutboxPayload } from '../events/outbox-envelope.util';
-import { OutboxService } from '../outbox/outbox.service';
+import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
 
 interface FindAllFilters {
@@ -32,53 +32,42 @@ interface AssignInput {
 
 @Injectable()
 export class TicketsService {
-  private readonly logger = new Logger(TicketsService.name);
-
   constructor(
     @Inject(TICKET_REPOSITORY) private readonly ticketRepo: ITicketRepository,
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly ticketEventService: TicketEventService,
-    private readonly outboxService: OutboxService,
+    private readonly outbox: NathappOutboxService,
     private readonly transitionsService: TicketTransitionsService,
   ) {}
 
-  private async emitTicketEvent(
+  /**
+   * Writes the TicketEvent row and its ticket_event outbox row. Must be called
+   * inside the business write's txManager.run so all three commit or roll back
+   * together (outside run() the outbox row would commit on its own).
+   */
+  private async recordTicketEvent(
     ticketId: string,
     projectId: string,
     action: string,
     principal: KodaPrincipal,
     extra: Record<string, unknown> = {},
   ): Promise<void> {
-    try {
-      const actorType = isUserPrincipal(principal) ? 'user' : 'agent';
-      const event = await this.ticketEventService.create({
-        ticketId,
-        projectId,
-        action,
-        actorId: principal.id,
-        actorType,
-        source: 'internal',
-        data: extra,
-      });
-      await this.outboxService.enqueue({
-        projectId,
-        eventType: 'ticket_event',
-        eventId: event.id,
-        // H13: consumers switch on action/id/timestamp — enqueue the full event envelope
-        payload: buildTicketEventOutboxPayload({
-          event,
-          ticketId,
-          projectId,
-          actorId: principal.id,
-          actorType,
-          data: extra,
-        }),
-      });
-    } catch (err) {
-      this.logger.warn(
-        `Non-fatal: failed to emit TicketEvent after ${action} on ticket ${ticketId}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+    const actorType = isUserPrincipal(principal) ? 'user' : 'agent';
+    const event = await this.ticketEventService.create({
+      ticketId,
+      projectId,
+      action,
+      actorId: principal.id,
+      actorType,
+      source: 'internal',
+      data: extra,
+    });
+    await this.outbox.record({
+      type: 'ticket_event',
+      // H13: consumers switch on action/id/timestamp — record the full event envelope
+      payload: buildTicketEventOutboxPayload({ event, ticketId, projectId, actorId: principal.id, actorType, data: extra }),
+      metadata: { projectId, eventId: event.id },
+    });
   }
 
   private computeGitRefUrl(
@@ -119,7 +108,7 @@ export class TicketsService {
       const nextNumber = (lastTicket?.number ?? 0) + 1;
 
       const creatorKeys = actorForeignKeys(principal, 'createdBy');
-      return this.ticketRepo.createTicket({
+      const created = await this.ticketRepo.createTicket({
         projectId: project.id,
         number: nextNumber,
         type: createTicketDto.type,
@@ -130,14 +119,14 @@ export class TicketsService {
         createdByUserId: creatorKeys.createdByUserId,
         createdByAgentId: creatorKeys.createdByAgentId,
       });
+      await this.recordTicketEvent(created.id, project.id, 'TICKET_CREATED', principal, {
+        type: created.type,
+        title: created.title,
+      });
+      return created;
     });
 
     const response = TicketResponseDto.from({ ...ticket, ref: `${project.key}-${ticket.number}` }, project.key);
-
-    void this.emitTicketEvent(ticket.id, project.id, 'TICKET_CREATED', principal, {
-      type: ticket.type,
-      title: ticket.title,
-    });
 
     return response;
   }
@@ -267,9 +256,16 @@ export class TicketsService {
       updateData.priority = updateTicketDto.priority;
     }
 
-    const updated = await this.ticketRepo.updateTicket(ticket.id, updateData);
-
     const project = await this.ticketRepo.findProjectBySlug(projectSlug);
+
+    const updated = await this.txManager.run(async () => {
+      const row = await this.ticketRepo.updateTicket(ticket.id, updateData);
+      if (project?.id) {
+        await this.recordTicketEvent(ticket.id, project.id, 'TICKET_UPDATED', principal, { ...updateData });
+      }
+      return row;
+    });
+
     const gitRefUrl = this.computeGitRefUrl(
       project?.gitRemoteUrl,
       updated.gitRefVersion,
@@ -277,12 +273,6 @@ export class TicketsService {
       updated.gitRefLine,
     );
     const response = TicketResponseDto.from(updated, project?.key, gitRefUrl);
-
-    if (project?.id) {
-      void this.emitTicketEvent(ticket.id, project.id, 'TICKET_UPDATED', principal, {
-        ...updateData,
-      });
-    }
 
     return response;
   }
@@ -297,9 +287,16 @@ export class TicketsService {
       throw new NotFoundAppException({}, 'tickets');
     }
 
-    const updated = await this.ticketRepo.softDeleteTicket(ticket.id);
-
     const project = await this.ticketRepo.findProjectBySlug(projectSlug);
+
+    const updated = await this.txManager.run(async () => {
+      const row = await this.ticketRepo.softDeleteTicket(ticket.id);
+      if (project?.id) {
+        await this.recordTicketEvent(ticket.id, project.id, 'TICKET_DELETED', principal);
+      }
+      return row;
+    });
+
     const gitRefUrl = this.computeGitRefUrl(
       project?.gitRemoteUrl,
       updated.gitRefVersion,
@@ -307,10 +304,6 @@ export class TicketsService {
       updated.gitRefLine,
     );
     const response = TicketResponseDto.from(updated, project?.key, gitRefUrl);
-
-    if (project?.id) {
-      void this.emitTicketEvent(ticket.id, project.id, 'TICKET_DELETED', principal);
-    }
 
     return response;
   }
@@ -364,15 +357,17 @@ export class TicketsService {
       assignData.assignedToAgentId = assignInput.agentId;
     }
 
-    const updated = await this.ticketRepo.assignTicket(ticket.id, assignData);
-
-    // H13: emit an 'assigned' ticket_event so memory extraction and entity-graph
-    // updates run for assignment activity. Fire-and-forget; never fails the request.
-    if (principal) {
-      void this.emitTicketEvent(ticket.id, project.id, 'assigned', principal, {
-        assignedTo: assignInput.userId ?? assignInput.agentId ?? null,
-      });
-    }
+    // H13: record an 'assigned' ticket_event so memory extraction and entity-graph
+    // updates run for assignment activity.
+    const updated = await this.txManager.run(async () => {
+      const row = await this.ticketRepo.assignTicket(ticket.id, assignData);
+      if (principal) {
+        await this.recordTicketEvent(ticket.id, project.id, 'assigned', principal, {
+          assignedTo: assignInput.userId ?? assignInput.agentId ?? null,
+        });
+      }
+      return row;
+    });
 
     const gitRefUrl = this.computeGitRefUrl(
       project.gitRemoteUrl,

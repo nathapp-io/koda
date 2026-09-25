@@ -60,33 +60,28 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
   let transitionsService: TicketTransitionsService;
 
   /**
-   * Emissions are fire-and-forget (`void` promises), so the outbox row may land
-   * a few microtasks after the service call returns. Poll briefly for the row
-   * whose payload carries the expected action.
+   * Producers now record inside the write's transaction, so when the service
+   * call resolves the outbox row is already committed — a direct query.
    */
-  async function waitForOutboxRow(predicateAction: string, timeoutMs = 5000): Promise<{
+  async function getOutboxRow(predicateAction: string): Promise<{
     id: string;
     eventId: string;
     payload: string;
   }> {
-    const deadline = Date.now() + timeoutMs;
-    for (;;) {
-      const rows = await prisma.outboxEvent.findMany({
-        where: { type: 'ticket_event', status: 'pending' },
-      });
-      const match = rows.find((r) => {
-        try {
-          return (JSON.parse(r.payload) as { action?: string }).action === predicateAction;
-        } catch {
-          return false;
-        }
-      });
-      if (match) return match;
-      if (Date.now() > deadline) {
-        throw new Error(`Timed out waiting for pending outbox row with action '${predicateAction}'`);
+    const rows = await prisma.outboxEvent.findMany({
+      where: { type: 'ticket_event', status: 'pending' },
+    });
+    const match = rows.find((r) => {
+      try {
+        return (JSON.parse(r.payload) as { action?: string }).action === predicateAction;
+      } catch {
+        return false;
       }
-      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+    if (!match) {
+      throw new Error(`No pending outbox row with action '${predicateAction}'`);
     }
+    return match;
   }
 
   let projectId: string;
@@ -133,7 +128,8 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
     );
     memorySubscriber.onModuleInit();
 
-    // Real producers.
+    // Real producers. Producers take the package OutboxService (record()) —
+    // koda's transitional enqueue() adapter stays only for the RED baseline test.
     const ticketRepo = new PrismaTicketsRepository(prismaService);
     // The 5th ctor arg (transitionsService) arrived with the M2 fix on PR #129;
     // assign() does not delegate to it, so a minimal stub satisfies DI here.
@@ -147,9 +143,9 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
       undefined,
       undefined,
       ticketEventService,
-      outboxService,
+      packageOutbox,
     );
-    ticketsService = new TicketsService(ticketRepo, txManager, ticketEventService, outboxService, transitionsService);
+    ticketsService = new TicketsService(ticketRepo, txManager, ticketEventService, packageOutbox, transitionsService);
 
     // Seed: project, ADMIN user (assignee), and two tickets.
     const project = await prisma.project.create({
@@ -245,7 +241,7 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
     await transitionsService.start('h13-project', 'HKK-1', principal);
 
     // The outbox payload must be the full event envelope.
-    const outboxRow = await waitForOutboxRow('status_changed');
+    const outboxRow = await getOutboxRow('status_changed');
     const payload = JSON.parse(outboxRow.payload);
     expect(payload).toEqual({
       id: expect.any(String),
@@ -283,7 +279,7 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
   it('assign enqueues an assigned ticket_event whose full envelope yields an assigned_to MemoryItem', async () => {
     await ticketsService.assign('h13-project', 'HKK-2', { userId: adminUserId }, principal);
 
-    const outboxRow = await waitForOutboxRow('assigned');
+    const outboxRow = await getOutboxRow('assigned');
     const payload = JSON.parse(outboxRow.payload);
     expect(payload).toEqual({
       id: expect.any(String),

@@ -851,7 +851,7 @@ describe('TicketTransitionsService (H13: outbox emission)', () => {
 
   function buildService(overrides: {
     ticketEventService?: { create: jest.Mock };
-    outboxService?: { enqueue: jest.Mock };
+    outboxService?: { record: jest.Mock };
   } = {}) {
     const ticketRepo = {
       findProjectBySlug: jest.fn().mockResolvedValue(mockProject),
@@ -871,13 +871,16 @@ describe('TicketTransitionsService (H13: outbox emission)', () => {
       create: jest.fn().mockResolvedValue(mockEvent),
     };
     const outboxService = overrides.outboxService ?? {
-      enqueue: jest.fn().mockResolvedValue(undefined),
+      record: jest.fn().mockResolvedValue(undefined),
+    };
+    const webhookDispatcher = {
+      dispatch: jest.fn().mockResolvedValue(undefined),
     };
     const service = new TicketTransitionsService(
       ticketRepo as never,
       txManager as never,
       undefined,
-      undefined,
+      webhookDispatcher as never,
       undefined,
       undefined,
       undefined,
@@ -885,14 +888,13 @@ describe('TicketTransitionsService (H13: outbox emission)', () => {
       ticketEventService as never,
       outboxService as never,
     );
-    return { service, ticketRepo, ticketEventService, outboxService };
+    return { service, ticketRepo, ticketEventService, outboxService, webhookDispatcher, txManager };
   }
 
-  it('H13: start() enqueues a status_changed ticket_event with the full envelope', async () => {
+  it('H13: start() records a status_changed ticket_event with the full envelope', async () => {
     const { service, ticketEventService, outboxService } = buildService();
 
     await service.start('koda', 'KODA-1', principal);
-    await new Promise(resolve => setImmediate(resolve));
 
     expect(ticketEventService.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -905,10 +907,8 @@ describe('TicketTransitionsService (H13: outbox emission)', () => {
         data: { fromStatus: TicketStatus.VERIFIED, newStatus: TicketStatus.IN_PROGRESS },
       }),
     );
-    expect(outboxService.enqueue).toHaveBeenCalledWith({
-      projectId: 'proj-123',
-      eventType: 'ticket_event',
-      eventId: 'evt-1',
+    expect(outboxService.record).toHaveBeenCalledWith({
+      type: 'ticket_event',
       payload: {
         id: 'evt-1',
         type: 'ticket_event',
@@ -920,16 +920,16 @@ describe('TicketTransitionsService (H13: outbox emission)', () => {
         actorType: 'user',
         data: { fromStatus: TicketStatus.VERIFIED, newStatus: TicketStatus.IN_PROGRESS },
       },
+      metadata: { projectId: 'proj-123', eventId: 'evt-1' },
     });
   });
 
-  it('H13: verify() enqueues a status_changed ticket_event for the VERIFIED transition', async () => {
+  it('H13: verify() records a status_changed ticket_event for the VERIFIED transition', async () => {
     const { service, ticketRepo, ticketEventService, outboxService } = buildService();
     // verify() transitions CREATED → VERIFIED (a VERIFIED ticket would be a no-op rule miss)
     ticketRepo.findTicketByRefRaw.mockResolvedValue({ ...mockTicket, status: TicketStatus.CREATED });
 
     await service.verify('koda', 'KODA-1', 'Verified', principal);
-    await new Promise(resolve => setImmediate(resolve));
 
     expect(ticketEventService.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -939,29 +939,55 @@ describe('TicketTransitionsService (H13: outbox emission)', () => {
         data: { fromStatus: TicketStatus.CREATED, newStatus: TicketStatus.VERIFIED },
       }),
     );
-    expect(outboxService.enqueue).toHaveBeenCalledWith(
+    expect(outboxService.record).toHaveBeenCalledWith(
       expect.objectContaining({
-        projectId: 'proj-123',
-        eventType: 'ticket_event',
-        eventId: 'evt-1',
+        type: 'ticket_event',
         payload: expect.objectContaining({
           action: 'status_changed',
           ticketId: 'ticket-123',
           data: { fromStatus: TicketStatus.CREATED, newStatus: TicketStatus.VERIFIED },
         }),
+        metadata: { projectId: 'proj-123', eventId: 'evt-1' },
       }),
     );
   });
 
-  it('H13: still completes the transition when event emission fails', async () => {
+  it('fails the transition when event emission throws (no silent drop)', async () => {
     const { service } = buildService({
       ticketEventService: { create: jest.fn().mockRejectedValue(new Error('event store down')) },
     });
 
-    const result = await service.start('koda', 'KODA-1', principal);
-    await new Promise(resolve => setImmediate(resolve));
+    await expect(service.start('koda', 'KODA-1', principal)).rejects.toThrow('event store down');
+  });
 
-    expect(result.ticket.id).toBe('ticket-123');
-    expect(result.ticket.status).toBe(TicketStatus.IN_PROGRESS);
+  it('records the status_changed event and STATUS_CHANGE webhooks inside the transition transaction', async () => {
+    const { service, outboxService, webhookDispatcher, txManager } = buildService();
+    let depth = 0;
+    txManager.run.mockImplementation(async (fn: () => Promise<unknown>) => {
+      depth += 1;
+      try {
+        return await fn();
+      } finally {
+        depth -= 1;
+      }
+    });
+    const depthAtRecord: number[] = [];
+    outboxService.record.mockImplementation(async () => {
+      depthAtRecord.push(depth);
+    });
+    webhookDispatcher.dispatch.mockImplementation(async () => {
+      depthAtRecord.push(depth);
+    });
+
+    await service.start('koda', 'KODA-1', principal);
+
+    expect(depthAtRecord.length).toBeGreaterThanOrEqual(2);
+    expect(depthAtRecord.every((d) => d === 1)).toBe(true);
+  });
+
+  it('fails the transition when recording its outbox rows fails', async () => {
+    const { service, outboxService } = buildService();
+    outboxService.record.mockRejectedValue(new Error('outbox down'));
+    await expect(service.start('koda', 'KODA-1', principal)).rejects.toThrow('outbox down');
   });
 });
