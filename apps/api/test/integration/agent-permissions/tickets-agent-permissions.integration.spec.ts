@@ -14,6 +14,7 @@ import { TICKET_REPOSITORY } from '../../../src/tickets/domain/ticket.domain';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
 import { OutboxService } from '../../../src/outbox/outbox.service';
+import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
 
 describe('TicketsService — agent permissions', () => {
   let service: TicketsService;
@@ -85,6 +86,7 @@ describe('TicketsService — agent permissions', () => {
         },
         { provide: TicketEventService, useValue: { create: jest.fn().mockResolvedValue({ id: 'evt-1' }) } },
         { provide: OutboxService, useValue: { enqueue: jest.fn().mockResolvedValue(undefined) } },
+        { provide: TicketTransitionsService, useValue: { executeTransitionPublic: jest.fn() } },
       ],
     }).compile();
 

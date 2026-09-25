@@ -5,13 +5,13 @@ import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TicketResponseDto } from './dto/ticket-response.dto';
 import { TicketType, TicketStatus, Priority } from '../common/enums';
-import { validateTransition } from './state-machine/ticket-transitions';
 import { buildGitUrl } from '../common/utils/git-url.util';
 import { actorForeignKeys } from '../auth/principal/actor-foreign-keys';
 import { isUserPrincipal, KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { TICKET_REPOSITORY, ITicketRepository } from './domain/ticket.domain';
 import { TicketEventService } from '../events/ticket-event.service';
 import { OutboxService } from '../outbox/outbox.service';
+import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
 
 interface FindAllFilters {
   status?: TicketStatus;
@@ -37,6 +37,7 @@ export class TicketsService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly ticketEventService: TicketEventService,
     private readonly outboxService: OutboxService,
+    private readonly transitionsService: TicketTransitionsService,
   ) {}
 
   private async emitTicketEvent(
@@ -183,17 +184,9 @@ export class TicketsService {
       throw new NotFoundAppException({}, 'tickets');
     }
 
-    const refPattern = /^([A-Z]+)-(\d+)$/;
-    const match = ref.match(refPattern);
-
-    let ticket;
-
-    if (match) {
-      const number = parseInt(match[2], 10);
-      ticket = await this.ticketRepo.findTicketByProjectAndNumber(project.id, number);
-    } else {
-      ticket = await this.ticketRepo.findTicketById(ref);
-    }
+    // H5: single scoped lookup — KEY-N prefix must match the project key and
+    // CUIDs are constrained to this project; soft-deleted tickets miss.
+    const ticket = await this.ticketRepo.findTicketScoped(project.id, project.key, ref);
 
     if (!ticket || ticket.deletedAt) {
       throw new NotFoundAppException({}, 'tickets');
@@ -214,12 +207,44 @@ export class TicketsService {
     updateTicketDto: UpdateTicketDto,
     principal: KodaPrincipal,
   ) {
+    // M2: status changes are routed through the transition state machine
+    // (TRANSITION validation + activity row + webhook) instead of a direct
+    // write that bypassed them. Other fields keep the direct update path.
+    if (updateTicketDto.status !== undefined) {
+      // Final-review Finding B: verify TRANSITION permission BEFORE any field
+      // write. A caller with UPDATE but no TRANSITION must get a clean 403,
+      // not a partial field write followed by 403. executeTransitionPublic
+      // re-runs the same check (defense in depth, no extra DB work).
+      await this.transitionsService.assertTransitionPermission(principal);
+      const { status, ...rest } = updateTicketDto;
+      if (Object.keys(rest).length > 0) {
+        // Apply field updates first, then transition; keep it one perceived operation
+        await this.applyUpdate(projectSlug, ref, rest as UpdateTicketDto, principal);
+      }
+      const result = await this.transitionsService.executeTransitionPublic(projectSlug, ref, status, principal);
+      return result.ticket;
+    }
+
+    return this.applyUpdate(projectSlug, ref, updateTicketDto, principal);
+  }
+
+  /**
+   * Direct field update path (no status handling — status goes through the
+   * transitions service). Enforces ticket existence; UPDATE permission is
+   * enforced at the controller (CASL) layer.
+   */
+  private async applyUpdate(
+    projectSlug: string,
+    ref: string,
+    updateTicketDto: UpdateTicketDto,
+    principal: KodaPrincipal,
+  ) {
     const ticket = await this.findByRef(projectSlug, ref);
     if (!ticket) {
       throw new NotFoundAppException({}, 'tickets');
     }
 
-    const updateData: UpdateTicketDto & { status?: string } = {};
+    const updateData: UpdateTicketDto = {};
 
     if (updateTicketDto.title !== undefined) {
       updateData.title = updateTicketDto.title;
@@ -229,11 +254,6 @@ export class TicketsService {
     }
     if (updateTicketDto.priority !== undefined) {
       updateData.priority = updateTicketDto.priority;
-    }
-
-    if (updateTicketDto.status !== undefined) {
-      validateTransition(ticket.status as TicketStatus, updateTicketDto.status);
-      updateData.status = updateTicketDto.status;
     }
 
     const updated = await this.ticketRepo.updateTicket(ticket.id, updateData);

@@ -3,6 +3,7 @@ import { AbstractPrismaRepository, PrismaClientLike, PrismaModelDelegate, Prisma
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { Comment, PrismaClient } from '@prisma/client';
 import { CommentDomain } from './domain/comment.domain';
+import { parseTicketRef } from '../common/utils/ticket-ref.util';
 
 @Injectable()
 export class PrismaCommentRepository extends AbstractPrismaRepository<CommentDomain, Comment, string> {
@@ -58,23 +59,32 @@ export class PrismaCommentRepository extends AbstractPrismaRepository<CommentDom
     return models.map((m) => this.toDomain(m as Comment));
   }
 
-  async findProjectBySlug(slug: string): Promise<{ id: string; deletedAt: Date | null } | null> {
+  async findProjectBySlug(slug: string): Promise<{ id: string; key: string; deletedAt: Date | null } | null> {
     return this.prisma.client.project.findUnique({
       where: { slug },
-      select: { id: true, deletedAt: true },
+      select: { id: true, key: true, deletedAt: true },
     });
   }
 
-  async findTicketByNumber(projectId: string, number: number): Promise<{ id: string; deletedAt: Date | null } | null> {
-    return this.prisma.client.ticket.findUnique({
-      where: { projectId_number: { projectId, number } },
-      select: { id: true, deletedAt: true },
-    });
-  }
+  // H5: same scoped predicate as tickets — KEY-N prefix must match the
+  // project key and CUIDs are constrained to the project.
+  async findTicketScoped(
+    projectId: string,
+    projectKey: string,
+    ticketRef: string,
+  ): Promise<{ id: string; deletedAt: Date | null } | null> {
+    const match = parseTicketRef(ticketRef);
 
-  async findTicketById(id: string): Promise<{ id: string; deletedAt: Date | null } | null> {
-    return this.prisma.client.ticket.findUnique({
-      where: { id },
+    if (match) {
+      if (match.prefix !== projectKey) return null;
+      return this.prisma.client.ticket.findUnique({
+        where: { projectId_number: { projectId, number: match.number } },
+        select: { id: true, deletedAt: true },
+      });
+    }
+
+    return this.prisma.client.ticket.findFirst({
+      where: { id: ticketRef, projectId },
       select: { id: true, deletedAt: true },
     });
   }
