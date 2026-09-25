@@ -141,20 +141,28 @@ export async function resolveContext(
   const projectConfig = await deps.findProjectConfig(flags.cwd);
   const globalConfig = deps.getConfig();
 
+  // H10: project-local `.koda/config.json` is repo-controlled and untrusted —
+  // a cloned repository must never be able to redirect API traffic or steal
+  // the user's credentials. apiUrl/apiKey from project configs are ignored;
+  // only projectSlug, profile and defaults are honored.
+  if (projectConfig && ('apiUrl' in projectConfig || 'apiKey' in projectConfig)) {
+    console.error(
+      '[koda] WARNING: .koda/config.json contains apiUrl/apiKey — ignored for security (H10). Only projectSlug, profile and defaults are honored.',
+    );
+  }
+
   const profileName = projectConfig?.profile;
   const profile = profileName ? globalConfig.profiles[profileName] : undefined;
 
   const apiUrl =
     flags.apiUrl ??
     process.env.KODA_API_URL ??
-    projectConfig?.apiUrl ??
     profile?.apiUrl ??
     (globalConfig.apiUrl || DEFAULT_API_URL);
 
   const apiKey =
     flags.apiKey ??
     process.env.KODA_API_KEY ??
-    projectConfig?.apiKey ??
     profile?.apiKey ??
     globalConfig.apiKey ??
     '';
@@ -214,6 +222,13 @@ export async function findProjectConfig(dir?: string, deps: ConfigDeps = _config
   let parentDir = dirname(currentDir);
 
   while (parentDir !== currentDir) {
+    // H10: homedir ceiling — `~/.koda/config.json` is the user's global config
+    // (credentials), not a project config. Stop the walk-up before the home
+    // directory is considered so it is never returned as a project config.
+    if (currentDir === homedir()) {
+      break;
+    }
+
     const configPath = join(currentDir, '.koda', 'config.json');
 
     const fileExists = await deps.exists(configPath);

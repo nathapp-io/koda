@@ -188,6 +188,20 @@ describe('initCommand', () => {
     });
   });
 
+  describe('H10: written config carries no credentials or endpoints', () => {
+    it('writes only keys within ["projectSlug", "defaults"] to .koda/config.json', async () => {
+      const deps = makeDeps();
+
+      await initCommand({ project: 'koda', defaultType: 'BUG', defaultPriority: 'HIGH' }, deps);
+
+      const written = JSON.parse((deps.writeFile as jest.Mock).mock.calls[0][1] as string);
+      const allowedKeys = ['projectSlug', 'defaults'];
+      expect(Object.keys(written).every((key) => allowedKeys.includes(key))).toBe(true);
+      expect(written).not.toHaveProperty('apiKey');
+      expect(written).not.toHaveProperty('apiUrl');
+    });
+  });
+
   describe('project validation', () => {
     it('calls fetchProject with correct apiUrl, apiKey, and project slug', async () => {
       const deps = makeDeps();
