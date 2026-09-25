@@ -25,6 +25,8 @@ import { TicketsService } from '../../../src/tickets/tickets.service';
 import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
 import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.repository';
 import { TICKET_REPOSITORY } from '../../../src/tickets/domain/ticket.domain';
+import { TicketLinksService } from '../../../src/ticket-links/ticket-links.service';
+import { PrismaTicketLinkRepository } from '../../../src/ticket-links/prisma-ticket-link.repository';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
 import { OutboxService } from '../../../src/outbox/outbox.service';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
@@ -37,6 +39,7 @@ describeIntegration('H5 ticket tenancy', () => {
   let module: TestingModule;
   let ticketsService: TicketsService;
   let transitionsService: TicketTransitionsService;
+  let ticketLinksService: TicketLinksService;
   let prisma: PrismaService<PrismaClient>;
 
   const principal = {
@@ -66,6 +69,8 @@ describeIntegration('H5 ticket tenancy', () => {
         TicketTransitionsService,
         PrismaTicketsRepository,
         { provide: TICKET_REPOSITORY, useExisting: PrismaTicketsRepository },
+        TicketLinksService,
+        PrismaTicketLinkRepository,
         {
           provide: PrismaService,
           useFactory: () =>
@@ -90,6 +95,7 @@ describeIntegration('H5 ticket tenancy', () => {
 
     ticketsService = module.get<TicketsService>(TicketsService);
     transitionsService = module.get<TicketTransitionsService>(TicketTransitionsService);
+    ticketLinksService = module.get<TicketLinksService>(TicketLinksService);
     prisma = module.get<PrismaService<PrismaClient>>(PrismaService);
     await prisma.onModuleInit();
 
@@ -189,6 +195,25 @@ describeIntegration('H5 ticket tenancy', () => {
     await expect(ticketsService.findByRef('proj-a', 'OTHER-5')).rejects.toThrow(
       NotFoundAppException,
     );
+  });
+
+  it('AC-5: foreign KEY prefix on ticket-links endpoints → 404 even when A has #5', async () => {
+    // Positive control: links endpoints resolve KDA-5 normally.
+    await expect(ticketLinksService.findByTicket('proj-a', 'KDA-5')).resolves.toEqual([]);
+
+    // The same foreign prefix must 404 on links endpoints too — an unscoped
+    // number lookup would have resolved project A's own #5.
+    await expect(
+      ticketLinksService.findByTicket('proj-a', 'OTHER-5'),
+    ).rejects.toThrow(NotFoundAppException);
+    await expect(
+      ticketLinksService.create('proj-a', 'OTHER-5', {
+        url: 'https://github.com/owner/repo/pull/1',
+      }),
+    ).rejects.toThrow(NotFoundAppException);
+    await expect(
+      ticketLinksService.remove('proj-a', 'OTHER-5', 'link-xyz'),
+    ).rejects.toThrow(NotFoundAppException);
   });
 
   it('smoke: seeded state is consistent (A does not own B tickets)', () => {
