@@ -811,9 +811,18 @@ describe('KodaDomainWriter Unit Tests', () => {
     });
 
     it('indexDocument indexes into RAG only after the transaction commits', async () => {
-      mockRagService.indexDocument.mockImplementation(async () => { expect(depth).toBe(0); });
+      // indexDocument swallows RAG failures into WriteResult.error, so an
+      // assertion inside the RAG mock would be swallowed too. Capture the
+      // transaction depth instead and assert it after the call, where a
+      // regression that moved the RAG call inside txManager.run still fails.
+      let depthAtRag: number | undefined;
+      mockTicketEventService.create.mockResolvedValue({ id: 'evt-1', action: 'a', timestamp: new Date() });
+      mockRagService.indexDocument.mockImplementation(async () => { depthAtRag = depth; });
+
       await service.indexDocument(indexInput);
+
       expect(mockRagService.indexDocument).toHaveBeenCalled();
+      expect(depthAtRag).toBe(0);
     });
   });
 });
