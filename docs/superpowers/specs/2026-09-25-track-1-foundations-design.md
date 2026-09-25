@@ -66,7 +66,7 @@ start.
 
 - runs the allocate-and-create in a fresh `txManager.run` per attempt (a P2002 aborts the Postgres transaction, so the retry must never be inside the failed transaction);
 - retries only on P2002 whose target is `(projectId, number)`, up to 5 attempts with 10-50 ms jitter;
-- after the last attempt throws a 409 `AppException` (conflict), never a 500.
+- after the last attempt throws `new HttpException(..., HttpStatus.CONFLICT)` (409), never a 500. `@nathapp/nestjs-common` has no conflict `AppException`; this is koda's existing 409 convention (`ticket-transitions.service.ts:429`, `webhook-replay.guard.ts:149`).
 
 The false `@design` comment ("callers retry") is replaced with an accurate one.
 
@@ -79,9 +79,12 @@ The false `@design` comment ("callers retry") is replaced with an accurate one.
 
 ### Test infrastructure
 
-- `test/global-setup.ts`: unchanged mechanism (`prisma db push --force-reset` once).
+- **Test script split.** Today `bun run test` loads `.env.test` (which sets a SQLite `DATABASE_URL`), so it pushes the schema and runs the `test/e2e/*` suites; that only works because SQLite needs no server. After the switch `bun run test` / `test:unit` must stay DB-free: `testPathIgnorePatterns` becomes `integration|e2e`, `.env.test` drops `DATABASE_URL`, and `test:integration` sets `DATABASE_URL` explicitly and matches `integration|e2e`.
+- `test/global-setup.ts`: unchanged mechanism (`prisma db push --force-reset` once), still gated on `DATABASE_URL`, so it is a no-op for `bun run test`.
+- `test/global-teardown.ts`: the SQLite file cleanup is removed (the PG test DB is reset by `global-setup` on the next run).
 - `test/helpers/reset-db.ts`: replace the `sqlite_master` / `sqlite_sequence` logic with one `TRUNCATE <all tables> RESTART IDENTITY CASCADE`, table list from `pg_tables WHERE schemaname = current_schema()`, excluding `_prisma_migrations`.
-- `.env.test` and the `test:integration` script: `DATABASE_URL=postgresql://koda:koda@localhost:5433/koda_test` (port 5433 so tests cannot hit a dev DB on 5432).
+- `test:integration` script: `DATABASE_URL=postgresql://koda:koda@localhost:5433/koda_test` unless already set (port 5433 so tests cannot hit a dev DB on 5432).
+- Doc comments in integration/e2e specs that say `DATABASE_URL=file:./koda-test.ephemeral.db` are updated to the PG command.
 - A `docker-compose.test.yml` (or a `test-db` profile) starts `postgres:16` on 5433 for local runs.
 
 ### CI
@@ -89,7 +92,9 @@ The false `@design` comment ("callers retry") is replaced with an accurate one.
 CI currently never runs integration tests (`test` excludes `integration`; `evaluate` uses a SQLite file).
 
 - New `integration` job: `postgres:16` service container, `bun run test:integration`.
-- `evaluate` and smoke jobs: `DATABASE_URL` from `file:` to the service container.
+- `evaluate` job: `DATABASE_URL` from `file:` to a `postgres:16` service container.
+- `smoke` job + `scripts/smoke-test-cli.sh`: the script applies migrations and promotes the admin with the `sqlite3` CLI. It switches to `bunx prisma migrate deploy` and `psql` (preinstalled on GitHub `ubuntu-latest`), against a `postgres:16` service container.
+- Web Playwright (`apps/web/playwright.config.ts`): the API `webServer` deletes and recreates a SQLite `koda-e2e.db`. It switches to `prisma migrate reset --force --skip-seed` against `postgresql://koda:koda@localhost:5433/koda_e2e`, then `seed-e2e.ts`.
 
 ### Deployment
 
@@ -122,7 +127,7 @@ Slice 2 adds a migration reshaping `OutboxEvent` that also rewrites existing row
 
 ### `PrismaOutboxStore` (implements `IOutboxStore`)
 
-- `save(record, client)` writes through the passed client (the active transaction client from `txManager.getClient()`), so `record()` is fail-closed with the business write.
+- `save(record, client)` writes through the passed client (the active transaction client from `txManager.getClient()`), so `record()` is atomic with the business write **only when called inside `txManager.run`**. Trap: `PrismaTransactionManager.getClient()` returns the root client outside `run()`, so a `record()` outside a transaction silently succeeds non-atomically instead of failing. Every producer must wrap it.
 - `claimBatch(limit, leaseMs, now, owner)`: one statement — `UPDATE "OutboxEvent" SET status='processing', owner=$owner, "leaseUntil"=$now+lease WHERE id IN (SELECT id FROM "OutboxEvent" WHERE (status='pending' AND "nextAttemptAt" <= $now) OR (status='processing' AND "leaseUntil" < $now) ORDER BY "nextAttemptAt" LIMIT $limit FOR UPDATE SKIP LOCKED) RETURNING *`. This is deliberate raw SQL (Prisma has no `SKIP LOCKED`); it replaces the per-row optimistic claim and `requeueStaleProcessing`.
 - `markPublished` / `markRetry` / `markDead` all include `WHERE id = $id AND owner = $owner`; a relay whose lease expired cannot overwrite a newer claim. `markRetry` sets `status='pending'`, `attempts`, `nextAttemptAt`, clears `owner`/`leaseUntil`.
 
@@ -143,7 +148,7 @@ Every `outboxService.enqueue(...)` call site becomes `outbox.record({ type, payl
 - `src/vcs/vcs-webhook.service.ts`
 - `src/webhook/webhook-dispatcher.service.ts`
 
-Each site is audited; any that enqueue after the commit move inside the transaction. Where a site has no enclosing transaction today, the plan adds one around the business write and the `record()`.
+Each site is audited; any that enqueue after the commit move inside the transaction. The ticket event emitters in `tickets.service.ts` are currently called as `void this.emitTicketEvent(...)` (never awaited, outside the write's transaction); those call sites drop the `void` and the `record()` moves into the write's `txManager.run`. Where a site has no enclosing transaction today, the plan adds one around the business write and the `record()`.
 
 ### Deleted
 
@@ -151,7 +156,7 @@ Koda's `OutboxService` (enqueue/process/retry/markFailed/delay), `OutboxProcesso
 
 ### Admin
 
-`src/outbox/admin.controller.ts` and the web outbox page use the new status names (`published`, `dead`). Manual retry resets the row to `pending`, `attempts = 0`, `nextAttemptAt = now()`, clears `owner`/`leaseUntil`/`lastError`.
+`src/outbox/admin.controller.ts` (`GET /admin/outbox`, `POST /admin/outbox/:eventId/retry`) uses the new status names (`published`, `dead`). There is no web outbox page today; adding one is Track 2 (admin UIs), not this slice. Manual retry resets the row to `pending`, `attempts = 0`, `nextAttemptAt = now()`, clears `owner`/`leaseUntil`/`lastError`.
 
 ### Tests
 
@@ -162,6 +167,8 @@ Koda's `OutboxService` (enqueue/process/retry/markFailed/delay), `OutboxProcesso
 ---
 
 ## Slice 3 — Pagination
+
+Package map: `PageOption`, `IPageOption`, `Page<T>` (class with `remap`) from `@nathapp/nestjs-common`; `IPageResult<T>` (interface) from `@nathapp/nestjs-data`; `Paginate()` from `@nathapp/nestjs-prisma`. Repositories and services declare `IPageResult<T>`; concrete repositories return `Page<T>` instances.
 
 ### Shared query base
 
@@ -217,7 +224,7 @@ The timeline/context cursor is the one documented exception to the `Page<T>` rul
 - `DELETE /:userId`.
 - Authorization: new `ProjectAccessService.assertProjectAdmin(projectId, principal)` — global ADMIN, or a member whose project role is `ADMIN`.
 - Last-ADMIN guard: a role change or removal that would leave zero project `ADMIN` members is refused unless the actor is a global ADMIN. Count and write in one transaction.
-- If membership is part of the 60 s cached principal, membership writes invalidate that cache entry (the plan verifies the cache contents first).
+- Membership is not cached (`assertProjectMembership` queries `findMembershipRole` on every call; only `tokenVersion` is cached, 60 s, in `jwt-auth.provider.ts`), so membership writes need no cache invalidation.
 
 ### Web
 
@@ -246,7 +253,7 @@ The timeline/context cursor is the one documented exception to the `Page<T>` rul
 - **`GET /projects/:slug/events`** (`LiveController`, Nest `@Sse()` on Fastify):
   - `assertProjectMembership` on connect;
   - `: ping` comment every 25 s;
-  - on each heartbeat re-validate the principal (`tokenVersion`, `disabled`, membership, via the existing principal cache) and close the stream on failure; also close at access-token expiry (the browser `EventSource` reconnects with the refreshed cookie);
+  - on each heartbeat re-validate: `tokenVersion` via the existing 60 s cache (`jwt-auth.provider.ts`), `disabled` and membership via a live query (one cheap indexed read per 25 s per stream); close the stream on failure; also close at access-token expiry (the browser `EventSource` reconnects with the refreshed cookie);
   - unsubscribe on client close;
   - excluded from the global throttler (a long-lived stream would miscount);
   - max 5 concurrent streams per user, 429 beyond.
