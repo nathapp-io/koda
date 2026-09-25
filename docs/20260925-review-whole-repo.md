@@ -19,6 +19,30 @@
 
 ---
 
+## Verification update: 2026-09-25, HEAD `bdd91483`
+
+The PR #127 content was landed on `main` as commit `bdd91483` ("fix(security): close all review findings from 2026-09-14"). Every HIGH finding was re-checked against source at that HEAD. Result: **10 of 13 HIGH remain open; H8 and H11 are fixed; H7 is partially fixed** (per the prediction in *Fixes in flight* above).
+
+| Finding | Status at `bdd91483` | Evidence |
+|:--|:--|:--|
+| H1 | Open | `auth.service.ts:82-95` — `refresh()` still never reads `principal.revoked`; re-signs with current `tokenVersion`. |
+| H2 | Open | No `APP_GUARD` anywhere in `apps/api/src`; `main.ts:34` still `useAppGlobalGuards()` with no arguments. |
+| H3 | Open | `project-response.dto.ts:101` still maps `ciWebhookToken`. |
+| H4 | Open | `projects.controller.ts:161` — `PATCH :slug/agents/:agentSlug` still has no `@RequiredPermission`; `project-access.service.ts` unchanged. |
+| H5 | Open | `tickets.service.ts` still does bare `findTicketById(ref)`; `findTicketByRefRaw` id-branch (`prisma-tickets.repository.ts:302-305`) filters neither `projectId` nor `deletedAt`. |
+| H6 | Open | `prisma-vcs.repository.ts:306` still writes `authorAgentId: 'system'`. |
+| H7 | Partial | `rag.controller.ts` still double-indexes via `Promise.all`; per-table locks landed (BUG-4) but duplicates and the cross-service first-write race remain. |
+| H8 | **Fixed** | `ACCESS_COOKIE`/`REFRESH_COOKIE` declared at `apps/web/server/utils/api.ts:22-23`. Caveat: the names (`koda_access_token`/`koda_refresh_token`) still disagree with the API's `koda_token`/`koda_refresh` (`auth.module.ts:15-16`), so the end-to-end session remains broken (with H9/M22/M23, all untouched). |
+| H9 | Open | `useApi.ts:104-117` still locale-only headers + bare `$fetch`; no `useRequestFetch`/`useRequestHeaders`. |
+| H10 | Open | `config.ts` — project `apiUrl` still outranks the profile, and `apiKey` still falls back through `projectConfig?.apiKey` to the global key. |
+| H11 | **Fixed** | `cli/src/commands/ticket.ts:309-357` resolves the target to an agent CUID, sends a real `requestBody`, and prints the actual outcome. |
+| H12 | Open | `/extract` still takes a raw event with `ownerId` from `event.actorId` (`memory.controller.ts:72`); the generic route accepts caller `ownerId` (`:125`). |
+| H13 | Open | Producer still sends `{ticketId, projectId, actorId, data}` (`tickets.service.ts:64`); the memory consumer still reads `action`/`id`/`timestamp`. |
+
+**Remaining HIGH work:** H1, H2, H3, H4, H5, H6, H9, H10, H12, H13, plus H7's residual write-path unification. The *Suggested fix order* below still applies, minus H8/H11.
+
+---
+
 ## Verification corrections applied
 
 | Item | Correction |
