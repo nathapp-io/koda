@@ -1,11 +1,15 @@
 /**
- * US-003: Fix ticket status PATCH no-op — Unit tests
+ * US-003 / M2: ticket status PATCH routes through the transition state machine
  *
- * Acceptance Criteria (AC-1 through AC-4):
- * AC-1: update() with status 'IN_PROGRESS' on CREATED ticket calls validateTransition and returns updated ticket
- * AC-2: update() passes status: 'IN_PROGRESS' to db.ticket.update() data
- * AC-3: update() with invalid transition throws ValidationAppException and never calls db.ticket.update()
- * AC-4: update() with no status in DTO does not include status key in updateData
+ * Acceptance Criteria (AC-1 through AC-4, adapted for M2):
+ * AC-1: update() with status 'IN_PROGRESS' on a CREATED ticket delegates to
+ *       TicketTransitionsService.executeTransitionPublic and the caller sees the
+ *       ticket with the new status
+ * AC-2: update() passes the requested status to the transitions service (not to
+ *       db.ticket.update() directly)
+ * AC-3: update() with a status the transitions service rejects (invalid
+ *       transition) propagates the exception and never writes via the repo
+ * AC-4: update() with no status in DTO does not call the transitions service
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { TicketsService } from '../../../src/tickets/tickets.service';
@@ -15,12 +19,12 @@ import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.rep
 import { TICKET_REPOSITORY } from '../../../src/tickets/domain/ticket.domain';
 import { UpdateTicketDto } from '../../../src/tickets/dto/update-ticket.dto';
 import { TicketStatus } from '../../../src/common/enums';
-import * as ticketTransitions from '../../../src/tickets/state-machine/ticket-transitions';
+import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
 import { OutboxService } from '../../../src/outbox/outbox.service';
 
-describe('US-003: TicketsService.update() — status field', () => {
+describe('US-003 (M2): TicketsService.update() — status field routes through transitions', () => {
   let service: TicketsService;
 
   const mockProject = {
@@ -57,6 +61,11 @@ describe('US-003: TicketsService.update() — status field', () => {
     deletedAt: null,
   };
 
+  const mockUserPrincipal = {
+    id: 'user-123',
+    sub: 'user-123',
+  } as unknown as KodaPrincipal;
+
   const mockPrismaService = {
     client: {
       project: {
@@ -70,6 +79,10 @@ describe('US-003: TicketsService.update() — status field', () => {
       },
       $transaction: jest.fn(),
     },
+  };
+
+  const mockTransitionsService = {
+    executeTransitionPublic: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -89,6 +102,7 @@ describe('US-003: TicketsService.update() — status field', () => {
         },
         { provide: TicketEventService, useValue: { create: jest.fn().mockResolvedValue({ id: 'evt-1' }) } },
         { provide: OutboxService, useValue: { enqueue: jest.fn().mockResolvedValue(undefined) } },
+        { provide: TicketTransitionsService, useValue: mockTransitionsService },
       ],
     }).compile();
 
@@ -99,80 +113,73 @@ describe('US-003: TicketsService.update() — status field', () => {
     jest.clearAllMocks();
   });
 
-  describe('AC-1: valid transition calls validateTransition and returns updated ticket with new status', () => {
-    it('calls validateTransition("CREATED", "IN_PROGRESS") without throwing and returns ticket with status IN_PROGRESS', async () => {
+  describe('AC-1: valid status change delegates to the transitions service and returns the updated ticket', () => {
+    it('calls executeTransitionPublic("koda", "KODA-1", IN_PROGRESS, principal) and returns the ticket with status IN_PROGRESS', async () => {
       const updateDto: UpdateTicketDto = {
         status: TicketStatus.IN_PROGRESS,
       };
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockCreatedTicket);
-      mockPrismaService.client.ticket.update.mockResolvedValue({
-        ...mockCreatedTicket,
-        status: TicketStatus.IN_PROGRESS,
+      mockTransitionsService.executeTransitionPublic.mockResolvedValue({
+        ticket: { ...mockCreatedTicket, status: TicketStatus.IN_PROGRESS },
       });
 
-      const validateSpy = jest.spyOn(ticketTransitions, 'validateTransition');
+      const result = await service.update('koda', 'KODA-1', updateDto, mockUserPrincipal);
 
-      const result = await service.update(
+      expect(mockTransitionsService.executeTransitionPublic).toHaveBeenCalledWith(
         'koda',
         'KODA-1',
-        updateDto,
-        { id: 'user-123', sub: 'user-123' } as unknown as KodaPrincipal,
+        TicketStatus.IN_PROGRESS,
+        mockUserPrincipal,
       );
-
-      expect(validateSpy).toHaveBeenCalledWith(TicketStatus.CREATED, TicketStatus.IN_PROGRESS);
       expect(result.status).toBe(TicketStatus.IN_PROGRESS);
     });
   });
 
-  describe('AC-2: valid transition passes status to db.ticket.update()', () => {
-    it('includes status: "IN_PROGRESS" in the data passed to db.ticket.update()', async () => {
+  describe('AC-2: valid status change does not write status directly to db.ticket.update()', () => {
+    it('routes the status through the transitions service instead of db.ticket.update()', async () => {
       const updateDto: UpdateTicketDto = {
         status: TicketStatus.IN_PROGRESS,
       };
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockCreatedTicket);
-      mockPrismaService.client.ticket.update.mockResolvedValue({
-        ...mockCreatedTicket,
-        status: TicketStatus.IN_PROGRESS,
+      mockTransitionsService.executeTransitionPublic.mockResolvedValue({
+        ticket: { ...mockCreatedTicket, status: TicketStatus.IN_PROGRESS },
       });
 
-      await service.update(
-        'koda',
-        'KODA-1',
-        updateDto,
-        { id: 'user-123', sub: 'user-123' } as unknown as KodaPrincipal,
-      );
+      await service.update('koda', 'KODA-1', updateDto, mockUserPrincipal);
 
-      expect(mockPrismaService.client.ticket.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({ status: TicketStatus.IN_PROGRESS }),
-        }),
-      );
+      expect(mockTransitionsService.executeTransitionPublic).toHaveBeenCalled();
+      expect(mockPrismaService.client.ticket.update).not.toHaveBeenCalled();
     });
   });
 
-  describe('AC-3: invalid transition throws ValidationAppException and does not call db.ticket.update()', () => {
-    it('throws when transitioning CREATED → CLOSED (invalid) and never calls db.ticket.update()', async () => {
+  describe('AC-3: invalid transition surfaces the transitions service error and never writes directly', () => {
+    it('propagates the rejection from executeTransitionPublic and does not call db.ticket.update()', async () => {
       const updateDto: UpdateTicketDto = {
         status: TicketStatus.CLOSED,
       };
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.client.ticket.findUnique.mockResolvedValue(mockCreatedTicket);
+      // The transitions service owns state-machine validation; an invalid
+      // transition (CREATED → CLOSED) is rejected there.
+      mockTransitionsService.executeTransitionPublic.mockRejectedValue(
+        new Error('Invalid status transition'),
+      );
 
       await expect(
-        service.update('koda', 'KODA-1', updateDto, { id: 'user-123', sub: 'user-123' } as unknown as KodaPrincipal),
+        service.update('koda', 'KODA-1', updateDto, mockUserPrincipal),
       ).rejects.toThrow();
 
       expect(mockPrismaService.client.ticket.update).not.toHaveBeenCalled();
     });
   });
 
-  describe('AC-4: omitting status from DTO does not include status key in updateData', () => {
-    it('does not pass a status key to db.ticket.update() when status is absent in DTO', async () => {
+  describe('AC-4: omitting status from DTO does not involve the transitions service', () => {
+    it('does not call the transitions service when status is absent in DTO', async () => {
       const updateDto: UpdateTicketDto = {
         title: 'Updated title only',
       };
@@ -184,13 +191,9 @@ describe('US-003: TicketsService.update() — status field', () => {
         title: 'Updated title only',
       });
 
-      await service.update(
-        'koda',
-        'KODA-1',
-        updateDto,
-        { id: 'user-123', sub: 'user-123' } as unknown as KodaPrincipal,
-      );
+      await service.update('koda', 'KODA-1', updateDto, mockUserPrincipal);
 
+      expect(mockTransitionsService.executeTransitionPublic).not.toHaveBeenCalled();
       const updateCall = mockPrismaService.client.ticket.update.mock.calls[0][0];
       expect(updateCall.data).not.toHaveProperty('status');
     });

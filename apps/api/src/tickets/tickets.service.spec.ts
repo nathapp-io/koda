@@ -8,6 +8,7 @@ import { NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-com
 import type { KodaAgentRole } from '../auth/principal/koda-principal.types';
 import { TicketEventService } from '../events/ticket-event.service';
 import { OutboxService } from '../outbox/outbox.service';
+import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
 import { TicketType, TicketStatus, Priority } from '../common/enums';
 
 describe('TicketsService', () => {
@@ -121,6 +122,10 @@ describe('TicketsService', () => {
   const mockTicketEventService = { create: jest.fn().mockResolvedValue({ id: 'evt-mock' }) };
   const mockOutboxService = { enqueue: jest.fn().mockResolvedValue(undefined) };
 
+  const mockTransitionsService = {
+    executeTransitionPublic: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -129,6 +134,7 @@ describe('TicketsService', () => {
         { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
         { provide: TicketEventService, useValue: mockTicketEventService },
         { provide: OutboxService, useValue: mockOutboxService },
+        { provide: TicketTransitionsService, useValue: mockTransitionsService },
       ],
     }).compile();
 
@@ -601,6 +607,77 @@ describe('TicketsService', () => {
 
       expect(result.title).toBe('Only update title');
       expect(result.description).toBe(mockTicket.description); // Unchanged
+    });
+
+    // M2: PATCH with status must go through the transition state machine
+    // (permission + activity + webhook) instead of a direct write.
+    it('M2: PATCH with status delegates to transitions service', async () => {
+      const updateDto: UpdateTicketDto = { status: TicketStatus.IN_PROGRESS };
+
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
+      mockTransitionsService.executeTransitionPublic.mockResolvedValue({
+        ticket: { ...mockTicket, status: TicketStatus.IN_PROGRESS },
+      });
+
+      const result = await service.update('koda', 'KODA-1', updateDto, mockUserPrincipal);
+
+      expect(mockTransitionsService.executeTransitionPublic).toHaveBeenCalledWith(
+        'koda',
+        'KODA-1',
+        TicketStatus.IN_PROGRESS,
+        mockUserPrincipal,
+      );
+      expect(result.status).toBe(TicketStatus.IN_PROGRESS);
+      // No direct status write through the repo
+      expect(mockTicketRepo.updateTicket).not.toHaveBeenCalled();
+    });
+
+    it('M2: PATCH without status does not call transitions', async () => {
+      const updateDto: UpdateTicketDto = { title: 'x' };
+
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
+      mockTicketRepo.updateTicket.mockResolvedValue({ ...mockTicket, title: 'x' });
+
+      await service.update('koda', 'KODA-1', updateDto, mockUserPrincipal);
+
+      expect(mockTransitionsService.executeTransitionPublic).not.toHaveBeenCalled();
+      expect(mockTicketRepo.updateTicket).toHaveBeenCalledWith(mockTicket.id, { title: 'x' });
+    });
+
+    it('M2: PATCH with status and other fields applies fields first, then transitions', async () => {
+      const updateDto: UpdateTicketDto = {
+        title: 'Renamed before transition',
+        status: TicketStatus.IN_PROGRESS,
+      };
+
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
+      mockTicketRepo.updateTicket.mockResolvedValue({
+        ...mockTicket,
+        title: 'Renamed before transition',
+      });
+      mockTransitionsService.executeTransitionPublic.mockResolvedValue({
+        ticket: { ...mockTicket, title: 'Renamed before transition', status: TicketStatus.IN_PROGRESS },
+      });
+
+      const result = await service.update('koda', 'KODA-1', updateDto, mockUserPrincipal);
+
+      expect(mockTicketRepo.updateTicket).toHaveBeenCalledWith(mockTicket.id, {
+        title: 'Renamed before transition',
+      });
+      expect(mockTransitionsService.executeTransitionPublic).toHaveBeenCalledWith(
+        'koda',
+        'KODA-1',
+        TicketStatus.IN_PROGRESS,
+        mockUserPrincipal,
+      );
+      // Field write happens before the transition
+      expect(mockTicketRepo.updateTicket.mock.invocationCallOrder[0]).toBeLessThan(
+        mockTransitionsService.executeTransitionPublic.mock.invocationCallOrder[0],
+      );
+      expect(result.status).toBe(TicketStatus.IN_PROGRESS);
     });
   });
 

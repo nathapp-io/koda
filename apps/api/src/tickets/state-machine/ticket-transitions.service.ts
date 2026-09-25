@@ -240,7 +240,7 @@ export class TicketTransitionsService {
   ): Promise<TransitionResultWithComment> {
     const ticket = await this.findTicketByRef(projectSlug, ticketRef);
     if (ticket?.status === TicketStatus.VERIFY_FIX) {
-      return this.executeTransition(
+      return this.executeTransitionInternal(
         projectSlug,
         ticketRef,
         TicketStatus.CLOSED,
@@ -249,7 +249,7 @@ export class TicketTransitionsService {
         principal,
       ) as Promise<TransitionResultWithComment>;
     }
-    return this.executeTransition(
+    return this.executeTransitionInternal(
       projectSlug,
       ticketRef,
       TicketStatus.VERIFIED,
@@ -267,7 +267,7 @@ export class TicketTransitionsService {
     ticketRef: string,
     principal: KodaPrincipal,
   ): Promise<TransitionResultWithoutComment> {
-    return this.executeTransition(
+    return this.executeTransitionInternal(
       projectSlug,
       ticketRef,
       TicketStatus.IN_PROGRESS,
@@ -286,7 +286,7 @@ export class TicketTransitionsService {
     commentBody: string,
     principal: KodaPrincipal,
   ): Promise<TransitionResultWithComment> {
-    return this.executeTransition(
+    return this.executeTransitionInternal(
       projectSlug,
       ticketRef,
       TicketStatus.VERIFY_FIX,
@@ -312,7 +312,7 @@ export class TicketTransitionsService {
       throw new ValidationAppException({}, 'tickets');
     }
     const toStatus = approve ? TicketStatus.CLOSED : TicketStatus.IN_PROGRESS;
-    return this.executeTransition(
+    return this.executeTransitionInternal(
       projectSlug,
       ticketRef,
       toStatus,
@@ -393,7 +393,7 @@ export class TicketTransitionsService {
     commentBody: string,
     principal: KodaPrincipal,
   ): Promise<TransitionResultWithComment> {
-    return this.executeTransition(
+    return this.executeTransitionInternal(
       projectSlug,
       ticketRef,
       TicketStatus.REJECTED,
@@ -404,9 +404,24 @@ export class TicketTransitionsService {
   }
 
   /**
+   * M2: public entry for status changes routed from PATCH /projects/:slug/tickets/:ref.
+   * Runs the full transition pipeline (TRANSITION state-machine validation,
+   * conditional status write, activity row, webhook dispatch) instead of the
+   * direct `status` write the PATCH route used before.
+   */
+  async executeTransitionPublic(
+    projectSlug: string,
+    ticketRef: string,
+    toStatus: TicketStatus,
+    principal: KodaPrincipal,
+  ): Promise<TransitionResult> {
+    return this.executeTransitionInternal(projectSlug, ticketRef, toStatus, undefined, undefined, principal);
+  }
+
+  /**
    * Core transition execution logic with validation and transaction handling
    */
-  private async executeTransition(
+  private async executeTransitionInternal(
     projectSlug: string,
     ticketRef: string,
     toStatus: TicketStatus,
