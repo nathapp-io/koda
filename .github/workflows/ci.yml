@@ -234,6 +234,11 @@ jobs:
       - name: Generate OPENAPI types
         run: bun run generate:cli
 
+      # acceptance-mem-phase2's AC-4 spawns `bun run evaluate:retrieval`, which
+      # imports apps/api/dist — the API must be built before the suite runs.
+      - name: Build API
+        run: bunx turbo run build --filter=@nathapp/koda-api
+
       - name: Integration + e2e (Postgres)
         run: cd apps/api && bun run test:integration
         env:
