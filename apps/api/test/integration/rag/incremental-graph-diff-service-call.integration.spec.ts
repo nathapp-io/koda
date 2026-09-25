@@ -25,6 +25,7 @@ jest.mock('@lancedb/lancedb', () => ({
 import { Test, TestingModule } from '@nestjs/testing';
 import { RAG_CFG } from '../../../src/config/rag.config';
 import { RagService } from '../../../src/rag/rag.service';
+import { VectorStore } from '../../../src/rag/vector-store.service';
 import { IncrementalGraphDiffService } from '../../../src/rag/incremental-graph-diff.service';
 import { GraphStoreService, StoredGraph } from '../../../src/rag/graph-store.service';
 import { EmbeddingService } from '../../../src/rag/embedding.service';
@@ -102,6 +103,7 @@ describe('IncrementalGraphDiffService wiring (SRC-001)', () => {
     module = await Test.createTestingModule({
       providers: [
         RagService,
+        VectorStore,
         {
           provide: IncrementalGraphDiffService,
           useValue: { diffAndApply: diffAndApplyMock, getStoredGraph: jest.fn() },
@@ -114,7 +116,6 @@ describe('IncrementalGraphDiffService wiring (SRC-001)', () => {
     }).compile();
 
     ragService = module.get(RagService);
-    (ragService as unknown as { embeddingService: FakeEmbeddingService }).embeddingService = new FakeEmbeddingService();
   });
 
   afterAll(async () => {

@@ -230,6 +230,10 @@ export class PrismaMemoryItemRepository
     } else {
       orderByClause.push({ createdAt: 'desc' }, { confidence: 'desc' }, { updatedAt: 'desc' });
     }
+    // Unique tiebreaker: rows created in the same burst share timestamps and
+    // confidence, and Postgres does not guarantee a stable order among ties,
+    // which would shuffle items across pagination pages.
+    orderByClause.push({ id: 'desc' });
 
     const [models, total] = await Promise.all([
       this.prisma.client.memoryItem.findMany({ where, skip, take: limit, orderBy: orderByClause }),

@@ -121,6 +121,7 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
             { confidence: 'desc' },
             { updatedAt: 'desc' },
             { createdAt: 'desc' },
+            { id: 'desc' },
           ],
         }),
       );
@@ -138,6 +139,7 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
             { updatedAt: 'desc' },
             { confidence: 'desc' },
             { createdAt: 'desc' },
+            { id: 'desc' },
           ],
         }),
       );
@@ -155,6 +157,7 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
             { createdAt: 'desc' },
             { confidence: 'desc' },
             { updatedAt: 'desc' },
+            { id: 'desc' },
           ],
         }),
       );

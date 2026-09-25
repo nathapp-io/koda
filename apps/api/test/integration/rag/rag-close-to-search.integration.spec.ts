@@ -20,6 +20,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
 import { RagService } from '../../../src/rag/rag.service';
+import { VectorStore } from '../../../src/rag/vector-store.service';
 import { TicketStatus } from '../../../src/common/enums';
 import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.repository';
 import { TICKET_REPOSITORY } from '../../../src/tickets/domain/ticket.domain';
@@ -83,10 +84,12 @@ describe('RAG close-to-search integration', () => {
         {
           provide: RagService,
           useFactory: (ragCfg: IRagConfig) => {
-            // EmbeddingService injected as 2nd constructor arg — bypass NestJS DI
+            // RagService delegates all table and search work to VectorStore,
+            // which takes the embedding service as its 2nd constructor arg —
+            // both built here, bypassing NestJS DI.
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const rag = new RagService(ragCfg, fakeEmbedding as any);
-            return rag;
+            const vectorStore = new VectorStore(ragCfg, fakeEmbedding as any);
+            return new RagService(vectorStore);
           },
           inject: [RAG_CFG],
         },

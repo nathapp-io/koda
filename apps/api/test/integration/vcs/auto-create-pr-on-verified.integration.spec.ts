@@ -106,6 +106,8 @@ describe('Auto-create PR on VERIFIED Transition', () => {
         ticket: {
           findUnique: jest.fn(),
           findFirst: jest.fn(),
+          // M3 conditional status write used by updateTicketStatusIf
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
           update: jest.fn(),
         },
         comment: {
@@ -278,11 +280,14 @@ describe('Auto-create PR on VERIFIED Transition', () => {
       mockVcsProvider.createPullRequest.mockRejectedValue(error);
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(testProject);
-      mockPrismaService.client.ticket.findUnique.mockResolvedValue(testTicket);
-      mockPrismaService.client.ticket.update.mockResolvedValue({
-        ...testTicket,
-        status: TicketStatus.VERIFIED,
-      });
+      // Two pre-reads hit findUnique before the write (verify()'s VERIFY_FIX
+      // check, then executeTransitionInternal's transition guard) and both must
+      // see CREATED; the conditional write's fresh read returns the transitioned
+      // row.
+      mockPrismaService.client.ticket.findUnique
+        .mockResolvedValueOnce(testTicket)
+        .mockResolvedValueOnce(testTicket)
+        .mockResolvedValue({ ...testTicket, status: TicketStatus.VERIFIED });
       mockPrismaService.client.comment.create.mockResolvedValue({});
       mockPrismaService.client.ticketActivity.create.mockResolvedValue({});
 
@@ -327,6 +332,8 @@ describe('AC14: prNumber and prState persisted on TicketLink after successful PR
           ticket: {
             findUnique: jest.fn().mockResolvedValue(testTicket),
             findFirst: jest.fn(),
+            // M3 conditional status write used by updateTicketStatusIf
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
             update: jest.fn().mockResolvedValue({ ...testTicket, status: TicketStatus.VERIFIED }),
           },
           comment: {
@@ -398,14 +405,6 @@ describe('AC14: prNumber and prState persisted on TicketLink after successful PR
       mockPrismaService.client.ticketLink.create.mockResolvedValue({
         id: 'link-1',
         ticketId: 'ticket-1',
-        url: 'https://github.com/test-owner/test-repo/pull/pending',
-        provider: 'github',
-        externalRef: 'test-owner/test-repo#pending',
-        createdAt: new Date(),
-      });
-      mockPrismaService.client.ticketLink.update.mockResolvedValue({
-        id: 'link-1',
-        ticketId: 'ticket-1',
         url: mockPrResponse.url,
         provider: 'github',
         externalRef: 'test-owner/test-repo#123',
@@ -417,11 +416,15 @@ describe('AC14: prNumber and prState persisted on TicketLink after successful PR
 
       await transitionsService.verify('test-project', 'KODA-42', 'Verified', testUser);
 
-      // Verify ticketLink.update was called with prNumber and prState (AC1, AC2, AC3)
-      expect(mockPrismaService.client.ticketLink.update).toHaveBeenCalledWith(
+      // BUG-13: the link is persisted once, after PR creation succeeds, already
+      // carrying the prNumber and prState (no pending placeholder + update).
+      expect(mockPrismaService.client.ticketLink.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'link-1' },
           data: expect.objectContaining({
+            ticketId: 'ticket-1',
+            url: mockPrResponse.url,
+            provider: 'github',
+            externalRef: 'test-owner/test-repo#123',
             prNumber: 123,
             prState: 'draft',
           }),
@@ -442,14 +445,6 @@ describe('AC14: prNumber and prState persisted on TicketLink after successful PR
       mockPrismaService.client.ticketLink.create.mockResolvedValue({
         id: 'link-1',
         ticketId: 'ticket-1',
-        url: 'https://github.com/test-owner/test-repo/pull/pending',
-        provider: 'github',
-        externalRef: 'test-owner/test-repo#pending',
-        createdAt: new Date(),
-      });
-      mockPrismaService.client.ticketLink.update.mockResolvedValue({
-        id: 'link-1',
-        ticketId: 'ticket-1',
         url: mockPrResponse.url,
         provider: 'github',
         externalRef: 'test-owner/test-repo#456',
@@ -461,32 +456,26 @@ describe('AC14: prNumber and prState persisted on TicketLink after successful PR
 
       await transitionsService.verify('test-project', 'KODA-42', 'Verified', testUser);
 
-      // Verify ticketLink.update was called with prState: 'draft' (AC2)
-      expect(mockPrismaService.client.ticketLink.update).toHaveBeenCalledWith(
+      // The link is persisted with prState 'draft' even when the GitHub API
+      // reports the PR as non-draft (AC2)
+      expect(mockPrismaService.client.ticketLink.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
+            prNumber: 456,
             prState: 'draft',
           }),
         }),
       );
     });
 
-    it('TicketLink is not updated when PR creation fails', async () => {
+    it('TicketLink is not created when PR creation fails', async () => {
       mockVcsProvider.createPullRequest.mockRejectedValue(new Error('GitHub API error'));
-      mockPrismaService.client.ticketLink.create.mockResolvedValue({
-        id: 'link-1',
-        ticketId: 'ticket-1',
-        url: 'https://github.com/test-owner/test-repo/pull/pending',
-        provider: 'github',
-        externalRef: 'test-owner/test-repo#pending',
-        createdAt: new Date(),
-      });
 
       await transitionsService.verify('test-project', 'KODA-42', 'Verified', testUser);
 
-      // When PR creation fails, ticketLink.update should NOT be called (AC4)
-      // ticketLink.create is still called (creates pending link), but update is skipped
-      expect(mockPrismaService.client.ticketLink.create).toHaveBeenCalled();
+      // BUG-13: when PR creation fails, no TicketLink is written at all —
+      // neither a pending placeholder nor a final link (AC4)
+      expect(mockPrismaService.client.ticketLink.create).not.toHaveBeenCalled();
       expect(mockPrismaService.client.ticketLink.update).not.toHaveBeenCalled();
     });
   });
@@ -497,10 +486,6 @@ describe('AC12: No PR creation for non-VERIFIED transitions', () => {
       mockPrismaService.client.ticket.findUnique.mockResolvedValue({
         ...testTicket,
         status: TicketStatus.VERIFIED,
-      });
-      mockPrismaService.client.ticket.update.mockResolvedValue({
-        ...testTicket,
-        status: TicketStatus.IN_PROGRESS,
       });
       mockPrismaService.client.ticketActivity.create.mockResolvedValue({});
 
@@ -517,10 +502,6 @@ describe('AC12: No PR creation for non-VERIFIED transitions', () => {
       mockPrismaService.client.ticket.findUnique.mockResolvedValue({
         ...testTicket,
         status: TicketStatus.VERIFY_FIX,
-      });
-      mockPrismaService.client.ticket.update.mockResolvedValue({
-        ...testTicket,
-        status: TicketStatus.CLOSED,
       });
       mockPrismaService.client.ticketActivity.create.mockResolvedValue({});
 

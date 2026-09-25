@@ -3,6 +3,7 @@ import { OutboxFanOutRegistry } from '../../../src/outbox/outbox-fan-out-registr
 import { AstIndexService } from '../../../src/code-intel/ast-index.service';
 import { SymbolStore } from '../../../src/code-intel/symbol-store';
 import { CodeGraphService } from '../../../src/code-intel/code-graph.service';
+import { CodeIntelOutboxSubscriber } from '../../../src/code-intel/code-intel-outbox.subscriber';
 
 describe('code_commit outbox handler', () => {
   let registry: OutboxFanOutRegistry;
@@ -36,11 +37,16 @@ describe('code_commit outbox handler', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OutboxFanOutRegistry,
+        CodeIntelOutboxSubscriber,
         { provide: AstIndexService, useValue: mockAstIndexService },
         { provide: SymbolStore, useValue: mockSymbolStore },
         { provide: CodeGraphService, useValue: mockCodeGraph },
       ],
     }).compile();
+
+    // Initialize lifecycle hooks: CodeIntelOutboxSubscriber.onModuleInit is
+    // what registers the code_commit handler on the registry.
+    await module.init();
 
     registry = module.get<OutboxFanOutRegistry>(OutboxFanOutRegistry);
     astIndexService = module.get(AstIndexService);
