@@ -25,10 +25,9 @@ export class CommentsService {
       throw new NotFoundAppException({}, 'comments');
     }
 
-    const match = ticketRef.match(/^([A-Z]+)-(\d+)$/);
-    const ticket = match
-      ? await this.commentRepo.findTicketByNumber(project.id, parseInt(match[2], 10))
-      : await this.commentRepo.findTicketById(ticketRef);
+    // H5: scoped resolution — KEY-N prefix must match the project key and
+    // CUIDs are constrained to this project; soft-deleted tickets miss.
+    const ticket = await this.commentRepo.findTicketScoped(project.id, project.key, ticketRef);
 
     if (!ticket || ticket.deletedAt) {
       throw new NotFoundAppException({}, 'comments');

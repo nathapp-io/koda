@@ -183,17 +183,9 @@ export class TicketsService {
       throw new NotFoundAppException({}, 'tickets');
     }
 
-    const refPattern = /^([A-Z]+)-(\d+)$/;
-    const match = ref.match(refPattern);
-
-    let ticket;
-
-    if (match) {
-      const number = parseInt(match[2], 10);
-      ticket = await this.ticketRepo.findTicketByProjectAndNumber(project.id, number);
-    } else {
-      ticket = await this.ticketRepo.findTicketById(ref);
-    }
+    // H5: single scoped lookup — KEY-N prefix must match the project key and
+    // CUIDs are constrained to this project; soft-deleted tickets miss.
+    const ticket = await this.ticketRepo.findTicketScoped(project.id, project.key, ref);
 
     if (!ticket || ticket.deletedAt) {
       throw new NotFoundAppException({}, 'tickets');

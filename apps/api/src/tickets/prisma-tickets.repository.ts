@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
+import { parseTicketRef } from '../common/utils/ticket-ref.util';
 import type {
   ITicketRepository,
   TicketProject,
@@ -283,26 +284,50 @@ export class PrismaTicketsRepository implements ITicketRepository {
   async findTicketByRefRaw(projectSlug: string, ref: string): Promise<TicketDomain | null> {
     const project = await this.db.project.findUnique({
       where: { slug: projectSlug },
-      select: { id: true },
+      select: { id: true, key: true },
     });
 
     if (!project) return null;
 
-    const refPattern = /^([A-Z]+)-(\d+)$/;
-    const match = ref.match(refPattern);
+    // H5: transitions resolve through the same scoped predicate as reads —
+    // cross-project CUIDs, foreign KEY prefixes and soft-deleted tickets all
+    // miss (deletedAt: null is applied by findTicketScoped by default).
+    return this.findTicketScoped(project.id, project.key, ref);
+  }
+
+  async findTicketScoped(
+    projectId: string,
+    projectKey: string,
+    ref: string,
+    opts: { includeDeleted?: boolean } = {},
+  ): Promise<TicketDomain | null> {
+    const match = parseTicketRef(ref);
 
     if (match) {
-      const number = parseInt(match[2], 10);
+      // H5: a foreign KEY prefix never resolves locally, even when the
+      // project happens to own the same ticket number.
+      if (match.prefix !== projectKey) return null;
+
       const row = await this.db.ticket.findUnique({
-        where: { projectId_number: { projectId: project.id, number } },
+        where: { projectId_number: { projectId, number: match.number } },
+        include: {
+          labels: { include: { label: true } },
+          links: true,
+        },
       });
-      return row ? this.toDomain(row) : null;
+      return row && (opts.includeDeleted || !row.deletedAt) ? this.toDomain(row) : null;
     }
 
-    const row = await this.db.ticket.findUnique({
-      where: { id: ref },
+    // H5: CUID refs are constrained to the caller's project — a valid CUID
+    // belonging to another project must not resolve.
+    const row = await this.db.ticket.findFirst({
+      where: { id: ref, projectId },
+      include: {
+        labels: { include: { label: true } },
+        links: true,
+      },
     });
-    return row ? this.toDomain(row) : null;
+    return row && (opts.includeDeleted || !row.deletedAt) ? this.toDomain(row) : null;
   }
 
   // Extra method used by ticket-transitions for full ticket with comments for RAG indexing

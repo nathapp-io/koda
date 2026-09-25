@@ -102,6 +102,17 @@ export interface ITicketRepository {
   assignTicket(id: string, data: AssignTicketData): Promise<TicketDomain>;
   softDeleteTicket(id: string): Promise<TicketDomain>;
   findTicketByRefRaw(projectSlug: string, ref: string): Promise<TicketDomain | null>;
+  /**
+   * H5: resolve a ticket ref (KEY-N or CUID) strictly within one project.
+   * KEY-N prefix must equal projectKey; CUIDs are looked up with a projectId
+   * constraint; soft-deleted tickets are excluded unless includeDeleted.
+   */
+  findTicketScoped(
+    projectId: string,
+    projectKey: string,
+    ref: string,
+    opts?: { includeDeleted?: boolean },
+  ): Promise<TicketDomain | null>;
   findUserById(id: string): Promise<{ id: string; role: string } | null>;
   findAgentById(id: string): Promise<{ id: string } | null>;
   findProjectMemberRole(projectId: string, userId: string): Promise<string | null>;
