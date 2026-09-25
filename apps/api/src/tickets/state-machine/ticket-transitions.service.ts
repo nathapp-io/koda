@@ -1,7 +1,10 @@
 import { Injectable, Optional, Logger, Inject, HttpException, HttpStatus } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
-import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { TicketStatus, CommentType, ActivityType } from '../../common/enums';
+import { KodaAction } from '../../auth/casl/koda-action.enum';
+import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
 import { validateTransition } from './ticket-transitions';
 import { RagService } from '../../rag/rag.service';
 import { WebhookDispatcherService } from '../../webhook/webhook-dispatcher.service';
@@ -67,6 +70,10 @@ export class TicketTransitionsService {
     @Optional() private readonly ticketLinksService?: TicketLinksService,
     @Optional() private readonly vcsLinkExtractorService?: VcsLinkExtractorService,
     @Optional() @Inject(VCS_CFG) private readonly vcsConfig?: IVcsConfig,
+    // M2 fix: evaluates the TRANSITION permission for the PATCH status-delegation
+    // path. Optional only so legacy test harnesses can construct the service;
+    // executeTransitionPublic fails closed when it is absent.
+    @Optional() private readonly caslAbilityFactory?: KodaCaslAbilityFactory,
   ) {}
 
   /**
@@ -408,6 +415,16 @@ export class TicketTransitionsService {
    * Runs the full transition pipeline (TRANSITION state-machine validation,
    * conditional status write, activity row, webhook dispatch) instead of the
    * direct `status` write the PATCH route used before.
+   *
+   * M2 permission fix: the PATCH route only enforces UPDATE on Ticket, so the
+   * TRANSITION check is enforced here — this method is the only caller path
+   * that lacks decorator-level TRANSITION enforcement (the dedicated
+   * verify/start/fix/verify-fix/close/reject routes carry their own
+   * @RequiredPermission([TRANSITION, 'Ticket']) and never go through this
+   * wrapper). Mirrors DefaultPermissionProvider's evaluation of
+   * @RequiredPermission: build the CASL ability for the principal and check
+   * `can(TRANSITION, 'Ticket')`; failure throws the same 403-class
+   * ForbiddenAppException the permission guard raises.
    */
   async executeTransitionPublic(
     projectSlug: string,
@@ -415,6 +432,15 @@ export class TicketTransitionsService {
     toStatus: TicketStatus,
     principal: KodaPrincipal,
   ): Promise<TransitionResult> {
+    if (!this.caslAbilityFactory) {
+      // Fail closed: without the ability factory there is no way to verify
+      // TRANSITION, and the PATCH route only proves UPDATE.
+      throw new ForbiddenAppException({}, 'tickets');
+    }
+    const ability = await this.caslAbilityFactory.createForUser(principal);
+    if (!ability.can(KodaAction.TRANSITION as CaslPermissionAction, 'Ticket')) {
+      throw new ForbiddenAppException({}, 'tickets');
+    }
     return this.executeTransitionInternal(projectSlug, ticketRef, toStatus, undefined, undefined, principal);
   }
 

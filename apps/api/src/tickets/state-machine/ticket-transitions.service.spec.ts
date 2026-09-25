@@ -2,9 +2,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { TicketStatus, CommentType, ActivityType } from '../../common/enums';
 import { TicketTransitionsService } from './ticket-transitions.service';
-import { AppException } from '@nathapp/nestjs-common';
+import { AppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { TICKET_REPOSITORY } from '../domain/ticket.domain';
+import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
+import type { AgentPrincipal, KodaPrincipal, UserPrincipal } from '../../auth/principal/koda-principal.types';
 
 describe('TicketTransitionsService', () => {
   let service: TicketTransitionsService;
@@ -135,6 +137,7 @@ describe('TicketTransitionsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TicketTransitionsService,
+        KodaCaslAbilityFactory,
         {
           provide: TICKET_REPOSITORY,
           useValue: mockTicketRepo,
@@ -676,6 +679,122 @@ describe('TicketTransitionsService', () => {
         TicketStatus.CREATED,
         TicketStatus.VERIFIED,
       );
+    });
+  });
+
+  describe('M2: executeTransitionPublic enforces TRANSITION on Ticket (PATCH permission fix)', () => {
+    // Agent TRIAGER: has UPDATE on Ticket (koda-casl-ability.factory.ts TRIAGER
+    // case) but no TRANSITION — the escalation the M2 delegation would have
+    // allowed when the PATCH route only checks UPDATE.
+    const makeTriagerAgentPrincipal = (): AgentPrincipal => ({
+      id: 'agent-triager',
+      sub: 'agent-triager',
+      actorType: 'agent',
+      slug: 'triager-agent',
+      status: 'ACTIVE',
+      agentRoles: ['TRIAGER'],
+      capabilities: [],
+      blacklisted: false,
+      revoked: false,
+      authorities: ['WORKER'],
+      name: 'Triager Agent',
+    });
+
+    const makeAdminUserPrincipal = (): UserPrincipal => ({
+      id: 'admin-1',
+      sub: 'admin-1',
+      actorType: 'user',
+      role: 'ADMIN',
+      email: 'admin@example.com',
+      blacklisted: false,
+      revoked: false,
+      authorities: ['ADMIN'],
+      name: 'Admin User',
+    });
+
+    const makeDeveloperAgentPrincipal = (): AgentPrincipal => ({
+      id: 'agent-dev',
+      sub: 'agent-dev',
+      actorType: 'agent',
+      slug: 'developer-agent',
+      status: 'ACTIVE',
+      agentRoles: ['DEVELOPER'],
+      capabilities: [],
+      blacklisted: false,
+      revoked: false,
+      authorities: ['WORKER'],
+      name: 'Developer Agent',
+    });
+
+    const mockExecuteTransitionInternalPath = () => {
+      const updatedTicket = { ...mockTicket, status: TicketStatus.IN_PROGRESS };
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(updatedTicket);
+      mockTicketRepo.createTicketActivity.mockResolvedValue({
+        ...mockActivity,
+        toStatus: TicketStatus.IN_PROGRESS,
+      });
+    };
+
+    it('M2: principal without TRANSITION (agent TRIAGER, UPDATE-only) is rejected 403 and the transition never runs', async () => {
+      mockExecuteTransitionInternalPath();
+
+      await expect(
+        service.executeTransitionPublic('koda', 'KODA-1', TicketStatus.IN_PROGRESS, makeTriagerAgentPrincipal()),
+      ).rejects.toThrow(ForbiddenAppException);
+
+      // The transition pipeline (lookup + conditional write + activity) must not run
+      expect(mockTicketRepo.findProjectBySlug).not.toHaveBeenCalled();
+      expect(mockTicketRepo.updateTicketStatusIf).not.toHaveBeenCalled();
+      expect(mockTicketRepo.createTicketActivity).not.toHaveBeenCalled();
+    });
+
+    it('M2: ADMIN (MANAGE implies all) passes the TRANSITION check and the transition runs', async () => {
+      mockExecuteTransitionInternalPath();
+
+      const result = await service.executeTransitionPublic(
+        'koda',
+        'KODA-1',
+        TicketStatus.IN_PROGRESS,
+        makeAdminUserPrincipal(),
+      );
+
+      expect(result.ticket.status).toBe(TicketStatus.IN_PROGRESS);
+      expect(mockTicketRepo.updateTicketStatusIf).toHaveBeenCalledWith(
+        'ticket-123',
+        TicketStatus.CREATED,
+        TicketStatus.IN_PROGRESS,
+      );
+    });
+
+    it('M2: agent with TRANSITION role (DEVELOPER) passes and the transition runs', async () => {
+      mockExecuteTransitionInternalPath();
+
+      const result = await service.executeTransitionPublic(
+        'koda',
+        'KODA-1',
+        TicketStatus.IN_PROGRESS,
+        makeDeveloperAgentPrincipal(),
+      );
+
+      expect(result.ticket.status).toBe(TicketStatus.IN_PROGRESS);
+    });
+
+    it('M2: fails closed with 403 when no ability factory is available', async () => {
+      // Service constructed without the optional KodaCaslAbilityFactory — the
+      // PATCH path cannot prove TRANSITION, so it must deny.
+      const bareService = new TicketTransitionsService(
+        mockTicketRepo,
+        mockTxManager,
+      );
+      mockExecuteTransitionInternalPath();
+
+      await expect(
+        bareService.executeTransitionPublic('koda', 'KODA-1', TicketStatus.IN_PROGRESS, makeAdminUserPrincipal()),
+      ).rejects.toThrow(ForbiddenAppException);
+
+      expect(mockTicketRepo.updateTicketStatusIf).not.toHaveBeenCalled();
     });
   });
 
