@@ -1,21 +1,20 @@
 import { Controller, Post, Get, Body, Query, Param, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
-import { ForbiddenAppException } from '@nathapp/nestjs-common';
+import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { ExtractionService, WriteResult } from './extraction.service';
 import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
 import { MemoryItemInput } from './memory-item-repository';
-import { ActorRole } from '../common/enums';
+import { ActorRole, MemoryKind } from '../common/enums';
 import { KodaPrincipal, isAgentPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
 import { ProjectAccessService } from '../projects/project-access.service';
 import { RecordDecisionDto } from './dto/record-decision.dto';
 import { CreateMemoryDto } from './dto/create-memory.dto';
-
-const MEMORY_WRITE_ROLES: readonly string[] = [ActorRole.ADMIN, ActorRole.DEVELOPER, ActorRole.AGENT];
+import { ExtractEventDto } from './dto/extract-event.dto';
 
 function principalRole(principal: KodaPrincipal): string | null {
   return isAgentPrincipal(principal)
-    ? 'AGENT'
+    ? ActorRole.AGENT
     : (isUserPrincipal(principal) ? principal.role : null);
 }
 
@@ -33,29 +32,28 @@ export class MemoryController {
     projectId: string,
     principal: KodaPrincipal,
   ): Promise<void> {
-    const role = principalRole(principal);
-    if (!role || !MEMORY_WRITE_ROLES.includes(role)) {
+    if (!isUserPrincipal(principal) && !isAgentPrincipal(principal)) {
       throw new ForbiddenAppException({}, 'memory');
     }
-    // The global role check above lets admin users and agents through, but a
-    // member of project A must still not be able to write to project B —
-    // enforcing project membership closes that cross-project write path.
+    // Agents qualify as today. For users, assertProjectMembership lets global
+    // admins through and requires a ProjectMember row (any role) for everyone
+    // else — the previous MEMORY_WRITE_ROLES check compared the GLOBAL role,
+    // locking out users whose write access was only granted at project level.
+    // It also closes the cross-project write path (member of project A writing
+    // to project B).
     await this.projectAccess.assertProjectMembership(projectId, principal);
   }
 
   @Post('extract')
   @ApiOperation({ summary: 'Extract memory items from a canonical event (internal)' })
   @ApiResponse({ status: 201, description: 'Memory items extracted' })
-  async extractFromEvent(@Body() event: Record<string, unknown>, @Principal() principal: KodaPrincipal) {
-    const projectId = event.projectId as string | undefined;
+  async extractFromEvent(@Body() event: ExtractEventDto, @Principal() principal: KodaPrincipal) {
+    const projectId = event.projectId;
     if (!projectId) {
       return { items: [] };
     }
 
-    const role = principalRole(principal);
-    if (!role || !MEMORY_WRITE_ROLES.includes(role)) {
-      return { items: [] };
-    }
+    await this.assertWriteAuthorized(projectId, principal);
 
     const items = this.extractionService.extractFromEvent(event as unknown as Parameters<typeof this.extractionService.extractFromEvent>[0]);
 
@@ -66,10 +64,13 @@ export class MemoryController {
         subject: item.subject,
         predicate: item.predicate,
         object: item.object,
-        sourceType: item.sourceType ?? (event.type as string),
-        sourceId: item.sourceId ?? (event.id as string),
+        sourceType: item.sourceType ?? event.type,
+        sourceId: item.sourceId ?? event.id,
         confidence: item.confidence,
-        ownerId: (event.actorId as string) ?? principal.id,
+        // H12: attribution is always the authenticated caller. The raw event
+        // used to carry actorId, letting a caller forge another agent's or
+        // user's memory ownership — that field is no longer trusted.
+        ownerId: principal.id,
       };
       await this.repository.upsert(input);
     }
@@ -113,6 +114,22 @@ export class MemoryController {
   async createMemory(@Body() input: CreateMemoryDto, @Principal() principal: KodaPrincipal) {
     await this.assertWriteAuthorized(input.projectId, principal);
 
+    // H12: DECISION items carry agent attribution in their subject; they must
+    // go through recordDecision, which forces non-admin callers to record as
+    // themselves. The generic route can no longer be used to forge them.
+    if (input.kind === MemoryKind.DECISION) {
+      throw new ValidationAppException(
+        { kind: 'DECISION memory items must be recorded via POST /memory/decisions' },
+        'memory',
+      );
+    }
+
+    // H12: only global admins may attribute a memory item to an arbitrary
+    // owner; every other caller always owns what they write, so a compromised
+    // agent/user cannot plant memories under someone else's identity.
+    const isGlobalAdmin = isUserPrincipal(principal) && principal.role === ActorRole.ADMIN;
+    const ownerId = isGlobalAdmin ? (input.ownerId ?? principal.id) : principal.id;
+
     const memory = await this.repository.upsert({
       projectId: input.projectId,
       kind: input.kind,
@@ -122,7 +139,7 @@ export class MemoryController {
       sourceType: input.sourceType ?? 'manual',
       sourceId: input.sourceId,
       confidence: input.confidence ?? 0.8,
-      ownerId: input.ownerId ?? principal.id,
+      ownerId,
     });
 
     return memory;
