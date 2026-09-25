@@ -411,6 +411,31 @@ export class TicketTransitionsService {
   }
 
   /**
+   * Final-review Finding B: exposes the TRANSITION permission check from
+   * executeTransitionPublic so callers that combine field writes with a status
+   * change (PATCH {status, title}) can verify permission BEFORE applying the
+   * field writes — a caller with UPDATE but no TRANSITION then gets a clean
+   * 403 instead of a partial write followed by 403.
+   *
+   * Same CASL logic executeTransitionPublic itself uses (single source of
+   * truth); executeTransitionPublic calls this method, so there is no
+   * duplication and no double DB work (the ability build is the only cost and
+   * it is per-call anyway).
+   *
+   * Fails closed: without the ability factory there is no way to verify
+   * TRANSITION, and the PATCH route only proves UPDATE.
+   */
+  async assertTransitionPermission(principal: KodaPrincipal): Promise<void> {
+    if (!this.caslAbilityFactory) {
+      throw new ForbiddenAppException({}, 'tickets');
+    }
+    const ability = await this.caslAbilityFactory.createForUser(principal);
+    if (!ability.can(KodaAction.TRANSITION as CaslPermissionAction, 'Ticket')) {
+      throw new ForbiddenAppException({}, 'tickets');
+    }
+  }
+
+  /**
    * M2: public entry for status changes routed from PATCH /projects/:slug/tickets/:ref.
    * Runs the full transition pipeline (TRANSITION state-machine validation,
    * conditional status write, activity row, webhook dispatch) instead of the
@@ -432,15 +457,7 @@ export class TicketTransitionsService {
     toStatus: TicketStatus,
     principal: KodaPrincipal,
   ): Promise<TransitionResult> {
-    if (!this.caslAbilityFactory) {
-      // Fail closed: without the ability factory there is no way to verify
-      // TRANSITION, and the PATCH route only proves UPDATE.
-      throw new ForbiddenAppException({}, 'tickets');
-    }
-    const ability = await this.caslAbilityFactory.createForUser(principal);
-    if (!ability.can(KodaAction.TRANSITION as CaslPermissionAction, 'Ticket')) {
-      throw new ForbiddenAppException({}, 'tickets');
-    }
+    await this.assertTransitionPermission(principal);
     return this.executeTransitionInternal(projectSlug, ticketRef, toStatus, undefined, undefined, principal);
   }
 

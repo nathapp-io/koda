@@ -124,6 +124,7 @@ describe('TicketsService', () => {
 
   const mockTransitionsService = {
     executeTransitionPublic: jest.fn(),
+    assertTransitionPermission: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -678,6 +679,32 @@ describe('TicketsService', () => {
         mockTransitionsService.executeTransitionPublic.mock.invocationCallOrder[0],
       );
       expect(result.status).toBe(TicketStatus.IN_PROGRESS);
+    });
+
+    // Final-review Finding B: a caller with UPDATE but no TRANSITION must be
+    // rejected 403 BEFORE any field write, so the PATCH is all-or-nothing.
+    it('M2/Final-review: PATCH {status, title} with UPDATE-but-no-TRANSITION → 403 and title NOT written', async () => {
+      const updateDto: UpdateTicketDto = {
+        title: 'Should never be written',
+        status: TicketStatus.IN_PROGRESS,
+      };
+
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue(mockTicket);
+      mockTicketRepo.updateTicket.mockResolvedValue({ ...mockTicket, title: 'Should never be written' });
+      mockTransitionsService.assertTransitionPermission.mockRejectedValue(
+        new ForbiddenAppException({}, 'tickets'),
+      );
+
+      await expect(
+        service.update('koda', 'KODA-1', updateDto, mockUserPrincipal),
+      ).rejects.toThrow(ForbiddenAppException);
+
+      // Permission check ran before anything else
+      expect(mockTransitionsService.assertTransitionPermission).toHaveBeenCalledWith(mockUserPrincipal);
+      // The partial field write must not have happened
+      expect(mockTicketRepo.updateTicket).not.toHaveBeenCalled();
+      expect(mockTransitionsService.executeTransitionPublic).not.toHaveBeenCalled();
     });
   });
 
