@@ -156,7 +156,7 @@ Core modules:
 - `CiWebhookModule` handles inbound CI events that can update ticket state
 
 Memory and context modules (ADR-001):
-- `OutboxModule` — durable outbox on `@nathapp/nestjs-outbox` (`PrismaOutboxStore`, `FanOutPublisher`); relay polls every 1 s with leases and capped exponential backoff (2 s base, 5 min cap, 8 attempts → `dead`); fan-out handlers for ticket_event / agent_event / decision_event / document_indexed / graphify_import / code_commit / webhook_delivery
+- `OutboxModule` — durable outbox on `@nathapp/nestjs-outbox` (`PrismaOutboxStore`, `FanOutPublisher`); relay polls every 1 s with leases and capped exponential backoff (2 s base, 5 min cap, 8 attempts → `dead`); fan-out handlers for ticket_event / agent_event / document_indexed / graphify_import / code_commit / webhook_delivery
 - `KodaDomainWriterModule` — single canonical write gateway for agent-initiated ticket, agent, and decision events
 - `EventsModule` — TicketEvent / AgentEvent / DecisionEvent services and repositories
 - `MemoryModule` — semantic memory items, governance, extraction, timeline
@@ -246,7 +246,7 @@ Client request
   → Controller (validates slug → projectId)
   → TicketsService / CommentsService / KodaDomainWriter
   → Prisma (canonical write — must succeed)
-  → TicketEventService.create()     (non-fatal)
+  → TicketEventService.create()     (same transaction as the business write — failure is fatal)
   → OutboxService.record()          (same transaction as the write)
 ```
 
