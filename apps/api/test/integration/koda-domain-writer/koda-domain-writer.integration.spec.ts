@@ -19,12 +19,13 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
+import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 
 // This service doesn't exist yet - tests will fail initially (RED phase)
 import { KodaDomainWriter } from '../../../src/koda-domain-writer/koda-domain-writer.service';
 import { PrismaKodaDomainWriterRepository } from '../../../src/koda-domain-writer/prisma-koda-domain-writer.repository';
 import { RagService } from '../../../src/rag/rag.service';
-import { OutboxService } from '../../../src/outbox/outbox.service';
 import { AgentAuthProvider } from '../../../src/auth/agent-auth.provider';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
 import { AgentEventService } from '../../../src/events/agent-event.service';
@@ -138,9 +139,18 @@ describe('KodaDomainWriter Integration Tests', () => {
         { provide: RagService, useValue: mockRagService },
         { provide: AgentsService, useValue: mockAgentsService },
         {
-          provide: OutboxService,
+          provide: NathappOutboxService,
           useValue: {
-            enqueue: jest.fn().mockResolvedValue(undefined),
+            record: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
+          // Transactions run inline; the writer's two writes hit the same mocked Prisma client.
+          provide: TRANSACTION_MANAGER,
+          useValue: {
+            run: jest.fn((fn: () => Promise<unknown>) => fn()),
+            getClient: jest.fn(),
+            isInTransaction: jest.fn(() => false),
           },
         },
         {

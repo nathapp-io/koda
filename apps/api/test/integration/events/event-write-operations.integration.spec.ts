@@ -21,11 +21,12 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
+import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 
 import { KodaDomainWriter } from '../../../src/koda-domain-writer/koda-domain-writer.service';
 import { PrismaKodaDomainWriterRepository } from '../../../src/koda-domain-writer/prisma-koda-domain-writer.repository';
 import { RagService } from '../../../src/rag/rag.service';
-import { OutboxService } from '../../../src/outbox/outbox.service';
 import { AgentAuthProvider } from '../../../src/auth/agent-auth.provider';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
 import { AgentEventService } from '../../../src/events/agent-event.service';
@@ -144,9 +145,8 @@ describe('Event Write Operations and Actor Resolution', () => {
     search: jest.fn(),
   };
 
-  const mockOutboxService = {
-    enqueue: jest.fn(),
-    processPending: jest.fn(),
+  const mockOutbox = {
+    record: jest.fn().mockResolvedValue(undefined),
   };
 
   beforeEach(async () => {
@@ -160,7 +160,16 @@ describe('Event Write Operations and Actor Resolution', () => {
         DecisionEventService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: RagService, useValue: mockRagService },
-        { provide: OutboxService, useValue: mockOutboxService },
+        { provide: NathappOutboxService, useValue: mockOutbox },
+        {
+          // Transactions run inline; the writer's writes hit the mocked Prisma client.
+          provide: TRANSACTION_MANAGER,
+          useValue: {
+            run: jest.fn((fn: () => Promise<unknown>) => fn()),
+            getClient: jest.fn(),
+            isInTransaction: jest.fn(() => false),
+          },
+        },
         { provide: AgentAuthProvider, useValue: { loadAgentRoles: jest.fn().mockResolvedValue([]) } },
       ],
     }).compile();
@@ -580,7 +589,7 @@ describe('Event Write Operations and Actor Resolution', () => {
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.client.ticketEvent.create.mockResolvedValue(createdEvent);
-      mockOutboxService.enqueue.mockResolvedValue({ id: 'outbox-1' } as any);
+      mockOutbox.record.mockResolvedValue({ id: 'outbox-1' } as any);
 
       const result = await kodaDomainWriter.writeTicketEvent(ticketEventData);
 
@@ -613,7 +622,7 @@ describe('Event Write Operations and Actor Resolution', () => {
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.client.agentEvent.create.mockResolvedValue(createdEvent);
-      mockOutboxService.enqueue.mockResolvedValue({ id: 'outbox-2' } as any);
+      mockOutbox.record.mockResolvedValue({ id: 'outbox-2' } as any);
 
       const result = await kodaDomainWriter.writeAgentAction(agentEventData);
 
@@ -654,7 +663,7 @@ describe('Event Write Operations and Actor Resolution', () => {
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.client.ticketEvent.create.mockResolvedValue(createdEvent);
-      mockOutboxService.enqueue.mockResolvedValue({ id: 'outbox-3' } as any);
+      mockOutbox.record.mockResolvedValue({ id: 'outbox-3' } as any);
 
       const result = await kodaDomainWriter.writeTicketEvent(eventData);
 
@@ -693,7 +702,7 @@ describe('Event Write Operations and Actor Resolution', () => {
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.client.agentEvent.create.mockResolvedValue(createdEvent);
-      mockOutboxService.enqueue.mockResolvedValue({ id: 'outbox-4' } as any);
+      mockOutbox.record.mockResolvedValue({ id: 'outbox-4' } as any);
 
       const result = await kodaDomainWriter.writeAgentAction(eventData);
 
@@ -816,7 +825,7 @@ describe('Event Write Operations and Actor Resolution', () => {
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.client.ticketEvent.create.mockResolvedValue(createdEvent);
-      mockOutboxService.enqueue.mockResolvedValue({ id: 'outbox-5' } as any);
+      mockOutbox.record.mockResolvedValue({ id: 'outbox-5' } as any);
 
       const result = await kodaDomainWriter.writeTicketEvent(eventData);
 
@@ -849,7 +858,7 @@ describe('Event Write Operations and Actor Resolution', () => {
 
       mockPrismaService.client.project.findUnique.mockResolvedValue(mockProject);
       mockPrismaService.client.ticketEvent.create.mockResolvedValue(createdEvent);
-      mockOutboxService.enqueue.mockResolvedValue({ id: 'outbox-6' } as any);
+      mockOutbox.record.mockResolvedValue({ id: 'outbox-6' } as any);
 
       const result = await kodaDomainWriter.writeTicketEvent(eventData);
 
@@ -885,7 +894,7 @@ describe('Event Write Operations and Actor Resolution', () => {
       mockPrismaService.client.agentRoleEntry.findMany.mockResolvedValue([
         { projectId: 'proj-koda-123', role: 'AGENT' },
       ]);
-      mockOutboxService.enqueue.mockResolvedValue({ id: 'outbox-7' } as any);
+      mockOutbox.record.mockResolvedValue({ id: 'outbox-7' } as any);
 
       const result = await kodaDomainWriter.writeTicketEvent(eventData);
 

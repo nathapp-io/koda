@@ -5,7 +5,7 @@ import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { VcsLinkExtractorService } from './vcs-link-extractor.service';
 import { VcsIssue } from './types';
-import { OutboxService } from '../outbox/outbox.service';
+import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { IVcsRepository, TicketLinkData, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 
@@ -90,7 +90,7 @@ export class VcsWebhookService implements OnModuleDestroy {
     private readonly prSyncService: VcsPrSyncService,
     @Inject(VCS_CFG) private readonly vcsConfig: IVcsConfig,
     @Optional() private readonly vcsLinkExtractorService?: VcsLinkExtractorService,
-    @Optional() private readonly outboxService?: OutboxService,
+    @Optional() private readonly outboxService?: NathappOutboxService,
   ) {
     this.cleanupInterval = setInterval(() => {
       this.cleanupStaleEntries();
@@ -625,11 +625,12 @@ export class VcsWebhookService implements OnModuleDestroy {
       };
 
       try {
-        await this.outboxService.enqueue({
-          projectId: connection.projectId,
-          eventType: 'code_commit',
-          eventId: commitHash,
+        // The code_commit row is this handler's only write: there is no business
+        // write to share a transaction with.
+        await this.outboxService.record({
+          type: 'code_commit',
           payload: eventPayload,
+          metadata: { projectId: connection.projectId, eventId: commitHash },
         });
         this.rememberCommitHash(recentKey, now);
         enqueuedCount++;

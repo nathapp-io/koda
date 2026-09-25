@@ -14,9 +14,15 @@ import { TicketTransitionsService } from '../../../src/tickets/state-machine/tic
 import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.repository';
 import { TICKET_REPOSITORY } from '../../../src/tickets/domain/ticket.domain';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
+import { AgentEventService } from '../../../src/events/agent-event.service';
+import { DecisionEventService } from '../../../src/events/decision-event.service';
 import { PrismaEventsRepository } from '../../../src/events/prisma-events.repository';
 import { WebhookDispatcherService } from '../../../src/webhook/webhook-dispatcher.service';
 import { PrismaWebhookRepository } from '../../../src/webhook/prisma-webhook.repository';
+import { KodaDomainWriter } from '../../../src/koda-domain-writer/koda-domain-writer.service';
+import { PrismaKodaDomainWriterRepository } from '../../../src/koda-domain-writer/prisma-koda-domain-writer.repository';
+import { RagService } from '../../../src/rag/rag.service';
+import { AgentAuthProvider } from '../../../src/auth/agent-auth.provider';
 import { TicketStatus, TicketType } from '../../../src/common/enums';
 import { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { resetDb } from '../../helpers/reset-db';
@@ -30,8 +36,18 @@ describeIntegration('producers record outbox rows atomically', () => {
   let tickets: TicketsService;
   let transitions: TicketTransitionsService;
   let store: PrismaOutboxStore;
+  let writer: KodaDomainWriter;
   let principal: KodaPrincipal;
   let projectId: string;
+  let agentId: string;
+  let agentActionInput: {
+    projectId: string;
+    agentId: string;
+    actorId: string;
+    action: string;
+    source: 'api' | 'internal' | 'webhook';
+    data: Record<string, unknown>;
+  };
 
   beforeAll(async () => {
     await resetDb();
@@ -47,9 +63,15 @@ describeIntegration('producers record outbox rows atomically', () => {
         PrismaTicketsRepository,
         { provide: TICKET_REPOSITORY, useExisting: PrismaTicketsRepository },
         TicketEventService,
+        AgentEventService,
+        DecisionEventService,
         PrismaEventsRepository,
         WebhookDispatcherService,
         PrismaWebhookRepository,
+        KodaDomainWriter,
+        PrismaKodaDomainWriterRepository,
+        { provide: RagService, useValue: { indexDocument: jest.fn(), importGraphify: jest.fn() } },
+        { provide: AgentAuthProvider, useValue: { loadAgentRoles: jest.fn().mockResolvedValue(['AGENT']) } },
       ],
     }).compile();
     prisma = module.get(PrismaService);
@@ -57,12 +79,25 @@ describeIntegration('producers record outbox rows atomically', () => {
     tickets = module.get(TicketsService);
     transitions = module.get(TicketTransitionsService);
     store = module.get(PrismaOutboxStore);
+    writer = module.get(KodaDomainWriter);
 
     const project = await prisma.client.project.create({ data: { name: 'Atomic', slug: 'atomic', key: 'ATM' } });
     projectId = project.id;
     const user = await prisma.client.user.create({
       data: { email: 'atomic@koda.test', name: 'Atomic', passwordHash: 'x', role: 'ADMIN' },
     });
+    const agent = await prisma.client.agent.create({
+      data: { name: 'Atomic Agent', slug: 'atomic-agent', apiKeyHash: 'atomic-agent-key', status: 'ACTIVE' },
+    });
+    agentId = agent.id;
+    agentActionInput = {
+      projectId,
+      agentId,
+      actorId: agentId,
+      action: 'decision_made',
+      source: 'api',
+      data: {},
+    };
     // actorType is the discriminator actorForeignKeys uses; without it the
     // creator lands in createdByAgentId and violates the Agent FK (principal
     // shape copied from ticket-transition-race.integration.spec.ts).
@@ -134,5 +169,22 @@ describeIntegration('producers record outbox rows atomically', () => {
     const ticket = await prisma.client.ticket.findUniqueOrThrow({ where: { id: created.id } });
     expect(ticket.status).toBe(TicketStatus.VERIFIED);
     expect(await prisma.client.outboxEvent.count()).toBe(0);
+  });
+
+  it('writeAgentAction rolls back the AgentEvent when the outbox write fails', async () => {
+    jest.spyOn(store, 'save').mockRejectedValueOnce(new Error('outbox down'));
+    const before = await prisma.client.agentEvent.count();
+
+    await expect(writer.writeAgentAction(agentActionInput)).rejects.toThrow('outbox down');
+
+    expect(await prisma.client.agentEvent.count()).toBe(before);
+  });
+
+  it('writeAgentAction commits the AgentEvent and one agent_event row keyed by its id', async () => {
+    const result = await writer.writeAgentAction(agentActionInput);
+
+    const rows = await prisma.client.outboxEvent.findMany({ where: { eventId: result.canonicalId } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].type).toBe('agent_event');
   });
 });
