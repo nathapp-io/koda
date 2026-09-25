@@ -80,11 +80,11 @@ The false `@design` comment ("callers retry") is replaced with an accurate one.
 
 ### Test infrastructure
 
-- **Test script split.** Today `bun run test` loads `.env.test` (which sets a SQLite `DATABASE_URL`), so it pushes the schema and runs the `test/e2e/*` suites; that only works because SQLite needs no server. After the switch `bun run test` / `test:unit` must stay DB-free: `testPathIgnorePatterns` becomes `integration|e2e`, `.env.test` drops `DATABASE_URL`, and `test:integration` sets `DATABASE_URL` explicitly and matches `integration|e2e`.
-- `test/global-setup.ts`: unchanged mechanism (`prisma db push --force-reset` once), still gated on `DATABASE_URL`, so it is a no-op for `bun run test`.
+- **Test script split.** Today `bun run test` loads `.env.test` (which sets a SQLite `DATABASE_URL`), so it pushes the schema and runs the `test/e2e/*` suites; that only works because SQLite needs no server. After the switch `bun run test` / `test:unit` must stay DB-free: `testPathIgnorePatterns` becomes `integration|e2e`; `.env.test` keeps a `DATABASE_URL` (the Joi schema requires it) pointing at the PG test database; `test/global-setup.ts` is gated on `KODA_DB_TESTS=1` instead of on `DATABASE_URL` being set; `test:integration` sets `KODA_DB_TESTS=1` and matches `integration|e2e`.
+- `test/global-setup.ts`: unchanged mechanism (`prisma db push --force-reset` once), gated on `KODA_DB_TESTS=1`, so it is a no-op for `bun run test`.
 - `test/global-teardown.ts`: the SQLite file cleanup is removed (the PG test DB is reset by `global-setup` on the next run).
 - `test/helpers/reset-db.ts`: replace the `sqlite_master` / `sqlite_sequence` logic with one `TRUNCATE <all tables> RESTART IDENTITY CASCADE`, table list from `pg_tables WHERE schemaname = current_schema()`, excluding `_prisma_migrations`.
-- `test:integration` script: `DATABASE_URL=postgresql://koda:koda@localhost:5433/koda_test` unless already set (port 5433 so tests cannot hit a dev DB on 5432).
+- Test database URL: `postgresql://koda:koda@localhost:5433/koda_test` (port 5433 so tests cannot hit a dev DB on 5432); CI overrides it through the job env (dotenv never overrides an existing variable).
 - Doc comments in integration/e2e specs that say `DATABASE_URL=file:./koda-test.ephemeral.db` are updated to the PG command.
 - A `docker-compose.test.yml` (or a `test-db` profile) starts `postgres:16` on 5433 for local runs.
 
