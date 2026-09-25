@@ -15,9 +15,15 @@ fi
 
 mkdir -p "$BACKUP_DIR"
 
-echo "==> Creating Postgres dump: $DB_BACKUP_FILE"
-docker compose -f "$COMPOSE_FILE" exec -T postgres \
-  sh -lc 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' | gzip > "$DB_BACKUP_FILE"
+DB_DUMPED=0
+if [[ -n "$(docker compose -f "$COMPOSE_FILE" ps --quiet --status running postgres)" ]]; then
+  echo "==> Creating Postgres dump: $DB_BACKUP_FILE"
+  docker compose -f "$COMPOSE_FILE" exec -T postgres \
+    sh -lc 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' | gzip > "$DB_BACKUP_FILE"
+  DB_DUMPED=1
+else
+  echo "==> Postgres service is not running yet — skipping database dump"
+fi
 
 echo "==> Creating LanceDB volume backup: $LANCE_BACKUP_FILE"
 # Backup the named volume (koda-local_koda_data) via helper container.
@@ -27,4 +33,8 @@ docker run --rm \
   alpine:3.20 \
   sh -lc "tar -czf /backup/$(basename "$LANCE_BACKUP_FILE") -C /source ."
 
-echo "✅ Backup complete: $DB_BACKUP_FILE, $LANCE_BACKUP_FILE"
+if [[ "$DB_DUMPED" -eq 1 ]]; then
+  echo "✅ Backup complete: $DB_BACKUP_FILE, $LANCE_BACKUP_FILE"
+else
+  echo "✅ Backup complete: $LANCE_BACKUP_FILE (database dump skipped — postgres not running)"
+fi

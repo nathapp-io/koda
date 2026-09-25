@@ -240,7 +240,10 @@ describe('HybridRetrieverService integration', () => {
 
   describe('AC5: timeWindow filters results before scoring', () => {
     it('returns results when timeWindow start is recent', async () => {
-      const recentTime = new Date();
+      // Start the window a few seconds in the past: docs were indexed in
+      // beforeEach, so `new Date()` here can land before an index timestamp
+      // by a few milliseconds under load and flakily filter everything out.
+      const recentTime = new Date(Date.now() - 5000);
       const result = await hybridService.search({
         projectId,
         query: 'auth',

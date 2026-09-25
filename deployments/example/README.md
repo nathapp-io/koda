@@ -4,7 +4,7 @@ This example deploys Koda from published Docker images and includes a dedicated 
 
 ## Files
 
-- `docker-compose.yml` — `migrate`, `api`, `web` services
+- `docker-compose.yml` — `postgres`, `api`, `web` services
 - `deploy.sh` — one-command deploy wrapper (runs pre-deploy backup by default)
 - `backup-db.sh` — backup the database before risky changes
 - `rollback.sh` — rollback app version (optionally restore DB backup)
@@ -42,7 +42,7 @@ This runs:
 1) pre-deploy safety checks
 2) backup the database volume (default)
 3) `docker compose pull`
-4) `docker compose run --rm migrate`
+4) `docker compose run --rm api bunx --package prisma@6.19.2 prisma migrate deploy`
 5) `docker compose up -d api web`
 6) post-deploy health checks
 
@@ -55,7 +55,7 @@ To skip backup explicitly:
 ## Manual migration only
 
 ```bash
-docker compose -f deployments/example/docker-compose.yml run --rm migrate
+docker compose -f deployments/example/docker-compose.yml run --rm api bunx --package prisma@6.19.2 prisma migrate deploy
 ```
 
 ## Backup strategy (database volume)
