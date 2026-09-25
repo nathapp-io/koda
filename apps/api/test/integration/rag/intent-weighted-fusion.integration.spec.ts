@@ -466,7 +466,11 @@ describe('Intent-Weighted Fusion and Reranking', () => {
         const maxRecency = Math.max(...recencyScores);
 
         expect(minRecency).toBeLessThan(maxRecency);
-        expect(minRecency).toBeGreaterThan(0);
+        // Min-max normalization maps the minimum raw score to exactly 0, so the
+        // normalized minimum must be >= 0 (it was previously > 0 only because
+        // duplicate rows from repeated seeding pushed differently-aged docs out
+        // of the candidate pool; the single write path dedups those rows).
+        expect(minRecency).toBeGreaterThanOrEqual(0);
         expect(maxRecency).toBeLessThanOrEqual(1);
       }
     });

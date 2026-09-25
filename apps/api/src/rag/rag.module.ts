@@ -7,6 +7,7 @@ import { RagService } from './rag.service';
 import { VectorStore } from './vector-store.service';
 import { EmbeddingService } from './embedding.service';
 import { HybridRetrieverService } from './hybrid-retriever.service';
+import { LanceTableManager } from './lance-table-manager';
 import { LexicalIndex } from './lexical-index';
 import { EntityStore } from './entity-store';
 import { GraphStoreService } from './graph-store.service';
@@ -125,6 +126,16 @@ class EntityStoreWarmup implements OnModuleInit {
   providers: [
     PrismaRagRepository,
     { provide: RAG_REPOSITORY, useExisting: PrismaRagRepository },
+    // ONE shared LanceTableManager for both VectorStore and HybridRetrieverService:
+    // single lancedb.connect per db path, one per-table write mutex across both
+    // services, so KB documents are never double-indexed and deletes are visible
+    // to both stores (H7 residual).
+    {
+      provide: LanceTableManager,
+      useFactory: (ragConfig: IRagConfig, embeddingService: EmbeddingService): LanceTableManager =>
+        new LanceTableManager(ragConfig, embeddingService),
+      inject: [RAG_CFG, EmbeddingService],
+    },
     RagService,
     VectorStore,
     EmbeddingService,
@@ -153,6 +164,6 @@ class EntityStoreWarmup implements OnModuleInit {
       inject: [RAG_CFG, SchedulerRegistry],
     },
   ],
-  exports: [RagService, HybridRetrieverService, LexicalIndex, EntityStore, GraphStoreService, FTS_OPTIMIZE_STRATEGY, IncrementalGraphDiffService, PrismaRagRepository],
+  exports: [RagService, HybridRetrieverService, LanceTableManager, LexicalIndex, EntityStore, GraphStoreService, FTS_OPTIMIZE_STRATEGY, IncrementalGraphDiffService, PrismaRagRepository],
 })
 export class RagModule {}

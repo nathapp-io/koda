@@ -85,20 +85,19 @@ export class RagController {
   ) {
     const project = await this.resolveProject(slug);
     await this.checkProjectMembership(project.id, principal);
-    await Promise.all([
-      this.ragService.indexDocument(project.id, {
-        source: dto.source,
-        sourceId: dto.sourceId,
-        content: dto.content,
-        metadata: dto.metadata ?? {},
-      }),
-      this.hybridRetrieverService.indexDocument(project.id, {
-        source: dto.source,
-        sourceId: dto.sourceId,
-        content: dto.content,
-        metadata: dto.metadata ?? {},
-      }),
-    ]);
+    // H7: single write path. Previously this ran Promise.all over
+    // RagService.indexDocument AND HybridRetrieverService.indexDocument, which
+    // double-indexed every document into the shared project table (duplicate
+    // search results, cross-service first-write race, deletes that never
+    // reached Hybrid's in-memory store). Index once via RagService
+    // (VectorStore.indexDocument); HybridRetriever reads the same row through
+    // the shared LanceTableManager.
+    await this.ragService.indexDocument(project.id, {
+      source: dto.source,
+      sourceId: dto.sourceId,
+      content: dto.content,
+      metadata: dto.metadata ?? {},
+    });
     return JsonResponse.Ok({ indexed: true });
   }
 

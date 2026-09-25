@@ -1,5 +1,4 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional, Inject } from '@nestjs/common';
-import { mkdirSync } from 'node:fs';
 import { RAG_CFG, IRagConfig } from '../config/rag.config';
 import { ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { PrismaRagRepository } from './prisma-rag.repository';
@@ -7,81 +6,32 @@ import { EmbeddingService } from './embedding.service';
 import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interface';
 import { LexicalIndex } from './lexical-index';
 import { EntityStore } from './entity-store';
+import { LanceTableManager } from './lance-table-manager';
+import type { LanceRecord, LanceTable } from './lance-table-manager';
 import { simpleFtsScore, reciprocalRankFusion, getSimilarityTier, getVerdict } from './rag.service';
 import type { IndexDocumentInput } from './rag.service';
 import type { KbResultDto, SearchKbResponseDto } from './dto/kb-result.dto';
-
-interface LanceRecord {
-  id: string;
-  source: string;
-  source_id: string;
-  content: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  vector: any;
-  metadata: string;
-  created_at: string;
-  provider: string;
-  model: string;
-  _distance?: number;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type LanceTable = any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type LanceConnection = any;
 
 function generateId(): string {
   return `doc_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
-class InMemoryTable {
-  private records: LanceRecord[] = [];
-  async add(records: LanceRecord[]): Promise<void> { this.records = [...this.records, ...records]; }
-  async countRows(): Promise<number> { return this.records.length; }
-  async delete(filter: string): Promise<void> {
-    const sourceIdFilter = /^source_id\s*=\s*'([^']+)'$/.exec(filter);
-    if (sourceIdFilter) {
-      const sourceId = sourceIdFilter[1];
-      this.records = this.records.filter((record) => record.source_id !== sourceId);
-      return;
-    }
-
-    const sourceFilter = /^source\s*=\s*'([a-zA-Z0-9_-]+)'$/.exec(filter);
-    if (sourceFilter) {
-      const source = sourceFilter[1];
-      this.records = this.records.filter((record) => record.source !== source);
-      return;
-    }
-
-    const idInFilter = /^id\s+IN\s+\((.+)\)$/.exec(filter);
-    if (idInFilter) {
-      const ids = idInFilter[1]
-        .split(',')
-        .map((part) => part.trim().replace(/^'|'$/g, ''));
-      const idSet = new Set(ids);
-      this.records = this.records.filter((record) => !idSet.has(record.id));
-    }
-  }
-  vectorSearch() { return { distanceType: () => ({ limit: (n) => ({ toArray: () => this.records.slice(0, n) }) }) }; }
-  query() { return { limit: (n) => ({ toArray: () => this.records.slice(0, n) }) }; }
-}
-
 @Injectable()
 export class VectorStore implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(VectorStore.name);
-  private db: LanceConnection = null;
-  private readonly tableCache = new Map<string, LanceTable>();
-  private readonly tableCreationLocks = new Map<string, Promise<LanceTable>>();
-  private readonly writeLocks = new Map<string, Promise<unknown>>();
-  private readonly TABLE_CACHE_MAX_SIZE = 50;
-  private lanceAvailable = true;
-  private readonly lancedbPath: string;
+  /**
+   * Shared LanceDB connection/table/mutex owner. In production, RagModule
+   * provides ONE LanceTableManager instance that is injected into both
+   * VectorStore and HybridRetrieverService, so all writes to the same
+   * `project_<id>` table are serialized and deletes are visible to both
+   * services (H7). When not injected (direct construction in unit tests),
+   * a private manager is created for this service alone.
+   */
+  private readonly lanceTable: LanceTableManager;
   private readonly similarityHigh: number;
   private readonly similarityMedium: number;
   private readonly similarityLow: number;
   private readonly ftsIndexMode: string;
-  private readonly inMemoryOnly: boolean;
-  private readonly firstAccessedProjectIds = new Set<string>();
 
   constructor(
     @Inject(RAG_CFG) ragConfig: IRagConfig,
@@ -90,31 +40,59 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
     @Optional() private readonly ragRepository?: PrismaRagRepository,
     @Optional() private readonly lexicalIndex?: LexicalIndex,
     @Optional() private readonly entityStore?: EntityStore,
+    @Optional() lanceTableManager?: LanceTableManager,
   ) {
-    this.lancedbPath = ragConfig.lancedbPath;
+    this.lanceTable = lanceTableManager ?? new LanceTableManager(ragConfig, embeddingService);
     this.similarityHigh = ragConfig.similarityHigh;
     this.similarityMedium = ragConfig.similarityMedium;
     this.similarityLow = ragConfig.similarityLow;
     this.ftsIndexMode = ragConfig.ftsIndexMode;
-    this.inMemoryOnly = ragConfig.inMemoryOnly;
 
-    if (this.inMemoryOnly) {
-      this.lanceAvailable = false;
+    if (ragConfig.inMemoryOnly) {
       this.logger.log('RAG is running in in-memory mode; LanceDB native module will not be loaded');
     }
   }
 
-  onModuleInit(): void {
-    if (this.inMemoryOnly) {
-      return;
-    }
+  // --- Compatibility surface -------------------------------------------------
+  // Connection state, the table cache, and availability now live on the shared
+  // LanceTableManager. These accessors keep the historical internal surface
+  // (used extensively by vector-store.service.spec.ts) working by delegating to
+  // the manager; they are not part of the service's behavioral API.
 
-    try {
-      mkdirSync(this.lancedbPath, { recursive: true });
-      this.logger.log(`LanceDB storage directory ensured: ${this.lancedbPath}`);
-    } catch (err) {
-      this.logger.warn(`Could not create LanceDB directory ${this.lancedbPath}: ${(err as Error).message}`);
-    }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  get db(): any {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (this.lanceTable as any).db;
+  }
+
+  set db(value: unknown) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (this.lanceTable as any).db = value;
+  }
+
+  get lanceAvailable(): boolean {
+    return this.lanceTable.available;
+  }
+
+  set lanceAvailable(value: boolean) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (this.lanceTable as any).lanceAvailable = value;
+  }
+
+  get tableCache(): Map<string, LanceTable> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (this.lanceTable as any).tableCache;
+  }
+
+  set tableCache(value: Map<string, LanceTable>) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (this.lanceTable as any).tableCache = value;
+  }
+
+  // ---------------------------------------------------------------------------
+
+  onModuleInit(): void {
+    this.lanceTable.ensureStorage();
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -122,37 +100,14 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
       await this.optimizeStrategy.onDestroy();
     }
 
-    this.tableCache.clear();
-
-    if (this.db && typeof this.db.close === 'function') {
-      try {
-        const closeResult = this.db.close();
-        if (closeResult && typeof closeResult.then === 'function') {
-          await closeResult;
-        }
-      } catch (err) {
-        this.logger.warn(`Failed to close LanceDB connection: ${(err as Error).message}`);
-      }
-    }
-
-    this.db = null;
+    await this.lanceTable.close();
   }
 
   clearProjectCaches(projectId: string): void {
-    this.tableCache.delete(`project_${projectId}`);
-    this.firstAccessedProjectIds.delete(projectId);
+    this.lanceTable.evictTable(`project_${projectId}`);
     this.lexicalIndex?.clearProject(projectId);
     this.entityStore?.clear(projectId);
     this.optimizeStrategy?.clearProject?.(projectId);
-  }
-
-  private evictTableCacheIfNeeded(): void {
-    if (this.tableCache.size > this.TABLE_CACHE_MAX_SIZE) {
-      const firstKey = this.tableCache.keys().next().value;
-      if (firstKey !== undefined) {
-        this.tableCache.delete(firstKey);
-      }
-    }
   }
 
   /**
@@ -195,26 +150,6 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async connect(): Promise<LanceConnection | null> {
-    if (this.inMemoryOnly) {
-      return null;
-    }
-
-    if (!this.db) {
-      try {
-        const lancedb = await import('@lancedb/lancedb');
-        const connectFn = (lancedb as unknown as { connect: (path: string) => Promise<LanceConnection> }).connect
-          ?? (lancedb.default as unknown as { connect: (path: string) => Promise<LanceConnection> })?.connect;
-        this.db = await connectFn(this.lancedbPath);
-      } catch (err) {
-        this.lanceAvailable = false;
-        this.logger.warn(`LanceDB unavailable - ${(err as Error).message} - using in-memory fallback`);
-        return null;
-      }
-    }
-    return this.db;
-  }
-
   /**
    * Gets or creates a LanceDB table for a project.
    * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
@@ -226,108 +161,24 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
       this.logger.warn('FTS_INDEX_MODE=eager is not yet implemented — using in-memory FTS fallback');
     }
 
-    const tableName = `project_${projectId}`;
-    const cached = this.tableCache.get(tableName);
-    if (cached) return cached;
-
-    // Serialize table open/create per project: concurrent callers for the same
-    // tableName await the same in-flight creation instead of racing LanceDB's
-    // check-then-create against each other.
-    const inFlight = this.tableCreationLocks.get(tableName);
-    if (inFlight) return inFlight;
-
-    const creation = this.createOrOpenTable(projectId, tableName).finally(() => {
-      this.tableCreationLocks.delete(tableName);
+    const optimizeStrategy = this.optimizeStrategy;
+    return this.lanceTable.getOrCreateTable(`project_${projectId}`, {
+      onFirstAccess: optimizeStrategy
+        ? (table) => {
+            if (!this.lanceTable.available) return Promise.resolve();
+            return optimizeStrategy.onFirstAccess(projectId, table);
+          }
+        : undefined,
     });
-    this.tableCreationLocks.set(tableName, creation);
-    return creation;
-  }
-
-  /**
-   * Serializes LanceDB writes (add/delete/optimize) per table. LanceDB has no
-   * built-in mutex for concurrent writers against the same table, so without
-   * this, interleaved indexDocument/deleteBySource calls can race each other
-   * and corrupt table state.
-   */
-  private async runExclusive<T>(tableName: string, fn: () => Promise<T>): Promise<T> {
-    const previous = this.writeLocks.get(tableName) ?? Promise.resolve();
-    const run = previous.then(fn, fn);
-    const tracked = run.catch(() => undefined);
-    this.writeLocks.set(tableName, tracked);
-    // Once this write settles, drop the entry if no later write has queued
-    // behind it, so the map only holds currently in-flight/queued chains
-    // instead of growing forever with one entry per project ever written to.
-    tracked.finally(() => {
-      if (this.writeLocks.get(tableName) === tracked) {
-        this.writeLocks.delete(tableName);
-      }
-    });
-    return run;
-  }
-
-  private async createOrOpenTable(projectId: string, tableName: string): Promise<LanceTable> {
-    const cached = this.tableCache.get(tableName);
-    if (cached) return cached;
-
-    const db = await this.connect();
-    if (!this.lanceAvailable || !db) {
-      const memTable = new InMemoryTable();
-      this.tableCache.set(tableName, memTable);
-      this.evictTableCacheIfNeeded();
-      return memTable;
-    }
-    const tableNames: string[] = await db.tableNames();
-
-    let table: LanceTable;
-    if (tableNames.includes(tableName)) {
-      table = await db.openTable(tableName);
-    } else {
-      const provider = this.embeddingService?.providerName ?? 'ollama';
-      const model = this.embeddingService?.modelName ?? 'nomic-embed-text';
-      const dims = this.embeddingService?.dimensions ?? 768;
-
-      // Create table with a sentinel record to define schema, then delete it
-      const sentinel: LanceRecord = {
-        id: '__schema_sentinel__',
-        source: 'manual',
-        source_id: '__sentinel__',
-        content: '',
-        vector: Array(dims).fill(0) as number[],
-        metadata: '{}',
-        created_at: new Date().toISOString(),
-        provider,
-        model,
-      };
-      table = await db.createTable(tableName, [sentinel]);
-      await table.delete("id = '__schema_sentinel__'");
-    }
-
-    // Create FTS index on content column when LanceDB is available
-    if (this.lanceAvailable) {
-      try {
-        const IndexModule = (await import('@lancedb/lancedb')).Index;
-        await table.createIndex('content', {
-          config: IndexModule.fts(),
-          replace: false,
-        });
-      } catch (err) {
-        this.logger.warn(`FTS index creation failed for project ${projectId}: ${(err as Error).message}`);
-      }
-    }
-
-    this.tableCache.set(tableName, table);
-    this.evictTableCacheIfNeeded();
-
-    if (this.lanceAvailable && this.optimizeStrategy && !this.firstAccessedProjectIds.has(projectId)) {
-      this.firstAccessedProjectIds.add(projectId);
-      await this.optimizeStrategy.onFirstAccess(projectId, table);
-    }
-
-    return table;
   }
 
   /**
    * Indexes a document in the knowledge base for a project.
+   *
+   * This is the single KB write path used by the controller (H7): the document
+   * is written once, through the shared LanceTableManager, so HybridRetriever
+   * reads the same row from the shared table. Re-indexing the same sourceId
+   * replaces the previous row (manager.addRecord) instead of duplicating it.
    * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
    */
   async indexDocument(projectId: string, doc: IndexDocumentInput): Promise<void> {
@@ -338,50 +189,43 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const table = await this.getOrCreateTable(projectId);
     const tableName = `project_${projectId}`;
+    let vector: number[];
     try {
-      const vector = await this.embeddingService.embed(doc.content);
-      const record: LanceRecord = {
-        id: generateId(),
-        source: doc.source,
-        source_id: doc.sourceId,
-        content: doc.content,
-        vector,
-        metadata: JSON.stringify(doc.metadata),
-        created_at: new Date().toISOString(),
-        provider: this.embeddingService.providerName,
-        model: this.embeddingService.modelName,
-      };
-      await this.runExclusive(tableName, () => table.add([record]));
-      if (this.lanceAvailable && this.optimizeStrategy) {
-        await this.optimizeStrategy.onInsert(projectId, table);
-      }
-      if (this.lexicalIndex) {
-        this.lexicalIndex.addDocument(projectId, { id: doc.sourceId, content: doc.content });
-      }
+      vector = await this.embeddingService.embed(doc.content);
     } catch (err) {
       // Embedding service unreachable — store content-only with zero vector for FTS
       this.logger.warn(`Embedding failed (${(err as Error).message}) — storing with zero vector`);
       const dims = this.embeddingService?.dimensions ?? 768;
-      const record: LanceRecord = {
-        id: generateId(),
-        source: doc.source,
-        source_id: doc.sourceId,
-        content: doc.content,
-        vector: Array(dims).fill(0) as number[],
-        metadata: JSON.stringify(doc.metadata ?? {}),
-        created_at: new Date().toISOString(),
-        provider: this.embeddingService?.providerName ?? 'unknown',
-        model: this.embeddingService?.modelName ?? 'unknown',
-      };
-      await this.runExclusive(tableName, () => table.add([record]));
-      if (this.lanceAvailable && this.optimizeStrategy) {
-        await this.optimizeStrategy.onInsert(projectId, table);
-      }
-      if (this.lexicalIndex) {
-        this.lexicalIndex.addDocument(projectId, { id: doc.sourceId, content: doc.content });
-      }
+      vector = Array(dims).fill(0) as number[];
+    }
+
+    // createdAtOverride lets callers backdate a record's created_at (matches
+    // the previous HybridRetrieverService.indexDocument behavior).
+    const createdAtOverride = doc.metadata?.['createdAtOverride'];
+    const createdAt =
+      typeof createdAtOverride === 'string' ? createdAtOverride : new Date().toISOString();
+
+    const record: LanceRecord = {
+      id: generateId(),
+      source: doc.source,
+      source_id: doc.sourceId,
+      content: doc.content,
+      vector,
+      metadata: JSON.stringify(doc.metadata ?? {}),
+      created_at: createdAt,
+      provider: this.embeddingService.providerName,
+      model: this.embeddingService.modelName,
+    };
+
+    const table = await this.getOrCreateTable(projectId);
+    await this.lanceTable.addRecord(tableName, table, record);
+
+    if (this.lanceTable.available && this.optimizeStrategy) {
+      await this.optimizeStrategy.onInsert(projectId, table);
+    }
+    if (this.lexicalIndex) {
+      this.lexicalIndex.addDocument(projectId, { id: doc.sourceId, content: doc.content });
     }
   }
 
@@ -422,7 +266,7 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
       let nativeFtsRows: LanceRecord[] = [];
       let ftsRanked: { id: string; score: number }[];
 
-      if (this.lanceAvailable) {
+      if (this.lanceTable.available) {
         let nativeFtsFailed = false;
         try {
           const nativeFtsResult = await table.search(query, 'fts', 'content');
@@ -467,7 +311,7 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
 
       // Skip vector search when LanceDB is unavailable — use pure FTS
       let vectorRows: LanceRecord[] = [];
-      if (this.lanceAvailable) {
+      if (this.lanceTable.available) {
         try {
           const queryVector = await this.embeddingService.embed(query);
           vectorRows = await table
@@ -622,7 +466,7 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
       throw new ValidationAppException();
     }
     const table = await this.getOrCreateTable(projectId);
-    await this.runExclusive(`project_${projectId}`, () => table.delete(`source_id = '${sourceId}'`));
+    await this.lanceTable.exclusive(`project_${projectId}`, () => table.delete(`source_id = '${sourceId}'`));
     if (this.lexicalIndex) {
       this.lexicalIndex.removeDocument(projectId, sourceId);
     }
@@ -637,19 +481,11 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
 
     if (!this.embeddingService) return { valid: true };
 
-    const db = await this.connect();
-    if (!db) {
+    const table = await this.lanceTable.openTableIfLance(`project_${projectId}`);
+    if (!table) {
       return { valid: true };
     }
 
-    const tableName = `project_${projectId}`;
-    const tableNames: string[] = await db.tableNames();
-
-    if (!tableNames.includes(tableName)) {
-      return { valid: true };
-    }
-
-    const table = await db.openTable(tableName);
     const rowCount: number = await table.countRows();
     if (rowCount === 0) return { valid: true };
 
@@ -661,7 +497,7 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
     const currentModel = this.embeddingService.modelName;
 
     if (firstRow.provider !== currentProvider || firstRow.model !== currentModel) {
-      const msg = `Table ${tableName} was created with provider=${firstRow.provider}/model=${firstRow.model}, but current config uses provider=${currentProvider}/model=${currentModel}. Results may be inconsistent.`;
+      const msg = `Table project_${projectId} was created with provider=${firstRow.provider}/model=${firstRow.model}, but current config uses provider=${currentProvider}/model=${currentModel}. Results may be inconsistent.`;
       this.logger.warn(msg);
       return { valid: false, message: msg };
     }
@@ -676,12 +512,12 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
   async optimizeTable(projectId: string): Promise<void> {
     await this.validateProjectId(projectId);
 
-    if (!this.lanceAvailable) {
+    if (!this.lanceTable.available) {
       return;
     }
 
     const table = await this.getOrCreateTable(projectId);
-    await this.runExclusive(`project_${projectId}`, () => table.optimize());
+    await this.lanceTable.exclusive(`project_${projectId}`, () => table.optimize());
   }
 
   /**
@@ -700,7 +536,7 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
     const countBefore = await table.countRows();
     if (countBefore === 0) return 0;
 
-    await this.runExclusive(`project_${projectId}`, () => table.delete(`source = '${sourceType}'`));
+    await this.lanceTable.exclusive(`project_${projectId}`, () => table.delete(`source = '${sourceType}'`));
 
     const countAfter = await table.countRows();
     return countBefore - countAfter;

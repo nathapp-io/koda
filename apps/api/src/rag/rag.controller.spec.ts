@@ -99,10 +99,9 @@ describe('RagController', () => {
   });
 
   describe('addDocument', () => {
-    it('indexes in both ragService and hybridRetrieverService', async () => {
+    it('indexes only via ragService (single LanceDB write path — H7)', async () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
       ragService.indexDocument.mockResolvedValue(undefined);
-      hybridRetrieverService.indexDocument.mockResolvedValue(undefined);
 
       const result = await controller.addDocument(
         'alpha',
@@ -115,8 +114,10 @@ describe('RagController', () => {
         mockAdminUser,
       );
 
+      expect(ragService.indexDocument).toHaveBeenCalledTimes(1);
       expect(ragService.indexDocument).toHaveBeenCalledWith('proj-1', expect.objectContaining({ sourceId: 'doc-1' }));
-      expect(hybridRetrieverService.indexDocument).toHaveBeenCalledWith('proj-1', expect.objectContaining({ sourceId: 'doc-1' }));
+      // H7: HybridRetriever must NOT receive a second, duplicate index write.
+      expect(hybridRetrieverService.indexDocument).not.toHaveBeenCalled();
       expect((result as any).data).toEqual({ indexed: true });
     });
 
@@ -147,7 +148,6 @@ describe('RagController', () => {
     it('allows agent principal to add a document', async () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
       ragService.indexDocument.mockResolvedValue(undefined);
-      hybridRetrieverService.indexDocument.mockResolvedValue(undefined);
 
       const result = await controller.addDocument(
         'alpha',
@@ -157,6 +157,7 @@ describe('RagController', () => {
 
       expect(mockFindProjectMembership).not.toHaveBeenCalled();
       expect(ragService.indexDocument).toHaveBeenCalled();
+      expect(hybridRetrieverService.indexDocument).not.toHaveBeenCalled();
       expect((result as any).data).toEqual({ indexed: true });
     });
 
