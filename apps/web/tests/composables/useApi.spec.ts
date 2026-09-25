@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, jest } from '@jest/globals'
+import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { ref, computed } from 'vue'
@@ -169,5 +169,139 @@ describe('AC5: useApi baseURL uses import.meta.server for SSR', () => {
   test('source code conditionally assigns baseURL using import.meta.server', () => {
     const source = readFileSync(composablePath, 'utf-8')
     expect(source).toMatch(/const\s+baseURL\s*=\s*import\.meta\.server\s*\?\s*[^:]+:\s*config\.public\.apiBaseUrl/)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// H9 — SSR cookie forwarding + caller header merging
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('H9: mergeHeaders merges caller headers over the locale base', () => {
+  test('caller headers are added on top of base headers', async () => {
+    const mod = await import(`${composablePath}`)
+    const merged = mod.mergeHeaders({ 'X-Caller': '1' }, { 'Accept-Language': 'en' })
+    expect(merged).toEqual({ 'X-Caller': '1', 'Accept-Language': 'en' })
+  })
+
+  test('caller headers win on key conflicts', async () => {
+    const mod = await import(`${composablePath}`)
+    const merged = mod.mergeHeaders(
+      { 'Accept-Language': 'zh' },
+      { 'Accept-Language': 'en', lang: 'en' },
+    )
+    expect(merged).toEqual({ 'Accept-Language': 'zh', lang: 'en' })
+  })
+
+  test('missing caller headers falls back to the base', async () => {
+    const mod = await import(`${composablePath}`)
+    const merged = mod.mergeHeaders(undefined, { 'Accept-Language': 'en' })
+    expect(merged).toEqual({ 'Accept-Language': 'en' })
+  })
+})
+
+describe('H9: useApi merges (not replaces) caller headers at request time', () => {
+  const g = globalThis as Record<string, unknown>
+
+  beforeEach(() => {
+    g.useRuntimeConfig = () => ({
+      public: { apiBaseUrl: '/api' },
+      apiInternalUrl: 'http://localhost:3100',
+    })
+    g.useI18n = () => ({ locale: ref('en') })
+  })
+
+  afterEach(() => {
+    g.__JEST_IS_SERVER__ = false
+  })
+
+  test('client-side request passes caller headers alongside locale headers', async () => {
+    const fetchMock = makeFetchMock()
+    g.$fetch = fetchMock
+
+    const mod = await import(`${composablePath}`)
+    const { $api } = mod.useApi()
+
+    await $api.get('/projects', { headers: { 'X-Caller': '1' } })
+
+    const [, calledOpts] = fetchMock.mock.calls[0]
+    const headers = (calledOpts?.headers ?? {}) as Record<string, string>
+    expect(headers['X-Caller']).toBe('1')
+    expect(headers['Accept-Language']).toBe('en')
+    expect(headers['lang']).toBe('en')
+  })
+
+  test('caller headers override the locale base on conflict', async () => {
+    const fetchMock = makeFetchMock()
+    g.$fetch = fetchMock
+
+    const mod = await import(`${composablePath}`)
+    const { $api } = mod.useApi()
+
+    await $api.get('/projects', { headers: { 'Accept-Language': 'zh' } })
+
+    const [, calledOpts] = fetchMock.mock.calls[0]
+    const headers = (calledOpts?.headers ?? {}) as Record<string, string>
+    expect(headers['Accept-Language']).toBe('zh')
+  })
+})
+
+describe('H9: useApi routes server-side calls through useRequestFetch', () => {
+  const g = globalThis as Record<string, unknown>
+
+  beforeEach(() => {
+    g.useRuntimeConfig = () => ({
+      public: { apiBaseUrl: '/api' },
+      apiInternalUrl: 'http://localhost:3100',
+    })
+    g.useI18n = () => ({ locale: ref('en') })
+  })
+
+  afterEach(() => {
+    g.__JEST_IS_SERVER__ = false
+    g.useRequestFetch = undefined
+  })
+
+  test('source conditionally selects useRequestFetch on the server', () => {
+    const source = readFileSync(composablePath, 'utf-8')
+    expect(source).toMatch(/if \(import\.meta\.server\)/)
+    expect(source).toContain('useRequestFetch()')
+    // The fetch instance must feed the request call site
+    expect(source).toMatch(/await requestFetch\(/)
+  })
+
+  test('server-side request goes through the useRequestFetch instance', async () => {
+    const requestFetchMock = makeFetchMock()
+    const clientFetchMock = makeFetchMock()
+    g.__JEST_IS_SERVER__ = true
+    g.useRequestFetch = () => requestFetchMock
+    g.$fetch = clientFetchMock
+
+    const mod = await import(`${composablePath}`)
+    const { $api } = mod.useApi()
+
+    await $api.get('/projects/1')
+
+    expect(requestFetchMock).toHaveBeenCalledTimes(1)
+    expect(clientFetchMock).not.toHaveBeenCalled()
+    // SSR calls hit the internal upstream URL, not the client /api proxy
+    const [calledUrl] = requestFetchMock.mock.calls[0]
+    expect(calledUrl).toBe('http://localhost:3100/api/projects/1')
+  })
+
+  test('server-side request still merges caller headers', async () => {
+    const requestFetchMock = makeFetchMock()
+    g.__JEST_IS_SERVER__ = true
+    g.useRequestFetch = () => requestFetchMock
+    g.$fetch = makeFetchMock()
+
+    const mod = await import(`${composablePath}`)
+    const { $api } = mod.useApi()
+
+    await $api.get('/projects/1', { headers: { 'X-Caller': '1' } })
+
+    const [, calledOpts] = requestFetchMock.mock.calls[0]
+    const headers = (calledOpts?.headers ?? {}) as Record<string, string>
+    expect(headers['X-Caller']).toBe('1')
+    expect(headers['Accept-Language']).toBe('en')
   })
 })

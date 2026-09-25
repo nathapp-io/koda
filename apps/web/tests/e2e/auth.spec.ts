@@ -15,6 +15,17 @@ test.describe('Authentication', () => {
     await expect(page).toHaveURL('/');
   });
 
+  test('session survives a full page reload (H9: SSR cookies forwarded)', async ({ page }) => {
+    await webLogin(page);
+    await expect(page).toHaveURL('/');
+
+    // A hard reload re-runs SSR + auth middleware against /api/auth/me.
+    // If SSR fetches dropped the cookies, the middleware would bounce to /login.
+    await page.reload({ waitUntil: 'networkidle' });
+    await expect(page).toHaveURL('/');
+    await expect(page).not.toHaveURL(/\/login/);
+  });
+
   test('invalid credentials shows error', async ({ page }) => {
     await page.goto('/login');
     await page.locator('input[type="email"]').fill('wrong@example.com');

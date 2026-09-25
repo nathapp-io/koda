@@ -65,7 +65,20 @@ export function useAuth() {
    */
   async function fetchUser(): Promise<boolean> {
     try {
-      const response = await $fetch<{ user: AuthUser | null }>('/api/auth/me')
+      // H9: useRequestFetch() forwards the browser's cookie header on the
+      // server, so SSR /auth/me probes (deep links, middleware) resolve the
+      // session instead of silently hitting an unauthenticated request.
+      // Minimal callable signature + per-branch casts: the raw union of
+      // useRequestFetch()'s return type triggers "excessive stack depth" in
+      // TS overload resolution.
+      type AuthFetchFn = <T = unknown>(url: string, options?: Record<string, unknown>) => Promise<T>
+      let requestFetch: AuthFetchFn
+      if (import.meta.server) {
+        requestFetch = useRequestFetch() as unknown as AuthFetchFn
+      } else {
+        requestFetch = $fetch as unknown as AuthFetchFn
+      }
+      const response = await requestFetch<{ user: AuthUser | null }>('/api/auth/me')
       user.value = response.user
       return !!response.user
     } catch {
