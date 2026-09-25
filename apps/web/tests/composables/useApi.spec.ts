@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, jest } from '@jest/globals'
+import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { ref, computed } from 'vue'
@@ -169,5 +169,305 @@ describe('AC5: useApi baseURL uses import.meta.server for SSR', () => {
   test('source code conditionally assigns baseURL using import.meta.server', () => {
     const source = readFileSync(composablePath, 'utf-8')
     expect(source).toMatch(/const\s+baseURL\s*=\s*import\.meta\.server\s*\?\s*[^:]+:\s*config\.public\.apiBaseUrl/)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// H9 — SSR cookie forwarding + caller header merging
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('H9: mergeHeaders merges caller headers over the locale base', () => {
+  test('caller headers are added on top of base headers', async () => {
+    const mod = await import(`${composablePath}`)
+    const merged = mod.mergeHeaders({ 'X-Caller': '1' }, { 'Accept-Language': 'en' })
+    expect(merged).toEqual({ 'X-Caller': '1', 'Accept-Language': 'en' })
+  })
+
+  test('caller headers win on key conflicts', async () => {
+    const mod = await import(`${composablePath}`)
+    const merged = mod.mergeHeaders(
+      { 'Accept-Language': 'zh' },
+      { 'Accept-Language': 'en', lang: 'en' },
+    )
+    expect(merged).toEqual({ 'Accept-Language': 'zh', lang: 'en' })
+  })
+
+  test('missing caller headers falls back to the base', async () => {
+    const mod = await import(`${composablePath}`)
+    const merged = mod.mergeHeaders(undefined, { 'Accept-Language': 'en' })
+    expect(merged).toEqual({ 'Accept-Language': 'en' })
+  })
+})
+
+describe('H9: useApi merges (not replaces) caller headers at request time', () => {
+  const g = globalThis as Record<string, unknown>
+
+  beforeEach(() => {
+    g.useRuntimeConfig = () => ({
+      public: { apiBaseUrl: '/api' },
+      apiInternalUrl: 'http://localhost:3100',
+    })
+    g.useI18n = () => ({ locale: ref('en') })
+  })
+
+  afterEach(() => {
+    g.__JEST_IS_SERVER__ = false
+  })
+
+  test('client-side request passes caller headers alongside locale headers', async () => {
+    const fetchMock = makeFetchMock()
+    g.$fetch = fetchMock
+
+    const mod = await import(`${composablePath}`)
+    const { $api } = mod.useApi()
+
+    await $api.get('/projects', { headers: { 'X-Caller': '1' } })
+
+    const [, calledOpts] = fetchMock.mock.calls[0]
+    const headers = (calledOpts?.headers ?? {}) as Record<string, string>
+    expect(headers['X-Caller']).toBe('1')
+    expect(headers['Accept-Language']).toBe('en')
+    expect(headers['lang']).toBe('en')
+  })
+
+  test('caller headers override the locale base on conflict', async () => {
+    const fetchMock = makeFetchMock()
+    g.$fetch = fetchMock
+
+    const mod = await import(`${composablePath}`)
+    const { $api } = mod.useApi()
+
+    await $api.get('/projects', { headers: { 'Accept-Language': 'zh' } })
+
+    const [, calledOpts] = fetchMock.mock.calls[0]
+    const headers = (calledOpts?.headers ?? {}) as Record<string, string>
+    expect(headers['Accept-Language']).toBe('zh')
+  })
+})
+
+describe('H9: useApi routes server-side calls through useRequestFetch', () => {
+  const g = globalThis as Record<string, unknown>
+
+  beforeEach(() => {
+    g.useRuntimeConfig = () => ({
+      public: { apiBaseUrl: '/api' },
+      apiInternalUrl: 'http://localhost:3100',
+    })
+    g.useI18n = () => ({ locale: ref('en') })
+  })
+
+  afterEach(() => {
+    g.__JEST_IS_SERVER__ = false
+    g.useRequestFetch = undefined
+  })
+
+  test('source conditionally selects useRequestFetch on the server', () => {
+    const source = readFileSync(composablePath, 'utf-8')
+    expect(source).toMatch(/if \(import\.meta\.server\)/)
+    expect(source).toContain('useRequestFetch()')
+    // The fetch instance must feed the request call site
+    expect(source).toMatch(/await requestFetch\(/)
+  })
+
+  test('server-side request goes through the useRequestFetch instance', async () => {
+    const requestFetchMock = makeFetchMock()
+    const clientFetchMock = makeFetchMock()
+    g.__JEST_IS_SERVER__ = true
+    g.useRequestFetch = () => requestFetchMock
+    g.$fetch = clientFetchMock
+
+    const mod = await import(`${composablePath}`)
+    const { $api } = mod.useApi()
+
+    await $api.get('/projects/1')
+
+    expect(requestFetchMock).toHaveBeenCalledTimes(1)
+    expect(clientFetchMock).not.toHaveBeenCalled()
+    // SSR calls hit the internal upstream URL, not the client /api proxy
+    const [calledUrl] = requestFetchMock.mock.calls[0]
+    expect(calledUrl).toBe('http://localhost:3100/api/projects/1')
+  })
+
+  test('server-side request still merges caller headers', async () => {
+    const requestFetchMock = makeFetchMock()
+    g.__JEST_IS_SERVER__ = true
+    g.useRequestFetch = () => requestFetchMock
+    g.$fetch = makeFetchMock()
+
+    const mod = await import(`${composablePath}`)
+    const { $api } = mod.useApi()
+
+    await $api.get('/projects/1', { headers: { 'X-Caller': '1' } })
+
+    const [, calledOpts] = requestFetchMock.mock.calls[0]
+    const headers = (calledOpts?.headers ?? {}) as Record<string, string>
+    expect(headers['X-Caller']).toBe('1')
+    expect(headers['Accept-Language']).toBe('en')
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
+// M22 — one silent refresh + retry on 401 (client only)
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('M22: shouldRetryAfter401 retry decision helper', () => {
+  test('retries on 401 for a client-side call that has not been retried', async () => {
+    const mod = await import(`${composablePath}`)
+    expect(mod.shouldRetryAfter401(401, true, false)).toBe(true)
+  })
+
+  test('does not retry on other statuses', async () => {
+    const mod = await import(`${composablePath}`)
+    expect(mod.shouldRetryAfter401(403, true, false)).toBe(false)
+    expect(mod.shouldRetryAfter401(500, true, false)).toBe(false)
+  })
+
+  test('does not retry when the status is unknown', async () => {
+    const mod = await import(`${composablePath}`)
+    expect(mod.shouldRetryAfter401(undefined, true, false)).toBe(false)
+  })
+
+  test('does not retry on the server (SSR must not silently refresh)', async () => {
+    const mod = await import(`${composablePath}`)
+    expect(mod.shouldRetryAfter401(401, false, false)).toBe(false)
+  })
+
+  test('does not retry when the request was already retried (loop guard)', async () => {
+    const mod = await import(`${composablePath}`)
+    expect(mod.shouldRetryAfter401(401, true, true)).toBe(false)
+  })
+})
+
+describe('M22: extractErrorStatus helper', () => {
+  test('reads err.status first', async () => {
+    const mod = await import(`${composablePath}`)
+    expect(mod.extractErrorStatus({ status: 401 })).toBe(401)
+  })
+
+  test('falls back to err.response.status', async () => {
+    const mod = await import(`${composablePath}`)
+    expect(mod.extractErrorStatus({ response: { status: 401 } })).toBe(401)
+  })
+
+  test('returns undefined for non-object errors and missing fields', async () => {
+    const mod = await import(`${composablePath}`)
+    expect(mod.extractErrorStatus('boom')).toBeUndefined()
+    expect(mod.extractErrorStatus(null)).toBeUndefined()
+    expect(mod.extractErrorStatus({})).toBeUndefined()
+    expect(mod.extractErrorStatus({ status: '401' })).toBeUndefined()
+  })
+})
+
+describe('M22: useApi client wrapper retries once through /api/auth/refresh on 401', () => {
+  const g = globalThis as Record<string, unknown>
+
+  beforeEach(() => {
+    g.__JEST_IS_SERVER__ = false
+    g.useRuntimeConfig = () => ({
+      public: { apiBaseUrl: 'http://localhost:3100' },
+      apiInternalUrl: 'http://localhost:3100',
+    })
+    g.useI18n = () => ({ locale: ref('en') })
+  })
+
+  afterEach(() => {
+    g.__JEST_IS_SERVER__ = false
+    g.useAuth = undefined
+  })
+
+  function make401FetchMock(successBody: unknown = { ret: 0, data: 'ok' }) {
+    return jest.fn()
+      .mockRejectedValueOnce(Object.assign(new Error('Unauthorized'), { status: 401 }))
+      .mockResolvedValueOnce(successBody)
+  }
+
+  test('calls refresh once then retries the original request on 401', async () => {
+    const fetchMock = make401FetchMock()
+    const refreshMock = jest.fn(() => Promise.resolve(true))
+    g.$fetch = fetchMock
+    g.useAuth = () => ({ refresh: refreshMock })
+
+    const mod = await import(`${composablePath}`)
+    const { $api } = mod.useApi()
+
+    const result = await $api.get('/projects')
+
+    expect(result).toBe('ok')
+    expect(refreshMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[0][0]).toBe(fetchMock.mock.calls[1][0])
+  })
+
+  test('the retried request never leaks the __retried flag onto the wire', async () => {
+    const fetchMock = make401FetchMock()
+    g.$fetch = fetchMock
+    g.useAuth = () => ({ refresh: jest.fn(() => Promise.resolve(true)) })
+
+    const mod = await import(`${composablePath}`)
+    const { $api } = mod.useApi()
+
+    await $api.get('/projects')
+
+    const [, retryOpts] = fetchMock.mock.calls[1] as [string, Record<string, unknown>]
+    expect('__retried' in retryOpts).toBe(false)
+  })
+
+  test('does not retry when refresh fails — the original 401 surfaces', async () => {
+    const fetchMock = make401FetchMock()
+    g.$fetch = fetchMock
+    g.useAuth = () => ({ refresh: jest.fn(() => Promise.resolve(false)) })
+
+    const mod = await import(`${composablePath}`)
+    const { $api } = mod.useApi()
+
+    await expect($api.get('/projects')).rejects.toThrow()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  test('does not retry on non-401 failures', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('Forbidden'), { status: 403 }))
+    g.$fetch = fetchMock
+    const refreshMock = jest.fn(() => Promise.resolve(true))
+    g.useAuth = () => ({ refresh: refreshMock })
+
+    const mod = await import(`${composablePath}`)
+    const { $api } = mod.useApi()
+
+    await expect($api.get('/projects')).rejects.toThrow()
+    expect(refreshMock).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  test('does not retry on the server (SSR errors surface immediately)', async () => {
+    const requestFetchMock = jest
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('Unauthorized'), { status: 401 }))
+    const refreshMock = jest.fn(() => Promise.resolve(true))
+    g.__JEST_IS_SERVER__ = true
+    g.useRequestFetch = () => requestFetchMock
+    g.$fetch = makeFetchMock()
+    g.useAuth = () => ({ refresh: refreshMock })
+
+    const mod = await import(`${composablePath}`)
+    const { $api } = mod.useApi()
+
+    await expect($api.get('/projects')).rejects.toThrow()
+    expect(refreshMock).not.toHaveBeenCalled()
+    expect(requestFetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('M22: retry wiring source assertions', () => {
+  test('useApi.ts wires the refresh retry inside request()', () => {
+    const source = readFileSync(composablePath, 'utf-8')
+    expect(source).toContain('shouldRetryAfter401')
+    expect(source).toMatch(/__retried/)
+  })
+
+  test('the refresh call is made through useAuth (shared state, no duplicate refresh logic)', () => {
+    const source = readFileSync(composablePath, 'utf-8')
+    expect(source).toMatch(/useAuth\(\)/)
   })
 })

@@ -76,7 +76,7 @@ const formSchema = toTypedSchema(
       .min(2, t('projects.validation.keyMin'))
       .max(6, t('projects.validation.keyMax'))
       .regex(/^[A-Z]+$/, t('projects.validation.keyFormat')),
-  }) as any
+  })
 )
 
 const { handleSubmit, setFieldValue, isSubmitting, values, resetForm } = useForm({
@@ -91,13 +91,13 @@ function deriveSlug(name: string): string {
     .replace(/[^a-z0-9-]/g, '')
 }
 
-watch(() => values.name, (name: string) => {
+watch(() => values.name, (name?: string) => {
   if (name !== undefined) {
     setFieldValue('slug', deriveSlug(name))
   }
 })
 
-watch(() => values.key, (key: string) => {
+watch(() => values.key, (key?: string) => {
   if (key !== undefined) {
     const uppercased = key.toUpperCase().replace(/[^A-Z]/g, '')
     if (uppercased !== key) {

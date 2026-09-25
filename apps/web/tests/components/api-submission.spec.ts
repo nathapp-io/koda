@@ -107,7 +107,7 @@ describe('US-002-5 AC2: On API failure, error message is displayed and dialog re
     const source = getSource()
     // In the catch block, should NOT set apiKey.value
     // Extract the catch block content
-    const catchBlockMatch = source.match(/catch\s*\([^)]*\)\s*\{([\s\S]*?)\}/)
+    const catchBlockMatch = source.match(/catch\s*(?:\([^)]*\))?\s*\{([\s\S]*?)\}/)
     expect(catchBlockMatch).not.toBeNull()
     const catchBlock = catchBlockMatch?.[1] ?? ''
     // The catch block should NOT set apiKey
@@ -119,7 +119,7 @@ describe('US-002-5 AC2: On API failure, error message is displayed and dialog re
     const source = getSource()
     // The form has v-if="!apiKey" - so if apiKey is not set, form stays visible
     // This is verified by ensuring catch block does NOT set apiKey
-    const catchBlockMatch = source.match(/catch\s*\([^)]*\)\s*\{([\s\S]*?)\}/)
+    const catchBlockMatch = source.match(/catch\s*(?:\([^)]*\))?\s*\{([\s\S]*?)\}/)
     expect(catchBlockMatch).not.toBeNull()
     const catchBlock = catchBlockMatch?.[1] ?? ''
     // apiKey should not be modified in catch block
@@ -130,7 +130,7 @@ describe('US-002-5 AC2: On API failure, error message is displayed and dialog re
     const source = getSource()
     // The catch block should NOT emit update:open(false)
     // It should only show the error toast
-    const catchBlockMatch = source.match(/catch\s*\([^)]*\)\s*\{([\s\S]*?)\}/)
+    const catchBlockMatch = source.match(/catch\s*(?:\([^)]*\))?\s*\{([\s\S]*?)\}/)
     expect(catchBlockMatch).not.toBeNull()
     const catchBlock = catchBlockMatch?.[1] ?? ''
     // Should NOT close the dialog in catch block

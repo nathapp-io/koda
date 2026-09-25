@@ -1,13 +1,15 @@
 /**
  * POST /api/auth/refresh
  *
- * Uses the refresh-token cookie (also accepted by the upstream API's
- * /auth/refresh route) to mint a new access/refresh pair. Stores the
- * rotated cookies on the response.
+ * Uses the refresh-token cookie to mint a new access/refresh pair. The
+ * refresh cookie value is forwarded as the Bearer token (M22) — the upstream
+ * API's JwtRefreshGuard extracts the refresh token from the Authorization
+ * header first. Stores the rotated cookies on the response.
  */
 export default defineEventHandler(async (event) => {
   const { status, body: responseBody } = await forwardToApi(event, '/auth/refresh', {
     method: 'POST',
+    cookieName: 'refresh',
   })
 
   if (status >= 400) {

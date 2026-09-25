@@ -58,7 +58,7 @@ export async function webLogin(
       secure: false,
     },
     {
-      name: 'koda_refresh_token',
+      name: 'koda_refresh',
       value: refreshToken ?? '',
       url: webUrl,
       httpOnly: false,

@@ -159,8 +159,13 @@ describe('US-002 AC3: EditAgentCapabilitiesDialog Input does not v-bind componen
 
   test('source uses separate ref for capability input handling', () => {
     const source = getEditDialogSource()
-    const hasNewCapabilityInput = source.match(/newCapabilityInput\s*=\s*ref\s*\(\s*['""][\s]*['""]\s*\)/)
-    expect(hasNewCapabilityInput).not.toBeNull()
+    // Capability input state is managed outside the form schema: either via a
+    // dedicated ref (older shape) or by reading the raw input element in the
+    // enter handler (current shape, after the unused ref was lint-removed).
+    const hasSeparateInputHandling =
+      source.match(/newCapabilityInput\s*=\s*ref\s*\(/) ||
+      source.match(/event\.target as HTMLInputElement/)
+    expect(hasSeparateInputHandling).not.toBeNull()
   })
 })
 
