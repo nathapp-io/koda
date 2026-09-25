@@ -81,7 +81,7 @@ describe('PrismaCodeIntelRepository.searchSymbols()', () => {
     expect(mockSymbolFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          name: { contains: 'myFunc' },
+          name: { contains: 'myFunc', mode: 'insensitive' },
         }),
       }),
     );
@@ -106,7 +106,7 @@ describe('PrismaCodeIntelRepository.searchSymbols()', () => {
     expect(mockSymbolFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          file: { contains: 'src/auth' },
+          file: { contains: 'src/auth', mode: 'insensitive' },
         }),
       }),
     );
@@ -214,8 +214,8 @@ describe('PrismaCodeIntelRepository.searchSymbols()', () => {
     expect(mockSymbolFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          name: { contains: 'Service' },
-          file: { contains: 'src/auth' },
+          name: { contains: 'Service', mode: 'insensitive' },
+          file: { contains: 'src/auth', mode: 'insensitive' },
         }),
       }),
     );

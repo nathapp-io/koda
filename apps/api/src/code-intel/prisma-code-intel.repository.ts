@@ -156,8 +156,11 @@ export class PrismaCodeIntelRepository implements ICodeIntelRepository {
   ): Promise<{ items: Pick<SymbolRow, 'id' | 'name' | 'kind' | 'file' | 'signature'>[]; total: number }> {
     const { q, file, page = 1, limit = 20 } = opts;
     const where: Record<string, unknown> = { projectId };
-    if (q !== undefined) where.name = { contains: q };
-    if (file !== undefined) where.file = { contains: file };
+    // SQLite LIKE was ASCII case-insensitive; Postgres `contains` is not,
+    // so keep search case-insensitive explicitly. `memory` subject startsWith
+    // and symbol-id endsWith key matches elsewhere stay case-sensitive by design.
+    if (q !== undefined) where.name = { contains: q, mode: 'insensitive' };
+    if (file !== undefined) where.file = { contains: file, mode: 'insensitive' };
 
     const skip = (page - 1) * limit;
     const [items, total] = await Promise.all([
