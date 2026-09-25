@@ -173,6 +173,10 @@ export class ProjectsService {
     return this.access.assertProjectMembership(projectId, principal);
   }
 
+  findMembershipRole(projectId: string, userId: string): Promise<string | null> {
+    return this.projectRepo.findMembershipRole(projectId, userId);
+  }
+
   async findCiWebhookToken(slug: string): Promise<string | null> {
     const project = await this.projectRepo.findBySlug(slug);
 

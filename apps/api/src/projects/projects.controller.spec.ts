@@ -76,6 +76,7 @@ describe('ProjectsController', () => {
       update: jest.fn(),
       softDelete: jest.fn(),
       assertProjectMembership: jest.fn(),
+      findMembershipRole: jest.fn(),
       findCiWebhookToken: jest.fn(),
     } as unknown as jest.Mocked<ProjectsService>;
 
@@ -360,6 +361,19 @@ describe('ProjectsController', () => {
       await expect(
         controller.updateProjectAgent('missing', 'bot', { status: 'PAUSED' }, adminPrincipal),
       ).rejects.toThrow(NotFoundAppException);
+    });
+
+    it('H4: allows a project-level ADMIN (global MEMBER with ProjectMember role ADMIN)', async () => {
+      projectsService.findBySlug.mockResolvedValue(mockProject as any);
+      agentsService.findByProject.mockResolvedValue([mockUpdatedAgent] as any);
+      agentsService.update.mockResolvedValue(mockUpdatedAgent as any);
+      projectsService.findMembershipRole.mockResolvedValue('ADMIN');
+
+      const result = await controller.updateProjectAgent('alpha', 'bot', { status: 'PAUSED' }, memberPrincipal);
+
+      expect(projectsService.findMembershipRole).toHaveBeenCalledWith('proj-1', 'user-member');
+      expect(agentsService.update).toHaveBeenCalledWith('bot', { status: 'PAUSED' });
+      expect((result as any).data.status).toBe('PAUSED');
     });
 
     it('H4: forbids a non-admin user (project member) from updating agent status', async () => {

@@ -32,6 +32,7 @@ import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
 import { KodaAction } from '../auth/casl/koda-action.enum';
 import { AgentsService } from '../agents/agents.service';
 import { UpdateAgentDto } from '../agents/dto/update-agent.dto';
+import { ActorRole } from '../common/enums';
 
 @ApiTags('projects')
 @ApiBearerAuth()
@@ -186,16 +187,19 @@ export class ProjectsController {
     @Body() updateDto: UpdateAgentDto,
     @Principal() principal: KodaPrincipal,
   ) {
-    await this.projectsService.findBySlug(slug);
+    const project = await this.projectsService.findBySlug(slug);
     const projectAgents = await this.agentsService.findByProject(slug);
     const target = projectAgents.find((a) => a.slug === agentSlug);
     if (!target) {
       throw new NotFoundAppException({}, 'agents');
     }
 
-    // H4: only ADMINs may change agent state; an agent may update only itself
-    // (graceful OFFLINE shutdown).
-    const isAdmin = isUserPrincipal(principal) && principal.role === 'ADMIN';
+    // H4: only global or project ADMINs may change agent state; an agent may
+    // update only itself (graceful OFFLINE shutdown).
+    const isAdmin =
+      isUserPrincipal(principal) &&
+      (principal.role === 'ADMIN' ||
+        (await this.projectsService.findMembershipRole(project.id, principal.id)) === ActorRole.ADMIN);
     const isSelf = isAgentPrincipal(principal) && principal.id === target.id;
     if (!isAdmin && !isSelf) {
       throw new ForbiddenAppException({}, 'projects');
