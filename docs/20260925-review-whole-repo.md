@@ -43,6 +43,25 @@ The PR #127 content was landed on `main` as commit `bdd91483` ("fix(security): c
 
 ---
 
+## Remediation update: 2026-09-25, branch `feat/koda-pr5-background` (head `36bb2fb0`)
+
+Three of the remaining HIGH findings are fixed on this branch (unmerged; `main` is unchanged, as with PR #127 before it). Gate at `36bb2fb0`: `apps/api` lint, type-check and unit tests (159 suites / 2162 tests) are green, the root Turbo build succeeds, and the four new integration suites (`test/integration/vcs/vcs-merged-pr`, `test/integration/memory/outbox-envelope`, `test/integration/memory/outbox-fanout-extraction`, `test/integration/rag/lance-table-manager`; 27 tests) all pass. The full integration suite was not re-run — the vcs/rag/ast-index suites carry pre-existing failures unrelated to this branch.
+
+| Finding | Status on branch | Commits | Evidence |
+|:--|:--|:--|:--|
+| H6 | **Fixed** | `6b456cf7` | `prisma-vcs.repository.ts:306` writes `authorAgentId: null` (no more `Agent` FK violation), and `vcs-pr-sync.service.ts:91-93` treats `merged`/`closed` as terminal so an out-of-order or stale sync can no longer regress `prState`. Covered by the real-DB `vcs-merged-pr` integration spec. |
+| H13 | **Fixed** | `1f0a8882` + `b3112309` + `36bb2fb0` | Outbox producers enqueue the full canonical event envelope — `id`, `type`, `action`, `timestamp`, `ticketId`/`agentId`, `projectId`, `actorId`, `actorType`, `data` (`events/outbox-envelope.util.ts`); transitions and assign emit ticket events; the fan-out wiring to the memory/entity-graph consumers is repaired. Covered by the `outbox-envelope` and `outbox-fanout-extraction` integration specs. |
+| H7 (residual) | **Fixed** | `b3112309` + `36bb2fb0` | Both RAG services delegate table open/create and all writes to one shared `LanceTableManager` (single connection, single per-table write mutex, sentinel-row create fallback); `addRecord` replaces rows with the same `source_id` first, so re-indexing is idempotent instead of duplicating. `36bb2fb0` additionally fires `optimizeStrategy.onFirstAccess` deterministically across hook-less first access. Covered by the `lance-table-manager` integration spec. |
+
+**Deferred follow-ups (out of scope for this branch):**
+
+- **M12 webhook-path `prState` regression** — explicitly out of scope. The terminal guard covers the sync path; the inbound webhook handlers still write `prState` unconditionally, so late/out-of-order webhook deliveries with fresh delivery ids can still regress the state.
+- **Non-atomic VCS repo writes (ambient client)** — the repository's `db` getter returns the ambient `prisma.client`, not a tx-scoped client, so even `applyMergedPrTransition`'s `txManager.run` wraps writes that do not actually join the transaction.
+- **Uppercase `TICKET_*` actions match no extraction rule** — `tickets.service.ts:134,260,290` emits `TICKET_CREATED`/`TICKET_UPDATED`/`TICKET_DELETED`, but `extraction.service.ts` gates only on `status_changed` and `assigned`, so those events reach the consumer and extract nothing.
+- **`source_id`-only replace scope** — the manager's idempotent replace keys solely on `source_id`; whether re-index replaces should be scoped further (e.g. per project/table) is left open.
+
+---
+
 ## Verification corrections applied
 
 | Item | Correction |
