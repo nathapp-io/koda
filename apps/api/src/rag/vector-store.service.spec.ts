@@ -744,7 +744,7 @@ describe('VectorStore.indexDocument — onInsert Strategy Hook (US-003-4)', () =
   it('calls optimizeStrategy.onInsert(projectId, table) after table.add() when lanceAvailable is true', async () => {
     const vectorStore = new VectorStore(mockRagConfig, mockEmbeddingService as never);
     const onInsertSpy = jest.fn().mockResolvedValue(undefined);
-    const mockStrategy = { onInsert: onInsertSpy } as unknown as never;
+    const mockStrategy = { onInsert: onInsertSpy, onFirstAccess: jest.fn() } as unknown as never;
     const mockTable = { add: jest.fn().mockResolvedValue(undefined), delete: jest.fn().mockResolvedValue(undefined) };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -767,7 +767,7 @@ describe('VectorStore.indexDocument — onInsert Strategy Hook (US-003-4)', () =
   it('does not call optimizeStrategy.onInsert() when lanceAvailable is false', async () => {
     const vectorStore = new VectorStore(mockRagConfig, mockEmbeddingService as never);
     const onInsertSpy = jest.fn().mockResolvedValue(undefined);
-    const mockStrategy = { onInsert: onInsertSpy } as unknown as never;
+    const mockStrategy = { onInsert: onInsertSpy, onFirstAccess: jest.fn() } as unknown as never;
     const mockTable = { add: jest.fn().mockResolvedValue(undefined), delete: jest.fn().mockResolvedValue(undefined) };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

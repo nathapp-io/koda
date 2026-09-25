@@ -169,6 +169,13 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
             return optimizeStrategy.onFirstAccess(projectId, table);
           }
         : undefined,
+      // Stable per-process hook identity: there is exactly one
+      // FTS_OPTIMIZE_STRATEGY instance per process, so keying on the caller
+      // role makes the once-per-process guarantee deterministic even when the
+      // table was first created/opened by a hook-less caller (e.g.
+      // HybridRetriever's search) and is already cached when VectorStore
+      // attaches its hook.
+      firstAccessKey: 'vector-store.optimize-strategy',
     });
   }
 

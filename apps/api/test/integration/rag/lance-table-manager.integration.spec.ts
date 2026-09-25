@@ -353,27 +353,14 @@ describe('LanceTableManager', () => {
     await manager.close();
   });
 
-  it('evictTable drops the cached handle and first-access marker', async () => {
+  it('evictTable drops the cached handle so a fresh table is created', async () => {
     const manager = new LanceTableManager(makeRagConfig(tmpDir, true));
     const table = await manager.getOrCreateTable('project_p4');
-
-    let firstAccessCount = 0;
-    const again = await manager.getOrCreateTable('project_p4', {
-      onFirstAccess: () => {
-        firstAccessCount++;
-      },
-    });
+    const again = await manager.getOrCreateTable('project_p4');
     expect(again).toBe(table);
-    // onFirstAccess only fires when the table is first created in this manager
-    // and was not already resolved before the hook was attached.
-    expect(firstAccessCount).toBe(0);
 
     manager.evictTable('project_p4');
-    const fresh = await manager.getOrCreateTable('project_p4', {
-      onFirstAccess: () => {
-        firstAccessCount++;
-      },
-    });
+    const fresh = await manager.getOrCreateTable('project_p4');
     // Fresh InMemoryTable instance after eviction.
     expect(fresh).not.toBe(table);
   });
@@ -396,6 +383,115 @@ describe('LanceTableManager', () => {
     });
 
     expect(firstAccessCount).toBe(1);
+    await manager.close();
+  });
+
+  it('fires a first-access hook even when the table was already created/cached by a hook-less caller (Hybrid-first scenario)', async () => {
+    // Review finding: the hook used to fire only when the hooked call itself
+    // created/opened the table. If a hook-less caller (HybridRetriever's search)
+    // touched project_<id> first — creating it on disk and caching it — the
+    // hooked caller (VectorStore's optimize strategy) hit the cache and the
+    // hook never fired. The hook must now fire exactly once per
+    // (firstAccessKey, table) per process regardless of who cached the table.
+    const manager = new LanceTableManager(makeRagConfig(tmpDir, false));
+
+    // Hook-less caller creates the table on disk and caches it.
+    await manager.getOrCreateTable('project_p7');
+
+    let count = 0;
+    await manager.getOrCreateTable('project_p7', {
+      onFirstAccess: () => {
+        count++;
+      },
+      firstAccessKey: 'vector-store.optimize-strategy',
+    });
+    expect(count).toBe(1);
+
+    // Second hooked call — must not fire again.
+    await manager.getOrCreateTable('project_p7', {
+      onFirstAccess: () => {
+        count++;
+      },
+      firstAccessKey: 'vector-store.optimize-strategy',
+    });
+    expect(count).toBe(1);
+
+    await manager.close();
+  });
+
+  it('tracks distinct hook identities independently on the same table', async () => {
+    const manager = new LanceTableManager(makeRagConfig(tmpDir, false));
+    await manager.getOrCreateTable('project_p8');
+
+    let countA = 0;
+    let countB = 0;
+    await manager.getOrCreateTable('project_p8', {
+      onFirstAccess: () => {
+        countA++;
+      },
+      firstAccessKey: 'hook-a',
+    });
+    await manager.getOrCreateTable('project_p8', {
+      onFirstAccess: () => {
+        countB++;
+      },
+      firstAccessKey: 'hook-b',
+    });
+
+    expect(countA).toBe(1);
+    expect(countB).toBe(1);
+    await manager.close();
+  });
+
+  it('fires VectorStore.optimizeStrategy.onFirstAccess even when HybridRetriever touched the table first', async () => {
+    // Service-level version of the review scenario: HybridRetriever's search
+    // (hook-less getOrCreateTable) runs before VectorStore ever touches the
+    // table; VectorStore's optimize strategy hook must still fire exactly once.
+    const ragConfig = makeRagConfig(tmpDir, false);
+    const manager = new LanceTableManager(ragConfig, new FakeEmbeddingService() as never);
+    const embedding = new FakeEmbeddingService();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const entityStore: any = { searchEntities: () => [], computeEntityScore: () => 0 };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ragRepository: any = { findProjectGraphifyEnabled: async () => ({ graphifyEnabled: false }) };
+    const hybrid = new HybridRetrieverService(
+      ragConfig,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      embedding as any,
+      entityStore,
+      ragRepository,
+      manager,
+    );
+    const onFirstAccessSpy = jest.fn().mockResolvedValue(undefined);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const strategy = { onFirstAccess: onFirstAccessSpy, onInsert: jest.fn(), onDestroy: jest.fn() } as any;
+    const vectorStore = new VectorStore(
+      ragConfig,
+      embedding as never,
+      strategy as never,
+      undefined,
+      undefined,
+      undefined,
+      manager,
+    );
+
+    // Hybrid touches the table first (empty search still creates/caches it).
+    await hybrid.search({ projectId: 'proj_hybrid_first', query: 'anything' });
+
+    // VectorStore's first access with its optimize strategy.
+    await vectorStore.indexDocument('proj_hybrid_first', {
+      source: 'doc',
+      sourceId: 'doc-hf-1',
+      content: 'document indexed after hybrid touched the table',
+      metadata: {},
+    });
+    expect(onFirstAccessSpy).toHaveBeenCalledTimes(1);
+    expect(onFirstAccessSpy).toHaveBeenCalledWith('proj_hybrid_first', expect.anything());
+
+    // Later VectorStore accesses must not re-fire.
+    await vectorStore.listDocuments('proj_hybrid_first', 10);
+    expect(onFirstAccessSpy).toHaveBeenCalledTimes(1);
+
     await manager.close();
   });
 

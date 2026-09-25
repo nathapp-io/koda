@@ -8,6 +8,13 @@ export type LanceTable = any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type LanceConnection = any;
 
+/**
+ * Default hook identity used by getOrCreateTable when the caller does not pass
+ * an explicit `firstAccessKey`. Callers with distinct hooks on the same table
+ * should pass their own stable per-process key.
+ */
+const DEFAULT_FIRST_ACCESS_KEY = 'default';
+
 export interface LanceRecord {
   id: string;
   source: string;
@@ -126,7 +133,12 @@ export class LanceTableManager {
   private readonly tableCache = new Map<string, LanceTable>();
   private readonly tableCreationLocks = new Map<string, Promise<LanceTable>>();
   private readonly writeLocks = new Map<string, Promise<unknown>>();
-  private readonly firstAccessedTables = new Set<string>();
+  /**
+   * First-access hooks that already fired, keyed by hook identity (caller-supplied
+   * stable string) → set of table names. A hook fires at most once per
+   * (identity, table) per process; `evictTable` resets the marker for a table.
+   */
+  private readonly firstAccessFired = new Map<string, Set<string>>();
   private readonly TABLE_CACHE_MAX_SIZE = 50;
   private lanceAvailable = true;
   private readonly lancedbPath: string;
@@ -169,6 +181,7 @@ export class LanceTableManager {
     this.tableCache.clear();
     this.tableCreationLocks.clear();
     this.writeLocks.clear();
+    this.firstAccessFired.clear();
 
     if (this.db && typeof this.db.close === 'function') {
       try {
@@ -207,35 +220,92 @@ export class LanceTableManager {
   /**
    * Gets or creates a LanceDB table by name (create-or-open).
    *
-   * `opts.onFirstAccess` fires at most once per table name (until `evictTable`
-   * resets it) so services can attach one-time hooks (e.g. optimize strategy
-   * warm-up) without duplicating the once-per-table bookkeeping.
+   * `opts.onFirstAccess` fires at most once per (firstAccessKey, tableName) per
+   * process, deterministically — including when THIS call finds the table
+   * already cached or already on disk because another caller (e.g. a hook-less
+   * read path) touched it first. `opts.firstAccessKey` identifies the hook
+   * owner so independent hooks on the same table each fire once; when omitted,
+   * a single shared identity is used. `evictTable` resets the marker for a
+   * table so the hook can fire again after a cache eviction.
    */
   async getOrCreateTable(
     tableName: string,
-    opts?: { onFirstAccess?: (table: LanceTable) => Promise<void> | void },
+    opts?: {
+      onFirstAccess?: (table: LanceTable) => Promise<void> | void;
+      firstAccessKey?: string;
+    },
   ): Promise<LanceTable> {
     const cached = this.tableCache.get(tableName);
-    if (cached) return cached;
+    if (cached) {
+      if (opts?.onFirstAccess) {
+        await this.runFirstAccessHook(
+          opts.firstAccessKey ?? DEFAULT_FIRST_ACCESS_KEY,
+          tableName,
+          cached,
+          opts.onFirstAccess,
+        );
+      }
+      return cached;
+    }
 
     // Serialize table open/create per table: concurrent callers for the same
     // tableName await the same in-flight creation instead of racing LanceDB's
     // check-then-create against each other (within this manager; sharing one
     // manager across services also serializes it cross-service).
     const inFlight = this.tableCreationLocks.get(tableName);
-    if (inFlight) return inFlight;
+    let table: LanceTable;
+    if (inFlight) {
+      table = await inFlight;
+    } else {
+      const creation = this.createOrOpenTable(tableName).finally(() => {
+        this.tableCreationLocks.delete(tableName);
+      });
+      this.tableCreationLocks.set(tableName, creation);
+      table = await creation;
+    }
 
-    const creation = this.createOrOpenTable(tableName, opts?.onFirstAccess).finally(() => {
-      this.tableCreationLocks.delete(tableName);
-    });
-    this.tableCreationLocks.set(tableName, creation);
-    return creation;
+    if (opts?.onFirstAccess) {
+      await this.runFirstAccessHook(
+        opts.firstAccessKey ?? DEFAULT_FIRST_ACCESS_KEY,
+        tableName,
+        table,
+        opts.onFirstAccess,
+      );
+    }
+
+    return table;
   }
 
-  private async createOrOpenTable(
+  /**
+   * Fires a first-access hook exactly once per (identity, tableName) per
+   * process. The check-and-mark is synchronous, so concurrent callers of
+   * getOrCreateTable cannot double-fire; the hook runs only while the native
+   * LanceDB path is available (the in-memory fallback has nothing to optimize).
+   */
+  private async runFirstAccessHook(
+    identity: string,
     tableName: string,
-    onFirstAccess?: (table: LanceTable) => Promise<void> | void,
-  ): Promise<LanceTable> {
+    table: LanceTable,
+    hook: (table: LanceTable) => Promise<void> | void,
+  ): Promise<void> {
+    if (!this.lanceAvailable) {
+      return;
+    }
+
+    let fired = this.firstAccessFired.get(identity);
+    if (!fired) {
+      fired = new Set();
+      this.firstAccessFired.set(identity, fired);
+    }
+    if (fired.has(tableName)) {
+      return;
+    }
+    fired.add(tableName);
+
+    await hook(table);
+  }
+
+  private async createOrOpenTable(tableName: string): Promise<LanceTable> {
     const cached = this.tableCache.get(tableName);
     if (cached) return cached;
 
@@ -286,11 +356,6 @@ export class LanceTableManager {
 
     this.tableCache.set(tableName, table);
     this.evictTableCacheIfNeeded();
-
-    if (onFirstAccess && !this.firstAccessedTables.has(tableName)) {
-      this.firstAccessedTables.add(tableName);
-      await onFirstAccess(table);
-    }
 
     return table;
   }
@@ -355,10 +420,12 @@ export class LanceTableManager {
     return db.openTable(tableName);
   }
 
-  /** Drops the cached table handle and first-access marker for one table. */
+  /** Drops the cached table handle and resets first-access hook markers for one table. */
   evictTable(tableName: string): void {
     this.tableCache.delete(tableName);
-    this.firstAccessedTables.delete(tableName);
+    for (const fired of this.firstAccessFired.values()) {
+      fired.delete(tableName);
+    }
   }
 
   private evictTableCacheIfNeeded(): void {
