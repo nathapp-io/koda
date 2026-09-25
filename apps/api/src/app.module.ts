@@ -35,6 +35,7 @@ import { authConfig } from './config/auth.config';
 import { databaseConfig } from './config/database.config';
 import { ragConfig } from './config/rag.config';
 import { vcsConfig } from './config/vcs.config';
+import { outboxConfig } from './config/outbox.config';
 import { validate } from './config/env.validation';
 import { ConfigBridgeModule } from './config/config-bridge.module';
 
@@ -43,7 +44,7 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
-      load: [appConfig, authConfig, databaseConfig, ragConfig, vcsConfig, ServerSecurityConfig],
+      load: [appConfig, authConfig, databaseConfig, ragConfig, vcsConfig, outboxConfig, ServerSecurityConfig],
       validate: validate,
     }),
     ConfigBridgeModule,
