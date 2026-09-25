@@ -384,7 +384,7 @@ describe('VcsWebhookService — cross-instance deduplication', () => {
     );
 
     // Simulate: outbox processor consumes the event.
-    // The DB row status changes to 'completed' — no longer 'pending' or 'processing'.
+    // The DB row status changes to 'published' — no longer 'pending' or 'processing'.
     // Clear sharedEvents so the DB dedup mock returns empty (no pending events in DB).
     sharedEvents.length = 0;
 
