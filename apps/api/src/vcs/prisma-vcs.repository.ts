@@ -303,7 +303,7 @@ export class PrismaVcsRepository implements IVcsRepository {
           body: commentBody,
           type: CommentType.FIX_REPORT,
           authorUserId: null,
-          authorAgentId: 'system',
+          authorAgentId: null,
         },
       });
 

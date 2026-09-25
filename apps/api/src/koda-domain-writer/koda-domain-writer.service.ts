@@ -6,6 +6,7 @@ import { AgentAuthProvider } from '../auth/agent-auth.provider';
 import { TicketEventService } from '../events/ticket-event.service';
 import { AgentEventService } from '../events/agent-event.service';
 import { DecisionEventService } from '../events/decision-event.service';
+import { buildTicketEventOutboxPayload, buildAgentEventOutboxPayload } from '../events/outbox-envelope.util';
 import { PrismaKodaDomainWriterRepository } from './prisma-koda-domain-writer.repository';
 import type {
   WriteResult,
@@ -104,12 +105,15 @@ export class KodaDomainWriter {
       projectId: data.projectId,
       eventType: 'ticket_event',
       eventId: event.id,
-      payload: {
+      // H13: consumers switch on action/id/timestamp — enqueue the full event envelope
+      payload: buildTicketEventOutboxPayload({
+        event,
         ticketId: data.ticketId,
         projectId: data.projectId,
         actorId: data.actorId,
+        actorType: data.actorType,
         data: data.data,
-      },
+      }),
     });
 
     return {
@@ -138,12 +142,14 @@ export class KodaDomainWriter {
       projectId: data.projectId,
       eventType: 'agent_event',
       eventId: event.id,
-      payload: {
+      // H13: consumers switch on action/id/timestamp — enqueue the full event envelope
+      payload: buildAgentEventOutboxPayload({
+        event,
         agentId: data.agentId,
         projectId: data.projectId,
         actorId: data.actorId,
         data: data.data,
-      },
+      }),
     });
 
     return {

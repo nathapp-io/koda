@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { OutboxFanOutRegistry } from '../../../src/outbox/outbox-fan-out-registry';
 import { ExtractionService } from '../../../src/memory/extraction.service';
 import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-item.repository';
+import { MemoryOutboxSubscriber } from '../../../src/memory/memory-outbox.subscriber';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { MemoryKind } from '../../../src/common/enums';
@@ -34,6 +35,10 @@ describe('AC8: OutboxFanOutRegistry dispatches to ExtractionService', () => {
         OutboxFanOutRegistry,
         ExtractionService,
         PrismaMemoryItemRepository,
+        // H13: register the real subscriber so its onModuleInit() wires the
+        // ticket_event/agent_event handlers into the registry — without it,
+        // dispatch() is a no-op and extraction never runs.
+        MemoryOutboxSubscriber,
         { provide: PrismaService, useValue: mockPrismaService },
         {
           provide: TRANSACTION_MANAGER,
@@ -45,6 +50,9 @@ describe('AC8: OutboxFanOutRegistry dispatches to ExtractionService', () => {
         },
       ],
     }).compile();
+
+    // Register the subscriber's handlers (the work its onModuleInit() does).
+    module.get<MemoryOutboxSubscriber>(MemoryOutboxSubscriber).onModuleInit();
 
     fanOutRegistry = module.get<OutboxFanOutRegistry>(OutboxFanOutRegistry);
     extractionService = module.get<ExtractionService>(ExtractionService);

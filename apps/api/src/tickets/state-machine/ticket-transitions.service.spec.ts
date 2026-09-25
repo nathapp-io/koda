@@ -801,3 +801,167 @@ describe('TicketTransitionsService', () => {
   // Unused variable kept to avoid removing test data
   void mockUser;
 });
+
+describe('TicketTransitionsService (H13: outbox emission)', () => {
+  const fixedTimestamp = new Date('2026-01-01T00:00:00Z');
+
+  const principal = {
+    actorType: 'user' as const,
+    id: 'user-123',
+    name: 'Test User',
+    email: 'user@example.com',
+    role: 'MEMBER' as const,
+    blacklisted: false,
+    revoked: false,
+    authorities: [],
+  };
+
+  const mockProject = {
+    id: 'proj-123',
+    slug: 'koda',
+    key: 'KODA',
+    gitRemoteUrl: null,
+    autoIndexOnClose: false,
+    deletedAt: null,
+  };
+
+  const mockTicket = {
+    id: 'ticket-123',
+    projectId: 'proj-123',
+    number: 1,
+    type: 'BUG',
+    title: 'Fix login bug',
+    description: null,
+    status: TicketStatus.VERIFIED,
+    priority: 'HIGH',
+    deletedAt: null,
+  };
+
+  const mockEvent = {
+    id: 'evt-1',
+    ticketId: 'ticket-123',
+    projectId: 'proj-123',
+    action: 'status_changed',
+    actorId: 'user-123',
+    actorType: 'user',
+    source: 'internal',
+    data: '{}',
+    timestamp: fixedTimestamp,
+  };
+
+  function buildService(overrides: {
+    ticketEventService?: { create: jest.Mock };
+    outboxService?: { enqueue: jest.Mock };
+  } = {}) {
+    const ticketRepo = {
+      findProjectBySlug: jest.fn().mockResolvedValue(mockProject),
+      findTicketByRefRaw: jest.fn().mockResolvedValue(mockTicket),
+      // M3: the merged service uses the conditional update; the stub resolves
+      // with the transitioned ticket so the H13 emission assertions below run.
+      updateTicketStatusIf: jest.fn().mockResolvedValue({ ...mockTicket, status: TicketStatus.IN_PROGRESS }),
+      createComment: jest.fn().mockResolvedValue({ id: 'comment-1' }),
+      createTicketActivity: jest.fn().mockResolvedValue({ id: 'activity-1' }),
+    };
+    const txManager = {
+      run: jest.fn((fn: () => unknown) => fn()),
+      getClient: jest.fn(),
+      isInTransaction: jest.fn(() => false),
+    };
+    const ticketEventService = overrides.ticketEventService ?? {
+      create: jest.fn().mockResolvedValue(mockEvent),
+    };
+    const outboxService = overrides.outboxService ?? {
+      enqueue: jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new TicketTransitionsService(
+      ticketRepo as never,
+      txManager as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      ticketEventService as never,
+      outboxService as never,
+    );
+    return { service, ticketRepo, ticketEventService, outboxService };
+  }
+
+  it('H13: start() enqueues a status_changed ticket_event with the full envelope', async () => {
+    const { service, ticketEventService, outboxService } = buildService();
+
+    await service.start('koda', 'KODA-1', principal);
+    await new Promise(resolve => setImmediate(resolve));
+
+    expect(ticketEventService.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ticketId: 'ticket-123',
+        projectId: 'proj-123',
+        action: 'status_changed',
+        actorId: 'user-123',
+        actorType: 'user',
+        source: 'internal',
+        data: { fromStatus: TicketStatus.VERIFIED, newStatus: TicketStatus.IN_PROGRESS },
+      }),
+    );
+    expect(outboxService.enqueue).toHaveBeenCalledWith({
+      projectId: 'proj-123',
+      eventType: 'ticket_event',
+      eventId: 'evt-1',
+      payload: {
+        id: 'evt-1',
+        type: 'ticket_event',
+        action: 'status_changed',
+        timestamp: '2026-01-01T00:00:00.000Z',
+        ticketId: 'ticket-123',
+        projectId: 'proj-123',
+        actorId: 'user-123',
+        actorType: 'user',
+        data: { fromStatus: TicketStatus.VERIFIED, newStatus: TicketStatus.IN_PROGRESS },
+      },
+    });
+  });
+
+  it('H13: verify() enqueues a status_changed ticket_event for the VERIFIED transition', async () => {
+    const { service, ticketRepo, ticketEventService, outboxService } = buildService();
+    // verify() transitions CREATED → VERIFIED (a VERIFIED ticket would be a no-op rule miss)
+    ticketRepo.findTicketByRefRaw.mockResolvedValue({ ...mockTicket, status: TicketStatus.CREATED });
+
+    await service.verify('koda', 'KODA-1', 'Verified', principal);
+    await new Promise(resolve => setImmediate(resolve));
+
+    expect(ticketEventService.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ticketId: 'ticket-123',
+        projectId: 'proj-123',
+        action: 'status_changed',
+        data: { fromStatus: TicketStatus.CREATED, newStatus: TicketStatus.VERIFIED },
+      }),
+    );
+    expect(outboxService.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: 'proj-123',
+        eventType: 'ticket_event',
+        eventId: 'evt-1',
+        payload: expect.objectContaining({
+          action: 'status_changed',
+          ticketId: 'ticket-123',
+          data: { fromStatus: TicketStatus.CREATED, newStatus: TicketStatus.VERIFIED },
+        }),
+      }),
+    );
+  });
+
+  it('H13: still completes the transition when event emission fails', async () => {
+    const { service } = buildService({
+      ticketEventService: { create: jest.fn().mockRejectedValue(new Error('event store down')) },
+    });
+
+    const result = await service.start('koda', 'KODA-1', principal);
+    await new Promise(resolve => setImmediate(resolve));
+
+    expect(result.ticket.id).toBe('ticket-123');
+    expect(result.ticket.status).toBe(TicketStatus.IN_PROGRESS);
+  });
+});

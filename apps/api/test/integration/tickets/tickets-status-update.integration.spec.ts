@@ -82,6 +82,9 @@ describe('US-003 (M2): TicketsService.update() — status field routes through t
   };
 
   const mockTransitionsService = {
+    // Fix-wave B: update() calls this before applyUpdate so a 403 never
+    // follows a partial field write.
+    assertTransitionPermission: jest.fn(),
     executeTransitionPublic: jest.fn(),
   };
 

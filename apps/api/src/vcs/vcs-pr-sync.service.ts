@@ -88,37 +88,42 @@ export class VcsPrSyncService {
 
         // Update if state differs
         if (newPrState !== link.prState) {
-          // Handle auto-transition when PR is merged
-          if (newPrState === 'merged') {
-            await this.handleMergedPrAutoTransition(link, prStatus);
-          }
+          // merged/closed are terminal: an out-of-order or stale event must
+          // never regress them (e.g. a delayed 'opened' event after a merge).
+          const terminal = link.prState === 'merged' || link.prState === 'closed';
+          if (!terminal) {
+            // Handle auto-transition when PR is merged
+            if (newPrState === 'merged') {
+              await this.handleMergedPrAutoTransition(link, prStatus);
+            }
 
-          // Always update prState regardless of transition outcome
-          await this.vcsRepo.updateTicketLinkPrState(link.id, newPrState);
-          updated++;
+            // Always update prState regardless of transition outcome
+            await this.vcsRepo.updateTicketLinkPrState(link.id, newPrState);
+            updated++;
 
-          // AC6: After syncPrStatus() updates a TicketLink, extractLinksFromPr() is called
-          // to pick up new commits from the PR
-          if (this.vcsLinkExtractorService && link.ticket && prStatus.branchName) {
-            const ticketData = link.ticket;
-            const ticketForExtraction: VcsTicketDomain = {
-              id: ticketData.id,
-              number: ticketData.number,
-              externalVcsId: ticketData.externalVcsId,
-            };
+            // AC6: After syncPrStatus() updates a TicketLink, extractLinksFromPr() is called
+            // to pick up new commits from the PR
+            if (this.vcsLinkExtractorService && link.ticket && prStatus.branchName) {
+              const ticketData = link.ticket;
+              const ticketForExtraction: VcsTicketDomain = {
+                id: ticketData.id,
+                number: ticketData.number,
+                externalVcsId: ticketData.externalVcsId,
+              };
 
-            this.vcsLinkExtractorService.extractLinksFromPr(
-              { id: project.id, key: project.key },
-              ticketForExtraction,
-              connection,
-              encryptionKey,
-              prStatus.branchName,
-              prStatus.number,
-            ).catch((err) => {
-              this.logger.warn(
-                `[vcs-pr-sync] Failed to extract links for ticket ${ticketData.id}: ${err instanceof Error ? err.message : String(err)}`,
-              );
-            });
+              this.vcsLinkExtractorService.extractLinksFromPr(
+                { id: project.id, key: project.key },
+                ticketForExtraction,
+                connection,
+                encryptionKey,
+                prStatus.branchName,
+                prStatus.number,
+              ).catch((err) => {
+                this.logger.warn(
+                  `[vcs-pr-sync] Failed to extract links for ticket ${ticketData.id}: ${err instanceof Error ? err.message : String(err)}`,
+                );
+              });
+            }
           }
         }
       } catch (error) {

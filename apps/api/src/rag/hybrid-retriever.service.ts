@@ -1,9 +1,10 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Inject } from '@nestjs/common';
-import { mkdirSync } from 'node:fs';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Inject, Optional } from '@nestjs/common';
 import { RAG_CFG, IRagConfig } from '../config/rag.config';
 import { PrismaRagRepository } from './prisma-rag.repository';
 import { EmbeddingService } from './embedding.service';
 import { EntityStore } from './entity-store';
+import { LanceTableManager } from './lance-table-manager';
+import type { LanceRecord, LanceTable } from './lance-table-manager';
 import {
   HybridSearchQuery,
   HybridSearchResult,
@@ -27,60 +28,26 @@ const INTENT_WEIGHTS: Record<string, typeof ANSWER_WEIGHTS> = {
   search:   { vectorScore: 0.3, lexicalScore: 0.4, entityScore: 0.1, recencyScore: 0.2 },
 };
 
-interface LanceRecord {
-  id: string;
-  source: string;
-  source_id: string;
-  content: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  vector: any;
-  metadata: string;
-  created_at: string;
-  provider: string;
-  model: string;
-  _distance?: number;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type LanceTable = any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type LanceConnection = any;
-
 function generateId(): string {
   return `doc_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-}
-
-class InMemoryTable {
-  private records: LanceRecord[] = [];
-  async add(records: LanceRecord[]): Promise<void> {
-    this.records = [...this.records, ...records];
-  }
-  async countRows(): Promise<number> {
-    return this.records.length;
-  }
-  async delete(_filter: string): Promise<void> {}
-  vectorSearch() {
-    return { distanceType: () => ({ limit: (n: number) => ({ toArray: () => this.records.slice(0, n) }) }) };
-  }
-  query() {
-    return { limit: (n: number) => ({ toArray: () => this.records.slice(0, n) }) };
-  }
 }
 
 @Injectable()
 export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(HybridRetrieverService.name);
-  private db: LanceConnection = null;
-  private readonly tableCache = new Map<string, LanceTable>();
-  private readonly tableCreationLocks = new Map<string, Promise<LanceTable>>();
-  private readonly writeLocks = new Map<string, Promise<unknown>>();
+  /**
+   * Shared LanceDB connection/table/mutex owner. In production, RagModule
+   * provides ONE LanceTableManager instance that is injected into both
+   * VectorStore and HybridRetrieverService, so HybridRetriever reads the same
+   * table the controller's single write path (VectorStore.indexDocument) wrote,
+   * and all writes share one per-table mutex (H7). When not injected (direct
+   * construction in tests), a private manager is created for this service.
+   */
+  private readonly lanceTable: LanceTableManager;
   private readonly graphifyEnabledCache = new Map<string, { value: boolean; expiresAt: number }>();
-  private lanceAvailable = true;
-  private readonly lancedbPath: string;
   private readonly similarityHigh: number;
   private readonly similarityMedium: number;
   private readonly similarityLow: number;
-  private readonly inMemoryOnly: boolean;
   private readonly graphifyEnabledCacheTtlMs: number;
 
   constructor(
@@ -88,189 +55,73 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     private readonly embeddingService: EmbeddingService,
     private readonly entityStore: EntityStore,
     private readonly ragRepository: PrismaRagRepository,
+    @Optional() lanceTableManager?: LanceTableManager,
   ) {
-    this.lancedbPath = ragConfig.lancedbPath;
+    this.lanceTable = lanceTableManager ?? new LanceTableManager(ragConfig, embeddingService);
     this.similarityHigh = ragConfig.similarityHigh;
     this.similarityMedium = ragConfig.similarityMedium;
     this.similarityLow = ragConfig.similarityLow;
-    this.inMemoryOnly = ragConfig.inMemoryOnly;
     this.graphifyEnabledCacheTtlMs = ragConfig.graphifyEnabledCacheTtlSec * 1000;
 
-    if (this.inMemoryOnly) {
-      this.lanceAvailable = false;
+    if (ragConfig.inMemoryOnly) {
       this.logger.log({ storyId: 'US-004', msg: 'HybridRetriever is running in in-memory mode' });
     }
   }
 
   onModuleInit(): void {
-    if (this.inMemoryOnly) return;
-    try {
-      mkdirSync(this.lancedbPath, { recursive: true });
-    } catch {
-      this.lanceAvailable = false;
-    }
+    this.lanceTable.ensureStorage();
   }
 
   async onModuleDestroy(): Promise<void> {
-    this.tableCache.clear();
     this.graphifyEnabledCache.clear();
-    this.tableCreationLocks.clear();
-    this.writeLocks.clear();
-    if (this.db && typeof this.db.close === 'function') {
-      try {
-        const result = this.db.close();
-        if (result && typeof result.then === 'function') await result;
-      } catch (err) {
-        this.logger.warn({ storyId: 'US-004', msg: `Failed to close LanceDB: ${(err as Error).message}` });
-      }
-    }
-    this.db = null;
+    await this.lanceTable.close();
   }
 
-  private async connect(): Promise<LanceConnection | null> {
-    if (this.inMemoryOnly) return null;
-    if (!this.db) {
-      try {
-        const lancedb = await import('@lancedb/lancedb');
-        const connectFn =
-          (lancedb as unknown as { connect: (path: string) => Promise<LanceConnection> }).connect ??
-          (lancedb.default as unknown as { connect: (path: string) => Promise<LanceConnection> })?.connect;
-        this.db = await connectFn(this.lancedbPath);
-      } catch (err) {
-        this.lanceAvailable = false;
-        this.logger.warn({ storyId: 'US-004', msg: `LanceDB unavailable: ${(err as Error).message}` });
-        return null;
-      }
-    }
-    return this.db;
-  }
-
+  /**
+   * Indexes a document for a project.
+   *
+   * H7: the controller's addDocument no longer calls this — RagService
+   * (VectorStore.indexDocument) is the single KB write path. This method is
+   * kept for existing callers and goes through the same shared manager write
+   * path (one connection, one per-table mutex, replace-by-source_id), so it
+   * can no longer create a duplicate row or race VectorStore's writes.
+   */
   async indexDocument(
     projectId: string,
     doc: { source: string; sourceId: string; content: string; metadata: Record<string, unknown> },
   ): Promise<void> {
     const tableName = `project_${projectId}`;
-    const table = await this.getOrCreateTable(projectId);
-    const createdAtOverride = doc.metadata?.['createdAtOverride'];
-    const createdAt =
-      typeof createdAtOverride === 'string' ? createdAtOverride : new Date().toISOString();
-    let record: LanceRecord | null = null;
+    let vector: number[];
     try {
-      const vector = await this.embeddingService.embed(doc.content);
-      record = {
-        id: generateId(),
-        source: doc.source,
-        source_id: doc.sourceId,
-        content: doc.content,
-        vector,
-        metadata: JSON.stringify(doc.metadata),
-        created_at: createdAt,
-        provider: this.embeddingService.providerName,
-        model: this.embeddingService.modelName,
-      };
+      vector = await this.embeddingService.embed(doc.content);
     } catch (err) {
       this.logger.warn({ storyId: 'US-004', msg: `Embedding failed: ${(err as Error).message}` });
       const dims = this.embeddingService.dimensions ?? 768;
-      record = {
-        id: generateId(),
-        source: doc.source,
-        source_id: doc.sourceId,
-        content: doc.content,
-        vector: Array(dims).fill(0) as number[],
-        metadata: JSON.stringify(doc.metadata ?? {}),
-        created_at: createdAt,
-        provider: this.embeddingService.providerName,
-        model: this.embeddingService.modelName,
-      };
+      vector = Array(dims).fill(0) as number[];
     }
-    if (!record) return;
 
-    // BUG-4: serialize writes per table so interleaved add/delete calls
-    // cannot race LanceDB (same pattern as VectorStore.runExclusive).
-    await this.runExclusive(tableName, () => table.add([record as LanceRecord]));
-  }
+    const createdAtOverride = doc.metadata?.['createdAtOverride'];
+    const createdAt =
+      typeof createdAtOverride === 'string' ? createdAtOverride : new Date().toISOString();
 
-  /**
-   * Serializes LanceDB writes (add/delete) per table. LanceDB has no built-in
-   * mutex for concurrent writers, so interleaved writes against the same
-   * table can corrupt table state.
-   */
-  private async runExclusive<T>(tableName: string, fn: () => Promise<T>): Promise<T> {
-    const previous = this.writeLocks.get(tableName) ?? Promise.resolve();
-    const run = previous.then(fn, fn);
-    const tracked = run.catch(() => undefined);
-    this.writeLocks.set(tableName, tracked);
-    tracked.finally(() => {
-      if (this.writeLocks.get(tableName) === tracked) {
-        this.writeLocks.delete(tableName);
-      }
-    });
-    return run;
+    const record: LanceRecord = {
+      id: generateId(),
+      source: doc.source,
+      source_id: doc.sourceId,
+      content: doc.content,
+      vector,
+      metadata: JSON.stringify(doc.metadata ?? {}),
+      created_at: createdAt,
+      provider: this.embeddingService.providerName,
+      model: this.embeddingService.modelName,
+    };
+
+    const table = await this.lanceTable.getOrCreateTable(tableName);
+    await this.lanceTable.addRecord(tableName, table, record);
   }
 
   private async getOrCreateTable(projectId: string): Promise<LanceTable> {
-    const tableName = `project_${projectId}`;
-    const cached = this.tableCache.get(tableName);
-    if (cached) return cached;
-
-    // BUG-4: serialize table open/create per project — concurrent callers
-    // await the same in-flight creation instead of racing LanceDB's
-    // check-then-create against each other.
-    const inFlight = this.tableCreationLocks.get(tableName);
-    if (inFlight) return inFlight;
-
-    const creation = this.createOrOpenTable(projectId, tableName).finally(() => {
-      this.tableCreationLocks.delete(tableName);
-    });
-    this.tableCreationLocks.set(tableName, creation);
-    return creation;
-  }
-
-  private async createOrOpenTable(projectId: string, tableName: string): Promise<LanceTable> {
-    const cached = this.tableCache.get(tableName);
-    if (cached) return cached;
-
-    const db = await this.connect();
-    if (!this.lanceAvailable || !db) {
-      const memTable = new InMemoryTable();
-      this.tableCache.set(tableName, memTable);
-      return memTable;
-    }
-
-    const tableNames: string[] = await db.tableNames();
-    let table: LanceTable;
-
-    if (tableNames.includes(tableName)) {
-      table = await db.openTable(tableName);
-    } else {
-      const provider = this.embeddingService?.providerName ?? 'ollama';
-      const model = this.embeddingService?.modelName ?? 'nomic-embed-text';
-      const dims = this.embeddingService?.dimensions ?? 768;
-
-      const sentinel: LanceRecord = {
-        id: '__schema_sentinel__',
-        source: 'manual',
-        source_id: '__sentinel__',
-        content: '',
-        vector: Array(dims).fill(0) as number[],
-        metadata: '{}',
-        created_at: new Date().toISOString(),
-        provider,
-        model,
-      };
-      table = await db.createTable(tableName, [sentinel]);
-      await table.delete("id = '__schema_sentinel__'");
-    }
-
-    try {
-      const IndexModule = (await import('@lancedb/lancedb')).Index;
-      await table.createIndex('content', { config: IndexModule.fts(), replace: false });
-    } catch (err) {
-      this.logger.warn({ storyId: 'US-004', msg: `FTS index creation failed: ${(err as Error).message}` });
-    }
-
-    this.tableCache.set(tableName, table);
-    return table;
+    return this.lanceTable.getOrCreateTable(`project_${projectId}`);
   }
 
   async search(query: HybridSearchQuery): Promise<HybridSearchResult> {
@@ -292,7 +143,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     const allRows: LanceRecord[] = await table.query().limit(Math.min(rowCount, 500)).toArray();
 
     let ftsRanked: { id: string; score: number }[] = [];
-    if (this.lanceAvailable) {
+    if (this.lanceTable.available) {
       try {
         const nativeFtsResult = await table.search(query.query, 'fts', 'content');
         let nativeFtsRows: LanceRecord[] = [];
@@ -320,7 +171,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     const ftsScoreMap = new Map<string, number>(ftsRanked.map((r) => [r.id, r.score]));
 
     let vectorRows: LanceRecord[] = [];
-    if (this.lanceAvailable) {
+    if (this.lanceTable.available) {
       try {
         const queryVector = await this.embeddingService.embed(query.query);
         vectorRows = await table

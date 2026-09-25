@@ -218,7 +218,8 @@ describe('VectorStore — write mutex serialization (LanceDB has no built-in con
       resolveFirstAdd = resolve;
     });
     const addSpy = jest.fn().mockReturnValueOnce(firstAddPromise).mockResolvedValueOnce(undefined);
-    const mockTable = { add: addSpy };
+    // indexDocument's replace-by-source_id write path issues a delete before each add.
+    const mockTable = { add: addSpy, delete: jest.fn().mockResolvedValue(undefined) };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (vectorStore as any).tableCache = new Map([['project_test-project', mockTable]]);
@@ -292,7 +293,8 @@ describe('VectorStore — write mutex serialization (LanceDB has no built-in con
     await Promise.all([indexPromise, deletePromise]);
 
     expect(addSpy).toHaveBeenCalledTimes(1);
-    expect(deleteSpy).toHaveBeenCalledTimes(1);
+    // Two deletes: indexDocument's replace-by-source_id pre-delete + deleteBySource.
+    expect(deleteSpy).toHaveBeenCalledTimes(2);
   });
 
   it('does not let one project table lock block writes to a different project table', async () => {
@@ -307,8 +309,8 @@ describe('VectorStore — write mutex serialization (LanceDB has no built-in con
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (vectorStore as any).tableCache = new Map([
-      ['project_project-a', { add: addASpy }],
-      ['project_project-b', { add: addBSpy }],
+      ['project_project-a', { add: addASpy, delete: jest.fn().mockResolvedValue(undefined) }],
+      ['project_project-b', { add: addBSpy, delete: jest.fn().mockResolvedValue(undefined) }],
     ]);
 
     const pendingA = vectorStore.indexDocument('project-a', {
@@ -742,8 +744,8 @@ describe('VectorStore.indexDocument — onInsert Strategy Hook (US-003-4)', () =
   it('calls optimizeStrategy.onInsert(projectId, table) after table.add() when lanceAvailable is true', async () => {
     const vectorStore = new VectorStore(mockRagConfig, mockEmbeddingService as never);
     const onInsertSpy = jest.fn().mockResolvedValue(undefined);
-    const mockStrategy = { onInsert: onInsertSpy } as unknown as never;
-    const mockTable = { add: jest.fn().mockResolvedValue(undefined) };
+    const mockStrategy = { onInsert: onInsertSpy, onFirstAccess: jest.fn() } as unknown as never;
+    const mockTable = { add: jest.fn().mockResolvedValue(undefined), delete: jest.fn().mockResolvedValue(undefined) };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (vectorStore as any).lanceAvailable = true;
@@ -765,8 +767,8 @@ describe('VectorStore.indexDocument — onInsert Strategy Hook (US-003-4)', () =
   it('does not call optimizeStrategy.onInsert() when lanceAvailable is false', async () => {
     const vectorStore = new VectorStore(mockRagConfig, mockEmbeddingService as never);
     const onInsertSpy = jest.fn().mockResolvedValue(undefined);
-    const mockStrategy = { onInsert: onInsertSpy } as unknown as never;
-    const mockTable = { add: jest.fn().mockResolvedValue(undefined) };
+    const mockStrategy = { onInsert: onInsertSpy, onFirstAccess: jest.fn() } as unknown as never;
+    const mockTable = { add: jest.fn().mockResolvedValue(undefined), delete: jest.fn().mockResolvedValue(undefined) };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (vectorStore as any).lanceAvailable = false;

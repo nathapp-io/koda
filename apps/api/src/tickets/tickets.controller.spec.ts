@@ -525,7 +525,7 @@ describe('TicketsController', () => {
 
       expect((result as any).assignedToUserId).toBe('user-456');
       expect((result as any).assignedToAgentId).toBeNull();
-      expect(service.assign).toHaveBeenCalledWith('koda', 'KODA-1', { userId: 'user-456' });
+      expect(service.assign).toHaveBeenCalledWith('koda', 'KODA-1', { userId: 'user-456' }, undefined);
     });
 
     it('should assign ticket to agent', async () => {
@@ -578,7 +578,7 @@ describe('TicketsController', () => {
 
       expect(mockProjectsService.findProjectIdBySlug).toHaveBeenCalledWith('koda');
       expect(mockProjectsService.assertProjectMembership).toHaveBeenCalledWith('proj-123', mockAdminUser);
-      expect(service.assign).toHaveBeenCalledWith('koda', 'KODA-1', {});
+      expect(service.assign).toHaveBeenCalledWith('koda', 'KODA-1', {}, mockAdminUser);
     });
 
     it('should not assign when the caller is not a project member (BUG-2)', async () => {
