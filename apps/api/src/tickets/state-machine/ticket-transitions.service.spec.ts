@@ -3,6 +3,7 @@ import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { TicketStatus, CommentType, ActivityType } from '../../common/enums';
 import { TicketTransitionsService } from './ticket-transitions.service';
 import { AppException } from '@nathapp/nestjs-common';
+import { HttpException, HttpStatus } from '@nestjs/common';
 import { TICKET_REPOSITORY } from '../domain/ticket.domain';
 
 describe('TicketTransitionsService', () => {
@@ -124,7 +125,7 @@ describe('TicketTransitionsService', () => {
       findTicketByRefRaw: jest.fn(),
       // PrismaTicketsRepository extras used by transitions
       findTicketWithComments: jest.fn(),
-      updateTicketStatus: jest.fn(),
+      updateTicketStatusIf: jest.fn(),
       createComment: jest.fn(),
       createTicketActivity: jest.fn(),
       createTicketLink: jest.fn(),
@@ -161,7 +162,7 @@ describe('TicketTransitionsService', () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
       mockTicketRepo.createComment.mockResolvedValue(verificationComment);
-      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(updatedTicket);
       mockTicketRepo.createTicketActivity.mockResolvedValue(verifiedActivity);
 
       const result = await service.verify(
@@ -186,7 +187,7 @@ describe('TicketTransitionsService', () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
       mockTicketRepo.createComment.mockResolvedValue(verificationComment);
-      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(updatedTicket);
       mockTicketRepo.createTicketActivity.mockResolvedValue(verifiedActivity);
 
       await service.verify(
@@ -213,7 +214,7 @@ describe('TicketTransitionsService', () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
       mockTicketRepo.createComment.mockResolvedValue(verificationComment);
-      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(updatedTicket);
       mockTicketRepo.createTicketActivity.mockResolvedValue(verifiedActivity);
 
       const result = await service.verify(
@@ -266,7 +267,7 @@ describe('TicketTransitionsService', () => {
 
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketByRefRaw.mockResolvedValue(verifiedTicket);
-      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(updatedTicket);
       mockTicketRepo.createTicketActivity.mockResolvedValue(inProgressActivity);
 
       const result = await service.start('koda', 'KODA-1', mockUserPrincipal);
@@ -283,7 +284,7 @@ describe('TicketTransitionsService', () => {
 
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketByRefRaw.mockResolvedValue(verifiedTicket);
-      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(updatedTicket);
       mockTicketRepo.createTicketActivity.mockResolvedValue(inProgressActivity);
 
       await service.start('koda', 'KODA-1', mockUserPrincipal);
@@ -314,7 +315,7 @@ describe('TicketTransitionsService', () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketByRefRaw.mockResolvedValue(inProgressTicket);
       mockTicketRepo.createComment.mockResolvedValue(fixComment);
-      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(updatedTicket);
       mockTicketRepo.createTicketActivity.mockResolvedValue(fixActivity);
 
       const result = await service.fix(
@@ -339,7 +340,7 @@ describe('TicketTransitionsService', () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketByRefRaw.mockResolvedValue(inProgressTicket);
       mockTicketRepo.createComment.mockResolvedValue(fixComment);
-      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(updatedTicket);
       mockTicketRepo.createTicketActivity.mockResolvedValue(fixActivity);
 
       await service.fix(
@@ -363,7 +364,7 @@ describe('TicketTransitionsService', () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketByRefRaw.mockResolvedValue(verifyFixTicket);
       mockTicketRepo.createComment.mockResolvedValue(reviewComment);
-      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(updatedTicket);
       mockTicketRepo.createTicketActivity.mockResolvedValue(closedActivity);
 
       const result = await service.verifyFix(
@@ -388,7 +389,7 @@ describe('TicketTransitionsService', () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketByRefRaw.mockResolvedValue(verifyFixTicket);
       mockTicketRepo.createComment.mockResolvedValue(reviewComment);
-      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(updatedTicket);
       mockTicketRepo.createTicketActivity.mockResolvedValue(inProgressActivity);
 
       const result = await service.verifyFix(
@@ -413,7 +414,7 @@ describe('TicketTransitionsService', () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketByRefRaw.mockResolvedValue(verifyFixTicket);
       mockTicketRepo.createComment.mockResolvedValue(reviewComment);
-      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(updatedTicket);
       mockTicketRepo.createTicketActivity.mockResolvedValue(closedActivity);
 
       await service.verifyFix(
@@ -436,7 +437,7 @@ describe('TicketTransitionsService', () => {
 
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketByRefRaw.mockResolvedValue(verifyFixTicket);
-      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(updatedTicket);
       mockTicketRepo.createTicketActivity.mockResolvedValue(closedActivity);
 
       const result = await service.close('koda', 'KODA-1', mockUserPrincipal);
@@ -465,7 +466,7 @@ describe('TicketTransitionsService', () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
       mockTicketRepo.createComment.mockResolvedValue(generalComment);
-      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(updatedTicket);
       mockTicketRepo.createTicketActivity.mockResolvedValue(rejectedActivity);
 
       const result = await service.reject(
@@ -489,7 +490,7 @@ describe('TicketTransitionsService', () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketByRefRaw.mockResolvedValue(verifiedTicket);
       mockTicketRepo.createComment.mockResolvedValue(generalComment);
-      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(updatedTicket);
       mockTicketRepo.createTicketActivity.mockResolvedValue(rejectedActivity);
 
       const result = await service.reject(
@@ -533,7 +534,7 @@ describe('TicketTransitionsService', () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
       mockTicketRepo.createComment.mockResolvedValue(userComment);
-      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(updatedTicket);
       mockTicketRepo.createTicketActivity.mockResolvedValue(userActivity);
 
       const result = await service.verify(
@@ -557,7 +558,7 @@ describe('TicketTransitionsService', () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
       mockTicketRepo.createComment.mockResolvedValue(agentComment);
-      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(updatedTicket);
       mockTicketRepo.createTicketActivity.mockResolvedValue(agentActivity);
 
       const result = await service.verify(
@@ -583,7 +584,7 @@ describe('TicketTransitionsService', () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
       mockTicketRepo.createComment.mockResolvedValue(verificationComment);
-      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(updatedTicket);
       mockTicketRepo.createTicketActivity.mockResolvedValue(verifiedActivity);
 
       await service.verify(
@@ -604,7 +605,7 @@ describe('TicketTransitionsService', () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
       mockTicketRepo.createComment.mockResolvedValue(verificationComment);
-      mockTicketRepo.updateTicketStatus.mockResolvedValue(updatedTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(updatedTicket);
       mockTicketRepo.createTicketActivity.mockResolvedValue(verifiedActivity);
 
       const result = await service.verify(
@@ -619,6 +620,62 @@ describe('TicketTransitionsService', () => {
       expect(result).toHaveProperty('comment');
       expect(result).toHaveProperty('activity');
       expect(mockTxManager.run).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('M3: conditional transition (race protection)', () => {
+    it('M3: stale status → 409 conflict, no second write', async () => {
+      // Row moved between read and write: the conditional update matches 0 rows.
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(null);
+
+      await expect(
+        service.verify('koda', 'KODA-1', 'looks fine', mockUserPrincipal),
+      ).rejects.toThrow(HttpException);
+
+      try {
+        await service.verify('koda', 'KODA-1', 'looks fine', mockUserPrincipal);
+      } catch (err) {
+        expect(err).toBeInstanceOf(HttpException);
+        expect((err as HttpException).getStatus()).toBe(HttpStatus.CONFLICT);
+      }
+
+      // Loser must not leave side effects behind: no activity, no webhook fire path reached.
+      expect(mockTicketRepo.createTicketActivity).not.toHaveBeenCalled();
+    });
+
+    it('should throw 409 on stale status in close()', async () => {
+      const verifyFixTicket = { ...mockTicket, status: TicketStatus.VERIFY_FIX };
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(verifyFixTicket);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(null);
+
+      await expect(
+        service.close('koda', 'KODA-1', mockUserPrincipal),
+      ).rejects.toMatchObject({ status: HttpStatus.CONFLICT });
+
+      expect(mockTicketRepo.createTicketActivity).not.toHaveBeenCalled();
+    });
+
+    it('should pass the pre-read status as `from` to the conditional update', async () => {
+      const updatedTicket = { ...mockTicket, status: TicketStatus.VERIFIED };
+      const verificationComment = { ...mockComment };
+      const verifiedActivity = { ...mockActivity };
+
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket);
+      mockTicketRepo.createComment.mockResolvedValue(verificationComment);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(updatedTicket);
+      mockTicketRepo.createTicketActivity.mockResolvedValue(verifiedActivity);
+
+      await service.verify('koda', 'KODA-1', 'looks fine', mockUserPrincipal);
+
+      expect(mockTicketRepo.updateTicketStatusIf).toHaveBeenCalledWith(
+        'ticket-123',
+        TicketStatus.CREATED,
+        TicketStatus.VERIFIED,
+      );
     });
   });
 

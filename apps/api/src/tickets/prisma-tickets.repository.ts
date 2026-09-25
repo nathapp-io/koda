@@ -341,12 +341,17 @@ export class PrismaTicketsRepository implements ITicketRepository {
 
   // Transition-specific write methods (used inside txManager.run())
 
-  async updateTicketStatus(id: string, status: string): Promise<TicketDomain> {
-    const row = await this.db.ticket.update({
-      where: { id },
-      data: { status },
+  // M3: conditional status write — only updates when the row still holds
+  // `from`. Returns the fresh domain row, or null when 0 rows matched
+  // (another writer transitioned the ticket between read and write).
+  async updateTicketStatusIf(id: string, from: string, to: string): Promise<TicketDomain | null> {
+    const rows = await this.db.ticket.updateMany({
+      where: { id, status: from },
+      data: { status: to },
     });
-    return this.toDomain(row);
+    if (rows.count === 0) return null;
+    const row = await this.db.ticket.findUnique({ where: { id } });
+    return row ? this.toDomain(row) : null;
   }
 
   async createComment(data: {

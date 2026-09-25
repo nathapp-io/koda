@@ -113,6 +113,12 @@ export interface ITicketRepository {
     ref: string,
     opts?: { includeDeleted?: boolean },
   ): Promise<TicketDomain | null>;
+  /**
+   * M3: conditional status write. Updates the ticket to `to` only when its
+   * current status is still `from`; returns the fresh row, or null when no
+   * row matched (stale read — another writer transitioned the ticket).
+   */
+  updateTicketStatusIf(id: string, from: string, to: string): Promise<TicketDomain | null>;
   findUserById(id: string): Promise<{ id: string; role: string } | null>;
   findAgentById(id: string): Promise<{ id: string } | null>;
   findProjectMemberRole(projectId: string, userId: string): Promise<string | null>;

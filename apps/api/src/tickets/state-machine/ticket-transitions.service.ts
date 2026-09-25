@@ -1,4 +1,4 @@
-import { Injectable, Optional, Logger, Inject } from '@nestjs/common';
+import { Injectable, Optional, Logger, Inject, HttpException, HttpStatus } from '@nestjs/common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { TicketStatus, CommentType, ActivityType } from '../../common/enums';
@@ -354,7 +354,15 @@ export class TicketTransitionsService {
     const transaction = await this.txManager.run(async () => {
       const actorFields = actorForeignKeys(principal, 'actor');
 
-      const updatedTicket = await repo.updateTicketStatus(ticket.id, TicketStatus.CLOSED);
+      // M3: conditional write — the pre-checked status is `from`, so a
+      // concurrent transition makes this update match 0 rows and fail closed.
+      const updatedTicket = await repo.updateTicketStatusIf(ticket.id, ticket.status, TicketStatus.CLOSED);
+      if (!updatedTicket) {
+        // 409 pattern copied from webhook-replay.guard.ts:148 (ConflictAppException
+        // does not exist in @nathapp/nestjs-common). Thrown inside the tx callback
+        // so PrismaTransactionManager.run propagates it and rolls back.
+        throw new HttpException('Ticket state changed concurrently', HttpStatus.CONFLICT);
+      }
 
       const activity = await repo.createTicketActivity({
         ticketId: ticket.id,
@@ -435,7 +443,16 @@ export class TicketTransitionsService {
         });
       }
 
-      const updatedTicket = await repo.updateTicketStatus(ticket.id, toStatus);
+      // M3: conditional write keyed on the status read before the transaction —
+      // a concurrent writer (verify vs reject race) makes this match 0 rows and
+      // fail closed with 409 instead of double-committing.
+      const updatedTicket = await repo.updateTicketStatusIf(ticket.id, ticket.status, toStatus);
+      if (!updatedTicket) {
+        // 409 pattern copied from webhook-replay.guard.ts:148 (ConflictAppException
+        // does not exist in @nathapp/nestjs-common). Thrown inside the tx callback
+        // so PrismaTransactionManager.run propagates it and rolls back.
+        throw new HttpException('Ticket state changed concurrently', HttpStatus.CONFLICT);
+      }
 
       const activity = await repo.createTicketActivity({
         ticketId: ticket.id,
