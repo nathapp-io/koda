@@ -215,6 +215,92 @@ describe('MemoryController', () => {
       expect(repository.upsert).not.toHaveBeenCalled();
     });
 
+    it('H12 follow-up: extract with decision_event payload does not create a DECISION item via the HTTP route', async () => {
+      const principal = makeUserPrincipal(ActorRole.ADMIN);
+      (extractionService.extractFromEvent as jest.Mock).mockReturnValue([
+        {
+          projectId: 'project-123',
+          kind: MemoryKind.DECISION,
+          subject: 'agent:victim',
+          predicate: 'decision',
+          object: 'use microservices',
+          sourceType: 'decision_event',
+          sourceId: 'evt-1',
+          confidence: 1.0,
+        },
+      ]);
+      (repository.upsert as jest.Mock).mockResolvedValue(makeMemoryItem());
+
+      const result = await controller.extractFromEvent(
+        { projectId: 'project-123', type: 'decision_event', action: 'decided', data: {}, agentId: 'victim' },
+        principal,
+      );
+
+      // Filtered silently — nothing persisted, nothing echoed back.
+      expect(result.items).toEqual([]);
+      expect(repository.upsert).not.toHaveBeenCalled();
+    });
+
+    it('H12 follow-up: extract with agent_event decision_made payload does not create a DECISION item', async () => {
+      const principal = makeAgentPrincipal();
+      (extractionService.extractFromEvent as jest.Mock).mockReturnValue([
+        {
+          projectId: 'project-123',
+          kind: MemoryKind.DECISION,
+          subject: 'agent:victim',
+          predicate: 'decision',
+          object: 'use microservices',
+          sourceType: 'agent_event',
+          sourceId: 'evt-2',
+          confidence: 0.95,
+        },
+      ]);
+      (repository.upsert as jest.Mock).mockResolvedValue(makeMemoryItem());
+
+      const result = await controller.extractFromEvent(
+        { projectId: 'project-123', type: 'agent_event', action: 'decision_made', data: { decision: 'x' }, agentId: 'victim' },
+        principal,
+      );
+
+      expect(result.items).toEqual([]);
+      expect(repository.upsert).not.toHaveBeenCalled();
+    });
+
+    it('H12 follow-up: non-DECISION items are still extracted while DECISION items are filtered (positive control)', async () => {
+      const principal = makeUserPrincipal(ActorRole.ADMIN);
+      const factItem = {
+        projectId: 'project-123',
+        kind: MemoryKind.FACT,
+        subject: 'ticket:1',
+        predicate: 'status',
+        object: 'active',
+        sourceType: 'ticket_event',
+        sourceId: 'evt-3',
+        confidence: 0.9,
+      };
+      const decisionItem = {
+        projectId: 'project-123',
+        kind: MemoryKind.DECISION,
+        subject: 'agent:victim',
+        predicate: 'decision',
+        object: 'forged',
+        confidence: 1.0,
+      };
+      (extractionService.extractFromEvent as jest.Mock).mockReturnValue([decisionItem, factItem]);
+      (repository.upsert as jest.Mock).mockResolvedValue(makeMemoryItem());
+
+      const result = await controller.extractFromEvent(
+        { projectId: 'project-123', type: 'ticket_event', action: 'status_changed', data: {} },
+        principal,
+      );
+
+      expect(result.items).toEqual([factItem]);
+      expect(repository.upsert).toHaveBeenCalledTimes(1);
+      expect(repository.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: MemoryKind.FACT, ownerId: 'user-1' }),
+      );
+    });
+
     it('H12: extract uses principal.id as ownerId, not event.actorId', async () => {
       const principal = makeUserPrincipal(ActorRole.ADMIN);
       (extractionService.extractFromEvent as jest.Mock).mockReturnValue([

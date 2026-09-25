@@ -57,7 +57,17 @@ export class MemoryController {
 
     const items = this.extractionService.extractFromEvent(event as unknown as Parameters<typeof this.extractionService.extractFromEvent>[0]);
 
-    for (const item of items) {
+    // H12 follow-up: extraction of decision_event / agent_event('decision_made')
+    // payloads emits DECISION items whose subject is 'agent:<event.agentId>' —
+    // a caller-controlled value. Persisting them here would let an authorized
+    // caller plant (or supersede, via the KIND:subject:predicate upsert key) a
+    // decision shown as another agent's, the exact forgery recordDecision
+    // guards against. DECISION memories must only be minted through
+    // recordDecision, which forces non-admin self-attribution. The outbox
+    // subscriber calls ExtractionService directly and is unaffected.
+    const persisted = items.filter((item) => item.kind !== MemoryKind.DECISION);
+
+    for (const item of persisted) {
       const input: MemoryItemInput = {
         projectId: item.projectId,
         kind: item.kind,
@@ -75,7 +85,7 @@ export class MemoryController {
       await this.repository.upsert(input);
     }
 
-    return { items };
+    return { items: persisted };
   }
 
   @Post('decisions')
