@@ -44,6 +44,8 @@ describe('toLiveEvent', () => {
 
   it.each([
     ['an unknown action', envelope('label_added')],
+    ['a prototype-chain action key (toString)', envelope('TICKET_CREATED', { action: 'toString' })],
+    ['a prototype-chain action key (constructor)', envelope('TICKET_CREATED', { action: 'constructor' })],
     ['a missing ticketId', envelope('TICKET_CREATED', { ticketId: undefined })],
     ['a missing projectId', envelope('TICKET_CREATED', { projectId: undefined })],
     ['a missing id', envelope('TICKET_CREATED', { id: undefined })],

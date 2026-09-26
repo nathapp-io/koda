@@ -31,7 +31,12 @@ const isNonEmptyString = (value: unknown): value is string => typeof value === '
 export function toLiveEvent(payload: unknown): LiveEvent | null {
   if (typeof payload !== 'object' || payload === null) return null;
   const p = payload as Record<string, unknown>;
-  const action = typeof p['action'] === 'string' ? TICKET_ACTION_TO_LIVE[p['action']] : undefined;
+  // Own-property check: a plain-object lookup would otherwise resolve inherited
+  // keys like 'toString' and publish an event with a function as its action.
+  const action =
+    typeof p['action'] === 'string' && Object.prototype.hasOwnProperty.call(TICKET_ACTION_TO_LIVE, p['action'])
+      ? TICKET_ACTION_TO_LIVE[p['action']]
+      : undefined;
   if (!action) return null;
   const { id, projectId, ticketId, actorId, timestamp } = p;
   if (!isNonEmptyString(id) || !isNonEmptyString(projectId) || !isNonEmptyString(ticketId)) return null;
