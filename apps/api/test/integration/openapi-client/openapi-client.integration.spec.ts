@@ -8,11 +8,12 @@
  * - openapi.json is committed at repo root
  *
  * hey-api/openapi-ts generates flat files (not service directories):
- *   services.gen.ts  — all API functions
- *   types.gen.ts     — all request/response types
- *   schemas.gen.ts   — JSON schemas
- *   index.ts         — barrel export
- *   core/            — client runtime (Axios/Fetch)
+ *   sdk.gen.ts    — all API functions
+ *   types.gen.ts  — all request/response types
+ *   index.ts      — barrel export
+ *   client.gen.ts — client singleton
+ *   client/       — client runtime (vendored fetch client)
+ *   core/         — shared runtime helpers
  *
  * Run: bun run test:integration
  */
@@ -49,7 +50,7 @@ describe('Phase 3 — Step 3: OpenAPI Client Sanity Checks', () => {
   });
 
   // ─────────────────────────────────────────────────────────────────────────
-  // 2. CLI client (Axios)
+  // 2. CLI client (vendored fetch client via @hey-api/client-fetch)
   // ─────────────────────────────────────────────────────────────────────────
 
   const describeCli = HAS_CLI_GENERATED ? describe : describe.skip;
@@ -63,23 +64,27 @@ describe('Phase 3 — Step 3: OpenAPI Client Sanity Checks', () => {
       expect(fs.existsSync(path.join(CLI_GENERATED, 'index.ts'))).toBe(true);
     });
 
-    it('should have services.gen.ts', () => {
-      expect(fs.existsSync(path.join(CLI_GENERATED, 'services.gen.ts'))).toBe(true);
+    it('should have sdk.gen.ts', () => {
+      expect(fs.existsSync(path.join(CLI_GENERATED, 'sdk.gen.ts'))).toBe(true);
     });
 
     it('should have types.gen.ts', () => {
       expect(fs.existsSync(path.join(CLI_GENERATED, 'types.gen.ts'))).toBe(true);
     });
 
+    it('should have client.gen.ts client singleton', () => {
+      expect(fs.existsSync(path.join(CLI_GENERATED, 'client.gen.ts'))).toBe(true);
+    });
+
     it('should have core/ runtime directory', () => {
       expect(fs.existsSync(path.join(CLI_GENERATED, 'core'))).toBe(true);
     });
 
-    describe('services.gen.ts content', () => {
+    describe('sdk.gen.ts content', () => {
       let services: string;
 
       beforeAll(() => {
-        services = fs.readFileSync(path.join(CLI_GENERATED, 'services.gen.ts'), 'utf-8');
+        services = fs.readFileSync(path.join(CLI_GENERATED, 'sdk.gen.ts'), 'utf-8');
       });
 
       it('should contain auth functions', () => {
@@ -113,8 +118,8 @@ describe('Phase 3 — Step 3: OpenAPI Client Sanity Checks', () => {
         });
       });
 
-      it('should use Axios client (not fetch)', () => {
-        expect(services).toMatch(/CancelablePromise|OpenAPI/);
+      it('should wire SDK functions to the generated client singleton', () => {
+        expect(services).toMatch(/from '\.\/client\.gen'/);
       });
 
       it('should not contain obvious codegen errors', () => {
@@ -229,7 +234,7 @@ describe('Phase 3 — Step 3: OpenAPI Client Sanity Checks', () => {
   describeParity('Consistency: CLI and Web clients', () => {
     it('should both export the same service function names', () => {
       const cliServices = fs.readFileSync(
-        path.join(CLI_GENERATED, 'services.gen.ts'),
+        path.join(CLI_GENERATED, 'sdk.gen.ts'),
         'utf-8',
       );
       const webServices = fs.readFileSync(
@@ -271,7 +276,7 @@ describe('Phase 3 — Step 3: OpenAPI Client Sanity Checks', () => {
     });
 
     it('CLI and Web generated output should be similar in size', () => {
-      const cliSize = fs.statSync(path.join(CLI_GENERATED, 'services.gen.ts')).size;
+      const cliSize = fs.statSync(path.join(CLI_GENERATED, 'sdk.gen.ts')).size;
       const webSize = fs.statSync(path.join(WEB_GENERATED, 'services.gen.ts')).size;
 
       // Both should be non-trivial and roughly similar (within 30%)

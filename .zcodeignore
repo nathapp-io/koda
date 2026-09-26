@@ -1,0 +1,112 @@
+.vscode/
+.worktrees/
+node_modules/
+dist/
+.output/
+.nuxt/
+.turbo/
+coverage/
+
+# DB
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Generated (OpenAPI clients — regenerate with `bun run generate`)
+apps/cli/src/generated/
+apps/web/generated/
+!apps/cli/src/generated/.gitkeep
+!apps/web/generated/.gitkeep
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# nax HOME mis-set artifact (creates ~/... relative to repo root)
+~/
+~
+
+# IDE
+.vscode/
+.idea/
+
+
+# nax — generated files
+.nax-verifier-verdict.json
+
+# nax runtime
+.nax/prompt-audit/
+.nax/review-audit/
+.nax/review-verdicts/
+.nax/**/semantic-verdicts/
+.nax/**/verdicts/
+.nax/**/sessions/
+.nax/**/stories/
+nax.lock
+.nax-wt/
+.nax-pids
+.nax-verifier-verdict.json
+TEST_SUMMARY.md
+TEST_SUMMARY_*.md
+test/tmp/
+apps/api/smoke-result.txt
+
+.nax/metrics.json
+.nax/**/status.json
+.nax/**/*.jsonl
+.nax/**/runs/
+.nax/**/acp-sessions.json
+.nax/**/progress.txt
+.nax/**/*.bak
+.nax/**/acp-sessions.json
+
+out/
+apps/web/playwright-report/
+apps/web/test-results/
+apps/api/lancedb/
+lancedb/
+
+## cli test will create .koda on apps/cli
+## we not ignore the project level .koda
+apps/**/.koda/
+.codex
+
+# ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
+.git/
+.hg/
+.svn/
+bower_components/
+jspm_packages/
+__pycache__/
+site-packages/
+venv/
+htmlcov/
+lcov-report/
+cmakefiles/
+cmake-build-*/
+bazel-*/
+pods/
+deriveddata/
+storybook-static/
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+cdk.out/
+*.egg-info/
+*.dist-info/
+eggs/
+pip-wheel-metadata/
+wheels/
+# ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
+# 自定义规则写在下方（本行提示可删除）
