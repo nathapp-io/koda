@@ -62,6 +62,12 @@ Top-level module composition in [`apps/api/src/app.module.ts`](/home/williamkhoo
 - `ThrottlerModule` adds rate limiting
 - feature modules: `Auth`, `Agents`, `Projects`, `Tickets`, `Comments`, `Labels`, `TicketLinks`, `Health`, `Rag`, `Webhook`, `CiWebhook`
 
+#### Pagination
+
+List endpoints that page take `current` (1-based, default 1) and `size` (1-100, default 20) through a query DTO that extends `KodaPageQuery` (`apps/api/src/common/dto/koda-page.query.ts`), and return `{ total, current, size, hasNext, hasPrev, records }`. The global ValidationPipe does not transform, so controllers pass the raw query through `parseQuery()` and return `toPageResult(page)`. Paged today: tickets, memory.
+
+The timeline (`GET /projects/:slug/timeline`) is the exception: an append-only feed merged from three tables, paged by an opaque `(createdAt, id)` keyset cursor (`limit` 1-100, response `{ events, nextCursor? }`). `/context` reads at most 20 recent events. Comments, labels, agents and links return plain arrays.
+
 ### Web
 
 `apps/web` is a Nuxt 3 SSR application.
