@@ -97,6 +97,14 @@ describe('createLiveStream', () => {
     s.subscription.unsubscribe();
   });
 
+  it('does not hammer checks when the heartbeat delay overflows the timer range', async () => {
+    const s = setup({ heartbeatMs: 60 * 24 * 60 * 60 * 1000 });
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(s.messages.filter((m) => m.type === 'ping')).toHaveLength(0);
+    expect(s.options.stillAllowed).not.toHaveBeenCalled();
+    s.subscription.unsubscribe();
+  });
+
   it('completes right after ready when the token is already expired', async () => {
     const s = setup({ expiresAtMs: 10, now: () => 20 });
     await jest.advanceTimersByTimeAsync(0);

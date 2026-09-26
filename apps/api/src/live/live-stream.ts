@@ -36,6 +36,8 @@ export function createLiveStream(options: LiveStreamOptions): Observable<Message
       if (!done) subscriber.next({ type: event.type, id: event.id, data: event });
     });
 
+    // Same overflow clamp as the expiry timer: Node collapses delays above
+    // 2^31-1 ms to 1 ms, which would hammer the access check.
     const heartbeat = setInterval(() => {
       if (done || checking) return;
       checking = true;
@@ -48,7 +50,7 @@ export function createLiveStream(options: LiveStreamOptions): Observable<Message
           if (allowed) subscriber.next({ type: 'ping', data: {} });
           else finish();
         });
-    }, options.heartbeatMs);
+    }, Math.min(MAX_TIMER_MS, options.heartbeatMs));
 
     // setTimeout overflows above 2^31-1 ms (about 24.8 days) and would fire at once.
     const expiry = options.expiresAtMs === null
