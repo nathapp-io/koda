@@ -31,13 +31,12 @@ export function commentCommand(program: Command): void {
         }
 
         const response = await commentsControllerCreateFromHttp({
-          slug: ctx.projectSlug,
-          ref,
-          requestBody: {
+  body: {
             body: options.body,
             type: options.type,
           },
-        });
+  path: { slug: ctx.projectSlug, ref }
+  });
         const commentData = unwrap(response);
 
         if (options.json) {
@@ -65,9 +64,8 @@ export function commentCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         const response = await commentsControllerListByTicketFromHttp({
-          slug: ctx.projectSlug,
-          ref,
-        });
+  path: { slug: ctx.projectSlug, ref }
+  });
         const data = unwrap<{ items?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>>(response);
         const items: Array<Record<string, unknown>> = Array.isArray(data)
           ? data
@@ -101,9 +99,9 @@ export function commentCommand(program: Command): void {
         await withContext({}, { requireProject: false });
 
         const response = await commentsControllerUpdateFromHttp({
-          id: options.id,
-          requestBody: { body: options.body },
-        });
+  body: { body: options.body },
+  path: { id: options.id }
+  });
         const updated = unwrap<Record<string, unknown>>(response);
 
         if (options.json) {
@@ -133,7 +131,7 @@ export function commentCommand(program: Command): void {
       try {
         await withContext({}, { requireProject: false });
 
-        const response = await commentsControllerDeleteFromHttp({ id: options.id });
+        const response = await commentsControllerDeleteFromHttp({ path: { id: options.id }});
         const deleted = unwrap<Record<string, unknown> | undefined>(response);
 
         if (options.json) {

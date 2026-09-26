@@ -38,9 +38,6 @@ jest.mock('../generated', () => ({
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
-jest.mock('../generated/core/OpenAPI', () => ({
-  OpenAPI: { BASE: '', TOKEN: '' },
-}));
 
 // Mock config module to use mockData instead of real filesystem
 jest.mock('../config', () => ({
@@ -168,7 +165,7 @@ describe('kbCommand', () => {
       await searchCmd?.parseAsync(['node', 'test', '--project', 'koda', '--query', 'auth error']);
 
       expect(ragControllerSearch).toHaveBeenCalledWith(
-        expect.objectContaining({ slug: 'koda', requestBody: { query: 'auth error' } })
+        expect.objectContaining({ body: expect.objectContaining({ query: 'auth error' }), path: expect.objectContaining({ slug: 'koda' })})
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
@@ -356,7 +353,7 @@ describe('kbCommand', () => {
       await listCmd?.parseAsync(['node', 'test', '--project', 'koda']);
 
       expect(ragControllerListDocuments).toHaveBeenCalledWith(
-        expect.objectContaining({ slug: 'koda', limit: '100' })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'koda' }), query: expect.objectContaining({ limit: '100' })})
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
@@ -533,10 +530,7 @@ describe('kbCommand', () => {
       await addCmd?.parseAsync(['node', 'test', '--project', 'koda', '--file', './README.md']);
 
       expect(ragControllerAddDocument).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'koda',
-          requestBody: expect.objectContaining({ content: mockFileContent, source: 'doc', sourceId: 'README.md' }),
-        })
+        expect.objectContaining({ body: expect.objectContaining({ content: mockFileContent, source: 'doc', sourceId: 'README.md' }), path: expect.objectContaining({ slug: 'koda' })})
       );
     });
 
@@ -549,10 +543,7 @@ describe('kbCommand', () => {
       await addCmd?.parseAsync(['node', 'test', '--project', 'koda', '--file', './README.md', '--source', 'manual']);
 
       expect(ragControllerAddDocument).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'koda',
-          requestBody: expect.objectContaining({ source: 'manual', sourceId: 'README.md' }),
-        })
+        expect.objectContaining({ body: expect.objectContaining({ source: 'manual', sourceId: 'README.md' }), path: expect.objectContaining({ slug: 'koda' })})
       );
     });
 
@@ -671,7 +662,7 @@ describe('kbCommand', () => {
       await deleteCmd?.parseAsync(['node', 'test', '--project', 'koda', '--source-id', 'README.md', '--force']).catch(() => undefined);
 
       expect(ragControllerDeleteDocument).toHaveBeenCalledWith(
-        expect.objectContaining({ slug: 'koda', sourceId: 'README.md' })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'koda', sourceId: 'README.md' })})
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
@@ -699,7 +690,7 @@ describe('kbCommand', () => {
       await optimizeCmd?.parseAsync(['node', 'test', '--project', 'koda']).catch(() => undefined);
 
       expect(ragControllerOptimizeTable).toHaveBeenCalledWith(
-        expect.objectContaining({ slug: 'koda' })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'koda' })})
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
@@ -779,10 +770,10 @@ describe('kbCommand', () => {
       await importCmd?.parseAsync(['node', 'test', '--project', 'koda', '--graphify', './graph.json']);
 
       const callArgs = (ragControllerImportGraphify as jest.Mock).mock.calls[0][0];
-      expect(callArgs.requestBody.nodes).toBeDefined();
-      expect(callArgs.requestBody.links).toBeDefined();
+      expect(callArgs.body.nodes).toBeDefined();
+      expect(callArgs.body.links).toBeDefined();
       // Verify it doesn't include other top-level keys from the JSON
-      expect(Object.keys(callArgs.requestBody)).toEqual(expect.arrayContaining(['nodes', 'links']));
+      expect(Object.keys(callArgs.body)).toEqual(expect.arrayContaining(['nodes', 'links']));
     });
 
     it('outputs JSON with --json flag', async () => {

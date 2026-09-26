@@ -31,9 +31,9 @@ export function webhookCommand(program: Command): void {
 
         const events = (options.events as string).split(',').map((e: string) => e.trim()).filter(Boolean);
         const response = await webhookControllerRegister({
-          slug: ctx.projectSlug,
-          requestBody: { url: options.url, secret: options.secret, events },
-        });
+  body: { url: options.url, secret: options.secret, events },
+  path: { slug: ctx.projectSlug }
+  });
         const data = unwrap<{ id: string; url: string; events: string[] }>(response);
 
         if (options.json) {
@@ -61,7 +61,7 @@ export function webhookCommand(program: Command): void {
       try {
         const ctx = await withContext({ projectSlug: options.project });
 
-        const response = await webhookControllerList({ slug: ctx.projectSlug });
+        const response = await webhookControllerList({ path: { slug: ctx.projectSlug }});
         const raw = unwrap<{ items?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>>(response);
         const items: Array<Record<string, unknown>> = Array.isArray(raw)
           ? raw
@@ -92,7 +92,7 @@ export function webhookCommand(program: Command): void {
       try {
         await withContext({}, { requireProject: false });
 
-        await webhookControllerRemove({ id: options.id });
+        await webhookControllerRemove({ path: { id: options.id }});
 
         if (options.json) {
           console.log(JSON.stringify({ deleted: true, id: options.id }));

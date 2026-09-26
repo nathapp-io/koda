@@ -1,6 +1,5 @@
 import { Command } from 'commander';
 import { resolveAuth } from '../utils/auth';
-import { OpenAPI } from '../generated/core/OpenAPI';
 import {
   projectsControllerFindAll,
   projectsControllerFindBySlug,
@@ -8,6 +7,7 @@ import {
   projectsControllerRemove,
   projectsControllerUpdate,
 } from '../generated';
+import { configureApiClient } from '../utils/api-client';
 import { table, error } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
@@ -28,8 +28,7 @@ export function projectCommand(program: Command): void {
           return;
         }
 
-        OpenAPI.BASE = auth.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = auth.apiKey;
+        configureApiClient(auth.apiUrl.replace(/\/api\/?$/, ''), auth.apiKey);
 
         const response = await projectsControllerFindAll();
         const data = unwrap<{ items?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>>(response);
@@ -63,10 +62,9 @@ export function projectCommand(program: Command): void {
           return;
         }
 
-        OpenAPI.BASE = auth.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = auth.apiKey;
+        configureApiClient(auth.apiUrl.replace(/\/api\/?$/, ''), auth.apiKey);
 
-        const response = await projectsControllerFindBySlug({ slug });
+        const response = await projectsControllerFindBySlug({ path: { slug }});
         const proj = unwrap<{ name: string; key: string; slug: string; description?: string }>(response);
 
         if (options.json) {
@@ -116,17 +114,16 @@ export function projectCommand(program: Command): void {
           return;
         }
 
-        OpenAPI.BASE = auth.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = auth.apiKey;
+        configureApiClient(auth.apiUrl.replace(/\/api\/?$/, ''), auth.apiKey);
 
         const response = await projectsControllerCreate({
-          requestBody: {
+  body: {
             name: options.name,
             slug: options.slug,
             key: options.key,
             description: options.desc,
-          },
-        });
+          }
+  });
         const proj = unwrap<{ name: string; key: string; slug: string; description?: string }>(response);
 
         if (options.json) {
@@ -165,10 +162,9 @@ export function projectCommand(program: Command): void {
           return;
         }
 
-        OpenAPI.BASE = auth.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = auth.apiKey;
+        configureApiClient(auth.apiUrl.replace(/\/api\/?$/, ''), auth.apiKey);
 
-        await projectsControllerRemove({ slug });
+        await projectsControllerRemove({ path: { slug }});
 
         console.log(`Project '${slug}' deleted.`);
         process.exit(0);
@@ -204,15 +200,14 @@ export function projectCommand(program: Command): void {
           return;
         }
 
-        OpenAPI.BASE = auth.apiUrl.replace(/\/api\/?$/, '');
-        OpenAPI.TOKEN = auth.apiKey;
+        configureApiClient(auth.apiUrl.replace(/\/api\/?$/, ''), auth.apiKey);
 
         const requestBody: { name?: string; key?: string; description?: string } = {};
         if (options.name) requestBody.name = options.name;
         if (options.key) requestBody.key = options.key;
         if (options.desc) requestBody.description = options.desc;
 
-        const response = await projectsControllerUpdate({ slug, requestBody });
+        const response = await projectsControllerUpdate({ body: requestBody, path: { slug }});
         const proj = unwrap<{ name: string; key: string; slug: string; description?: string }>(response);
 
         if (options.json) {

@@ -19,7 +19,6 @@ jest.mock('../generated', () => ({
   authControllerLogout: jest.fn(),
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
-jest.mock('../generated/core/OpenAPI', () => ({ OpenAPI: { BASE: '', TOKEN: '' } }));
 
 jest.mock('../config', () => ({
   resolveContext: jest.fn(),
@@ -95,7 +94,7 @@ describe('authCommand', () => {
       await program.parseAsync(['node', 'koda', 'auth', 'register', '--email', 'new@example.com', '--password', 'Str0ng!Pass']);
 
       expect(mockRegister).toHaveBeenCalledWith(expect.objectContaining({
-        requestBody: expect.objectContaining({ email: 'new@example.com', password: 'Str0ng!Pass' }),
+        body: expect.objectContaining({ email: 'new@example.com', password: 'Str0ng!Pass' }),
       }));
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
@@ -115,7 +114,7 @@ describe('authCommand', () => {
       await program.parseAsync(['node', 'koda', 'auth', 'register', '--email', 'a@b.com', '--password', 'Str0ng!1', '--name', 'Bob']);
 
       expect(mockRegister).toHaveBeenCalledWith(expect.objectContaining({
-        requestBody: expect.objectContaining({ name: 'Bob' }),
+        body: expect.objectContaining({ name: 'Bob' }),
       }));
     });
   });

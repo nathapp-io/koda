@@ -33,9 +33,6 @@ jest.mock('../generated', () => ({
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
-jest.mock('../generated/core/OpenAPI', () => ({
-  OpenAPI: { BASE: '', TOKEN: '' },
-}));
 
 // Mock config module to use mockData instead of real filesystem
 jest.mock('../config', () => ({
@@ -115,14 +112,10 @@ describe('commentCommand', () => {
       await addCmd?.parseAsync(['node', 'test', 'KODA-42', '--body', 'Test comment']).catch(() => undefined);
 
       expect(commentsControllerCreateFromHttp).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'koda',
-          ref: 'KODA-42',
-          requestBody: expect.objectContaining({
+        expect.objectContaining({ body: expect.objectContaining({
             body: 'Test comment',
             type: 'GENERAL',
-          }),
-        })
+          }), path: expect.objectContaining({ slug: 'koda', ref: 'KODA-42' })})
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
@@ -152,14 +145,10 @@ describe('commentCommand', () => {
       ]).catch(() => undefined);
 
       expect(commentsControllerCreateFromHttp).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'koda',
-          ref: 'KODA-42',
-          requestBody: expect.objectContaining({
+        expect.objectContaining({ body: expect.objectContaining({
             body: 'Fix report',
             type: 'FIX_REPORT',
-          }),
-        })
+          }), path: expect.objectContaining({ slug: 'koda', ref: 'KODA-42' })})
       );
     });
 
@@ -200,11 +189,7 @@ describe('commentCommand', () => {
         ]).catch(() => undefined);
 
         expect(commentsControllerCreateFromHttp).toHaveBeenCalledWith(
-          expect.objectContaining({
-            slug: 'koda',
-            ref: 'KODA-42',
-            requestBody: expect.objectContaining({ type }),
-          })
+          expect.objectContaining({ body: expect.objectContaining({ type }), path: expect.objectContaining({ slug: 'koda', ref: 'KODA-42' })})
         );
       }
     });
@@ -303,7 +288,7 @@ describe('commentCommand', () => {
       await listCmd?.parseAsync(['node', 'test', 'KODA-42']).catch(() => undefined);
 
       expect(commentsControllerListByTicketFromHttp).toHaveBeenCalledWith(
-        expect.objectContaining({ slug: 'koda', ref: 'KODA-42' })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'koda', ref: 'KODA-42' })})
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
@@ -322,10 +307,7 @@ describe('commentCommand', () => {
       await updateCmd?.parseAsync(['node', 'test', '--id', 'comment-1', '--body', 'Updated']).catch(() => undefined);
 
       expect(commentsControllerUpdateFromHttp).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: 'comment-1',
-          requestBody: { body: 'Updated' },
-        })
+        expect.objectContaining({ body: expect.objectContaining({ body: 'Updated' }), path: expect.objectContaining({ id: 'comment-1' })})
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
@@ -341,7 +323,7 @@ describe('commentCommand', () => {
       await deleteCmd?.parseAsync(['node', 'test', '--id', 'comment-1', '--force']).catch(() => undefined);
 
       expect(commentsControllerDeleteFromHttp).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 'comment-1' })
+        expect.objectContaining({ path: expect.objectContaining({ id: 'comment-1' })})
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
     });

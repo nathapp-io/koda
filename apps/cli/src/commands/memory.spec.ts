@@ -20,7 +20,6 @@ jest.mock('../generated', () => ({
   projectsControllerFindBySlug: jest.fn(),
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
-jest.mock('../generated/core/OpenAPI', () => ({ OpenAPI: { BASE: '', TOKEN: '' } }));
 
 jest.mock('../config', () => ({
   resolveContext: jest.fn(),
@@ -65,7 +64,7 @@ describe('memoryCommand', () => {
 
       await program.parseAsync(['node', 'koda', 'memory', 'timeline']);
 
-      expect(mockGetTimeline).toHaveBeenCalledWith(expect.objectContaining({ slug: 'my-proj' }));
+      expect(mockGetTimeline).toHaveBeenCalledWith(expect.objectContaining({ path: expect.objectContaining({ slug: 'my-proj' })}));
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
@@ -90,13 +89,7 @@ describe('memoryCommand', () => {
         '--limit', '10',
       ]);
 
-      expect(mockGetTimeline).toHaveBeenCalledWith(expect.objectContaining({
-        actorId: 'u-1',
-        ticketId: 't-1',
-        from: '2026-01-01',
-        to: '2026-06-01',
-        limit: '10',
-      }));
+      expect(mockGetTimeline).toHaveBeenCalledWith(expect.objectContaining({ query: expect.objectContaining({ actorId: 'u-1', ticketId: 't-1', from: '2026-01-01', to: '2026-06-01', limit: '10' })}));
     });
 
     it('handles empty result gracefully', async () => {
@@ -125,17 +118,15 @@ describe('memoryCommand', () => {
         '--rationale', 'simplest for now',
       ]);
 
-      expect(mockFindBySlug).toHaveBeenCalledWith({ slug: 'my-proj' });
-      expect(mockRecordDecision).toHaveBeenCalledWith({
-        requestBody: {
+      expect(mockFindBySlug).toHaveBeenCalledWith({ path: { slug: 'my-proj' }});
+      expect(mockRecordDecision).toHaveBeenCalledWith({ body: {
           projectId: 'proj-cuid-1',
           actorId: 'agent-1',
           topic: 'auth approach',
           decision: 'use JWT',
           rationale: 'simplest for now',
           sourceId: undefined,
-        },
-      });
+        }});
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
@@ -162,9 +153,7 @@ describe('memoryCommand', () => {
         '--decision', 'd',
       ]);
 
-      expect(mockRecordDecision).toHaveBeenCalledWith({
-        requestBody: expect.objectContaining({ actorId: undefined }),
-      });
+      expect(mockRecordDecision).toHaveBeenCalledWith({ body: expect.objectContaining({ actorId: undefined })});
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
   });
@@ -186,9 +175,9 @@ describe('memoryCommand', () => {
         '--confidence', '0.9',
       ]);
 
-      expect(mockFindBySlug).toHaveBeenCalledWith({ slug: 'my-proj' });
+      expect(mockFindBySlug).toHaveBeenCalledWith({ path: { slug: 'my-proj' }});
       expect(mockCreateMemory).toHaveBeenCalledWith({
-        requestBody: {
+        body: {
           projectId: 'proj-cuid-1',
           kind: 'FACT',
           subject: 'ticket-1',

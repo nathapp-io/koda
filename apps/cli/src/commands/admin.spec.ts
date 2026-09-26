@@ -19,7 +19,6 @@ jest.mock('../generated', () => ({
   sloDashboardControllerGetSloMetrics: jest.fn(),
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
-jest.mock('../generated/core/OpenAPI', () => ({ OpenAPI: { BASE: '', TOKEN: '' } }));
 
 jest.mock('../config', () => ({
   resolveContext: jest.fn(),
@@ -85,7 +84,7 @@ describe('adminCommand', () => {
 
       await program.parseAsync(['node', 'koda', 'admin', 'outbox', 'list', '--status', 'dead']);
 
-      expect(mockGetOutbox).toHaveBeenCalledWith(expect.objectContaining({ status: 'dead' }));
+      expect(mockGetOutbox).toHaveBeenCalledWith(expect.objectContaining({ query: expect.objectContaining({ status: 'dead' })}));
     });
   });
 
@@ -95,7 +94,7 @@ describe('adminCommand', () => {
 
       await program.parseAsync(['node', 'koda', 'admin', 'outbox', 'retry', '--event-id', 'ev-1']);
 
-      expect(mockRetryEvent).toHaveBeenCalledWith({ eventId: 'ev-1' });
+      expect(mockRetryEvent).toHaveBeenCalledWith({ path: { eventId: 'ev-1' }});
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
@@ -134,7 +133,7 @@ describe('adminCommand', () => {
 
       await program.parseAsync(['node', 'koda', 'admin', 'slos', '--from', '2026-01-01', '--to', '2026-06-01']);
 
-      expect(mockGetSlos).toHaveBeenCalledWith(expect.objectContaining({ from: '2026-01-01', to: '2026-06-01' }));
+      expect(mockGetSlos).toHaveBeenCalledWith(expect.objectContaining({ query: expect.objectContaining({ from: '2026-01-01', to: '2026-06-01' })}));
     });
   });
 });

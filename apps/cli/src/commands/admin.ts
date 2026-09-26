@@ -25,7 +25,7 @@ export function adminCommand(program: Command): void {
       try {
         await withContext({}, { requireProject: false });
 
-        const response = await adminControllerGetOutbox({ status: options.status });
+        const response = await adminControllerGetOutbox({ query: { status: options.status }});
         const raw = unwrap<{ items?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>>(response);
         const items: Array<Record<string, unknown>> = Array.isArray(raw)
           ? raw
@@ -57,7 +57,7 @@ export function adminCommand(program: Command): void {
       try {
         await withContext({}, { requireProject: false });
 
-        const response = await adminControllerRetryOutboxEvent({ eventId: options.eventId });
+        const response = await adminControllerRetryOutboxEvent({ path: { eventId: options.eventId }});
         const data = unwrap<Record<string, unknown>>(response);
 
         if (options.json) {
@@ -81,7 +81,7 @@ export function adminCommand(program: Command): void {
       try {
         await withContext({}, { requireProject: false });
 
-        const response = await sloDashboardControllerGetSloMetrics({ from: options.from, to: options.to });
+        const response = await sloDashboardControllerGetSloMetrics({ query: { from: options.from, to: options.to }});
         const data = unwrap<Record<string, unknown>>(response);
 
         if (options.json) {

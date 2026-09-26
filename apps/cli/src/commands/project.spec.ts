@@ -34,9 +34,6 @@ jest.mock('../generated', () => ({
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
-jest.mock('../generated/core/OpenAPI', () => ({
-  OpenAPI: { BASE: '', TOKEN: '' },
-}));
 
 // Mock config module to use mockData instead of real filesystem
 jest.mock('../config', () => ({
@@ -278,7 +275,7 @@ describe('projectCommand', () => {
 
       expect(projectsControllerCreate).toHaveBeenCalledWith(
         expect.objectContaining({
-          requestBody: expect.objectContaining({ name: 'Test', slug: 'test', key: 'TEST' }),
+          body: expect.objectContaining({ name: 'Test', slug: 'test', key: 'TEST' }),
         })
       );
     });
@@ -366,7 +363,7 @@ describe('projectCommand', () => {
       await deleteCmd?.parseAsync(['node', 'test', 'test', '--force']);
 
       expect(projectsControllerRemove).toHaveBeenCalledWith(
-        expect.objectContaining({ slug: 'test' })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'test' })})
       );
     });
 
@@ -524,14 +521,11 @@ describe('projectCommand', () => {
       await updateCmd?.parseAsync(['node', 'test', 'project-a', '--name', 'Updated', '--key', 'UPD', '--desc', 'Updated description']);
 
       expect(projectsControllerUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'project-a',
-          requestBody: expect.objectContaining({
+        expect.objectContaining({ body: expect.objectContaining({
             name: 'Updated',
             key: 'UPD',
             description: 'Updated description',
-          }),
-        })
+          }), path: expect.objectContaining({ slug: 'project-a' })})
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
     });

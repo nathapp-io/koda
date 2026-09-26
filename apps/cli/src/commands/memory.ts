@@ -11,7 +11,7 @@ import { withContext } from '../utils/context';
  */
 async function resolveProjectId(slug: string): Promise<string> {
   try {
-    const response = await projectsControllerFindBySlug({ slug });
+    const response = await projectsControllerFindBySlug({ path: { slug }});
     const project = unwrap<{ id: string }>(response);
     return project.id;
   } catch (err: unknown) {
@@ -39,14 +39,9 @@ export function memoryCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         const response = await timelineControllerGetTimeline({
-          slug: ctx.projectSlug,
-          actorId: options.actorId,
-          ticketId: options.ticketId,
-          from: options.from,
-          to: options.to,
-          limit: options.limit,
-          cursor: options.cursor,
-        });
+  path: { slug: ctx.projectSlug },
+  query: { actorId: options.actorId, ticketId: options.ticketId, from: options.from, to: options.to, limit: options.limit, cursor: options.cursor }
+  });
         const raw = unwrap<{ items?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>>(response);
         const items: Array<Record<string, unknown>> = Array.isArray(raw)
           ? raw
@@ -86,15 +81,15 @@ export function memoryCommand(program: Command): void {
         const projectId = await resolveProjectId(ctx.projectSlug);
 
         const response = await memoryControllerRecordDecision({
-          requestBody: {
+  body: {
             projectId,
             actorId: options.actorId,
             topic: options.topic,
             decision: options.decision,
             rationale: options.rationale,
             sourceId: options.sourceId,
-          },
-        });
+          }
+  });
         const result = unwrap(response);
 
         if (options.json) {
@@ -137,7 +132,7 @@ export function memoryCommand(program: Command): void {
         const projectId = await resolveProjectId(ctx.projectSlug);
 
         const response = await memoryControllerCreateMemory({
-          requestBody: {
+  body: {
             projectId,
             kind: options.kind,
             subject: options.subject,
@@ -147,8 +142,8 @@ export function memoryCommand(program: Command): void {
             sourceId: options.sourceId,
             confidence,
             ownerId: options.ownerId,
-          },
-        });
+          }
+  });
         const result = unwrap(response);
 
         if (options.json) {

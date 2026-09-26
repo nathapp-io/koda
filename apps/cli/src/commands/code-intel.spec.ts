@@ -19,7 +19,6 @@ jest.mock('../generated', () => ({
   codeIntelControllerGetCallees: jest.fn(),
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
-jest.mock('../generated/core/OpenAPI', () => ({ OpenAPI: { BASE: '', TOKEN: '' } }));
 
 jest.mock('../config', () => ({
   resolveContext: jest.fn(),
@@ -68,7 +67,7 @@ describe('codeIntelCommand', () => {
 
       await program.parseAsync(['node', 'koda', 'code-intel', 'symbol', '--symbol-id', SYMBOL_ID]);
 
-      expect(mockGetSymbol).toHaveBeenCalledWith(expect.objectContaining({ symbolId: SYMBOL_ID }));
+      expect(mockGetSymbol).toHaveBeenCalledWith(expect.objectContaining({ path: expect.objectContaining({ symbolId: SYMBOL_ID })}));
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
@@ -98,7 +97,7 @@ describe('codeIntelCommand', () => {
 
       await program.parseAsync(['node', 'koda', 'code-intel', 'callers', '--symbol-id', SYMBOL_ID]);
 
-      expect(mockGetCallers).toHaveBeenCalledWith(expect.objectContaining({ symbolId: SYMBOL_ID }));
+      expect(mockGetCallers).toHaveBeenCalledWith(expect.objectContaining({ path: expect.objectContaining({ symbolId: SYMBOL_ID })}));
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
@@ -119,7 +118,7 @@ describe('codeIntelCommand', () => {
 
       await program.parseAsync(['node', 'koda', 'code-intel', 'callees', '--symbol-id', SYMBOL_ID]);
 
-      expect(mockGetCallees).toHaveBeenCalledWith(expect.objectContaining({ symbolId: SYMBOL_ID }));
+      expect(mockGetCallees).toHaveBeenCalledWith(expect.objectContaining({ path: expect.objectContaining({ symbolId: SYMBOL_ID })}));
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 

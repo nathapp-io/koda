@@ -1,8 +1,8 @@
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { resolveAuth } from '../utils/auth';
-import { OpenAPI } from '../generated/core/OpenAPI';
 import { projectsControllerFindBySlug } from '../generated';
+import { configureApiClient } from '../utils/api-client';
 
 export interface InitOptions {
   project?: string;
@@ -33,9 +33,8 @@ export const _initDeps: InitDeps = {
   writeFile: (filePath: string, content: string) => fs.writeFile(filePath, content, 'utf-8'),
   mkdir: (dirPath: string, opts: { recursive: boolean }) => fs.mkdir(dirPath, opts).then(() => undefined),
   fetchProject: async (apiUrl: string, apiKey: string, slug: string) => {
-    OpenAPI.BASE = apiUrl.replace(/\/api\/?$/, '');
-    OpenAPI.TOKEN = apiKey;
-    return projectsControllerFindBySlug({ slug });
+    configureApiClient(apiUrl.replace(/\/api\/?$/, ''), apiKey);
+    return projectsControllerFindBySlug({ path: { slug } });
   },
   resolveAuth,
   cwd: () => process.cwd(),

@@ -47,9 +47,6 @@ jest.mock('../generated', () => ({
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
-jest.mock('../generated/core/OpenAPI', () => ({
-  OpenAPI: { BASE: '', TOKEN: '' },
-}));
 
 // Mock config module to use mockData instead of real filesystem
 jest.mock('../config', () => ({
@@ -215,13 +212,10 @@ describe('ticketCommand', () => {
       ]);
 
       expect(ticketsControllerCreate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'test-project',
-          requestBody: expect.objectContaining({
+        expect.objectContaining({ body: expect.objectContaining({
             type: 'BUG',
             title: 'Test bug',
-          }),
-        })
+          }), path: expect.objectContaining({ slug: 'test-project' })})
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });
@@ -261,13 +255,11 @@ describe('ticketCommand', () => {
       ]);
 
       expect(ticketsControllerCreate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          requestBody: expect.objectContaining({
+        expect.objectContaining({ body: expect.objectContaining({
             type: 'ENHANCEMENT',
             title: 'New feature',
             description: 'Feature description',
-          }),
-        })
+          })})
       );
     });
 
@@ -305,11 +297,9 @@ describe('ticketCommand', () => {
       ]);
 
       expect(ticketsControllerCreate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          requestBody: expect.objectContaining({
+        expect.objectContaining({ body: expect.objectContaining({
             priority: 'CRITICAL',
-          }),
-        })
+          })})
       );
     });
 
@@ -435,9 +425,7 @@ describe('ticketCommand', () => {
       await createCmd?.parseAsync(['node', 'test', '--project', 'proj', '--type', 'BUG', '--title', 'Test']);
 
       expect(ticketsControllerCreate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          requestBody: expect.objectContaining({ type: 'BUG' }),
-        })
+        expect.objectContaining({ body: expect.objectContaining({ type: 'BUG' })})
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });
@@ -464,9 +452,7 @@ describe('ticketCommand', () => {
       await createCmd?.parseAsync(['node', 'test', '--project', 'proj', '--type', 'BUG', '--title', 'Test', '--priority', 'HIGH']);
 
       expect(ticketsControllerCreate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          requestBody: expect.objectContaining({ priority: 'HIGH' }),
-        })
+        expect.objectContaining({ body: expect.objectContaining({ priority: 'HIGH' })})
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });
@@ -518,9 +504,7 @@ describe('ticketCommand', () => {
       await listCmd?.parseAsync(['node', 'test', '--project', 'test-project']);
 
       expect(ticketsControllerFindAll).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'test-project',
-        })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'test-project' })})
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });
@@ -556,9 +540,7 @@ describe('ticketCommand', () => {
       ]);
 
       expect(ticketsControllerFindAll).toHaveBeenCalledWith(
-        expect.objectContaining({
-          status: 'verified',
-        })
+        expect.objectContaining({ query: expect.objectContaining({ status: 'verified' })})
       );
     });
 
@@ -593,9 +575,7 @@ describe('ticketCommand', () => {
       ]);
 
       expect(ticketsControllerFindAll).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: 'BUG',
-        })
+        expect.objectContaining({ query: expect.objectContaining({ type: 'BUG' })})
       );
     });
 
@@ -630,9 +610,7 @@ describe('ticketCommand', () => {
       ]);
 
       expect(ticketsControllerFindAll).toHaveBeenCalledWith(
-        expect.objectContaining({
-          priority: 'CRITICAL',
-        })
+        expect.objectContaining({ query: expect.objectContaining({ priority: 'CRITICAL' })})
       );
     });
 
@@ -667,9 +645,7 @@ describe('ticketCommand', () => {
       ]);
 
       expect(ticketsControllerFindAll).toHaveBeenCalledWith(
-        expect.objectContaining({
-          assignedTo: 'agent-1',
-        })
+        expect.objectContaining({ query: expect.objectContaining({ assignedTo: 'agent-1' })})
       );
     });
 
@@ -703,9 +679,7 @@ describe('ticketCommand', () => {
       ]);
 
       expect(ticketsControllerFindAll).toHaveBeenCalledWith(
-        expect.objectContaining({
-          unassigned: true,
-        })
+        expect.objectContaining({ query: expect.objectContaining({ unassigned: true })})
       );
     });
 
@@ -728,9 +702,7 @@ describe('ticketCommand', () => {
       ]);
 
       expect(ticketsControllerFindAll).toHaveBeenCalledWith(
-        expect.objectContaining({
-          limit: 10,
-        })
+        expect.objectContaining({ query: expect.objectContaining({ limit: 10 })})
       );
     });
 
@@ -753,9 +725,7 @@ describe('ticketCommand', () => {
       ]);
 
       expect(ticketsControllerFindAll).toHaveBeenCalledWith(
-        expect.objectContaining({
-          page: 2,
-        })
+        expect.objectContaining({ query: expect.objectContaining({ page: 2 })})
       );
     });
 
@@ -900,9 +870,7 @@ describe('ticketCommand', () => {
       await mineCmd?.parseAsync(['node', 'test']);
 
       expect(ticketsControllerFindAll).toHaveBeenCalledWith(
-        expect.objectContaining({
-          assignedTo: 'self',
-        })
+        expect.objectContaining({ query: expect.objectContaining({ assignedTo: 'self' })})
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });
@@ -924,10 +892,7 @@ describe('ticketCommand', () => {
       ]);
 
       expect(ticketsControllerFindAll).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'test-project',
-          assignedTo: 'self',
-        })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'test-project' }), query: expect.objectContaining({ assignedTo: 'self' })})
       );
     });
 
@@ -948,9 +913,7 @@ describe('ticketCommand', () => {
       ]);
 
       expect(ticketsControllerFindAll).toHaveBeenCalledWith(
-        expect.objectContaining({
-          status: 'verified',
-        })
+        expect.objectContaining({ query: expect.objectContaining({ status: 'verified' })})
       );
     });
 
@@ -1063,7 +1026,7 @@ describe('ticketCommand', () => {
       await showCmd?.parseAsync(['node', 'test', 'KODA-42']);
 
       expect(ticketsControllerFindByRef).toHaveBeenCalledWith(
-        expect.objectContaining({ slug: 'koda', ref: 'KODA-42' })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'koda', ref: 'KODA-42' })})
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });
@@ -1092,7 +1055,7 @@ describe('ticketCommand', () => {
       await showCmd?.parseAsync(['node', 'test', 'cuid123456']);
 
       expect(ticketsControllerFindByRef).toHaveBeenCalledWith(
-        expect.objectContaining({ slug: 'koda', ref: 'cuid123456' })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'koda', ref: 'cuid123456' })})
       );
     });
 
@@ -1250,13 +1213,9 @@ describe('ticketCommand', () => {
       ]);
 
       expect(ticketsControllerVerify).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'koda',
-          ref: 'KODA-1',
-          requestBody: expect.objectContaining({
+        expect.objectContaining({ body: expect.objectContaining({
             body: 'Verified this bug',
-          }),
-        })
+          }), path: expect.objectContaining({ slug: 'koda', ref: 'KODA-1' })})
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });
@@ -1301,11 +1260,9 @@ describe('ticketCommand', () => {
       ]);
 
       expect(ticketsControllerVerify).toHaveBeenCalledWith(
-        expect.objectContaining({
-          requestBody: expect.objectContaining({
+        expect.objectContaining({ body: expect.objectContaining({
             body: 'Verified',
-          }),
-        })
+          })})
       );
     });
 
@@ -1365,13 +1322,9 @@ describe('ticketCommand', () => {
         'agent-123',
       ]);
 
-      expect(agentsControllerFindBySlug).toHaveBeenCalledWith({ slug: 'agent-123' });
+      expect(agentsControllerFindBySlug).toHaveBeenCalledWith({ path: { slug: 'agent-123' }});
       expect(ticketsControllerAssign).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'koda',
-          ref: 'KODA-1',
-          requestBody: { agentId: 'agent-123' },
-        })
+        expect.objectContaining({ body: expect.objectContaining({ agentId: 'agent-123' }), path: expect.objectContaining({ slug: 'koda', ref: 'KODA-1' })})
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });
@@ -1399,11 +1352,7 @@ describe('ticketCommand', () => {
 
       expect(agentsControllerFindBySlug).not.toHaveBeenCalled();
       expect(ticketsControllerAssign).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'koda',
-          ref: 'KODA-1',
-          requestBody: {},
-        })
+        expect.objectContaining({ body: expect.objectContaining({}), path: expect.objectContaining({ slug: 'koda', ref: 'KODA-1' })})
       );
     });
   });
@@ -1430,7 +1379,7 @@ describe('ticketCommand', () => {
       await startCmd?.parseAsync(['node', 'test', 'KODA-1']);
 
       expect(ticketsControllerStart).toHaveBeenCalledWith(
-        expect.objectContaining({ slug: 'koda', ref: 'KODA-1' })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'koda', ref: 'KODA-1' })})
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });
@@ -1485,13 +1434,9 @@ describe('ticketCommand', () => {
       ]);
 
       expect(ticketsControllerFix).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'koda',
-          ref: 'KODA-1',
-          requestBody: expect.objectContaining({
+        expect.objectContaining({ body: expect.objectContaining({
             body: 'Fixed the bug',
-          }),
-        })
+          }), path: expect.objectContaining({ slug: 'koda', ref: 'KODA-1' })})
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });
@@ -1525,11 +1470,9 @@ describe('ticketCommand', () => {
       ]);
 
       expect(ticketsControllerFix).toHaveBeenCalledWith(
-        expect.objectContaining({
-          requestBody: expect.objectContaining({
+        expect.objectContaining({ body: expect.objectContaining({
             body: 'Fixed the bug',
-          }),
-        })
+          })})
       );
     });
 
@@ -1573,11 +1516,9 @@ describe('ticketCommand', () => {
       ]);
 
       expect(ticketsControllerFix).toHaveBeenCalledWith(
-        expect.objectContaining({
-          requestBody: expect.objectContaining({
+        expect.objectContaining({ body: expect.objectContaining({
             body: 'Fixed',
-          }),
-        })
+          })})
       );
     });
   });
@@ -1611,13 +1552,9 @@ describe('ticketCommand', () => {
       ]);
 
       expect(ticketsControllerVerifyFix).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'koda',
-          ref: 'KODA-1',
-          requestBody: expect.objectContaining({
+        expect.objectContaining({ body: expect.objectContaining({
             body: 'Looks good',
-          }),
-        })
+          }), path: expect.objectContaining({ slug: 'koda', ref: 'KODA-1' })})
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });
@@ -1650,11 +1587,9 @@ describe('ticketCommand', () => {
       ]);
 
       expect(ticketsControllerVerifyFix).toHaveBeenCalledWith(
-        expect.objectContaining({
-          requestBody: expect.objectContaining({
+        expect.objectContaining({ body: expect.objectContaining({
             body: 'Need more work',
-          }),
-        })
+          })})
       );
     });
 
@@ -1699,11 +1634,9 @@ describe('ticketCommand', () => {
       ]);
 
       expect(ticketsControllerVerifyFix).toHaveBeenCalledWith(
-        expect.objectContaining({
-          requestBody: expect.objectContaining({
+        expect.objectContaining({ body: expect.objectContaining({
             body: 'Looks good',
-          }),
-        })
+          })})
       );
     });
   });
@@ -1730,7 +1663,7 @@ describe('ticketCommand', () => {
       await closeCmd?.parseAsync(['node', 'test', 'KODA-1']);
 
       expect(ticketsControllerClose).toHaveBeenCalledWith(
-        expect.objectContaining({ slug: 'koda', ref: 'KODA-1' })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'koda', ref: 'KODA-1' })})
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });
@@ -1785,13 +1718,9 @@ describe('ticketCommand', () => {
       ]);
 
       expect(ticketsControllerReject).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'koda',
-          ref: 'KODA-1',
-          requestBody: expect.objectContaining({
+        expect.objectContaining({ body: expect.objectContaining({
             body: 'Not reproducible',
-          }),
-        })
+          }), path: expect.objectContaining({ slug: 'koda', ref: 'KODA-1' })})
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });
@@ -1836,11 +1765,9 @@ describe('ticketCommand', () => {
       ]);
 
       expect(ticketsControllerReject).toHaveBeenCalledWith(
-        expect.objectContaining({
-          requestBody: expect.objectContaining({
+        expect.objectContaining({ body: expect.objectContaining({
             body: 'Rejected',
-          }),
-        })
+          })})
       );
     });
   });
@@ -1925,11 +1852,7 @@ describe('ticketCommand', () => {
       await updateCmd?.parseAsync(['node', 'test', 'KODA-1', '--project', 'koda', '--title', 'New title']);
 
       expect(ticketsControllerUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'koda',
-          ref: 'KODA-1',
-          requestBody: expect.objectContaining({ title: 'New title' }),
-        })
+        expect.objectContaining({ body: expect.objectContaining({ title: 'New title' }), path: expect.objectContaining({ slug: 'koda', ref: 'KODA-1' })})
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });
@@ -1958,11 +1881,7 @@ describe('ticketCommand', () => {
       await updateCmd?.parseAsync(['node', 'test', 'KODA-1', '--project', 'koda', '--priority', 'HIGH']);
 
       expect(ticketsControllerUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'koda',
-          ref: 'KODA-1',
-          requestBody: expect.objectContaining({ priority: 'HIGH' }),
-        })
+        expect.objectContaining({ body: expect.objectContaining({ priority: 'HIGH' }), path: expect.objectContaining({ slug: 'koda', ref: 'KODA-1' })})
       );
     });
 
@@ -2016,7 +1935,7 @@ describe('ticketCommand', () => {
       await deleteCmd?.parseAsync(['node', 'test', 'KODA-1', '--project', 'koda', '--force']);
 
       expect(ticketsControllerSoftDelete).toHaveBeenCalledWith(
-        expect.objectContaining({ slug: 'koda', ref: 'KODA-1' })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'koda', ref: 'KODA-1' })})
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });
@@ -2056,9 +1975,9 @@ describe('ticketCommand', () => {
 
       await assignCmd?.parseAsync(['node', 'test', 'KODA-1', '--project', 'koda', '--agent', 'subrina-coder']);
 
-      expect(agentsControllerFindBySlug).toHaveBeenCalledWith({ slug: 'subrina-coder' });
+      expect(agentsControllerFindBySlug).toHaveBeenCalledWith({ path: { slug: 'subrina-coder' }});
       expect(ticketsControllerAssign).toHaveBeenCalledWith(
-        expect.objectContaining({ slug: 'koda', ref: 'KODA-1', requestBody: { agentId: 'agent-123' } })
+        expect.objectContaining({ body: expect.objectContaining({ agentId: 'agent-123' }), path: expect.objectContaining({ slug: 'koda', ref: 'KODA-1' })})
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });
@@ -2200,9 +2119,7 @@ describe('ticketCommand', () => {
       await fixCmd?.parseAsync(['node', 'test', 'KODA-1', '--comment', 'Fixed null ref']);
 
       expect(ticketsControllerFix).toHaveBeenCalledWith(
-        expect.objectContaining({
-          requestBody: expect.objectContaining({ body: 'Fixed null ref' }),
-        })
+        expect.objectContaining({ body: expect.objectContaining({ body: 'Fixed null ref' })})
       );
     });
   });
@@ -2221,11 +2138,7 @@ describe('ticketCommand', () => {
         ]);
 
         expect(labelsControllerAssignLabelFromHttp).toHaveBeenCalledWith(
-          expect.objectContaining({
-            slug: 'koda',
-            ref: 'KODA-1',
-            requestBody: expect.objectContaining({ labelId: 'lbl-1' }),
-          })
+          expect.objectContaining({ body: expect.objectContaining({ labelId: 'lbl-1' }), path: expect.objectContaining({ slug: 'koda', ref: 'KODA-1' })})
         );
         expect(processExitSpy).toHaveBeenCalledWith(0);
       });
@@ -2259,11 +2172,7 @@ describe('ticketCommand', () => {
         ]);
 
         expect(labelsControllerRemoveLabelFromHttp).toHaveBeenCalledWith(
-          expect.objectContaining({
-            slug: 'koda',
-            ref: 'KODA-1',
-            labelId: 'lbl-1',
-          })
+          expect.objectContaining({ path: expect.objectContaining({ slug: 'koda', ref: 'KODA-1', labelId: 'lbl-1' })})
         );
         expect(processExitSpy).toHaveBeenCalledWith(0);
       });

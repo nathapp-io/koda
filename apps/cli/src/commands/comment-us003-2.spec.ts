@@ -41,9 +41,6 @@ jest.mock('../generated', () => ({
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
-jest.mock('../generated/core/OpenAPI', () => ({
-  OpenAPI: { BASE: '', TOKEN: '' },
-}));
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -112,7 +109,7 @@ describe('US-003-2: commentCommand add — resolveContext wiring', () => {
 
     expect(commentsControllerCreateFromHttp).toHaveBeenCalled();
     const callArgs = (commentsControllerCreateFromHttp as jest.Mock).mock.calls[0][0] as Record<string, unknown>;
-    expect(callArgs).toMatchObject({ slug: 'demo' });
+    expect(callArgs).toMatchObject({ path: { slug: 'demo' } });
   });
 
   /**

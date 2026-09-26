@@ -18,7 +18,6 @@ jest.mock('../generated', () => ({
   contextControllerQueryContext: jest.fn(),
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
-jest.mock('../generated/core/OpenAPI', () => ({ OpenAPI: { BASE: '', TOKEN: '' } }));
 
 jest.mock('../config', () => ({
   resolveContext: jest.fn(),
@@ -65,7 +64,7 @@ describe('contextCommand', () => {
 
       await program.parseAsync(['node', 'koda', 'context', 'get', '--project', PROJECT_SLUG]);
 
-      expect(mockGetContext).toHaveBeenCalledWith({ slug: PROJECT_SLUG });
+      expect(mockGetContext).toHaveBeenCalledWith({ path: { slug: PROJECT_SLUG }});
       expect(logSpy).toHaveBeenCalledWith(JSON.stringify(contextData, null, 2));
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
@@ -100,10 +99,7 @@ describe('contextCommand', () => {
         '--intent', 'diagnose',
       ]);
 
-      expect(mockQueryContext).toHaveBeenCalledWith(expect.objectContaining({
-        slug: PROJECT_SLUG,
-        requestBody: expect.objectContaining({ query: 'what is broken', intent: 'diagnose' }),
-      }));
+      expect(mockQueryContext).toHaveBeenCalledWith(expect.objectContaining({ body: expect.objectContaining({ query: 'what is broken', intent: 'diagnose' }), path: expect.objectContaining({ slug: PROJECT_SLUG })}));
       expect(logSpy).toHaveBeenCalledWith(JSON.stringify(result, null, 2));
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
@@ -118,12 +114,10 @@ describe('contextCommand', () => {
         '--token-budget', '4000',
       ]);
 
-      expect(mockQueryContext).toHaveBeenCalledWith(expect.objectContaining({
-        requestBody: expect.objectContaining({
+      expect(mockQueryContext).toHaveBeenCalledWith(expect.objectContaining({ body: expect.objectContaining({
           ticketIds: ['tid-1', 'tid-2'],
           tokenBudget: 4000,
-        }),
-      }));
+        })}));
     });
 
     it('errors when project is not configured', async () => {

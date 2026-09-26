@@ -27,9 +27,9 @@ export function labelCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         const response = await labelsControllerCreateFromHttp({
-          slug: ctx.projectSlug,
-          requestBody: { name: options.name, color: options.color },
-        });
+  body: { name: options.name, color: options.color },
+  path: { slug: ctx.projectSlug }
+  });
         const labelData = unwrap<{ id: string; name: string; color?: string }>(response);
 
         if (options.json) {
@@ -58,7 +58,7 @@ export function labelCommand(program: Command): void {
       try {
         const ctx = await withContext({ projectSlug: options.project });
 
-        const response = await labelsControllerFindByProjectFromHttp({ slug: ctx.projectSlug });
+        const response = await labelsControllerFindByProjectFromHttp({ path: { slug: ctx.projectSlug }});
         const data = unwrap<{ items?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>>(response);
         const items: Array<Record<string, unknown>> = Array.isArray(data)
           ? data
@@ -87,7 +87,7 @@ export function labelCommand(program: Command): void {
       try {
         const ctx = await withContext({ projectSlug: options.project });
 
-        await labelsControllerDeleteFromHttp({ slug: ctx.projectSlug, id: options.id });
+        await labelsControllerDeleteFromHttp({ path: { slug: ctx.projectSlug, id: options.id }});
 
         console.log(`Label '${options.id}' deleted.`);
         process.exit(0);
@@ -117,10 +117,9 @@ export function labelCommand(program: Command): void {
         if (options.color) requestBody.color = options.color;
 
         const response = await labelsControllerUpdateFromHttp({
-          slug: ctx.projectSlug,
-          id: options.id,
-          requestBody,
-        });
+  body: requestBody,
+  path: { slug: ctx.projectSlug, id: options.id }
+  });
         const labelData = unwrap<{ id: string; name: string; color?: string }>(response);
 
         if (options.json) {

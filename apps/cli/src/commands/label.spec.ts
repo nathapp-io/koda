@@ -33,9 +33,6 @@ jest.mock('../generated', () => ({
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
-jest.mock('../generated/core/OpenAPI', () => ({
-  OpenAPI: { BASE: '', TOKEN: '' },
-}));
 
 // Mock config module to use mockData instead of real filesystem
 jest.mock('../config', () => ({
@@ -110,10 +107,7 @@ describe('labelCommand', () => {
       ]);
 
       expect(labelsControllerCreateFromHttp).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'koda',
-          requestBody: expect.objectContaining({ name: 'Bug', color: '#ff0000' }),
-        })
+        expect.objectContaining({ body: expect.objectContaining({ name: 'Bug', color: '#ff0000' }), path: expect.objectContaining({ slug: 'koda' })})
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
@@ -187,7 +181,7 @@ describe('labelCommand', () => {
       await listCmd?.parseAsync(['node', 'test', '--project', 'koda']);
 
       expect(labelsControllerFindByProjectFromHttp).toHaveBeenCalledWith(
-        expect.objectContaining({ slug: 'koda' })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'koda' })})
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
@@ -240,7 +234,7 @@ describe('labelCommand', () => {
       ]);
 
       expect(labelsControllerDeleteFromHttp).toHaveBeenCalledWith(
-        expect.objectContaining({ slug: 'koda', id: 'lbl-1' })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'koda', id: 'lbl-1' })})
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
@@ -291,11 +285,7 @@ describe('labelCommand', () => {
       ]);
 
       expect(labelsControllerUpdateFromHttp).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'koda',
-          id: 'lbl-1',
-          requestBody: expect.objectContaining({ name: 'Bug Updated' }),
-        })
+        expect.objectContaining({ body: expect.objectContaining({ name: 'Bug Updated' }), path: expect.objectContaining({ slug: 'koda', id: 'lbl-1' })})
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
     });

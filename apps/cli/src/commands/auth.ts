@@ -1,12 +1,12 @@
 import { Command } from 'commander';
 import { resolveContext, clearApiKey } from '../config';
-import { OpenAPI } from '../generated/core/OpenAPI';
 import {
   authControllerMe,
   authControllerRegister,
   authControllerLogout,
 } from '../generated';
 import { table } from '../utils/output';
+import { configureApiClient } from '../utils/api-client';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
@@ -57,10 +57,10 @@ export function authCommand(program: Command): void {
           handleApiError(new Error('API URL not configured. Run: koda login --api-key <key>'), { configError: true });
         }
 
-        OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
+        configureApiClient(ctx.apiUrl.replace(/\/api\/?$/, ''));
 
         const response = await authControllerRegister({
-          requestBody: { email: options.email, password: options.password, name: options.name },
+          body: { email: options.email, password: options.password, name: options.name },
         });
         const data = unwrap<Record<string, unknown>>(response);
 

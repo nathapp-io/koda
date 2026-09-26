@@ -18,12 +18,12 @@
     "db:studio": "turbo run db:studio",
     "db:reset": "turbo run db:reset",
     "api:export-spec": "bash -c 'cd apps/api && bun run build && bun scripts/export-spec.cjs'",
-    "generate:cli": "openapi-ts --input openapi.json --output apps/cli/src/generated --client axios",
+    "generate:cli": "openapi-ts",
     "generate": "bun run api:export-spec && bun run generate:cli",
     "generate:spec": "bun run api:export-spec"
   },
   "devDependencies": {
-    "@hey-api/openapi-ts": "^0.46.0",
+    "@hey-api/openapi-ts": "0.99.0",
     "@types/node": "^22.0.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",

@@ -20,7 +20,7 @@ export function contextCommand(program: Command): void {
       try {
         const context = await withContext({ projectSlug: options.project });
 
-        const response = await contextControllerGetContext({ slug: context.projectSlug });
+        const response = await contextControllerGetContext({ path: { slug: context.projectSlug }});
         const data = unwrap<Record<string, unknown>>(response);
 
         console.log(JSON.stringify(data, null, 2));
@@ -50,9 +50,9 @@ export function contextCommand(program: Command): void {
         if (options.tokenBudget) requestBody['tokenBudget'] = options.tokenBudget;
 
         const response = await contextControllerQueryContext({
-          slug: context.projectSlug,
-          requestBody,
-        });
+  body: requestBody,
+  path: { slug: context.projectSlug }
+  });
         const data = unwrap<Record<string, unknown>>(response);
 
         console.log(JSON.stringify(data, null, 2));

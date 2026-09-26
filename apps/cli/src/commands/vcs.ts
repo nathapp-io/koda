@@ -20,7 +20,7 @@ import {
   vcsControllerSyncAll,
   vcsControllerSyncIssue,
   vcsControllerSyncPr,
-} from '../generated/services.gen';
+} from '../generated';
 
 /**
  * Format a connection for display
@@ -106,9 +106,9 @@ export function vcsCommand(program: Command): void {
         };
 
         const response = await vcsControllerCreateConnection({
-          slug: ctx.projectSlug,
-          requestBody,
-        });
+  body: requestBody,
+  path: { slug: ctx.projectSlug }
+  });
 
         // CLI-01: route through unwrap() so the JSON envelope is unwrapped
         // consistently with the rest of the generated-client surface.
@@ -136,7 +136,7 @@ export function vcsCommand(program: Command): void {
       try {
         const ctx = await withContext({ projectSlug: options.project });
 
-        const response = await vcsControllerGetConnection({ slug: ctx.projectSlug });
+        const response = await vcsControllerGetConnection({ path: { slug: ctx.projectSlug }});
         const data = unwrap<ConnectionRecord>(response);
 
         if (options.json) {
@@ -169,7 +169,7 @@ export function vcsCommand(program: Command): void {
       try {
         const ctx = await withContext({ projectSlug: options.project });
 
-        await vcsControllerDeleteConnection({ slug: ctx.projectSlug });
+        await vcsControllerDeleteConnection({ path: { slug: ctx.projectSlug }});
 
         console.log(VCS_MESSAGES.DISCONNECTED(ctx.projectSlug));
 
@@ -204,9 +204,9 @@ export function vcsCommand(program: Command): void {
         }
 
         await vcsControllerUpdateConnection({
-          slug: ctx.projectSlug,
-          requestBody,
-        });
+  body: requestBody,
+  path: { slug: ctx.projectSlug }
+  });
 
         console.log(VCS_MESSAGES.SETTINGS_UPDATED(ctx.projectSlug));
 
@@ -224,8 +224,8 @@ export function vcsCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         const response = await vcsControllerTestConnection({
-          slug: ctx.projectSlug,
-        });
+  path: { slug: ctx.projectSlug }
+  });
 
         // CLI-01: unwrap envelope so ok/error are always populated from the
         // real API payload (previously `result.ok` was always undefined).
@@ -253,8 +253,8 @@ export function vcsCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         const response = await vcsControllerSyncAll({
-          slug: ctx.projectSlug,
-        });
+  path: { slug: ctx.projectSlug }
+  });
 
         // CLI-01: unwrap envelope so issuesSynced/issuesSkipped are populated
         // (previously `result.issuesSynced` was always undefined).
@@ -285,9 +285,8 @@ export function vcsCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         const response = await vcsControllerSyncIssue({
-          slug: ctx.projectSlug,
-          issueNumber: String(issueNumber),
-        });
+  path: { slug: ctx.projectSlug, issueNumber: String(issueNumber) }
+  });
 
         // CLI-01: unwrap envelope so result.tickets is populated.
         const result = unwrap<SyncIssueResult>(response);
@@ -312,8 +311,8 @@ export function vcsCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         const response = await vcsControllerSyncPr({
-          slug: ctx.projectSlug,
-        });
+  path: { slug: ctx.projectSlug }
+  });
 
         // CLI-01: unwrap envelope so result.updated is populated.
         const result = unwrap<SyncPrResult>(response);

@@ -34,7 +34,7 @@ function envelope<T>(data: T): { ret: 0; data: T } {
 }
 
 // Mock generated API client
-jest.mock('../generated/services.gen', () => ({
+jest.mock('../generated', () => ({
   vcsControllerUpdateConnection: jest.fn(),
   vcsControllerTestConnection: jest.fn(),
   vcsControllerSyncAll: jest.fn(),
@@ -45,9 +45,6 @@ jest.mock('../generated/services.gen', () => ({
   vcsControllerDeleteConnection: jest.fn(),
 }));
 
-jest.mock('../generated/core/OpenAPI', () => ({
-  OpenAPI: { BASE: '', TOKEN: '' },
-}));
 
 // Mock config module
 jest.mock('../config', () => ({
@@ -75,7 +72,7 @@ import {
   vcsControllerTestConnection,
   vcsControllerSyncAll,
   vcsControllerSyncIssue,
-} from '../generated/services.gen';
+} from '../generated';
 
 describe('vcsCommand - update, test, sync, import', () => {
   let program: Command;
@@ -146,13 +143,10 @@ describe('vcsCommand - update, test, sync, import', () => {
       ]);
 
       expect(vcsControllerUpdateConnection).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'my-project',
-          requestBody: expect.objectContaining({
+        expect.objectContaining({ body: expect.objectContaining({
             syncMode: 'webhook',
             allowedAuthors: ['user1', 'user2'],
-          }),
-        })
+          }), path: expect.objectContaining({ slug: 'my-project' })})
       );
     });
 
@@ -179,12 +173,9 @@ describe('vcsCommand - update, test, sync, import', () => {
       await updateCmd?.parseAsync(['node', 'test', '--sync-mode', 'webhook']);
 
       expect(vcsControllerUpdateConnection).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'my-project',
-          requestBody: expect.objectContaining({
+        expect.objectContaining({ body: expect.objectContaining({
             syncMode: 'webhook',
-          }),
-        })
+          }), path: expect.objectContaining({ slug: 'my-project' })})
       );
     });
 
@@ -211,12 +202,9 @@ describe('vcsCommand - update, test, sync, import', () => {
       await updateCmd?.parseAsync(['node', 'test', '--authors', 'user1,user2']);
 
       expect(vcsControllerUpdateConnection).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'my-project',
-          requestBody: expect.objectContaining({
+        expect.objectContaining({ body: expect.objectContaining({
             allowedAuthors: ['user1', 'user2'],
-          }),
-        })
+          }), path: expect.objectContaining({ slug: 'my-project' })})
       );
     });
 
@@ -252,9 +240,7 @@ describe('vcsCommand - update, test, sync, import', () => {
       ]);
 
       expect(vcsControllerUpdateConnection).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'another-project',
-        })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'another-project' })})
       );
     });
 
@@ -312,9 +298,7 @@ describe('vcsCommand - update, test, sync, import', () => {
       await testCmd?.parseAsync(['node', 'test']);
 
       expect(vcsControllerTestConnection).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'my-project',
-        })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'my-project' })})
       );
       expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Connection OK'));
     });
@@ -347,9 +331,7 @@ describe('vcsCommand - update, test, sync, import', () => {
       await testCmd?.parseAsync(['node', 'test', '--project', 'another-project']);
 
       expect(vcsControllerTestConnection).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'another-project',
-        })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'another-project' })})
       );
     });
 
@@ -395,9 +377,7 @@ describe('vcsCommand - update, test, sync, import', () => {
       await syncCmd?.parseAsync(['node', 'test']);
 
       expect(vcsControllerSyncAll).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'my-project',
-        })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'my-project' })})
       );
       expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('5'));
       expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('2'));
@@ -461,9 +441,7 @@ describe('vcsCommand - update, test, sync, import', () => {
       await syncCmd?.parseAsync(['node', 'test', '--project', 'another-project']);
 
       expect(vcsControllerSyncAll).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'another-project',
-        })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'another-project' })})
       );
     });
 
@@ -509,10 +487,7 @@ describe('vcsCommand - update, test, sync, import', () => {
       await importCmd?.parseAsync(['node', 'test', '42']);
 
       expect(vcsControllerSyncIssue).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'my-project',
-          issueNumber: '42',
-        })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'my-project', issueNumber: '42' })})
       );
       expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('PROJ-123'));
     });
@@ -565,10 +540,7 @@ describe('vcsCommand - update, test, sync, import', () => {
       await importCmd?.parseAsync(['node', 'test', '42', '--project', 'another-project']);
 
       expect(vcsControllerSyncIssue).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'another-project',
-          issueNumber: '42',
-        })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'another-project', issueNumber: '42' })})
       );
     });
 

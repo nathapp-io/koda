@@ -89,14 +89,14 @@ export function ticketCommand(program: Command): void {
         }
 
         const response = await ticketsControllerCreate({
-          slug: ctx.projectSlug,
-          requestBody: {
+  body: {
             type: options.type as 'BUG' | 'ENHANCEMENT' | 'TASK' | 'QUESTION',
             title: options.title,
             description: options.desc,
             priority: options.priority,
           },
-        });
+  path: { slug: ctx.projectSlug }
+  });
         const ticketData = unwrap<{ ref?: string; number?: number }>(response);
 
         if (options.json) {
@@ -128,15 +128,9 @@ export function ticketCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         const response = await ticketsControllerFindAll({
-          slug: ctx.projectSlug,
-          status: options.status,
-          type: options.type,
-          priority: options.priority,
-          assignedTo: options.assignedTo,
-          unassigned: options.unassigned ? true : undefined,
-          limit: parseInt(options.limit, 10),
-          page: parseInt(options.page, 10),
-        });
+  path: { slug: ctx.projectSlug },
+  query: { status: options.status, type: options.type, priority: options.priority, assignedTo: options.assignedTo, unassigned: options.unassigned ? true : undefined, limit: parseInt(options.limit, 10), page: parseInt(options.page, 10) }
+  });
         const data = unwrap<{ items?: TicketRow[] } | TicketRow[]>(response);
         const items: TicketRow[] = Array.isArray(data) ? data : ((data as { items?: TicketRow[] }).items ?? []);
 
@@ -171,10 +165,9 @@ export function ticketCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         const response = await ticketsControllerFindAll({
-          slug: ctx.projectSlug,
-          status: options.status,
-          assignedTo: 'self',
-        });
+  path: { slug: ctx.projectSlug },
+  query: { status: options.status, assignedTo: 'self' }
+  });
         const data = unwrap<{ items?: TicketRow[] } | TicketRow[]>(response);
         const items: TicketRow[] = Array.isArray(data) ? data : ((data as { items?: TicketRow[] }).items ?? []);
 
@@ -207,7 +200,7 @@ export function ticketCommand(program: Command): void {
       try {
         const ctx = await withContext({ projectSlug: options.project });
 
-        const response = await ticketsControllerFindByRef({ slug: ctx.projectSlug, ref });
+        const response = await ticketsControllerFindByRef({ path: { slug: ctx.projectSlug, ref }});
         const ticketData = unwrap<TicketDetail>(response);
 
         if (options.json) {
@@ -294,10 +287,9 @@ export function ticketCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         await ticketsControllerVerify({
-          slug: ctx.projectSlug,
-          ref,
-          requestBody: { body: options.comment },
-        });
+  body: { body: options.comment },
+  path: { slug: ctx.projectSlug, ref }
+  });
         console.log(`✓ Ticket verified successfully`);
         process.exit(0);
       } catch (err: unknown) {
@@ -332,7 +324,7 @@ export function ticketCommand(program: Command): void {
         const requestBody: AssignTicketDto = {};
         if (requestedTarget) {
           const agent = unwrap<{ id: string }>(
-            await agentsControllerFindBySlug({ slug: requestedTarget }),
+            await agentsControllerFindBySlug({ path: { slug: requestedTarget }}),
           );
           requestBody.agentId = agent.id;
         } else if (options.user) {
@@ -340,10 +332,9 @@ export function ticketCommand(program: Command): void {
         }
 
         const response = await ticketsControllerAssign({
-          slug: ctx.projectSlug,
-          ref,
-          requestBody,
-        });
+  body: requestBody,
+  path: { slug: ctx.projectSlug, ref }
+  });
         const ticketData = unwrap<TicketRow>(response);
 
         if (options.json) {
@@ -371,7 +362,7 @@ export function ticketCommand(program: Command): void {
       try {
         const ctx = await withContext({ projectSlug: options.project });
 
-        await ticketsControllerStart({ slug: ctx.projectSlug, ref });
+        await ticketsControllerStart({ path: { slug: ctx.projectSlug, ref }});
         console.log(`✓ Ticket started successfully`);
         process.exit(0);
       } catch (err: unknown) {
@@ -395,10 +386,9 @@ export function ticketCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         await ticketsControllerFix({
-          slug: ctx.projectSlug,
-          ref,
-          requestBody: { body: options.comment },
-        });
+  body: { body: options.comment },
+  path: { slug: ctx.projectSlug, ref }
+  });
         console.log(`✓ Fix submitted successfully`);
         process.exit(0);
       } catch (err: unknown) {
@@ -431,15 +421,14 @@ export function ticketCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         await ticketsControllerVerifyFix({
-          slug: ctx.projectSlug,
-          ref,
-          requestBody: { body: options.comment },
-        });
+  body: { body: options.comment },
+  path: { slug: ctx.projectSlug, ref }
+  });
 
         // The generated client currently does not expose the approve query param.
         // Preserve expected CLI semantics: --pass should conclude with CLOSED.
         if (options.pass) {
-          await ticketsControllerClose({ slug: ctx.projectSlug, ref });
+          await ticketsControllerClose({ path: { slug: ctx.projectSlug, ref }});
           console.log(`✓ Fix verified and ticket closed successfully`);
         } else {
           console.log(`✓ Fix verification submitted successfully`);
@@ -459,7 +448,7 @@ export function ticketCommand(program: Command): void {
       try {
         const ctx = await withContext({ projectSlug: options.project });
 
-        await ticketsControllerClose({ slug: ctx.projectSlug, ref });
+        await ticketsControllerClose({ path: { slug: ctx.projectSlug, ref }});
         console.log(`✓ Ticket closed successfully`);
         process.exit(0);
       } catch (err: unknown) {
@@ -482,10 +471,9 @@ export function ticketCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         await ticketsControllerReject({
-          slug: ctx.projectSlug,
-          ref,
-          requestBody: { body: options.comment },
-        });
+  body: { body: options.comment },
+  path: { slug: ctx.projectSlug, ref }
+  });
         console.log(`✓ Ticket rejected successfully`);
         process.exit(0);
       } catch (err: unknown) {
@@ -510,7 +498,7 @@ export function ticketCommand(program: Command): void {
         if (options.desc) requestBody.description = options.desc;
         if (options.priority) requestBody.priority = options.priority;
 
-        const response = await ticketsControllerUpdate({ slug: ctx.projectSlug, ref, requestBody });
+        const response = await ticketsControllerUpdate({ body: requestBody, path: { slug: ctx.projectSlug, ref }});
         const ticketData = unwrap<TicketRow>(response);
 
         if (options.json) {
@@ -538,7 +526,7 @@ export function ticketCommand(program: Command): void {
 
         const ctx = await withContext({ projectSlug: options.project });
 
-        await ticketsControllerSoftDelete({ slug: ctx.projectSlug, ref });
+        await ticketsControllerSoftDelete({ path: { slug: ctx.projectSlug, ref }});
 
         console.log(`✓ Ticket deleted successfully`);
         process.exit(0);
@@ -558,10 +546,9 @@ export function ticketCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         const response = await ticketLinksControllerCreate({
-          slug: ctx.projectSlug,
-          ref,
-          requestBody: { url: options.url },
-        });
+  body: { url: options.url },
+  path: { slug: ctx.projectSlug, ref }
+  });
         const linkData = unwrap<TicketLink>(response);
 
         if (options.json) {
@@ -586,7 +573,7 @@ export function ticketCommand(program: Command): void {
       try {
         const ctx = await withContext({ projectSlug: options.project });
 
-        const listResponse = await ticketLinksControllerFindAll({ slug: ctx.projectSlug, ref });
+        const listResponse = await ticketLinksControllerFindAll({ path: { slug: ctx.projectSlug, ref }});
         const links = unwrap<TicketLink[]>(listResponse);
         const match = links.find((l) => l.url === options.url);
 
@@ -595,7 +582,7 @@ export function ticketCommand(program: Command): void {
           process.exit(1);
         }
 
-        await ticketLinksControllerRemove({ slug: ctx.projectSlug, ref, linkId: match.id });
+        await ticketLinksControllerRemove({ path: { slug: ctx.projectSlug, ref, linkId: match.id }});
         process.exit(0);
       } catch (err: unknown) {
         handleApiError(err);
@@ -614,10 +601,9 @@ export function ticketCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         await labelsControllerAssignLabelFromHttp({
-          slug: ctx.projectSlug,
-          ref,
-          requestBody: { labelId: options.label },
-        });
+  body: { labelId: options.label },
+  path: { slug: ctx.projectSlug, ref }
+  });
 
         console.log(`✓ Label attached to ticket ${ref}`);
         process.exit(0);
@@ -637,10 +623,8 @@ export function ticketCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         await labelsControllerRemoveLabelFromHttp({
-          slug: ctx.projectSlug,
-          ref,
-          labelId: options.label,
-        });
+  path: { slug: ctx.projectSlug, ref, labelId: options.label }
+  });
         console.log(`✓ Label detached from ticket ${ref}`);
         process.exit(0);
       } catch (err: unknown) {

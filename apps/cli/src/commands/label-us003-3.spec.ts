@@ -45,9 +45,6 @@ jest.mock('../generated', () => ({
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
-jest.mock('../generated/core/OpenAPI', () => ({
-  OpenAPI: { BASE: '', TOKEN: '' },
-}));
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -137,7 +134,7 @@ describe('US-003-3: labelCommand — resolveContext wiring', () => {
 
       expect(labelsControllerCreateFromHttp).toHaveBeenCalled();
       const callOpts = (labelsControllerCreateFromHttp as jest.Mock).mock.calls[0][0] as Record<string, unknown>;
-      expect(callOpts).toMatchObject({ slug: 'configured-project' });
+      expect(callOpts).toMatchObject({ path: { slug: 'configured-project' } });
     });
 
     /**
@@ -177,7 +174,7 @@ describe('US-003-3: labelCommand — resolveContext wiring', () => {
 
       expect(labelsControllerFindByProjectFromHttp).toHaveBeenCalled();
       const callOpts = (labelsControllerFindByProjectFromHttp as jest.Mock).mock.calls[0][0] as Record<string, unknown>;
-      expect(callOpts).toMatchObject({ slug: 'configured-project' });
+      expect(callOpts).toMatchObject({ path: { slug: 'configured-project' } });
     });
 
     /**
@@ -217,7 +214,7 @@ describe('US-003-3: labelCommand — resolveContext wiring', () => {
 
       expect(labelsControllerDeleteFromHttp).toHaveBeenCalled();
       const callOpts = (labelsControllerDeleteFromHttp as jest.Mock).mock.calls[0][0] as Record<string, unknown>;
-      expect(callOpts).toMatchObject({ slug: 'configured-project' });
+      expect(callOpts).toMatchObject({ path: { slug: 'configured-project' } });
     });
 
     /**
