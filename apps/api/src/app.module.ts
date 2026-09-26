@@ -9,6 +9,7 @@ import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { ThrottlerModule, DefaultThrottlerGuard } from '@nathapp/nestjs-throttler';
 import { PrismaClient } from '@prisma/client';
 import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
 import { AgentsModule } from './agents/agents.module';
 import { ProjectsModule } from './projects/projects.module';
 import { TicketsModule } from './tickets/tickets.module';
@@ -76,6 +77,7 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
       }),
     }),
     AuthModule,
+    UsersModule,
     AgentsModule,
     ProjectsModule,
     TicketsModule,
