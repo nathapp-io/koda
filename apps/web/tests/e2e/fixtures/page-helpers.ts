@@ -49,11 +49,13 @@ export async function webLogin(
 
   // 3. Navigate to the app and wait for full hydration
   // Use networkidle to ensure SSR auth middleware resolves before continuing
+  // networkidle is safe here only while the dashboard opens no live stream; switch to waitForHydration if it ever does.
   await page.goto(webUrl, { waitUntil: 'networkidle' });
 
   // 4. Retry a few times if middleware still routes to /login while hydrating
   for (let attempt = 0; attempt < 3 && page.url().endsWith('/login'); attempt += 1) {
     await page.waitForTimeout(300 * (attempt + 1));
+    // networkidle is safe here only while the dashboard opens no live stream; switch to waitForHydration if it ever does.
     await page.goto(webUrl, { waitUntil: 'networkidle' });
   }
 

@@ -88,7 +88,6 @@ test.describe('Live updates (SSE through the Nuxt proxy)', () => {
 
   test('B on ticket detail sees a new comment appear', async ({ browser }) => {
     const ticket = await createTicket(token, projectSlug, { title: `Live comment ${Date.now()}`, type: 'BUG' });
-    // (only ticket.ref is used below)
     const b = await openAs(browser, MEMBER.email, MEMBER.password);
     try {
       await gotoLive(b.page, `/${projectSlug}/tickets/${ticket.ref}`, projectSlug);

@@ -14,11 +14,11 @@ class FakeEventSource implements EventSourceLike {
   onopen: ((ev: unknown) => void) | null = null
   onerror: ((ev: unknown) => void) | null = null
   closed = false
-  private listeners: Record<string, Array<(ev: { data: string }) => void>> = {}
+  private listeners: Record<string, Array<(ev: { data?: string }) => void>> = {}
 
   constructor(readonly url: string) {}
 
-  addEventListener(type: string, listener: (ev: { data: string }) => void): void {
+  addEventListener(type: string, listener: (ev: { data?: string }) => void): void {
     this.listeners = { ...this.listeners, [type]: [...(this.listeners[type] ?? []), listener] }
   }
 
@@ -34,6 +34,12 @@ class FakeEventSource implements EventSourceLike {
 
   emit(type: string, data: unknown): void {
     for (const listener of this.listeners[type] ?? []) listener({ data: JSON.stringify(data) })
+  }
+
+  // Native network error, as the browser dispatches it to addEventListener
+  // listeners: same `error` type but without a .data payload.
+  listenerError(): void {
+    for (const listener of this.listeners.error ?? []) listener({})
   }
 
   transientError(): void {
@@ -154,6 +160,39 @@ describe('createProjectEventStream', () => {
     expect(s.sources).toHaveLength(2)
     s.latest().open()
     expect(s.onResync).toHaveBeenCalledTimes(1)
+  })
+
+  test('a server-sent error frame is terminal even while the socket is open', async () => {
+    s.latest().open()
+    s.latest().emit('error', { error: 'member_removed' })
+    await flush()
+    expect(s.deps.refreshAuth).toHaveBeenCalledTimes(1)
+    expect(s.sources[0].closed).toBe(true)
+
+    expect(s.runTimers()).toEqual([1000])
+    expect(s.sources).toHaveLength(2)
+    s.latest().open()
+    expect(s.onResync).toHaveBeenCalledTimes(1)
+  })
+
+  test('a server-sent error frame does not double-fire when the close also lands', async () => {
+    s.latest().open()
+    s.latest().emit('error', { error: 'member_removed' })
+    await flush()
+    s.latest().terminalError()
+    await flush()
+    expect(s.deps.refreshAuth).toHaveBeenCalledTimes(1)
+    expect(s.runTimers()).toEqual([1000])
+    expect(s.sources).toHaveLength(2)
+  })
+
+  test('a data-less error via the listener stays transient while the socket is open', async () => {
+    s.latest().open()
+    s.latest().listenerError()
+    await flush()
+    expect(s.deps.refreshAuth).not.toHaveBeenCalled()
+    expect(s.runTimers()).toEqual([])
+    expect(s.sources).toHaveLength(1)
   })
 
   test('backs off 1 s, 2 s, 4 s … across consecutive terminal failures', async () => {

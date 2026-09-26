@@ -4,7 +4,8 @@
  * Transient drops: the browser EventSource reconnects by itself; the next
  * open fires onResync so pages refetch what they may have missed.
  * Terminal failures (readyState CLOSED, e.g. 401 after the access cookie
- * expired, 403, 429): refresh auth, then reopen with backoff. Give up after
+ * expired, 403, 429, or a server-sent `error` frame: HTTP 200 followed by an
+ * in-stream refusal): refresh auth, then reopen with backoff. Give up after
  * MAX_TERMINAL_FAILURES in a row or when the refresh fails; the page keeps
  * working as a static page.
  */
@@ -30,7 +31,7 @@ export interface EventSourceLike {
   readonly readyState: number
   onopen: ((ev: unknown) => void) | null
   onerror: ((ev: unknown) => void) | null
-  addEventListener: (type: string, listener: (ev: { data: string }) => void) => void
+  addEventListener: (type: string, listener: (ev: { data?: string }) => void) => void
   close: () => void
 }
 
@@ -73,6 +74,8 @@ export function createProjectEventStream(
   let stopped = false
   let hadError = false
   let failures = 0
+  // seen intentionally persists across reconnects: once resync refetches the
+  // gap, a redelivered pre-gap event is still dropped by this window.
   let seen: readonly string[] = []
 
   const isNew = (id: string): boolean => {
@@ -100,6 +103,17 @@ export function createProjectEventStream(
     }, delay)
   }
 
+  // Shared terminal/transient path so counting, backoff and stopped semantics
+  // stay identical for both entry points; the current-source guard keeps a
+  // refusal frame and the socket close it triggers from double-running recover.
+  const handleFailure = (es: EventSourceLike, terminal: boolean): void => {
+    hadError = true
+    if (!terminal || stopped || source !== es) return
+    es.close()
+    source = null
+    void recover()
+  }
+
   const open = (): void => {
     if (stopped) return
     const es = deps.createEventSource(url)
@@ -112,16 +126,16 @@ export function createProjectEventStream(
       }
     }
     es.addEventListener('ticket', (ev) => {
-      const event = parseLiveEvent(ev.data)
+      const event = parseLiveEvent(ev.data ?? '')
       if (event && isNew(event.id)) handlers.onEvent(event)
     })
-    es.onerror = () => {
-      hadError = true
-      if (stopped || es.readyState !== EVENT_SOURCE_CLOSED) return
-      es.close()
-      source = null
-      void recover()
-    }
+    // A server-sent `error` frame arrives here as a MessageEvent carrying
+    // .data and is terminal even while the socket is OPEN; native network
+    // errors arrive without .data and stay transient vs terminal by readyState.
+    es.addEventListener('error', (ev) => {
+      handleFailure(es, typeof ev.data === 'string' || es.readyState === EVENT_SOURCE_CLOSED)
+    })
+    es.onerror = () => handleFailure(es, es.readyState === EVENT_SOURCE_CLOSED)
   }
 
   open()
