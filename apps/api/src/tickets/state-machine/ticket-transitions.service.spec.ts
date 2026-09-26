@@ -117,8 +117,6 @@ describe('TicketTransitionsService', () => {
       findProjectBySlug: jest.fn(),
       findLastTicketInProject: jest.fn(),
       createTicket: jest.fn(),
-      findTicketsByProject: jest.fn(),
-      countTicketsByProject: jest.fn(),
       findTicketByProjectAndNumber: jest.fn(),
       findTicketById: jest.fn(),
       updateTicket: jest.fn(),
