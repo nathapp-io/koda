@@ -4,9 +4,14 @@ import { CacheManager } from '@nathapp/nestjs-cache';
 import { AuthService } from './auth.service';
 import { PrismaAuthRepository } from './prisma-auth.repository';
 import { ConfigService } from '@nestjs/config';
-import { AppException, AuthException } from '@nathapp/nestjs-common';
+import { AppException, AuthException, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { Prisma } from '@prisma/client';
+import { AUTH_CFG } from '../config/auth.config';
+import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import type { IPrincipal } from './types';
-import * as bcrypt from 'bcrypt';
+// Default (not `import * as`): the interop namespace object has
+// non-configurable properties, which would make jest.spyOn(bcrypt, 'hash') throw.
+import bcrypt from 'bcrypt';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -19,6 +24,7 @@ describe('AuthService', () => {
     passwordHash: 'hashed-password',
     role: 'MEMBER',
     tokenVersion: 0,
+    disabled: false,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -35,6 +41,8 @@ describe('AuthService', () => {
   const mockConfigService = {
     get: jest.fn(),
   };
+
+  const mockAuthConfig = { registrationEnabled: false };
 
   const mockJwtStrategyProvider = {
     sign: jest.fn(),
@@ -54,6 +62,7 @@ describe('AuthService', () => {
         AuthService,
         { provide: PrismaAuthRepository, useValue: mockAuthRepository },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: AUTH_CFG, useValue: mockAuthConfig },
         { provide: JwtStrategyProvider, useValue: mockJwtStrategyProvider },
         { provide: JwtRefreshStrategyProvider, useValue: mockJwtRefreshStrategyProvider },
         { provide: CacheManager, useValue: mockCacheManager },
@@ -68,6 +77,7 @@ describe('AuthService', () => {
     mockJwtRefreshStrategyProvider.sign.mockReturnValue('mock-token');
     mockAuthRepository.findAnyUser.mockResolvedValue(null);
     mockAuthRepository.findAnyUserAndCreate.mockImplementation(async (data) => ({ user: { ...mockUser, ...data, role: 'ADMIN' }, firstUser: true }));
+    mockAuthConfig.registrationEnabled = false;
   });
 
   afterEach(() => {
@@ -140,12 +150,100 @@ describe('AuthService', () => {
 
       await service.register(registerDto);
 
-      // The service must NOT do its own existence check followed by create —
-      // doing both outside one transaction is exactly the race the new
-      // repository method serializes.
-      expect(authRepo.findAnyUser).not.toHaveBeenCalled();
+      // The service must NOT do its own write path (find-any + create) outside
+      // one transaction — that is exactly the race the repository method
+      // serializes. Its findAnyUser call is the sanctioned fast-path gate
+      // (refuse before bcrypt when registration is closed), not a write path.
       expect(authRepo.createUser).not.toHaveBeenCalled();
       expect(authRepo.findAnyUserAndCreate).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('registration gate', () => {
+    const dto = { email: 'late@example.com', name: 'Late', password: 'Password123!' };
+
+    it('refuses before hashing when registration is closed and users exist', async () => {
+      mockAuthRepository.findAnyUser.mockResolvedValueOnce({ id: 'existing' });
+      const hashSpy = jest.spyOn(bcrypt, 'hash');
+
+      await expect(service.register(dto)).rejects.toBeInstanceOf(ForbiddenAppException);
+      expect(mockAuthRepository.findAnyUserAndCreate).not.toHaveBeenCalled();
+      expect(hashSpy).not.toHaveBeenCalled();
+      hashSpy.mockRestore();
+    });
+
+    it('refuses when a concurrent registration won the bootstrap race', async () => {
+      mockAuthRepository.findAnyUser.mockResolvedValueOnce(null);
+      mockAuthRepository.findAnyUserAndCreate.mockResolvedValueOnce(null);
+
+      await expect(service.register(dto)).rejects.toBeInstanceOf(ForbiddenAppException);
+    });
+
+    it('passes the flag to the repository', async () => {
+      mockAuthConfig.registrationEnabled = true;
+      // No findAnyUser stub: the flag is on, so the fast-path gate (and its
+      // findAnyUser call) is skipped entirely — that is part of the contract.
+      mockAuthRepository.findAnyUserAndCreate.mockResolvedValueOnce({ user: mockUser, firstUser: false });
+
+      await service.register(dto);
+
+      expect(mockAuthRepository.findAnyUserAndCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ email: dto.email }),
+        { allowWhenUsersExist: true },
+      );
+    });
+
+    it('normalises the email to lower case before writing', async () => {
+      mockAuthConfig.registrationEnabled = true;
+      mockAuthRepository.findUserByEmail.mockResolvedValueOnce(null);
+      mockAuthRepository.findAnyUserAndCreate.mockResolvedValueOnce({ user: mockUser, firstUser: false });
+
+      await service.register({ ...dto, email: '  Mixed@Example.COM ' });
+
+      expect(mockAuthRepository.findUserByEmail).toHaveBeenCalledWith('mixed@example.com');
+      expect(mockAuthRepository.findAnyUserAndCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ email: 'mixed@example.com' }),
+        { allowWhenUsersExist: true },
+      );
+    });
+
+    it('rejects a case-variant duplicate when registration is open', async () => {
+      mockAuthConfig.registrationEnabled = true;
+      mockAuthRepository.findUserByEmail.mockResolvedValueOnce({ id: 'existing' });
+
+      await expect(service.register({ ...dto, email: 'LATE@example.com' }))
+        .rejects.toBeInstanceOf(ConflictAppException);
+
+      expect(mockAuthRepository.findAnyUserAndCreate).not.toHaveBeenCalled();
+    });
+
+    it('maps a unique violation from the locked create to a conflict', async () => {
+      mockAuthConfig.registrationEnabled = true;
+      mockAuthRepository.findUserByEmail.mockResolvedValueOnce(null);
+      mockAuthRepository.findAnyUserAndCreate.mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('dup', {
+          code: 'P2002', clientVersion: 'test', meta: { target: ['email'] },
+        }),
+      );
+
+      await expect(service.register(dto)).rejects.toBeInstanceOf(ConflictAppException);
+    });
+  });
+
+  describe('registrationStatus', () => {
+    it('is open on an empty user table even when the flag is off', async () => {
+      mockAuthRepository.findAnyUser.mockResolvedValueOnce(null);
+      expect(await service.registrationStatus()).toEqual({ open: true });
+    });
+
+    it('is closed when users exist and the flag is off', async () => {
+      mockAuthRepository.findAnyUser.mockResolvedValueOnce({ id: 'u1' });
+      expect(await service.registrationStatus()).toEqual({ open: false });
+    });
+
+    it('is open when the flag is on', async () => {
+      mockAuthConfig.registrationEnabled = true;
+      expect(await service.registrationStatus()).toEqual({ open: true });
     });
   });
 
@@ -229,6 +327,21 @@ describe('AuthService', () => {
     });
   });
 
+  describe('disabled users', () => {
+    it('login rejects a disabled user with the same error as a bad password', async () => {
+      const passwordHash = await bcrypt.hash('Password123!', 4);
+      mockAuthRepository.findUserByEmail.mockResolvedValueOnce({ ...mockUser, passwordHash, disabled: true });
+
+      await expect(service.login({ email: mockUser.email, password: 'Password123!' })).rejects.toBeInstanceOf(AuthException);
+    });
+
+    it('refresh refuses to mint tokens for a disabled user', async () => {
+      mockAuthRepository.findUserById.mockResolvedValueOnce({ ...mockUser, disabled: true });
+
+      await expect(service.refresh({ id: mockUser.id, revoked: false } as IPrincipal)).rejects.toBeInstanceOf(AuthException);
+    });
+  });
+
   describe('validateUser', () => {
     it('should return user for valid principal', async () => {
       mockAuthRepository.findUserById.mockResolvedValue(mockUser);
@@ -303,6 +416,8 @@ describe('AuthService', () => {
 
       expect(authRepo.bumpTokenVersion).toHaveBeenCalledWith(mockUser.id);
       expect(mockCacheManager.invalidate).toHaveBeenCalledWith(`USER:${mockUser.id}`, { mode: 'tag' });
+      // MEMORY-strategy fallback: the auth state is also evicted by its direct key.
+      expect(mockCacheManager.invalidate).toHaveBeenCalledWith(['user-auth-state', mockUser.id]);
     });
   });
 });

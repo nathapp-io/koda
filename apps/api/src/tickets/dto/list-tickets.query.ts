@@ -24,7 +24,7 @@ export class ListTicketsQuery extends KodaPageQuery {
   @IsEnum(Priority)
   priority?: Priority;
 
-  @ApiPropertyOptional({ description: 'User ID to filter by' })
+  @ApiPropertyOptional({ description: 'User id of the assignee, or "self" for the caller (user or agent)' })
   @IsOptional()
   @IsString()
   assignedTo?: string;

@@ -7,6 +7,7 @@ export interface UserDomain {
   role: string;
   passwordHash: string;
   tokenVersion: number;
+  disabled: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

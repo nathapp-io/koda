@@ -28,9 +28,34 @@
           },
           "400": {
             "description": "Invalid input"
+          },
+          "403": {
+            "description": "Registration is closed"
           }
         },
         "summary": "Register a new user",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/registration-status": {
+      "get": {
+        "operationId": "AuthController_registrationStatus",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistrationStatusDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Whether self-registration is open",
         "tags": [
           "auth"
         ]
@@ -151,6 +176,155 @@
         "summary": "Revoke all outstanding access and refresh tokens for the current user",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/admin/users": {
+      "get": {
+        "operationId": "AdminUsersController_list",
+        "parameters": [
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "email",
+            "required": false,
+            "in": "query",
+            "description": "Case-insensitive substring match on email",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of users: { total, current, size, hasNext, hasPrev, records }"
+          },
+          "403": {
+            "description": "Global admin role required"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List users (global admin)",
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "operationId": "AdminUsersController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUserDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserAdminDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Email already in use"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Create a user with a temporary password (global admin)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/admin/users/{id}": {
+      "patch": {
+        "operationId": "AdminUsersController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserAdminDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Cannot demote or disable yourself"
+          },
+          "404": {
+            "description": "User not found"
+          },
+          "409": {
+            "description": "Would leave no active global admin"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Change a user's global role or disable/enable them (global admin)",
+        "tags": [
+          "admin"
         ]
       }
     },
@@ -1822,6 +1996,218 @@
         ]
       }
     },
+    "/api/projects/{slug}/members": {
+      "get": {
+        "operationId": "ProjectMembersController_list",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of members: { total, current, size, hasNext, hasPrev, records, canManage }"
+          },
+          "403": {
+            "description": "Not a project member"
+          },
+          "404": {
+            "description": "Project not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List project members (any member)",
+        "tags": [
+          "projects"
+        ]
+      },
+      "post": {
+        "operationId": "ProjectMembersController_add",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddMemberDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectMemberDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Project admin role required"
+          },
+          "404": {
+            "description": "Project or user not found"
+          },
+          "409": {
+            "description": "Already a member"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add an existing user by email (project admin)",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/projects/{slug}/members/{userId}": {
+      "patch": {
+        "operationId": "ProjectMembersController_updateRole",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemberRoleDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectMemberDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not a member"
+          },
+          "409": {
+            "description": "Would leave the project without an ADMIN"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Change a member's project role (project admin)",
+        "tags": [
+          "projects"
+        ]
+      },
+      "delete": {
+        "operationId": "ProjectMembersController_remove",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed"
+          },
+          "404": {
+            "description": "Not a member"
+          },
+          "409": {
+            "description": "Would leave the project without an ADMIN"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Remove a member (project admin)",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
     "/api/projects/{slug}/tickets": {
       "post": {
         "operationId": "TicketsController_create",
@@ -1955,7 +2341,7 @@
             "name": "assignedTo",
             "required": false,
             "in": "query",
-            "description": "User ID to filter by",
+            "description": "User id of the assignee, or \"self\" for the caller (user or agent)",
             "schema": {
               "type": "string"
             }
@@ -3933,6 +4319,7 @@
         "properties": {
           "email": {
             "type": "string",
+            "maxLength": 254,
             "format": "email",
             "example": "user@example.com"
           },
@@ -3944,7 +4331,6 @@
           "password": {
             "type": "string",
             "minLength": 8,
-            "pattern": "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z\\d]).+$",
             "example": "StrongPass123!"
           }
         },
@@ -3968,6 +4354,9 @@
           "role": {
             "type": "string"
           },
+          "disabled": {
+            "type": "boolean"
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
@@ -3982,6 +4371,7 @@
           "email",
           "name",
           "role",
+          "disabled",
           "createdAt",
           "updatedAt"
         ]
@@ -4005,6 +4395,18 @@
           "user"
         ]
       },
+      "RegistrationStatusDto": {
+        "type": "object",
+        "properties": {
+          "open": {
+            "type": "boolean",
+            "description": "True when POST /auth/register will accept a new user"
+          }
+        },
+        "required": [
+          "open"
+        ]
+      },
       "LoginDto": {
         "type": "object",
         "properties": {
@@ -4022,6 +4424,99 @@
           "email",
           "password"
         ]
+      },
+      "CreateUserDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "format": "email",
+            "example": "dev@example.com"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "example": "Dev User"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "description": "Temporary password, handed over out of band",
+            "example": "StrongPass123!"
+          },
+          "role": {
+            "enum": [
+              "MEMBER",
+              "ADMIN"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "name",
+          "password",
+          "role"
+        ]
+      },
+      "UserAdminDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "MEMBER",
+              "ADMIN"
+            ]
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "role",
+          "disabled",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "UpdateUserDto": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "enum": [
+              "MEMBER",
+              "ADMIN"
+            ],
+            "type": "string"
+          },
+          "disabled": {
+            "type": "boolean",
+            "description": "Disabling revokes every session of the user"
+          }
+        }
       },
       "CreateAgentDto": {
         "type": "object",
@@ -4562,6 +5057,79 @@
           "commitHash",
           "projectSlug",
           "files"
+        ]
+      },
+      "AddMemberDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "Email of an existing user",
+            "example": "dev@example.com"
+          },
+          "role": {
+            "enum": [
+              "ADMIN",
+              "DEVELOPER",
+              "VIEWER"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "role"
+        ]
+      },
+      "ProjectMemberDto": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "ADMIN",
+              "DEVELOPER",
+              "AGENT",
+              "VIEWER"
+            ]
+          },
+          "joinedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "userId",
+          "email",
+          "role",
+          "joinedAt"
+        ]
+      },
+      "UpdateMemberRoleDto": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "enum": [
+              "ADMIN",
+              "DEVELOPER",
+              "VIEWER"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
         ]
       },
       "CreateTicketDto": {

@@ -1,0 +1,7 @@
+{
+  "404": "User not found",
+  "409": "Email address is already in use",
+  "-2": "Validation error",
+  "self": { "40003": "You cannot demote or disable your own account" },
+  "lastAdmin": { "409": "At least one active administrator must remain" }
+}

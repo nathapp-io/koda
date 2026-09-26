@@ -7,7 +7,7 @@
       </p>
     </div>
 
-    <form class="space-y-4" @submit.prevent="onSubmit">
+    <form class="space-y-4" v-if="registrationOpen" @submit.prevent="onSubmit">
       <FormField v-slot="{ componentField }" name="name">
         <FormItem>
           <FormLabel>{{ t('auth.register.name') }}</FormLabel>
@@ -58,6 +58,11 @@
       </Button>
     </form>
 
+    <div v-else-if="registrationLoaded" class="rounded-md border border-border p-6 text-center space-y-2">
+      <h3 class="text-lg font-semibold">{{ t('auth.register.closedTitle') }}</h3>
+      <p class="text-sm text-muted-foreground">{{ t('auth.register.closedBody') }}</p>
+    </div>
+
     <p class="text-center text-sm text-muted-foreground">
       {{ t('auth.register.hasAccount') }}
       <NuxtLink to="/login" class="font-medium text-primary hover:underline">
@@ -77,6 +82,13 @@ definePageMeta({ layout: 'auth' })
 
 const { t } = useI18n()
 const toast = useAppToast()
+
+const {
+  open: registrationOpen,
+  loaded: registrationLoaded,
+  load: loadRegistrationStatus,
+} = useRegistrationStatus()
+onMounted(loadRegistrationStatus)
 
 const formSchema = toTypedSchema(z.object({
   name: z.string().min(1, t('auth.validation.nameRequired') || 'Name is required'),

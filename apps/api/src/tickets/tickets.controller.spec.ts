@@ -242,6 +242,34 @@ describe('TicketsController', () => {
 
       expect(Object.keys(res.data).sort()).toEqual(['current', 'hasNext', 'hasPrev', 'records', 'size', 'total']);
     });
+
+    it('assignedTo=self resolves to the calling user', async () => {
+      mockTicketsService.findAll.mockResolvedValue(new Page({ current: 1, size: 20 }, 0, []));
+      const user = { actorType: 'user', id: 'user-7', role: 'MEMBER', email: 'u@k.t' } as never;
+
+      await controller.findAll('koda', { assignedTo: 'self' } as never, user);
+
+      const filters = mockTicketsService.findAll.mock.calls[0][1];
+      expect(filters.assignedTo).toBe('user-7');
+      expect(filters.assignedToAgentId).toBeUndefined();
+    });
+
+    it('assignedTo=self resolves to the calling agent', async () => {
+      mockTicketsService.findAll.mockResolvedValue(new Page({ current: 1, size: 20 }, 0, []));
+      const agent = { actorType: 'agent', id: 'agent-3', slug: 'bot', status: 'ACTIVE', agentRoles: [], capabilities: [] } as never;
+
+      await controller.findAll('koda', { assignedTo: 'self' } as never, agent);
+
+      const filters = mockTicketsService.findAll.mock.calls[0][1];
+      expect(filters.assignedTo).toBeUndefined();
+      expect(filters.assignedToAgentId).toBe('agent-3');
+    });
+
+    it('any other assignedTo value passes through unchanged', async () => {
+      mockTicketsService.findAll.mockResolvedValue(new Page({ current: 1, size: 20 }, 0, []));
+      await controller.findAll('koda', { assignedTo: 'user-9' } as never, { actorType: 'user', id: 'user-7' } as never);
+      expect(mockTicketsService.findAll.mock.calls[0][1].assignedTo).toBe('user-9');
+    });
   });
 
   describe('GET /api/projects/:slug/tickets/:ref', () => {

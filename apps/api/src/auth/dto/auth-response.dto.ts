@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import type { UserDomain } from '../domain/auth.domain';
 
 export class UserResponseDto {
   @ApiProperty()
@@ -14,16 +15,28 @@ export class UserResponseDto {
   role!: string;
 
   @ApiProperty()
+  disabled!: boolean;
+
+  @ApiProperty()
   createdAt!: Date;
 
   @ApiProperty()
   updatedAt!: Date;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  static from(user: any): UserResponseDto {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { passwordHash: _passwordHash, ...result } = user;
-    return result as UserResponseDto;
+  /**
+   * Explicit field list: a spread would serialize every extra property the
+   * domain row carries (tokenVersion, and historically passwordHash).
+   */
+  static from(user: UserDomain): UserResponseDto {
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      disabled: user.disabled,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
   }
 }
 

@@ -10,8 +10,10 @@ import { PrismaModule } from '@nathapp/nestjs-prisma';
 import { ThrottlerModule, DefaultThrottlerGuard } from '@nathapp/nestjs-throttler';
 import { PrismaClient } from '@prisma/client';
 import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
 import { AgentsModule } from './agents/agents.module';
 import { ProjectsModule } from './projects/projects.module';
+import { ProjectMembersModule } from './projects/members/project-members.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { CommentsModule } from './comments/comments.module';
 import { LabelsModule } from './labels/labels.module';
@@ -78,8 +80,10 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
       }),
     }),
     AuthModule,
+    UsersModule,
     AgentsModule,
     ProjectsModule,
+    ProjectMembersModule,
     TicketsModule,
     CommentsModule,
     LabelsModule,

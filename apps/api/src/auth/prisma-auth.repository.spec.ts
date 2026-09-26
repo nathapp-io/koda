@@ -34,22 +34,27 @@ describe('PrismaAuthRepository agent methods', () => {
 });
 
 describe('PrismaAuthRepository.findAnyUserAndCreate bootstrap race', () => {
+  const txManager = createMock<ITransactionManager>({ run: <T>(fn: () => Promise<T>) => fn() });
+
   const makePrisma = (): {
     prisma: PrismaService;
     findFirst: jest.Mock;
     create: jest.Mock;
+    queryRaw: jest.Mock;
   } => {
     const findFirst = jest.fn();
     const create = jest.fn();
+    const queryRaw = jest.fn().mockResolvedValue([{ locked: 1 }]);
     const prisma = createMock<PrismaService>({
       client: {
+        $queryRaw: queryRaw,
         user: {
           findFirst,
           create,
         },
       } as any,
     });
-    return { prisma, findFirst, create };
+    return { prisma, findFirst, create, queryRaw };
   };
 
   it('assigns ADMIN and reports firstUser=true when no user exists', async () => {
@@ -66,7 +71,7 @@ describe('PrismaAuthRepository.findAnyUserAndCreate bootstrap race', () => {
       email: 'a@example.com',
       name: 'A',
       passwordHash: 'h',
-    });
+    }, { allowWhenUsersExist: true });
 
     expect(findFirst).toHaveBeenCalledTimes(1);
     expect(create).toHaveBeenCalledTimes(1);
@@ -91,7 +96,7 @@ describe('PrismaAuthRepository.findAnyUserAndCreate bootstrap race', () => {
       email: 'b@example.com',
       name: 'B',
       passwordHash: 'h',
-    });
+    }, { allowWhenUsersExist: true });
 
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.not.objectContaining({ role: expect.anything() }) }),
@@ -115,8 +120,51 @@ describe('PrismaAuthRepository.findAnyUserAndCreate bootstrap race', () => {
       email: 'c@example.com',
       name: 'C',
       passwordHash: 'h',
-    });
+    }, { allowWhenUsersExist: true });
 
     expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns null without creating when users exist and registration is closed', async () => {
+    const { prisma, findFirst, create } = makePrisma();
+    findFirst.mockResolvedValueOnce({ id: 'existing' });
+    const repo = new PrismaAuthRepository(prisma as any, txManager);
+
+    const result = await repo.findAnyUserAndCreate(
+      { email: 'b@example.com', name: 'B', passwordHash: 'h' },
+      { allowWhenUsersExist: false },
+    );
+
+    expect(result).toBeNull();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('bootstraps on an empty table even when registration is closed', async () => {
+    const { prisma, findFirst, create } = makePrisma();
+    findFirst.mockResolvedValueOnce(null);
+    create.mockResolvedValueOnce({
+      id: 'u1', email: 'a@example.com', name: 'A', passwordHash: 'h', role: 'ADMIN',
+      tokenVersion: 0, createdAt: new Date(), updatedAt: new Date(),
+    });
+    const repo = new PrismaAuthRepository(prisma as any, txManager);
+
+    const result = await repo.findAnyUserAndCreate(
+      { email: 'a@example.com', name: 'A', passwordHash: 'h' },
+      { allowWhenUsersExist: false },
+    );
+
+    expect(result?.firstUser).toBe(true);
+    expect(create).toHaveBeenCalledWith({ data: expect.objectContaining({ role: 'ADMIN' }) });
+  });
+
+  it('takes the bootstrap lock before the existence check', async () => {
+    const { prisma, findFirst, queryRaw } = makePrisma();
+    findFirst.mockResolvedValueOnce({ id: 'existing' });
+    const repo = new PrismaAuthRepository(prisma as any, txManager);
+
+    await repo.findAnyUserAndCreate({ email: 'c@example.com', name: 'C', passwordHash: 'h' }, { allowWhenUsersExist: false });
+
+    expect(queryRaw).toHaveBeenCalled();
+    expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(findFirst.mock.invocationCallOrder[0]);
   });
 });

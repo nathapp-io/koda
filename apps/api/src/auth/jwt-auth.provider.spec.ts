@@ -30,29 +30,39 @@ describe('JwtAuthProvider', () => {
     jest.clearAllMocks();
   });
 
-  it('marks the principal as not revoked when the payload tokenVersion matches the current one', async () => {
-    mockCacheManager.get.mockResolvedValue(0);
+  const payload = (tokenVersion: number) => ({ sub: 'user-1', email: 'a@b.com', role: 'MEMBER', tokenVersion });
 
-    const principal = await provider.getPrincipal({ sub: 'user-1', email: 'a@b.com', role: 'MEMBER', tokenVersion: 0 });
-
-    expect(principal.revoked).toBe(false);
+  it('is not revoked when the state matches the token', async () => {
+    mockCacheManager.get.mockResolvedValue({ tokenVersion: 0, disabled: false });
+    expect((await provider.getPrincipal(payload(0))).revoked).toBe(false);
   });
 
-  it('marks the principal as revoked when the current tokenVersion is ahead of the payload', async () => {
-    mockCacheManager.get.mockResolvedValue(2);
-
-    const principal = await provider.getPrincipal({ sub: 'user-1', email: 'a@b.com', role: 'MEMBER', tokenVersion: 1 });
-
-    expect(principal.revoked).toBe(true);
+  it('is revoked when the current tokenVersion is ahead of the token', async () => {
+    mockCacheManager.get.mockResolvedValue({ tokenVersion: 2, disabled: false });
+    expect((await provider.getPrincipal(payload(1))).revoked).toBe(true);
   });
 
-  it('resolves the current tokenVersion via the repository when not cached', async () => {
-    mockCacheManager.get.mockImplementation(async (_keys: unknown, resolver: () => Promise<number>) => resolver());
-    mockAuthRepository.findUserById.mockResolvedValue({ tokenVersion: 3 });
+  it('is revoked when the user is disabled, even with a current tokenVersion', async () => {
+    mockCacheManager.get.mockResolvedValue({ tokenVersion: 0, disabled: true });
+    expect((await provider.getPrincipal(payload(0))).revoked).toBe(true);
+  });
 
-    const principal = await provider.getPrincipal({ sub: 'user-1', email: 'a@b.com', role: 'MEMBER', tokenVersion: 1 });
+  it('loads the state from the repository on a cache miss', async () => {
+    mockCacheManager.get.mockImplementation(async (_keys: unknown, resolver: () => Promise<unknown>) => resolver());
+    mockAuthRepository.findUserById.mockResolvedValue({ tokenVersion: 1, disabled: false });
+
+    const principal = await provider.getPrincipal(payload(1));
 
     expect(mockAuthRepository.findUserById).toHaveBeenCalledWith('user-1');
-    expect(principal.revoked).toBe(true);
+    expect(principal.revoked).toBe(false);
+    expect(mockCacheManager.get).toHaveBeenCalledWith(
+      ['user-auth-state', 'user-1'], expect.any(Function), 60_000, { tags: ['USER:user-1'] },
+    );
+  });
+
+  it('treats a user that no longer exists as revoked', async () => {
+    mockCacheManager.get.mockImplementation(async (_keys: unknown, resolver: () => Promise<unknown>) => resolver());
+    mockAuthRepository.findUserById.mockResolvedValue(null);
+    expect((await provider.getPrincipal(payload(0))).revoked).toBe(true);
   });
 });

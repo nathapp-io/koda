@@ -1,6 +1,6 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import type { ITransactionManager } from '@nathapp/nestjs-data';
+import { isUniqueViolation } from './prisma-errors';
 
 /**
  * Ticket numbers are allocated as MAX(number)+1 per project. On Postgres two
@@ -26,13 +26,7 @@ function conflict(): HttpException {
 }
 
 export function isTicketNumberConflict(error: unknown): boolean {
-  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') {
-    return false;
-  }
-  const target = (error.meta as { target?: unknown } | undefined)?.target;
-  if (Array.isArray(target)) return target.includes('number');
-  if (typeof target === 'string') return target.includes('number');
-  return false;
+  return isUniqueViolation(error, 'number');
 }
 
 export async function runWithTicketNumberRetry<T>(

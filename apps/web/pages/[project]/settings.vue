@@ -297,6 +297,8 @@ async function disconnect() {
             </div>
           </form>
         </div>
+
+        <ProjectMembersPanel :slug="slug" />
       </TabsContent>
 
       <!-- VCS Integration Tab -->

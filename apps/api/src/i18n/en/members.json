@@ -1,0 +1,8 @@
+{
+  "404": "Member not found",
+  "409": "User is already a member of this project",
+  "40003": "Project admin role required",
+  "-2": "Validation error",
+  "user": { "404": "No user with that email address" },
+  "lastAdmin": { "409": "A project must keep at least one admin" }
+}

@@ -12,6 +12,7 @@ import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto, UserResponseDto } from './dto/auth-response.dto';
+import { RegistrationStatusDto } from './dto/registration-status.dto';
 import { Public, Principal, JwtRefreshGuard } from '@nathapp/nestjs-auth';
 import type { IPrincipal } from './types';
 import { Throttle } from '@nathapp/nestjs-throttler';
@@ -27,10 +28,22 @@ export class AuthController {
   @ApiOperation({ summary: 'Register a new user' })
   @ApiResponse({ status: 201, type: AuthResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid input' })
+  @ApiResponse({ status: 403, description: 'Registration is closed' })
   @Public()
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async register(@Body() registerDto: RegisterDto) {
     const data = await this.authService.register(registerDto);
+    return JsonResponse.Ok(data);
+  }
+
+  @Get('registration-status')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Whether self-registration is open' })
+  @ApiResponse({ status: 200, type: RegistrationStatusDto })
+  @Public()
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  async registrationStatus() {
+    const data = await this.authService.registrationStatus();
     return JsonResponse.Ok(data);
   }
 

@@ -43,6 +43,7 @@ export const mockAuthConfig: IAuthConfig = {
   jwtRefreshSecret: 'test-refresh-secret',
   jwtRefreshExpiresIn: '7d',
   apiKeySecret: 'test-api-key-secret',
+  registrationEnabled: false,
 };
 
 export const mockRagConfig: IRagConfig = {

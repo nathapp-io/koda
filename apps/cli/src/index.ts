@@ -21,6 +21,8 @@ import { memoryCommand } from './commands/memory';
 import { codeIntelCommand } from './commands/code-intel';
 import { authCommand } from './commands/auth';
 import { adminCommand } from './commands/admin';
+import { userCommand } from './commands/user';
+import { memberCommand } from './commands/member';
 import { ciWebhookCommand } from './commands/ci-webhook';
 import { setJsonMode } from './utils/json-mode';
 
@@ -239,6 +241,12 @@ authCommand(program);
 
 // Admin command
 adminCommand(program);
+
+// User administration command
+userCommand(program);
+
+// Project membership command
+memberCommand(program);
 
 // CI webhook command
 ciWebhookCommand(program);

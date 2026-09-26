@@ -79,6 +79,7 @@ describe('AgentsService', () => {
     jwtRefreshSecret: 'jwt-refresh-secret',
     jwtRefreshExpiresIn: '7d',
     apiKeySecret: 'test-secret',
+    registrationEnabled: false,
   };
 
   const mockKodaDomainWriter = {

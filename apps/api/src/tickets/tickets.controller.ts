@@ -26,9 +26,22 @@ import { ListTicketsQuery } from './dto/list-tickets.query';
 import { parseQuery, toPageResult } from '../common/dto/koda-page.query';
 import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
 import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
-import { KodaPrincipal } from '../auth/principal/koda-principal.types';
+import { isAgentPrincipal, KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { KodaAction } from '../auth/casl/koda-action.enum';
 import { ProjectsService } from '../projects/projects.service';
+import { TicketListFilterInput } from './tickets.service';
+
+/** `assignedTo=self` means the caller: its user id, or its agent id for an agent. */
+export function resolveSelfAssignee(
+  filters: TicketListFilterInput,
+  principal: KodaPrincipal | undefined,
+): TicketListFilterInput {
+  if (filters.assignedTo !== 'self' || !principal) return filters;
+  const { assignedTo: _self, ...rest } = filters;
+  return isAgentPrincipal(principal)
+    ? { ...rest, assignedToAgentId: principal.id }
+    : { ...rest, assignedTo: principal.id };
+}
 
 @ApiTags('tickets')
 @ApiBearerAuth()
@@ -158,9 +171,13 @@ export class TicketsController {
   @ApiResponse({ status: 200, description: 'Page of tickets: { total, current, size, hasNext, hasPrev, records }' })
   @ApiResponse({ status: 400, description: 'Invalid filter or paging parameter' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  async findAll(@Param('slug') slug: string, @Query() rawQuery: ListTicketsQuery) {
+  async findAll(
+    @Param('slug') slug: string,
+    @Query() rawQuery: ListTicketsQuery,
+    @Principal() principal?: KodaPrincipal,
+  ) {
     const { current, size, ...filters } = parseQuery(ListTicketsQuery, rawQuery);
-    const page = await this.ticketsService.findAll(slug, filters, { current, size });
+    const page = await this.ticketsService.findAll(slug, resolveSelfAssignee(filters, principal), { current, size });
     return JsonResponse.Ok(toPageResult(page));
   }
 

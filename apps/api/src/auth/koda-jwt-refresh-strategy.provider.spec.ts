@@ -54,4 +54,12 @@ describe('KodaJwtRefreshStrategyProvider', () => {
 
     expect(principal.revoked).toBe(true);
   });
+
+  it('is revoked when the user is disabled, even with a current tokenVersion', async () => {
+    mockAuthRepository.findUserById.mockResolvedValue({ tokenVersion: 0, disabled: true });
+
+    const principal = await provider.validate({ headers: {} }, { sub: 'user-1', tokenVersion: 0 });
+
+    expect(principal.revoked).toBe(true);
+  });
 });

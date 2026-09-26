@@ -25,6 +25,7 @@ function makeConfig(apiKeySecret: string | undefined = 'super-secret'): IAuthCon
     jwtExpiresIn: '15m',
     jwtRefreshSecret: undefined,
     jwtRefreshExpiresIn: '7d',
+    registrationEnabled: false,
   };
 }
 

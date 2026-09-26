@@ -2,19 +2,21 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { AuthException, JsonResponse } from '@nathapp/nestjs-common';
+import { IS_PUBLIC_KEY } from '@nathapp/nestjs-auth';
 
 describe('AuthController', () => {
   let controller: AuthController;
   let authService: AuthService;
 
-  const mockUser = {
-    id: 'user-123',
-    email: 'test@example.com',
-    name: 'Test User',
-    role: 'MEMBER',
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  };
+const mockUser = {
+  id: 'user-123',
+  email: 'test@example.com',
+  name: 'Test User',
+  role: 'MEMBER',
+  disabled: false,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+};
 
   const mockTokenResponse = {
     accessToken: 'mock-access-token',
@@ -30,6 +32,7 @@ describe('AuthController', () => {
     generateAccessToken: jest.fn(),
     generateRefreshToken: jest.fn(),
     logout: jest.fn(),
+    registrationStatus: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -293,6 +296,13 @@ describe('AuthController', () => {
       const proto = AuthController.prototype as unknown as Record<string, unknown>;
       expect(Reflect.getMetadata(LIMIT_KEY, proto['refresh'] as object)).toBeUndefined();
     });
+
+    it('throttles the anonymous registration probe at 30/min', () => {
+      const proto = AuthController.prototype as unknown as Record<string, unknown>;
+      const handlerFn = proto['registrationStatus'] as object;
+      expect(Reflect.getMetadata(LIMIT_KEY, handlerFn)).toBe(30);
+      expect(Reflect.getMetadata(TTL_KEY, handlerFn)).toBe(60000);
+    });
   });
 
   describe('POST /auth/logout', () => {
@@ -328,6 +338,19 @@ describe('AuthController', () => {
 
       expect(authService.logout).toHaveBeenCalledWith(mockUser.id);
       expect(authService.logout).not.toHaveBeenCalledWith(undefined);
+    });
+  });
+
+  describe('registrationStatus', () => {
+    it('returns the service result wrapped in JsonResponse', async () => {
+      mockAuthService.registrationStatus.mockResolvedValue({ open: false });
+      const res = await controller.registrationStatus();
+      expect(res).toEqual(expect.objectContaining({ ret: 0, data: { open: false } }));
+    });
+
+    it('is public', () => {
+      const isPublic = Reflect.getMetadata(IS_PUBLIC_KEY, AuthController.prototype.registrationStatus);
+      expect(isPublic).toBe(true);
     });
   });
 });

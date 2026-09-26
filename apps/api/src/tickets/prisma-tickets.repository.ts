@@ -151,9 +151,10 @@ export class PrismaTicketsRepository implements ITicketRepository {
       ...(filters.priority && { priority: filters.priority }),
       ...(filters.unassigned
         ? { assignedToUserId: null, assignedToAgentId: null }
-        : filters.assignedToUserId
-          ? { assignedToUserId: filters.assignedToUserId }
-          : {}),
+        : {
+            ...(filters.assignedToUserId && { assignedToUserId: filters.assignedToUserId }),
+            ...(filters.assignedToAgentId && { assignedToAgentId: filters.assignedToAgentId }),
+          }),
     };
 
     // `number` is unique per project, so it is a total order for offset paging.

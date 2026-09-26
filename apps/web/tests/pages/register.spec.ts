@@ -195,3 +195,25 @@ describe('Code quality: no console.log statements', () => {
     expect(source).not.toContain('console.log')
   })
 })
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Slice 4 — register page follows the registration status
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('Slice 4: register page follows the registration status', () => {
+  const source = () => readFileSync(registerPath, 'utf-8')
+
+  test('probes the registration status on mount', () => {
+    expect(source()).toContain('useRegistrationStatus()')
+    expect(source()).toMatch(/onMounted\(/)
+  })
+
+  test('renders the form only while registration is open', () => {
+    expect(source()).toMatch(/<form[^>]*v-if="registrationOpen"/)
+  })
+
+  test('shows the closed notice with a way back to sign in', () => {
+    expect(source()).toContain("t('auth.register.closedTitle')")
+    expect(source()).toMatch(/v-else-if="registrationLoaded"/)
+  })
+})
