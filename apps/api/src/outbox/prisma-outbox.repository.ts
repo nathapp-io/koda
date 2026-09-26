@@ -105,4 +105,17 @@ export class PrismaOutboxRepository extends AbstractPrismaRepository<OutboxEvent
       data: { lastError: message },
     });
   }
+
+  /**
+   * Retention purge (issue #135): delete terminal rows whose last change predates
+   * the cutoff. updatedAt is the terminal-transition time — markPublished/markDead
+   * are a terminal row's last writes — and an admin retry bumps it, giving a
+   * retried row a fresh retention window. Returns rows deleted.
+   */
+  async deleteTerminalBefore(statuses: string[], before: Date): Promise<number> {
+    const result = await this.prisma.client.outboxEvent.deleteMany({
+      where: { status: { in: statuses }, updatedAt: { lt: before } },
+    });
+    return result.count;
+  }
 }

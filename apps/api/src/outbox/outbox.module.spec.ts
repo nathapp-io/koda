@@ -15,6 +15,7 @@ import {
 import { outboxConfig } from '../config/outbox.config';
 import { FanOutPublisher } from './fan-out-publisher';
 import { OutboxModule } from './outbox.module';
+import { OutboxRetentionProcessor } from './outbox-retention.processor';
 import { PrismaOutboxStore } from './prisma-outbox.store';
 
 @Global()
@@ -69,5 +70,10 @@ describe('OutboxModule (DI wiring, no database)', () => {
     moduleRef = await compile();
     expect(moduleRef.get(NathappOutboxService)).toBeDefined();
     expect(moduleRef.get(OutboxRelay)).toBeDefined();
+  });
+
+  it('registers the retention processor for the nightly terminal-row purge', async () => {
+    moduleRef = await compile();
+    expect(moduleRef.get(OutboxRetentionProcessor)).toBeInstanceOf(OutboxRetentionProcessor);
   });
 });

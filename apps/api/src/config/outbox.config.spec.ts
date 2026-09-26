@@ -4,6 +4,7 @@ describe('outboxConfig', () => {
   const saved = {
     NODE_ENV: process.env['NODE_ENV'],
     OUTBOX_RELAY_ENABLED: process.env['OUTBOX_RELAY_ENABLED'],
+    OUTBOX_RETENTION_DAYS: process.env['OUTBOX_RETENTION_DAYS'],
   };
 
   const restore = (key: keyof typeof saved): void => {
@@ -61,6 +62,41 @@ describe('outboxConfig', () => {
 
   it('rejects a non-boolean OUTBOX_RELAY_ENABLED', () => {
     process.env['OUTBOX_RELAY_ENABLED'] = 'yes';
+    expect(() => outboxConfig()).toThrow();
+  });
+
+  it('defaults retention to 30 days outside tests', () => {
+    process.env['NODE_ENV'] = 'production';
+    delete process.env['OUTBOX_RETENTION_DAYS'];
+    expect(outboxConfig().retention).toEqual({ days: 30 });
+  });
+
+  it('disables retention under NODE_ENV=test', () => {
+    process.env['NODE_ENV'] = 'test';
+    delete process.env['OUTBOX_RETENTION_DAYS'];
+    expect(outboxConfig().retention).toEqual({ days: null });
+  });
+
+  it('OUTBOX_RETENTION_DAYS overrides the production default', () => {
+    process.env['NODE_ENV'] = 'production';
+    process.env['OUTBOX_RETENTION_DAYS'] = '7';
+    expect(outboxConfig().retention).toEqual({ days: 7 });
+  });
+
+  it('OUTBOX_RETENTION_DAYS re-enables retention under NODE_ENV=test', () => {
+    process.env['NODE_ENV'] = 'test';
+    process.env['OUTBOX_RETENTION_DAYS'] = '14';
+    expect(outboxConfig().retention).toEqual({ days: 14 });
+  });
+
+  it('OUTBOX_RETENTION_DAYS=0 is the kill switch', () => {
+    process.env['NODE_ENV'] = 'production';
+    process.env['OUTBOX_RETENTION_DAYS'] = '0';
+    expect(outboxConfig().retention).toEqual({ days: null });
+  });
+
+  it('rejects a non-numeric OUTBOX_RETENTION_DAYS', () => {
+    process.env['OUTBOX_RETENTION_DAYS'] = 'weekly';
     expect(() => outboxConfig()).toThrow();
   });
 });

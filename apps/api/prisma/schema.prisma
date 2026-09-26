@@ -380,6 +380,7 @@ model OutboxEvent {
   @@index([projectId, createdAt])
   @@index([status, nextAttemptAt])
   @@index([status, leaseUntil])
+  @@index([status, updatedAt]) // retention purge (issue #135)
 }
 
 // ---------------------------------------------------------------------------
