@@ -2,6 +2,7 @@
  * Lightweight API client for E2E test setup/teardown.
  * Used in beforeAll/afterAll to create and clean up test data.
  */
+import { getSession } from './session';
 
 const API_URL = process.env['E2E_API_URL'] ?? 'http://localhost:3102';
 
@@ -29,23 +30,8 @@ export interface AgentResult {
 export type TicketTransitionAction = 'verify' | 'start' | 'fix' | 'verify-fix' | 'reject' | 'close';
 
 export async function login(email: string, password: string): Promise<LoginResult> {
-  const res = await fetch(`${API_URL}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
-  if (!res.ok) throw new Error(`Login failed: ${res.status} ${await res.text()}`);
-  const body = (await res.json()) as {
-    data?: { accessToken?: string; user?: { id?: string } };
-  };
-  const token = body.data?.accessToken;
-  const userId = body.data?.user?.id;
-
-  if (!token || !userId) {
-    throw new Error('Login response missing access token or user id');
-  }
-
-  return { token, userId };
+  const session = await getSession(email, password);
+  return { token: session.accessToken, userId: session.userId };
 }
 
 export async function createProject(
@@ -142,12 +128,13 @@ export async function deleteProject(token: string, slug: string): Promise<void> 
 
 export async function createAgent(
   token: string,
-  data: { name: string; slug: string },
+  data: { name: string; slug: string; roles?: string[] },
 ): Promise<AgentResult> {
   const res = await fetch(`${API_URL}/api/agents`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify(data),
+    // The API requires a non-empty roles array (DEVELOPER/REVIEWER/VERIFIER/TRIAGER).
+    body: JSON.stringify({ roles: ['DEVELOPER'], ...data }),
   });
 
   if (!res.ok) {

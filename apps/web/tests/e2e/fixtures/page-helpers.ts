@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
 import { E2E_ADMIN } from './api-client';
+import { getSession } from './session';
 
 export function generateUniqueProjectKey(prefix = 'EE'): string {
   const normalizedPrefix = prefix.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2) || 'EE';
@@ -21,32 +22,12 @@ export async function webLogin(
   page: Page,
   email = E2E_ADMIN.email,
   password = E2E_ADMIN.password,
+  opts: { fresh?: boolean } = {},
 ) {
-  const apiUrl = process.env['E2E_API_URL'] ?? 'http://localhost:3102';
   const webUrl = process.env['E2E_WEB_URL'] ?? 'http://localhost:3103';
 
-  // 1. Call the API directly to get an access token
-  const response = await page.request.post(`${apiUrl}/api/auth/login`, {
-    data: { email, password },
-  });
-
-  if (!response.ok()) {
-    throw new Error(
-      `Login API failed: ${response.status()} ${response.statusText()} ${await response.text()}`,
-    );
-  }
-
-  const body = (await response.json()) as {
-    data?: { accessToken?: string; refreshToken?: string };
-    accessToken?: string;
-    refreshToken?: string;
-  };
-  const accessToken = body.data?.accessToken ?? body.accessToken;
-  const refreshToken = body.data?.refreshToken ?? body.refreshToken;
-
-  if (!accessToken) {
-    throw new Error('No accessToken in login response');
-  }
+  // 1. One cached API login per user per worker (see fixtures/session.ts)
+  const { accessToken, refreshToken } = await getSession(email, password, opts);
 
   // 2. Inject auth cookies so the browser session is authenticated
   await page.context().addCookies([
@@ -59,7 +40,7 @@ export async function webLogin(
     },
     {
       name: 'koda_refresh',
-      value: refreshToken ?? '',
+      value: refreshToken,
       url: webUrl,
       httpOnly: false,
       secure: false,
