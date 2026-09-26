@@ -99,4 +99,30 @@ describe('ProjectAccessService', () => {
       await expect(service.assertProjectAdmin('p1', agent)).rejects.toBeInstanceOf(ForbiddenAppException);
     });
   });
+
+  describe('canManageMembers', () => {
+    const globalAdmin = { actorType: 'user', id: 'g1', role: 'ADMIN', email: 'g@g.com' } as KodaPrincipal;
+    const member = { actorType: 'user', id: 'm1', role: 'MEMBER', email: 'm@m.com' } as KodaPrincipal;
+    const agent = { actorType: 'agent', id: 'a1', slug: 'bot', status: 'ACTIVE', agentRoles: [], capabilities: [] } as unknown as KodaPrincipal;
+
+    it('is true for a global ADMIN without a membership lookup', async () => {
+      expect(await service.canManageMembers('p1', globalAdmin)).toBe(true);
+      expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
+    });
+
+    it('is true only for a project ADMIN member', async () => {
+      mockProjectRepo.findMembershipRole.mockResolvedValue('ADMIN');
+      expect(await service.canManageMembers('p1', member)).toBe(true);
+
+      mockProjectRepo.findMembershipRole.mockResolvedValue('DEVELOPER');
+      expect(await service.canManageMembers('p1', member)).toBe(false);
+
+      mockProjectRepo.findMembershipRole.mockResolvedValue(null);
+      expect(await service.canManageMembers('p1', member)).toBe(false);
+    });
+
+    it('is false for agents', async () => {
+      expect(await service.canManageMembers('p1', agent)).toBe(false);
+    });
+  });
 });

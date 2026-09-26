@@ -12,9 +12,17 @@ describe('Slice 4: project members panel', () => {
     expect(panel()).toMatch(/onMounted\(/)
   })
 
-  test('management controls are gated by canManageMembers', () => {
-    expect(panel()).toContain('canManageMembers(')
+  test('management controls are gated by the API canManage flag', () => {
+    expect(panel()).not.toContain('canManageMembers(')
     expect(panel()).toMatch(/v-if="canManage"/)
+  })
+
+  test('a failed role change reloads the current page', () => {
+    expect(panel()).toContain('await run(reload)')
+  })
+
+  test('non-assignable (legacy AGENT) roles render as a label, not a select', () => {
+    expect(panel()).toContain('isAssignableRole(member.role)')
   })
 
   test('removal asks for confirmation', () => {

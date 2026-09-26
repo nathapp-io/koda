@@ -18,7 +18,14 @@ export class PrismaProjectMembersRepository {
   }
 
   private toRecord(m: MemberRow): ProjectMemberRecord {
-    return { userId: m.userId, email: m.user.email, name: m.user.name, role: m.role, joinedAt: m.joinedAt };
+    return {
+      userId: m.userId,
+      email: m.user.email,
+      name: m.user.name,
+      role: m.role,
+      disabled: m.user.disabled,
+      joinedAt: m.joinedAt,
+    };
   }
 
   async findMemberPage(projectId: string, page: IPageOption): Promise<IPageResult<ProjectMemberRecord>> {
@@ -38,8 +45,12 @@ export class PrismaProjectMembersRepository {
     return m ? this.toRecord(m) : null;
   }
 
+  /** Case-insensitive so admins do not need the exact stored casing. */
   async findUserIdByEmail(email: string): Promise<string | null> {
-    const u = await this.db.user.findUnique({ where: { email }, select: { id: true } });
+    const u = await this.db.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } },
+      select: { id: true },
+    });
     return u?.id ?? null;
   }
 
@@ -61,8 +72,11 @@ export class PrismaProjectMembersRepository {
     await this.db.projectMember.delete({ where: { projectId_userId: { projectId, userId } } });
   }
 
+  /** Active admins only: a disabled user cannot act, so must not satisfy the guard. */
   async countProjectAdmins(projectId: string): Promise<number> {
-    return this.db.projectMember.count({ where: { projectId, role: ActorRole.ADMIN } });
+    return this.db.projectMember.count({
+      where: { projectId, role: ActorRole.ADMIN, user: { disabled: false } },
+    });
   }
 
   /** Serializes last-project-admin checks. Call inside txManager.run only. */

@@ -6,7 +6,8 @@ import type { KodaPrincipal } from '../../auth/principal/koda-principal.types';
 
 const globalAdmin = { actorType: 'user', id: 'g1', role: 'ADMIN', email: 'g@k.t' } as KodaPrincipal;
 const projectAdmin = { actorType: 'user', id: 'pa', role: 'MEMBER', email: 'pa@k.t' } as KodaPrincipal;
-const member = (userId: string, role: string) => ({ userId, email: `${userId}@k.t`, name: userId, role, joinedAt: new Date(0) });
+const member = (userId: string, role: string, disabled = false) =>
+  ({ userId, email: `${userId}@k.t`, name: userId, role, disabled, joinedAt: new Date(0) });
 
 describe('ProjectMembersService', () => {
   let repo: Record<string, jest.Mock>;
@@ -28,16 +29,23 @@ describe('ProjectMembersService', () => {
       findProjectIdBySlug: jest.fn().mockResolvedValue('p1'),
       assertProjectMembership: jest.fn(),
       assertProjectAdmin: jest.fn(),
+      canManageMembers: jest.fn(),
     };
     const txManager = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
     service = new ProjectMembersService(repo as never, access as never, txManager as never);
   });
 
-  it('list checks membership, not admin rights', async () => {
+  it('list checks membership, not admin rights, and reports canManage', async () => {
     repo.findMemberPage.mockResolvedValue({ total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] });
-    await service.list('proj', projectAdmin, { current: 1, size: 20 });
+    access.canManageMembers.mockResolvedValue(true);
+
+    const result = await service.list('proj', projectAdmin, { current: 1, size: 20 });
+
     expect(access.assertProjectMembership).toHaveBeenCalledWith('p1', projectAdmin);
     expect(access.assertProjectAdmin).not.toHaveBeenCalled();
+    expect(access.canManageMembers).toHaveBeenCalledWith('p1', projectAdmin);
+    expect(result.canManage).toBe(true);
+    expect(result.page.total).toBe(0);
   });
 
   it('writes are gated by assertProjectAdmin', async () => {
@@ -89,6 +97,15 @@ describe('ProjectMembersService', () => {
   it('keeping ADMIN, or changing a non-admin, needs no count', async () => {
     repo.findMember.mockResolvedValue(member('d1', 'DEVELOPER'));
     await service.updateRole('proj', 'd1', { role: 'VIEWER' }, projectAdmin);
+    expect(repo.countProjectAdmins).not.toHaveBeenCalled();
+  });
+
+  it('a disabled ADMIN does not trigger the last-admin guard', async () => {
+    repo.findMember.mockResolvedValue(member('dis', 'ADMIN', true));
+
+    await service.remove('proj', 'dis', projectAdmin);
+
+    expect(repo.deleteMember).toHaveBeenCalledWith('p1', 'dis');
     expect(repo.countProjectAdmins).not.toHaveBeenCalled();
   });
 });

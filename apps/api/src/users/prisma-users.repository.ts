@@ -34,6 +34,15 @@ export class PrismaUsersRepository {
     return m ? this.toRecord(m) : null;
   }
 
+  /** Case-insensitive: the unique index is case-sensitive, the product is not. */
+  async findByEmail(email: string): Promise<{ id: string } | null> {
+    const m = await this.db.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } },
+      select: { id: true },
+    });
+    return m;
+  }
+
   async createUser(data: { email: string; name: string; passwordHash: string; role: GlobalRole }): Promise<UserAdminRecord> {
     return this.toRecord(await this.db.user.create({ data }));
   }

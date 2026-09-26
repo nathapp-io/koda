@@ -5,7 +5,9 @@ import { AuthService } from './auth.service';
 import { PrismaAuthRepository } from './prisma-auth.repository';
 import { ConfigService } from '@nestjs/config';
 import { AppException, AuthException, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { Prisma } from '@prisma/client';
 import { AUTH_CFG } from '../config/auth.config';
+import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import type { IPrincipal } from './types';
 // Default (not `import * as`): the interop namespace object has
 // non-configurable properties, which would make jest.spyOn(bcrypt, 'hash') throw.
@@ -189,6 +191,42 @@ describe('AuthService', () => {
         expect.objectContaining({ email: dto.email }),
         { allowWhenUsersExist: true },
       );
+    });
+
+    it('normalises the email to lower case before writing', async () => {
+      mockAuthConfig.registrationEnabled = true;
+      mockAuthRepository.findUserByEmail.mockResolvedValueOnce(null);
+      mockAuthRepository.findAnyUserAndCreate.mockResolvedValueOnce({ user: mockUser, firstUser: false });
+
+      await service.register({ ...dto, email: '  Mixed@Example.COM ' });
+
+      expect(mockAuthRepository.findUserByEmail).toHaveBeenCalledWith('mixed@example.com');
+      expect(mockAuthRepository.findAnyUserAndCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ email: 'mixed@example.com' }),
+        { allowWhenUsersExist: true },
+      );
+    });
+
+    it('rejects a case-variant duplicate when registration is open', async () => {
+      mockAuthConfig.registrationEnabled = true;
+      mockAuthRepository.findUserByEmail.mockResolvedValueOnce({ id: 'existing' });
+
+      await expect(service.register({ ...dto, email: 'LATE@example.com' }))
+        .rejects.toBeInstanceOf(ConflictAppException);
+
+      expect(mockAuthRepository.findAnyUserAndCreate).not.toHaveBeenCalled();
+    });
+
+    it('maps a unique violation from the locked create to a conflict', async () => {
+      mockAuthConfig.registrationEnabled = true;
+      mockAuthRepository.findUserByEmail.mockResolvedValueOnce(null);
+      mockAuthRepository.findAnyUserAndCreate.mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('dup', {
+          code: 'P2002', clientVersion: 'test', meta: { target: ['email'] },
+        }),
+      );
+
+      await expect(service.register(dto)).rejects.toBeInstanceOf(ConflictAppException);
     });
   });
 
@@ -378,6 +416,8 @@ describe('AuthService', () => {
 
       expect(authRepo.bumpTokenVersion).toHaveBeenCalledWith(mockUser.id);
       expect(mockCacheManager.invalidate).toHaveBeenCalledWith(`USER:${mockUser.id}`, { mode: 'tag' });
+      // MEMORY-strategy fallback: the auth state is also evicted by its direct key.
+      expect(mockCacheManager.invalidate).toHaveBeenCalledWith(['user-auth-state', mockUser.id]);
     });
   });
 });

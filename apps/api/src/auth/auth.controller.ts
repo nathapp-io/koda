@@ -41,6 +41,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Whether self-registration is open' })
   @ApiResponse({ status: 200, type: RegistrationStatusDto })
   @Public()
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   async registrationStatus() {
     const data = await this.authService.registrationStatus();
     return JsonResponse.Ok(data);

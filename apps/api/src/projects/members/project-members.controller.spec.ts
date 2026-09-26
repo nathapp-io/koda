@@ -7,16 +7,19 @@ describe('ProjectMembersController', () => {
 
   afterEach(() => jest.clearAllMocks());
 
-  it('list parses paging strings and returns the six-field page', async () => {
+  it('list parses paging strings and returns the page envelope with canManage', async () => {
     const page = { total: 0, current: 2, size: 5, hasNext: false, hasPrev: true, records: [] };
-    service.list.mockResolvedValue(page);
+    service.list.mockResolvedValue({ page, canManage: true });
     const res = await controller.list('proj', { current: '2', size: '5' } as never, principal);
     expect(service.list).toHaveBeenCalledWith('proj', principal, { current: 2, size: 5 });
-    expect(res).toEqual(expect.objectContaining({ ret: 0, data: page }));
+    expect(res).toEqual(expect.objectContaining({ ret: 0, data: { ...page, canManage: true } }));
   });
 
   it('list ignores undeclared query keys', async () => {
-    service.list.mockResolvedValue({ total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] });
+    service.list.mockResolvedValue({
+      page: { total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] },
+      canManage: false,
+    });
     await controller.list('proj', { projectId: 'other' } as never, principal);
     expect(service.list).toHaveBeenCalledWith('proj', principal, { current: 1, size: 20 });
   });

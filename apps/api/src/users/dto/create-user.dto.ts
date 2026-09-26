@@ -6,6 +6,7 @@ import { GLOBAL_ROLES, GlobalRole } from '../domain/user-admin.domain';
 export class CreateUserDto {
   @ApiProperty({ example: 'dev@example.com' })
   @IsEmail({}, { message: '$t(common.validation.isEmail)' })
+  @MaxLength(254, { message: '$t(common.validation.maxLength)' })
   declare email: string;
 
   @ApiProperty({ example: 'Dev User' })

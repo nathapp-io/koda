@@ -8,14 +8,15 @@ describe('AuthController', () => {
   let controller: AuthController;
   let authService: AuthService;
 
-  const mockUser = {
-    id: 'user-123',
-    email: 'test@example.com',
-    name: 'Test User',
-    role: 'MEMBER',
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  };
+const mockUser = {
+  id: 'user-123',
+  email: 'test@example.com',
+  name: 'Test User',
+  role: 'MEMBER',
+  disabled: false,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+};
 
   const mockTokenResponse = {
     accessToken: 'mock-access-token',
@@ -294,6 +295,13 @@ describe('AuthController', () => {
     it('does not throttle refresh beyond the global default', () => {
       const proto = AuthController.prototype as unknown as Record<string, unknown>;
       expect(Reflect.getMetadata(LIMIT_KEY, proto['refresh'] as object)).toBeUndefined();
+    });
+
+    it('throttles the anonymous registration probe at 30/min', () => {
+      const proto = AuthController.prototype as unknown as Record<string, unknown>;
+      const handlerFn = proto['registrationStatus'] as object;
+      expect(Reflect.getMetadata(LIMIT_KEY, handlerFn)).toBe(30);
+      expect(Reflect.getMetadata(TTL_KEY, handlerFn)).toBe(60000);
     });
   });
 

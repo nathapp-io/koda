@@ -2034,7 +2034,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Page of members: { total, current, size, hasNext, hasPrev, records }"
+            "description": "Page of members: { total, current, size, hasNext, hasPrev, records, canManage }"
           },
           "403": {
             "description": "Not a project member"
@@ -4319,6 +4319,7 @@
         "properties": {
           "email": {
             "type": "string",
+            "maxLength": 254,
             "format": "email",
             "example": "user@example.com"
           },
@@ -4429,6 +4430,7 @@
         "properties": {
           "email": {
             "type": "string",
+            "maxLength": 254,
             "format": "email",
             "example": "dev@example.com"
           },

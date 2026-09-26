@@ -50,9 +50,9 @@ describeIntegration('/projects/:slug/members (PG)', () => {
     await request(server).post(base).set(auth('root')).send({ email: 'dev@koda.test', role: 'DEVELOPER' }).expect(201);
   });
 
-  it('unknown email is 404; an existing member is 409', async () => {
+  it('unknown email is 404; an existing member is 409 (lookup is case-insensitive)', async () => {
     await request(server).post(base).set(auth('root')).send({ email: 'ghost@koda.test', role: 'VIEWER' }).expect(404);
-    await request(server).post(base).set(auth('root')).send({ email: 'dev@koda.test', role: 'VIEWER' }).expect(409);
+    await request(server).post(base).set(auth('root')).send({ email: 'DEV@KODA.TEST', role: 'VIEWER' }).expect(409);
   });
 
   it('a DEVELOPER can list but cannot add members', async () => {
@@ -83,6 +83,17 @@ describeIntegration('/projects/:slug/members (PG)', () => {
     await request(server).delete(`${base}/${ids.viewer}`).set(auth('root')).expect(200);
     await request(server).get(base).set(auth('viewer')).expect(403);
     await request(server).delete(`${base}/${ids.viewer}`).set(auth('root')).expect(404);
+  });
+
+  it('a disabled project ADMIN does not count as an active admin', async () => {
+    // pa was demoted to DEVELOPER above; restore ADMIN and add a second admin.
+    await request(server).patch(`${base}/${ids.pa}`).set(auth('root')).send({ role: 'ADMIN' }).expect(200);
+    await request(server).post(base).set(auth('root')).send({ email: 'viewer@koda.test', role: 'ADMIN' }).expect(201);
+    await request(server).patch(`/api/admin/users/${ids.viewer}`).set(auth('root')).send({ disabled: true }).expect(200);
+
+    // viewer is disabled, so pa is the only active project ADMIN: self-demotion is refused.
+    // Before the active-only count this returned 200 and the project lost its last active admin.
+    await request(server).patch(`${base}/${ids.pa}`).set(auth('pa')).send({ role: 'DEVELOPER' }).expect(409);
   });
 
   it('rejects an unassignable role with 400', async () => {

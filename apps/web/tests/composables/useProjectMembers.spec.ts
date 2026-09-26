@@ -50,12 +50,31 @@ describe('useProjectMembers', () => {
     expect(members.total.value).toBe(1)
   })
 
-  test('canManageMembers: global admin or project ADMIN member only', async () => {
-    const { canManageMembers } = await import(composablePath)
-    const list = [m('pa', 'ADMIN'), m('dev', 'DEVELOPER')]
-    expect(canManageMembers({ id: 'root', role: 'ADMIN' }, list)).toBe(true)
-    expect(canManageMembers({ id: 'pa', role: 'MEMBER' }, list)).toBe(true)
-    expect(canManageMembers({ id: 'dev', role: 'MEMBER' }, list)).toBe(false)
-    expect(canManageMembers(null, list)).toBe(false)
+  test('canManage comes from the API page, not from the loaded rows', async () => {
+    const get = jest.fn(async () => pageOf([m('dev')], { canManage: true }))
+    withApi({ get })
+    const { useProjectMembers } = await import(composablePath)
+    const members = useProjectMembers('team')
+
+    await members.load()
+
+    expect(members.canManage.value).toBe(true)
+  })
+
+  test('reload refetches the current page instead of resetting to page 1', async () => {
+    const get = jest.fn()
+      .mockImplementationOnce(async () => pageOf([m('a')], { total: 2, hasNext: true }))
+      .mockImplementationOnce(async () => pageOf([m('b')], { total: 2, current: 2 }))
+      .mockImplementationOnce(async () => pageOf([m('b')], { total: 2, current: 2 }))
+    withApi({ get })
+    const { useProjectMembers } = await import(composablePath)
+    const members = useProjectMembers('team')
+
+    await members.load()
+    await members.loadMore()
+    await members.reload()
+
+    expect(get).toHaveBeenNthCalledWith(3, '/projects/team/members', { query: { current: '2' } })
+    expect(members.members.value.map((x: { userId: string }) => x.userId)).toEqual(['b'])
   })
 })

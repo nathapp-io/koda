@@ -18,6 +18,7 @@ describe('UsersAdminService', () => {
     repo = {
       findUserPage: jest.fn(),
       findById: jest.fn(),
+      findByEmail: jest.fn(),
       createUser: jest.fn(),
       countActiveAdmins: jest.fn(),
       updateUser: jest.fn(async (id: string, w: { role?: string; disabled?: boolean }) => user({ id, ...w })),
@@ -44,6 +45,25 @@ describe('UsersAdminService', () => {
       }));
       await expect(service.create({ email: 'd@k.t', name: 'D', password: 'Admin1234!Aa', role: 'MEMBER' }))
         .rejects.toBeInstanceOf(ConflictAppException);
+    });
+
+    it('normalises the email to lower case before writing', async () => {
+      repo.createUser.mockImplementation(async (d: { email: string }) => ({ ...user(), email: d.email }));
+
+      const created = await service.create({ email: '  Mixed@K.T ', name: 'M', password: 'Admin1234!Aa', role: 'MEMBER' });
+
+      expect(repo.findByEmail).toHaveBeenCalledWith('mixed@k.t');
+      expect(repo.createUser).toHaveBeenCalledWith(expect.objectContaining({ email: 'mixed@k.t' }));
+      expect(created.email).toBe('mixed@k.t');
+    });
+
+    it('rejects a case-variant duplicate before the unique index is reached', async () => {
+      repo.findByEmail.mockResolvedValue({ id: 'existing' });
+
+      await expect(service.create({ email: 'Dup@K.T', name: 'D', password: 'Admin1234!Aa', role: 'MEMBER' }))
+        .rejects.toBeInstanceOf(ConflictAppException);
+
+      expect(repo.createUser).not.toHaveBeenCalled();
     });
   });
 

@@ -70,17 +70,21 @@ describeIntegration('/admin/users (PG)', () => {
     await app.close();
   });
 
-  it('creates a user without leaking the hash; a duplicate email is 409', async () => {
-    const created = await createUser('alice@koda.test');
+  it('creates a user (email canonicalised) without leaking the hash; duplicate casing is 409', async () => {
+    const created = await createUser('Alice@Koda.test');
     expect(created).toEqual(expect.objectContaining({ email: 'alice@koda.test', role: 'MEMBER', disabled: false }));
     expect(created).not.toHaveProperty('passwordHash');
 
+    // Exact and case-variant duplicates both conflict: the plain unique index
+    // alone would let the case variant through.
     await request(server).post('/api/admin/users').set(auth(rootToken))
       .send({ email: 'alice@koda.test', name: 'A2', password: TEST_PASSWORD, role: 'MEMBER' }).expect(409);
+    await request(server).post('/api/admin/users').set(auth(rootToken))
+      .send({ email: 'ALICE@KODA.TEST', name: 'A3', password: TEST_PASSWORD, role: 'MEMBER' }).expect(409);
   });
 
-  it('a MEMBER cannot use the admin routes', async () => {
-    const token = await loginToken(server, 'alice@koda.test');
+  it('a MEMBER cannot use the admin routes (and login is case-insensitive)', async () => {
+    const token = await loginToken(server, 'ALICE@KODA.TEST');
     await request(server).get('/api/admin/users').set(auth(token)).expect(403);
   });
 

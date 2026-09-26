@@ -1,21 +1,23 @@
 <script setup lang="ts">
 import { extractApiError } from '~/composables/useApi'
-import { ASSIGNABLE_MEMBER_ROLES, canManageMembers } from '~/composables/useProjectMembers'
+import { ASSIGNABLE_MEMBER_ROLES } from '~/composables/useProjectMembers'
 import type { AssignableMemberRole, ProjectMember } from '~/composables/useProjectMembers'
 
 const props = defineProps<{ slug: string }>()
 
 const { t } = useI18n()
 const toast = useAppToast()
-const { user } = useAuth()
-const { members, total, hasNext, load, loadMore, add, changeRole, remove } = useProjectMembers(props.slug)
+const { members, total, hasNext, canManage, load, reload, loadMore, add, changeRole, remove } = useProjectMembers(props.slug)
 
 const loading = ref(true)
 const newEmail = ref('')
 const newRole = ref<AssignableMemberRole>('DEVELOPER')
 const adding = ref(false)
 
-const canManage = computed(() => canManageMembers(user.value, members.value))
+/** Legacy AGENT rows are not assignable through this API; render them as a label. */
+function isAssignableRole(role: string): role is AssignableMemberRole {
+  return (ASSIGNABLE_MEMBER_ROLES as readonly string[]).includes(role)
+}
 
 async function run(action: () => Promise<void>, successKey?: string): Promise<boolean> {
   try {
@@ -39,7 +41,7 @@ async function onAdd(): Promise<void> {
 async function onRoleChange(member: ProjectMember, role: AssignableMemberRole): Promise<void> {
   if (role === member.role) return
   const ok = await run(() => changeRole(member.userId, role), 'projects.members.toast.roleChanged')
-  if (!ok) await run(load)
+  if (!ok) await run(reload)
 }
 
 async function onRemove(member: ProjectMember): Promise<void> {
@@ -78,7 +80,7 @@ onMounted(async () => {
         </div>
         <div class="flex items-center gap-2">
           <select
-            v-if="canManage"
+            v-if="canManage && isAssignableRole(member.role)"
             :value="member.role"
             class="h-8 rounded-md border border-input bg-background px-2 text-sm"
             @change="onRoleChange(member, ($event.target as HTMLSelectElement).value as AssignableMemberRole)"

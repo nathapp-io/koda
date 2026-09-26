@@ -25,10 +25,20 @@ export class ProjectMembersService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
 
-  async list(slug: string, principal: KodaPrincipal, page: IPageOption): Promise<IPageResult<ProjectMemberDto>> {
+  /**
+   * `canManage` travels with the page so the UI does not have to guess from the
+   * rows it happens to have loaded (a project ADMIN can be on a later page).
+   */
+  async list(
+    slug: string,
+    principal: KodaPrincipal,
+    page: IPageOption,
+  ): Promise<{ page: IPageResult<ProjectMemberDto>; canManage: boolean }> {
     const projectId = await this.access.findProjectIdBySlug(slug);
     await this.access.assertProjectMembership(projectId, principal);
-    return remapPage(await this.membersRepo.findMemberPage(projectId, page), ProjectMemberDto.from);
+    const canManage = await this.access.canManageMembers(projectId, principal);
+    const mapped = remapPage(await this.membersRepo.findMemberPage(projectId, page), ProjectMemberDto.from);
+    return { page: mapped, canManage };
   }
 
   async add(slug: string, dto: AddMemberDto, principal: KodaPrincipal): Promise<ProjectMemberDto> {
@@ -79,7 +89,9 @@ export class ProjectMembersService {
     nextRole: ProjectMemberRole | null,
     principal: KodaPrincipal,
   ): Promise<void> {
-    const losesAdmin = current.role === ActorRole.ADMIN && nextRole !== ActorRole.ADMIN;
+    // A disabled member is not an active admin: removing them cannot lock the
+    // project out, so they do not trigger the guard.
+    const losesAdmin = current.role === ActorRole.ADMIN && !current.disabled && nextRole !== ActorRole.ADMIN;
     if (!losesAdmin || isGlobalAdmin(principal)) return;
     if ((await this.membersRepo.countProjectAdmins(projectId)) <= 1) {
       throw new ConflictAppException({}, 'members.lastAdmin');

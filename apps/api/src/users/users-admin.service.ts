@@ -27,9 +27,16 @@ export class UsersAdminService {
   }
 
   async create(dto: CreateUserDto): Promise<UserAdminDto> {
+    // Canonical lower-case; the check is case-insensitive because the default
+    // unique index is not (a legacy mixed-case row would otherwise slip through).
+    const email = dto.email.trim().toLowerCase();
+    if (await this.usersRepo.findByEmail(email)) {
+      throw new ConflictAppException({}, 'users');
+    }
+
     const passwordHash = await bcrypt.hash(dto.password, 12);
     try {
-      const user = await this.usersRepo.createUser({ email: dto.email, name: dto.name, passwordHash, role: dto.role });
+      const user = await this.usersRepo.createUser({ email, name: dto.name, passwordHash, role: dto.role });
       return UserAdminDto.from(user);
     } catch (error) {
       if (isUniqueViolation(error, 'email')) throw new ConflictAppException({}, 'users');

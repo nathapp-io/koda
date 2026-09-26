@@ -9,5 +9,7 @@ export interface ProjectMemberRecord {
   email: string;
   name: string | null;
   role: string;
+  /** Global account state; a disabled member cannot act and is not an active admin. */
+  disabled: boolean;
   joinedAt: Date;
 }

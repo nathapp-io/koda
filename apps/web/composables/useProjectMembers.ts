@@ -16,13 +16,8 @@ interface MemberPage {
   total: number
   current: number
   hasNext: boolean
-}
-
-/** The API enforces this too; the UI only hides controls a user cannot use. */
-export function canManageMembers(user: { id: string; role?: string } | null, members: ProjectMember[]): boolean {
-  if (!user) return false
-  if (user.role === 'ADMIN') return true
-  return members.some((m) => m.userId === user.id && m.role === 'ADMIN')
+  /** Computed server-side (global ADMIN, or a project ADMIN member). */
+  canManage?: boolean
 }
 
 export function useProjectMembers(slug: string) {
@@ -32,26 +27,35 @@ export function useProjectMembers(slug: string) {
   const total = ref(0)
   const current = ref(1)
   const hasNext = ref(false)
+  const canManage = ref(false)
 
   async function fetchPage(pageNumber: number): Promise<MemberPage> {
     const query: Record<string, string> = pageNumber > 1 ? { current: String(pageNumber) } : {}
     return $api.get<MemberPage>(base, { query })
   }
 
-  async function load(): Promise<void> {
-    const res = await fetchPage(1)
-    members.value = res.records ?? []
-    total.value = res.total ?? 0
-    current.value = 1
+  async function fetchInto(targetPage: number, append: boolean): Promise<void> {
+    const res = await fetchPage(targetPage)
+    members.value = append ? [...members.value, ...(res.records ?? [])] : (res.records ?? [])
+    total.value = append ? (res.total ?? total.value) : (res.total ?? 0)
+    current.value = targetPage
     hasNext.value = res.hasNext === true
+    // The API computes this from live membership, so it is correct even when
+    // the caller's own ADMIN row is on a later page. Absent only on old servers.
+    if (typeof res.canManage === 'boolean') canManage.value = res.canManage
+  }
+
+  async function load(): Promise<void> {
+    await fetchInto(1, false)
+  }
+
+  /** Refetch the page currently shown, without resetting pagination. */
+  async function reload(): Promise<void> {
+    await fetchInto(current.value, false)
   }
 
   async function loadMore(): Promise<void> {
-    const res = await fetchPage(current.value + 1)
-    members.value = [...members.value, ...(res.records ?? [])]
-    total.value = res.total ?? total.value
-    current.value = res.current ?? current.value + 1
-    hasNext.value = res.hasNext === true
+    await fetchInto(current.value + 1, true)
   }
 
   async function add(email: string, role: AssignableMemberRole): Promise<void> {
@@ -71,5 +75,5 @@ export function useProjectMembers(slug: string) {
     total.value = Math.max(0, total.value - 1)
   }
 
-  return { members, total, hasNext, load, loadMore, add, changeRole, remove }
+  return { members, total, current, hasNext, canManage, load, reload, loadMore, add, changeRole, remove }
 }

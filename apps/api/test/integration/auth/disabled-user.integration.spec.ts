@@ -46,4 +46,21 @@ describeIntegration('disabled users (PG)', () => {
   it('a disabled user cannot log in', async () => {
     await request(server).post('/api/auth/login').send({ email: 'dis@koda.test', password: TEST_PASSWORD }).expect(401);
   });
+
+  it('logout revokes an access token that already warmed the auth-state cache', async () => {
+    const email = 'logout@koda.test';
+    await prisma.client.user.create({
+      data: { email, name: 'Logout', passwordHash: await bcrypt.hash(TEST_PASSWORD, 4) },
+    });
+
+    const login = await request(server).post('/api/auth/login').send({ email, password: TEST_PASSWORD }).expect(200);
+    const { accessToken } = data<{ accessToken: string }>(login);
+
+    // Warm the 60 s per-user auth-state cache, then log out.
+    await request(server).get('/api/auth/me').set('Authorization', `Bearer ${accessToken}`).expect(200);
+    await request(server).post('/api/auth/logout').set('Authorization', `Bearer ${accessToken}`).expect(200);
+
+    // Without the direct-key eviction this stays 200 under the MEMORY strategy.
+    await request(server).get('/api/auth/me').set('Authorization', `Bearer ${accessToken}`).expect(401);
+  });
 });

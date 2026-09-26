@@ -68,8 +68,11 @@ export class PrismaAuthRepository {
     });
   }
 
+  /** Case-insensitive so rows created before email normalization still resolve. */
   async findUserByEmail(email: string): Promise<UserDomain | null> {
-    const m = await this.db.user.findUnique({ where: { email } });
+    const m = await this.db.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } },
+    });
     return m ? this.toDomain(m) : null;
   }
 

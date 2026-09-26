@@ -8,8 +8,10 @@ import { LoginDto } from './dto/login.dto';
 import type { IPrincipal } from './types';
 import { UserResponseDto } from './dto/auth-response.dto';
 import { PrismaAuthRepository } from './prisma-auth.repository';
-import { userTokenVersionCacheTag } from './token-version.cache';
+import { userAuthStateCacheKey, userTokenVersionCacheTag } from './token-version.cache';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
+import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
+import { isUniqueViolation } from '../common/utils/prisma-errors';
 
 export interface JwtPayload {
   sub: string;
@@ -34,7 +36,10 @@ export class AuthService {
   ) {}
 
   async register(registerDto: RegisterDto) {
-    const { email, password } = registerDto;
+    const { password } = registerDto;
+    // Emails are canonicalised to lower-case on write; lookups are
+    // case-insensitive so rows created before normalization still resolve.
+    const email = registerDto.email.trim().toLowerCase();
     // BUG-8: never leak the email local-part into the display name
     const name = registerDto.name ?? 'User';
     const allowWhenUsersExist = this.authConfig.registrationEnabled;
@@ -45,11 +50,19 @@ export class AuthService {
       throw new ForbiddenAppException({}, 'registration');
     }
 
+    // A legacy mixed-case row does not collide with the plain unique index,
+    // so an explicit case-insensitive check is needed when registration is open.
+    if (allowWhenUsersExist && (await this.authRepo.findUserByEmail(email))) {
+      throw new ConflictAppException({}, 'auth');
+    }
+
     const passwordHash = await bcrypt.hash(password, 12);
-    const created = await this.authRepo.findAnyUserAndCreate(
-      { email, name, passwordHash },
-      { allowWhenUsersExist },
-    );
+    const created = await this.authRepo
+      .findAnyUserAndCreate({ email, name, passwordHash }, { allowWhenUsersExist })
+      .catch((error: unknown) => {
+        if (isUniqueViolation(error, 'email')) throw new ConflictAppException({}, 'auth');
+        throw error;
+      });
     if (!created) {
       throw new ForbiddenAppException({}, 'registration');
     }
@@ -130,6 +143,10 @@ export class AuthService {
   async logout(userId: string): Promise<void> {
     await this.authRepo.bumpTokenVersion(userId);
     await this.cache.invalidate(userTokenVersionCacheTag(userId), { mode: 'tag' });
+    // MEMORY strategy has no tag registry, so tag mode degrades to deleting the
+    // literal `USER:<id>` key and never matches `USER-AUTH-STATE:<id>`. Evict
+    // the cached 60 s auth state by its direct key as well.
+    await this.cache.invalidate(userAuthStateCacheKey(userId));
   }
 
   generateAccessToken(userId: string, email: string, role: string, tokenVersion: number): string {
