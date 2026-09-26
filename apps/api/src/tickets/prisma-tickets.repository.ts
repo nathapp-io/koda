@@ -1,12 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '@nathapp/nestjs-prisma';
-import { PrismaClient } from '@prisma/client';
+import { PrismaService, Paginate } from '@nathapp/nestjs-prisma';
+import { PrismaClient, Prisma } from '@prisma/client';
+import type { IPageOption } from '@nathapp/nestjs-common';
+import type { IPageResult } from '@nathapp/nestjs-data';
 import { parseTicketRef } from '../common/utils/ticket-ref.util';
 import type {
   ITicketRepository,
   TicketProject,
   TicketDomain,
-  FindTicketsFilters,
+  TicketListFilters,
   CreateTicketData,
   UpdateTicketData,
   AssignTicketData,
@@ -140,68 +142,27 @@ export class PrismaTicketsRepository implements ITicketRepository {
     return this.toDomain(row);
   }
 
-  async findTicketsByProject(filters: FindTicketsFilters): Promise<TicketDomain[]> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const whereConditions: Record<string, any> = {
+  async findTicketPage(filters: TicketListFilters, page: IPageOption): Promise<IPageResult<TicketDomain>> {
+    const where: Prisma.TicketWhereInput = {
       projectId: filters.projectId,
       deletedAt: null,
+      ...(filters.status && { status: filters.status }),
+      ...(filters.type && { type: filters.type }),
+      ...(filters.priority && { priority: filters.priority }),
+      ...(filters.unassigned
+        ? { assignedToUserId: null, assignedToAgentId: null }
+        : filters.assignedToUserId
+          ? { assignedToUserId: filters.assignedToUserId }
+          : {}),
     };
 
-    if (filters.status) {
-      whereConditions.status = filters.status;
-    }
-    if (filters.type) {
-      whereConditions.type = filters.type;
-    }
-    if (filters.priority) {
-      whereConditions.priority = filters.priority;
-    }
-    if (filters.unassigned) {
-      whereConditions.AND = [
-        { assignedToUserId: null },
-        { assignedToAgentId: null },
-      ];
-    } else if (filters.assignedToUserId) {
-      whereConditions.assignedToUserId = filters.assignedToUserId;
-    }
-
-    const skip = (filters.page - 1) * filters.limit;
-
-    const rows = await this.db.ticket.findMany({
-      where: whereConditions,
-      take: filters.limit,
-      skip,
+    // `number` is unique per project, so it is a total order for offset paging.
+    const rows = await Paginate(this.db.ticket, page, {
+      where,
       orderBy: { number: 'asc' },
-      include: {
-        labels: { include: { label: true } },
-        links: true,
-      },
+      include: { labels: { include: { label: true } }, links: true },
     });
-    return rows.map((row) => this.toDomain(row));
-  }
-
-  async countTicketsByProject(
-    filters: Omit<FindTicketsFilters, 'limit' | 'page'>,
-  ): Promise<number> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const whereConditions: Record<string, any> = {
-      projectId: filters.projectId,
-      deletedAt: null,
-    };
-
-    if (filters.status) whereConditions.status = filters.status;
-    if (filters.type) whereConditions.type = filters.type;
-    if (filters.priority) whereConditions.priority = filters.priority;
-    if (filters.unassigned) {
-      whereConditions.AND = [
-        { assignedToUserId: null },
-        { assignedToAgentId: null },
-      ];
-    } else if (filters.assignedToUserId) {
-      whereConditions.assignedToUserId = filters.assignedToUserId;
-    }
-
-    return this.db.ticket.count({ where: whereConditions });
+    return rows.remap((row: PrismaTicketRow) => this.toDomain(row));
   }
 
   async findTicketByProjectAndNumber(

@@ -1,29 +1,25 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
+import type { IPageOption } from '@nathapp/nestjs-common';
+import type { IPageResult } from '@nathapp/nestjs-data';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TicketResponseDto } from './dto/ticket-response.dto';
+import { ListTicketsQuery } from './dto/list-tickets.query';
+import { remapPage } from '../common/dto/koda-page.query';
 import { TicketType, TicketStatus, Priority } from '../common/enums';
 import { buildGitUrl } from '../common/utils/git-url.util';
 import { actorForeignKeys } from '../auth/principal/actor-foreign-keys';
 import { isUserPrincipal, KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { runWithTicketNumberRetry } from '../common/utils/ticket-number-retry';
-import { TICKET_REPOSITORY, ITicketRepository } from './domain/ticket.domain';
+import { TICKET_REPOSITORY, ITicketRepository, TicketDomain } from './domain/ticket.domain';
 import { TicketEventService } from '../events/ticket-event.service';
 import { buildTicketEventOutboxPayload } from '../events/outbox-envelope.util';
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
 
-interface FindAllFilters {
-  status?: TicketStatus;
-  type?: TicketType;
-  priority?: Priority;
-  assignedTo?: string;
-  unassigned?: boolean;
-  limit?: number;
-  page?: number;
-}
+export type TicketListFilterInput = Omit<ListTicketsQuery, 'current' | 'size'>;
 
 interface AssignInput {
   userId?: string;
@@ -131,50 +127,36 @@ export class TicketsService {
     return response;
   }
 
-  async findAll(projectSlug: string, filters: FindAllFilters) {
+  async findAll(
+    projectSlug: string,
+    filters: TicketListFilterInput,
+    page: IPageOption,
+  ): Promise<IPageResult<TicketResponseDto>> {
     const project = await this.ticketRepo.findProjectBySlug(projectSlug);
 
     if (!project || project.deletedAt) {
       throw new NotFoundAppException({}, 'tickets');
     }
 
-    const limit = filters.limit || 20;
-    const page = filters.page || 1;
-
-    const repoFilters = {
-      projectId: project.id,
-      status: filters.status,
-      type: filters.type,
-      priority: filters.priority,
-      assignedToUserId: filters.assignedTo,
-      unassigned: filters.unassigned,
-      limit,
+    const tickets = await this.ticketRepo.findTicketPage(
+      {
+        projectId: project.id,
+        status: filters.status,
+        type: filters.type,
+        priority: filters.priority,
+        assignedToUserId: filters.assignedTo,
+        unassigned: filters.unassigned,
+      },
       page,
-    };
+    );
 
-    const [tickets, total] = await Promise.all([
-      this.ticketRepo.findTicketsByProject(repoFilters),
-      this.ticketRepo.countTicketsByProject(repoFilters),
-    ]);
-
-    return {
-      items: TicketResponseDto.fromMany(tickets, project.key).map((t, i) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const raw = tickets[i] as any;
-        return {
-          ...t,
-          gitRefUrl: this.computeGitRefUrl(
-            project.gitRemoteUrl,
-            raw.gitRefVersion,
-            raw.gitRefFile,
-            raw.gitRefLine,
-          ),
-        };
-      }),
-      total,
-      page,
-      limit,
-    };
+    return remapPage(tickets, (ticket: TicketDomain) =>
+      TicketResponseDto.from(
+        ticket,
+        project.key,
+        this.computeGitRefUrl(project.gitRemoteUrl, ticket.gitRefVersion, ticket.gitRefFile, ticket.gitRefLine),
+      ),
+    );
   }
 
   async findByRef(projectSlug: string, ref: string) {

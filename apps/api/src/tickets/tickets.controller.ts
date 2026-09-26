@@ -14,7 +14,6 @@ import {
   ApiBearerAuth,
   ApiOperation,
   ApiResponse,
-  ApiQuery,
 } from '@nestjs/swagger';
 import { TicketsService } from './tickets.service';
 import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
@@ -23,8 +22,9 @@ import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TicketResponseDto } from './dto/ticket-response.dto';
 import { TransitionWithCommentDto } from './dto/transition-with-comment.dto';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
+import { ListTicketsQuery } from './dto/list-tickets.query';
+import { parseQuery, toPageResult } from '../common/dto/koda-page.query';
 import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
-import { TicketType, TicketStatus, Priority } from '../common/enums';
 import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { KodaAction } from '../auth/casl/koda-action.enum';
@@ -47,10 +47,6 @@ export class TicketsController {
     principal: KodaPrincipal,
   ) {
     return this.ticketsService.create(slug, createTicketDto, principal);
-  }
-
-  async listTickets(slug: string, filters: Record<string, unknown>) {
-    return this.ticketsService.findAll(slug, filters);
   }
 
   async getTicket(slug: string, ref: string) {
@@ -158,36 +154,14 @@ export class TicketsController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'List all tickets for a project' })
-  @ApiResponse({ status: 200, description: 'List of tickets' })
+  @ApiOperation({ summary: 'List tickets for a project (paginated)' })
+  @ApiResponse({ status: 200, description: 'Page of tickets: { total, current, size, hasNext, hasPrev, records }' })
+  @ApiResponse({ status: 400, description: 'Invalid filter or paging parameter' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  @ApiQuery({ name: 'status', enum: TicketStatus, required: false })
-  @ApiQuery({ name: 'type', enum: TicketType, required: false })
-  @ApiQuery({ name: 'priority', enum: Priority, required: false })
-  @ApiQuery({ name: 'assignedTo', required: false, description: 'User ID to filter by' })
-  @ApiQuery({ name: 'unassigned', required: false, type: Boolean })
-  @ApiQuery({ name: 'limit', required: false, type: Number, example: 20 })
-  @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async findAll(
-    @Param('slug') slug: string,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    @Query() query: Record<string, any>,
-  ) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const filters: any = {};
-
-    if (query.status !== undefined) filters.status = query.status;
-    if (query.type !== undefined) filters.type = query.type;
-    if (query.priority !== undefined) filters.priority = query.priority;
-    if (query.assignedTo !== undefined) filters.assignedTo = query.assignedTo;
-    if (query.unassigned !== undefined) filters.unassigned = query.unassigned === 'true' || query.unassigned === true;
-    if (query.limit !== undefined) filters.limit = parseInt(query.limit, 10);
-    if (query.page !== undefined) filters.page = parseInt(query.page, 10);
-
-    const data = await this.listTickets(slug, filters);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return JsonResponse.Ok(data);
+  async findAll(@Param('slug') slug: string, @Query() rawQuery: ListTicketsQuery) {
+    const { current, size, ...filters } = parseQuery(ListTicketsQuery, rawQuery);
+    const page = await this.ticketsService.findAll(slug, filters, { current, size });
+    return JsonResponse.Ok(toPageResult(page));
   }
 
   @Get(':ref')

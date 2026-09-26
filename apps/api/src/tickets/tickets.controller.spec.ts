@@ -6,7 +6,7 @@ import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { PERMISSION_KEY, CaslPermissionAction } from '@nathapp/nestjs-auth';
-import { ValidationAppException } from '@nathapp/nestjs-common';
+import { ValidationAppException, Page } from '@nathapp/nestjs-common';
 import { KodaAction } from '../auth/casl/koda-action.enum';
 import { ProjectsService } from '../projects/projects.service';
 import { TransitionWithCommentDto } from './dto/transition-with-comment.dto';
@@ -214,130 +214,33 @@ describe('TicketsController', () => {
     });
   });
 
-  describe('GET /api/projects/:slug/tickets', () => {
-    it('should return all tickets with pagination', async () => {
-      const tickets = [mockTicket, { ...mockTicket, number: 2, id: 'ticket-124' }];
-      mockTicketsService.findAll.mockResolvedValue({
-        tickets,
-        total: 2,
-      });
+  describe('GET /projects/:slug/tickets', () => {
+    it('parses the raw query into numbers and defaults before calling the service', async () => {
+      mockTicketsService.findAll.mockResolvedValue(new Page({ current: 2, size: 5 }, 0, []));
 
-      const result = await controller.listTickets('koda', {});
+      await controller.findAll('koda', { current: '2', size: '5', status: 'IN_PROGRESS' } as never);
 
-      expect((result as any).tickets).toEqual(tickets);
-      expect((result as any).total).toBe(2);
+      expect(mockTicketsService.findAll).toHaveBeenCalledWith(
+        'koda',
+        expect.objectContaining({ status: 'IN_PROGRESS' }),
+        { current: 2, size: 5 },
+      );
     });
 
-    it('should accept filters as query parameters', async () => {
-      mockTicketsService.findAll.mockResolvedValue({
-        tickets: [mockTicket],
-        total: 1,
-      });
+    it('defaults to page 1 of 20 when no paging params are sent', async () => {
+      mockTicketsService.findAll.mockResolvedValue(new Page({ current: 1, size: 20 }, 0, []));
 
-      const query = {
-        status: 'IN_PROGRESS',
-        type: 'BUG',
-        priority: 'HIGH',
-        assignedTo: 'user-456',
-        unassigned: false,
-        limit: 10,
-        page: 1,
-      };
+      await controller.findAll('koda', {} as never);
 
-      const result = await controller.listTickets('koda', query);
-
-      expect(service.findAll).toHaveBeenCalledWith('koda', expect.objectContaining(query));
-      expect((result as any).total).toEqual(1);
+      expect(mockTicketsService.findAll).toHaveBeenCalledWith('koda', expect.anything(), { current: 1, size: 20 });
     });
 
-    it('should apply status filter', async () => {
-      mockTicketsService.findAll.mockResolvedValue({
-        tickets: [{ ...mockTicket, status: 'VERIFIED' }],
-        total: 1,
-      });
+    it('returns only the six page fields', async () => {
+      mockTicketsService.findAll.mockResolvedValue(new Page({ current: 1, size: 20 }, 1, [{ ref: 'KODA-1' }]));
 
-      const result = await controller.listTickets('koda', { status: 'VERIFIED' });
+      const res = await controller.findAll('koda', {} as never);
 
-      expect(service.findAll).toHaveBeenCalledWith('koda', { status: 'VERIFIED' });
-      expect((result as any).tickets[0].status).toBe('VERIFIED');
-    });
-
-    it('should apply type filter', async () => {
-      mockTicketsService.findAll.mockResolvedValue({
-        tickets: [{ ...mockTicket, type: 'ENHANCEMENT' }],
-        total: 1,
-      });
-
-      const result = await controller.listTickets('koda', { type: 'ENHANCEMENT' });
-
-      expect(service.findAll).toHaveBeenCalledWith('koda', { type: 'ENHANCEMENT' });
-      expect((result as any).tickets[0].type).toBe('ENHANCEMENT');
-    });
-
-    it('should apply priority filter', async () => {
-      mockTicketsService.findAll.mockResolvedValue({
-        tickets: [{ ...mockTicket, priority: 'CRITICAL' }],
-        total: 1,
-      });
-
-      const result = await controller.listTickets('koda', { priority: 'CRITICAL' });
-
-      expect(service.findAll).toHaveBeenCalledWith('koda', { priority: 'CRITICAL' });
-      expect((result as any).tickets[0].priority).toBe('CRITICAL');
-    });
-
-    it('should apply assignedTo filter', async () => {
-      mockTicketsService.findAll.mockResolvedValue({
-        tickets: [{ ...mockTicket, assignedToUserId: 'user-456' }],
-        total: 1,
-      });
-
-      const result = await controller.listTickets('koda', { assignedTo: 'user-456' });
-
-      expect(service.findAll).toHaveBeenCalledWith('koda', { assignedTo: 'user-456' });
-      expect((result as any).tickets[0].assignedToUserId).toBe('user-456');
-    });
-
-    it('should filter for unassigned tickets', async () => {
-      mockTicketsService.findAll.mockResolvedValue({
-        tickets: [mockTicket],
-        total: 1,
-      });
-
-      await controller.listTickets('koda', { unassigned: true });
-
-      expect(service.findAll).toHaveBeenCalledWith('koda', { unassigned: true });
-    });
-
-    it('should apply pagination with limit and page', async () => {
-      mockTicketsService.findAll.mockResolvedValue({
-        tickets: [mockTicket],
-        total: 1,
-      });
-
-      await controller.listTickets('koda', { limit: 10, page: 2 });
-
-      expect(service.findAll).toHaveBeenCalledWith('koda', { limit: 10, page: 2 });
-    });
-
-    it('should return empty list when no tickets found', async () => {
-      mockTicketsService.findAll.mockResolvedValue({
-        tickets: [],
-        total: 0,
-      });
-
-      const result = await controller.listTickets('koda', {});
-
-      expect((result as any).tickets).toEqual([]);
-      expect((result as any).total).toBe(0);
-    });
-
-    it('should return 404 if project not found', async () => {
-      mockTicketsService.findAll.mockRejectedValue(new Error('Project not found'));
-
-      await expect(
-        controller.listTickets('nonexistent', {})
-      ).rejects.toThrow();
+      expect(Object.keys(res.data).sort()).toEqual(['current', 'hasNext', 'hasPrev', 'records', 'size', 'total']);
     });
   });
 
