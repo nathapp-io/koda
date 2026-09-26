@@ -56,6 +56,22 @@ describe('PrismaTimelineRepository', () => {
       expect(result).toEqual([]);
     });
 
+    it('pushes take and the keyset condition into findTicketEvents', async () => {
+      const cursor = { createdAt: new Date('2026-01-02T00:00:00.000Z'), id: 'ckb' };
+      await repository.findTicketEvents({ projectId: 'p1' }, { cursor, take: 11 });
+
+      expect(mockTicketEvent.findMany).toHaveBeenCalledWith({
+        where: {
+          AND: [
+            { projectId: 'p1' },
+            { OR: [{ createdAt: { lt: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { lt: 'ckb' } }] },
+          ],
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: 11,
+      });
+    });
+
     it('passes complex where clause through unchanged', async () => {
       mockTicketEvent.findMany.mockResolvedValue([]);
 
@@ -91,6 +107,22 @@ describe('PrismaTimelineRepository', () => {
       expect(result).toEqual(rows);
     });
 
+    it('pushes take and the keyset condition into findAgentEvents', async () => {
+      const cursor = { createdAt: new Date('2026-01-02T00:00:00.000Z'), id: 'ckb' };
+      await repository.findAgentEvents({ projectId: 'p1' }, { cursor, take: 11 });
+
+      expect(mockAgentEvent.findMany).toHaveBeenCalledWith({
+        where: {
+          AND: [
+            { projectId: 'p1' },
+            { OR: [{ createdAt: { lt: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { lt: 'ckb' } }] },
+          ],
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: 11,
+      });
+    });
+
     it('returns empty array when no agent events match', async () => {
       mockAgentEvent.findMany.mockResolvedValue([]);
 
@@ -123,6 +155,22 @@ describe('PrismaTimelineRepository', () => {
       const result = await repository.findDecisionEvents({ projectId: 'none' });
 
       expect(result).toEqual([]);
+    });
+
+    it('pushes take and the keyset condition into findDecisionEvents', async () => {
+      const cursor = { createdAt: new Date('2026-01-02T00:00:00.000Z'), id: 'ckb' };
+      await repository.findDecisionEvents({ projectId: 'p1' }, { cursor, take: 11 });
+
+      expect(mockDecisionEvent.findMany).toHaveBeenCalledWith({
+        where: {
+          AND: [
+            { projectId: 'p1' },
+            { OR: [{ createdAt: { lt: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { lt: 'ckb' } }] },
+          ],
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: 11,
+      });
     });
 
     it('passes agentId filter through unchanged', async () => {

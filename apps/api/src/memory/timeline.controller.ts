@@ -2,7 +2,7 @@ import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Principal } from '@nathapp/nestjs-auth';
 import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
-import { TimelineService } from './timeline.service';
+import { TimelineService, MAX_TIMELINE_LIMIT } from './timeline.service';
 import { ProjectAccessService } from '../projects/project-access.service';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
@@ -41,10 +41,10 @@ export class TimelineController {
   }
 
   private parseLimit(value?: string): number | undefined {
-    if (!value) return undefined;
-    const parsed = Number.parseInt(value, 10);
-    if (Number.isNaN(parsed)) {
-      throw new ValidationAppException({ limit: 'Invalid limit' });
+    if (value === undefined || value === '') return undefined;
+    const parsed = /^\d+$/.test(value) ? Number(value) : NaN;
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_TIMELINE_LIMIT) {
+      throw new ValidationAppException({ limit: `limit must be an integer between 1 and ${MAX_TIMELINE_LIMIT}` });
     }
     return parsed;
   }

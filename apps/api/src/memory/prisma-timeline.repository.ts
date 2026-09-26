@@ -1,6 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
+import { keysetWhere, TimelineKey } from './timeline-cursor';
+
+export interface KeysetPage {
+  cursor?: TimelineKey;
+  take: number;
+}
+
+const NEWEST_FIRST = [{ createdAt: 'desc' as const }, { id: 'desc' as const }];
 
 export interface TicketEventRow {
   id: string;
@@ -28,24 +36,27 @@ export interface DecisionEventRow {
 export class PrismaTimelineRepository {
   constructor(private readonly prisma: PrismaService<PrismaClient>) {}
 
-  async findTicketEvents(where: Record<string, unknown>): Promise<TicketEventRow[]> {
+  async findTicketEvents(where: Record<string, unknown>, page?: KeysetPage): Promise<TicketEventRow[]> {
     return this.prisma.client.ticketEvent.findMany({
-      where,
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      where: keysetWhere(where, page?.cursor),
+      orderBy: NEWEST_FIRST,
+      ...(page && { take: page.take }),
     });
   }
 
-  async findAgentEvents(where: Record<string, unknown>): Promise<AgentEventRow[]> {
+  async findAgentEvents(where: Record<string, unknown>, page?: KeysetPage): Promise<AgentEventRow[]> {
     return this.prisma.client.agentEvent.findMany({
-      where,
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      where: keysetWhere(where, page?.cursor),
+      orderBy: NEWEST_FIRST,
+      ...(page && { take: page.take }),
     });
   }
 
-  async findDecisionEvents(where: Record<string, unknown>): Promise<DecisionEventRow[]> {
+  async findDecisionEvents(where: Record<string, unknown>, page?: KeysetPage): Promise<DecisionEventRow[]> {
     return this.prisma.client.decisionEvent.findMany({
-      where,
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      where: keysetWhere(where, page?.cursor),
+      orderBy: NEWEST_FIRST,
+      ...(page && { take: page.take }),
     });
   }
 }
