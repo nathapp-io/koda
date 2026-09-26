@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { JwtStrategyProvider, JwtRefreshStrategyProvider } from '@nathapp/nestjs-auth';
-import { AuthException } from '@nathapp/nestjs-common';
+import { AuthException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { CacheManager } from '@nathapp/nestjs-cache';
 import * as bcrypt from 'bcrypt';
 import { RegisterDto } from './dto/register.dto';
@@ -9,6 +9,7 @@ import type { IPrincipal } from './types';
 import { UserResponseDto } from './dto/auth-response.dto';
 import { PrismaAuthRepository } from './prisma-auth.repository';
 import { userTokenVersionCacheTag } from './token-version.cache';
+import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
 
 export interface JwtPayload {
   sub: string;
@@ -29,23 +30,30 @@ export class AuthService {
     private jwtStrategyProvider: JwtStrategyProvider,
     private jwtRefreshStrategyProvider: JwtRefreshStrategyProvider,
     private cache: CacheManager,
+    @Inject(AUTH_CFG) private readonly authConfig: IAuthConfig,
   ) {}
 
   async register(registerDto: RegisterDto) {
     const { email, password } = registerDto;
     // BUG-8: never leak the email local-part into the display name
     const name = registerDto.name ?? 'User';
+    const allowWhenUsersExist = this.authConfig.registrationEnabled;
+
+    // Fast path: refuse before paying for bcrypt. The locked check in the
+    // repository stays authoritative for the empty-table race.
+    if (!allowWhenUsersExist && (await this.authRepo.findAnyUser()) !== null) {
+      throw new ForbiddenAppException({}, 'registration');
+    }
 
     const passwordHash = await bcrypt.hash(password, 12);
-
-    // The existence-check + create are serialized inside a single transaction
-    // so two concurrent registrations against an empty DB cannot both
-    // receive the bootstrap ADMIN role.
-    const { user } = await this.authRepo.findAnyUserAndCreate({
-      email,
-      name,
-      passwordHash,
-    });
+    const created = await this.authRepo.findAnyUserAndCreate(
+      { email, name, passwordHash },
+      { allowWhenUsersExist },
+    );
+    if (!created) {
+      throw new ForbiddenAppException({}, 'registration');
+    }
+    const { user } = created;
 
     const accessToken = this.generateAccessToken(user.id, user.email, user.role, user.tokenVersion);
     const refreshToken = this.generateRefreshToken(user.id, user.tokenVersion);
@@ -55,6 +63,11 @@ export class AuthService {
       refreshToken,
       user: UserResponseDto.from(user),
     };
+  }
+
+  async registrationStatus(): Promise<{ open: boolean }> {
+    if (this.authConfig.registrationEnabled) return { open: true };
+    return { open: (await this.authRepo.findAnyUser()) === null };
   }
 
   async login(loginDto: LoginDto) {

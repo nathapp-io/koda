@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { AuthException, JsonResponse } from '@nathapp/nestjs-common';
+import { IS_PUBLIC_KEY } from '@nathapp/nestjs-auth';
 
 describe('AuthController', () => {
   let controller: AuthController;
@@ -30,6 +31,7 @@ describe('AuthController', () => {
     generateAccessToken: jest.fn(),
     generateRefreshToken: jest.fn(),
     logout: jest.fn(),
+    registrationStatus: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -328,6 +330,19 @@ describe('AuthController', () => {
 
       expect(authService.logout).toHaveBeenCalledWith(mockUser.id);
       expect(authService.logout).not.toHaveBeenCalledWith(undefined);
+    });
+  });
+
+  describe('registrationStatus', () => {
+    it('returns the service result wrapped in JsonResponse', async () => {
+      mockAuthService.registrationStatus.mockResolvedValue({ open: false });
+      const res = await controller.registrationStatus();
+      expect(res).toEqual(expect.objectContaining({ ret: 0, data: { open: false } }));
+    });
+
+    it('is public', () => {
+      const isPublic = Reflect.getMetadata(IS_PUBLIC_KEY, AuthController.prototype.registrationStatus);
+      expect(isPublic).toBe(true);
     });
   });
 });

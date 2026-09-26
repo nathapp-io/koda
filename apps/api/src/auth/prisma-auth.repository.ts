@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { AgentDomain, UserDomain } from './domain/auth.domain';
+import { GlobalLock, lockGlobal } from '../common/utils/advisory-lock';
 
 @Injectable()
 export class PrismaAuthRepository {
@@ -44,23 +45,23 @@ export class PrismaAuthRepository {
   }
 
   /**
-   * Atomically checks if any user exists and creates a new user, optionally
-   * with the bootstrap ADMIN role. Serializing the existence-check and the
-   * create inside a single transaction prevents two concurrent registrations
-   * against an empty database from both becoming ADMIN.
+   * Bootstrap-safe user creation. A transaction-scoped advisory lock taken
+   * before the existence check serializes concurrent registrations, so on an
+   * empty table exactly one caller becomes ADMIN (Postgres has no SQLite-style
+   * write serialization). Returns null and writes nothing when users already
+   * exist and `allowWhenUsersExist` is false (registration closed).
    */
-  async findAnyUserAndCreate(data: {
-    email: string;
-    name: string;
-    passwordHash: string;
-  }): Promise<{ user: UserDomain; firstUser: boolean }> {
+  async findAnyUserAndCreate(
+    data: { email: string; name: string; passwordHash: string },
+    options: { allowWhenUsersExist: boolean },
+  ): Promise<{ user: UserDomain; firstUser: boolean } | null> {
     return this.txManager.run(async () => {
+      await lockGlobal(this.db, GlobalLock.USER_BOOTSTRAP);
       const existing = await this.db.user.findFirst({ select: { id: true } });
       const firstUser = existing === null;
+      if (!firstUser && !options.allowWhenUsersExist) return null;
       const m = await this.db.user.create({
-        data: firstUser
-          ? { ...data, role: 'ADMIN' }
-          : data,
+        data: firstUser ? { ...data, role: 'ADMIN' } : data,
       });
       return { user: this.toDomain(m), firstUser };
     });

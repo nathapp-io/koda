@@ -1,6 +1,6 @@
 import { validateUtil } from '@nathapp/nestjs-common';
 import { registerAs } from '@nestjs/config';
-import { IsOptional, IsString } from 'class-validator';
+import { IsIn, IsOptional, IsString } from 'class-validator';
 
 export const AUTH_CFG = 'auth';
 
@@ -10,6 +10,8 @@ export interface IAuthConfig {
   jwtRefreshSecret: string;
   jwtRefreshExpiresIn: string;
   apiKeySecret: string | undefined;
+  /** Self-registration after the bootstrap user. Default false (admin creates users). */
+  registrationEnabled: boolean;
 }
 
 export class AuthConfigSchema {
@@ -29,6 +31,10 @@ export class AuthConfigSchema {
 
   @IsString()
   API_KEY_SECRET: string;
+
+  @IsOptional()
+  @IsIn(['true', 'false'])
+  REGISTRATION_ENABLED?: string;
 }
 
 export const authConfig = registerAs(AUTH_CFG, (): IAuthConfig => {
@@ -39,5 +45,6 @@ export const authConfig = registerAs(AUTH_CFG, (): IAuthConfig => {
     jwtRefreshSecret: process.env['JWT_REFRESH_SECRET'] as string,
     jwtRefreshExpiresIn: process.env['JWT_REFRESH_EXPIRES_IN'] ?? '7d',
     apiKeySecret: process.env['API_KEY_SECRET'],
+    registrationEnabled: process.env['REGISTRATION_ENABLED'] === 'true',
   };
 });
