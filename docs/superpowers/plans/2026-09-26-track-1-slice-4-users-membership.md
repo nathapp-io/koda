@@ -28,7 +28,7 @@
 - `bun run test` (unit) must pass with **no database running**. DB-backed tests live under `test/integration/`, gated by `KODA_DB_TESTS === '1'`. Run them with `bun run test:db:up && bun run test:integration` from `apps/api` (PG16 on port 5433).
 - Jest runs test files in one process (`maxWorkers: 1`), so `process.env` is shared across files. A test that changes `REGISTRATION_ENABLED` restores it (the Task 1 `bootHttpApp` helper does this).
 - Never edit generated files (`apps/cli/src/generated/`, root `openapi.json`) by hand. Regenerate with `bun run generate` from the repo root.
-- Web: every user-facing string lives in `apps/web/i18n/locales/{en,zh}.json` (the `tests/i18n/locale-parity.spec.ts` gate enforces parity).
+- Web: every user-facing string lives in `apps/web/i18n/locales/{en,zh}.json`. The existing `tests/i18n/locale-parity.spec.ts` only checks the handful of keys it names, so this slice adds `tests/i18n/users-membership-locale-parity.spec.ts` (Task 7, extended in Task 8), which deep-compares every new subtree between `en` and `zh`.
 - Do not push, open a PR, or touch `projects/koda/deployments/koda-local` without the user's explicit approval at that moment.
 - Git: the rtk hook rewrites git commands. If one misbehaves, prefix it with `RTK_DISABLED=1`.
 
@@ -325,7 +325,7 @@ In `apps/api/src/auth/prisma-auth.repository.spec.ts`, inside `describe('PrismaA
   });
 ```
 
-(Declare a `txManager` in this `describe` the same way the first `describe` does, if it is not already in scope.)
+(Declare `const txManager = createMock<ITransactionManager>({ run: <T>(fn: () => Promise<T>) => fn() });` at the top of this `describe`: the two `describe` blocks are siblings, so the first one's `txManager` is not in scope.)
 
 - [ ] **Step 10: Run to verify they fail**
 
@@ -3248,6 +3248,7 @@ git commit -m "feat(cli): koda user and koda member commands; regenerate client"
 - Create: `apps/web/pages/admin/users.vue`, `apps/web/components/CreateUserDialog.vue`, `apps/web/tests/pages/admin-users.spec.ts`
 - Modify: `apps/web/layouts/default.vue`
 - Modify: `apps/web/i18n/locales/en.json`, `apps/web/i18n/locales/zh.json`
+- Create: `apps/web/tests/i18n/users-membership-locale-parity.spec.ts`
 
 **Interfaces:**
 - Consumes (API wire): `GET /auth/registration-status → { open }`; `GET /admin/users?email&current → { records: AdminUser[], total, current, size, hasNext, hasPrev }`; `POST /admin/users`; `PATCH /admin/users/:id { role? , disabled? } → AdminUser`.
@@ -3704,7 +3705,7 @@ const onSubmit = handleSubmit(async (values) => {
 </script>
 ```
 
-(If `auth.validation.nameRequired` does not exist in `en.json`, add it in Step 7 — `register.vue` already calls it with a fallback.)
+(`auth.validation.nameRequired` is added in Step 7.)
 
 Create `apps/web/pages/admin/users.vue`:
 
@@ -3725,8 +3726,11 @@ const emailFilter = ref('')
 const createOpen = ref(false)
 const adminOnly = ref(false)
 
+// ApiError.code is the envelope `ret`, not the HTTP status: a 403 from
+// @RequiredPermission / ForbiddenAppException arrives as ret 40003.
+// (pages/admin/slos.vue checks only 403, which never matches; do not copy it.)
 function isForbidden(err: unknown): boolean {
-  return err instanceof ApiError && (err.code === 403 || err.code === 40003)
+  return err instanceof ApiError && (err.code === 40003 || err.code === 403)
 }
 
 function isSelf(user: AdminUser): boolean {
@@ -3855,7 +3859,7 @@ and after the SLOs `NuxtLink`:
 
 In `apps/web/i18n/locales/en.json`:
 - `auth.register`: add `"closedTitle": "Registration is closed"`, `"closedBody": "Ask an administrator to create an account for you."`
-- `auth.validation`: add `"nameRequired": "Name is required"` if missing.
+- `auth.validation`: add `"nameRequired": "Name is required"` (it does not exist yet; `register.vue` has been falling back to a literal).
 - `nav`: add `"users": "Users"`.
 - New top-level `admin`:
 
@@ -3893,13 +3897,52 @@ In `apps/web/i18n/locales/en.json`:
 ```
 
 In `apps/web/i18n/locales/zh.json`, the same keys:
-- `auth.register`: `"closedTitle": "注册已关闭"`, `"closedBody": "请联系管理员为您创建账号。"`; `auth.validation.nameRequired`: `"请输入姓名"` if missing; `nav.users`: `"用户"`.
+- `auth.register`: `"closedTitle": "注册已关闭"`, `"closedBody": "请联系管理员为您创建账号。"`; `auth.validation.nameRequired`: `"请输入姓名"`; `nav.users`: `"用户"`.
 - `admin.users`: `title` 用户, `subtitle` 创建账号、调整全局角色、停用访问。, `create` 新建用户, `filter` 筛选, `filterPlaceholder` 按邮箱筛选, `adminOnly` 只有全局管理员可以管理用户。, `you` 你, `enable` 启用, `disable` 停用, `prev` 上一页, `next` 下一页, `table` {email 邮箱, name 姓名, role 角色, status 状态}, `status` {active 正常, disabled 已停用}, `roles` {MEMBER 成员, ADMIN 管理员}, `toast` {created 用户已创建, disabled 用户已停用, enabled 用户已启用, roleChanged 角色已更新}, `form` {title 新建用户, email 邮箱, name 姓名, password 临时密码, passwordHint 请通过其他渠道告知用户。, passwordComplexity 需包含大小写字母、数字和符号, role 全局角色, submit 创建用户, creating 创建中…}.
+
+Then create `apps/web/tests/i18n/users-membership-locale-parity.spec.ts` (the existing `locale-parity.spec.ts` only checks keys it names):
+
+```ts
+import { describe, test, expect } from '@jest/globals'
+
+const en = require('../../i18n/locales/en.json') as Record<string, unknown>
+const zh = require('../../i18n/locales/zh.json') as Record<string, unknown>
+
+type Tree = Record<string, unknown>
+
+function at(tree: Tree, path: string): unknown {
+  return path.split('.').reduce<unknown>((node, key) => (node as Tree | undefined)?.[key], tree)
+}
+
+/** Every leaf path under `node`, e.g. ['form.title', 'toast.created']. */
+function leafPaths(node: unknown, prefix = ''): string[] {
+  if (node === null || typeof node !== 'object') return [prefix]
+  return Object.entries(node as Tree).flatMap(([key, child]) => leafPaths(child, prefix ? `${prefix}.${key}` : key))
+}
+
+// Subtrees added or extended by Track 1 Slice 4.
+const SUBTREES = ['admin.users', 'auth.register', 'auth.validation', 'nav']
+
+describe('Slice 4 locale parity (en ⇄ zh)', () => {
+  test.each(SUBTREES)('%s has the same keys in en and zh, all non-empty', (subtree) => {
+    const enNode = at(en, subtree)
+    const zhNode = at(zh, subtree)
+    expect(enNode).toBeDefined()
+    expect(zhNode).toBeDefined()
+    expect(leafPaths(zhNode).sort()).toEqual(leafPaths(enNode).sort())
+    for (const leaf of leafPaths(zhNode)) {
+      expect(String(at(zhNode as Tree, leaf) ?? '').trim()).not.toBe('')
+    }
+  })
+})
+```
+
+(`auth.register`, `auth.validation` and `nav` have identical key sets in `en` and `zh` on `main` @ `6a06031f`, so the test only fails if a new key misses its translation.)
 
 - [ ] **Step 8: Run the web suite and type-check**
 
 Run: `cd apps/web && bunx jest && cd ../.. && bun run type-check`
-Expected: PASS, including `tests/i18n/locale-parity.spec.ts` and the existing `register.spec.ts` structure tests.
+Expected: PASS, including the new `users-membership-locale-parity.spec.ts` and the existing `register.spec.ts` structure tests.
 
 - [ ] **Step 9: Commit**
 
@@ -3908,7 +3951,8 @@ git add apps/web/composables/useRegistrationStatus.ts apps/web/composables/useAd
   apps/web/pages/login.vue apps/web/pages/register.vue apps/web/pages/admin/users.vue \
   apps/web/components/CreateUserDialog.vue apps/web/layouts/default.vue apps/web/i18n/locales \
   apps/web/tests/composables/useRegistrationStatus.spec.ts apps/web/tests/composables/useAdminUsers.spec.ts \
-  apps/web/tests/pages/register.spec.ts apps/web/tests/pages/login.spec.ts apps/web/tests/pages/admin-users.spec.ts
+  apps/web/tests/pages/register.spec.ts apps/web/tests/pages/login.spec.ts apps/web/tests/pages/admin-users.spec.ts \
+  apps/web/tests/i18n/users-membership-locale-parity.spec.ts
 git commit -m "feat(web): admin users page; register link follows registration status"
 ```
 
@@ -3920,7 +3964,7 @@ git commit -m "feat(web): admin users page; register link follows registration s
 - Create: `apps/web/composables/useProjectMembers.ts`, `apps/web/tests/composables/useProjectMembers.spec.ts`
 - Create: `apps/web/components/ProjectMembersPanel.vue`, `apps/web/tests/components/ProjectMembersPanel.spec.ts`
 - Modify: `apps/web/pages/[project]/settings.vue:266-300`
-- Modify: `apps/web/i18n/locales/en.json`, `apps/web/i18n/locales/zh.json`
+- Modify: `apps/web/i18n/locales/en.json`, `apps/web/i18n/locales/zh.json`, `apps/web/tests/i18n/users-membership-locale-parity.spec.ts`
 
 **Interfaces:**
 - Consumes (API wire): `GET /projects/:slug/members?current` → page of `{ userId, email, name, role, joinedAt }`; `POST` `{ email, role }`; `PATCH /:userId { role }`; `DELETE /:userId`.
@@ -4252,17 +4296,20 @@ In `apps/web/pages/[project]/settings.vue`, inside `<TabsContent value="project"
 
 `apps/web/i18n/locales/zh.json`, under `projects.members`: `title` 成员, `subtitle` 可以查看和参与此项目的人员。, `addEmail` 已有用户的邮箱, `add` 添加成员, `remove` 移除, `removeConfirm` 确定将 {email} 移出此项目？, `empty` 暂无成员。, `loadMore` 加载更多, `roles` {ADMIN 管理员, DEVELOPER 开发者, VIEWER 查看者, AGENT 代理}, `toast` {added 已添加成员, removed 已移除成员, roleChanged 角色已更新}.
 
+In `apps/web/tests/i18n/users-membership-locale-parity.spec.ts` (Task 7), add `'projects.members'` to `SUBTREES`.
+
 - [ ] **Step 7: Run the web suite and type-check**
 
 Run: `cd apps/web && bunx jest && cd ../.. && bun run type-check`
-Expected: PASS (including locale parity and the existing settings tab tests).
+Expected: PASS (including the Slice 4 locale-parity test with `projects.members` and the existing settings tab tests).
 
 - [ ] **Step 8: Commit**
 
 ```bash
 git add apps/web/composables/useProjectMembers.ts apps/web/components/ProjectMembersPanel.vue \
   apps/web/pages/[project]/settings.vue apps/web/i18n/locales \
-  apps/web/tests/composables/useProjectMembers.spec.ts apps/web/tests/components/ProjectMembersPanel.spec.ts
+  apps/web/tests/composables/useProjectMembers.spec.ts apps/web/tests/components/ProjectMembersPanel.spec.ts \
+  apps/web/tests/i18n/users-membership-locale-parity.spec.ts
 git commit -m "feat(web): project members section in settings"
 ```
 
