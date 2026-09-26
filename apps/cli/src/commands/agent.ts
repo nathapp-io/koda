@@ -60,7 +60,7 @@ const response = await agentsControllerFindMe();
         const meResponse = await agentsControllerFindMe();
         const agentData = unwrap<{ name: string; slug: string; apiKey?: string }>(meResponse);
 
-        const pickupResponse = await agentsControllerSuggestTicket({ slug: agentData.slug, project: ctx.projectSlug });
+        const pickupResponse = await agentsControllerSuggestTicket({ path: { slug: agentData.slug }, query: { project: ctx.projectSlug }});
         const result = unwrap(pickupResponse);
 
         if (options.json) {
@@ -129,13 +129,13 @@ const response = await agentsControllerFindAll();
       try {
         await withContext({}, { requireProject: false });
 const response = await agentsControllerGenerateApiKey({
-          requestBody: {
+  body: {
             name: options.name,
             slug: options.slug,
             roles: options.roles ? String(options.roles).split(',').map((r: string) => r.trim()).filter(Boolean) : [],
             maxConcurrentTickets: options.maxConcurrentTickets !== undefined ? Number(options.maxConcurrentTickets) : undefined,
-          },
-        });
+          }
+  });
         const created = unwrap<{ name: string; slug: string; apiKey?: string }>(response);
 
         if (options.json) {
@@ -165,13 +165,13 @@ const response = await agentsControllerGenerateApiKey({
       try {
         await withContext({}, { requireProject: false });
 const response = await agentsControllerUpdate({
-          slug,
-          requestBody: {
+  body: {
             name: options.name,
             status: options.status,
             maxConcurrentTickets: options.maxConcurrentTickets !== undefined ? Number(options.maxConcurrentTickets) : undefined,
           },
-        });
+  path: { slug }
+  });
         const updated = unwrap(response);
 
         if (options.json) {
@@ -193,7 +193,7 @@ const response = await agentsControllerUpdate({
     .action(async (slug: string, options) => {
       try {
         await withContext({}, { requireProject: false });
-const response = await agentsControllerRotateApiKey({ slug });
+const response = await agentsControllerRotateApiKey({ path: { slug }});
         const result = unwrap<{ apiKey?: string }>(response);
 
         if (options.json) {
@@ -218,7 +218,7 @@ const response = await agentsControllerRotateApiKey({ slug });
     .action(async (slug: string) => {
       try {
         await withContext({}, { requireProject: false });
-await agentsControllerRemove({ slug });
+await agentsControllerRemove({ path: { slug }});
         console.log(`Agent '${slug}' deleted.`);
         process.exit(0);
       } catch (err: unknown) {

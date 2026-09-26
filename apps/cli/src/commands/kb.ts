@@ -40,9 +40,9 @@ export function kbCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         const response = await ragControllerSearch({
-          slug: ctx.projectSlug,
-          requestBody: { query: options.query },
-        });
+  body: { query: options.query },
+  path: { slug: ctx.projectSlug }
+  });
         const data = unwrap<{
           results: Array<{
             id: string;
@@ -88,7 +88,7 @@ export function kbCommand(program: Command): void {
       try {
         const ctx = await withContext({ projectSlug: options.project });
 
-        const response = await ragControllerListDocuments({ slug: ctx.projectSlug, limit: '100' });
+        const response = await ragControllerListDocuments({ path: { slug: ctx.projectSlug }, query: { limit: '100' }});
         const data = unwrap<{ items: Array<{ id: string; source: string; createdAt: string }>; total: number }>(response);
 
         if (options.json) {
@@ -137,9 +137,9 @@ export function kbCommand(program: Command): void {
         const fileName = basename(options.file);
 
         const response = await ragControllerAddDocument({
-          slug: ctx.projectSlug,
-          requestBody: { content, source: options.source, sourceId: fileName },
-        });
+  body: { content, source: options.source, sourceId: fileName },
+  path: { slug: ctx.projectSlug }
+  });
         const data = unwrap<{ id: string; source: string; docCount: number }>(response);
 
         if (options.json) {
@@ -172,9 +172,8 @@ export function kbCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         const response = await ragControllerDeleteDocument({
-          slug: ctx.projectSlug,
-          sourceId: options.sourceId,
-        });
+  path: { slug: ctx.projectSlug, sourceId: options.sourceId }
+  });
         const data = unwrap<Record<string, unknown> | undefined>(response);
 
         if (options.json) {
@@ -199,8 +198,8 @@ export function kbCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         const response = await ragControllerOptimizeTable({
-          slug: ctx.projectSlug,
-        });
+  path: { slug: ctx.projectSlug }
+  });
         const data = unwrap<Record<string, unknown>>(response);
 
         if (options.json) {
@@ -270,9 +269,9 @@ export function kbCommand(program: Command): void {
         }
 
         const response = await ragControllerImportGraphify({
-          slug: ctx.projectSlug,
+          path: { slug: ctx.projectSlug },
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          requestBody: { nodes, links } as any,
+          body: { nodes, links } as any,
         });
         const data = unwrap<{ imported: number; cleared: number }>(response);
 

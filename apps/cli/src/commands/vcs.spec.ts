@@ -25,7 +25,7 @@ jest.mock('conf', () => {
 });
 
 // Mock generated API client
-jest.mock('../generated/services.gen', () => ({
+jest.mock('../generated', () => ({
   vcsControllerCreateConnection: jest.fn(),
   vcsControllerGetConnection: jest.fn(),
   vcsControllerDeleteConnection: jest.fn(),
@@ -36,9 +36,6 @@ jest.mock('../generated/services.gen', () => ({
   vcsControllerSyncPr: jest.fn(),
 }));
 
-jest.mock('../generated/core/OpenAPI', () => ({
-  OpenAPI: { BASE: '', TOKEN: '' },
-}));
 
 // Mock config module
 jest.mock('../config', () => ({
@@ -65,7 +62,7 @@ import {
   vcsControllerCreateConnection,
   vcsControllerGetConnection,
   vcsControllerDeleteConnection,
-} from '../generated/services.gen';
+} from '../generated';
 
 describe('vcsCommand', () => {
   let program: Command;
@@ -234,9 +231,7 @@ describe('vcsCommand', () => {
       ]);
 
       expect(vcsControllerCreateConnection).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'my-project',
-        })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'my-project' })})
       );
     });
 
@@ -281,9 +276,7 @@ describe('vcsCommand', () => {
       ]);
 
       expect(vcsControllerCreateConnection).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'another-project',
-        })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'another-project' })})
       );
     });
 
@@ -507,9 +500,7 @@ describe('vcsCommand', () => {
       await statusCmd?.parseAsync(['node', 'test']);
 
       expect(vcsControllerGetConnection).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'my-project',
-        })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'my-project' })})
       );
     });
 
@@ -540,9 +531,7 @@ describe('vcsCommand', () => {
       await statusCmd?.parseAsync(['node', 'test', '--project', 'another-project']);
 
       expect(vcsControllerGetConnection).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'another-project',
-        })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'another-project' })})
       );
     });
 
@@ -609,9 +598,7 @@ describe('vcsCommand', () => {
       await disconnectCmd?.parseAsync(['node', 'test']);
 
       expect(vcsControllerDeleteConnection).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'my-project',
-        })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'my-project' })})
       );
     });
 
@@ -627,9 +614,7 @@ describe('vcsCommand', () => {
       await disconnectCmd?.parseAsync(['node', 'test', '--project', 'another-project']);
 
       expect(vcsControllerDeleteConnection).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: 'another-project',
-        })
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'another-project' })})
       );
     });
 

@@ -51,9 +51,6 @@ jest.mock('../generated', () => ({
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
-jest.mock('../generated/core/OpenAPI', () => ({
-  OpenAPI: { BASE: '', TOKEN: '' },
-}));
 
 // Mock config module
 jest.mock('../config', () => ({
@@ -164,11 +161,7 @@ describe('ticket link subcommand', () => {
       ]);
 
       expect(ticketLinksControllerCreate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          slug: PROJECT_SLUG,
-          ref: TEST_REF,
-          requestBody: { url: TEST_URL },
-        })
+        expect.objectContaining({ body: expect.objectContaining({ url: TEST_URL }), path: expect.objectContaining({ slug: PROJECT_SLUG, ref: TEST_REF })})
       );
 
       const output = consoleLogSpy.mock.calls.map((c) => c.join(' ')).join('\n');
@@ -252,10 +245,10 @@ describe('ticket link subcommand', () => {
       ]);
 
       expect(ticketLinksControllerFindAll).toHaveBeenCalledWith(
-        expect.objectContaining({ slug: PROJECT_SLUG, ref: TEST_REF })
+        expect.objectContaining({ path: expect.objectContaining({ slug: PROJECT_SLUG, ref: TEST_REF })})
       );
       expect(ticketLinksControllerRemove).toHaveBeenCalledWith(
-        expect.objectContaining({ slug: PROJECT_SLUG, ref: TEST_REF, linkId: 'link-1' })
+        expect.objectContaining({ path: expect.objectContaining({ slug: PROJECT_SLUG, ref: TEST_REF, linkId: 'link-1' })})
       );
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });

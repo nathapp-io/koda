@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { resolveContext } from '../config';
 import { handleApiError } from '../utils/error';
-import { OpenAPI } from '../generated';
+import { configureApiClient } from '../utils/api-client';
 
 const CI_THRESHOLD = 0.70;
 
@@ -24,15 +24,14 @@ export function evaluateCommand(program: Command): void {
         process.exit(2);
       }
 
-      OpenAPI.BASE = ctx.apiUrl;
-      OpenAPI.TOKEN = ctx.apiKey;
+      configureApiClient(ctx.apiUrl, ctx.apiKey);
 
       if (!ctx.projectSlug) {
         console.error('Error: project slug is required');
         process.exit(2);
       }
 
-      let retrievalControllerEvaluateRetrieval: (arg: { slug: string }) => Promise<unknown>;
+      let retrievalControllerEvaluateRetrieval: (arg: { path: { slug: string } }) => Promise<unknown>;
       try {
         const generated = await import('../generated');
         retrievalControllerEvaluateRetrieval = generated.retrievalControllerEvaluateRetrieval;
@@ -43,7 +42,7 @@ export function evaluateCommand(program: Command): void {
 
       try {
         const result = await retrievalControllerEvaluateRetrieval({
-          slug: ctx.projectSlug,
+          path: { slug: ctx.projectSlug },
         }) as unknown as { data: { precisionAt5_avg: number; precisionAt5_p50: number; precisionAt5_p95: number; totalQueries: number; results: Array<{ query: string; intent: string; precisionAt5: number }> } };
 
         const summary = result.data;

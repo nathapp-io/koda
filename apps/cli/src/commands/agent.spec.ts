@@ -36,9 +36,6 @@ jest.mock('../generated', () => ({
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
-jest.mock('../generated/core/OpenAPI', () => ({
-  OpenAPI: { BASE: '', TOKEN: '' },
-}));
 
 // Mock config module to use mockData instead of real filesystem
 jest.mock('../config', () => ({
@@ -454,12 +451,10 @@ describe('agentCommand', () => {
 
       await createCmd?.parseAsync(['node', 'test', '--name', 'New Agent', '--roles', 'DEVELOPER,AGENT']);
 
-      expect(agentsControllerGenerateApiKey).toHaveBeenCalledWith({
-        requestBody: expect.objectContaining({
+      expect(agentsControllerGenerateApiKey).toHaveBeenCalledWith({ body: expect.objectContaining({
           name: 'New Agent',
           roles: ['DEVELOPER', 'AGENT'],
-        }),
-      });
+        })});
       expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('sk-generated-key'));
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
@@ -475,9 +470,7 @@ describe('agentCommand', () => {
 
       await createCmd?.parseAsync(['node', 'test', '--name', 'New Agent']);
 
-      expect(agentsControllerGenerateApiKey).toHaveBeenCalledWith({
-        requestBody: expect.objectContaining({ roles: [] }),
-      });
+      expect(agentsControllerGenerateApiKey).toHaveBeenCalledWith({ body: expect.objectContaining({ roles: [] })});
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
   });
@@ -491,10 +484,7 @@ describe('agentCommand', () => {
 
       await updateCmd?.parseAsync(['node', 'test', 'agent-one', '--status', 'PAUSED']);
 
-      expect(agentsControllerUpdate).toHaveBeenCalledWith({
-        slug: 'agent-one',
-        requestBody: expect.objectContaining({ status: 'PAUSED' }),
-      });
+      expect(agentsControllerUpdate).toHaveBeenCalledWith({ body: expect.objectContaining({ status: 'PAUSED' }), path: { slug: 'agent-one' }});
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
   });
@@ -508,7 +498,7 @@ describe('agentCommand', () => {
 
       await rotateCmd?.parseAsync(['node', 'test', 'agent-one']);
 
-      expect(agentsControllerRotateApiKey).toHaveBeenCalledWith({ slug: 'agent-one' });
+      expect(agentsControllerRotateApiKey).toHaveBeenCalledWith({ path: { slug: 'agent-one' }});
       expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('sk-rotated'));
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
@@ -523,7 +513,7 @@ describe('agentCommand', () => {
 
       await deleteCmd?.parseAsync(['node', 'test', 'agent-one']);
 
-      expect(agentsControllerRemove).toHaveBeenCalledWith({ slug: 'agent-one' });
+      expect(agentsControllerRemove).toHaveBeenCalledWith({ path: { slug: 'agent-one' }});
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 

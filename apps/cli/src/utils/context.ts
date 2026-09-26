@@ -1,5 +1,5 @@
 import { resolveContext, ResolveContextFlags, ResolvedContext } from '../config';
-import { OpenAPI } from '../generated/core/OpenAPI';
+import { configureApiClient } from './api-client';
 import { handleApiError } from './error';
 
 export interface WithContextOptions {
@@ -19,7 +19,7 @@ export interface WithContextOptions {
  *   H10: apiUrl/apiKey from project-local `.koda/config.json` are ignored)
  * - short-circuits with the correct config error + exit code when project
  *   (default) or API key is missing
- * - wires the generated client (OpenAPI.BASE/TOKEN)
+ * - wires the generated client (base URL + Authorization header)
  */
 export function withContext(
   flags: ResolveContextFlags,
@@ -46,8 +46,7 @@ export async function withContext(
     throw new Error('API key or URL not configured. Run: koda login --api-key <key>');
   }
 
-  OpenAPI.BASE = ctx.apiUrl.replace(/\/api\/?$/, '');
-  OpenAPI.TOKEN = ctx.apiKey;
+  configureApiClient(ctx.apiUrl.replace(/\/api\/?$/, ''), ctx.apiKey);
 
   return ctx;
 }

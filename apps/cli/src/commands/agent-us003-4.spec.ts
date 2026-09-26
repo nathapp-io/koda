@@ -43,9 +43,6 @@ jest.mock('../generated', () => ({
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
-jest.mock('../generated/core/OpenAPI', () => ({
-  OpenAPI: { BASE: '', TOKEN: '' },
-}));
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -138,7 +135,7 @@ describe('US-003-4: agentCommand pickup — resolveContext wiring', () => {
 
     expect(agentsControllerSuggestTicket).toHaveBeenCalled();
     const callArgs = (agentsControllerSuggestTicket as jest.Mock).mock.calls[0][0] as Record<string, unknown>;
-    expect(callArgs).toMatchObject({ project: 'configured-project' });
+    expect(callArgs).toMatchObject({ query: { project: 'configured-project' } });
   });
 
   /**
@@ -156,7 +153,7 @@ describe('US-003-4: agentCommand pickup — resolveContext wiring', () => {
 
     expect(agentsControllerSuggestTicket).toHaveBeenCalled();
     const callArgs = (agentsControllerSuggestTicket as jest.Mock).mock.calls[0][0] as Record<string, unknown>;
-    expect(callArgs).toMatchObject({ project: 'foo' });
+    expect(callArgs).toMatchObject({ query: { project: 'foo' } });
   });
 
   /**

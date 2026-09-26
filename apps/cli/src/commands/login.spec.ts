@@ -18,9 +18,6 @@ jest.mock('../generated', () => ({
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
 
-jest.mock('../generated/core/OpenAPI', () => ({
-  OpenAPI: { BASE: '', TOKEN: '' },
-}));
 
 // Mock config module
 jest.mock('../config', () => ({
@@ -42,7 +39,6 @@ jest.mock('../config', () => ({
 
 import { loginCommand, loginError } from './login';
 import { agentsControllerFindMe } from '../generated';
-import { ApiError } from '../generated/core/ApiError';
 
 describe('login command', () => {
   beforeEach(() => {
@@ -71,12 +67,9 @@ describe('login command', () => {
     ).rejects.toThrow();
   });
 
-  function makeApiError(status: number, statusText: string, body: unknown): ApiError {
-  return new ApiError(
-    { method: 'GET', path: '/agents/me', headers: {} } as never,
-    { body, ok: false, status, statusText, url: 'http://api.example.com' },
-    statusText,
-  );
+  // The generated client throws the parsed error body for HTTP failures.
+  function makeApiError(status: number, statusText: string, body: unknown): unknown {
+  return { ...(body as Record<string, unknown>), statusText, statusCode: status };
 }
 
 describe('loginError — distinguishes auth failures from network and 5xx', () => {

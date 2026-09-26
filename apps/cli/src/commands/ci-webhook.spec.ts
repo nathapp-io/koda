@@ -17,7 +17,6 @@ jest.mock('../generated', () => ({
   ciWebhookControllerHandleCiWebhook: jest.fn(),
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
-jest.mock('../generated/core/OpenAPI', () => ({ OpenAPI: { BASE: '', TOKEN: '' } }));
 
 jest.mock('../config', () => ({
   resolveContext: jest.fn(),
@@ -65,14 +64,11 @@ describe('ciWebhookCommand', () => {
 
       await program.parseAsync(BASE_ARGS);
 
-      expect(mockTrigger).toHaveBeenCalledWith(expect.objectContaining({
-        slug: 'my-proj',
-        requestBody: expect.objectContaining({
+      expect(mockTrigger).toHaveBeenCalledWith(expect.objectContaining({ body: expect.objectContaining({
           event: 'pipeline_failed',
           pipeline: expect.objectContaining({ id: 'pipe-1' }),
           commit: expect.objectContaining({ sha: 'abc123' }),
-        }),
-      }));
+        }), path: { slug: 'my-proj' }}));
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
@@ -95,9 +91,7 @@ describe('ciWebhookCommand', () => {
         '--commit-sha', 'def456',
       ]);
 
-      expect(mockTrigger).toHaveBeenCalledWith(expect.objectContaining({
-        requestBody: expect.objectContaining({ event: 'pipeline_success' }),
-      }));
+      expect(mockTrigger).toHaveBeenCalledWith(expect.objectContaining({ body: expect.objectContaining({ event: 'pipeline_success' })}));
     });
 
     it('passes optional commit message', async () => {
@@ -105,11 +99,9 @@ describe('ciWebhookCommand', () => {
 
       await program.parseAsync([...BASE_ARGS, '--commit-message', 'fix: crash']);
 
-      expect(mockTrigger).toHaveBeenCalledWith(expect.objectContaining({
-        requestBody: expect.objectContaining({
+      expect(mockTrigger).toHaveBeenCalledWith(expect.objectContaining({ body: expect.objectContaining({
           commit: expect.objectContaining({ message: 'fix: crash' }),
-        }),
-      }));
+        })}));
     });
 
     it('passes parsed failures JSON array', async () => {
@@ -118,9 +110,7 @@ describe('ciWebhookCommand', () => {
 
       await program.parseAsync([...BASE_ARGS, '--failures', JSON.stringify(failures)]);
 
-      expect(mockTrigger).toHaveBeenCalledWith(expect.objectContaining({
-        requestBody: expect.objectContaining({ failures }),
-      }));
+      expect(mockTrigger).toHaveBeenCalledWith(expect.objectContaining({ body: expect.objectContaining({ failures })}));
     });
   });
 });

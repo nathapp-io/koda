@@ -19,7 +19,6 @@ jest.mock('../generated', () => ({
   webhookControllerRemove: jest.fn(),
   OpenAPI: { BASE: '', TOKEN: '' },
 }));
-jest.mock('../generated/core/OpenAPI', () => ({ OpenAPI: { BASE: '', TOKEN: '' } }));
 
 jest.mock('../config', () => ({
   resolveContext: jest.fn(),
@@ -68,7 +67,7 @@ describe('webhookCommand', () => {
 
       await program.parseAsync(['node', 'koda', 'webhook', 'create', '--url', 'https://example.com/hook']);
 
-      expect(mockRegister).toHaveBeenCalledWith(expect.objectContaining({ slug: 'my-proj', requestBody: expect.objectContaining({ url: 'https://example.com/hook' }) }));
+      expect(mockRegister).toHaveBeenCalledWith(expect.objectContaining({ body: expect.objectContaining({ url: 'https://example.com/hook' }), path: expect.objectContaining({ slug: 'my-proj' })}));
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
@@ -86,9 +85,7 @@ describe('webhookCommand', () => {
 
       await program.parseAsync(['node', 'koda', 'webhook', 'create', '--url', 'https://example.com', '--events', 'COMMENT,CREATED', '--secret', 'mysecret']);
 
-      expect(mockRegister).toHaveBeenCalledWith(expect.objectContaining({
-        requestBody: expect.objectContaining({ events: ['COMMENT', 'CREATED'], secret: 'mysecret' }),
-      }));
+      expect(mockRegister).toHaveBeenCalledWith(expect.objectContaining({ body: expect.objectContaining({ events: ['COMMENT', 'CREATED'], secret: 'mysecret' })}));
     });
   });
 
@@ -99,7 +96,7 @@ describe('webhookCommand', () => {
 
       await program.parseAsync(['node', 'koda', 'webhook', 'list']);
 
-      expect(mockList).toHaveBeenCalledWith({ slug: 'my-proj' });
+      expect(mockList).toHaveBeenCalledWith({ path: { slug: 'my-proj' }});
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
@@ -119,7 +116,7 @@ describe('webhookCommand', () => {
 
       await program.parseAsync(['node', 'koda', 'webhook', 'delete', '--id', 'wh-1']);
 
-      expect(mockRemove).toHaveBeenCalledWith({ id: 'wh-1' });
+      expect(mockRemove).toHaveBeenCalledWith({ path: { id: 'wh-1' }});
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 

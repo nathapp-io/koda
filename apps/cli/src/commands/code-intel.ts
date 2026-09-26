@@ -24,9 +24,9 @@ export function codeIntelCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         const response = await codeIntelControllerGetSymbol({
-          symbolId: options.symbolId,
-          projectSlug: ctx.projectSlug ?? options.project,
-        });
+  path: { symbolId: options.symbolId },
+  query: { projectSlug: ctx.projectSlug ?? options.project }
+  });
         const data = unwrap<Record<string, unknown>>(response);
 
         if (options.json) {
@@ -59,9 +59,9 @@ export function codeIntelCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         const response = await codeIntelControllerGetCallers({
-          symbolId: options.symbolId,
-          projectSlug: ctx.projectSlug ?? options.project,
-        });
+  path: { symbolId: options.symbolId },
+  query: { projectSlug: ctx.projectSlug ?? options.project }
+  });
         const raw = unwrap<{ items?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>>(response);
         const items: Array<Record<string, unknown>> = Array.isArray(raw)
           ? raw
@@ -90,9 +90,9 @@ export function codeIntelCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         const response = await codeIntelControllerGetCallees({
-          symbolId: options.symbolId,
-          projectSlug: ctx.projectSlug ?? options.project,
-        });
+  path: { symbolId: options.symbolId },
+  query: { projectSlug: ctx.projectSlug ?? options.project }
+  });
         const raw = unwrap<{ items?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>>(response);
         const items: Array<Record<string, unknown>> = Array.isArray(raw)
           ? raw

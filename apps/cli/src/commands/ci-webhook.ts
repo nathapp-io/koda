@@ -34,13 +34,15 @@ export function ciWebhookCommand(program: Command): void {
         }
 
         const response = await ciWebhookControllerHandleCiWebhook({
-          slug: ctx.projectSlug,
-          xCiSignature: options.signature,
-          // SEC-1: the API requires a unique delivery id and a fresh Date header
-          // to reject replayed deliveries.
-          xCiDelivery: `cli-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-          date: new Date().toUTCString(),
-          requestBody: {
+          path: { slug: ctx.projectSlug },
+          headers: {
+            'x-ci-signature': options.signature,
+            // SEC-1: the API requires a unique delivery id and a fresh Date header
+            // to reject replayed deliveries.
+            'x-ci-delivery': `cli-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+            date: new Date().toUTCString(),
+          },
+          body: {
             event: options.event as 'pipeline_failed' | 'pipeline_success',
             pipeline: { id: options.pipelineId, url: options.pipelineUrl },
             commit: { sha: options.commitSha, message: options.commitMessage },

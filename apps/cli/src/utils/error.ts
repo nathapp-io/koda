@@ -1,5 +1,4 @@
 import { error as printError } from './output';
-import { ApiError } from '../generated/core/ApiError';
 import { isJsonMode } from './json-mode';
 
 interface HandleApiErrorOpts {
@@ -28,28 +27,52 @@ function emitError(message: string, code: ErrorCode, status: number | undefined,
   }
 }
 
+function describeMessage(m: unknown): string | undefined {
+  if (typeof m === 'string') {
+    return m;
+  }
+  // Nest ValidationPipe rejects with `message: string[]`
+  if (Array.isArray(m)) {
+    return m.map(String).join('; ');
+  }
+  return undefined;
+}
+
 function getStatusAndMessage(err: unknown): { status: number | undefined; message: string } {
-  if (err instanceof ApiError) {
-    const body = err.body as Record<string, unknown> | undefined;
-    const message =
-      (typeof body?.message === 'string' ? body.message : undefined) ??
-      err.statusText ??
-      err.message ??
-      'Unknown error';
-    return { status: err.status, message };
+  if (typeof err === 'string') {
+    return { status: undefined, message: err || 'Unknown error' };
   }
 
-  const apiError = err as {
+  const e = err as {
+    message?: unknown;
+    statusCode?: number;
+    status?: number;
+  } | null;
+
+  // The generated client throws the parsed error body for HTTP failures
+  // (e.g. Nest's { statusCode, message }); `.status` is bridged for errors
+  // that carry it directly.
+  const status = e?.statusCode ?? e?.status;
+  if (typeof status === 'number') {
+    return { status, message: describeMessage(e?.message) ?? 'Unknown error' };
+  }
+
+  // Transport-level errors shaped like { response: { status, data } }
+  const apiError = e as {
     response?: { status: number; data?: { message?: string } };
-    message?: string;
+  } | null;
+  if (apiError?.response) {
+    const message =
+      apiError.response.data?.message ??
+      describeMessage(e?.message) ??
+      'Unknown error';
+    return { status: apiError.response.status, message };
+  }
+
+  return {
+    status: undefined,
+    message: describeMessage(e?.message) ?? 'Unknown error',
   };
-
-  const message =
-    apiError.response?.data?.message ??
-    apiError.message ??
-    'Unknown error';
-
-  return { status: apiError.response?.status, message };
 }
 
 /**

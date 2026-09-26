@@ -34,7 +34,6 @@
   "dependencies": {
     "@casl/ability": "^6.8.1",
     "@fastify/helmet": "^13.0.0",
-    "@fastify/static": "^9.0.0",
     "@keyv/redis": "^3.0.0",
     "@lancedb/lancedb": "0.17.0",
     "@nathapp/nestjs-app": "^3.3.0",
