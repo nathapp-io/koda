@@ -4,9 +4,10 @@ import { CommentsService } from './comments.service';
 import { PrismaCommentRepository } from './prisma-comment.repository';
 import { COMMENT_REPOSITORY } from './domain/comment.domain';
 import { AuthModule } from '../auth/auth.module';
+import { EventsModule } from '../events/events.module';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, EventsModule],
   controllers: [CommentsController],
   providers: [
     PrismaCommentRepository,

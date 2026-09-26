@@ -121,6 +121,21 @@ describe('EntityGraphService', () => {
       );
       expect(incidentLink).toBeDefined();
     });
+
+    it('Slice 5: COMMENT_ADDED writes no entity node', async () => {
+      await service.onTicketEvent({
+        type: 'ticket_event',
+        id: 'event-comment',
+        ticketId: 'ticket-comment',
+        projectId: 'project-123',
+        actorId: 'user-1',
+        action: 'COMMENT_ADDED',
+        data: { commentId: 'comment-1' },
+        timestamp: new Date(),
+      });
+
+      expect(await entityStore.findNodeByEntityId('project-123', 'ticket-comment')).toBeNull();
+    });
   });
 
   describe('onGraphifyImport', () => {

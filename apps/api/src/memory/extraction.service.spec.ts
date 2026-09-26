@@ -333,6 +333,21 @@ describe('ExtractionService', () => {
     });
   });
 
+  it('Slice 5: extracts nothing from a COMMENT_ADDED ticket event', () => {
+    const items = service.extractFromEvent({
+      type: 'ticket_event',
+      id: 'evt-comment',
+      ticketId: 'ticket-1',
+      projectId: 'project-123',
+      actorId: 'user-1',
+      action: 'COMMENT_ADDED',
+      data: { commentId: 'comment-1' },
+      timestamp: new Date(),
+    } as Parameters<ExtractionService['extractFromEvent']>[0]);
+
+    expect(items).toEqual([]);
+  });
+
   describe('recordDecision', () => {
     it('creates a new decision and returns canonicalId and memoryId', async () => {
       const mockRepository = createMockRepository();

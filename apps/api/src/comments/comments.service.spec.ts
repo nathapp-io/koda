@@ -6,6 +6,9 @@ import { PrismaCommentRepository } from './prisma-comment.repository';
 import { COMMENT_REPOSITORY } from './domain/comment.domain';
 import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
 import type { KodaAgentRole } from '../auth/principal/koda-principal.types';
+import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
+import { TicketEventService } from '../events/ticket-event.service';
 
 describe('CommentsService', () => {
   let service: CommentsService;
@@ -154,6 +157,29 @@ describe('CommentsService', () => {
 
   let mockCaslCan: jest.Mock;
 
+  const callOrder: string[] = [];
+  const mockTxManager = {
+    run: jest.fn(async <T>(fn: () => Promise<T>) => {
+      callOrder.push('tx:start');
+      const result = await fn();
+      callOrder.push('tx:end');
+      return result;
+    }),
+  };
+  // Typed parameters: a zero-arg jest.fn types mock.calls as [][] and
+  // mock.calls[0][0] would not compile under ts-jest diagnostics.
+  const mockTicketEventService = {
+    create: jest.fn(async (_input: unknown) => {
+      callOrder.push('ticketEvent');
+      return { id: 'tev-1', action: 'COMMENT_ADDED', timestamp: new Date('2026-09-26T00:00:00.000Z') };
+    }),
+  };
+  const mockOutbox = {
+    record: jest.fn(async (_input: unknown) => {
+      callOrder.push('outbox');
+    }),
+  };
+
   beforeEach(async () => {
     mockCaslCan = jest.fn().mockReturnValue(true);
 
@@ -162,6 +188,9 @@ describe('CommentsService', () => {
         CommentsService,
         { provide: COMMENT_REPOSITORY, useValue: mockCommentRepo },
         { provide: KodaCaslAbilityFactory, useValue: { createForUser: jest.fn().mockResolvedValue({ can: mockCaslCan }) } },
+        { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
+        { provide: TicketEventService, useValue: mockTicketEventService },
+        { provide: NathappOutboxService, useValue: mockOutbox },
       ],
     }).compile();
 
@@ -170,6 +199,7 @@ describe('CommentsService', () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+    callOrder.length = 0;
   });
 
   describe('create', () => {
@@ -313,6 +343,67 @@ describe('CommentsService', () => {
           service.create('koda', 'KODA-1', invalidDto as CreateCommentDto, mockUserPrincipal)
         ).rejects.toThrow();
       }
+    });
+  });
+
+  describe('create — COMMENT_ADDED ticket event', () => {
+    beforeEach(() => {
+      mockCommentRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockCommentRepo.findTicketScoped.mockResolvedValue(mockTicket);
+      mockCommentRepo.create.mockImplementation(async () => {
+        callOrder.push('comment');
+        return mockComment;
+      });
+    });
+
+    it('writes the comment, the TicketEvent and the outbox row inside one transaction', async () => {
+      await service.create('koda', 'KODA-1', { body: 'hello', type: 'GENERAL' }, mockUserPrincipal);
+
+      expect(callOrder).toEqual(['tx:start', 'comment', 'ticketEvent', 'outbox', 'tx:end']);
+    });
+
+    it('records COMMENT_ADDED with only the comment id as data', async () => {
+      await service.create('koda', 'KODA-1', { body: 'secret body', type: 'GENERAL' }, mockUserPrincipal);
+
+      expect(mockTicketEventService.create).toHaveBeenCalledWith({
+        ticketId: mockTicket.id,
+        projectId: mockProject.id,
+        action: 'COMMENT_ADDED',
+        actorId: mockUserPrincipal.id,
+        actorType: 'user',
+        source: 'internal',
+        data: { commentId: mockComment.id },
+      });
+      const recorded = mockOutbox.record.mock.calls[0][0] as { type: string; payload: Record<string, unknown>; metadata: Record<string, unknown> };
+      expect(recorded.type).toBe('ticket_event');
+      expect(recorded.payload).toEqual(expect.objectContaining({
+        id: 'tev-1',
+        type: 'ticket_event',
+        action: 'COMMENT_ADDED',
+        ticketId: mockTicket.id,
+        projectId: mockProject.id,
+        data: { commentId: mockComment.id },
+      }));
+      expect(JSON.stringify(recorded.payload)).not.toContain('secret body');
+      expect(recorded.metadata).toEqual({ projectId: mockProject.id, eventId: 'tev-1' });
+    });
+
+    it('marks agent authors as actorType agent', async () => {
+      await service.create('koda', 'KODA-1', { body: 'hi', type: 'GENERAL' }, mockAgentPrincipal);
+
+      expect(mockTicketEventService.create).toHaveBeenCalledWith(expect.objectContaining({ actorId: 'agent-123', actorType: 'agent' }));
+    });
+
+    it('propagates an event-write failure so the transaction rolls back', async () => {
+      mockTicketEventService.create.mockRejectedValueOnce(new Error('db down'));
+
+      await expect(service.create('koda', 'KODA-1', { body: 'hi', type: 'GENERAL' }, mockUserPrincipal)).rejects.toThrow('db down');
+      expect(mockOutbox.record).not.toHaveBeenCalled();
+    });
+
+    it('does not open a transaction when validation fails', async () => {
+      await expect(service.create('koda', 'KODA-1', { body: '   ', type: 'GENERAL' }, mockUserPrincipal)).rejects.toBeDefined();
+      expect(mockTxManager.run).not.toHaveBeenCalled();
     });
   });
 
