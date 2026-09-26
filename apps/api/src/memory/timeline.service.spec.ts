@@ -114,7 +114,8 @@ describe('TimelineService', () => {
 
       expect(mockTimelineRepo.findTicketEvents).toHaveBeenCalledWith(expect.anything(), { cursor: undefined, take: 3 });
       expect(result.events.map((e) => e.id)).toEqual(['tk3', 'ag2']);
-      expect(decodeTimelineCursor(result.nextCursor!)).toEqual({ createdAt: t('2026-01-02T00:00:00.000Z'), id: 'ag2' });
+      expect(result.nextCursor).toBeDefined();
+      expect(decodeTimelineCursor(result.nextCursor as string)).toEqual({ createdAt: t('2026-01-02T00:00:00.000Z'), id: 'ag2' });
       expect(result).not.toHaveProperty('total');
     });
 

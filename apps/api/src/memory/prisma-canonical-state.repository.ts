@@ -2,12 +2,15 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { PrismaClient } from '@prisma/client';
 import type { ICanonicalStateRepository } from './domain/canonical-state.domain';
+import { compareEventsDesc } from './event-order';
 import type {
   CanonicalDecision,
   CanonicalEvent,
   CanonicalSnapshotQuery,
   CanonicalTicket,
 } from './canonical-state.service';
+
+export const DEFAULT_CANONICAL_EVENT_LIMIT = 20;
 
 @Injectable()
 export class PrismaCanonicalStateRepository implements ICanonicalStateRepository {
@@ -66,18 +69,23 @@ export class PrismaCanonicalStateRepository implements ICanonicalStateRepository
     const actorWhere = query.actorId ? { ...baseWhere, actorId: query.actorId } : baseWhere;
     const decisionWhere = query.actorId ? { ...baseWhere, agentId: query.actorId } : baseWhere;
 
+    const take = query.eventLimit ?? DEFAULT_CANONICAL_EVENT_LIMIT;
+
     const [ticketRows, agentRows, decisionRows] = await Promise.all([
       this.db.ticketEvent.findMany({
         where: actorWhere,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take,
       }),
       this.db.agentEvent.findMany({
         where: actorWhere,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take,
       }),
       this.db.decisionEvent.findMany({
         where: decisionWhere,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take,
       }),
     ]);
 
@@ -119,13 +127,8 @@ export class PrismaCanonicalStateRepository implements ICanonicalStateRepository
       });
     }
 
-    events.sort((a, b) => {
-      const timeDelta = b.createdAt.getTime() - a.createdAt.getTime();
-      if (timeDelta !== 0) return timeDelta;
-      return b.id.localeCompare(a.id);
-    });
-
-    return events;
+    events.sort(compareEventsDesc);
+    return events.slice(0, take);
   }
 
   async findActiveDecisions(projectId: string): Promise<CanonicalDecision[]> {

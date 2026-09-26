@@ -1,7 +1,6 @@
 import { performance } from 'perf_hooks';
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
-import { AppException, NotFoundAppException, InternalAppException } from '@nathapp/nestjs-common';
-import { PageOption } from '@nathapp/nestjs-common';
+import { AppException, NotFoundAppException, InternalAppException, PageOption } from '@nathapp/nestjs-common';
 import { CanonicalStateService, CanonicalTicket, CanonicalEvent, CanonicalDecision } from '../memory/canonical-state.service';
 import { PrismaMemoryItemRepository } from '../memory/prisma-memory-item.repository';
 import { MemoryItem } from '../memory/memory-item-repository';
@@ -105,6 +104,7 @@ export class ContextBuilderService {
           ticketIds: query.ticketIds,
           actorId: query.actorId,
           timeWindow: query.timeWindow ?? { from: new Date(0) },
+          eventLimit: MAX_RECENT_EVENTS,
         }),
         this.memoryItemRepository.findByProjectMemory(
           { projectId: query.projectId, orderBy: 'confidence' },

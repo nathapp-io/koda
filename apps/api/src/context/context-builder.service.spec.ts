@@ -239,6 +239,16 @@ describe('ContextBuilderService', () => {
       );
     });
 
+    test('passes eventLimit of 20 to canonicalStateService.getSnapshot', async () => {
+      setupDefaultStubs();
+
+      await service.getProjectContext(baseQuery);
+
+      expect(canonicalStateService.getSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({ eventLimit: 20 }),
+      );
+    });
+
     test('includes tickets from canonical snapshot in response', async () => {
       setupDefaultStubs();
       const ticket = makeTicket();
