@@ -495,7 +495,7 @@ describe('ticketCommand', () => {
 
       (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
         ret: 0,
-        data: { items: mockTickets, total: 2 },
+        data: { records: mockTickets, total: 2, current: 1, size: 20, hasNext: false, hasPrev: false },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -524,7 +524,7 @@ describe('ticketCommand', () => {
 
       (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
         ret: 0,
-        data: { items: mockTickets, total: 1 },
+        data: { records: mockTickets, total: 1, current: 1, size: 20, hasNext: false, hasPrev: false },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -559,7 +559,7 @@ describe('ticketCommand', () => {
 
       (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
         ret: 0,
-        data: { items: mockTickets, total: 1 },
+        data: { records: mockTickets, total: 1, current: 1, size: 20, hasNext: false, hasPrev: false },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -594,7 +594,7 @@ describe('ticketCommand', () => {
 
       (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
         ret: 0,
-        data: { items: mockTickets, total: 1 },
+        data: { records: mockTickets, total: 1, current: 1, size: 20, hasNext: false, hasPrev: false },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -629,7 +629,7 @@ describe('ticketCommand', () => {
 
       (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
         ret: 0,
-        data: { items: mockTickets, total: 1 },
+        data: { records: mockTickets, total: 1, current: 1, size: 20, hasNext: false, hasPrev: false },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -664,7 +664,7 @@ describe('ticketCommand', () => {
 
       (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
         ret: 0,
-        data: { items: mockTickets, total: 1 },
+        data: { records: mockTickets, total: 1, current: 1, size: 20, hasNext: false, hasPrev: false },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -683,50 +683,32 @@ describe('ticketCommand', () => {
       );
     });
 
-    it('supports pagination with limit', async () => {
+    it('sends --page and --size as current and size', async () => {
       (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
         ret: 0,
-        data: { items: [], total: 0 },
+        data: { records: [], total: 0, current: 2, size: 10, hasNext: false, hasPrev: true },
       });
+      const listCmd = program.commands.find((c) => c.name() === 'ticket')?.commands.find((c) => c.name() === 'list');
 
-      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
-      const listCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'list');
-
-      await listCmd?.parseAsync([
-        'node',
-        'test',
-        '--project',
-        'test-project',
-        '--limit',
-        '10',
-      ]);
+      await listCmd?.parseAsync(['node', 'test', '--project', 'test-project', '--page', '2', '--size', '10']);
 
       expect(ticketsControllerFindAll).toHaveBeenCalledWith(
-        expect.objectContaining({ query: expect.objectContaining({ limit: 10 })})
+        expect.objectContaining({ query: expect.objectContaining({ current: 2, size: 10 }) }),
       );
     });
 
-    it('supports pagination with page', async () => {
+    it('prints a next-page hint when hasNext', async () => {
       (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
         ret: 0,
-        data: { items: [], total: 0 },
+        data: { records: [], total: 45, current: 1, size: 20, hasNext: true, hasPrev: false },
       });
+      const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+      const listCmd = program.commands.find((c) => c.name() === 'ticket')?.commands.find((c) => c.name() === 'list');
 
-      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
-      const listCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'list');
+      await listCmd?.parseAsync(['node', 'test', '--project', 'test-project']);
 
-      await listCmd?.parseAsync([
-        'node',
-        'test',
-        '--project',
-        'test-project',
-        '--page',
-        '2',
-      ]);
-
-      expect(ticketsControllerFindAll).toHaveBeenCalledWith(
-        expect.objectContaining({ query: expect.objectContaining({ page: 2 })})
-      );
+      expect(logSpy.mock.calls.flat().join('\n')).toContain('--page 2');
+      logSpy.mockRestore();
     });
 
     it('displays table with correct columns', async () => {
@@ -744,7 +726,7 @@ describe('ticketCommand', () => {
 
       (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
         ret: 0,
-        data: { items: mockTickets, total: 1 },
+        data: { records: mockTickets, total: 1, current: 1, size: 20, hasNext: false, hasPrev: false },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -775,7 +757,7 @@ describe('ticketCommand', () => {
 
       (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
         ret: 0,
-        data: { items: mockTickets, total: 1 },
+        data: { records: mockTickets, total: 1, current: 1, size: 20, hasNext: false, hasPrev: false },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -806,7 +788,7 @@ describe('ticketCommand', () => {
 
       (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
         ret: 0,
-        data: { items: mockTickets, total: 1 },
+        data: { records: mockTickets, total: 1, current: 1, size: 20, hasNext: false, hasPrev: false },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -833,7 +815,7 @@ describe('ticketCommand', () => {
 
       (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
         ret: 0,
-        data: { items: mockTickets, total: 1 },
+        data: { records: mockTickets, total: 1, current: 1, size: 20, hasNext: false, hasPrev: false },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -861,7 +843,7 @@ describe('ticketCommand', () => {
 
       (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
         ret: 0,
-        data: { items: mockTickets, total: 1 },
+        data: { records: mockTickets, total: 1, current: 1, size: 20, hasNext: false, hasPrev: false },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -878,7 +860,7 @@ describe('ticketCommand', () => {
     it('supports optional project filter', async () => {
       (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
         ret: 0,
-        data: { items: [], total: 0 },
+        data: { records: [], total: 0, current: 1, size: 20, hasNext: false, hasPrev: false },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -899,7 +881,7 @@ describe('ticketCommand', () => {
     it('supports status filter', async () => {
       (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
         ret: 0,
-        data: { items: [], total: 0 },
+        data: { records: [], total: 0, current: 1, size: 20, hasNext: false, hasPrev: false },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -920,7 +902,7 @@ describe('ticketCommand', () => {
     it('returns JSON with --json flag', async () => {
       (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
         ret: 0,
-        data: { items: [], total: 0 },
+        data: { records: [], total: 0, current: 1, size: 20, hasNext: false, hasPrev: false },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -951,7 +933,7 @@ describe('ticketCommand', () => {
 
       (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
         ret: 0,
-        data: { items: mockTickets, total: 1 },
+        data: { records: mockTickets, total: 1, current: 1, size: 20, hasNext: false, hasPrev: false },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
@@ -978,7 +960,7 @@ describe('ticketCommand', () => {
 
       (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
         ret: 0,
-        data: { items: mockTickets, total: 1 },
+        data: { records: mockTickets, total: 1, current: 1, size: 20, hasNext: false, hasPrev: false },
       });
 
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');

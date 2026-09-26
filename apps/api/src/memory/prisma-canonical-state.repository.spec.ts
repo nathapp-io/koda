@@ -237,6 +237,37 @@ describe('PrismaCanonicalStateRepository', () => {
         }),
       );
     });
+
+    it('pushes take into all three event tables and returns the newest eventLimit overall', async () => {
+      const t = (m: number) => new Date(Date.UTC(2026, 0, 1, 0, m));
+      mockTicketEvent.findMany.mockResolvedValue([
+        { id: 't3', actorId: 'u', action: 'a', data: '{}', createdAt: t(3) },
+        { id: 't1', actorId: 'u', action: 'a', data: '{}', createdAt: t(1) },
+      ]);
+      mockAgentEvent.findMany.mockResolvedValue([
+        { id: 'a2', actorId: 'u', action: 'a', data: '{}', createdAt: t(2) },
+      ]);
+      mockDecisionEvent.findMany.mockResolvedValue([
+        { id: 'd4', agentId: 'u', action: 'a', data: '{}', rationale: null, createdAt: t(4) },
+      ]);
+
+      const events = await repository.findEvents({ projectId: 'p1', timeWindow: { from: new Date(0) }, eventLimit: 2 });
+
+      for (const model of [mockTicketEvent, mockAgentEvent, mockDecisionEvent]) {
+        expect(model.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 2 }));
+      }
+      expect(events.map((e) => e.id)).toEqual(['d4', 't3']);
+    });
+
+    it('defaults eventLimit to 20', async () => {
+      mockTicketEvent.findMany.mockResolvedValue([]);
+      mockAgentEvent.findMany.mockResolvedValue([]);
+      mockDecisionEvent.findMany.mockResolvedValue([]);
+
+      await repository.findEvents({ projectId: 'p1', actorId: 'u' });
+
+      expect(mockTicketEvent.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 20 }));
+    });
   });
 
   describe('findActiveDecisions', () => {

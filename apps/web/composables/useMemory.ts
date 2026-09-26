@@ -17,8 +17,12 @@ export interface MemoryQuery {
 }
 
 export interface MemoryResponse {
-  items: MemoryItem[]
+  records: MemoryItem[]
   total: number
+  current: number
+  size: number
+  hasNext: boolean
+  hasPrev: boolean
 }
 
 export function buildMemoryQuery(
@@ -27,7 +31,7 @@ export function buildMemoryQuery(
   const query: Record<string, string> = {}
   if (filters.kind) query.kind = filters.kind
   if (filters.status) query.status = filters.status
-  if (filters.page && filters.page > 1) query.page = String(filters.page)
+  if (filters.page && filters.page > 1) query.current = String(filters.page)
   return query
 }
 
@@ -39,12 +43,13 @@ export function useMemory(slug: string) {
   const error = ref<unknown>(null)
   const total = ref(0)
   const page = ref(1)
+  const hasNext = ref(false)
   let latestRequestId = 0
 
   const kindFilter = ref<string>('')
   const statusFilter = ref<string>('')
 
-  const hasMore = computed(() => items.value.length < total.value)
+  const hasMore = computed(() => hasNext.value)
 
   async function loadMemory({ append = false }: { append?: boolean } = {}) {
     const requestId = ++latestRequestId
@@ -61,9 +66,10 @@ export function useMemory(slug: string) {
         { query },
       )
       if (requestId !== latestRequestId) return
-      const fetched = res.items ?? []
+      const fetched = res.records ?? []
       items.value = append ? [...items.value, ...fetched] : fetched
       total.value = res.total ?? items.value.length
+      hasNext.value = res.hasNext ?? false
     }
     catch (err) {
       if (requestId !== latestRequestId) return
@@ -75,6 +81,7 @@ export function useMemory(slug: string) {
       if (!append) {
         items.value = []
         total.value = 0
+        hasNext.value = false
       }
       // If this was an append that we incremented page for, restore it
       // so the next retry re-fetches the same page instead of skipping.

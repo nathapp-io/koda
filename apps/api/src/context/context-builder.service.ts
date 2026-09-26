@@ -1,6 +1,6 @@
 import { performance } from 'perf_hooks';
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
-import { AppException, NotFoundAppException, InternalAppException } from '@nathapp/nestjs-common';
+import { AppException, NotFoundAppException, InternalAppException, PageOption } from '@nathapp/nestjs-common';
 import { CanonicalStateService, CanonicalTicket, CanonicalEvent, CanonicalDecision } from '../memory/canonical-state.service';
 import { PrismaMemoryItemRepository } from '../memory/prisma-memory-item.repository';
 import { MemoryItem } from '../memory/memory-item-repository';
@@ -104,12 +104,12 @@ export class ContextBuilderService {
           ticketIds: query.ticketIds,
           actorId: query.actorId,
           timeWindow: query.timeWindow ?? { from: new Date(0) },
+          eventLimit: MAX_RECENT_EVENTS,
         }),
-        this.memoryItemRepository.findByProjectMemory({
-          projectId: query.projectId,
-          orderBy: 'confidence',
-          limit: MAX_SEMANTIC_MEMORY,
-        }),
+        this.memoryItemRepository.findByProjectMemory(
+          { projectId: query.projectId, orderBy: 'confidence' },
+          PageOption.from(1, MAX_SEMANTIC_MEMORY),
+        ),
         this.fetchDocuments(query),
       ]);
     } catch (err) {
@@ -121,7 +121,7 @@ export class ContextBuilderService {
 
     const recentEvents = this.buildRecentEvents(query.intent, snapshot.recentEvents);
 
-    const semanticMemory = [...semanticMemoryResult.items]
+    const semanticMemory = [...semanticMemoryResult.records]
       .sort((a, b) => b.confidence - a.confidence)
       .slice(0, MAX_SEMANTIC_MEMORY);
 

@@ -26,7 +26,6 @@ const makeTimelineResponse = () => ({
       createdAt: new Date('2025-01-01'),
     },
   ],
-  total: 1,
 });
 
 describe('TimelineController', () => {
@@ -131,6 +130,19 @@ describe('TimelineController', () => {
         await expect(
           controller.getTimeline('my-project', memberPrincipal, undefined, undefined, undefined, undefined, undefined, 'abc'),
         ).rejects.toThrow(ValidationAppException);
+      });
+
+      it.each(['0', '101', '-1', '10abc', '2.5'])('rejects limit=%s with a validation error', async (limit) => {
+        await expect(
+          controller.getTimeline('koda', memberPrincipal, undefined, undefined, undefined, undefined, undefined, limit, undefined),
+        ).rejects.toThrow(ValidationAppException);
+        expect(mockTimelineService.getProjectTimeline).not.toHaveBeenCalled();
+      });
+
+      it('passes limit=100 through as a number', async () => {
+        mockTimelineService.getProjectTimeline.mockResolvedValue(makeTimelineResponse());
+        await controller.getTimeline('koda', memberPrincipal, undefined, undefined, undefined, undefined, undefined, '100', undefined);
+        expect(mockTimelineService.getProjectTimeline).toHaveBeenCalledWith(expect.objectContaining({ limit: 100 }));
       });
     });
 

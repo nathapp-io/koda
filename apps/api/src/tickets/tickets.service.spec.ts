@@ -5,7 +5,7 @@ import { Prisma } from '@prisma/client';
 import { TICKET_REPOSITORY } from './domain/ticket.domain';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
-import { NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException, ForbiddenAppException, Page } from '@nathapp/nestjs-common';
 import type { KodaAgentRole } from '../auth/principal/koda-principal.types';
 import { TicketEventService } from '../events/ticket-event.service';
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
@@ -102,8 +102,7 @@ describe('TicketsService', () => {
     findProjectBySlug: jest.fn(),
     findLastTicketInProject: jest.fn(),
     createTicket: jest.fn(),
-    findTicketsByProject: jest.fn(),
-    countTicketsByProject: jest.fn(),
+    findTicketPage: jest.fn(),
     findTicketScoped: jest.fn(),
     updateTicket: jest.fn(),
     assignTicket: jest.fn(),
@@ -358,146 +357,49 @@ describe('TicketsService', () => {
   });
 
   describe('findAll', () => {
-    it('should return all tickets for a project excluding soft-deleted', async () => {
+    const page1 = { current: 1, size: 20 };
+
+    it('returns a page of response DTOs with refs and gitRefUrl', async () => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketsByProject.mockResolvedValue([mockTicket]);
-      mockTicketRepo.countTicketsByProject.mockResolvedValue(1);
+      mockTicketRepo.findTicketPage.mockResolvedValue(new Page(page1, 1, [mockTicket]));
 
-      const result = await service.findAll('koda', {});
+      const result = await service.findAll('koda', {}, page1);
 
-      expect(result).toEqual(expect.objectContaining({
-        items: [expect.objectContaining({ ...mockTicket, ref: 'KODA-1' })],
-        total: 1,
-      }));
-      expect(mockTicketRepo.findTicketsByProject).toHaveBeenCalledWith(
-        expect.objectContaining({
+      expect(result.total).toBe(1);
+      expect(result.current).toBe(1);
+      expect(result.size).toBe(20);
+      expect(result.hasNext).toBe(false);
+      expect(result.records).toEqual([expect.objectContaining({ ref: 'KODA-1' })]);
+      expect(result.records[0]).toHaveProperty('gitRefUrl');
+    });
+
+    it('maps filters to the repository and passes the page through', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketPage.mockResolvedValue(new Page({ current: 2, size: 5 }, 0, []));
+
+      await service.findAll(
+        'koda',
+        { status: 'IN_PROGRESS', type: 'BUG', priority: 'HIGH', assignedTo: 'user-1', unassigned: false },
+        { current: 2, size: 5 },
+      );
+
+      expect(mockTicketRepo.findTicketPage).toHaveBeenCalledWith(
+        {
           projectId: mockProject.id,
-        })
+          status: 'IN_PROGRESS',
+          type: 'BUG',
+          priority: 'HIGH',
+          assignedToUserId: 'user-1',
+          unassigned: false,
+        },
+        { current: 2, size: 5 },
       );
     });
 
-    it('should compute and include ref field for each ticket', async () => {
-      const ticket1 = { ...mockTicket, number: 1 };
-      const ticket2 = { ...mockTicket, number: 2, id: 'ticket-124' };
-      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketsByProject.mockResolvedValue([ticket1, ticket2]);
-      mockTicketRepo.countTicketsByProject.mockResolvedValue(2);
-
-      const result = await service.findAll('koda', {});
-
-      expect(result.items).toHaveLength(2);
-      expect(result.items[0]).toEqual(expect.objectContaining({
-        ...ticket1,
-        ref: 'KODA-1',
-      }));
-      expect(result.items[1]).toEqual(expect.objectContaining({
-        ...ticket2,
-        ref: 'KODA-2',
-      }));
-    });
-
-    it('should filter by status', async () => {
-      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketsByProject.mockResolvedValue([
-        { ...mockTicket, status: 'IN_PROGRESS' },
-      ]);
-      mockTicketRepo.countTicketsByProject.mockResolvedValue(1);
-
-      await service.findAll('koda', { status: 'IN_PROGRESS' });
-
-      expect(mockTicketRepo.findTicketsByProject).toHaveBeenCalledWith(
-        expect.objectContaining({ status: 'IN_PROGRESS' })
-      );
-    });
-
-    it('should filter by type', async () => {
-      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketsByProject.mockResolvedValue([
-        { ...mockTicket, type: 'ENHANCEMENT' },
-      ]);
-      mockTicketRepo.countTicketsByProject.mockResolvedValue(1);
-
-      await service.findAll('koda', { type: 'ENHANCEMENT' });
-
-      expect(mockTicketRepo.findTicketsByProject).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'ENHANCEMENT' })
-      );
-    });
-
-    it('should filter by priority', async () => {
-      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketsByProject.mockResolvedValue([
-        { ...mockTicket, priority: 'CRITICAL' },
-      ]);
-      mockTicketRepo.countTicketsByProject.mockResolvedValue(1);
-
-      await service.findAll('koda', { priority: 'CRITICAL' });
-
-      expect(mockTicketRepo.findTicketsByProject).toHaveBeenCalledWith(
-        expect.objectContaining({ priority: 'CRITICAL' })
-      );
-    });
-
-    it('should filter by assignedTo userId', async () => {
-      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketsByProject.mockResolvedValue([
-        { ...mockTicket, assignedToUserId: 'user-456' },
-      ]);
-      mockTicketRepo.countTicketsByProject.mockResolvedValue(1);
-
-      await service.findAll('koda', { assignedTo: 'user-456' });
-
-      expect(mockTicketRepo.findTicketsByProject).toHaveBeenCalledWith(
-        expect.objectContaining({ assignedToUserId: 'user-456' })
-      );
-    });
-
-    it('should filter for unassigned tickets', async () => {
-      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketsByProject.mockResolvedValue([mockTicket]);
-      mockTicketRepo.countTicketsByProject.mockResolvedValue(1);
-
-      await service.findAll('koda', { unassigned: true });
-
-      expect(mockTicketRepo.findTicketsByProject).toHaveBeenCalledWith(
-        expect.objectContaining({ unassigned: true })
-      );
-    });
-
-    it('should apply pagination with limit and page', async () => {
-      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketsByProject.mockResolvedValue([mockTicket]);
-      mockTicketRepo.countTicketsByProject.mockResolvedValue(1);
-
-      await service.findAll('koda', { limit: 10, page: 2 });
-
-      expect(mockTicketRepo.findTicketsByProject).toHaveBeenCalledWith(
-        expect.objectContaining({ limit: 10, page: 2 })
-      );
-    });
-
-    it('should return empty array when no tickets found', async () => {
-      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketsByProject.mockResolvedValue([]);
-      mockTicketRepo.countTicketsByProject.mockResolvedValue(0);
-
-      const result = await service.findAll('koda', {});
-
-      expect(result.items).toEqual([]);
-      expect(result.total).toBe(0);
-    });
-
-    it('should not return soft-deleted tickets', async () => {
-      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketsByProject.mockResolvedValue([]);
-      mockTicketRepo.countTicketsByProject.mockResolvedValue(0);
-
-      await service.findAll('koda', {});
-
-      // The repo encapsulates the deletedAt: null filter; service just passes projectId
-      expect(mockTicketRepo.findTicketsByProject).toHaveBeenCalledWith(
-        expect.objectContaining({ projectId: mockProject.id })
-      );
+    it('throws NotFound for a missing or soft-deleted project', async () => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue({ ...mockProject, deletedAt: new Date() });
+      await expect(service.findAll('koda', {}, page1)).rejects.toThrow(NotFoundAppException);
+      expect(mockTicketRepo.findTicketPage).not.toHaveBeenCalled();
     });
   });
 

@@ -1,6 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { PrismaTimelineRepository } from './prisma-timeline.repository';
+import { compareEventsDesc } from './event-order';
+import { decodeTimelineCursor, encodeTimelineCursor, TimelineKey } from './timeline-cursor';
+
+export const DEFAULT_TIMELINE_LIMIT = 50;
+export const MAX_TIMELINE_LIMIT = 100;
+const TIMELINE_EVENT_TYPES = ['ticket_event', 'agent_event', 'decision_event'] as const;
+type TimelineEventType = (typeof TIMELINE_EVENT_TYPES)[number];
 
 export interface TimelineQuery {
   projectId: string;
@@ -25,7 +32,6 @@ export interface TimelineEvent {
 export interface TimelineResponse {
   events: TimelineEvent[];
   nextCursor?: string;
-  total?: number;
 }
 
 export interface TicketHistoryResponse {
@@ -38,15 +44,21 @@ export class TimelineService {
   constructor(private readonly timelineRepo: PrismaTimelineRepository) {}
 
   async getProjectTimeline(query: TimelineQuery): Promise<TimelineResponse> {
-    const limit = Math.min(Math.max(Math.floor(query.limit ?? 50), 1), 200);
-    const eventTypes = query.eventTypes?.length
-      ? query.eventTypes
-      : ['ticket_event', 'agent_event', 'decision_event'];
+    const limit = query.limit ?? DEFAULT_TIMELINE_LIMIT;
+    const eventTypes = query.eventTypes?.length ? query.eventTypes : [...TIMELINE_EVENT_TYPES];
 
-    const allowedTypes = new Set(['ticket_event', 'agent_event', 'decision_event']);
-    const unknownTypes = eventTypes.filter((eventType) => !allowedTypes.has(eventType));
+    const unknownTypes = eventTypes.filter((eventType) => !TIMELINE_EVENT_TYPES.includes(eventType as TimelineEventType));
     if (unknownTypes.length > 0) {
       throw new ValidationAppException({ eventTypes: `Unknown event types: ${unknownTypes.join(', ')}` });
+    }
+
+    let cursor: TimelineKey | undefined;
+    if (query.cursor !== undefined) {
+      const decoded = decodeTimelineCursor(query.cursor);
+      if (!decoded) {
+        throw new ValidationAppException({ cursor: 'Invalid cursor' });
+      }
+      cursor = decoded;
     }
 
     const baseWhere = {
@@ -67,11 +79,14 @@ export class TimelineService {
       ? { ...baseWhere, agentId: query.actorId }
       : baseWhere;
 
+    // Each table returns at most limit + 1 rows past the cursor; the merged
+    // top `limit` is exact because every table is individually sorted the same way.
+    const page = { cursor, take: limit + 1 };
     const results: TimelineEvent[] = [];
 
     if (eventTypes.includes('ticket_event')) {
-      const ticketEvents = (await this.timelineRepo.findTicketEvents(ticketWhere)) ?? [];
-      results.push(...ticketEvents.map((e) => ({
+      const rows = (await this.timelineRepo.findTicketEvents(ticketWhere, page)) ?? [];
+      results.push(...rows.map((e) => ({
         id: e.id,
         eventType: 'ticket_event',
         actorId: e.actorId,
@@ -82,8 +97,8 @@ export class TimelineService {
     }
 
     if (!query.ticketId && eventTypes.includes('agent_event')) {
-      const agentEvents = (await this.timelineRepo.findAgentEvents(actorWhere)) ?? [];
-      results.push(...agentEvents.map((e) => ({
+      const rows = (await this.timelineRepo.findAgentEvents(actorWhere, page)) ?? [];
+      results.push(...rows.map((e) => ({
         id: e.id,
         eventType: 'agent_event',
         actorId: e.actorId,
@@ -93,8 +108,8 @@ export class TimelineService {
     }
 
     if (!query.ticketId && eventTypes.includes('decision_event')) {
-      const decisionEvents = (await this.timelineRepo.findDecisionEvents(decisionWhere)) ?? [];
-      results.push(...decisionEvents.map((e) => ({
+      const rows = (await this.timelineRepo.findDecisionEvents(decisionWhere, page)) ?? [];
+      results.push(...rows.map((e) => ({
         id: e.id,
         eventType: 'decision_event',
         actorId: e.agentId,
@@ -103,29 +118,13 @@ export class TimelineService {
       })));
     }
 
-    results.sort((left, right) => {
-      const timeDelta = right.createdAt.getTime() - left.createdAt.getTime();
-      if (timeDelta !== 0) return timeDelta;
-      return right.id.localeCompare(left.id);
-    });
-
-    const total = results.length;
-
-    if (query.cursor) {
-      const cursorIndex = results.findIndex((event) => event.id === query.cursor);
-      if (cursorIndex < 0) {
-        throw new ValidationAppException({ cursor: 'Unknown cursor' });
-      }
-      results.splice(0, cursorIndex + 1);
-    }
-
-    const slicedEvents = results.slice(0, limit);
-    const hasMore = results.length > limit;
+    results.sort(compareEventsDesc);
+    const events = results.slice(0, limit);
+    const last = events[events.length - 1];
 
     return {
-      events: slicedEvents,
-      nextCursor: hasMore ? slicedEvents[slicedEvents.length - 1]?.id : undefined,
-      total,
+      events,
+      nextCursor: results.length > limit && last ? encodeTimelineCursor(last) : undefined,
     };
   }
 

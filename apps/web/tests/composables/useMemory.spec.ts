@@ -39,7 +39,7 @@ describe('AC2: useMemory fetches /projects/<slug>/memory', () => {
 
   test('loadMemory calls $api.get with the /projects/<slug>/memory path', async () => {
     const fetchMock = jest.fn(() =>
-      Promise.resolve({ data: { items: [], total: 0 } }),
+      Promise.resolve({ data: { records: [], total: 0, current: 1, size: 20, hasNext: false, hasPrev: false } }),
     )
     applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
 
@@ -75,7 +75,7 @@ describe('AC2: useMemory fetches /projects/<slug>/memory', () => {
         status: 'active',
       },
     ]
-    const fetchMock = jest.fn(() => Promise.resolve({ data: { items: fetched, total: 2 } }))
+    const fetchMock = jest.fn(() => Promise.resolve({ data: { records: fetched, total: 2, current: 1, size: 20, hasNext: false, hasPrev: false } }))
     applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
 
     const { useMemory } = await import(composablePath)
@@ -130,7 +130,7 @@ describe('AC6/AC7: filter inputs populate the memory query', () => {
 
   test('kind and status are sent as query params when set', async () => {
     const fetchMock = jest.fn(() =>
-      Promise.resolve({ data: { items: [], total: 0 } }),
+      Promise.resolve({ data: { records: [], total: 0, current: 1, size: 20, hasNext: false, hasPrev: false } }),
     )
     applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
 
@@ -151,7 +151,7 @@ describe('AC6/AC7: filter inputs populate the memory query', () => {
 
   test('empty filters produce an empty query object', async () => {
     const fetchMock = jest.fn(() =>
-      Promise.resolve({ data: { items: [], total: 0 } }),
+      Promise.resolve({ data: { records: [], total: 0, current: 1, size: 20, hasNext: false, hasPrev: false } }),
     )
     applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
 
@@ -175,18 +175,26 @@ describe('AC8: page-number pagination', () => {
   test('loadMore sends the next page and appends items to existing list', async () => {
     const firstPage = {
       data: {
-        items: [
+        records: [
           { id: 'mem-1', subject: 'a', predicate: 'b', object: 'c', kind: 'FACT', confidence: 0.9, status: 'active' },
         ],
         total: 3,
+        current: 1,
+        size: 20,
+        hasNext: true,
+        hasPrev: false,
       },
     }
     const secondPage = {
       data: {
-        items: [
+        records: [
           { id: 'mem-2', subject: 'd', predicate: 'e', object: 'f', kind: 'FACT', confidence: 0.7, status: 'active' },
         ],
         total: 3,
+        current: 2,
+        size: 20,
+        hasNext: false,
+        hasPrev: true,
       },
     }
     const fetchMock = jest.fn()
@@ -207,15 +215,39 @@ describe('AC8: page-number pagination', () => {
 
     const [, page2Opts] = fetchMock.mock.calls[1]
     const page2Query = (page2Opts as { query?: Record<string, string> }).query
-    expect(page2Query).toEqual({ page: '2' })
+    expect(page2Query).toEqual({ current: '2' })
+  })
+
+  test('hasMore follows the server hasNext flag, not a length comparison', async () => {
+    // records.length (1) is not < total (0), so the old length-comparison
+    // derivation would yield false; only the server's hasNext (true) explains
+    // hasMore being true — the two derivations must disagree here.
+    const fetchMock = jest.fn(() => Promise.resolve({
+      data: {
+        records: [
+          { id: 'mem-1', subject: 'a', predicate: 'b', object: 'c', kind: 'FACT', confidence: 0.9, status: 'active' },
+        ],
+        total: 0,
+        current: 1,
+        size: 20,
+        hasNext: true,
+        hasPrev: false,
+      },
+    }))
+    applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
+
+    const { useMemory } = await import(composablePath)
+    const mem = useMemory('koda')
+    await mem.loadMemory()
+    expect(mem.hasMore.value).toBe(true)
   })
 
   test('applyFilters resets the page before re-fetching', async () => {
     const fetchMock = jest.fn()
       .mockResolvedValueOnce({
-        data: { items: [{ id: 'mem-1', subject: 'a', predicate: 'b', object: 'c', kind: 'FACT', confidence: 0.9, status: 'active' }], total: 3 },
+        data: { records: [{ id: 'mem-1', subject: 'a', predicate: 'b', object: 'c', kind: 'FACT', confidence: 0.9, status: 'active' }], total: 3, current: 1, size: 20, hasNext: true, hasPrev: false },
       })
-      .mockResolvedValueOnce({ data: { items: [], total: 1 } })
+      .mockResolvedValueOnce({ data: { records: [], total: 1, current: 1, size: 20, hasNext: false, hasPrev: false } })
     applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
 
     const { useMemory } = await import(composablePath)
@@ -228,7 +260,7 @@ describe('AC8: page-number pagination', () => {
     const [, page2Opts] = fetchMock.mock.calls[1]
     const page2Query = (page2Opts as { query?: Record<string, string> }).query
     expect(page2Query).toEqual({ kind: 'FACT' })
-    expect(page2Query?.page).toBeUndefined()
+    expect(page2Query?.current).toBeUndefined()
   })
 })
 
@@ -245,7 +277,7 @@ describe('AC1 page contract: composable exposes render-ready item fields', () =>
       { id: 'mem-1', subject: 'ticket:42', predicate: 'status', object: 'open', kind: 'FACT', confidence: 0.95, status: 'active' },
       { id: 'mem-2', subject: 'agent:7',  predicate: 'role',   object: 'developer', kind: 'FACT', confidence: 0.8, status: 'active' },
     ]
-    const fetchMock = jest.fn(() => Promise.resolve({ data: { items: fetched, total: 2 } }))
+    const fetchMock = jest.fn(() => Promise.resolve({ data: { records: fetched, total: 2, current: 1, size: 20, hasNext: false, hasPrev: false } }))
     applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
 
     const { useMemory } = await import(composablePath)
@@ -266,7 +298,7 @@ describe('AC1 page contract: composable exposes render-ready item fields', () =>
 
   test('when isLoading transitions to false and items are non-empty, page should render the table', async () => {
     const fetchMock = jest.fn(() =>
-      Promise.resolve({ data: { items: [{ id: 'mem-1', subject: 's', predicate: 'p', object: 'o', kind: 'FACT', confidence: 0.9, status: 'active' }], total: 1 } }),
+      Promise.resolve({ data: { records: [{ id: 'mem-1', subject: 's', predicate: 'p', object: 'o', kind: 'FACT', confidence: 0.9, status: 'active' }], total: 1, current: 1, size: 20, hasNext: false, hasPrev: false } }),
     )
     applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
 
@@ -341,10 +373,14 @@ describe('useMemory: loadMore failure restores page and preserves items', () => 
   test('when loadMore fails, page is restored to its pre-increment value', async () => {
     const firstPage = {
       data: {
-        items: [
+        records: [
           { id: 'mem-1', subject: 'a', predicate: 'b', object: 'c', kind: 'FACT', confidence: 0.9, status: 'active' },
         ],
         total: 5,
+        current: 1,
+        size: 20,
+        hasNext: true,
+        hasPrev: false,
       },
     }
     const fetchMock = jest.fn()
@@ -371,29 +407,37 @@ describe('useMemory: loadMore failure restores page and preserves items', () => 
     // of skipping straight to page 3.
     expect(mem.page.value).toBe(1)
 
-    // And the next retry should go out with page=2 (NOT page=3).
+    // And the next retry should go out with current=2 (NOT current=3).
     fetchMock.mockResolvedValueOnce({
       data: {
-        items: [
+        records: [
           { id: 'mem-2', subject: 'd', predicate: 'e', object: 'f', kind: 'FACT', confidence: 0.7, status: 'active' },
         ],
         total: 5,
+        current: 2,
+        size: 20,
+        hasNext: true,
+        hasPrev: true,
       },
     })
     await mem.loadMore()
     expect(fetchMock).toHaveBeenCalledTimes(3)
     const [, opts] = fetchMock.mock.calls[2]
     const query = (opts as { query?: Record<string, string> }).query
-    expect(query.page).toBe('2')
+    expect(query.current).toBe('2')
   })
 
   test('when loadMore fails, the already-loaded items are preserved (not wiped)', async () => {
     const firstPage = {
       data: {
-        items: [
+        records: [
           { id: 'mem-1', subject: 'a', predicate: 'b', object: 'c', kind: 'FACT', confidence: 0.9, status: 'active' },
         ],
         total: 5,
+        current: 1,
+        size: 20,
+        hasNext: true,
+        hasPrev: false,
       },
     }
     const fetchMock = jest.fn()

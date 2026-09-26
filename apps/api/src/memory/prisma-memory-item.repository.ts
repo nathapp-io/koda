@@ -1,11 +1,12 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { AbstractPrismaRepository, PrismaClientLike, PrismaModelDelegate, PrismaService } from '@nathapp/nestjs-prisma';
+import { AbstractPrismaRepository, Paginate, PrismaClientLike, PrismaModelDelegate, PrismaService } from '@nathapp/nestjs-prisma';
+import type { IPageOption } from '@nathapp/nestjs-common';
+import type { IPageResult } from '@nathapp/nestjs-data';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { MemoryItem as MemoryItemModel, PrismaClient } from '@prisma/client';
 import {
   MemoryQuery,
   ProjectMemoryQuery,
-  PaginatedResult,
   MemoryItemInput,
   MemoryItem,
 } from './memory-item-repository';
@@ -88,11 +89,7 @@ export class PrismaMemoryItemRepository
     return data;
   }
 
-  async findByProject(query: MemoryQuery): Promise<PaginatedResult<MemoryItem>> {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
-    const skip = (page - 1) * limit;
-
+  async findByProject(query: MemoryQuery, page: IPageOption): Promise<IPageResult<MemoryItem>> {
     const where: Record<string, unknown> = {
       projectId: query.projectId,
       deletedAt: null,
@@ -108,12 +105,11 @@ export class PrismaMemoryItemRepository
     // Unique tiebreaker: rows created in the same burst share timestamps and
     // Postgres does not guarantee a stable order among ties, which would
     // shuffle items across pagination pages.
-    const [models, total] = await Promise.all([
-      this.prisma.client.memoryItem.findMany({ where, skip, take: limit, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] }),
-      this.prisma.client.memoryItem.count({ where }),
-    ]);
-
-    return { data: models.map((m) => this.toDomain(m)), total, page, limit };
+    const models = await Paginate(this.prisma.client.memoryItem, page, {
+      where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+    return models.remap((m) => this.toDomain(m));
   }
 
   async upsert(item: MemoryItemInput): Promise<MemoryItem> {
@@ -213,12 +209,7 @@ export class PrismaMemoryItemRepository
     await this.prisma.client.memoryItem.update({ where: { id }, data: updateData });
   }
 
-  async findByProjectMemory(query: ProjectMemoryQuery): Promise<{ items: MemoryItem[]; total: number }> {
-    const limit = Math.min(query.limit ?? 10, 50);
-    let page = query.page ?? 1;
-    if (page < 1) page = 1;
-    const skip = (page - 1) * limit;
-
+  async findByProjectMemory(query: ProjectMemoryQuery, page: IPageOption): Promise<IPageResult<MemoryItem>> {
     const where: Record<string, unknown> = { projectId: query.projectId, deletedAt: null };
 
     if (query.status) {
@@ -249,11 +240,7 @@ export class PrismaMemoryItemRepository
     // which would shuffle items across pagination pages.
     orderByClause.push({ id: 'desc' });
 
-    const [models, total] = await Promise.all([
-      this.prisma.client.memoryItem.findMany({ where, skip, take: limit, orderBy: orderByClause }),
-      this.prisma.client.memoryItem.count({ where }),
-    ]);
-
-    return { items: models.map((m) => this.toDomain(m)), total };
+    const models = await Paginate(this.prisma.client.memoryItem, page, { where, orderBy: orderByClause });
+    return models.remap((m) => this.toDomain(m));
   }
 }

@@ -35,6 +35,15 @@ type TicketRow = {
   title: string;
 };
 
+interface TicketPage {
+  records: TicketRow[];
+  total: number;
+  current: number;
+  size: number;
+  hasNext: boolean;
+  hasPrev: boolean;
+}
+
 type TicketDetail = TicketRow & {
   id: string;
   description?: string;
@@ -120,8 +129,8 @@ export function ticketCommand(program: Command): void {
     .option('--priority <priority>', 'Filter by priority')
     .option('--assigned-to <slug>', 'Filter by assignee')
     .option('--unassigned', 'Show only unassigned tickets')
-    .option('--limit <number>', 'Items per page', '20')
-    .option('--page <number>', 'Page number', '1')
+    .option('--page <number>', 'Page number (1-based)', '1')
+    .option('--size <number>', 'Tickets per page (1-100)', '20')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
@@ -129,10 +138,10 @@ export function ticketCommand(program: Command): void {
 
         const response = await ticketsControllerFindAll({
   path: { slug: ctx.projectSlug },
-  query: { status: options.status, type: options.type, priority: options.priority, assignedTo: options.assignedTo, unassigned: options.unassigned ? true : undefined, limit: parseInt(options.limit, 10), page: parseInt(options.page, 10) }
+  query: { status: options.status, type: options.type, priority: options.priority, assignedTo: options.assignedTo, unassigned: options.unassigned ? true : undefined, current: parseInt(options.page, 10), size: parseInt(options.size, 10) }
   });
-        const data = unwrap<{ items?: TicketRow[] } | TicketRow[]>(response);
-        const items: TicketRow[] = Array.isArray(data) ? data : ((data as { items?: TicketRow[] }).items ?? []);
+        const page = unwrap<TicketPage>(response);
+        const items = page.records ?? [];
 
         if (options.json) {
           console.log(JSON.stringify(items, null, 2));
@@ -146,6 +155,9 @@ export function ticketCommand(program: Command): void {
             String(t.title),
           ]);
           table(['#', 'Type', 'Priority', 'Status', 'Assignee', 'Title'], rows);
+          if (page.hasNext) {
+            console.log(`\nShowing page ${page.current} (${items.length} of ${page.total}). More: --page ${page.current + 1}`);
+          }
         }
 
         process.exit(0);
@@ -168,8 +180,8 @@ export function ticketCommand(program: Command): void {
   path: { slug: ctx.projectSlug },
   query: { status: options.status, assignedTo: 'self' }
   });
-        const data = unwrap<{ items?: TicketRow[] } | TicketRow[]>(response);
-        const items: TicketRow[] = Array.isArray(data) ? data : ((data as { items?: TicketRow[] }).items ?? []);
+        const page = unwrap<TicketPage>(response);
+        const items = page.records ?? [];
 
         if (options.json) {
           console.log(JSON.stringify(items, null, 2));

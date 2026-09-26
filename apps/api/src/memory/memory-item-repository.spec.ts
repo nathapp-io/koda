@@ -44,7 +44,7 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
       mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
       mockPrismaClient.memoryItem.count.mockResolvedValue(0);
 
-      await repository.findByProjectMemory({ projectId: 'project-123' });
+      await repository.findByProjectMemory({ projectId: 'project-123' }, { current: 1, size: 10 });
 
       expect(mockPrismaClient.memoryItem.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -67,7 +67,7 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
       mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
       mockPrismaClient.memoryItem.count.mockResolvedValue(0);
 
-      await repository.findByProjectMemory({ projectId: 'project-123', kind: 'FACT' });
+      await repository.findByProjectMemory({ projectId: 'project-123', kind: 'FACT' }, { current: 1, size: 10 });
 
       expect(mockPrismaClient.memoryItem.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -82,7 +82,7 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
       mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
       mockPrismaClient.memoryItem.count.mockResolvedValue(0);
 
-      await repository.findByProjectMemory({ projectId: 'project-123', subject: 'ticket:123' });
+      await repository.findByProjectMemory({ projectId: 'project-123', subject: 'ticket:123' }, { current: 1, size: 10 });
 
       expect(mockPrismaClient.memoryItem.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -99,7 +99,7 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
       mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
       mockPrismaClient.memoryItem.count.mockResolvedValue(0);
 
-      await repository.findByProjectMemory({ projectId: 'project-123', status: 'superseded' });
+      await repository.findByProjectMemory({ projectId: 'project-123', status: 'superseded' }, { current: 1, size: 10 });
 
       const callArgs = mockPrismaClient.memoryItem.findMany.mock.calls[0][0] as Record<string, unknown>;
       const where = callArgs.where as Record<string, unknown>;
@@ -113,7 +113,7 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
       mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
       mockPrismaClient.memoryItem.count.mockResolvedValue(0);
 
-      await repository.findByProjectMemory({ projectId: 'project-123' });
+      await repository.findByProjectMemory({ projectId: 'project-123' }, { current: 1, size: 10 });
 
       expect(mockPrismaClient.memoryItem.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -131,7 +131,7 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
       mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
       mockPrismaClient.memoryItem.count.mockResolvedValue(0);
 
-      await repository.findByProjectMemory({ projectId: 'project-123', orderBy: 'updatedAt' });
+      await repository.findByProjectMemory({ projectId: 'project-123', orderBy: 'updatedAt' }, { current: 1, size: 10 });
 
       expect(mockPrismaClient.memoryItem.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -149,7 +149,7 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
       mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
       mockPrismaClient.memoryItem.count.mockResolvedValue(0);
 
-      await repository.findByProjectMemory({ projectId: 'project-123', orderBy: 'createdAt' });
+      await repository.findByProjectMemory({ projectId: 'project-123', orderBy: 'createdAt' }, { current: 1, size: 10 });
 
       expect(mockPrismaClient.memoryItem.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -165,49 +165,39 @@ describe('PrismaMemoryItemRepository.findByProjectMemory', () => {
   });
 
   describe('pagination', () => {
-    it('should use limit cap of 10 by default', async () => {
+    it('should skip 20 and take 10 for page 3 with size 10', async () => {
       mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
       mockPrismaClient.memoryItem.count.mockResolvedValue(0);
 
-      await repository.findByProjectMemory({ projectId: 'project-123' });
+      await repository.findByProjectMemory({ projectId: 'project-123' }, { current: 3, size: 10 });
 
       expect(mockPrismaClient.memoryItem.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          skip: 0,
+          skip: 20,
           take: 10,
-        }),
-      );
-    });
-
-    it('should calculate skip correctly for page 3 with limit 5', async () => {
-      mockPrismaClient.memoryItem.findMany.mockResolvedValue([]);
-      mockPrismaClient.memoryItem.count.mockResolvedValue(0);
-
-      await repository.findByProjectMemory({ projectId: 'project-123', page: 3, limit: 5 });
-
-      expect(mockPrismaClient.memoryItem.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          skip: 10,
-          take: 5,
         }),
       );
     });
   });
 
   describe('return shape', () => {
-    it('should return { items, total }', async () => {
+    it('should return the page envelope with records, total, current and size', async () => {
       const mockItems = [
         { id: 'mem-1', projectId: 'project-123', kind: 'FACT', subject: 'ticket:1', predicate: 'status', confidence: 0.9, status: 'active', createdAt: new Date(), updatedAt: new Date() },
       ];
       mockPrismaClient.memoryItem.findMany.mockResolvedValue(mockItems);
       mockPrismaClient.memoryItem.count.mockResolvedValue(1);
 
-      const result = await repository.findByProjectMemory({ projectId: 'project-123' });
+      const result = await repository.findByProjectMemory({ projectId: 'project-123' }, { current: 1, size: 10 });
 
-      expect(result).toHaveProperty('items');
-      expect(result).toHaveProperty('total');
-      expect(result.items).toHaveLength(1);
-      expect(result.total).toBe(1);
+      expect(result).toEqual(
+        expect.objectContaining({
+          records: mockItems,
+          total: 1,
+          current: 1,
+          size: 10,
+        }),
+      );
     });
   });
 });

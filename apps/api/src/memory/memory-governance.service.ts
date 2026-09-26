@@ -1,4 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { PageOption } from '@nathapp/nestjs-common';
+import type { IPageOption } from '@nathapp/nestjs-common';
+import type { IPageResult } from '@nathapp/nestjs-data';
 import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
 import { MemoryItem, ProjectMemoryQuery } from './memory-item-repository';
 import { MemoryKind } from '../common/enums';
@@ -20,8 +23,8 @@ export class MemoryGovernanceService {
 
   constructor(private readonly repository: PrismaMemoryItemRepository) {}
 
-  async getProjectMemory(query: ProjectMemoryQuery): Promise<{ items: MemoryItem[]; total: number }> {
-    return this.repository.findByProjectMemory(query);
+  async getProjectMemory(query: ProjectMemoryQuery, page: IPageOption): Promise<IPageResult<MemoryItem>> {
+    return this.repository.findByProjectMemory(query, page);
   }
 
   async runCleanup(projectId: string): Promise<GovernanceResult> {
@@ -52,16 +55,14 @@ export class MemoryGovernanceService {
         this.logger.warn(`expireMemories: pagination exceeded ${MAX_PAGES} pages for project ${projectId}`);
         break;
       }
-      const result = await this.repository.findByProject({
-        projectId,
-        status: 'active',
-        page,
-        limit: PAGE_SIZE,
-      });
+      const result = await this.repository.findByProject(
+        { projectId, status: 'active' },
+        PageOption.from(page, PAGE_SIZE),
+      );
 
-      hasMore = result.data.length >= PAGE_SIZE;
+      hasMore = result.records.length >= PAGE_SIZE;
 
-      const expiredItems = result.data.filter(
+      const expiredItems = result.records.filter(
         (item) => item.ttlAt && item.ttlAt < now,
       );
 
@@ -91,16 +92,14 @@ export class MemoryGovernanceService {
         this.logger.warn(`downrankStaleLowConfidence: pagination exceeded ${MAX_PAGES} pages for project ${projectId}`);
         break;
       }
-      const result = await this.repository.findByProject({
-        projectId,
-        status: 'active',
-        page,
-        limit: PAGE_SIZE,
-      });
+      const result = await this.repository.findByProject(
+        { projectId, status: 'active' },
+        PageOption.from(page, PAGE_SIZE),
+      );
 
-      hasMore = result.data.length >= PAGE_SIZE;
+      hasMore = result.records.length >= PAGE_SIZE;
 
-      const staleItems = result.data.filter(
+      const staleItems = result.records.filter(
         (item) =>
           item.createdAt < ninetyDaysAgo &&
           item.confidence < 0.3,
@@ -127,17 +126,15 @@ export class MemoryGovernanceService {
         this.logger.warn(`deduplicate: pagination exceeded ${MAX_PAGES} pages for project ${projectId}`);
         break;
       }
-      const result = await this.repository.findByProject({
-        projectId,
-        status: 'active',
-        page,
-        limit: PAGE_SIZE,
-      });
+      const result = await this.repository.findByProject(
+        { projectId, status: 'active' },
+        PageOption.from(page, PAGE_SIZE),
+      );
 
-      hasMore = result.data.length >= PAGE_SIZE;
+      hasMore = result.records.length >= PAGE_SIZE;
 
       const groups = new Map<string, MemoryItem[]>();
-      for (const item of result.data) {
+      for (const item of result.records) {
         const key = `${item.kind}:${item.subject}:${item.predicate}`;
         if (!groups.has(key)) {
           groups.set(key, []);
@@ -184,18 +181,15 @@ export class MemoryGovernanceService {
         this.logger.warn(`applySupersession: pagination exceeded ${MAX_PAGES} pages for project ${projectId}`);
         break;
       }
-      const result = await this.repository.findByProject({
-        projectId,
-        kind: MemoryKind.DECISION,
-        status: 'active',
-        page,
-        limit: PAGE_SIZE,
-      });
+      const result = await this.repository.findByProject(
+        { projectId, kind: MemoryKind.DECISION, status: 'active' },
+        PageOption.from(page, PAGE_SIZE),
+      );
 
-      hasMore = result.data.length >= PAGE_SIZE;
+      hasMore = result.records.length >= PAGE_SIZE;
 
       const topicGroups = new Map<string, MemoryItem[]>();
-      for (const item of result.data) {
+      for (const item of result.records) {
         const topicKey = `${item.subject}:${item.predicate}`;
         if (!topicGroups.has(topicKey)) {
           topicGroups.set(topicKey, []);

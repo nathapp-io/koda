@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { extractApiError } from '~/composables/useApi'
+import { useTicketBoardPages, type TicketPage } from '~/composables/useTicketBoardPages'
+
 definePageMeta({ layout: 'default' })
 
 interface Assignee {
@@ -23,20 +26,23 @@ const { t } = useI18n()
 const slug = route.params.project as string
 
 const { $api } = useApi()
+const toast = useAppToast()
 
-interface TicketPage {
-  items: Ticket[]
-  total: number
-  page: number
-  limit: number
-}
+const BOARD_PAGE_SIZE = 100
 
 const { data: ticketsData, pending, error, refresh } = useAsyncData(
   `tickets-${slug}`,
-  () => $api.get<TicketPage>(`/projects/${slug}/tickets`),
+  () => $api.get<TicketPage<Ticket>>(`/projects/${slug}/tickets`, { query: { size: BOARD_PAGE_SIZE } }),
 )
 
-const tickets = computed(() => ticketsData.value?.items ?? [])
+const { tickets, hasNext, loadingMore, loadMoreTickets } = useTicketBoardPages(
+  ticketsData,
+  current => $api.get<TicketPage<Ticket>>(`/projects/${slug}/tickets`, {
+    query: { current, size: BOARD_PAGE_SIZE },
+  }),
+  err => toast.error(extractApiError(err)),
+)
+
 const showCreateDialog = ref(false)
 const showImportDialog = ref(false)
 
@@ -70,6 +76,11 @@ function handleCreated() {
       @open-ticket="handleOpenTicket"
       @create="showCreateDialog = true"
     />
+    <div v-if="hasNext" class="flex justify-center">
+      <Button variant="outline" :disabled="loadingMore" @click="loadMoreTickets">
+        {{ loadingMore ? t('common.loading') : t('tickets.loadMore') }}
+      </Button>
+    </div>
 
     <CreateTicketDialog
       :open="showCreateDialog"

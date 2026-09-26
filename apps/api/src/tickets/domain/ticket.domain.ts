@@ -1,4 +1,6 @@
 import type { TicketStatus, TicketType, Priority } from '../../common/enums';
+import type { IPageOption } from '@nathapp/nestjs-common';
+import type { IPageResult } from '@nathapp/nestjs-data';
 
 export const TICKET_REPOSITORY = Symbol('TICKET_REPOSITORY');
 
@@ -55,15 +57,13 @@ export interface TicketDomain {
   links?: TicketLink[];
 }
 
-export interface FindTicketsFilters {
+export interface TicketListFilters {
   projectId: string;
   status?: TicketStatus;
   type?: TicketType;
   priority?: Priority;
   assignedToUserId?: string;
   unassigned?: boolean;
-  limit: number;
-  page: number;
 }
 
 export interface CreateTicketData {
@@ -94,8 +94,7 @@ export interface ITicketRepository {
   findProjectBySlug(slug: string): Promise<TicketProject | null>;
   findLastTicketInProject(projectId: string): Promise<{ number: number } | null>;
   createTicket(data: CreateTicketData): Promise<TicketDomain>;
-  findTicketsByProject(filters: FindTicketsFilters): Promise<TicketDomain[]>;
-  countTicketsByProject(filters: Omit<FindTicketsFilters, 'limit' | 'page'>): Promise<number>;
+  findTicketPage(filters: TicketListFilters, page: IPageOption): Promise<IPageResult<TicketDomain>>;
   findTicketByProjectAndNumber(projectId: string, number: number): Promise<TicketDomain | null>;
   findTicketById(id: string): Promise<TicketDomain | null>;
   updateTicket(id: string, data: UpdateTicketData): Promise<TicketDomain>;

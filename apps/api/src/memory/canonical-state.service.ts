@@ -10,6 +10,8 @@ export interface CanonicalSnapshotQuery {
   ticketIds?: string[];
   actorId?: string;
   timeWindow?: { from?: Date; to?: Date };
+  /** Max events returned by findEvents across all three tables (default 20). */
+  eventLimit?: number;
 }
 
 export interface CanonicalTicket {

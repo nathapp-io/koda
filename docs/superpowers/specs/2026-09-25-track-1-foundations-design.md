@@ -169,6 +169,8 @@ Koda's `OutboxService` (enqueue/process/retry/markFailed/delay), `OutboxProcesso
 
 ## Slice 3 — Pagination
 
+**Status:** implemented on feat/track1-pagination (M20 closed).
+
 Package map: `PageOption`, `IPageOption`, `Page<T>` (class with `remap`) from `@nathapp/nestjs-common`; `IPageResult<T>` (interface) from `@nathapp/nestjs-data`; `Paginate()` from `@nathapp/nestjs-prisma`. Repositories and services declare `IPageResult<T>`; concrete repositories return `Page<T>` instances.
 
 ### Shared query base
