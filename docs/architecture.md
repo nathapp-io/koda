@@ -206,6 +206,26 @@ Request handling pattern:
 - **CLI**: `koda user …` and member writes need a user access token
   (`KODA_API_KEY=<token>`); agent API keys never hold the global `ADMIN` authority.
 
+### Live updates (Track 1 Slice 5)
+
+- **Source**: `TicketLiveSubscriber` (`apps/api/src/live/`) is one more handler on the
+  outbox fan-out for `ticket_event`. It maps the action (`TICKET_CREATED`, `TICKET_UPDATED`,
+  `status_changed`, `assigned`, `COMMENT_ADDED`, `TICKET_DELETED`) to a content-free
+  `LiveEvent` and publishes it on the in-process `ProjectEventBus`. Latency is the relay
+  poll (1 s) plus the batch ahead of it; delivery is at-least-once, and clients drop
+  duplicates by event id.
+- **Stream**: `GET /projects/:slug/events` (SSE, browser users only, project members only,
+  at most 5 streams per user). It sends `ready`, then `ticket` events, and a `ping` every
+  `LIVE_HEARTBEAT_MS` (25 s) after re-checking the token (`tokenVersion`, `disabled`, 60 s
+  cache) and membership (live). It closes on lost access and at token expiry. Excluded
+  from `openapi.json`.
+- **Web**: `server/api/projects/[slug]/events.get.ts` proxies the stream and aborts the
+  upstream request when the browser disconnects (the catch-all proxy cannot).
+  `useProjectEvents` wraps `EventSource` with dedupe, resync-on-reconnect and
+  auth-refresh backoff. The board and ticket detail refetch silently (never through
+  `useAsyncData` `refresh()`).
+- **Single instance**: the bus is in memory; a multi-instance API would need a shared bus.
+
 ## Ticket Workflow Architecture
 
 The ticket lifecycle is enforced in the API rather than in the UI or CLI.

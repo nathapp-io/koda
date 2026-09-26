@@ -3,7 +3,7 @@
 **Date:** 2026-09-25
 **Base:** `main` @ `eb18be6c` (after PR #127 and HIGH remediation PRs #128-#132)
 **Source:** fleet platform design doc §9.3 (Track 1), whole-repo review `docs/20260925-review-whole-repo.md`
-**Status:** Approved design. Slices 1-4 merged (#133, #134, #137, #139). Slice 5 re-designed 2026-09-26 against `bba91e23` (brainstorm rulings in its section).
+**Status:** Approved design. Slices 1-4 merged (#133, #134, #137, #139). Slice 5 implemented on `feat/track1-sse`.
 
 ## Goal
 
