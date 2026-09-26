@@ -4,6 +4,7 @@ import { join } from 'path'
 
 const webDir = join(__dirname, '../..')
 const pagePath = join(webDir, 'pages', '[project]', 'index.vue')
+const paginationPath = join(webDir, 'composables', 'useTicketBoardPages.ts')
 
 // ──────────────────────────────────────────────────────────────────────────────
 // File existence
@@ -186,9 +187,11 @@ describe("US-004-4 AC5: CreateTicketDialog 'created' event triggers data refresh
 
 describe('Slice 3: board reads the page envelope and can load more', () => {
   test('reads records, not items', () => {
-    const source = readFileSync(pagePath, 'utf-8')
-    expect(source).toContain('.records')
-    expect(source).not.toMatch(/\.items\b/)
+    const pageSource = readFileSync(pagePath, 'utf-8')
+    const paginationSource = readFileSync(paginationPath, 'utf-8')
+    expect(pageSource).toContain('useTicketBoardPages')
+    expect(paginationSource).toContain('.records')
+    expect(`${pageSource}\n${paginationSource}`).not.toMatch(/\.items\b/)
   })
 
   test('requests a sized page and offers load-more while hasNext', () => {
