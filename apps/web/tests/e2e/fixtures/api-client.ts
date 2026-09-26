@@ -181,6 +181,54 @@ export async function updateAgentStatus(
   }
 }
 
+export async function createUser(
+  token: string,
+  data: { email: string; name: string; password: string },
+): Promise<void> {
+  const res = await fetch(`${API_URL}/api/admin/users`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ ...data, role: 'MEMBER' }),
+  });
+  if (!res.ok && res.status !== 409) throw new Error(`Create user failed: ${res.status} ${await res.text()}`);
+}
+
+export async function addProjectMember(
+  token: string,
+  projectSlug: string,
+  email: string,
+  role: 'ADMIN' | 'DEVELOPER' | 'VIEWER',
+): Promise<void> {
+  const res = await fetch(`${API_URL}/api/projects/${projectSlug}/members`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ email, role }),
+  });
+  if (!res.ok && res.status !== 409) throw new Error(`Add member failed: ${res.status} ${await res.text()}`);
+}
+
+export async function createComment(
+  token: string,
+  projectSlug: string,
+  ticketRef: string,
+  body: string,
+): Promise<void> {
+  const res = await fetch(`${API_URL}/api/projects/${projectSlug}/tickets/${ticketRef}/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ body, type: 'GENERAL' }),
+  });
+  if (!res.ok) throw new Error(`Create comment failed: ${res.status} ${await res.text()}`);
+}
+
+export async function deleteTicket(token: string, projectSlug: string, ticketRef: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/projects/${projectSlug}/tickets/${ticketRef}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Delete ticket failed: ${res.status} ${await res.text()}`);
+}
+
 /** Credentials for the seeded E2E admin user */
 export const E2E_ADMIN = {
   email: 'admin@koda-e2e.test',
