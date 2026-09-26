@@ -143,6 +143,27 @@
       "deleted": "Project deleted successfully",
       "deleteConfirm": "Delete this project? This action cannot be undone.",
       "noChanges": "No changes to save"
+    },
+    "members": {
+      "title": "Members",
+      "subtitle": "People who can see and work on this project.",
+      "addEmail": "Email of an existing user",
+      "add": "Add member",
+      "remove": "Remove",
+      "removeConfirm": "Remove {email} from this project?",
+      "empty": "No members yet.",
+      "loadMore": "Load more",
+      "roles": {
+        "ADMIN": "Admin",
+        "DEVELOPER": "Developer",
+        "VIEWER": "Viewer",
+        "AGENT": "Agent"
+      },
+      "toast": {
+        "added": "Member added",
+        "removed": "Member removed",
+        "roleChanged": "Role updated"
+      }
     }
   },
   "tickets": {

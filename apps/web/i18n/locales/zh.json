@@ -143,6 +143,27 @@
       "deleted": "项目删除成功",
       "deleteConfirm": "确认删除此项目？此操作不可撤销。",
       "noChanges": "没有可保存的变更"
+    },
+    "members": {
+      "title": "成员",
+      "subtitle": "可以查看和参与此项目的人员。",
+      "addEmail": "已有用户的邮箱",
+      "add": "添加成员",
+      "remove": "移除",
+      "removeConfirm": "确定将 {email} 移出此项目？",
+      "empty": "暂无成员。",
+      "loadMore": "加载更多",
+      "roles": {
+        "ADMIN": "管理员",
+        "DEVELOPER": "开发者",
+        "VIEWER": "查看者",
+        "AGENT": "代理"
+      },
+      "toast": {
+        "added": "已添加成员",
+        "removed": "已移除成员",
+        "roleChanged": "角色已更新"
+      }
     }
   },
   "tickets": {

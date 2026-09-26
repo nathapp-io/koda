@@ -16,7 +16,7 @@ function leafPaths(node: unknown, prefix = ''): string[] {
 }
 
 // Subtrees added or extended by Track 1 Slice 4.
-const SUBTREES = ['admin.users', 'auth.register', 'auth.validation', 'nav']
+const SUBTREES = ['admin.users', 'auth.register', 'auth.validation', 'nav', 'projects.members']
 
 describe('Slice 4 locale parity (en ⇄ zh)', () => {
   test.each(SUBTREES)('%s has the same keys in en and zh, all non-empty', (subtree) => {
