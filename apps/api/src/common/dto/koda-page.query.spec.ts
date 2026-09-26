@@ -37,6 +37,25 @@ describe('KodaPageQuery', () => {
   });
 });
 
+describe('parseQuery undeclared-key stripping', () => {
+  it('strips undeclared keys from the raw query', () => {
+    const q = parseQuery(KodaPageQuery, { current: '2', size: '5', projectId: 'evil' });
+    expect(q.current).toBe(2);
+    expect(q.size).toBe(5);
+    expect('projectId' in q).toBe(false);
+    expect(Object.keys(q)).not.toContain('projectId');
+  });
+
+  it('keeps declared subclass fields while stripping undeclared ones', () => {
+    class Q extends KodaPageQuery {
+      kind?: string;
+    }
+    const q = parseQuery(Q, { current: '1', size: '10', kind: 'FACT', projectId: 'evil' });
+    expect(q.kind).toBe('FACT');
+    expect('projectId' in q).toBe(false);
+  });
+});
+
 describe('toPageResult', () => {
   it('keeps exactly the six IPageResult fields', () => {
     const page = new Page({ current: 2, size: 2 }, 5, ['c', 'd']);

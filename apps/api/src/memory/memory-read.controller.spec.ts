@@ -259,5 +259,20 @@ describe('MemoryReadController', () => {
         );
       });
     });
+
+    describe('security: query params cannot override the membership-resolved projectId', () => {
+      it('ignores a projectId query param and uses the slug-resolved projectId', async () => {
+        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
+        mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
+        mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 0, []));
+
+        await controller.getMemory('my-project', principal, { projectId: 'evil', kind: 'FACT' } as never);
+
+        expect(mockGovernanceService.getProjectMemory).toHaveBeenCalled();
+        const calledWith = mockGovernanceService.getProjectMemory.mock.calls[0][0];
+        expect(calledWith.projectId).toBe('project-123');
+        expect(calledWith.projectId).not.toBe('evil');
+      });
+    });
   });
 });

@@ -28,8 +28,41 @@ export class KodaPageQuery extends PageOption {
   size: number = 20;
 }
 
+/**
+ * Property names declared on the DTO class: own keys of a fresh instance
+ * (field initializers, and declared-but-uninitialized fields under
+ * useDefineForClassFields) plus everything on the prototype chain
+ * (inherited declared fields, getters, methods) up to Object.prototype.
+ */
+function declaredPropertyNames<T extends object>(cls: new () => T): Set<string> {
+  const names = new Set<string>(Object.keys(new cls()));
+  let proto: object | null = cls.prototype;
+  while (proto && proto !== Object.prototype) {
+    for (const name of Object.getOwnPropertyNames(proto)) {
+      if (name !== 'constructor') {
+        names.add(name);
+      }
+    }
+    proto = Object.getPrototypeOf(proto);
+  }
+  return names;
+}
+
+/**
+ * Transform a raw query into a DTO instance with numbers/defaults applied.
+ * Unlike bare `plainToInstance`, undeclared keys from the raw object are
+ * stripped, so a query param cannot smuggle an undeclared field (e.g.
+ * `?projectId=...` overriding a controller-resolved value) into the result.
+ */
 export function parseQuery<T extends object>(cls: new () => T, raw: object): T {
-  return plainToInstance(cls, raw);
+  const instance = plainToInstance(cls, raw);
+  const declared = declaredPropertyNames(cls);
+  for (const name of Object.keys(instance)) {
+    if (!declared.has(name)) {
+      delete (instance as Record<string, unknown>)[name];
+    }
+  }
+  return instance;
 }
 
 /** A Page instance carries transformOptions/extra; send only the envelope. */
