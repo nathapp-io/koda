@@ -29,7 +29,7 @@ export class KodaJwtRefreshStrategyProvider extends JwtRefreshStrategyProvider {
     const tokenVersion = (payload.tokenVersion as number | undefined) ?? 0;
 
     const user = await this.authRepo.findUserById(payload.sub);
-    const revoked = !user || user.tokenVersion > tokenVersion;
+    const revoked = !user || user.disabled || user.tokenVersion > tokenVersion;
 
     const principal: IPrincipal = {
       id: payload.sub,

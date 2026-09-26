@@ -22,6 +22,7 @@ describe('AuthService', () => {
     passwordHash: 'hashed-password',
     role: 'MEMBER',
     tokenVersion: 0,
+    disabled: false,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -285,6 +286,21 @@ describe('AuthService', () => {
       const out = await service.refresh(principal);
       expect(out.accessToken).toBeDefined();
       expect(out.refreshToken).toBeDefined();
+    });
+  });
+
+  describe('disabled users', () => {
+    it('login rejects a disabled user with the same error as a bad password', async () => {
+      const passwordHash = await bcrypt.hash('Password123!', 4);
+      mockAuthRepository.findUserByEmail.mockResolvedValueOnce({ ...mockUser, passwordHash, disabled: true });
+
+      await expect(service.login({ email: mockUser.email, password: 'Password123!' })).rejects.toBeInstanceOf(AuthException);
+    });
+
+    it('refresh refuses to mint tokens for a disabled user', async () => {
+      mockAuthRepository.findUserById.mockResolvedValueOnce({ ...mockUser, disabled: true });
+
+      await expect(service.refresh({ id: mockUser.id, revoked: false } as IPrincipal)).rejects.toBeInstanceOf(AuthException);
     });
   });
 

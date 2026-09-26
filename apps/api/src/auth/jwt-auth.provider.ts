@@ -3,7 +3,7 @@ import { AuthProvider } from '@nathapp/nestjs-auth';
 import { CacheManager } from '@nathapp/nestjs-cache';
 import { UserPrincipal, KodaUserRole } from './principal/koda-principal.types';
 import { PrismaAuthRepository } from './prisma-auth.repository';
-import { userTokenVersionCacheKey, userTokenVersionCacheTag } from './token-version.cache';
+import { UserAuthState, userAuthStateCacheKey, userTokenVersionCacheTag } from './token-version.cache';
 
 /**
  * Custom AuthProvider that preserves JWT claims (role, email) in the principal.
@@ -27,11 +27,12 @@ export class JwtAuthProvider implements AuthProvider {
     const email = (jwtPayload['email'] as string) ?? id;
     const tokenVersion = (jwtPayload['tokenVersion'] as number | undefined) ?? 0;
 
-    const currentTokenVersion = await this.cache.get<number>(
-      userTokenVersionCacheKey(id),
+    const state = await this.cache.get<UserAuthState>(
+      userAuthStateCacheKey(id),
       async () => {
         const user = await this.authRepo.findUserById(id);
-        return user?.tokenVersion ?? 0;
+        // A user that no longer resolves must not keep a valid session.
+        return { tokenVersion: user?.tokenVersion ?? 0, disabled: user?.disabled ?? true };
       },
       60_000,
       { tags: [userTokenVersionCacheTag(id)] },
@@ -44,7 +45,7 @@ export class JwtAuthProvider implements AuthProvider {
       email,
       role,
       blacklisted: false,
-      revoked: (currentTokenVersion ?? 0) > tokenVersion,
+      revoked: !state || state.disabled || state.tokenVersion > tokenVersion,
       authorities: [role],
       extra: {
         sub: id,

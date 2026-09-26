@@ -83,7 +83,8 @@ export class AuthService {
     }
 
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
-    if (!isPasswordValid) {
+    // A disabled account answers exactly like a wrong password (no enumeration).
+    if (!isPasswordValid || user.disabled) {
       throw new AuthException({}, 'auth');
     }
 
@@ -106,7 +107,7 @@ export class AuthService {
     // JwtRefreshStrategy returns IPrincipal (with .id), not JwtPayload (with .sub)
     const user = await this.authRepo.findUserById(principal.id);
 
-    if (!user) {
+    if (!user || user.disabled) {
       throw new AuthException({}, 'auth');
     }
 

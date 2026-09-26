@@ -25,6 +25,7 @@ export class PrismaAuthRepository {
       role: m.role,
       passwordHash: m.passwordHash,
       tokenVersion: m.tokenVersion,
+      disabled: m.disabled,
       createdAt: m.createdAt,
       updatedAt: m.updatedAt,
     };

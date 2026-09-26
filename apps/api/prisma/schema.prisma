@@ -28,6 +28,7 @@ model User {
   passwordHash String
   role         String    @default("MEMBER") // MEMBER | ADMIN
   tokenVersion Int       @default(0)
+  disabled     Boolean   @default(false)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
