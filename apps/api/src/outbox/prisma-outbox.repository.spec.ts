@@ -1,3 +1,4 @@
+import { OutboxStatus } from '@nathapp/nestjs-outbox';
 import { PrismaOutboxRepository } from './prisma-outbox.repository';
 
 describe('PrismaOutboxRepository', () => {
@@ -11,6 +12,7 @@ describe('PrismaOutboxRepository', () => {
   const mockFindMany = jest.fn();
   const mockUpdateMany = jest.fn();
   const mockCount = jest.fn();
+  const mockDeleteMany = jest.fn();
   const mockPrisma = {
     client: {
       outboxEvent: {
@@ -18,6 +20,7 @@ describe('PrismaOutboxRepository', () => {
         findMany: mockFindMany,
         updateMany: mockUpdateMany,
         count: mockCount,
+        deleteMany: mockDeleteMany,
       },
     },
   };
@@ -150,6 +153,28 @@ describe('PrismaOutboxRepository', () => {
         where: { id: 'o1' },
         data: { lastError: '1 fan-out handler(s) failed' },
       });
+    });
+  });
+
+  describe('deleteTerminalBefore', () => {
+    it('deletes the given terminal statuses by updatedAt cutoff, returning count', async () => {
+      mockDeleteMany.mockResolvedValue({ count: 12 });
+      const before = new Date('2026-08-27T04:00:00.000Z');
+
+      const count = await repo.deleteTerminalBefore([OutboxStatus.PUBLISHED, OutboxStatus.DEAD], before);
+
+      expect(mockDeleteMany).toHaveBeenCalledWith({
+        where: { status: { in: [OutboxStatus.PUBLISHED, OutboxStatus.DEAD] }, updatedAt: { lt: before } },
+      });
+      expect(count).toBe(12);
+    });
+
+    it('returns 0 when no rows are old enough', async () => {
+      mockDeleteMany.mockResolvedValue({ count: 0 });
+
+      const count = await repo.deleteTerminalBefore([OutboxStatus.PUBLISHED, OutboxStatus.DEAD], new Date());
+
+      expect(count).toBe(0);
     });
   });
 });

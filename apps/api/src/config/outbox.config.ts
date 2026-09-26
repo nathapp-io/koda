@@ -14,8 +14,14 @@ export interface OutboxRelayConfig {
   backoffCapMs: number;
 }
 
+export interface OutboxRetentionConfig {
+  /** Days a terminal (published/dead) row survives before the nightly purge. null disables the purge. */
+  days: number | null;
+}
+
 export interface IOutboxConfig {
   relay: OutboxRelayConfig;
+  retention: OutboxRetentionConfig;
 }
 
 export class OutboxConfigSchema {
@@ -23,6 +29,11 @@ export class OutboxConfigSchema {
   @IsOptional()
   @Matches(/^(true|false)$/i)
   OUTBOX_RELAY_ENABLED?: string;
+
+  // Digits-only to match the Joi `OUTBOX_RETENTION_DAYS` rule in env.validation.ts.
+  @IsOptional()
+  @Matches(/^\d+$/)
+  OUTBOX_RETENTION_DAYS?: string;
 }
 
 /**
@@ -30,11 +41,22 @@ export class OutboxConfigSchema {
  * The relay polls unless running under Jest (NODE_ENV=test), where tests
  * drive it explicitly via OutboxRelay.dispatchPendingBatch().
  * OUTBOX_RELAY_ENABLED overrides the default in either direction.
+ *
+ * Retention (issue #135): a nightly purge deletes terminal (published/dead)
+ * rows older than OUTBOX_RETENTION_DAYS. Default 30 outside tests, disabled
+ * under NODE_ENV=test (same default rule as the relay); 0 is the kill switch.
  */
 export const outboxConfig = registerAs(OUTBOX_CFG, (): IOutboxConfig => {
   validateUtil(process.env, OutboxConfigSchema);
   const override = process.env['OUTBOX_RELAY_ENABLED'];
   const enabled = override !== undefined ? override.toLowerCase() === 'true' : process.env['NODE_ENV'] !== 'test';
+  const retentionOverride = process.env['OUTBOX_RETENTION_DAYS'];
+  const parsedRetention = retentionOverride !== undefined ? parseInt(retentionOverride, 10) : NaN;
+  const days = retentionOverride !== undefined
+    ? (parsedRetention > 0 ? parsedRetention : null)
+    : process.env['NODE_ENV'] !== 'test'
+      ? 30
+      : null;
   return {
     relay: {
       enabled,
@@ -45,5 +67,6 @@ export const outboxConfig = registerAs(OUTBOX_CFG, (): IOutboxConfig => {
       backoffBaseMs: 2000,
       backoffCapMs: 300000,
     },
+    retention: { days },
   };
 });
