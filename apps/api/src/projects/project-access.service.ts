@@ -23,4 +23,15 @@ export class ProjectAccessService {
       throw new ForbiddenAppException({}, 'projects');
     }
   }
+
+  /**
+   * Membership management: global ADMIN, or a user whose project role is ADMIN.
+   * Agents never manage membership. Reads the role live (membership is not cached).
+   */
+  async assertProjectAdmin(projectId: string, principal: KodaPrincipal): Promise<void> {
+    if (!isUserPrincipal(principal)) throw new ForbiddenAppException({}, 'members');
+    if (principal.role === 'ADMIN') return;
+    const role = await this.projectRepo.findMembershipRole(projectId, principal.id);
+    if (role !== ActorRole.ADMIN) throw new ForbiddenAppException({}, 'members');
+  }
 }

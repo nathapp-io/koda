@@ -74,4 +74,29 @@ describe('ProjectAccessService', () => {
       await expect(service.assertProjectMembership('p1', memberUser)).resolves.toBeUndefined();
     });
   });
+
+  describe('assertProjectAdmin', () => {
+    const globalAdmin = { actorType: 'user', id: 'g1', role: 'ADMIN', email: 'g@g.com' } as KodaPrincipal;
+    const member = { actorType: 'user', id: 'm1', role: 'MEMBER', email: 'm@m.com' } as KodaPrincipal;
+    const agent = { actorType: 'agent', id: 'a1', slug: 'bot', status: 'ACTIVE', agentRoles: [], capabilities: [] } as unknown as KodaPrincipal;
+
+    it('passes a global ADMIN without a membership lookup', async () => {
+      await expect(service.assertProjectAdmin('p1', globalAdmin)).resolves.toBeUndefined();
+      expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
+    });
+
+    it('passes a project ADMIN member', async () => {
+      mockProjectRepo.findMembershipRole.mockResolvedValue('ADMIN');
+      await expect(service.assertProjectAdmin('p1', member)).resolves.toBeUndefined();
+    });
+
+    it.each(['DEVELOPER', 'VIEWER', null])('refuses a member whose project role is %s', async (role) => {
+      mockProjectRepo.findMembershipRole.mockResolvedValue(role);
+      await expect(service.assertProjectAdmin('p1', member)).rejects.toBeInstanceOf(ForbiddenAppException);
+    });
+
+    it('refuses agents', async () => {
+      await expect(service.assertProjectAdmin('p1', agent)).rejects.toBeInstanceOf(ForbiddenAppException);
+    });
+  });
 });
