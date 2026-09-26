@@ -19,10 +19,10 @@
 - Live events are an outbox subscriber only. No code publishes to the bus except `TicketLiveSubscriber`. The subscriber never throws.
 - SSE wire format: event name = `ready` (on connect), `ping` (heartbeat), `ticket` (a `LiveEvent`; the event name is `LiveEvent.type`). `data` is JSON. The browser client listens to `ticket` only.
 - Stream access: user principals only (agents 403), `assertProjectMembership` (403), max 5 concurrent streams per user (429 via `ThrottleAppException`), `@SkipThrottle()`, `@ApiExcludeEndpoint()`.
-- Heartbeat `LIVE_HEARTBEAT_MS` (default `25000`, digits only, minimum `100`). Each heartbeat re-validates with `JwtAuthProvider.getPrincipal(jwtPayload)` (`revoked` covers `tokenVersion` and `disabled`, 60 s cache) and `ProjectsService.assertProjectMembership` (live query); failure closes the stream. The stream also closes at the token's `exp`.
+- Heartbeat `LIVE_HEARTBEAT_MS` (default `25000`, digits only, minimum `100`). Each heartbeat re-validates with `JwtAuthProvider.getPrincipal(jwtPayload)` (`revoked` covers `tokenVersion` and `disabled`, 60 s cache) and `ProjectAccessService.assertProjectMembership` (live query); failure closes the stream. The stream also closes at the token's `exp`.
 - Comment create: one transaction for the comment row, the `TicketEvent` row (`action: 'COMMENT_ADDED'`, `data: { commentId }`) and the `ticket_event` outbox row. Comments created inside a transition keep emitting only `status_changed`.
 - Web live refetches never call `useAsyncData` `refresh()`. Fetch with `$api` and assign to the data ref (board: `reloadLoaded()`; detail: ticket data ref and `useNuxtData('comments-<slug>-<ref>')`).
-- Web client: dedupe by `id` (last 200); `resync` after any reopen that followed an error; on a terminal failure (`readyState === 2`) call `useAuth().refresh()` then reopen with backoff 1 s, 2 s, 4 s … capped at 30 s; stop after 5 consecutive terminal failures or when the refresh fails.
+- Web client: dedupe by `id` (last 200); `resync` after any reopen that followed an error; on a terminal failure (`readyState === 2`) call `useAuth().refresh()` then reopen with backoff 1 s, 2 s, 4 s … capped at 30 s; give up once 5 consecutive reopen attempts have failed (the 6th terminal failure in a row) or when the refresh fails.
 - The login throttle (5/min per IP, `auth.controller.ts`) is not changed. E2E fixes live in the tests.
 - Follow `nathapp-nestjs-patterns`: `JsonResponse.Ok` for JSON endpoints, `AppException` subclasses with i18n prefixes (`src/i18n/{en,zh}/<prefix>.json`, both languages), `registerAs` config validated with class-validator **and** the Joi schema in `env.validation.ts` (keep the two rules equivalent), no `process.env` outside config files and test harnesses, no `console.log` in the API.
 - `bun run test` (unit) passes with **no database running**. DB-backed tests live in `apps/api/test/integration/`, gated by `KODA_DB_TESTS === '1'`; run with `cd apps/api && bun run test:db:up && bun run test:integration` (PG16 on port 5433). Under Jest `NODE_ENV=test`, so the outbox relay does not poll: integration tests call `app.get(OutboxRelay).dispatchPendingBatch()`.
@@ -79,9 +79,9 @@
 | `apps/web/components/TicketBoard.vue` | `data-testid="board-column-<STATUS>"` | 7 |
 | `apps/web/i18n/locales/{en,zh}.json`, `apps/web/tests/i18n/live-locale-parity.spec.ts` | `tickets.live.deleted` | 7 |
 | `apps/web/tests/pages/live-wiring.spec.ts` | source-level wiring pins | 7 |
-| `apps/web/tests/e2e/fixtures/session.ts` | cached login per worker, 429 back-off | 8 |
+| `apps/web/tests/e2e/fixtures/session.ts` | cached login per worker; clear error on 429 | 8 |
 | `apps/web/tests/e2e/fixtures/api-client.ts`, `page-helpers.ts` | use the session cache | 8 |
-| `apps/web/tests/e2e/auth.spec.ts`, `ticket-detail-operations.e2e.spec.ts` | fresh sessions for logout/refresh; no `networkidle` on stream pages | 8 |
+| `apps/web/tests/e2e/auth.spec.ts`, `ticket-detail-operations.e2e.spec.ts`, `kb-admin-operations.e2e.spec.ts` | fresh session for logout; no `networkidle` on stream pages; KB skip flag | 8 |
 | `apps/web/playwright.config.ts` | `E2E_WEB_MODE=build` | 8 |
 | `apps/web/tests/e2e/live-board.spec.ts` | two-context live proof | 9 |
 | `.github/workflows/ci.yml` | `e2e` job | 9 |
@@ -180,7 +180,8 @@ describe('ProjectEventBus', () => {
   });
 
   it('isolates a throwing listener: the others still run and publish does not throw', () => {
-    const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    // test-setup.ts already replaces Logger methods with jest spies; do not re-spy or restore them.
+    (Logger.prototype.error as jest.Mock).mockClear();
     const bus = new ProjectEventBus();
     const after = jest.fn();
     bus.subscribe('p1', () => {
@@ -190,8 +191,7 @@ describe('ProjectEventBus', () => {
 
     expect(() => bus.publish(event('p1'))).not.toThrow();
     expect(after).toHaveBeenCalledTimes(1);
-    expect(errorSpy).toHaveBeenCalled();
-    errorSpy.mockRestore();
+    expect(Logger.prototype.error).toHaveBeenCalled();
   });
 
   it('the same listener function subscribed twice gets two independent subscriptions', () => {
@@ -297,13 +297,12 @@ describe('TicketLiveSubscriber', () => {
   });
 
   it('never throws, so it can never cause an outbox retry', async () => {
-    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     const registry = new FanOutPublisher(noopLastErrors);
     const bus = { publish: jest.fn(() => { throw new Error('bus down'); }) } as unknown as ProjectEventBus;
     new TicketLiveSubscriber(registry, bus).onModuleInit();
 
     await expect(registry.publish(outboxRecord('ticket_event', envelope('TICKET_CREATED')))).resolves.toBeUndefined();
-    warnSpy.mockRestore();
+    expect(Logger.prototype.warn).toHaveBeenCalled();
   });
 });
 ```
@@ -540,6 +539,7 @@ git commit -m "feat(api): live event bus and ticket_event live subscriber (Track
 - Modify: `apps/api/src/comments/comments.service.spec.ts` (providers, new tests)
 - Modify: `apps/api/src/memory/extraction.service.spec.ts` (pin)
 - Modify: `apps/api/src/entity-graph/entity-graph.service.spec.ts` (pin)
+- Create: `apps/api/src/rag/entity-store.spec.ts` (pin)
 - Create: `apps/api/test/integration/comments/comment-event.integration.spec.ts`
 
 **Interfaces:**
@@ -572,14 +572,16 @@ import { TicketEventService } from '../events/ticket-event.service';
       return result;
     }),
   };
+  // Typed parameters: a zero-arg jest.fn types mock.calls as [][] and
+  // mock.calls[0][0] would not compile under ts-jest diagnostics.
   const mockTicketEventService = {
-    create: jest.fn(async () => {
+    create: jest.fn(async (_input: unknown) => {
       callOrder.push('ticketEvent');
       return { id: 'tev-1', action: 'COMMENT_ADDED', timestamp: new Date('2026-09-26T00:00:00.000Z') };
     }),
   };
   const mockOutbox = {
-    record: jest.fn(async () => {
+    record: jest.fn(async (_input: unknown) => {
       callOrder.push('outbox');
     }),
   };
@@ -707,12 +709,32 @@ In `apps/api/src/entity-graph/entity-graph.service.spec.ts`, inside `describe('o
     });
 ```
 
-These pin current behavior (both already no-op on an unknown action; see the spec's verified facts). They should pass immediately; that is expected for a pin.
+Create `apps/api/src/rag/entity-store.spec.ts` (no spec exists for this class yet):
+
+```ts
+import { EntityStore } from './entity-store';
+
+describe('EntityStore.handleOutboxEvent', () => {
+  it('Slice 5: a COMMENT_ADDED ticket_event is handled without error (re-index only, no comment data used)', async () => {
+    const store = new EntityStore();
+    await expect(store.handleOutboxEvent({
+      eventType: 'ticket_event',
+      payload: {
+        id: 'evt-comment', type: 'ticket_event', action: 'COMMENT_ADDED', ticketId: 'ticket-1',
+        projectId: 'project-123', actorId: 'user-1', data: { commentId: 'comment-1' }, timestamp: new Date().toISOString(),
+      },
+    })).resolves.toBeUndefined();
+    expect(store.searchEntities('project-123', 'comment')).toEqual([]);
+  });
+});
+```
+
+These pin current behavior (memory and entity-graph no-op on an unknown action; RAG re-indexes the ticket regardless of action; see the spec's verified facts). They should pass immediately; that is expected for a pin. If `EntityStore.indexTicketEntity` throws without a repository, the pin has found a real defect: stop and report it rather than editing the pin.
 
 - [ ] **Step 3: Run the tests to verify the comment tests fail**
 
-Run: `cd apps/api && bunx jest src/comments/comments.service.spec.ts src/memory/extraction.service.spec.ts src/entity-graph/entity-graph.service.spec.ts`
-Expected: the new `create — COMMENT_ADDED ticket event` tests FAIL (no transaction, no event calls); the two pins PASS; all pre-existing tests PASS.
+Run: `cd apps/api && bunx jest src/comments/comments.service.spec.ts src/memory/extraction.service.spec.ts src/entity-graph/entity-graph.service.spec.ts src/rag/entity-store.spec.ts`
+Expected: the new `create — COMMENT_ADDED ticket event` tests FAIL (no transaction, no event calls); the three pins PASS; all pre-existing tests PASS.
 
 - [ ] **Step 4: Implement the transactional create**
 
@@ -805,7 +827,7 @@ Expected: only DI registrations and the controller spec's mock. If any test cons
 
 - [ ] **Step 6: Run the unit tests to verify they pass**
 
-Run: `cd apps/api && bunx jest src/comments src/memory/extraction.service.spec.ts src/entity-graph/entity-graph.service.spec.ts`
+Run: `cd apps/api && bunx jest src/comments src/memory/extraction.service.spec.ts src/entity-graph/entity-graph.service.spec.ts src/rag/entity-store.spec.ts`
 Expected: PASS.
 
 - [ ] **Step 7: Write the integration test**
@@ -890,7 +912,7 @@ Expected: PASS (2 tests).
 - [ ] **Step 9: Commit**
 
 ```bash
-git add apps/api/src/comments apps/api/src/memory/extraction.service.spec.ts apps/api/src/entity-graph/entity-graph.service.spec.ts apps/api/test/integration/comments
+git add apps/api/src/comments apps/api/src/memory/extraction.service.spec.ts apps/api/src/entity-graph/entity-graph.service.spec.ts apps/api/src/rag/entity-store.spec.ts apps/api/test/integration/comments
 git commit -m "feat(api): comment create emits COMMENT_ADDED ticket event in one transaction"
 ```
 
@@ -1135,6 +1157,13 @@ describe('createLiveStream', () => {
     expect(s.isCompleted()).toBe(true);
   });
 
+  it('does not fire at once for a far-future expiry (timer overflow guard)', async () => {
+    const s = setup({ expiresAtMs: 60 * 24 * 60 * 60 * 1000, now: () => 0, heartbeatMs: 60_000 });
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(s.isCompleted()).toBe(false);
+    s.subscription.unsubscribe();
+  });
+
   it('completes right after ready when the token is already expired', async () => {
     const s = setup({ expiresAtMs: 10, now: () => 20 });
     await jest.advanceTimersByTimeAsync(0);
@@ -1318,6 +1347,8 @@ import type { MessageEvent } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import type { LiveEvent } from './live-event';
 
+const MAX_TIMER_MS = 2_147_483_647;
+
 export interface LiveStreamOptions {
   projectId: string;
   heartbeatMs: number;
@@ -1329,8 +1360,8 @@ export interface LiveStreamOptions {
 }
 
 /**
- * One member's live stream. Sends `ready` at once (Nest writes no response
- * headers until the first message), forwards bus events as `ticket` events,
+ * One member's live stream. Sends `ready` at once so the client sees the
+ * stream open immediately, forwards bus events as `ticket` events,
  * re-checks access on every heartbeat (`ping` when it holds), and completes on
  * lost access or token expiry. Teardown runs once, on client close or
  * completion.
@@ -1364,7 +1395,10 @@ export function createLiveStream(options: LiveStreamOptions): Observable<Message
         });
     }, options.heartbeatMs);
 
-    const expiry = options.expiresAtMs === null ? null : setTimeout(finish, Math.max(0, options.expiresAtMs - options.now()));
+    // setTimeout overflows above 2^31-1 ms (about 24.8 days) and would fire at once.
+    const expiry = options.expiresAtMs === null
+      ? null
+      : setTimeout(finish, Math.min(MAX_TIMER_MS, Math.max(0, options.expiresAtMs - options.now())));
 
     return () => {
       done = true;
@@ -1909,8 +1943,10 @@ describeIntegration('GET /projects/:slug/events (PG)', () => {
     await request(server).post('/api/projects/live/tickets/LIV-1/verify').set(auth('root')).send({ body: 'ok' }).expect(200);
     await dispatch();
 
-    const created = parsed(await conn.next(isTicket));
-    const transitioned = parsed(await conn.next(isTicket));
+    // Match on content: an outbox re-delivery from an earlier test could arrive first.
+    const created = parsed(await conn.next((m) => isTicket(m) && parsed(m).action === 'created'));
+    const transitioned = parsed(await conn.next((m) => isTicket(m) && parsed(m).action === 'transitioned'
+      && parsed(m).ticketId === created.ticketId));
     expect(created).toEqual(expect.objectContaining({ type: 'ticket', action: 'created' }));
     expect(transitioned).toEqual(expect.objectContaining({ type: 'ticket', action: 'transitioned', ticketId: created.ticketId }));
     expect(created).not.toHaveProperty('title');
@@ -1928,9 +1964,13 @@ describeIntegration('GET /projects/:slug/events (PG)', () => {
     await request(server).post('/api/projects/live/tickets').set(auth('root')).send({ type: 'BUG', title: 'Here' }).expect(201);
     await dispatch();
 
-    const first = parsed(await conn.next(isTicket));
+    const otherProject = await prisma.project.findUnique({ where: { slug: 'other' } });
     const liveProject = await prisma.project.findUnique({ where: { slug: 'live' } });
-    expect(first.projectId).toBe(liveProject?.id);
+    const created = parsed(await conn.next((m) => isTicket(m) && parsed(m).action === 'created'
+      && parsed(m).projectId === liveProject?.id));
+    expect(created.projectId).toBe(liveProject?.id);
+    // Nothing from the other project was queued ahead of it.
+    await expect(conn.next((m) => isTicket(m) && parsed(m).projectId === otherProject?.id, HEARTBEAT_MS)).rejects.toThrow();
   });
 
   it('a comment arrives as commented', async () => {
@@ -1941,7 +1981,7 @@ describeIntegration('GET /projects/:slug/events (PG)', () => {
       .send({ body: 'hello live', type: 'GENERAL' }).expect(201);
     await dispatch();
 
-    expect(parsed(await conn.next(isTicket))).toEqual(expect.objectContaining({ action: 'commented' }));
+    await conn.next((m) => isTicket(m) && parsed(m).action === 'commented');
   });
 
   it('refuses a non-member (403), an agent (403) and no token (401)', async () => {
@@ -2139,6 +2179,10 @@ describe('events.get.ts route', () => {
     expect(source).toContain('LIVE_STREAM_HEADERS')
   })
 
+  test('treats the abort-on-disconnect stream error as a normal end', () => {
+    expect(source).toContain('sendStream(event, result.body).catch(')
+  })
+
   test('detects client disconnect on the response, not the request', () => {
     expect(source).toContain("node.res.on('close'")
     expect(source).not.toContain("node.req.on('close'")
@@ -2243,10 +2287,13 @@ export default defineEventHandler(async (event) => {
   })
   if (result.kind === 'error') {
     setResponseStatus(event, result.status)
+    setResponseHeader(event, 'content-type', 'text/plain; charset=utf-8')
     return result.body
   }
   setResponseHeaders(event, { ...LIVE_STREAM_HEADERS })
-  return sendStream(event, result.body)
+  // A browser disconnect aborts the upstream, which errors the piped body;
+  // that is the normal end of a live stream, not a request error.
+  return sendStream(event, result.body).catch(() => undefined)
 })
 ```
 
@@ -2287,6 +2334,8 @@ git commit -m "feat(web): abort-aware SSE proxy route for project live events"
   - `interface ProjectEventHandlers { onEvent: (event: LiveTicketEvent) => void; onResync: () => void }`
   - `createProjectEventStream(url: string, handlers: ProjectEventHandlers, deps: ProjectEventStreamDeps): { close(): void }`
   - `useProjectEvents(slug: string, handlers: ProjectEventHandlers): void` (client-only; opens on mount, closes on unmount)
+
+Deliberate deviation from the spec text: the spec sketches `on(action, handler)` / `onResync(handler)`; the plan uses one handlers object `{ onEvent, onResync }` passed at creation, which keeps the core free of listener bookkeeping. Pages filter on `event.action` themselves.
 
 - [ ] **Step 1: Write the failing core test**
 
@@ -3180,6 +3229,11 @@ Expected: failures, including `Login failed: 429` / `Login API failed: 429`. Sav
  * POST /auth/logout bumps the user's tokenVersion and revokes every cached
  * token: a test that logs out must use { fresh: true } and call
  * forgetSession() afterwards.
+ *
+ * A 429 fails fast with a clear message instead of sleeping: Playwright hooks
+ * share the 30 s test timeout, so waiting out the 60 s throttle window would
+ * fail anyway. A worker restarted after a failure (CI retries) empties this
+ * cache and logs in again; that stays well under 5/min unless many tests fail.
  */
 const API_URL = process.env['E2E_API_URL'] ?? 'http://localhost:3102';
 const MAX_AGE_MS = 10 * 60_000;
@@ -3283,12 +3337,21 @@ In `apps/web/tests/e2e/auth.spec.ts`:
 
 - [ ] **Step 5: Replace `networkidle` on the ticket detail page**
 
-In `apps/web/tests/e2e/ticket-detail-operations.e2e.spec.ts`, each of the three `await page.waitForLoadState('networkidle');` lines that follow `await page.goto(`/${projectSlug}/tickets/${ticket.ref}`);` becomes:
+In `apps/web/tests/e2e/ticket-detail-operations.e2e.spec.ts` there are three tests that do `const ticket = await createTicket(token, projectSlug, { title: `E2E … ${Date.now()}`, type: 'BUG' });` and later `await page.waitForLoadState('networkidle');` after navigating to the ticket. `createTicket` returns `{ id, ref, status }` with **no title**, so first hoist each title into a const:
+
+```ts
+    const title = `E2E Assign Close ${Date.now()}`; // keep each test's existing title text
+    const ticket = await createTicket(token, projectSlug, { title, type: 'BUG' });
+```
+
+then replace that test's `networkidle` line with:
 
 ```ts
     // The page holds a live EventSource open, so 'networkidle' never settles.
-    await expect(page.getByRole('heading', { level: 1, name: ticket.title })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible({ timeout: 10000 });
 ```
+
+(`name: ticket.title` would be `undefined`, which Playwright ignores, so the wait would match any `h1` and prove nothing.)
 
 Then search the rest of the suite: `grep -rn "networkidle" apps/web/tests/e2e`. Any remaining `networkidle` wait that runs on a board (`/${slug}`) or ticket detail (`/${slug}/tickets/...`) page gets the same treatment, with a locator for something that page renders. Waits on `/`, `/login`, `/${slug}/labels` or `/${slug}/settings` can stay (no stream there).
 
@@ -3323,7 +3386,13 @@ Expected: no 429s. For every remaining failure:
 Also run the build mode once: `cd apps/web && bunx turbo run build --filter=@nathapp/koda-web && E2E_WEB_MODE=build bun run test:e2e`.
 Expected: the same result as dev mode.
 
-The KB specs honor `SKIP_KB_E2E=1`; they need a reachable embeddings provider. If they fail locally only because Ollama is not running, note it and move on (CI sets `SKIP_KB_E2E=1`, Task 9).
+The KB specs need a reachable embeddings provider. `kb.spec.ts` honors `SKIP_KB_E2E=1`; `kb-admin-operations.e2e.spec.ts` does not yet. Add, as the first line inside its `test.describe(…)` callback:
+
+```ts
+  test.skip(process.env['SKIP_KB_E2E'] === '1', 'KB e2e needs an embeddings provider (SKIP_KB_E2E=1)');
+```
+
+If KB specs fail locally only because Ollama is not running, run with `SKIP_KB_E2E=1`, note it, and move on (CI sets it, Task 9).
 
 - [ ] **Step 8: Commit**
 
@@ -3345,7 +3414,7 @@ List in the commit body each test that was failing in Step 1 and what fixed it.
 
 **Interfaces:**
 - Consumes: Tasks 5-8 (`data-testid="board-column-<STATUS>"`, `webLogin(page, email, password)`, `confirmTransitionDialog`), Slice 4 endpoints `POST /api/admin/users` and `POST /api/projects/:slug/members`.
-- Produces: `createUser(token, { email, name, password }): Promise<void>` (tolerates 409), `addProjectMember(token, slug, email, role): Promise<void>` (tolerates 409), `createComment(token, slug, ref, body): Promise<void>`.
+- Produces: `createUser(token, { email, name, password }): Promise<void>` (tolerates 409), `addProjectMember(token, slug, email, role): Promise<void>` (tolerates 409), `createComment(token, slug, ref, body): Promise<void>`, `deleteTicket(token, slug, ref): Promise<void>`.
 
 - [ ] **Step 1: Add the fixture helpers**
 
@@ -3391,6 +3460,14 @@ export async function createComment(
   });
   if (!res.ok) throw new Error(`Create comment failed: ${res.status} ${await res.text()}`);
 }
+
+export async function deleteTicket(token: string, projectSlug: string, ticketRef: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/projects/${projectSlug}/tickets/${ticketRef}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Delete ticket failed: ${res.status} ${await res.text()}`);
+}
 ```
 
 `ticket-detail-operations.e2e.spec.ts` has a local `createComment` with the same signature; leave it (removing it is outside this slice).
@@ -3408,6 +3485,7 @@ import {
   createTicket,
   createUser,
   deleteProject,
+  deleteTicket,
   login,
   transitionTicket,
   E2E_ADMIN,
@@ -3464,19 +3542,21 @@ test.describe('Live updates (SSE through the Nuxt proxy)', () => {
   });
 
   test('A verifies a ticket; the card moves on B\'s board without a reload', async ({ browser }) => {
-    const ticket = await createTicket(token, projectSlug, { title: `Live move ${Date.now()}`, type: 'BUG' });
+    // createTicket returns { id, ref, status } only: keep the title locally.
+    const title = `Live move ${Date.now()}`;
+    const ticket = await createTicket(token, projectSlug, { title, type: 'BUG' });
     const a = await openAs(browser, E2E_ADMIN.email, E2E_ADMIN.password);
     const b = await openAs(browser, MEMBER.email, MEMBER.password);
     try {
       await gotoLive(b.page, `/${projectSlug}`, projectSlug);
-      await expect(b.page.getByTestId('board-column-CREATED').getByText(ticket.title)).toBeVisible();
+      await expect(b.page.getByTestId('board-column-CREATED').getByText(title)).toBeVisible();
       await b.page.evaluate(() => { (window as unknown as { __noReload: boolean }).__noReload = true; });
 
       await gotoLive(a.page, `/${projectSlug}/tickets/${ticket.ref}`, projectSlug);
       await a.page.getByRole('button', { name: 'Verify' }).click();
       await confirmTransitionDialog(a.page, 'verified while B watches');
 
-      await expect(b.page.getByTestId('board-column-VERIFIED').getByText(ticket.title)).toBeVisible({ timeout: 5000 });
+      await expect(b.page.getByTestId('board-column-VERIFIED').getByText(title)).toBeVisible({ timeout: 5000 });
       expect(await b.page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload)).toBe(true);
     }
     finally {
@@ -3487,6 +3567,7 @@ test.describe('Live updates (SSE through the Nuxt proxy)', () => {
 
   test('B on ticket detail sees a new comment appear', async ({ browser }) => {
     const ticket = await createTicket(token, projectSlug, { title: `Live comment ${Date.now()}`, type: 'BUG' });
+    // (only ticket.ref is used below)
     const b = await openAs(browser, MEMBER.email, MEMBER.password);
     try {
       await gotoLive(b.page, `/${projectSlug}/tickets/${ticket.ref}`, projectSlug);
@@ -3502,7 +3583,8 @@ test.describe('Live updates (SSE through the Nuxt proxy)', () => {
   });
 
   test('leaving the board releases the stream: after 6 visits live updates still arrive', async ({ browser }) => {
-    const ticket = await createTicket(token, projectSlug, { title: `Live leak ${Date.now()}`, type: 'BUG' });
+    const title = `Live leak ${Date.now()}`;
+    const ticket = await createTicket(token, projectSlug, { title, type: 'BUG' });
     const b = await openAs(browser, MEMBER.email, MEMBER.password);
     try {
       for (let visit = 0; visit < 6; visit += 1) {
@@ -3513,7 +3595,22 @@ test.describe('Live updates (SSE through the Nuxt proxy)', () => {
 
       await transitionTicket(token, projectSlug, ticket.ref, 'verify', { body: 'verified after many visits' });
 
-      await expect(b.page.getByTestId('board-column-VERIFIED').getByText(ticket.title)).toBeVisible({ timeout: 5000 });
+      await expect(b.page.getByTestId('board-column-VERIFIED').getByText(title)).toBeVisible({ timeout: 5000 });
+    }
+    finally {
+      await b.context.close();
+    }
+  });
+
+  test('B on ticket detail sees a deletion notice instead of an error', async ({ browser }) => {
+    const ticket = await createTicket(token, projectSlug, { title: `Live delete ${Date.now()}`, type: 'BUG' });
+    const b = await openAs(browser, MEMBER.email, MEMBER.password);
+    try {
+      await gotoLive(b.page, `/${projectSlug}/tickets/${ticket.ref}`, projectSlug);
+
+      await deleteTicket(token, projectSlug, ticket.ref);
+
+      await expect(b.page.getByTestId('ticket-deleted-notice')).toBeVisible({ timeout: 5000 });
     }
     finally {
       await b.context.close();
@@ -3529,7 +3626,7 @@ If the "Verify" button or dialog labels differ from `ticket-lifecycle.spec.ts` (
 - [ ] **Step 3: Run the live spec**
 
 Run: `cd apps/web && bunx playwright test tests/e2e/live-board.spec.ts`
-Expected: PASS (3 tests). Then the full suite: `bun run test:e2e`, expected green.
+Expected: PASS (4 tests). Then the full suite: `bun run test:e2e`, expected green.
 
 - [ ] **Step 4: Add the CI job**
 
