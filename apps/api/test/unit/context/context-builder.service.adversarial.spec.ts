@@ -100,7 +100,7 @@ function makeModule(overrides: ModuleOverrides = {}) {
   };
 
   const mockMemoryRepo = overrides.memoryRepo ?? {
-    findByProjectMemory: jest.fn().mockResolvedValue({ items: [], total: 0 }),
+    findByProjectMemory: jest.fn().mockResolvedValue({ records: [], total: 0, current: 1, size: 10, hasNext: false, hasPrev: false }),
   };
 
   const mockHybridRetriever = overrides.hybridRetriever ?? {

@@ -138,7 +138,7 @@ describe('ContextBuilderService — AC-7 token budget truncation priority', () =
       activeDecisions: [],
       retrievedAt: new Date(),
     });
-    mockMemoryItemRepo.findByProjectMemory.mockResolvedValue({ items: semanticMemory, total: 1 });
+    mockMemoryItemRepo.findByProjectMemory.mockResolvedValue({ records: semanticMemory, total: 1, current: 1, size: 10, hasNext: false, hasPrev: false });
     mockHybridRetriever.search.mockResolvedValue(documents);
     mockEntityGraph.getRelatedEntities.mockResolvedValue([graphPath]);
     mockImpactAnalysis.getChangeImpact.mockResolvedValue(codeIntelItem);

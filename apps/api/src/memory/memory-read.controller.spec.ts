@@ -1,4 +1,5 @@
 import { ForbiddenAppException, JsonResponse, NotFoundAppException } from '@nathapp/nestjs-common';
+import { Page } from '@nathapp/nestjs-common';
 import type { UserPrincipal } from '../auth/principal/koda-principal.types';
 import { MemoryKind } from '../common/enums';
 import { MemoryGovernanceService } from './memory-governance.service';
@@ -54,26 +55,26 @@ describe('MemoryReadController', () => {
   });
 
   describe('getMemory', () => {
-    describe('AC1: returns 200 with items and total for active memory items', () => {
-      it('returns items array matching the service result', async () => {
+    describe('AC1: returns 200 with records and total for active memory items', () => {
+      it('returns records array matching the service result', async () => {
         const items = [makeMemoryItem(), makeMemoryItem({ id: 'mem-2' })];
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
         mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
-        mockGovernanceService.getProjectMemory.mockResolvedValue({ items, total: 2 });
+        mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 2, items));
 
-        const result = await controller.getMemory('my-project', principal);
+        const result = await controller.getMemory('my-project', principal, {} as never);
 
         expect(result).toBeInstanceOf(JsonResponse);
-        expect(result.data.items).toEqual(items);
+        expect(result.data.records).toEqual(items);
       });
 
       it('returns total equal to the service total', async () => {
         const items = [makeMemoryItem()];
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
         mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
-        mockGovernanceService.getProjectMemory.mockResolvedValue({ items, total: 42 });
+        mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 42, items));
 
-        const result = await controller.getMemory('my-project', principal);
+        const result = await controller.getMemory('my-project', principal, {} as never);
 
         expect(result).toBeInstanceOf(JsonResponse);
         expect(result.data.total).toBe(42);
@@ -82,12 +83,13 @@ describe('MemoryReadController', () => {
       it('calls service with the projectId resolved from the slug', async () => {
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-resolved-id');
         mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
-        mockGovernanceService.getProjectMemory.mockResolvedValue({ items: [], total: 0 });
+        mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 0, []));
 
-        await controller.getMemory('my-project', principal);
+        await controller.getMemory('my-project', principal, {} as never);
 
         expect(mockGovernanceService.getProjectMemory).toHaveBeenCalledWith(
           expect.objectContaining({ projectId: 'project-resolved-id' }),
+          expect.objectContaining({ current: 1, size: 20 }),
         );
       });
     });
@@ -97,21 +99,22 @@ describe('MemoryReadController', () => {
         const items = [makeMemoryItem({ kind: MemoryKind.DECISION })];
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
         mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
-        mockGovernanceService.getProjectMemory.mockResolvedValue({ items, total: 1 });
+        mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 1, items));
 
-        await controller.getMemory('my-project', principal, 'DECISION');
+        await controller.getMemory('my-project', principal, { kind: 'DECISION' } as never);
 
         expect(mockGovernanceService.getProjectMemory).toHaveBeenCalledWith(
           expect.objectContaining({ kind: 'DECISION' }),
+          expect.anything(),
         );
       });
 
       it('does not include kind in the service query when kind is not provided', async () => {
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
         mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
-        mockGovernanceService.getProjectMemory.mockResolvedValue({ items: [], total: 0 });
+        mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 0, []));
 
-        await controller.getMemory('my-project', principal);
+        await controller.getMemory('my-project', principal, {} as never);
 
         expect(mockGovernanceService.getProjectMemory).toHaveBeenCalled();
         const calledWith = mockGovernanceService.getProjectMemory.mock.calls[0][0];
@@ -123,9 +126,9 @@ describe('MemoryReadController', () => {
       it('calls service without a status field when no status param is provided', async () => {
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
         mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
-        mockGovernanceService.getProjectMemory.mockResolvedValue({ items: [], total: 0 });
+        mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 0, []));
 
-        await controller.getMemory('my-project', principal);
+        await controller.getMemory('my-project', principal, {} as never);
 
         expect(mockGovernanceService.getProjectMemory).toHaveBeenCalled();
         const calledWith = mockGovernanceService.getProjectMemory.mock.calls[0][0];
@@ -138,21 +141,22 @@ describe('MemoryReadController', () => {
         const items = [makeMemoryItem({ status: 'superseded' })];
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
         mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
-        mockGovernanceService.getProjectMemory.mockResolvedValue({ items, total: 1 });
+        mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 1, items));
 
-        await controller.getMemory('my-project', principal, undefined, undefined, 'superseded');
+        await controller.getMemory('my-project', principal, { status: 'superseded' } as never);
 
         expect(mockGovernanceService.getProjectMemory).toHaveBeenCalledWith(
           expect.objectContaining({ status: 'superseded' }),
+          expect.anything(),
         );
       });
 
       it('does not include status in the service query when status is omitted', async () => {
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
         mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
-        mockGovernanceService.getProjectMemory.mockResolvedValue({ items: [], total: 0 });
+        mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 0, []));
 
-        await controller.getMemory('my-project', principal, undefined, undefined, undefined);
+        await controller.getMemory('my-project', principal, {} as never);
 
         expect(mockGovernanceService.getProjectMemory).toHaveBeenCalled();
         const calledWith = mockGovernanceService.getProjectMemory.mock.calls[0][0];
@@ -161,58 +165,28 @@ describe('MemoryReadController', () => {
     });
 
     describe('AC5: pagination', () => {
-      it('passes page=2 and limit=10 as parsed numbers to the service', async () => {
-        const page2Items = Array.from({ length: 10 }, (_, i) => makeMemoryItem({ id: `mem-${i + 11}` }));
+      it('parses paging strings and forwards filters and page separately', async () => {
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
         mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
-        mockGovernanceService.getProjectMemory.mockResolvedValue({ items: page2Items, total: 25 });
+        mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 2, size: 5 }, 0, []));
 
-        const result = await controller.getMemory('my-project', principal, undefined, undefined, undefined, '2', '10');
+        await controller.getMemory('my-project', principal, { current: '2', size: '5', kind: 'FACT' } as never);
 
         expect(mockGovernanceService.getProjectMemory).toHaveBeenCalledWith(
-          expect.objectContaining({ page: 2, limit: 10 }),
-        );
-        expect(result.data.items).toHaveLength(10);
-      });
-
-      it('returns only the items provided by the service for the requested page', async () => {
-        const page2Items = [makeMemoryItem({ id: 'mem-11' })];
-        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
-        mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
-        mockGovernanceService.getProjectMemory.mockResolvedValue({ items: page2Items, total: 11 });
-
-        const result = await controller.getMemory('my-project', principal, undefined, undefined, undefined, '2', '10');
-
-        expect(result).toBeInstanceOf(JsonResponse);
-        expect(result.data.items).toEqual(page2Items);
-      });
-    });
-
-    describe('AC6: limit clamped to 50', () => {
-      it('passes the parsed limit=1000 to the service (repository enforces the 50-item cap)', async () => {
-        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
-        mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
-        mockGovernanceService.getProjectMemory.mockResolvedValue({ items: [], total: 0 });
-
-        await controller.getMemory('my-project', principal, undefined, undefined, undefined, undefined, '1000');
-
-        expect(mockGovernanceService.getProjectMemory).toHaveBeenCalledWith(
-          expect.objectContaining({ limit: 1000 }),
+          expect.objectContaining({ projectId: 'project-123', kind: 'FACT' }),
+          { current: 2, size: 5 },
         );
       });
 
-      it('AC6: response items are at most 50 when limit=1000 is requested — mock returns 51 to make the cap non-vacuous', async () => {
-        // Pre-seeding exactly 50 items would make the assertion trivially true even without
-        // clamping. Use 51 items so the test fails if the cap is not enforced.
-        const fiftyOneItems = Array.from({ length: 51 }, (_, i) => makeMemoryItem({ id: `mem-${i}` }));
+      it('returns the six-field page envelope', async () => {
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
         mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
-        mockGovernanceService.getProjectMemory.mockResolvedValue({ items: fiftyOneItems, total: 200 });
+        mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 1, [{ id: 'm1' }]));
 
-        const result = await controller.getMemory('my-project', principal, undefined, undefined, undefined, undefined, '1000');
+        const res = await controller.getMemory('my-project', principal, {} as never);
 
-        expect(result).toBeInstanceOf(JsonResponse);
-        expect(result.data.items.length).toBeLessThanOrEqual(50);
+        expect(Object.keys(res.data).sort()).toEqual(['current', 'hasNext', 'hasPrev', 'records', 'size', 'total']);
+        expect(res.data.records).toEqual([{ id: 'm1' }]);
       });
     });
 
@@ -222,7 +196,7 @@ describe('MemoryReadController', () => {
           new NotFoundAppException({}, 'projects'),
         );
 
-        await expect(controller.getMemory('unknown-slug', principal)).rejects.toThrow(
+        await expect(controller.getMemory('unknown-slug', principal, {} as never)).rejects.toThrow(
           NotFoundAppException,
         );
       });
@@ -232,7 +206,7 @@ describe('MemoryReadController', () => {
           new NotFoundAppException({}, 'projects'),
         );
 
-        await expect(controller.getMemory('deleted-project', principal)).rejects.toThrow(
+        await expect(controller.getMemory('deleted-project', principal, {} as never)).rejects.toThrow(
           NotFoundAppException,
         );
       });
@@ -242,7 +216,7 @@ describe('MemoryReadController', () => {
           new NotFoundAppException({}, 'projects'),
         );
 
-        await expect(controller.getMemory('unknown-slug', principal)).rejects.toThrow();
+        await expect(controller.getMemory('unknown-slug', principal, {} as never)).rejects.toThrow();
 
         expect(mockProjectAccessService.assertProjectMembership).not.toHaveBeenCalled();
         expect(mockGovernanceService.getProjectMemory).not.toHaveBeenCalled();
@@ -256,7 +230,7 @@ describe('MemoryReadController', () => {
           new ForbiddenAppException({}, 'projects'),
         );
 
-        await expect(controller.getMemory('my-project', principal)).rejects.toThrow(
+        await expect(controller.getMemory('my-project', principal, {} as never)).rejects.toThrow(
           ForbiddenAppException,
         );
       });
@@ -267,7 +241,7 @@ describe('MemoryReadController', () => {
           new ForbiddenAppException({}, 'projects'),
         );
 
-        await expect(controller.getMemory('my-project', principal)).rejects.toThrow();
+        await expect(controller.getMemory('my-project', principal, {} as never)).rejects.toThrow();
 
         expect(mockGovernanceService.getProjectMemory).not.toHaveBeenCalled();
       });
@@ -275,41 +249,14 @@ describe('MemoryReadController', () => {
       it('calls assertProjectMembership with the resolved projectId and principal', async () => {
         mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
         mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
-        mockGovernanceService.getProjectMemory.mockResolvedValue({ items: [], total: 0 });
+        mockGovernanceService.getProjectMemory.mockResolvedValue(new Page({ current: 1, size: 20 }, 0, []));
 
-        await controller.getMemory('my-project', principal);
+        await controller.getMemory('my-project', principal, {} as never);
 
         expect(mockProjectAccessService.assertProjectMembership).toHaveBeenCalledWith(
           'project-123',
           principal,
         );
-      });
-    });
-
-    describe('AC9: response envelope shape', () => {
-      it('wraps the service result in JsonResponse.Ok with items and total at data root', async () => {
-        const items = [makeMemoryItem()];
-        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
-        mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
-        mockGovernanceService.getProjectMemory.mockResolvedValue({ items, total: 1 });
-
-        const result = await controller.getMemory('my-project', principal);
-
-        expect(result).toBeInstanceOf(JsonResponse);
-        expect(result.data).toEqual({ items, total: 1 });
-      });
-
-      it('data.items and data.total are present at the top level of data, not nested further', async () => {
-        const items = [makeMemoryItem()];
-        mockProjectAccessService.findProjectIdBySlug.mockResolvedValue('project-123');
-        mockProjectAccessService.assertProjectMembership.mockResolvedValue(undefined);
-        mockGovernanceService.getProjectMemory.mockResolvedValue({ items, total: 1 });
-
-        const result = await controller.getMemory('my-project', principal);
-
-        expect(result).toBeInstanceOf(JsonResponse);
-        expect(result.data).toHaveProperty('items');
-        expect(result.data).toHaveProperty('total');
       });
     });
   });

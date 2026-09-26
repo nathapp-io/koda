@@ -75,11 +75,11 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
   });
 
   describe('findByProject', () => {
-    it('uses default page=1 and limit=20 when not provided', async () => {
+    it('passes skip 0 and take 20 for the first page of 20', async () => {
       mockMemoryItem.findMany.mockResolvedValue([]);
       mockMemoryItem.count.mockResolvedValue(0);
 
-      await repository.findByProject({ projectId: 'project-123' });
+      await repository.findByProject({ projectId: 'project-123' }, { current: 1, size: 20 });
 
       expect(mockMemoryItem.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ skip: 0, take: 20 }),
@@ -90,12 +90,15 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
       mockMemoryItem.findMany.mockResolvedValue([]);
       mockMemoryItem.count.mockResolvedValue(0);
 
-      await repository.findByProject({
-        projectId: 'project-123',
-        kind: MemoryKind.FACT,
-        subject: 'ticket:1',
-        predicate: 'status',
-      });
+      await repository.findByProject(
+        {
+          projectId: 'project-123',
+          kind: MemoryKind.FACT,
+          subject: 'ticket:1',
+          predicate: 'status',
+        },
+        { current: 1, size: 20 },
+      );
 
       expect(mockMemoryItem.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -108,18 +111,24 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
       );
     });
 
-    it('returns paginated result shape with data, total, page, limit', async () => {
+    it('returns the page envelope with records, total, current and size', async () => {
       const rows = [makeModelRow()];
       mockMemoryItem.findMany.mockResolvedValue(rows);
       mockMemoryItem.count.mockResolvedValue(1);
 
-      const result = await repository.findByProject({ projectId: 'project-123' });
+      const result = await repository.findByProject({ projectId: 'project-123' }, { current: 1, size: 20 });
 
-      expect(result).toHaveProperty('data');
-      expect(result).toHaveProperty('total', 1);
-      expect(result).toHaveProperty('page', 1);
-      expect(result).toHaveProperty('limit', 20);
-      expect(result.data).toHaveLength(1);
+      expect(result).toEqual(
+        expect.objectContaining({
+          records: expect.arrayContaining([
+            expect.objectContaining({ id: 'mem-1' }),
+          ]),
+          total: 1,
+          current: 1,
+          size: 20,
+        }),
+      );
+      expect(result.records).toHaveLength(1);
     });
 
     it('maps null fields to undefined in domain object', async () => {
@@ -127,8 +136,8 @@ describe('PrismaMemoryItemRepository (additional coverage)', () => {
       mockMemoryItem.findMany.mockResolvedValue([row]);
       mockMemoryItem.count.mockResolvedValue(1);
 
-      const result = await repository.findByProject({ projectId: 'project-123' });
-      const item = result.data[0];
+      const result = await repository.findByProject({ projectId: 'project-123' }, { current: 1, size: 20 });
+      const item = result.records[0];
 
       expect(item.object).toBeUndefined();
       expect(item.ownerId).toBeUndefined();

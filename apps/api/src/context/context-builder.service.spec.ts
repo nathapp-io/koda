@@ -118,7 +118,7 @@ describe('ContextBuilderService', () => {
       activeDecisions: [],
       retrievedAt: new Date(),
     });
-    memoryItemRepository.findByProjectMemory.mockResolvedValue({ items: [], total: 0 });
+    memoryItemRepository.findByProjectMemory.mockResolvedValue({ records: [], total: 0, current: 1, size: 10, hasNext: false, hasPrev: false });
     hybridRetrieverService.search.mockResolvedValue(emptyDocuments);
   };
 
@@ -435,8 +435,12 @@ describe('ContextBuilderService', () => {
     test('uses DEFAULT_TOKEN_BUDGET of 4000 when tokenBudget is not specified', async () => {
       setupDefaultStubs();
       memoryItemRepository.findByProjectMemory.mockResolvedValue({
-        items: [makeMemoryItem()],
+        records: [makeMemoryItem()],
         total: 1,
+        current: 1,
+        size: 10,
+        hasNext: false,
+        hasPrev: false,
       });
 
       const result = await service.getProjectContext(baseQuery);
@@ -476,8 +480,12 @@ describe('ContextBuilderService', () => {
         retrievedAt: new Date().toISOString(),
       });
       memoryItemRepository.findByProjectMemory.mockResolvedValue({
-        items: [makeMemoryItem({ subject: 'x'.repeat(5000) })],
+        records: [makeMemoryItem({ subject: 'x'.repeat(5000) })],
         total: 1,
+        current: 1,
+        size: 10,
+        hasNext: false,
+        hasPrev: false,
       });
 
       const result = await service.getProjectContext({
@@ -495,11 +503,15 @@ describe('ContextBuilderService', () => {
     test('sorts semantic memory by confidence descending', async () => {
       setupDefaultStubs();
       memoryItemRepository.findByProjectMemory.mockResolvedValue({
-        items: [
+        records: [
           makeMemoryItem({ id: 'mem-low', confidence: 0.3 }),
           makeMemoryItem({ id: 'mem-high', confidence: 0.9 }),
         ],
         total: 2,
+        current: 1,
+        size: 10,
+        hasNext: false,
+        hasPrev: false,
       });
 
       const result = await service.getProjectContext(baseQuery);
@@ -513,7 +525,7 @@ describe('ContextBuilderService', () => {
     test('rethrows AppException from canonicalStateService without wrapping', async () => {
       contextRepository.projectExistsAndNotDeleted.mockResolvedValue(true);
       canonicalStateService.getSnapshot.mockRejectedValue(new ProjectNotFoundError());
-      memoryItemRepository.findByProjectMemory.mockResolvedValue({ items: [], total: 0 });
+      memoryItemRepository.findByProjectMemory.mockResolvedValue({ records: [], total: 0, current: 1, size: 10, hasNext: false, hasPrev: false });
       hybridRetrieverService.search.mockResolvedValue(emptyDocuments);
 
       await expect(service.getProjectContext(baseQuery)).rejects.toThrow(ProjectNotFoundError);
@@ -522,7 +534,7 @@ describe('ContextBuilderService', () => {
     test('wraps generic errors in InternalAppException', async () => {
       contextRepository.projectExistsAndNotDeleted.mockResolvedValue(true);
       canonicalStateService.getSnapshot.mockRejectedValue(new Error('unexpected'));
-      memoryItemRepository.findByProjectMemory.mockResolvedValue({ items: [], total: 0 });
+      memoryItemRepository.findByProjectMemory.mockResolvedValue({ records: [], total: 0, current: 1, size: 10, hasNext: false, hasPrev: false });
       hybridRetrieverService.search.mockResolvedValue(emptyDocuments);
 
       await expect(service.getProjectContext(baseQuery)).rejects.toThrow(InternalAppException);
