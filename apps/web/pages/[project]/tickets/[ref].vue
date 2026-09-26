@@ -2,6 +2,7 @@
 import { computed, reactive, ref as vueRef } from 'vue'
 import MarkdownEditor from '~/components/MarkdownEditor.vue'
 import { extractApiError } from '~/composables/useApi'
+import { createDebouncer } from '~/lib/debounce'
 import { renderSafeMarkdown } from '~/lib/markdown'
 import { safeHref } from '~/lib/safe-url'
 
@@ -77,6 +78,50 @@ const { data: allLabelsData, refresh: refreshAllLabels } = useAsyncData(
 )
 
 const ticket = computed(() => ticketData.value ?? null)
+
+// Track 1 Slice 5: live updates for the open ticket. Never refresh(): it flips
+// `pending`, which swaps the page for LoadingState and unmounts an open edit form.
+const LIVE_RELOAD_DEBOUNCE_MS = 300
+const ticketDeleted = vueRef(false)
+const { data: liveComments } = useNuxtData(`comments-${slug}-${ref}`)
+
+async function reloadTicketSilently() {
+  try {
+    ticketData.value = await ($api.get(`/projects/${slug}/tickets/${ref}`) as Promise<Ticket>)
+  }
+  catch {
+    // The next live event or a resync retries.
+  }
+}
+
+async function reloadCommentsSilently() {
+  try {
+    liveComments.value = await $api.get(`/projects/${slug}/tickets/${ref}/comments`)
+  }
+  catch {
+    // The next live event or a resync retries.
+  }
+}
+
+const liveTicketReload = createDebouncer(() => { void reloadTicketSilently() }, LIVE_RELOAD_DEBOUNCE_MS)
+onBeforeUnmount(() => liveTicketReload.cancel())
+
+useProjectEvents(slug, {
+  onEvent: (event) => {
+    if (!ticket.value || event.ticketId !== ticket.value.id) return
+    if (event.action === 'deleted') {
+      ticketDeleted.value = true
+      return
+    }
+    liveTicketReload.trigger()
+    if (event.action === 'commented') void reloadCommentsSilently()
+  },
+  onResync: () => {
+    if (ticketDeleted.value) return
+    liveTicketReload.trigger()
+    void reloadCommentsSilently()
+  },
+})
 const ticketLinks = computed(() => ticketLinksData.value ?? [])
 const ticketLabels = computed(() => ticket.value?.labels ?? [])
 const allLabels = computed(() => allLabelsData.value ?? [])
@@ -357,6 +402,14 @@ async function removeLink(linkId: string) {
     <div v-else-if="ticket" class="grid grid-cols-1 md:grid-cols-3 gap-6">
       <!-- Main content: 2/3 width on desktop, full width on mobile -->
       <div class="md:col-span-2 space-y-6">
+        <div
+          v-if="ticketDeleted"
+          role="status"
+          data-testid="ticket-deleted-notice"
+          class="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive"
+        >
+          {{ t('tickets.live.deleted') }}
+        </div>
         <div class="flex items-center justify-between">
           <div v-if="!editState.isEditing" class="flex-1">
             <h1 class="text-2xl font-bold">{{ ticket.title }}</h1>

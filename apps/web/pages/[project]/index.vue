@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { extractApiError } from '~/composables/useApi'
 import { useTicketBoardPages, type TicketPage } from '~/composables/useTicketBoardPages'
+import { createDebouncer } from '~/lib/debounce'
 
 definePageMeta({ layout: 'default' })
 
@@ -35,13 +36,25 @@ const { data: ticketsData, pending, error, refresh } = useAsyncData(
   () => $api.get<TicketPage<Ticket>>(`/projects/${slug}/tickets`, { query: { size: BOARD_PAGE_SIZE } }),
 )
 
-const { tickets, hasNext, loadingMore, loadMoreTickets } = useTicketBoardPages(
+const { tickets, hasNext, loadingMore, loadMoreTickets, reloadLoaded } = useTicketBoardPages(
   ticketsData,
   current => $api.get<TicketPage<Ticket>>(`/projects/${slug}/tickets`, {
     query: { current, size: BOARD_PAGE_SIZE },
   }),
   err => toast.error(extractApiError(err)),
 )
+
+// Track 1 Slice 5: live updates. Comments do not change the board.
+const LIVE_RELOAD_DEBOUNCE_MS = 300
+const liveReload = createDebouncer(() => { void reloadLoaded() }, LIVE_RELOAD_DEBOUNCE_MS)
+onBeforeUnmount(() => liveReload.cancel())
+
+useProjectEvents(slug, {
+  onEvent: (event) => {
+    if (event.action !== 'commented') liveReload.trigger()
+  },
+  onResync: () => liveReload.trigger(),
+})
 
 const showCreateDialog = ref(false)
 const showImportDialog = ref(false)

@@ -76,4 +76,59 @@ describe('useTicketBoardPages', () => {
     expect(fetchPage).toHaveBeenCalledTimes(2)
     expect(board.tickets.value.map(ticket => ticket.id)).toEqual(['a', 'b'])
   })
+
+  test('reloadLoaded refetches every loaded page and keeps the extra pages', async () => {
+    let version = 1
+    const firstPage = ref<TicketPage<Ticket> | null>(page(1, ['a'], true))
+    const fetchPage = jest.fn(async (current: number) =>
+      current === 1 ? page(1, [`a${version}`], true) : page(2, [`b${version}`], false))
+    const board = useTicketBoardPages(firstPage, fetchPage, jest.fn())
+    await board.loadMoreTickets()
+    expect(board.tickets.value.map(t => t.id)).toEqual(['a', 'b1'])
+
+    version = 2
+    await expect(board.reloadLoaded()).resolves.toBe(true)
+
+    expect(fetchPage).toHaveBeenCalledWith(1)
+    expect(board.tickets.value.map(t => t.id)).toEqual(['a2', 'b2'])
+    expect(board.hasNext.value).toBe(false)
+  })
+
+  test('reloadLoaded with only the first page fetches page 1 only', async () => {
+    const firstPage = ref<TicketPage<Ticket> | null>(page(1, ['a'], false))
+    const fetchPage = jest.fn(async (_current: number) => page(1, ['a-new'], false))
+    const board = useTicketBoardPages(firstPage, fetchPage, jest.fn())
+
+    await board.reloadLoaded()
+
+    expect(fetchPage).toHaveBeenCalledTimes(1)
+    expect(board.tickets.value.map(t => t.id)).toEqual(['a-new'])
+  })
+
+  test('a failed reload keeps the current tickets and reports nothing', async () => {
+    const firstPage = ref<TicketPage<Ticket> | null>(page(1, ['a'], false))
+    const reportError = jest.fn()
+    const board = useTicketBoardPages(firstPage, async () => { throw new Error('offline') }, reportError)
+
+    await expect(board.reloadLoaded()).resolves.toBe(false)
+
+    expect(board.tickets.value.map(t => t.id)).toEqual(['a'])
+    expect(reportError).not.toHaveBeenCalled()
+  })
+
+  test('an older reload that finishes last is discarded', async () => {
+    const firstPage = ref<TicketPage<Ticket> | null>(page(1, ['a'], false))
+    const slow = deferred<TicketPage<Ticket>>()
+    const fetchPage = jest.fn()
+      .mockImplementationOnce(() => slow.promise)
+      .mockImplementationOnce(async () => page(1, ['newest'], false))
+    const board = useTicketBoardPages(firstPage, fetchPage as (current: number) => Promise<TicketPage<Ticket>>, jest.fn())
+
+    const older = board.reloadLoaded()
+    await board.reloadLoaded()
+    slow.resolve(page(1, ['stale'], false))
+    await expect(older).resolves.toBe(false)
+
+    expect(board.tickets.value.map(t => t.id)).toEqual(['newest'])
+  })
 })

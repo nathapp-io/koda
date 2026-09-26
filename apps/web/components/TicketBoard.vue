@@ -45,6 +45,7 @@ function ticketsForStatus(status: string): Ticket[] {
       <div
         v-for="status in COLUMNS"
         :key="status"
+        :data-testid="`board-column-${status}`"
         class="w-64 flex flex-col gap-2 rounded-lg bg-muted/30 border border-border/50 p-3"
       >
         <div class="flex items-center justify-between mb-1">
