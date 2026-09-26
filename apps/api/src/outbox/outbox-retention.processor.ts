@@ -36,7 +36,9 @@ export class OutboxRetentionProcessor {
       const deleted = await this.repository.deleteTerminalBefore([OutboxStatus.PUBLISHED, OutboxStatus.DEAD], before);
       this.logger.log(`Purged ${deleted} terminal outbox event(s) not updated since ${before.toISOString()}`);
     } catch (error) {
-      this.logger.error(`Outbox retention purge failed, will retry next run: ${(error as Error).message}`);
+      const message = error instanceof Error ? error.message : String(error);
+      const stack = error instanceof Error ? error.stack : undefined;
+      this.logger.error(`Outbox retention purge failed, will retry next run: ${message}`, stack);
     }
   }
 }

@@ -5,6 +5,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
 import { PrismaModule, PrismaService } from '@nathapp/nestjs-prisma';
+import { OutboxStatus } from '@nathapp/nestjs-outbox';
 import { PrismaOutboxRepository } from '../../../src/outbox/prisma-outbox.repository';
 import { resetDb } from '../../helpers/reset-db';
 
@@ -50,7 +51,7 @@ describeIntegration('PrismaOutboxRepository.deleteTerminalBefore', () => {
   });
 
   /** Inserts a row directly with an explicit terminal status and updatedAt. */
-  const seed = async (id: string, status: string, updatedAt: Date): Promise<void> => {
+  const seed = async (id: string, status: OutboxStatus, updatedAt: Date): Promise<void> => {
     await prisma.client.outboxEvent.create({
       data: {
         id,
@@ -58,8 +59,8 @@ describeIntegration('PrismaOutboxRepository.deleteTerminalBefore', () => {
         type: 'ticket_event',
         eventId: `ev-${id}`,
         status,
-        attempts: status === 'dead' ? 8 : 0,
-        publishedAt: status === 'published' ? updatedAt : null,
+        attempts: status === OutboxStatus.DEAD ? 8 : 0,
+        publishedAt: status === OutboxStatus.PUBLISHED ? updatedAt : null,
         updatedAt,
       },
     });
@@ -69,15 +70,15 @@ describeIntegration('PrismaOutboxRepository.deleteTerminalBefore', () => {
     (await prisma.client.outboxEvent.findMany({ orderBy: { id: 'asc' }, select: { id: true } })).map((r) => r.id);
 
   it('deletes old terminal rows only: recent terminal, old pending, and rows exactly at the cutoff survive', async () => {
-    await seed('published-old', 'published', daysAgo(40));
-    await seed('published-edge', 'published', t0); // cutoff is exclusive
-    await seed('published-new', 'published', afterCutoff(3_600_000));
-    await seed('dead-old', 'dead', daysAgo(40, 60_000));
-    await seed('dead-new', 'dead', afterCutoff(7_200_000));
-    await seed('pending-old', 'pending', daysAgo(40));
-    await seed('processing-old', 'processing', daysAgo(40));
+    await seed('published-old', OutboxStatus.PUBLISHED, daysAgo(40));
+    await seed('published-edge', OutboxStatus.PUBLISHED, t0); // cutoff is exclusive
+    await seed('published-new', OutboxStatus.PUBLISHED, afterCutoff(3_600_000));
+    await seed('dead-old', OutboxStatus.DEAD, daysAgo(40, 60_000));
+    await seed('dead-new', OutboxStatus.DEAD, afterCutoff(7_200_000));
+    await seed('pending-old', OutboxStatus.PENDING, daysAgo(40));
+    await seed('processing-old', OutboxStatus.PROCESSING, daysAgo(40));
 
-    const deleted = await repo.deleteTerminalBefore(['published', 'dead'], t0);
+    const deleted = await repo.deleteTerminalBefore([OutboxStatus.PUBLISHED, OutboxStatus.DEAD], t0);
 
     expect(deleted).toBe(2);
     expect(await remainingIds()).toEqual([
@@ -90,10 +91,10 @@ describeIntegration('PrismaOutboxRepository.deleteTerminalBefore', () => {
   });
 
   it('returns 0 when nothing is old enough', async () => {
-    await seed('published-new', 'published', afterCutoff(3_600_000));
-    await seed('dead-new', 'dead', afterCutoff(3_600_000));
+    await seed('published-new', OutboxStatus.PUBLISHED, afterCutoff(3_600_000));
+    await seed('dead-new', OutboxStatus.DEAD, afterCutoff(3_600_000));
 
-    const deleted = await repo.deleteTerminalBefore(['published', 'dead'], daysAgo(30));
+    const deleted = await repo.deleteTerminalBefore([OutboxStatus.PUBLISHED, OutboxStatus.DEAD], daysAgo(30));
 
     expect(deleted).toBe(0);
   });

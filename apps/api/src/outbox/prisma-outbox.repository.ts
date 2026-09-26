@@ -1,6 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { AbstractPrismaRepository, PrismaClientLike, PrismaModelDelegate, PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { OutboxStatus } from '@nathapp/nestjs-outbox';
 import { OutboxEvent as OutboxEventModel, PrismaClient } from '@prisma/client';
 import { OutboxEventDomain } from './domain/outbox-event.domain';
 
@@ -112,7 +113,7 @@ export class PrismaOutboxRepository extends AbstractPrismaRepository<OutboxEvent
    * are a terminal row's last writes — and an admin retry bumps it, giving a
    * retried row a fresh retention window. Returns rows deleted.
    */
-  async deleteTerminalBefore(statuses: string[], before: Date): Promise<number> {
+  async deleteTerminalBefore(statuses: OutboxStatus[], before: Date): Promise<number> {
     const result = await this.prisma.client.outboxEvent.deleteMany({
       where: { status: { in: statuses }, updatedAt: { lt: before } },
     });

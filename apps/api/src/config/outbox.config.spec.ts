@@ -16,6 +16,7 @@ describe('outboxConfig', () => {
   afterEach(() => {
     restore('NODE_ENV');
     restore('OUTBOX_RELAY_ENABLED');
+    restore('OUTBOX_RETENTION_DAYS');
   });
 
   it('uses the slice-2 relay settings', () => {

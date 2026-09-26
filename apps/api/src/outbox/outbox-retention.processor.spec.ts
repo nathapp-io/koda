@@ -5,7 +5,7 @@ import { ScheduleModule, SchedulerRegistry } from '@nestjs/schedule';
 import { OutboxStatus } from '@nathapp/nestjs-outbox';
 import { OutboxRetentionProcessor } from './outbox-retention.processor';
 import { PrismaOutboxRepository } from './prisma-outbox.repository';
-import { IOutboxConfig, OUTBOX_CFG } from '../config/outbox.config';
+import { IOutboxConfig } from '../config/outbox.config';
 
 const createMockRepository = () => ({
   deleteTerminalBefore: jest.fn(),

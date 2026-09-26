@@ -1,3 +1,4 @@
+import { OutboxStatus } from '@nathapp/nestjs-outbox';
 import { PrismaOutboxRepository } from './prisma-outbox.repository';
 
 describe('PrismaOutboxRepository', () => {
@@ -160,10 +161,10 @@ describe('PrismaOutboxRepository', () => {
       mockDeleteMany.mockResolvedValue({ count: 12 });
       const before = new Date('2026-08-27T04:00:00.000Z');
 
-      const count = await repo.deleteTerminalBefore(['published', 'dead'], before);
+      const count = await repo.deleteTerminalBefore([OutboxStatus.PUBLISHED, OutboxStatus.DEAD], before);
 
       expect(mockDeleteMany).toHaveBeenCalledWith({
-        where: { status: { in: ['published', 'dead'] }, updatedAt: { lt: before } },
+        where: { status: { in: [OutboxStatus.PUBLISHED, OutboxStatus.DEAD] }, updatedAt: { lt: before } },
       });
       expect(count).toBe(12);
     });
@@ -171,7 +172,7 @@ describe('PrismaOutboxRepository', () => {
     it('returns 0 when no rows are old enough', async () => {
       mockDeleteMany.mockResolvedValue({ count: 0 });
 
-      const count = await repo.deleteTerminalBefore(['published', 'dead'], new Date());
+      const count = await repo.deleteTerminalBefore([OutboxStatus.PUBLISHED, OutboxStatus.DEAD], new Date());
 
       expect(count).toBe(0);
     });

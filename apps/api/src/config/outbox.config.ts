@@ -51,8 +51,9 @@ export const outboxConfig = registerAs(OUTBOX_CFG, (): IOutboxConfig => {
   const override = process.env['OUTBOX_RELAY_ENABLED'];
   const enabled = override !== undefined ? override.toLowerCase() === 'true' : process.env['NODE_ENV'] !== 'test';
   const retentionOverride = process.env['OUTBOX_RETENTION_DAYS'];
+  const parsedRetention = retentionOverride !== undefined ? parseInt(retentionOverride, 10) : NaN;
   const days = retentionOverride !== undefined
-    ? (parseInt(retentionOverride, 10) > 0 ? parseInt(retentionOverride, 10) : null)
+    ? (parsedRetention > 0 ? parsedRetention : null)
     : process.env['NODE_ENV'] !== 'test'
       ? 30
       : null;
