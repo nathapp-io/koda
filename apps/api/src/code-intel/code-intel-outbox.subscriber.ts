@@ -1,14 +1,14 @@
 import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { AstIndexService, SourceFile } from './ast-index.service';
 import { CodeCommitOutboxHandler } from './code-commit-outbox-handler';
-import { OutboxFanOutRegistry } from '../outbox/outbox-fan-out-registry';
+import { FanOutPublisher } from '../outbox/fan-out-publisher';
 
 @Injectable()
 export class CodeIntelOutboxSubscriber implements OnModuleInit {
   private readonly logger = new Logger(CodeIntelOutboxSubscriber.name);
 
   constructor(
-    private readonly registry: OutboxFanOutRegistry,
+    private readonly registry: FanOutPublisher,
     @Optional() private readonly codeCommitHandler?: CodeCommitOutboxHandler,
     @Optional() private readonly astIndexService?: AstIndexService,
   ) {}

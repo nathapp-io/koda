@@ -22,7 +22,7 @@ import { WebhookDomain } from './domain/webhook.domain';
  * AC9: findById resolves { active: false } -> handle() resolves without throwing, fetch not called
  *
  * Note: handler has no Nest lifecycle (no OnModuleInit) -> use direct instantiation,
- * matching the existing style in src/outbox/outbox-fan-out-registry.spec.ts.
+ * matching the existing style in src/outbox/fan-out-publisher.spec.ts.
  */
 
 function makeWebhookRepo(): jest.Mocked<PrismaWebhookRepository> {

@@ -1,38 +1,73 @@
+import { Global, Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
-import { OutboxFanOutRegistry } from './outbox-fan-out-registry';
+import { PrismaService } from '@nathapp/nestjs-prisma';
+import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import {
+  InMemoryOutboxStore,
+  OUTBOX_MODULE_OPTIONS,
+  OUTBOX_PUBLISHER,
+  OUTBOX_STORE,
+  OutboxModuleOptions,
+  OutboxRelay,
+  OutboxService as NathappOutboxService,
+} from '@nathapp/nestjs-outbox';
+import { outboxConfig } from '../config/outbox.config';
+import { FanOutPublisher } from './fan-out-publisher';
+import { OutboxModule } from './outbox.module';
+import { PrismaOutboxStore } from './prisma-outbox.store';
 
-/**
- * OutboxModule DI wiring tests
- *
- * Story: Register webhook delivery in OutboxModule fan-out
- *
- * Acceptance Criteria:
- * AC4: When a Nest testing module is constructed with OutboxFanOutRegistry as the sole provider
- *     and no other constructor arguments supplied, then compilation succeeds and
- *     module.get(OutboxFanOutRegistry) returns a defined instance.
- *
- * Rationale: this is a DI smoke test for the webhook_delivery constructor argument
- * (which is `@Optional()`), so OutboxFanOutRegistry must compile even with no
- * constructor arguments supplied by the testing module.
- */
+@Global()
+@Module({
+  providers: [
+    { provide: PrismaService, useValue: { client: {} } },
+    {
+      provide: TRANSACTION_MANAGER,
+      useValue: { run: <T>(fn: () => Promise<T>) => fn(), getClient: () => ({}), isInTransaction: () => false },
+    },
+  ],
+  exports: [PrismaService, TRANSACTION_MANAGER],
+})
+class FakePrismaModule {}
 
-describe('OutboxFanOutRegistry (DI wiring)', () => {
+describe('OutboxModule (DI wiring, no database)', () => {
+  const saved = process.env['OUTBOX_RELAY_ENABLED'];
   let moduleRef: TestingModule;
 
-  afterEach(async () => {
-    if (moduleRef) {
-      await moduleRef.close();
-      moduleRef = undefined as unknown as TestingModule;
-    }
-  });
-
-  it('AC4: Nest testing module with OutboxFanOutRegistry as the sole provider compiles and resolves a defined instance', async () => {
-    moduleRef = await Test.createTestingModule({
-      providers: [OutboxFanOutRegistry],
+  const compile = async (): Promise<TestingModule> =>
+    Test.createTestingModule({
+      imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true, load: [outboxConfig] }), FakePrismaModule, OutboxModule],
     }).compile();
 
-    const registry = moduleRef.get(OutboxFanOutRegistry);
-    expect(registry).toBeDefined();
-    expect(registry).toBeInstanceOf(OutboxFanOutRegistry);
+  afterEach(async () => {
+    await moduleRef?.close();
+    if (saved === undefined) delete process.env['OUTBOX_RELAY_ENABLED'];
+    else process.env['OUTBOX_RELAY_ENABLED'] = saved;
+  });
+
+  it('resolves PrismaOutboxStore as the store, never the in-memory fallback', async () => {
+    moduleRef = await compile();
+    const store = moduleRef.get(OUTBOX_STORE);
+    expect(store).toBeInstanceOf(PrismaOutboxStore);
+    expect(store).not.toBeInstanceOf(InMemoryOutboxStore);
+  });
+
+  it('uses the shared FanOutPublisher instance as the relay publisher', async () => {
+    moduleRef = await compile();
+    expect(moduleRef.get(OUTBOX_PUBLISHER)).toBe(moduleRef.get(FanOutPublisher));
+  });
+
+  it('passes the configured relay options, enabled outside tests', async () => {
+    process.env['OUTBOX_RELAY_ENABLED'] = 'true';
+    moduleRef = await compile();
+    const options = moduleRef.get<OutboxModuleOptions>(OUTBOX_MODULE_OPTIONS);
+    expect(options.relay).toEqual(outboxConfig().relay);
+    expect(options.relay?.enabled).toBe(true);
+  });
+
+  it('exposes the package OutboxService and OutboxRelay', async () => {
+    moduleRef = await compile();
+    expect(moduleRef.get(NathappOutboxService)).toBeDefined();
+    expect(moduleRef.get(OutboxRelay)).toBeDefined();
   });
 });

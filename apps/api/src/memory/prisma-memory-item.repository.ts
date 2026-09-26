@@ -134,6 +134,17 @@ export class PrismaMemoryItemRepository
           },
         });
 
+        // Outbox replays re-run this handler: restating the same fact from the
+        // same source is a no-op instead of superseding an identical row.
+        if (
+          existingActive &&
+          existingActive.object === (item.object ?? null) &&
+          existingActive.sourceType === item.sourceType &&
+          existingActive.sourceId === item.sourceId
+        ) {
+          return this.toDomain(existingActive);
+        }
+
         if (existingActive) {
           await db.memoryItem.update({
             where: { id: existingActive.id },

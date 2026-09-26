@@ -1,5 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { OutboxFanOutRegistry } from '../../../src/outbox/outbox-fan-out-registry';
+import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
+import { PrismaOutboxRepository } from '../../../src/outbox/prisma-outbox.repository';
+import { noopLastErrors, outboxRecord } from '../../helpers/outbox-record';
 import { ExtractionService } from '../../../src/memory/extraction.service';
 import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-item.repository';
 import { MemoryOutboxSubscriber } from '../../../src/memory/memory-outbox.subscriber';
@@ -7,8 +9,8 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { MemoryKind } from '../../../src/common/enums';
 
-describe('AC8: OutboxFanOutRegistry dispatches to ExtractionService', () => {
-  let fanOutRegistry: OutboxFanOutRegistry;
+describe('AC8: FanOutPublisher dispatches to ExtractionService', () => {
+  let fanOutRegistry: FanOutPublisher;
   let extractionService: ExtractionService;
   let memoryRepository: PrismaMemoryItemRepository;
   let mockPrismaService: any;
@@ -32,7 +34,8 @@ describe('AC8: OutboxFanOutRegistry dispatches to ExtractionService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        OutboxFanOutRegistry,
+        FanOutPublisher,
+        { provide: PrismaOutboxRepository, useValue: noopLastErrors },
         ExtractionService,
         PrismaMemoryItemRepository,
         // H13: register the real subscriber so its onModuleInit() wires the
@@ -54,7 +57,7 @@ describe('AC8: OutboxFanOutRegistry dispatches to ExtractionService', () => {
     // Register the subscriber's handlers (the work its onModuleInit() does).
     module.get<MemoryOutboxSubscriber>(MemoryOutboxSubscriber).onModuleInit();
 
-    fanOutRegistry = module.get<OutboxFanOutRegistry>(OutboxFanOutRegistry);
+    fanOutRegistry = module.get<FanOutPublisher>(FanOutPublisher);
     extractionService = module.get<ExtractionService>(ExtractionService);
     memoryRepository = module.get<PrismaMemoryItemRepository>(PrismaMemoryItemRepository);
   });
@@ -82,10 +85,7 @@ describe('AC8: OutboxFanOutRegistry dispatches to ExtractionService', () => {
         confidence: 0.9,
       } as any);
 
-      await fanOutRegistry.dispatch({
-        eventType: 'ticket_event',
-        payload: ticketEventPayload,
-      });
+      await fanOutRegistry.publish(outboxRecord('ticket_event', ticketEventPayload));
 
       expect(repositoryUpsertSpy).toHaveBeenCalled();
       const upsertCall = repositoryUpsertSpy.mock.calls[0][0];
@@ -116,10 +116,7 @@ describe('AC8: OutboxFanOutRegistry dispatches to ExtractionService', () => {
         confidence: 0.85,
       } as any);
 
-      await fanOutRegistry.dispatch({
-        eventType: 'ticket_event',
-        payload: ticketEventPayload,
-      });
+      await fanOutRegistry.publish(outboxRecord('ticket_event', ticketEventPayload));
 
       expect(repositoryUpsertSpy).toHaveBeenCalled();
     });
@@ -146,10 +143,7 @@ describe('AC8: OutboxFanOutRegistry dispatches to ExtractionService', () => {
         confidence: 0.75,
       } as any);
 
-      await fanOutRegistry.dispatch({
-        eventType: 'ticket_event',
-        payload: ticketEventPayload,
-      });
+      await fanOutRegistry.publish(outboxRecord('ticket_event', ticketEventPayload));
 
       expect(repositoryUpsertSpy).toHaveBeenCalled();
       const upsertCall = repositoryUpsertSpy.mock.calls[0][0];
@@ -180,10 +174,7 @@ describe('AC8: OutboxFanOutRegistry dispatches to ExtractionService', () => {
         confidence: 0.95,
       } as any);
 
-      await fanOutRegistry.dispatch({
-        eventType: 'agent_event',
-        payload: agentEventPayload,
-      });
+      await fanOutRegistry.publish(outboxRecord('agent_event', agentEventPayload));
 
       expect(repositoryUpsertSpy).toHaveBeenCalled();
     });
@@ -202,10 +193,7 @@ describe('AC8: OutboxFanOutRegistry dispatches to ExtractionService', () => {
 
       const repositoryUpsertSpy = jest.spyOn(memoryRepository, 'upsert');
 
-      await fanOutRegistry.dispatch({
-        eventType: 'agent_event',
-        payload: agentEventPayload,
-      });
+      await fanOutRegistry.publish(outboxRecord('agent_event', agentEventPayload));
 
       expect(repositoryUpsertSpy).not.toHaveBeenCalled();
     });
@@ -226,10 +214,7 @@ describe('AC8: OutboxFanOutRegistry dispatches to ExtractionService', () => {
         timestamp: new Date(),
       };
 
-      await fanOutRegistry.dispatch({
-        eventType: 'ticket_event',
-        payload: ticketEventPayload,
-      });
+      await fanOutRegistry.publish(outboxRecord('ticket_event', ticketEventPayload));
 
       expect(extractSpy).toHaveBeenCalledWith(
         expect.objectContaining({

@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
+import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { RagService } from '../rag/rag.service';
-import { OutboxService } from '../outbox/outbox.service';
 import { AgentAuthProvider } from '../auth/agent-auth.provider';
 import { TicketEventService } from '../events/ticket-event.service';
 import { AgentEventService } from '../events/agent-event.service';
@@ -23,11 +24,12 @@ export class KodaDomainWriter {
   constructor(
     private readonly writerRepo: PrismaKodaDomainWriterRepository,
     private readonly ragService: RagService,
-    private readonly outboxService: OutboxService,
+    private readonly outbox: NathappOutboxService,
     private readonly agentAuthProvider: AgentAuthProvider,
     private readonly ticketEventService: TicketEventService,
     private readonly agentEventService: AgentEventService,
     private readonly decisionEventService: DecisionEventService,
+    @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
   ) {}
 
   private assertNonEmpty(value: string, field: string): void {
@@ -99,27 +101,26 @@ export class KodaDomainWriter {
     };
     this.assertActorHasEventRole(actor);
 
-    const event = await this.ticketEventService.create(data);
-
-    await this.outboxService.enqueue({
-      projectId: data.projectId,
-      eventType: 'ticket_event',
-      eventId: event.id,
-      // H13: consumers switch on action/id/timestamp — enqueue the full event envelope
-      payload: buildTicketEventOutboxPayload({
-        event,
-        ticketId: data.ticketId,
-        projectId: data.projectId,
-        actorId: data.actorId,
-        actorType: data.actorType,
-        data: data.data,
-      }),
+    return this.txManager.run(async () => {
+      const event = await this.ticketEventService.create(data);
+      await this.outbox.record({
+        type: 'ticket_event',
+        // H13: consumers switch on action/id/timestamp — record the full event envelope
+        payload: buildTicketEventOutboxPayload({
+          event,
+          ticketId: data.ticketId,
+          projectId: data.projectId,
+          actorId: data.actorId,
+          actorType: data.actorType,
+          data: data.data,
+        }),
+        metadata: { projectId: data.projectId, eventId: event.id },
+      });
+      return {
+        canonicalId: event.id,
+        provenance: this.buildProvenance(data.actorId, data.projectId, data.action, data.source, event.id),
+      };
     });
-
-    return {
-      canonicalId: event.id,
-      provenance: this.buildProvenance(data.actorId, data.projectId, data.action, data.source, event.id),
-    };
   }
 
   async writeAgentAction(data: WriteAgentActionInput): Promise<WriteResult> {
@@ -136,26 +137,25 @@ export class KodaDomainWriter {
     };
     this.assertActorHasEventRole(actor);
 
-    const event = await this.agentEventService.create(data);
-
-    await this.outboxService.enqueue({
-      projectId: data.projectId,
-      eventType: 'agent_event',
-      eventId: event.id,
-      // H13: consumers switch on action/id/timestamp — enqueue the full event envelope
-      payload: buildAgentEventOutboxPayload({
-        event,
-        agentId: data.agentId,
-        projectId: data.projectId,
-        actorId: data.actorId,
-        data: data.data,
-      }),
+    return this.txManager.run(async () => {
+      const event = await this.agentEventService.create(data);
+      await this.outbox.record({
+        type: 'agent_event',
+        // H13: consumers switch on action/id/timestamp — record the full event envelope
+        payload: buildAgentEventOutboxPayload({
+          event,
+          agentId: data.agentId,
+          projectId: data.projectId,
+          actorId: data.actorId,
+          data: data.data,
+        }),
+        metadata: { projectId: data.projectId, eventId: event.id },
+      });
+      return {
+        canonicalId: event.id,
+        provenance: this.buildProvenance(data.actorId, data.projectId, data.action, data.source, event.id),
+      };
     });
-
-    return {
-      canonicalId: event.id,
-      provenance: this.buildProvenance(data.actorId, data.projectId, data.action, data.source, event.id),
-    };
   }
 
   async writeDecisionEvent(data: CreateDecisionEventInput): Promise<WriteResult> {
@@ -173,24 +173,23 @@ export class KodaDomainWriter {
     };
     this.assertActorHasEventRole(actor);
 
-    const event = await this.decisionEventService.create(data);
-
-    await this.outboxService.enqueue({
-      projectId: data.projectId,
-      eventType: 'decision_event',
-      eventId: event.id,
-      payload: {
-        projectId: data.projectId,
-        agentId: data.agentId,
-        decision: data.decision,
-        data: data.data,
-      },
+    return this.txManager.run(async () => {
+      const event = await this.decisionEventService.create(data);
+      await this.outbox.record({
+        type: 'decision_event',
+        payload: {
+          projectId: data.projectId,
+          agentId: data.agentId,
+          decision: data.decision,
+          data: data.data,
+        },
+        metadata: { projectId: data.projectId, eventId: event.id },
+      });
+      return {
+        canonicalId: event.id,
+        provenance: this.buildProvenance(data.agentId, data.projectId, data.action, data.source, event.id),
+      };
     });
-
-    return {
-      canonicalId: event.id,
-      provenance: this.buildProvenance(data.agentId, data.projectId, data.action, data.source, event.id),
-    };
   }
 
   async indexDocument(data: IndexDocumentInput): Promise<WriteResult> {
@@ -204,27 +203,28 @@ export class KodaDomainWriter {
       throw new ValidationAppException({ source: 'source must be ticket for canonical indexing events' });
     }
 
-    const event = await this.ticketEventService.create({
-      ticketId: data.sourceId,
-      projectId: data.projectId,
-      action: 'INDEX_DOCUMENT',
-      actorId: data.actorId,
-      actorType: 'agent',
-      source: 'api',
-      data: { source: data.source, metadata: data.metadata },
-    });
-
-    await this.outboxService.enqueue({
-      projectId: data.projectId,
-      eventType: 'document_indexed',
-      eventId: event.id,
-      payload: {
-        source: data.source,
-        sourceId: data.sourceId,
-        content: data.content,
+    const event = await this.txManager.run(async () => {
+      const created = await this.ticketEventService.create({
+        ticketId: data.sourceId,
+        projectId: data.projectId,
+        action: 'INDEX_DOCUMENT',
         actorId: data.actorId,
-        metadata: data.metadata,
-      },
+        actorType: 'agent',
+        source: 'api',
+        data: { source: data.source, metadata: data.metadata },
+      });
+      await this.outbox.record({
+        type: 'document_indexed',
+        payload: {
+          source: data.source,
+          sourceId: data.sourceId,
+          content: data.content,
+          actorId: data.actorId,
+          metadata: data.metadata,
+        },
+        metadata: { projectId: data.projectId, eventId: created.id },
+      });
+      return created;
     });
 
     let ragError: string | undefined;
@@ -254,15 +254,12 @@ export class KodaDomainWriter {
 
     const result = await this.ragService.importGraphify(data.projectId, data.nodes, data.links);
 
-    await this.outboxService.enqueue({
-      projectId: data.projectId,
-      eventType: 'graphify_import',
-      eventId: `${data.projectId}:${Date.now()}`,
-      payload: {
-        projectId: data.projectId,
-        nodeCount: data.nodes.length,
-        linkCount: data.links.length,
-      },
+    // The import spans the vector store and Prisma, which cannot share one Prisma
+    // transaction; the event is recorded once the import has succeeded.
+    await this.outbox.record({
+      type: 'graphify_import',
+      payload: { projectId: data.projectId, nodeCount: data.nodes.length, linkCount: data.links.length },
+      metadata: { projectId: data.projectId, eventId: `${data.projectId}:${Date.now()}` },
     });
 
     return {

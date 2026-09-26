@@ -358,24 +358,28 @@ model DecisionEvent {
 // ---------------------------------------------------------------------------
 
 model OutboxEvent {
-  id           String   @id @default(cuid())
-  projectId    String
-  eventType    String   // ticket_event | agent_event | decision_event | document_indexed | ...
-  eventId      String   // canonical record ID this outbox event originated from
-  payload      String   @default("{}") // JSON stored as string
-  status       String   @default("pending") // pending | processing | completed | failed | dead_letter
-  attempts     Int      @default(0)
-  lastError    String?
-  nextAttemptAt DateTime?
-  processedAt  DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id            String    @id @default(cuid())
+  projectId     String
+  type          String    // ticket_event | agent_event | decision_event | document_indexed | graphify_import | code_commit | webhook_delivery
+  eventId       String    // canonical record ID this outbox event originated from
+  payload       String    @default("{}") // JSON stored as string
+  headers       String?   // JSON stored as string
+  status        String    @default("pending") // pending | processing | published | dead (@nathapp/nestjs-outbox OutboxStatus)
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now())
+  leaseUntil    DateTime?
+  owner         String?
+  lastError     String?
+  publishedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([status, createdAt])
   @@index([projectId, createdAt])
   @@index([status, nextAttemptAt])
+  @@index([status, leaseUntil])
 }
 
 // ---------------------------------------------------------------------------

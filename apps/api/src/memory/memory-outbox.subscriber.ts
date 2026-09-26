@@ -3,14 +3,14 @@ import { ExtractionService, MemoryExtractedItem } from './extraction.service';
 import { PrismaMemoryItemRepository } from './prisma-memory-item.repository';
 import { MemoryItemInput } from './memory-item-repository';
 import { MemoryKind } from '../common/enums';
-import { OutboxFanOutRegistry } from '../outbox/outbox-fan-out-registry';
+import { FanOutPublisher } from '../outbox/fan-out-publisher';
 
 @Injectable()
 export class MemoryOutboxSubscriber implements OnModuleInit {
   private readonly logger = new Logger(MemoryOutboxSubscriber.name);
 
   constructor(
-    private readonly registry: OutboxFanOutRegistry,
+    private readonly registry: FanOutPublisher,
     private readonly extractionService: ExtractionService,
     private readonly memoryRepository: PrismaMemoryItemRepository,
   ) {}

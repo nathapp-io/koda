@@ -5,7 +5,7 @@ import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { VcsLinkExtractorService } from './vcs-link-extractor.service';
 import { VcsIssue } from './types';
-import { OutboxService } from '../outbox/outbox.service';
+import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { IVcsRepository, TicketLinkData, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 
@@ -90,7 +90,7 @@ export class VcsWebhookService implements OnModuleDestroy {
     private readonly prSyncService: VcsPrSyncService,
     @Inject(VCS_CFG) private readonly vcsConfig: IVcsConfig,
     @Optional() private readonly vcsLinkExtractorService?: VcsLinkExtractorService,
-    @Optional() private readonly outboxService?: OutboxService,
+    @Optional() private readonly outboxService?: NathappOutboxService,
   ) {
     this.cleanupInterval = setInterval(() => {
       this.cleanupStaleEntries();
@@ -537,7 +537,7 @@ export class VcsWebhookService implements OnModuleDestroy {
 
   /**
    * Handle push event
-   * Validates payload and enqueues code_commit outbox events for each commit.
+   * Validates payload and records code_commit outbox events for each commit.
    */
   private async handlePush(
     connection: VcsConnectionWithProjectDomain,
@@ -593,7 +593,7 @@ export class VcsWebhookService implements OnModuleDestroy {
             since: new Date(now - this.dedupWindowMs),
           });
           if (existingEvents.length > 0) {
-            this.logger.debug(`Skipping duplicate commit ${commitHash} (already enqueued in DB)`);
+            this.logger.debug(`Skipping duplicate commit ${commitHash} (already recorded in DB)`);
             continue;
           }
         } catch (err) {
@@ -625,16 +625,17 @@ export class VcsWebhookService implements OnModuleDestroy {
       };
 
       try {
-        await this.outboxService.enqueue({
-          projectId: connection.projectId,
-          eventType: 'code_commit',
-          eventId: commitHash,
+        // The code_commit row is this handler's only write: there is no business
+        // write to share a transaction with.
+        await this.outboxService.record({
+          type: 'code_commit',
           payload: eventPayload,
+          metadata: { projectId: connection.projectId, eventId: commitHash },
         });
         this.rememberCommitHash(recentKey, now);
         enqueuedCount++;
 
-        // Verify that the DB delegate actually tracks enqueued events.
+        // Verify that the DB delegate actually tracks recorded events.
         // If it does not (e.g. test mocks without shared state), we fall back
         // to in-memory dedup for subsequent pushes in this instance.
         if (!this.dbDedupVerified) {
@@ -653,12 +654,12 @@ export class VcsWebhookService implements OnModuleDestroy {
           this.dbDedupVerified = true;
         }
       } catch (err) {
-        this.logger.error(`[webhook] Failed to enqueue code_commit for ${commitHash}: ${err instanceof Error ? err.message : String(err)}`);
-        throw new HttpException('Failed to enqueue code_commit event', HttpStatus.INTERNAL_SERVER_ERROR);
+        this.logger.error(`[webhook] Failed to record code_commit for ${commitHash}: ${err instanceof Error ? err.message : String(err)}`);
+        throw new HttpException('Failed to record code_commit event', HttpStatus.INTERNAL_SERVER_ERROR);
       }
     }
 
-    this.logger.debug(`Push handler enqueued ${enqueuedCount} code_commit events for project ${connection.projectId}`);
+    this.logger.debug(`Push handler recorded ${enqueuedCount} code_commit events for project ${connection.projectId}`);
 
     return { success: true, ignored: enqueuedCount === 0 };
   }

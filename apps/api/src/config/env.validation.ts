@@ -20,6 +20,10 @@ const envSchema = Joi.object({
     .truthy('true')
     .falsy('false')
     .optional(),
+  OUTBOX_RELAY_ENABLED: Joi.boolean()
+    .truthy('true')
+    .falsy('false')
+    .optional(),
 }).unknown(true);
 
 export function validate(config: Record<string, unknown>): Record<string, unknown> {

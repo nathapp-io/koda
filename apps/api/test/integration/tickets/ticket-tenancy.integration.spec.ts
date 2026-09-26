@@ -28,7 +28,7 @@ import { TICKET_REPOSITORY } from '../../../src/tickets/domain/ticket.domain';
 import { TicketLinksService } from '../../../src/ticket-links/ticket-links.service';
 import { PrismaTicketLinkRepository } from '../../../src/ticket-links/prisma-ticket-link.repository';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
-import { OutboxService } from '../../../src/outbox/outbox.service';
+import { OutboxService } from '@nathapp/nestjs-outbox';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { resetDb } from '../../helpers/reset-db';
 
@@ -89,7 +89,7 @@ describeIntegration('H5 ticket tenancy', () => {
           },
         },
         { provide: TicketEventService, useValue: { create: jest.fn().mockResolvedValue({ id: 'evt-1' }) } },
-        { provide: OutboxService, useValue: { enqueue: jest.fn().mockResolvedValue(undefined) } },
+        { provide: OutboxService, useValue: { record: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 

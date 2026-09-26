@@ -83,9 +83,9 @@ describe('adminCommand', () => {
     it('passes --status filter to API', async () => {
       mockGetOutbox.mockResolvedValue({ ret: 0, data: [] });
 
-      await program.parseAsync(['node', 'koda', 'admin', 'outbox', 'list', '--status', 'failed']);
+      await program.parseAsync(['node', 'koda', 'admin', 'outbox', 'list', '--status', 'dead']);
 
-      expect(mockGetOutbox).toHaveBeenCalledWith(expect.objectContaining({ status: 'failed' }));
+      expect(mockGetOutbox).toHaveBeenCalledWith(expect.objectContaining({ status: 'dead' }));
     });
   });
 

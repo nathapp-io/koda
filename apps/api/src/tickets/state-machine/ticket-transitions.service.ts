@@ -21,7 +21,7 @@ import { TICKET_REPOSITORY, ITicketRepository } from '../domain/ticket.domain';
 import type { TicketDomain } from '../domain/ticket.domain';
 import { TicketEventService } from '../../events/ticket-event.service';
 import { buildTicketEventOutboxPayload } from '../../events/outbox-envelope.util';
-import { OutboxService } from '../../outbox/outbox.service';
+import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 
 export interface TransitionTicketShape {
   id: string;
@@ -76,7 +76,7 @@ export class TicketTransitionsService {
     // H13: optional so the existing vcs integration tests that construct this
     // service positionally keep working; emission is skipped when absent.
     @Optional() private readonly ticketEventService?: TicketEventService,
-    @Optional() private readonly outboxService?: OutboxService,
+    @Optional() private readonly outboxService?: NathappOutboxService,
     // M2 fix: evaluates the TRANSITION permission for the PATCH status-delegation
     // path. Optional only so legacy test harnesses can construct the service;
     // executeTransitionPublic fails closed when it is absent.
@@ -84,83 +84,56 @@ export class TicketTransitionsService {
   ) {}
 
   /**
-   * Fire-and-forget (H13): emit a `status_changed` ticket_event through the
-   * outbox with the full event envelope so the memory extraction and
-   * entity-graph outbox consumers can act on status transitions.
+   * H13: records a status_changed ticket_event (full envelope) for the memory
+   * and entity-graph consumers. Called inside the transition transaction.
    */
-  private emitStatusChangedEvent(
+  private async recordStatusChangedEvent(
     projectId: string,
     ticketId: string,
     fromStatus: string,
     toStatus: string,
     principal: KodaPrincipal,
-  ): void {
+  ): Promise<void> {
     if (!this.ticketEventService || !this.outboxService) return;
-
-    const ticketEventService = this.ticketEventService;
-    const outboxService = this.outboxService;
     const actorType = isUserPrincipal(principal) ? 'user' : 'agent';
     const data = { fromStatus, newStatus: toStatus };
-
-    void (async () => {
-      try {
-        const event = await ticketEventService.create({
-          ticketId,
-          projectId,
-          action: 'status_changed',
-          actorId: principal.id,
-          actorType,
-          source: 'internal',
-          data,
-        });
-        await outboxService.enqueue({
-          projectId,
-          eventType: 'ticket_event',
-          eventId: event.id,
-          payload: buildTicketEventOutboxPayload({
-            event,
-            ticketId,
-            projectId,
-            actorId: principal.id,
-            actorType,
-            data,
-          }),
-        });
-      } catch (err) {
-        this.logger.warn(
-          `[outbox] Failed to emit status_changed ticket_event for ticket ${ticketId}: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    })();
+    const event = await this.ticketEventService.create({
+      ticketId,
+      projectId,
+      action: 'status_changed',
+      actorId: principal.id,
+      actorType,
+      source: 'internal',
+      data,
+    });
+    await this.outboxService.record({
+      type: 'ticket_event',
+      payload: buildTicketEventOutboxPayload({ event, ticketId, projectId, actorId: principal.id, actorType, data }),
+      metadata: { projectId, eventId: event.id },
+    });
   }
 
   /**
-   * Fire-and-forget: dispatch STATUS_CHANGE webhook for a ticket.
+   * Records the STATUS_CHANGE webhook rows for a transition. Called inside the
+   * transition transaction so they commit (or roll back) with it.
    */
-  private dispatchStatusChangeWebhook(
+  private async recordStatusChangeWebhooks(
     projectId: string,
     projectKey: string,
     ticket: TicketDomain,
     fromStatus: string,
     toStatus: string,
-  ): void {
+  ): Promise<void> {
     if (!this.webhookDispatcher) return;
 
-    const dispatcher = this.webhookDispatcher;
-    dispatcher
-      .dispatch(projectId, 'STATUS_CHANGE', {
-        event: 'STATUS_CHANGE',
-        timestamp: new Date().toISOString(),
-        // BUG-15: report the human-readable ref (KODA-42), not the DB CUID
-        ticket: { id: ticket.id, ref: `${projectKey}-${ticket.number}`, status: toStatus },
-        from: fromStatus,
-        to: toStatus,
-      })
-      .catch((err) => {
-        this.logger.warn(
-          `[webhook] Failed to dispatch STATUS_CHANGE for ticket in project ${projectId}: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      });
+    await this.webhookDispatcher.dispatch(projectId, 'STATUS_CHANGE', {
+      event: 'STATUS_CHANGE',
+      timestamp: new Date().toISOString(),
+      // BUG-15: report the human-readable ref (KODA-42), not the DB CUID
+      ticket: { id: ticket.id, ref: `${projectKey}-${ticket.number}`, status: toStatus },
+      from: fromStatus,
+      to: toStatus,
+    });
   }
 
   /**
@@ -437,6 +410,9 @@ export class TicketTransitionsService {
         ...actorFields,
       });
 
+      await this.recordStatusChangeWebhooks(project.id, project.key, updatedTicket as unknown as TicketDomain, ticket.status, TicketStatus.CLOSED);
+      await this.recordStatusChangedEvent(project.id, ticket.id, ticket.status, TicketStatus.CLOSED, principal);
+
       return {
         ticket: updatedTicket as unknown as TransitionTicketShape,
         activity: activity as unknown as TransitionActivityShape,
@@ -444,8 +420,6 @@ export class TicketTransitionsService {
     });
 
     this.autoIndexTicket(project, transaction.ticket as unknown as TicketDomain);
-    this.dispatchStatusChangeWebhook(project.id, project.key, transaction.ticket as unknown as TicketDomain, ticket.status, TicketStatus.CLOSED);
-    this.emitStatusChangedEvent(project.id, ticket.id, ticket.status, TicketStatus.CLOSED, principal);
 
     return transaction;
   }
@@ -579,6 +553,9 @@ export class TicketTransitionsService {
         ...actorFields,
       });
 
+      await this.recordStatusChangeWebhooks(project.id, project.key, updatedTicket as unknown as TicketDomain, ticket.status, toStatus);
+      await this.recordStatusChangedEvent(project.id, ticket.id, ticket.status, toStatus, principal);
+
       if (comment) {
         return {
           ticket: updatedTicket as unknown as TransitionTicketShape,
@@ -596,8 +573,6 @@ export class TicketTransitionsService {
     if (toStatus === TicketStatus.CLOSED) {
       this.autoIndexTicket(project, result.ticket as unknown as TicketDomain);
     }
-    this.dispatchStatusChangeWebhook(project.id, project.key, result.ticket as unknown as TicketDomain, ticket.status, toStatus);
-    this.emitStatusChangedEvent(project.id, ticket.id, ticket.status, toStatus, principal);
     if (toStatus === TicketStatus.VERIFIED) {
       await this.createPrForTicket(project, result.ticket as unknown as TicketDomain);
     }

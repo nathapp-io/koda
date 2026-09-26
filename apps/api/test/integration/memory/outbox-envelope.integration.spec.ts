@@ -29,10 +29,11 @@
 import { PrismaClient } from '@prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import type { ITransactionManager } from '@nathapp/nestjs-data';
+import { OutboxRelay, OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { resetDb } from '../../helpers/reset-db';
 import { PrismaOutboxRepository } from '../../../src/outbox/prisma-outbox.repository';
-import { OutboxFanOutRegistry } from '../../../src/outbox/outbox-fan-out-registry';
-import { OutboxService } from '../../../src/outbox/outbox.service';
+import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
+import { PrismaOutboxStore } from '../../../src/outbox/prisma-outbox.store';
 import { PrismaEventsRepository } from '../../../src/events/prisma-events.repository';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
 import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-item.repository';
@@ -52,38 +53,34 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
 
   let prismaService: PrismaService<PrismaClient>;
   let prisma: PrismaClient;
-  let outboxService: OutboxService;
+  let packageOutbox: NathappOutboxService;
+  let relay: OutboxRelay;
   let ticketsService: TicketsService;
   let transitionsService: TicketTransitionsService;
 
   /**
-   * Emissions are fire-and-forget (`void` promises), so the outbox row may land
-   * a few microtasks after the service call returns. Poll briefly for the row
-   * whose payload carries the expected action.
+   * Producers now record inside the write's transaction, so when the service
+   * call resolves the outbox row is already committed — a direct query.
    */
-  async function waitForOutboxRow(predicateAction: string, timeoutMs = 5000): Promise<{
+  async function getOutboxRow(predicateAction: string): Promise<{
     id: string;
     eventId: string;
     payload: string;
   }> {
-    const deadline = Date.now() + timeoutMs;
-    for (;;) {
-      const rows = await prisma.outboxEvent.findMany({
-        where: { eventType: 'ticket_event', status: 'pending' },
-      });
-      const match = rows.find((r) => {
-        try {
-          return (JSON.parse(r.payload) as { action?: string }).action === predicateAction;
-        } catch {
-          return false;
-        }
-      });
-      if (match) return match;
-      if (Date.now() > deadline) {
-        throw new Error(`Timed out waiting for pending outbox row with action '${predicateAction}'`);
+    const rows = await prisma.outboxEvent.findMany({
+      where: { type: 'ticket_event', status: 'pending' },
+    });
+    const match = rows.find((r) => {
+      try {
+        return (JSON.parse(r.payload) as { action?: string }).action === predicateAction;
+      } catch {
+        return false;
       }
-      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+    if (!match) {
+      throw new Error(`No pending outbox row with action '${predicateAction}'`);
     }
+    return match;
   }
 
   let projectId: string;
@@ -115,20 +112,21 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
       isInTransaction: () => false,
     };
 
-    // Real outbox stack + real memory fan-out subscriber.
-    const outboxRepo = new PrismaOutboxRepository(txManager, prismaService);
-    const fanOutRegistry = new OutboxFanOutRegistry();
-    outboxService = new OutboxService(outboxRepo, fanOutRegistry);
+    // Real outbox stack (package relay) + real memory fan-out subscriber.
+    const store = new PrismaOutboxStore(prismaService);
+    const publisher = new FanOutPublisher(new PrismaOutboxRepository(txManager, prismaService));
+    packageOutbox = new NathappOutboxService(store, txManager);
+    relay = new OutboxRelay({ store, publisher, relay: { enabled: false } }, store, publisher);
     const ticketEventService = new TicketEventService(new PrismaEventsRepository(prismaService));
     const memoryRepository = new PrismaMemoryItemRepository(txManager, prismaService);
     const memorySubscriber = new MemoryOutboxSubscriber(
-      fanOutRegistry,
+      publisher,
       new ExtractionService(),
       memoryRepository,
     );
     memorySubscriber.onModuleInit();
 
-    // Real producers.
+    // Real producers. Producers take the package OutboxService (record()).
     const ticketRepo = new PrismaTicketsRepository(prismaService);
     // The 5th ctor arg (transitionsService) arrived with the M2 fix on PR #129;
     // assign() does not delegate to it, so a minimal stub satisfies DI here.
@@ -142,9 +140,9 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
       undefined,
       undefined,
       ticketEventService,
-      outboxService,
+      packageOutbox,
     );
-    ticketsService = new TicketsService(ticketRepo, txManager, ticketEventService, outboxService, transitionsService);
+    ticketsService = new TicketsService(ticketRepo, txManager, ticketEventService, packageOutbox, transitionsService);
 
     // Seed: project, ADMIN user (assignee), and two tickets.
     const project = await prisma.project.create({
@@ -205,21 +203,20 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
   });
 
   it('RED baseline: the legacy partial payload shape produces zero memory items', async () => {
-    // Before H13 producers enqueued {ticketId, projectId, actorId, data} with no
+    // Before H13 producers recorded {ticketId, projectId, actorId, data} with no
     // action/id/timestamp. The memory subscriber switches on `action`, so this
     // payload was silently ignored — this test pins that baseline at runtime.
-    await outboxService.enqueue({
-      projectId,
-      eventType: 'ticket_event',
-      eventId: 'legacy-evt-1',
+    await packageOutbox.record({
+      type: 'ticket_event',
       payload: {
         ticketId: transitionTicketId,
         projectId,
         actorId: adminUserId,
         data: {},
       },
+      metadata: { projectId, eventId: 'legacy-evt-1' },
     });
-    await outboxService.processPending();
+    await relay.dispatchPendingBatch();
 
     const items = await prisma.memoryItem.findMany({
       where: { projectId, subject: `ticket:${transitionTicketId}` },
@@ -227,7 +224,7 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
     expect(items).toHaveLength(0);
 
     const processed = await prisma.outboxEvent.findFirstOrThrow({ where: { eventId: 'legacy-evt-1' } });
-    expect(processed.status).toBe('completed');
+    expect(processed.status).toBe('published');
   });
 
   it('status transition enqueues a status_changed ticket_event whose full envelope yields a status MemoryItem', async () => {
@@ -240,7 +237,7 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
     await transitionsService.start('h13-project', 'HKK-1', principal);
 
     // The outbox payload must be the full event envelope.
-    const outboxRow = await waitForOutboxRow('status_changed');
+    const outboxRow = await getOutboxRow('status_changed');
     const payload = JSON.parse(outboxRow.payload);
     expect(payload).toEqual({
       id: expect.any(String),
@@ -257,7 +254,7 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
     expect(() => new Date(payload.timestamp)).not.toThrow();
 
     // GREEN: the full envelope drives real memory extraction end-to-end.
-    await outboxService.processPending();
+    await relay.dispatchPendingBatch();
 
     const items = await prisma.memoryItem.findMany({
       where: { projectId, subject: `ticket:${transitionTicketId}` },
@@ -272,13 +269,13 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
 
     // The outbox row was processed successfully.
     const processed = await prisma.outboxEvent.findUniqueOrThrow({ where: { id: outboxRow.id } });
-    expect(processed.status).toBe('completed');
+    expect(processed.status).toBe('published');
   });
 
   it('assign enqueues an assigned ticket_event whose full envelope yields an assigned_to MemoryItem', async () => {
     await ticketsService.assign('h13-project', 'HKK-2', { userId: adminUserId }, principal);
 
-    const outboxRow = await waitForOutboxRow('assigned');
+    const outboxRow = await getOutboxRow('assigned');
     const payload = JSON.parse(outboxRow.payload);
     expect(payload).toEqual({
       id: expect.any(String),
@@ -292,7 +289,7 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
       data: { assignedTo: adminUserId },
     });
 
-    await outboxService.processPending();
+    await relay.dispatchPendingBatch();
 
     const items = await prisma.memoryItem.findMany({
       where: { projectId, subject: `ticket:${assignTicketId}`, predicate: 'assigned_to' },

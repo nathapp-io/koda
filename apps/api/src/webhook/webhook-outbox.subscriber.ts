@@ -1,13 +1,13 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { WebhookDeliveryHandler, WebhookDeliveryPayload } from './webhook-delivery.handler';
-import { OutboxFanOutRegistry } from '../outbox/outbox-fan-out-registry';
+import { FanOutPublisher } from '../outbox/fan-out-publisher';
 
 @Injectable()
 export class WebhookOutboxSubscriber implements OnModuleInit {
   private readonly logger = new Logger(WebhookOutboxSubscriber.name);
 
   constructor(
-    private readonly registry: OutboxFanOutRegistry,
+    private readonly registry: FanOutPublisher,
     private readonly webhookDeliveryHandler: WebhookDeliveryHandler,
   ) {}
 

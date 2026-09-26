@@ -1,10 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
+import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 
 import { KodaDomainWriter } from './koda-domain-writer.service';
 import { PrismaKodaDomainWriterRepository } from './prisma-koda-domain-writer.repository';
 import { RagService } from '../rag/rag.service';
-import { OutboxService } from '../outbox/outbox.service';
 import { AgentAuthProvider } from '../auth/agent-auth.provider';
 import { TicketEventService } from '../events/ticket-event.service';
 import { AgentEventService } from '../events/agent-event.service';
@@ -22,8 +23,22 @@ describe('KodaDomainWriter Unit Tests', () => {
     importGraphify: jest.fn(),
   };
 
-  const mockOutboxService = {
-    enqueue: jest.fn().mockResolvedValue({ id: 'outbox-1', status: 'pending' }),
+  const outbox = {
+    record: jest.fn().mockResolvedValue(undefined),
+  };
+
+  let depth = 0;
+  const mockTxManager = {
+    run: jest.fn(async <T>(fn: () => Promise<T>): Promise<T> => {
+      depth += 1;
+      try {
+        return await fn();
+      } finally {
+        depth -= 1;
+      }
+    }),
+    getClient: jest.fn(),
+    isInTransaction: jest.fn(() => depth > 0),
   };
 
   const mockAgentAuthProvider = {
@@ -45,12 +60,14 @@ describe('KodaDomainWriter Unit Tests', () => {
   };
 
   beforeEach(async () => {
+    depth = 0;
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         KodaDomainWriter,
         { provide: PrismaKodaDomainWriterRepository, useValue: mockWriterRepo },
         { provide: RagService, useValue: mockRagService },
-        { provide: OutboxService, useValue: mockOutboxService },
+        { provide: NathappOutboxService, useValue: outbox },
+        { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
         { provide: AgentAuthProvider, useValue: mockAgentAuthProvider },
         { provide: TicketEventService, useValue: mockTicketEventService },
         { provide: AgentEventService, useValue: mockAgentEventService },
@@ -428,7 +445,7 @@ describe('KodaDomainWriter Unit Tests', () => {
   describe('H13: outbox payload carries the full event envelope', () => {
     const fixedTimestamp = new Date('2026-01-01T00:00:00Z');
 
-    it('writeTicketEvent enqueues the full ticket_event envelope', async () => {
+    it('writeTicketEvent records the full ticket_event envelope', async () => {
       const data = {
         ticketId: 'ticket-001',
         projectId: 'proj-123',
@@ -455,10 +472,8 @@ describe('KodaDomainWriter Unit Tests', () => {
 
       await service.writeTicketEvent(data);
 
-      expect(mockOutboxService.enqueue).toHaveBeenCalledWith({
-        projectId: 'proj-123',
-        eventType: 'ticket_event',
-        eventId: 'event-123',
+      expect(outbox.record).toHaveBeenCalledWith({
+        type: 'ticket_event',
         payload: {
           id: 'event-123',
           type: 'ticket_event',
@@ -470,10 +485,11 @@ describe('KodaDomainWriter Unit Tests', () => {
           actorType: 'agent',
           data: { newStatus: 'IN_PROGRESS' },
         },
+        metadata: { projectId: 'proj-123', eventId: 'event-123' },
       });
     });
 
-    it('writeAgentAction enqueues the full agent_event envelope', async () => {
+    it('writeAgentAction records the full agent_event envelope', async () => {
       const data = {
         agentId: 'agent-001',
         projectId: 'proj-123',
@@ -498,10 +514,8 @@ describe('KodaDomainWriter Unit Tests', () => {
 
       await service.writeAgentAction(data);
 
-      expect(mockOutboxService.enqueue).toHaveBeenCalledWith({
-        projectId: 'proj-123',
-        eventType: 'agent_event',
-        eventId: 'event-agent-123',
+      expect(outbox.record).toHaveBeenCalledWith({
+        type: 'agent_event',
         payload: {
           id: 'event-agent-123',
           type: 'agent_event',
@@ -513,6 +527,7 @@ describe('KodaDomainWriter Unit Tests', () => {
           actorType: 'agent',
           data: { decision: 'use_hot_path' },
         },
+        metadata: { projectId: 'proj-123', eventId: 'event-agent-123' },
       });
     });
   });
@@ -552,11 +567,10 @@ describe('KodaDomainWriter Unit Tests', () => {
       expect(result.provenance).toHaveProperty('action');
       expect(result.provenance).toHaveProperty('timestamp');
       expect(result.provenance).toHaveProperty('source');
-      expect(mockOutboxService.enqueue).toHaveBeenCalledWith(
+      expect(outbox.record).toHaveBeenCalledWith(
         expect.objectContaining({
-          projectId: 'proj-123',
-          eventType: 'ticket_event',
-          eventId: 'event-123',
+          type: 'ticket_event',
+          metadata: { projectId: 'proj-123', eventId: 'event-123' },
         }),
       );
     });
@@ -593,11 +607,10 @@ describe('KodaDomainWriter Unit Tests', () => {
       expect(result.provenance).toHaveProperty('action');
       expect(result.provenance).toHaveProperty('timestamp');
       expect(result.provenance).toHaveProperty('source');
-      expect(mockOutboxService.enqueue).toHaveBeenCalledWith(
+      expect(outbox.record).toHaveBeenCalledWith(
         expect.objectContaining({
-          projectId: 'proj-123',
-          eventType: 'agent_event',
-          eventId: 'event-123',
+          type: 'agent_event',
+          metadata: { projectId: 'proj-123', eventId: 'event-123' },
         }),
       );
     });
@@ -634,11 +647,10 @@ describe('KodaDomainWriter Unit Tests', () => {
       expect(Array.isArray(result.derivedIds)).toBe(true);
       expect(result).toHaveProperty('provenance');
       expect(result.canonicalId).toBe('event-index-001');
-      expect(mockOutboxService.enqueue).toHaveBeenCalledWith(
+      expect(outbox.record).toHaveBeenCalledWith(
         expect.objectContaining({
-          projectId: 'proj-123',
-          eventType: 'document_indexed',
-          eventId: 'event-index-001',
+          type: 'document_indexed',
+          metadata: { projectId: 'proj-123', eventId: 'event-index-001' },
         }),
       );
     });
@@ -730,6 +742,87 @@ describe('KodaDomainWriter Unit Tests', () => {
       mockTicketEventService.create.mockRejectedValue(new Error('Canonical write failed'));
 
       await expect(service.indexDocument(data)).rejects.toThrow('Canonical write failed');
+    });
+  });
+
+  describe('transactional recording', () => {
+    const ticketEventInput = {
+      ticketId: 'ticket-001',
+      projectId: 'proj-123',
+      action: 'CREATED',
+      actorId: 'agent-001',
+      actorType: 'agent' as const,
+      source: 'api' as const,
+      data: {},
+    };
+
+    const agentActionInput = {
+      agentId: 'agent-001',
+      projectId: 'proj-123',
+      action: 'ASSIGNED_TICKET',
+      actorId: 'agent-001',
+      source: 'api' as const,
+      data: {},
+    };
+
+    const decisionInput = {
+      projectId: 'proj-123',
+      agentId: 'agent-001',
+      action: 'DECIDE',
+      decision: 'approved' as const,
+      rationale: null,
+      source: 'api' as const,
+      data: {},
+    };
+
+    const indexInput = {
+      projectId: 'proj-123',
+      source: 'ticket' as const,
+      sourceId: 'ticket-001',
+      content: 'Test content',
+      metadata: {},
+      actorId: 'agent-001',
+      timestamp: new Date(),
+    };
+
+    const eventCreateMocks = [
+      mockTicketEventService.create,
+      mockAgentEventService.create,
+      mockDecisionEventService.create,
+    ];
+
+    beforeEach(() => {
+      mockWriterRepo.findProjectById.mockResolvedValue({ id: 'proj-123', deletedAt: null });
+    });
+
+    it.each([
+      ['writeTicketEvent', () => service.writeTicketEvent(ticketEventInput)],
+      ['writeAgentAction', () => service.writeAgentAction(agentActionInput)],
+      ['writeDecisionEvent', () => service.writeDecisionEvent(decisionInput)],
+      ['indexDocument', () => service.indexDocument(indexInput)],
+    ])('%s creates the event row and records the outbox row in one transaction', async (_name, call) => {
+      const depthAtWrite: number[] = [];
+      eventCreateMocks.forEach((m) => m.mockImplementation(async () => { depthAtWrite.push(depth); return { id: 'evt-1', action: 'a', timestamp: new Date() }; }));
+      outbox.record.mockImplementation(async () => { depthAtWrite.push(depth); });
+
+      await call();
+
+      expect(depthAtWrite).toEqual([1, 1]);
+    });
+
+    it('indexDocument indexes into RAG only after the transaction commits', async () => {
+      // indexDocument swallows RAG failures into WriteResult.error, so an
+      // assertion inside the RAG mock would be swallowed too. Capture the
+      // transaction depth instead and assert it after the call, where a
+      // regression that moved the RAG call inside txManager.run still fails.
+      let depthAtRag: number | undefined;
+      mockTicketEventService.create.mockResolvedValue({ id: 'evt-1', action: 'a', timestamp: new Date() });
+      mockRagService.indexDocument.mockImplementation(async () => { depthAtRag = depth; });
+
+      await service.indexDocument(indexInput);
+
+      expect(mockRagService.indexDocument).toHaveBeenCalled();
+      expect(depthAtRag).toBe(0);
     });
   });
 });
