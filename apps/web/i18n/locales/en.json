@@ -44,13 +44,16 @@
       "passwordPlaceholder": "••••••••",
       "signUp": "Create account",
       "hasAccount": "Already have an account?",
-      "signIn": "Sign in"
+      "signIn": "Sign in",
+      "closedTitle": "Registration is closed",
+      "closedBody": "Ask an administrator to create an account for you."
     },
     "validation": {
       "emailRequired": "Email is required",
       "emailInvalid": "Enter a valid email",
       "passwordRequired": "Password is required",
-      "passwordMin": "Password must be at least 8 characters"
+      "passwordMin": "Password must be at least 8 characters",
+      "nameRequired": "Name is required"
     }
   },
   "nav": {
@@ -66,7 +69,38 @@
     "tickets": "Tickets",
     "toggleSidebar": "Toggle sidebar",
     "settings": "Settings",
-    "slos": "SLOs"
+    "slos": "SLOs",
+    "users": "Users"
+  },
+  "admin": {
+    "users": {
+      "title": "Users",
+      "subtitle": "Create accounts, change global roles and disable access.",
+      "create": "New user",
+      "filter": "Filter",
+      "filterPlaceholder": "Filter by email",
+      "adminOnly": "Only global administrators can manage users.",
+      "you": "you",
+      "enable": "Enable",
+      "disable": "Disable",
+      "prev": "Previous",
+      "next": "Next",
+      "table": { "email": "Email", "name": "Name", "role": "Role", "status": "Status" },
+      "status": { "active": "Active", "disabled": "Disabled" },
+      "roles": { "MEMBER": "Member", "ADMIN": "Admin" },
+      "toast": { "created": "User created", "disabled": "User disabled", "enabled": "User enabled", "roleChanged": "Role updated" },
+      "form": {
+        "title": "New user",
+        "email": "Email",
+        "name": "Name",
+        "password": "Temporary password",
+        "passwordHint": "Share it with the user out of band.",
+        "passwordComplexity": "Use upper and lower case letters, a number and a symbol",
+        "role": "Global role",
+        "submit": "Create user",
+        "creating": "Creating…"
+      }
+    }
   },
   "projects": {
     "title": "Projects",

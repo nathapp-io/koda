@@ -41,7 +41,7 @@
       </Button>
     </form>
 
-    <p class="text-center text-sm text-muted-foreground">
+    <p v-if="registrationOpen" class="text-center text-sm text-muted-foreground">
       {{ t('auth.login.noAccount') }}
       <NuxtLink to="/register" class="font-medium text-primary hover:underline">
         {{ t('auth.login.createOne') }}
@@ -74,6 +74,9 @@ const { handleSubmit } = useForm({
 
 const auth = useAuth()
 const toast = useAppToast()
+
+const { open: registrationOpen, load: loadRegistrationStatus } = useRegistrationStatus()
+onMounted(loadRegistrationStatus)
 
 const onSubmit = handleSubmit(async (values) => {
   try {

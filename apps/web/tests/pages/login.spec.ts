@@ -133,6 +133,14 @@ describe('AC8: no console.log statements in pages/login.vue', () => {
 // Integration: useAuth().login() is called on submit
 // ──────────────────────────────────────────────────────────────────────────────
 
+describe('Slice 4: login page hides the register link when registration is closed', () => {
+  test('the create-account paragraph is conditional on the registration status', () => {
+    const source = readFileSync(loginPath, 'utf-8')
+    expect(source).toContain('useRegistrationStatus()')
+    expect(source).toMatch(/<p[^>]*v-if="registrationOpen"/)
+  })
+})
+
 describe('Integration: useAuth composable called on form submit', () => {
   test('source imports or calls useAuth', () => {
     const source = readFileSync(loginPath, 'utf-8')
