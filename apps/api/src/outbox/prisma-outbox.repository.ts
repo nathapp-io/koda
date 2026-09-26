@@ -85,6 +85,10 @@ export class PrismaOutboxRepository extends AbstractPrismaRepository<OutboxEvent
     return models.map((m) => this.toDomain(m));
   }
 
+  async countByStatus(status: string): Promise<number> {
+    return this.prisma.client.outboxEvent.count({ where: { status } });
+  }
+
   /** Admin retry: back to pending, due now, lease and error cleared. Returns rows changed. */
   async resetForRetry(id: string, now: Date): Promise<number> {
     const result = await this.prisma.client.outboxEvent.updateMany({

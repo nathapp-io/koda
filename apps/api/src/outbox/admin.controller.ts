@@ -23,11 +23,7 @@ export class AdminController {
     @Principal() _principal: KodaPrincipal,
     @Query() query: OutboxListQueryDto,
   ) {
-    const items = await this.outboxAdmin.list(query.status);
-    return {
-      items,
-      total: items.length,
-    };
+    return this.outboxAdmin.list(query.status);
   }
 
   @Post('outbox/:eventId/retry')

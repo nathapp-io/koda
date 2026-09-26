@@ -7,12 +7,21 @@ import { PrismaOutboxRepository } from './prisma-outbox.repository';
 const LIST_LIMIT = 100;
 const RETRYABLE: readonly string[] = [OutboxStatus.DEAD, OutboxStatus.PENDING];
 
+export interface OutboxEventPage {
+  items: OutboxEventDomain[];
+  total: number;
+}
+
 @Injectable()
 export class OutboxAdminService {
   constructor(private readonly outboxRepo: PrismaOutboxRepository) {}
 
-  async list(status: OutboxStatus = OutboxStatus.PENDING, limit = LIST_LIMIT): Promise<OutboxEventDomain[]> {
-    return this.outboxRepo.findByStatus(status, limit);
+  async list(status: OutboxStatus = OutboxStatus.PENDING, limit = LIST_LIMIT): Promise<OutboxEventPage> {
+    const [items, total] = await Promise.all([
+      this.outboxRepo.findByStatus(status, limit),
+      this.outboxRepo.countByStatus(status),
+    ]);
+    return { items, total };
   }
 
   /**

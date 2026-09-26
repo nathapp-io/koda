@@ -53,6 +53,12 @@ describe('outboxConfig', () => {
     expect(outboxConfig().relay.enabled).toBe(false);
   });
 
+  it('accepts OUTBOX_RELAY_ENABLED case-insensitively (matches the Joi rule)', () => {
+    process.env['NODE_ENV'] = 'production';
+    process.env['OUTBOX_RELAY_ENABLED'] = 'TRUE';
+    expect(outboxConfig().relay.enabled).toBe(true);
+  });
+
   it('rejects a non-boolean OUTBOX_RELAY_ENABLED', () => {
     process.env['OUTBOX_RELAY_ENABLED'] = 'yes';
     expect(() => outboxConfig()).toThrow();

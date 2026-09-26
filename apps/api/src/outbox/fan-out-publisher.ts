@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { IOutboxPublisher, OutboxRecord } from '@nathapp/nestjs-outbox';
 import { PrismaOutboxRepository } from './prisma-outbox.repository';
 
@@ -26,7 +26,7 @@ const errorMessage = (err: unknown): string => (err instanceof Error ? err.messa
  * must be idempotent).
  */
 @Injectable()
-export class FanOutPublisher implements IOutboxPublisher, OnModuleInit {
+export class FanOutPublisher implements IOutboxPublisher, OnApplicationBootstrap {
   private readonly logger = new Logger(FanOutPublisher.name);
   private handlers: ReadonlyMap<string, readonly OutboxHandlerFn[]> = new Map();
 
@@ -35,7 +35,9 @@ export class FanOutPublisher implements IOutboxPublisher, OnModuleInit {
     private readonly lastErrors: Pick<PrismaOutboxRepository, 'recordLastError'>,
   ) {}
 
-  onModuleInit(): void {
+  // Runs after every module's onModuleInit, so consumer subscribers have
+  // already registered their handlers by the time this count is logged.
+  onApplicationBootstrap(): void {
     const total = [...this.handlers.values()].reduce((count, list) => count + list.length, 0);
     this.logger.log(`Registered ${total} handlers`);
   }

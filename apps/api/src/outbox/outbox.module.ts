@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InternalAppException } from '@nathapp/nestjs-common';
 import { OutboxModule as NathappOutboxModule, OutboxModuleOptions } from '@nathapp/nestjs-outbox';
 import { IOutboxConfig, OUTBOX_CFG } from '../config/outbox.config';
 import { FanOutPublisher } from './fan-out-publisher';
@@ -20,7 +21,9 @@ import { PrismaOutboxStore } from './prisma-outbox.store';
       useFactory: (store: PrismaOutboxStore, publisher: FanOutPublisher, config: ConfigService): OutboxModuleOptions => {
         const outbox = config.get<IOutboxConfig>(OUTBOX_CFG);
         if (!outbox) {
-          throw new Error('OutboxModule: outbox config not loaded — ensure outboxConfig is in ConfigModule.forRoot load array');
+          throw new InternalAppException({
+            config: 'outbox config not loaded — ensure outboxConfig is in ConfigModule.forRoot load array',
+          });
         }
         return { store, publisher, relay: outbox.relay };
       },

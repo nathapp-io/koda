@@ -10,12 +10,14 @@ describe('PrismaOutboxRepository', () => {
   const mockFindUnique = jest.fn();
   const mockFindMany = jest.fn();
   const mockUpdateMany = jest.fn();
+  const mockCount = jest.fn();
   const mockPrisma = {
     client: {
       outboxEvent: {
         findUnique: mockFindUnique,
         findMany: mockFindMany,
         updateMany: mockUpdateMany,
+        count: mockCount,
       },
     },
   };
@@ -101,6 +103,17 @@ describe('PrismaOutboxRepository', () => {
 
       expect(result).toHaveLength(1);
       expect(result[0]).toMatchObject({ id: 'o1', type: 'ticket_event', status: 'dead', nextAttemptAt: now });
+    });
+  });
+
+  describe('countByStatus', () => {
+    it('counts rows for the status', async () => {
+      mockCount.mockResolvedValue(7);
+
+      const total = await repo.countByStatus('dead');
+
+      expect(mockCount).toHaveBeenCalledWith({ where: { status: 'dead' } });
+      expect(total).toBe(7);
     });
   });
 

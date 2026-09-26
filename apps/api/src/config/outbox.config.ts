@@ -1,6 +1,6 @@
 import { validateUtil } from '@nathapp/nestjs-common';
 import { registerAs } from '@nestjs/config';
-import { IsIn, IsOptional } from 'class-validator';
+import { IsOptional, Matches } from 'class-validator';
 
 export const OUTBOX_CFG = 'outbox';
 
@@ -19,8 +19,9 @@ export interface IOutboxConfig {
 }
 
 export class OutboxConfigSchema {
+  // Case-insensitive to match the Joi `OUTBOX_RELAY_ENABLED` rule in env.validation.ts.
   @IsOptional()
-  @IsIn(['true', 'false'])
+  @Matches(/^(true|false)$/i)
   OUTBOX_RELAY_ENABLED?: string;
 }
 
@@ -33,7 +34,7 @@ export class OutboxConfigSchema {
 export const outboxConfig = registerAs(OUTBOX_CFG, (): IOutboxConfig => {
   validateUtil(process.env, OutboxConfigSchema);
   const override = process.env['OUTBOX_RELAY_ENABLED'];
-  const enabled = override !== undefined ? override === 'true' : process.env['NODE_ENV'] !== 'test';
+  const enabled = override !== undefined ? override.toLowerCase() === 'true' : process.env['NODE_ENV'] !== 'test';
   return {
     relay: {
       enabled,

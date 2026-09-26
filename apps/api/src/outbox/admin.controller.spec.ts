@@ -47,7 +47,7 @@ const deadEvent = {
 
 function createMockOutboxAdminService() {
   return {
-    list: jest.fn().mockResolvedValue([]),
+    list: jest.fn().mockResolvedValue({ items: [], total: 0 }),
     retry: jest.fn().mockResolvedValue(undefined),
   };
 }
@@ -78,7 +78,7 @@ describe('AdminController', () => {
     });
 
     it('passes the requested status through to the service', async () => {
-      mockOutboxAdminService.list.mockResolvedValue([deadEvent]);
+      mockOutboxAdminService.list.mockResolvedValue({ items: [deadEvent], total: 1 });
 
       const result = await controller.getOutbox(adminUser, { status: 'dead' as never });
 

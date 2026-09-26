@@ -6,6 +6,7 @@ import { OutboxAdminService } from './outbox-admin.service';
 describe('OutboxAdminService', () => {
   const repo = {
     findByStatus: jest.fn().mockResolvedValue([]),
+    countByStatus: jest.fn().mockResolvedValue(0),
     findById: jest.fn(),
     resetForRetry: jest.fn().mockResolvedValue(1),
   };
@@ -13,14 +14,20 @@ describe('OutboxAdminService', () => {
 
   beforeEach(() => jest.clearAllMocks());
 
-  it('lists pending events by default, 100 at most', async () => {
-    await service.list();
+  it('lists pending events by default, 100 at most, with a real total', async () => {
+    repo.countByStatus.mockResolvedValueOnce(3);
+
+    const page = await service.list();
+
     expect(repo.findByStatus).toHaveBeenCalledWith(OutboxStatus.PENDING, 100);
+    expect(repo.countByStatus).toHaveBeenCalledWith(OutboxStatus.PENDING);
+    expect(page).toEqual({ items: [], total: 3 });
   });
 
-  it('lists the requested status', async () => {
+  it('lists the requested status with its total', async () => {
     await service.list(OutboxStatus.DEAD);
     expect(repo.findByStatus).toHaveBeenCalledWith(OutboxStatus.DEAD, 100);
+    expect(repo.countByStatus).toHaveBeenCalledWith(OutboxStatus.DEAD);
   });
 
   it.each([OutboxStatus.DEAD, OutboxStatus.PENDING])('retries a %s event', async (status) => {

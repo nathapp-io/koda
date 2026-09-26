@@ -379,6 +379,7 @@ model OutboxEvent {
   @@index([status, createdAt])
   @@index([projectId, createdAt])
   @@index([status, nextAttemptAt])
+  @@index([status, leaseUntil])
 }
 
 // ---------------------------------------------------------------------------

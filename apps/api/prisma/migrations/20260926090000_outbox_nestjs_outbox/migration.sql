@@ -17,3 +17,6 @@ UPDATE "OutboxEvent" SET "status" = 'pending', "nextAttemptAt" = CURRENT_TIMESTA
 -- nextAttemptAt becomes required
 UPDATE "OutboxEvent" SET "nextAttemptAt" = "createdAt" WHERE "nextAttemptAt" IS NULL;
 ALTER TABLE "OutboxEvent" ALTER COLUMN "nextAttemptAt" SET DEFAULT CURRENT_TIMESTAMP, ALTER COLUMN "nextAttemptAt" SET NOT NULL;
+
+-- Claim query serves its expired-lease reclaim branch from this index
+CREATE INDEX "OutboxEvent_status_leaseUntil_idx" ON "OutboxEvent"("status", "leaseUntil");
