@@ -113,6 +113,7 @@
   },
   "tickets": {
     "newTicket": "新建工单",
+    "loadMore": "加载更多",
     "status": {
       "CREATED": "CREATED",
       "VERIFIED": "VERIFIED",

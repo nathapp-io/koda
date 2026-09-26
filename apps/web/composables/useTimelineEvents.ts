@@ -19,7 +19,6 @@ export interface TimelineQuery {
 export interface TimelineResponse {
   events: TimelineEvent[]
   nextCursor?: string
-  total?: number
 }
 
 export function buildTimelineQuery(

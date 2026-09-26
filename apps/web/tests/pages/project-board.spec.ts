@@ -181,6 +181,25 @@ describe("US-004-4 AC5: CreateTicketDialog 'created' event triggers data refresh
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Slice 3 — board reads the page envelope and can load more
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('Slice 3: board reads the page envelope and can load more', () => {
+  test('reads records, not items', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    expect(source).toContain('.records')
+    expect(source).not.toMatch(/\.items\b/)
+  })
+
+  test('requests a sized page and offers load-more while hasNext', () => {
+    const source = readFileSync(pagePath, 'utf-8')
+    expect(source).toContain('size: BOARD_PAGE_SIZE')
+    expect(source).toContain('hasNext')
+    expect(source).toContain('loadMoreTickets')
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Quality — no console.log
 // ──────────────────────────────────────────────────────────────────────────────
 

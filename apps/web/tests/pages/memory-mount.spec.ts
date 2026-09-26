@@ -181,7 +181,7 @@ describe('US-004 AC2 (Behavioral SFC mount): page calls $api.get with /projects/
   test('mounting the memory page with project=acme triggers $api.get(\'/projects/acme/memory\')', async () => {
     const { fetchCalls } = await mountMemoryPage({
       slug: 'acme',
-      fetchMock: async () => ({ data: { items: [], total: 0 } }),
+      fetchMock: async () => ({ data: { records: [], total: 0, current: 1, size: 20, hasNext: false, hasPrev: false } }),
     })
 
     const memoryCalls = fetchCalls.filter(c => c.url === '/projects/acme/memory')
@@ -191,7 +191,7 @@ describe('US-004 AC2 (Behavioral SFC mount): page calls $api.get with /projects/
   test('mounting the memory page with project=other-project uses that slug in the API path', async () => {
     const { fetchCalls } = await mountMemoryPage({
       slug: 'other-project',
-      fetchMock: async () => ({ data: { items: [], total: 0 } }),
+      fetchMock: async () => ({ data: { records: [], total: 0, current: 1, size: 20, hasNext: false, hasPrev: false } }),
     })
 
     const memoryCalls = fetchCalls.filter(c => c.url === '/projects/other-project/memory')
@@ -202,7 +202,7 @@ describe('US-004 AC2 (Behavioral SFC mount): page calls $api.get with /projects/
   test('the mount-time call sends an empty query object (no kind/status/page filters)', async () => {
     const { fetchCalls } = await mountMemoryPage({
       slug: 'acme',
-      fetchMock: async () => ({ data: { items: [], total: 0 } }),
+      fetchMock: async () => ({ data: { records: [], total: 0, current: 1, size: 20, hasNext: false, hasPrev: false } }),
     })
 
     const mountCall = fetchCalls.find(c => c.url === '/projects/acme/memory')
@@ -221,18 +221,26 @@ describe('US-004 AC8 (Behavioral SFC mount): invoking load-more re-invokes $api.
   test('invoking loadMore sends page=2 query and appends the second batch of items', async () => {
     const firstPage = {
       data: {
-        items: [
+        records: [
           { id: 'm1', subject: 'ticket:1', predicate: 'status', object: 'open', kind: 'FACT', confidence: 0.9, status: 'active' },
         ],
         total: 3,
+        current: 1,
+        size: 20,
+        hasNext: true,
+        hasPrev: false,
       },
     }
     const secondPage = {
       data: {
-        items: [
+        records: [
           { id: 'm2', subject: 'ticket:2', predicate: 'status', object: 'closed', kind: 'FACT', confidence: 0.8, status: 'active' },
         ],
         total: 3,
+        current: 2,
+        size: 20,
+        hasNext: false,
+        hasPrev: true,
       },
     }
     const fetchMock = jest.fn()
@@ -255,12 +263,12 @@ describe('US-004 AC8 (Behavioral SFC mount): invoking load-more re-invokes $api.
     await loadMore()
     await new Promise(resolve => setTimeout(resolve, 20))
 
-    // Now we should have a second fetch call with page=2.
+    // Now we should have a second fetch call with current=2.
     expect(fetchCalls).toHaveLength(2)
     const page2Call = fetchCalls[1]
     expect(page2Call.url).toBe('/projects/acme/memory')
     const query = (page2Call.opts?.query ?? {}) as Record<string, string>
-    expect(query.page).toBe('2')
+    expect(query.current).toBe('2')
 
     // And items should have been appended (length 2, second item from page 2).
     expect(itemsRef.value.length).toBe(2)
@@ -320,8 +328,8 @@ describe('US-004 AC5 (Behavioral SFC mount): $api.get rejection surfaces extract
 
 describe('US-004 AC6 (Behavioral SFC mount): kind filter re-invokes $api.get with the chosen kind', () => {
   test('setting kindFilter to FACT and applying triggers a new fetch with kind=FACT', async () => {
-    const initial = { data: { items: [], total: 0 } }
-    const afterFilter = { data: { items: [], total: 0 } }
+    const initial = { data: { records: [], total: 0, current: 1, size: 20, hasNext: false, hasPrev: false } }
+    const afterFilter = { data: { records: [], total: 0, current: 1, size: 20, hasNext: false, hasPrev: false } }
     const fetchMock = jest.fn()
       .mockResolvedValueOnce(initial)
       .mockResolvedValueOnce(afterFilter)
@@ -349,7 +357,7 @@ describe('US-004 AC6 (Behavioral SFC mount): kind filter re-invokes $api.get wit
   })
 
   test('changing kind filter to INCIDENT_PATTERN sends that value in the query', async () => {
-    const fetchMock = jest.fn(() => Promise.resolve({ data: { items: [], total: 0 } }))
+    const fetchMock = jest.fn(() => Promise.resolve({ data: { records: [], total: 0, current: 1, size: 20, hasNext: false, hasPrev: false } }))
 
     const { fetchCalls, bindings } = await mountMemoryPage({ slug: 'acme', fetchMock })
     expect(fetchCalls).toHaveLength(1)
@@ -373,7 +381,7 @@ describe('US-004 AC6 (Behavioral SFC mount): kind filter re-invokes $api.get wit
 
 describe('US-004 AC7 (Behavioral SFC mount): status filter re-invokes $api.get with the chosen status', () => {
   test('setting statusFilter to active and applying triggers a new fetch with status=active', async () => {
-    const fetchMock = jest.fn(() => Promise.resolve({ data: { items: [], total: 0 } }))
+    const fetchMock = jest.fn(() => Promise.resolve({ data: { records: [], total: 0, current: 1, size: 20, hasNext: false, hasPrev: false } }))
 
     const { fetchCalls, bindings } = await mountMemoryPage({ slug: 'acme', fetchMock })
     expect(fetchCalls).toHaveLength(1)
@@ -395,7 +403,7 @@ describe('US-004 AC7 (Behavioral SFC mount): status filter re-invokes $api.get w
   })
 
   test('changing status filter to superseded sends that value in the query', async () => {
-    const fetchMock = jest.fn(() => Promise.resolve({ data: { items: [], total: 0 } }))
+    const fetchMock = jest.fn(() => Promise.resolve({ data: { records: [], total: 0, current: 1, size: 20, hasNext: false, hasPrev: false } }))
 
     const { fetchCalls, bindings } = await mountMemoryPage({ slug: 'acme', fetchMock })
     expect(fetchCalls).toHaveLength(1)
@@ -412,7 +420,7 @@ describe('US-004 AC7 (Behavioral SFC mount): status filter re-invokes $api.get w
   })
 
   test('applying both kind and status filters sends both query params', async () => {
-    const fetchMock = jest.fn(() => Promise.resolve({ data: { items: [], total: 0 } }))
+    const fetchMock = jest.fn(() => Promise.resolve({ data: { records: [], total: 0, current: 1, size: 20, hasNext: false, hasPrev: false } }))
 
     const { fetchCalls, bindings } = await mountMemoryPage({ slug: 'acme', fetchMock })
     expect(fetchCalls).toHaveLength(1)

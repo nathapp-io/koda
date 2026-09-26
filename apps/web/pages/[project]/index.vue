@@ -25,18 +25,49 @@ const slug = route.params.project as string
 const { $api } = useApi()
 
 interface TicketPage {
-  items: Ticket[]
+  records: Ticket[]
   total: number
-  page: number
-  limit: number
+  current: number
+  size: number
+  hasNext: boolean
+  hasPrev: boolean
 }
+
+const BOARD_PAGE_SIZE = 100
 
 const { data: ticketsData, pending, error, refresh } = useAsyncData(
   `tickets-${slug}`,
-  () => $api.get<TicketPage>(`/projects/${slug}/tickets`),
+  () => $api.get<TicketPage>(`/projects/${slug}/tickets`, { query: { size: BOARD_PAGE_SIZE } }),
 )
 
-const tickets = computed(() => ticketsData.value?.items ?? [])
+// Pages after the first, appended by "load more"; cleared whenever page 1 reloads.
+const moreTickets = ref<Ticket[]>([])
+const lastPage = ref<TicketPage | null>(null)
+const loadingMore = ref(false)
+
+watch(ticketsData, () => {
+  moreTickets.value = []
+  lastPage.value = null
+})
+
+const tickets = computed(() => [...(ticketsData.value?.records ?? []), ...moreTickets.value])
+const hasNext = computed(() => (lastPage.value ?? ticketsData.value)?.hasNext ?? false)
+
+async function loadMoreTickets() {
+  const current = (lastPage.value ?? ticketsData.value)?.current ?? 1
+  loadingMore.value = true
+  try {
+    const next = await $api.get<TicketPage>(`/projects/${slug}/tickets`, {
+      query: { current: current + 1, size: BOARD_PAGE_SIZE },
+    })
+    moreTickets.value = [...moreTickets.value, ...next.records]
+    lastPage.value = next
+  }
+  finally {
+    loadingMore.value = false
+  }
+}
+
 const showCreateDialog = ref(false)
 const showImportDialog = ref(false)
 
@@ -70,6 +101,11 @@ function handleCreated() {
       @open-ticket="handleOpenTicket"
       @create="showCreateDialog = true"
     />
+    <div v-if="hasNext" class="flex justify-center">
+      <Button variant="outline" :disabled="loadingMore" @click="loadMoreTickets">
+        {{ loadingMore ? t('common.loading') : t('tickets.loadMore') }}
+      </Button>
+    </div>
 
     <CreateTicketDialog
       :open="showCreateDialog"
