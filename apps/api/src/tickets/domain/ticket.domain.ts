@@ -63,6 +63,7 @@ export interface TicketListFilters {
   type?: TicketType;
   priority?: Priority;
   assignedToUserId?: string;
+  assignedToAgentId?: string;
   unassigned?: boolean;
 }
 

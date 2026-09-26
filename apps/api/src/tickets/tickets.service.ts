@@ -19,7 +19,7 @@ import { buildTicketEventOutboxPayload } from '../events/outbox-envelope.util';
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
 
-export type TicketListFilterInput = Omit<ListTicketsQuery, 'current' | 'size'>;
+export type TicketListFilterInput = Omit<ListTicketsQuery, 'current' | 'size'> & { assignedToAgentId?: string };
 
 interface AssignInput {
   userId?: string;
@@ -145,6 +145,7 @@ export class TicketsService {
         type: filters.type,
         priority: filters.priority,
         assignedToUserId: filters.assignedTo,
+        assignedToAgentId: filters.assignedToAgentId,
         unassigned: filters.unassigned,
       },
       page,

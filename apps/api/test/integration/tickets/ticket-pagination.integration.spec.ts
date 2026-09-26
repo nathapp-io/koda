@@ -81,4 +81,15 @@ describeIntegration('ticket list pagination (PG)', () => {
     expect(page.hasNext).toBe(false);
     expect(page.hasPrev).toBe(true);
   });
+
+  it('filters by agent assignee', async () => {
+    const agent = await prisma.client.agent.create({ data: { name: 'Bot', slug: 'paging-bot', apiKeyHash: 'paging-bot-hash' } });
+    await prisma.client.ticket.create({
+      data: { projectId, number: 9, type: 'TASK', title: 't9', status: 'CREATED', priority: 'LOW', assignedToAgentId: agent.id },
+    });
+
+    const page = await repo.findTicketPage({ projectId, assignedToAgentId: agent.id }, { current: 1, size: 20 });
+
+    expect(page.records.map((t) => t.number)).toEqual([9]);
+  });
 });
