@@ -55,7 +55,7 @@
 | `apps/api/src/memory/prisma-memory-item.repository.ts` (+ specs) | `findByProject` / `findByProjectMemory` take an `IPageOption`, return `IPageResult` | 3 |
 | `apps/api/src/memory/memory-governance.service.ts` (+ spec) | reads `.records`; passes `PageOption` | 3 |
 | `apps/api/src/memory/memory-read.controller.ts` (+ spec) | `@Query() ListMemoryQuery`; returns `toPageResult` | 3 |
-| `apps/api/src/context/context-builder.service.ts` (+ specs) | passes `PageOption.from(1, MAX_SEMANTIC_MEMORY)`, reads `.records`; passes `eventLimit` | 3, 5 |
+| `apps/api/src/context/context-builder.service.ts` (+ 5 specs in `src/context/` and `test/unit/context/`) | passes `PageOption.from(1, MAX_SEMANTIC_MEMORY)`, reads `.records`; passes `eventLimit` | 3, 5 |
 | `apps/api/src/memory/event-order.ts` (+ `.spec.ts`) | `compareEventsDesc`, shared by timeline and context | 4 |
 | `apps/api/src/memory/timeline-cursor.ts` (+ `.spec.ts`) | `encodeTimelineCursor` / `decodeTimelineCursor` / `keysetWhere` | 4 |
 | `apps/api/src/memory/prisma-timeline.repository.ts` (+ spec) | optional `{ cursor, take }` per table | 4 |
@@ -230,7 +230,7 @@ git commit -m "feat(api): shared KodaPageQuery, parseQuery, toPageResult and rem
 - Create: `apps/api/test/integration/tickets/ticket-pagination.integration.spec.ts`
 - Modify: `apps/api/src/tickets/domain/ticket.domain.ts:58-67,97-98`
 - Modify: `apps/api/src/tickets/prisma-tickets.repository.ts:143-205`
-- Modify: `apps/api/src/tickets/tickets.service.ts:18-26,134-179`
+- Modify: `apps/api/src/tickets/tickets.service.ts:18-26,134-178`
 - Modify: `apps/api/src/tickets/tickets.controller.ts:52-54,160-191`
 - Modify: `apps/api/src/tickets/tickets.service.spec.ts` (the `findAll` block, ~line 360-510), `apps/api/src/tickets/tickets.controller.spec.ts`
 
@@ -460,7 +460,7 @@ In `apps/api/src/tickets/tickets.service.ts`, replace the `FindAllFilters` inter
 export type TicketListFilterInput = Omit<ListTicketsQuery, 'current' | 'size'>;
 ```
 
-and replace `findAll` (lines 134-179) with:
+and replace `findAll` (lines 134-178) with:
 
 ```ts
   async findAll(
@@ -680,7 +680,7 @@ git commit -m "feat(api): paginate ticket list with validated ListTicketsQuery (
 - Modify: `apps/api/src/memory/memory-governance.service.ts` (lines 23-25 and the four `findByProject` loops at ~55, 94, 130, 187)
 - Modify: `apps/api/src/memory/memory-read.controller.ts`
 - Modify: `apps/api/src/context/context-builder.service.ts:108-112,124`
-- Modify specs: `memory-read.controller.spec.ts`, `memory-governance.service.spec.ts`, `memory-item-repository.spec.ts`, `prisma-memory-item.repository.additional.spec.ts`, `src/context/context-builder.service.spec.ts`, `test/unit/context/context-builder.service.token-budget.spec.ts`
+- Modify specs: `memory-read.controller.spec.ts`, `memory-governance.service.spec.ts`, `memory-item-repository.spec.ts`, `prisma-memory-item.repository.additional.spec.ts`, and all five context-builder specs that mock `findByProjectMemory`: `src/context/context-builder.service.spec.ts`, `test/unit/context/context-builder.service.spec.ts`, `test/unit/context/context-builder.service.token-budget.spec.ts`, `test/unit/context/context-builder.service.adversarial.spec.ts`, `test/unit/context/context-builder.service.slo-adversarial.spec.ts`
 
 **Interfaces:**
 - Consumes: `KodaPageQuery`, `parseQuery`, `toPageResult` (Task 1).
@@ -830,7 +830,7 @@ Expected: PASS
 
 - [ ] **Step 6: Controller test (failing)**
 
-In `apps/api/src/memory/memory-read.controller.spec.ts`, change the handler calls to the new signature `getMemory(slug, principal, rawQuery)` and replace the result/pagination assertions with:
+In `apps/api/src/memory/memory-read.controller.spec.ts`, change **all ~20** handler calls (`grep -n "getMemory(" apps/api/src/memory/memory-read.controller.spec.ts`) from the old positional form `getMemory(slug, principal, kind, subject, status, page, limit, orderBy)` to the new signature `getMemory(slug, principal, rawQuery)`, where `rawQuery` is an object of strings, for example `{ kind: 'FACT', current: '2', size: '5' }` and replace the result/pagination assertions with:
 
 ```ts
   it('parses paging strings and forwards filters and page separately', async () => {
@@ -892,7 +892,7 @@ In `apps/api/src/context/context-builder.service.ts`:
 - The `findByProjectMemory` call (lines 108-112) becomes `this.memoryItemRepository.findByProjectMemory({ projectId: query.projectId, orderBy: 'confidence' }, PageOption.from(1, MAX_SEMANTIC_MEMORY))`.
 - Line 124 `semanticMemoryResult.items` becomes `semanticMemoryResult.records`.
 - Import `PageOption` from `@nathapp/nestjs-common`.
-- In `src/context/context-builder.service.spec.ts` and `test/unit/context/context-builder.service.token-budget.spec.ts`, change every `findByProjectMemory.mockResolvedValue({ items: X, total: N })` to `mockResolvedValue({ records: X, total: N, current: 1, size: 10, hasNext: false, hasPrev: false })`.
+- Find every mock first: `grep -rn "findByProjectMemory" apps/api/src/context apps/api/test/unit/context`. Expect hits in five specs: `src/context/context-builder.service.spec.ts` and `test/unit/context/context-builder.service{,.token-budget,.adversarial,.slo-adversarial}.spec.ts`. In each, change every `findByProjectMemory.mockResolvedValue({ items: X, total: N })` (and `mockResolvedValueOnce`) to `{ records: X, total: N, current: 1, size: 10, hasNext: false, hasPrev: false }`, and change any assertion on the call arguments to the two-argument form `(expect.objectContaining({ projectId, orderBy: 'confidence' }), expect.objectContaining({ current: 1, size: 10 }))`. Missing any one leaves `semanticMemoryResult.records` undefined and that suite throws.
 
 Run: `cd apps/api && bun run test && bunx tsc --noEmit -p tsconfig.json`
 Expected: PASS, no type errors
@@ -1504,7 +1504,7 @@ git commit -m "feat(api): bound /context event reads with a pushed-down take (M2
 
 **Files:**
 - Regenerate: `openapi.json`, `apps/cli/src/generated/**`
-- Modify: `apps/cli/src/commands/ticket.ts:114-185`, `apps/cli/src/commands/ticket.spec.ts` (~line 680-740 and any `items` mocks for `ticket list` / `ticket mine`)
+- Modify: `apps/cli/src/commands/ticket.ts:114-185`, `apps/cli/src/commands/ticket.spec.ts` (18 `data: { items` mocks throughout the file, plus the `--limit`/`--page` tests at ~line 690-730), `apps/cli/src/commands/ticket-us003.spec.ts:103-106`
 - Modify: `apps/cli/src/commands/memory.ts:26-66`, `apps/cli/src/commands/memory.spec.ts`
 
 **Interfaces:**
@@ -1522,7 +1522,9 @@ Expected: contains `current` and `size`, not `page` / `limit`.
 
 - [ ] **Step 2: CLI tests (failing)**
 
-In `apps/cli/src/commands/ticket.spec.ts`:
+First list every call site: `grep -n "data: { items" apps/cli/src/commands/ticket.spec.ts apps/cli/src/commands/ticket-us003.spec.ts` (expect 18 hits in `ticket.spec.ts` and 1 in `ticket-us003.spec.ts`). Convert every hit, not just the tests shown below.
+
+In `apps/cli/src/commands/ticket.spec.ts` and `ticket-us003.spec.ts`:
 - Change every `ticketsControllerFindAll` mock result from `{ ret: 0, data: { items: X, total: N } }` to `{ ret: 0, data: { records: X, total: N, current: 1, size: 20, hasNext: false, hasPrev: false } }`.
 - Replace the `--limit` test (~line 690-707) and the `--page` test with:
 
@@ -1783,16 +1785,16 @@ git commit -m "feat(web): board and memory read the page envelope; board loads m
 ### Task 8: Docs and final verification
 
 **Files:**
-- Modify: `docs/architecture.md` (the API section that lists conventions; add a "Pagination" paragraph)
+- Modify: `docs/architecture.md` (add a `#### Pagination` subsection at the end of `### API`, which starts at line 38 and ends before `### Web` at line 65)
 - Modify: `docs/superpowers/specs/2026-09-25-track-1-foundations-design.md` (status line for Slice 3)
 - Modify: any doc that still documents `ticket list --limit` (`grep -rn "\-\-limit" docs apps/cli/README* README.md`)
 
 - [ ] **Step 1: Architecture doc**
 
-Add to `docs/architecture.md`, in the API conventions area:
+Add to `docs/architecture.md`, at the end of the `### API` section (just before `### Web`):
 
 ```markdown
-### Pagination
+#### Pagination
 
 List endpoints that page take `current` (1-based, default 1) and `size` (1-100, default 20) through a query DTO that extends `KodaPageQuery` (`apps/api/src/common/dto/koda-page.query.ts`), and return `{ total, current, size, hasNext, hasPrev, records }`. The global ValidationPipe does not transform, so controllers pass the raw query through `parseQuery()` and return `toPageResult(page)`. Paged today: tickets, memory.
 
