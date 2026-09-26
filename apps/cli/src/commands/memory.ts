@@ -31,7 +31,7 @@ export function memoryCommand(program: Command): void {
     .option('--ticket-id <id>', 'Filter by ticket ID')
     .option('--from <iso>', 'Start of time range (ISO 8601)')
     .option('--to <iso>', 'End of time range (ISO 8601)')
-    .option('--limit <n>', 'Maximum number of events to return (default: 50)', '50')
+    .option('--limit <n>', 'Maximum number of events to return (1-100, default: 50)', '50')
     .option('--cursor <cursor>', 'Pagination cursor')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
@@ -42,21 +42,22 @@ export function memoryCommand(program: Command): void {
   path: { slug: ctx.projectSlug },
   query: { actorId: options.actorId, ticketId: options.ticketId, from: options.from, to: options.to, limit: options.limit, cursor: options.cursor }
   });
-        const raw = unwrap<{ items?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>>(response);
-        const items: Array<Record<string, unknown>> = Array.isArray(raw)
-          ? raw
-          : ((raw as { items?: Array<Record<string, unknown>> }).items ?? []);
+        const timeline = unwrap<{ events?: Array<Record<string, unknown>>; nextCursor?: string }>(response);
+        const items = timeline.events ?? [];
 
         if (options.json) {
           console.log(JSON.stringify(items, null, 2));
         } else {
           const rows = items.map((e) => [
-            String(e['type'] ?? e['action'] ?? ''),
+            String(e['eventType'] ?? e['action'] ?? ''),
             String(e['actorId'] ?? e['actorUserId'] ?? e['actorAgentId'] ?? ''),
             String(e['ticketId'] ?? ''),
             String(e['createdAt'] ?? ''),
           ]);
           table(['Type', 'Actor', 'Ticket', 'Time'], rows);
+          if (timeline.nextCursor) {
+            console.log(`\nNext: --cursor ${timeline.nextCursor}`);
+          }
         }
         process.exit(0);
       } catch (err: unknown) {

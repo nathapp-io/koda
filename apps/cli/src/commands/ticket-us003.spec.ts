@@ -102,7 +102,7 @@ describe('US-003-1: ticketCommand list — resolveContext wiring', () => {
 
     (ticketsControllerFindAll as jest.Mock).mockResolvedValue({
       ret: 0,
-      data: { items: [], total: 0 },
+      data: { records: [], total: 0, current: 1, size: 20, hasNext: false, hasPrev: false },
     });
   });
 

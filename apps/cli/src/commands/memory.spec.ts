@@ -58,27 +58,33 @@ describe('memoryCommand', () => {
   });
 
   describe('timeline', () => {
+    const timelineEnvelope = {
+      events: [{ id: 'e1', eventType: 'ticket_event', actorId: 'u-1', action: 'created', createdAt: '2026-01-01T00:00:00.000Z' }],
+      nextCursor: 'abc',
+    };
+
     it('fetches timeline and prints a table', async () => {
-      const items = [{ type: 'TICKET_CREATED', actorUserId: 'u-1', ticketId: 't-1', createdAt: '2026-01-01T00:00:00Z' }];
-      mockGetTimeline.mockResolvedValue({ ret: 0, data: items });
+      mockGetTimeline.mockResolvedValue({ ret: 0, data: timelineEnvelope });
 
       await program.parseAsync(['node', 'koda', 'memory', 'timeline']);
 
       expect(mockGetTimeline).toHaveBeenCalledWith(expect.objectContaining({ path: expect.objectContaining({ slug: 'my-proj' })}));
+      expect(logSpy.mock.calls.flat().join('\n')).toContain('--cursor abc');
       expect(exitSpy).toHaveBeenCalledWith(0);
     });
 
     it('outputs JSON when --json flag is set', async () => {
-      const items = [{ type: 'COMMENT', actorUserId: 'u-2', ticketId: 't-2', createdAt: '2026-01-02T00:00:00Z' }];
-      mockGetTimeline.mockResolvedValue({ ret: 0, data: items });
+      mockGetTimeline.mockResolvedValue({ ret: 0, data: timelineEnvelope });
 
       await program.parseAsync(['node', 'koda', 'memory', 'timeline', '--json']);
 
-      expect(logSpy).toHaveBeenCalledWith(JSON.stringify(items, null, 2));
+      const parsed = JSON.parse(String(logSpy.mock.calls[0][0])) as Array<Record<string, unknown>>;
+      expect(Array.isArray(parsed)).toBe(true);
+      expect(parsed.some((e) => e['id'] === 'e1')).toBe(true);
     });
 
     it('passes filter options to the API', async () => {
-      mockGetTimeline.mockResolvedValue({ ret: 0, data: [] });
+      mockGetTimeline.mockResolvedValue({ ret: 0, data: { events: [] } });
 
       await program.parseAsync([
         'node', 'koda', 'memory', 'timeline',
@@ -93,7 +99,7 @@ describe('memoryCommand', () => {
     });
 
     it('handles empty result gracefully', async () => {
-      mockGetTimeline.mockResolvedValue({ ret: 0, data: [] });
+      mockGetTimeline.mockResolvedValue({ ret: 0, data: { events: [] } });
 
       await program.parseAsync(['node', 'koda', 'memory', 'timeline', '--json']);
 

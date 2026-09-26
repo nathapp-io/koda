@@ -1064,17 +1064,48 @@
             }
           },
           {
+            "name": "current",
+            "required": false,
+            "in": "query",
+            "description": "Page number (1-based)",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Page size",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
             "name": "kind",
             "required": false,
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "FACT",
+                "DECISION",
+                "PREFERENCE",
+                "CONSTRAINT",
+                "INCIDENT_PATTERN"
+              ]
             }
           },
           {
             "name": "subject",
             "required": false,
             "in": "query",
+            "description": "Subject prefix",
             "schema": {
               "type": "string"
             }
@@ -1083,24 +1114,14 @@
             "name": "status",
             "required": false,
             "in": "query",
+            "description": "Defaults to active, non-expired items",
             "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "page",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "active",
+                "superseded",
+                "rejected"
+              ]
             }
           },
           {
@@ -1108,13 +1129,22 @@
             "required": false,
             "in": "query",
             "schema": {
-              "type": "string"
+              "default": "confidence",
+              "type": "string",
+              "enum": [
+                "confidence",
+                "updatedAt",
+                "createdAt"
+              ]
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "Project memory items"
+            "description": "Page of memory items: { total, current, size, hasNext, hasPrev, records }"
+          },
+          "400": {
+            "description": "Invalid filter or paging parameter"
           },
           "403": {
             "description": "Forbidden"
@@ -1128,7 +1158,7 @@
             "bearer": []
           }
         ],
-        "summary": "Get project memory items",
+        "summary": "Get project memory items (paginated)",
         "tags": [
           "memory"
         ]
@@ -1855,64 +1885,26 @@
             }
           },
           {
-            "name": "page",
+            "name": "current",
             "required": false,
             "in": "query",
+            "description": "Page number (1-based)",
             "schema": {
-              "example": 1,
+              "minimum": 1,
+              "default": 1,
               "type": "number"
             }
           },
           {
-            "name": "limit",
+            "name": "size",
             "required": false,
             "in": "query",
+            "description": "Page size",
             "schema": {
-              "example": 20,
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
               "type": "number"
-            }
-          },
-          {
-            "name": "unassigned",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "boolean"
-            }
-          },
-          {
-            "name": "assignedTo",
-            "required": false,
-            "in": "query",
-            "description": "User ID to filter by",
-            "schema": {}
-          },
-          {
-            "name": "priority",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "enum": [
-                "LOW",
-                "MEDIUM",
-                "HIGH",
-                "CRITICAL"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "name": "type",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "enum": [
-                "BUG",
-                "ENHANCEMENT",
-                "TASK",
-                "QUESTION"
-              ],
-              "type": "string"
             }
           },
           {
@@ -1920,6 +1912,7 @@
             "required": false,
             "in": "query",
             "schema": {
+              "type": "string",
               "enum": [
                 "CREATED",
                 "VERIFIED",
@@ -1927,14 +1920,62 @@
                 "VERIFY_FIX",
                 "CLOSED",
                 "REJECTED"
-              ],
+              ]
+            }
+          },
+          {
+            "name": "type",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "BUG",
+                "ENHANCEMENT",
+                "TASK",
+                "QUESTION"
+              ]
+            }
+          },
+          {
+            "name": "priority",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "LOW",
+                "MEDIUM",
+                "HIGH",
+                "CRITICAL"
+              ]
+            }
+          },
+          {
+            "name": "assignedTo",
+            "required": false,
+            "in": "query",
+            "description": "User ID to filter by",
+            "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "unassigned",
+            "required": false,
+            "in": "query",
+            "description": "Only tickets with no user or agent assignee",
+            "schema": {
+              "type": "boolean"
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "List of tickets"
+            "description": "Page of tickets: { total, current, size, hasNext, hasPrev, records }"
+          },
+          "400": {
+            "description": "Invalid filter or paging parameter"
           },
           "404": {
             "description": "Project not found"
@@ -1945,7 +1986,7 @@
             "bearer": []
           }
         ],
-        "summary": "List all tickets for a project",
+        "summary": "List tickets for a project (paginated)",
         "tags": [
           "tickets"
         ]
