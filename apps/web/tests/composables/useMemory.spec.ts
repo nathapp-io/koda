@@ -219,7 +219,21 @@ describe('AC8: page-number pagination', () => {
   })
 
   test('hasMore follows the server hasNext flag, not a length comparison', async () => {
-    const fetchMock = jest.fn(() => Promise.resolve({ data: { records: [], total: 5, current: 1, size: 20, hasNext: true, hasPrev: false } }))
+    // records.length (1) is not < total (0), so the old length-comparison
+    // derivation would yield false; only the server's hasNext (true) explains
+    // hasMore being true — the two derivations must disagree here.
+    const fetchMock = jest.fn(() => Promise.resolve({
+      data: {
+        records: [
+          { id: 'mem-1', subject: 'a', predicate: 'b', object: 'c', kind: 'FACT', confidence: 0.9, status: 'active' },
+        ],
+        total: 0,
+        current: 1,
+        size: 20,
+        hasNext: true,
+        hasPrev: false,
+      },
+    }))
     applyNuxtGlobals({ fetchMock, tokenRef: ref(null), errorFn: jest.fn() })
 
     const { useMemory } = await import(composablePath)
