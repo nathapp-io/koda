@@ -428,10 +428,17 @@ describeIntegration('API Integration Tests', () => {
         .set('Authorization', `Bearer ${userAccessToken}`)
         .expect(200);
 
-      const data = body<{ items: Array<{ ref: string; number: number }>; total: number }>(res);
-      expect(data.items.length).toBeGreaterThanOrEqual(1);
-      // All items should have ref field matching pattern KT-1, KT-2, etc.
-      data.items.forEach((item) => {
+      const data = body<{
+        records: Array<{ ref: string; number: number }>;
+        total: number;
+        current: number;
+        size: number;
+        hasNext: boolean;
+        hasPrev: boolean;
+      }>(res);
+      expect(data.records.length).toBeGreaterThanOrEqual(1);
+      // All records should have ref field matching pattern KT-1, KT-2, etc.
+      data.records.forEach((item) => {
         expect(item.ref).toMatch(/^[A-Z0-9]+-[1-9][0-9]*$/);
         expect(item.ref).toBe(`KT-${item.number}`);
       });
