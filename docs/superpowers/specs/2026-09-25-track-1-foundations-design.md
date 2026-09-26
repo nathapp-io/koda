@@ -3,7 +3,7 @@
 **Date:** 2026-09-25
 **Base:** `main` @ `eb18be6c` (after PR #127 and HIGH remediation PRs #128-#132)
 **Source:** fleet platform design doc §9.3 (Track 1), whole-repo review `docs/20260925-review-whole-repo.md`
-**Status:** Approved design. Slice 1 merged (#133); Slice 2 implemented on `feat/track1-outbox`.
+**Status:** Approved design. Slice 1 merged (#133); Slice 2 implemented on `feat/track1-outbox`; Slice 3 merged (#137); Slice 4 implemented on `feat/track1-users-membership`.
 
 ## Goal
 

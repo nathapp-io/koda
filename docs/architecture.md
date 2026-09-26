@@ -185,6 +185,27 @@ Request handling pattern:
 - public routes opt out explicitly
 - API controllers/services can distinguish actor type for audit and ownership behavior
 
+### Users, registration and membership (Track 1 Slice 4)
+
+- **Registration is closed by default** (`REGISTRATION_ENABLED=false`). The first
+  user to register on an empty database becomes global `ADMIN`; the check and the
+  insert run in one transaction behind a Postgres advisory lock
+  (`src/common/utils/advisory-lock.ts`), so concurrent first registrations produce
+  exactly one admin. `GET /auth/registration-status` (public) reports `{ open }`.
+- **Global admins manage users** under `/admin/users` (list, create with a
+  temporary password, change role, disable). There is no deletion. Disabling or
+  changing a role bumps `tokenVersion` and invalidates the per-user auth-state
+  cache, so outstanding access and refresh tokens stop working on the next request.
+  The last active global admin cannot be demoted or disabled, and nobody can
+  demote or disable themselves.
+- **Project membership** lives under `/projects/:slug/members`. Any member can
+  list; a global admin or a project `ADMIN` can add (by email of an existing
+  user), change roles (`ADMIN | DEVELOPER | VIEWER`) and remove. A change that
+  would leave a project with no `ADMIN` member is refused unless a global admin
+  makes it. Membership is read live on every request (never cached).
+- **CLI**: `koda user …` and member writes need a user access token
+  (`KODA_API_KEY=<token>`); agent API keys never hold the global `ADMIN` authority.
+
 ## Ticket Workflow Architecture
 
 The ticket lifecycle is enforced in the API rather than in the UI or CLI.
