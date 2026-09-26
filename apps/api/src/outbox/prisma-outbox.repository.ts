@@ -1,6 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { AbstractPrismaRepository, PrismaClientLike, PrismaModelDelegate, PrismaService } from '@nathapp/nestjs-prisma';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { OutboxStatus } from '@nathapp/nestjs-outbox';
 import { OutboxEvent as OutboxEventModel, PrismaClient } from '@prisma/client';
 import { OutboxEventDomain } from './domain/outbox-event.domain';
 
@@ -104,5 +105,18 @@ export class PrismaOutboxRepository extends AbstractPrismaRepository<OutboxEvent
       where: { id },
       data: { lastError: message },
     });
+  }
+
+  /**
+   * Retention purge (issue #135): delete terminal rows whose last change predates
+   * the cutoff. updatedAt is the terminal-transition time — markPublished/markDead
+   * are a terminal row's last writes — and an admin retry bumps it, giving a
+   * retried row a fresh retention window. Returns rows deleted.
+   */
+  async deleteTerminalBefore(statuses: OutboxStatus[], before: Date): Promise<number> {
+    const result = await this.prisma.client.outboxEvent.deleteMany({
+      where: { status: { in: statuses }, updatedAt: { lt: before } },
+    });
+    return result.count;
   }
 }

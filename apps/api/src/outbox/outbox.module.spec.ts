@@ -15,6 +15,7 @@ import {
 import { outboxConfig } from '../config/outbox.config';
 import { FanOutPublisher } from './fan-out-publisher';
 import { OutboxModule } from './outbox.module';
+import { OutboxRetentionProcessor } from './outbox-retention.processor';
 import { PrismaOutboxStore } from './prisma-outbox.store';
 
 @Global()
@@ -31,7 +32,10 @@ import { PrismaOutboxStore } from './prisma-outbox.store';
 class FakePrismaModule {}
 
 describe('OutboxModule (DI wiring, no database)', () => {
-  const saved = process.env['OUTBOX_RELAY_ENABLED'];
+  const saved = {
+    OUTBOX_RELAY_ENABLED: process.env['OUTBOX_RELAY_ENABLED'],
+    OUTBOX_RETENTION_DAYS: process.env['OUTBOX_RETENTION_DAYS'],
+  };
   let moduleRef: TestingModule;
 
   const compile = async (): Promise<TestingModule> =>
@@ -39,10 +43,16 @@ describe('OutboxModule (DI wiring, no database)', () => {
       imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true, load: [outboxConfig] }), FakePrismaModule, OutboxModule],
     }).compile();
 
+  const restore = (key: keyof typeof saved): void => {
+    const value = saved[key];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  };
+
   afterEach(async () => {
     await moduleRef?.close();
-    if (saved === undefined) delete process.env['OUTBOX_RELAY_ENABLED'];
-    else process.env['OUTBOX_RELAY_ENABLED'] = saved;
+    restore('OUTBOX_RELAY_ENABLED');
+    restore('OUTBOX_RETENTION_DAYS');
   });
 
   it('resolves PrismaOutboxStore as the store, never the in-memory fallback', async () => {
@@ -69,5 +79,10 @@ describe('OutboxModule (DI wiring, no database)', () => {
     moduleRef = await compile();
     expect(moduleRef.get(NathappOutboxService)).toBeDefined();
     expect(moduleRef.get(OutboxRelay)).toBeDefined();
+  });
+
+  it('registers the retention processor for the nightly terminal-row purge', async () => {
+    moduleRef = await compile();
+    expect(moduleRef.get(OutboxRetentionProcessor)).toBeInstanceOf(OutboxRetentionProcessor);
   });
 });

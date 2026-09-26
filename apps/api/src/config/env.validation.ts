@@ -24,6 +24,10 @@ const envSchema = Joi.object({
     .truthy('true')
     .falsy('false')
     .optional(),
+  OUTBOX_RETENTION_DAYS: Joi.number()
+    .integer()
+    .min(0)
+    .optional(),
 }).unknown(true);
 
 export function validate(config: Record<string, unknown>): Record<string, unknown> {
