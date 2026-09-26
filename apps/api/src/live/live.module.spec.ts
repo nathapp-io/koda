@@ -1,7 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { GlobalStubsModule } from '../common/test-helpers/global-stubs.module';
 import { FanOutPublisher } from '../outbox/fan-out-publisher';
+import { LiveController } from './live.controller';
 import { LiveModule } from './live.module';
+import { LiveStreamRegistry } from './live-stream-registry';
 import { ProjectEventBus } from './project-event-bus';
 import { TicketLiveSubscriber } from './ticket-live.subscriber';
 
@@ -19,6 +21,11 @@ describe('LiveModule (DI wiring, no database)', () => {
   it('resolves the bus and the subscriber', () => {
     expect(moduleRef.get(ProjectEventBus)).toBeInstanceOf(ProjectEventBus);
     expect(moduleRef.get(TicketLiveSubscriber)).toBeInstanceOf(TicketLiveSubscriber);
+  });
+
+  it('resolves the controller and the stream registry', () => {
+    expect(moduleRef.get(LiveController)).toBeInstanceOf(LiveController);
+    expect(moduleRef.get(LiveStreamRegistry)).toBeInstanceOf(LiveStreamRegistry);
   });
 
   it('registers the live handler on ticket_event at init', async () => {

@@ -28,6 +28,10 @@ const envSchema = Joi.object({
     .integer()
     .min(0)
     .optional(),
+  LIVE_HEARTBEAT_MS: Joi.number()
+    .integer()
+    .min(100)
+    .optional(),
 }).unknown(true);
 
 export function validate(config: Record<string, unknown>): Record<string, unknown> {
