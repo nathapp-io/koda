@@ -80,3 +80,27 @@ lancedb/
 ## we not ignore the project level .koda
 apps/**/.koda/
 .codex
+
+# nax - generated files
+**/.nax/status.json
+**/.nax/features/*/runs/
+**/.nax/features/*/plan/
+**/.nax/features/*/sessions/
+**/.nax/features/*/stories/
+**/.nax/features/*/fragments/
+**/.nax/features/*/interactions/
+**/.nax/features/*/semantic-verdicts/
+**/.nax/features/*/status.json
+**/.nax/features/*/checkpoint.jsonl
+**/.nax/features/*/progress.txt
+**/.nax/features/*/acp-sessions.json
+**/.nax/features/*/acceptance-refined.json
+**/.nax/features/*/*.bak
+**/.nax-acceptance*
+**/_nax_acceptance_test.py
+**/_nax_suggested_test.py
+.nax/finish-audit/
+.nax/mutation-journal/
+.nax/tool-audit/
+**/.nax/cache/
+**/.nax/scratchpad/
