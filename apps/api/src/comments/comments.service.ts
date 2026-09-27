@@ -15,6 +15,7 @@ import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { TicketEventService } from '../events/ticket-event.service';
 import { buildTicketEventOutboxPayload } from '../events/outbox-envelope.util';
 import { ProjectAccessService } from '../projects/project-access.service';
+import { withProjectRole } from '../projects/project-context';
 
 @Injectable()
 export class CommentsService {
@@ -48,36 +49,29 @@ export class CommentsService {
   /**
    * US-002: resolve a comment to its owning project so the slug-less mutation
    * paths can gate by membership before the CASL check. Returns the resolved
-   * project id (throwing `NotFoundAppException` if the comment, ticket, or
-   * project is missing/soft-deleted).
+   * project id and the caller's project role (throwing
+   * `NotFoundAppException` if the comment, ticket, or project is
+   * missing/soft-deleted, or if the caller is not a project member).
    */
   private async assertCommentProjectMembership(
     commentId: string,
     principal: KodaPrincipal,
-  ): Promise<{ projectId: string }> {
+  ): Promise<{ projectId: string; role: string | null }> {
     const ownership = await this.commentRepo.findOwningProjectAndTicket(commentId);
 
     if (!ownership || ownership.ticket.deletedAt || ownership.project.deletedAt) {
       throw new NotFoundAppException({}, 'comments');
     }
 
-    // Agent principals are cross-project: they skip the membership lookup and
-    // fall through to the CASL check (AC3). Global ADMIN users are admitted by
-    // ProjectAccessService without a ProjectMember row (AC5).
-    if (principal.actorType === 'user') {
-      try {
-        await this.access.assertProjectMembership(ownership.project.id, principal);
-      } catch (err) {
-        if (err instanceof ForbiddenAppException) {
-          // Hide the comment's existence from non-members, matching the
-          // slugged routes that 404 an unknown slug.
-          throw new NotFoundAppException({}, 'comments');
-        }
-        throw err;
-      }
+    // Agents resolve to null without a lookup; global ADMIN resolves to 'ADMIN'.
+    // A non-member's 403 becomes 404 so the comment's existence stays hidden.
+    try {
+      const role = await this.access.resolveMembership(ownership.project.id, principal);
+      return { projectId: ownership.project.id, role };
+    } catch (err) {
+      if (err instanceof ForbiddenAppException) throw new NotFoundAppException({}, 'comments');
+      throw err;
     }
-
-    return { projectId: ownership.project.id };
   }
 
   /**
@@ -165,9 +159,9 @@ export class CommentsService {
   ) {
     // US-002: resolve comment → ticket → project and gate by membership before
     // the CASL check. A non-member user gets 404 (their membership lookup is
-    // translated from ForbiddenAppException); agent principals skip the
-    // membership resolution entirely.
-    await this.assertCommentProjectMembership(commentId, principal);
+    // translated from ForbiddenAppException); agents resolve to role null and
+    // proceed to the CASL check unchanged.
+    const { role } = await this.assertCommentProjectMembership(commentId, principal);
 
     // Find the comment via repository
     const comment = await this.commentRepo.findById(commentId);
@@ -176,7 +170,10 @@ export class CommentsService {
       throw new NotFoundAppException({}, 'comments');
     }
 
-    const ability = await this.caslAbilityFactory.createForUser(principal);
+    // #144: the ability is built from the principal enriched with the project
+    // role, so a project ADMIN gains unconditional DELETE and everyone else is
+    // held to the author-only rules.
+    const ability = await this.caslAbilityFactory.createForUser(withProjectRole(principal, role));
     if (!ability.can(CaslPermissionAction.UPDATE, subject('Comment', comment))) {
       throw new ForbiddenAppException({}, 'comments');
     }
@@ -196,7 +193,7 @@ export class CommentsService {
     // US-002: same membership gate as `update`. Global ADMINs and agents
     // proceed; non-member users get 404 (not 403) so the comment's existence
     // stays hidden.
-    await this.assertCommentProjectMembership(commentId, principal);
+    const { role } = await this.assertCommentProjectMembership(commentId, principal);
 
     // Find the comment via repository
     const comment = await this.commentRepo.findById(commentId);
@@ -205,7 +202,9 @@ export class CommentsService {
       throw new NotFoundAppException({}, 'comments');
     }
 
-    const ability = await this.caslAbilityFactory.createForUser(principal);
+    // #144: a project ADMIN may delete anyone's comment in the project; other
+    // roles remain author-only.
+    const ability = await this.caslAbilityFactory.createForUser(withProjectRole(principal, role));
     if (!ability.can(CaslPermissionAction.DELETE, subject('Comment', comment))) {
       throw new ForbiddenAppException({}, 'comments');
     }

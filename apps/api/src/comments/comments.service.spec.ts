@@ -212,13 +212,14 @@ describe('CommentsService', () => {
     },
   );
 
-  // Mirrors ProjectAccessService: agents and global ADMINs are admitted without
-  // a lookup, a user without a ProjectMember row is refused.
+  // Mirrors ProjectAccessService.resolveMembership: agents and global ADMINs
+  // resolve without a lookup, a member gets their raw ProjectMember.role, a
+  // user without a ProjectMember row is refused.
   const mockAccessService = {
-    assertProjectMembership: jest.fn(async (_projectId: string, principal: KodaPrincipal) => {
-      if (!principal || principal.actorType !== 'user') return;
-      if (principal.role === 'ADMIN') return;
-      if (memberUserIds.has(principal.id)) return;
+    resolveMembership: jest.fn(async (_projectId: string, principal: KodaPrincipal) => {
+      if (!principal || principal.actorType !== 'user') return null;
+      if (principal.role === 'ADMIN') return 'ADMIN';
+      if (memberUserIds.has(principal.id)) return 'DEVELOPER';
       throw new ForbiddenAppException({}, 'projects');
     }),
     findMembershipRole: jest.fn(async (_projectId: string, userId: string) =>
@@ -805,7 +806,11 @@ describe('CommentsService', () => {
       const result = await service.update('comment-123', { body: 'member edit' }, mockUserPrincipal);
 
       expect(result.body).toBe('member edit');
-      expect(mockCaslFactory.createForUser).toHaveBeenCalledWith(mockUserPrincipal);
+      // #144: the ability is built from the principal enriched with the
+      // resolved project role.
+      expect(mockCaslFactory.createForUser).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'user-123', projectRole: 'DEVELOPER' })
+      );
       expect(mockCommentRepo.update).toHaveBeenCalledWith('comment-123', { body: 'member edit' });
     });
 
@@ -850,6 +855,89 @@ describe('CommentsService', () => {
       await service.delete('comment-123', mockAdminPrincipal);
 
       expect(mockCommentRepo.delete).toHaveBeenCalledWith('comment-123');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // #144 — update/delete decide by the comment's PROJECT role: a project ADMIN
+  // may delete anyone's comment, editing stays author-only, and a non-member
+  // still sees 404 so the comment's existence stays hidden.
+  // ---------------------------------------------------------------------------
+
+  describe('#144 project-role comment rights', () => {
+    const ownership = {
+      project: { id: 'p1', slug: 'koda', key: 'KODA', deletedAt: null },
+      ticket: { id: 't1', deletedAt: null },
+    };
+    const othersComment = {
+      id: 'c1',
+      ticketId: 't1',
+      body: 'b',
+      type: 'GENERAL',
+      authorUserId: 'someone-else',
+      authorAgentId: null,
+    };
+
+    beforeEach(() => {
+      mockCommentRepo.findOwningProjectAndTicket.mockResolvedValue(ownership);
+      mockCommentRepo.findById.mockResolvedValue(othersComment);
+      // Mirror the real factory's Comment rules: UPDATE is author-only, DELETE
+      // is author-only or unconditional for a project/global ADMIN. The suite
+      // default `mockCaslCan` always grants, which would make these tests
+      // vacuous.
+      mockCaslFactory.createForUser.mockImplementation(async (principal: KodaPrincipal) => {
+        const isUser = principal.actorType === 'user';
+        const globalRole = isUser ? principal.role : null;
+        const projectRole = isUser ? principal.projectRole : null;
+        return {
+          can: (
+            action: string,
+            subj: {
+              __caslSubjectType__?: string;
+              authorUserId?: string | null;
+              authorAgentId?: string | null;
+            },
+          ) => {
+            if (subj.__caslSubjectType__ !== 'Comment') return false;
+            const isAuthor =
+              subj.authorUserId === principal.id || subj.authorAgentId === principal.id;
+            if (action === 'delete') {
+              return isAuthor || globalRole === 'ADMIN' || projectRole === 'ADMIN';
+            }
+            return action === 'update' && isAuthor;
+          },
+        };
+      });
+    });
+
+    it("a project ADMIN may delete another user's comment", async () => {
+      mockAccessService.resolveMembership.mockResolvedValue('ADMIN');
+      await expect(service.delete('c1', mockUserPrincipal)).resolves.toBeUndefined();
+      expect(mockCommentRepo.delete).toHaveBeenCalledWith('c1');
+    });
+
+    it("a project DEVELOPER may not delete another user's comment", async () => {
+      mockAccessService.resolveMembership.mockResolvedValue('DEVELOPER');
+      await expect(service.delete('c1', mockUserPrincipal)).rejects.toBeInstanceOf(
+        ForbiddenAppException
+      );
+      expect(mockCommentRepo.delete).not.toHaveBeenCalled();
+    });
+
+    it("a project ADMIN may not edit another user's comment", async () => {
+      mockAccessService.resolveMembership.mockResolvedValue('ADMIN');
+      await expect(
+        service.update('c1', { body: 'x' }, mockUserPrincipal)
+      ).rejects.toBeInstanceOf(ForbiddenAppException);
+    });
+
+    it('a non-member still gets 404, not 403', async () => {
+      mockAccessService.resolveMembership.mockRejectedValue(
+        new ForbiddenAppException({}, 'projects')
+      );
+      await expect(service.delete('c1', mockUserPrincipal)).rejects.toBeInstanceOf(
+        NotFoundAppException
+      );
     });
   });
 });
