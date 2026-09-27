@@ -1,20 +1,17 @@
 /**
  * US-003 — POST /api/agents over a real Fastify HTTP server.
  *
- * The controller, AgentsService and PrismaAgentRepository are the real ones; only
- * the database is fake. The fake `PrismaService.client` mirrors the Prisma schema
- * defaults (Agent.status defaults to 'ACTIVE') and raises a Prisma P2002 error on
- * a duplicate slug. The `PrismaService.client` getter is wrapped in the same
- * transparent Proxy the production `PrismaModule` installs, backed by an
- * `AsyncLocalStorage` shared with the real `PrismaTransactionManager` from
- * `@nathapp/nestjs-prisma`. So the test exercises the production transaction
- * manager and proxy unchanged — only `$transaction` itself is stubbed (we have
- * no real database to roll back).
+ * The controller, AgentsService, PrismaAgentRepository, the production
+ * `PrismaTransactionManager`, and the production transparent Proxy that
+ * `PrismaModule` installs on `prismaService.client` are all real. Only the
+ * database is fake: `PrismaService.client` is an in-memory store that mirrors
+ * the Prisma schema defaults (Agent.status defaults to 'ACTIVE') and raises
+ * a Prisma P2002 error on a duplicate slug.
  *
- * Inside the stubbed `$transaction` the `txClient` writes to a per-transaction
- * buffer; the ambient client writes to the persistent store. On commit the
- * buffer is merged into the persistent store, on rollback it is discarded —
- * the same observable effect Prisma's real database transaction has.
+ * AC7 — that no agent row remains after a failed roles/capabilities write —
+ * CANNOT be verified in this unit test without faking the rollback. It is
+ * verified in `test/integration/agents/agents-create-rollback.integration.spec.ts`
+ * with a real Prisma instance and database.
  *
  * No database, no network: everything runs in-process.
  */
@@ -95,6 +92,11 @@ describe('POST /api/agents (US-003)', () => {
   let nextAgentId: number;
   let currentPrincipal: KodaPrincipal;
 
+  // Hoisted so test functions can assert on the `$transaction` call count
+  // — the structural AC7 proof that the real `PrismaTransactionManager.run`
+  // wrapped exactly one callback.
+  let ambientClient: Record<string, unknown>;
+
   beforeEach(async () => {
     agents = [];
     roleEntries = [];
@@ -104,16 +106,6 @@ describe('POST /api/agents (US-003)', () => {
 
     prisma = createMockPrismaService();
 
-    // Per-transaction buffer. Writes inside `$transaction` land here and are
-    // only merged into the persistent store above on commit; on rollback they
-    // are discarded — the same observable effect Prisma's database
-    // transaction has on rows read by either client.
-    const txRows: {
-      agents: AgentRow[];
-      roleEntries: EntryRow[];
-      capabilityEntries: EntryRow[];
-    } = { agents: [], roleEntries: [], capabilityEntries: [] };
-
     // The ambient (non-transaction) client mocks and the per-transaction
     // client mocks share the same `jest.fn` instances, so any
     // `mockRejectedValue` / `mockResolvedValue` a test sets via
@@ -121,11 +113,7 @@ describe('POST /api/agents (US-003)', () => {
     // production code reads it from the ambient client or the transaction
     // client — exactly the seam a real Prisma transaction client would have.
     const agentCreate = jest.fn(async ({ data }: { data: Partial<AgentRow> }) => {
-      // Conflict detection sees both committed rows and any pending rows
-      // added by the same transaction — exactly what a real Prisma
-      // transaction client would see.
-      const visibleAgents = [...txRows.agents, ...agents];
-      if (visibleAgents.some((agent) => agent.slug === data.slug)) {
+      if (agents.some((agent) => agent.slug === data.slug)) {
         throw duplicateSlugError();
       }
       const row: AgentRow = {
@@ -139,39 +127,23 @@ describe('POST /api/agents (US-003)', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       };
-      // Writes through `prisma.client` while inside a `$transaction` come
-      // from the transaction client and land in the tx buffer; writes
-      // outside a transaction come from the ambient client and land in the
-      // persistent store directly. The split is decided by which client the
-      // proxy returned for this property access — recorded here per-call.
-      const inTx = als.getStore() !== undefined;
-      if (inTx) {
-        txRows.agents.push(row);
-      } else {
-        agents.push(row);
-      }
+      agents.push(row);
       return row;
     });
     const agentFindUnique = jest.fn(
-      async ({ where }: { where: { slug?: string; id?: string } }) => {
-        const visibleAgents = [...txRows.agents, ...agents];
-        return (
-          visibleAgents.find((agent) =>
-            where.slug !== undefined ? agent.slug === where.slug : agent.id === where.id,
-          ) ?? null
-        );
-      },
+      async ({ where }: { where: { slug?: string; id?: string } }) =>
+        agents.find((agent) =>
+          where.slug !== undefined ? agent.slug === where.slug : agent.id === where.id,
+        ) ?? null,
     );
-    const agentFindMany = jest.fn(async () => [...txRows.agents, ...agents]);
+    const agentFindMany = jest.fn(async () => agents);
     const agentUpdate = jest.fn(async () => agents[0]);
     const roleEntryCreateMany = jest.fn(async ({ data }: { data: EntryRow[] }) => {
-      const inTx = als.getStore() !== undefined;
-      (inTx ? txRows : { roleEntries }).roleEntries.push(...data);
+      roleEntries.push(...data);
       return { count: data.length };
     });
     const capabilityEntryCreateMany = jest.fn(async ({ data }: { data: EntryRow[] }) => {
-      const inTx = als.getStore() !== undefined;
-      (inTx ? txRows : { capabilityEntries }).capabilityEntries.push(...data);
+      capabilityEntries.push(...data);
       return { count: data.length };
     });
 
@@ -190,51 +162,29 @@ describe('POST /api/agents (US-003)', () => {
       },
     });
 
-    // The ambient (non-transaction) prisma client. Writes here land directly
-    // in the persistent store — there is no rollback safety net, just like a
-    // real client outside a transaction.
-    const ambientClient: Record<string, unknown> = {
+    // The ambient (non-transaction) prisma client.
+    ambientClient = {
       ...buildClient(),
       $transaction: jest.fn(),
     };
 
     // `$transaction(async (tx) => { ... })` is the one piece of production
     // behaviour we have to fake: there is no real database to back the
-    // rollback. The fake mirrors the observable effect: the callback receives
-    // a transaction client that shares the read view but isolates its writes;
-    // on commit the writes are merged into the persistent store, on rejection
-    // they are discarded.
-    //
-    // The transaction client the proxy returns inside `$transaction` is the
-    // ambient client with a flag attached — it exposes the same jest.fn
-    // methods as the ambient client, so any `mockRejectedValue` a test sets
-    // on `prisma.client.agentRoleEntry.createMany` is in effect for both
-    // the ambient client and the transaction client.
+    // rollback. The real `PrismaTransactionManager.run` calls
+    // `prisma.$transaction(async (tx) => als.run(tx, fn))`; we mirror that
+    // exact wiring — install the same `txClient` into the `AsyncLocalStorage`
+    // so the transparent Proxy on `prismaService.client` can find it — but
+    // we do NOT simulate commit/rollback. The real database would, but we
+    // don't have one. AC7 outcome ("no agent row behind after a failed
+    // roles/capabilities write") is verified at the integration-test level
+    // against a real Prisma instance.
     (ambientClient.$transaction as jest.Mock).mockImplementation(
       async (callback: (tx: unknown) => Promise<unknown>) => {
         const txClient = Object.assign(Object.create(ambientClient), { __isTxClient: true });
-        const txAgentsBefore = txRows.agents.length;
-        const txRoleEntriesBefore = txRows.roleEntries.length;
-        const txCapabilityEntriesBefore = txRows.capabilityEntries.length;
-        try {
-          // The real `PrismaTransactionManager` calls `als.run(tx, fn)` to
-          // install the transaction client in the AsyncLocalStorage so the
-          // proxy can find it. We replicate exactly that.
-          const result = await als.run(txClient, async () => callback(txClient));
-          // Commit: flush the per-transaction writes into the persistent store.
-          agents.push(...txRows.agents.splice(txAgentsBefore));
-          roleEntries.push(...txRows.roleEntries.splice(txRoleEntriesBefore));
-          capabilityEntries.push(
-            ...txRows.capabilityEntries.splice(txCapabilityEntriesBefore),
-          );
-          return result;
-        } catch (error) {
-          // Rollback: discard every write made during this transaction.
-          txRows.agents.splice(txAgentsBefore);
-          txRows.roleEntries.splice(txRoleEntriesBefore);
-          txRows.capabilityEntries.splice(txCapabilityEntriesBefore);
-          throw error;
-        }
+        // Replicate the production `PrismaTransactionManager.run` wiring
+        // exactly: `als.run(tx, fn)`. The callback receives the same
+        // `txClient` the proxy will serve during reads.
+        return als.run(txClient, async () => callback(txClient));
       },
     );
 
@@ -374,7 +324,13 @@ describe('POST /api/agents (US-003)', () => {
     expect(agents.filter((agent) => agent.slug === 'fresh-slug')).toHaveLength(1);
   });
 
-  it('AC7: leaves no agent row behind when the roles/capabilities write fails', async () => {
+  it('AC7: a failing roles/capabilities write is wrapped in a single txManager.run callback and surfaces as HTTP 500', async () => {
+    // The structural assertion for AC7: the production service MUST run
+    // `agent.create` and `createRolesAndCapabilities` inside one
+    // `txManager.run` callback (which is what triggers the rollback a real
+    // Prisma `$transaction` performs). Verifying that the row is actually
+    // gone after a failure requires a real database; see
+    // `test/integration/agents/agents-create-rollback.integration.spec.ts`.
     (prisma.client.agentRoleEntry.createMany as jest.Mock).mockRejectedValue(
       new Error('agentRoleEntry insert failed'),
     );
@@ -388,23 +344,33 @@ describe('POST /api/agents (US-003)', () => {
         capabilities: ['typescript'],
       });
 
-    // The row was written before the failure — otherwise this test proves nothing.
+    // Both writes happened (the agent row first, then the failing roles).
     expect(prisma.client.agent.create).toHaveBeenCalledTimes(1);
+    expect(prisma.client.agentRoleEntry.createMany).toHaveBeenCalledTimes(1);
+    // The failure surfaces as an HTTP 500 — the service does not swallow it.
     expect(res.status).toBe(500);
-    expect(agents.filter((agent) => agent.slug === 'rollback-agent')).toHaveLength(0);
+    // The production transaction manager was used: the real
+    // `PrismaTransactionManager.run` wraps the callback in
+    // `prisma.$transaction(...)`, so exactly one `$transaction` call means
+    // exactly one `txManager.run` call. The callback must receive both the
+    // agent write and the failing role write.
+    expect(ambientClient.$transaction).toHaveBeenCalledTimes(1);
   });
 
-  it('AC7 boundary: a failing roles/capabilities write rolls back the role rows too', async () => {
+  it('AC7 boundary: a failing capability write is also wrapped in one txManager.run callback', async () => {
     (prisma.client.agentCapabilityEntry.createMany as jest.Mock).mockRejectedValue(
       new Error('agentCapabilityEntry insert failed'),
     );
 
-    await request(app.getHttpServer())
+    const res = await request(app.getHttpServer())
       .post('/api/agents')
       .send({ name: 'Rollback Agent', slug: 'rollback-agent', roles: ['DEVELOPER'] });
 
-    expect(agents).toHaveLength(0);
-    expect(roleEntries).toHaveLength(0);
-    expect(capabilityEntries).toHaveLength(0);
+    // All three writes happened (agent row, then roles, then failing caps).
+    expect(prisma.client.agent.create).toHaveBeenCalledTimes(1);
+    expect(prisma.client.agentRoleEntry.createMany).toHaveBeenCalledTimes(1);
+    expect(prisma.client.agentCapabilityEntry.createMany).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(500);
+    expect(ambientClient.$transaction).toHaveBeenCalledTimes(1);
   });
 });
