@@ -174,17 +174,12 @@ Workdir: `apps/api`. Depends on: none.
 Whitelists create fields, validates the slug, maps a duplicate slug to 409, makes create atomic, and
 restricts `pickup`.
 
-### US-004 — Project LOWs
+### US-004 — Project and auth LOWs
 
 Workdir: `apps/api`. Depends on: none.
 
-409 on duplicate project slug/key, 404 on updating a soft-deleted project, and the three missing i18n keys.
-
-### US-006 — Auth secret and domain-writer role hardening
-
-Workdir: `apps/api`. Depends on: none.
-
-The JWT secret refinement and `KodaDomainWriter` role derivation.
+409 on duplicate project slug/key, 404 on updating a soft-deleted project, the three missing i18n keys,
+the JWT secret refinement, and `KodaDomainWriter` role derivation.
 
 ### US-005 — Remove duplicated membership and agent DTO code
 
@@ -222,14 +217,10 @@ Verification: build/static gate `bun run --cwd apps/api type-check` and `bun run
 
 **US-004**
 - `apps/api/src/projects/projects.service.ts`
-- `apps/api/src/projects/dto/create-project.dto.ts`
-- `apps/api/src/i18n/en/projects.json`
-- `apps/api/src/i18n/en/common.json`
-
-**US-006**
 - `apps/api/src/config/env.validation.ts`
 - `apps/api/src/koda-domain-writer/koda-domain-writer.service.ts`
 - `apps/api/src/koda-domain-writer/prisma-koda-domain-writer.repository.ts`
+- `apps/api/src/i18n/en/common.json`
 
 **US-005**
 - `apps/api/src/rag/rag.controller.ts`
@@ -268,8 +259,6 @@ Verification: build/static gate `bun run --cwd apps/api type-check` and `bun run
 
 **US-004**
 - `apps/api/src/projects/projects.service.spec.ts` — assertions that a duplicate slug or key throws `ValidationAppException` are replaced by the invariant that it throws `ConflictAppException` (409).
-
-**US-006**
 - `apps/api/src/koda-domain-writer/koda-domain-writer.service.spec.ts` — assertions that a user actor's role is read from `data.actorRole` are replaced by the invariant that it is read from `ProjectMember`.
 
 **US-005**
@@ -294,10 +283,13 @@ Verification: build/static gate `bun run --cwd apps/api type-check` and `bun run
 6. [unit] `ProjectMembershipGuard.canActivate` with no `params.slug` returns `true` without calling `ProjectAccessService`.
 7. [integration] `GET /api/projects/:slug/tickets` by a DEVELOPER user who is not a member returns 403.
 8. [integration] `POST /api/projects/:slug/tickets/:ref/assign` by a non-member DEVELOPER returns 403.
-9. [integration] `POST /api/projects/:slug/kb/documents` by a member whose project role is VIEWER returns 403.
-10. [integration] `POST /api/projects/:slug/kb/documents` by a member whose project role is DEVELOPER returns a 2xx status.
-11. [integration] `POST /api/projects/:slug/kb/search` by a member whose project role is VIEWER returns 200.
-12. [unit] `ProjectMembershipGuard.canActivate` on a handler carrying `@ProjectRoles('ADMIN', 'DEVELOPER', 'AGENT')` returns `true` for an agent principal and for a global ADMIN user without calling `ProjectAccessService.findMembershipRole`.
+9. [unit] `TicketsController.assign` called directly with a member principal does not call `ProjectsService.assertProjectMembership` (the guard is the only membership check on the route).
+10. [integration] `GET /api/projects/:slug` by a non-member DEVELOPER returns 403.
+11. [integration] `GET /api/projects/:slug` by a member DEVELOPER returns 200.
+12. [integration] `POST /api/projects/:slug/kb/documents` by a member whose project role is VIEWER returns 403.
+13. [integration] `POST /api/projects/:slug/kb/documents` by a member whose project role is DEVELOPER returns a 2xx status.
+14. [integration] `POST /api/projects/:slug/kb/search` by a member whose project role is VIEWER returns 200.
+15. [unit] `ProjectMembershipGuard.canActivate` on a handler carrying `@ProjectRoles('ADMIN', 'DEVELOPER', 'AGENT')` returns `true` for an agent principal and for a global ADMIN user without calling `ProjectAccessService.findMembershipRole`.
 
 ### US-002
 
@@ -334,15 +326,11 @@ Verification: build/static gate `bun run --cwd apps/api type-check` and `bun run
 2. [integration] `POST /api/projects` with a key that already exists returns 409.
 3. [integration] `PATCH /api/projects/:slug` for a soft-deleted project returns 404.
 4. [unit] Translating `projects.slugInvalid`, `projects.keyInvalid` and `common.validation.isIn` in both `en` and `zh` returns a string different from the key itself.
-5. [integration] `PATCH /api/projects/:slug` with a slug or key already used by another project returns 409.
-
-### US-006
-
-1. [unit] Validating an env object where `JWT_REFRESH_SECRET` equals `JWT_SECRET` throws a validation error naming `JWT_REFRESH_SECRET`.
-2. [unit] Validating an env object with distinct `JWT_SECRET` and `JWT_REFRESH_SECRET` passes.
-3. [unit] `KodaDomainWriter.writeTicketEvent` for a user actor whose payload carries `actorRole: 'ADMIN'` but who has no `ProjectMember` row and a non-ADMIN global role throws `ForbiddenAppException`.
-4. [unit] `KodaDomainWriter.writeTicketEvent` for a user actor with `ProjectMember.role` `DEVELOPER` and no payload role succeeds.
-5. [unit] `KodaDomainWriter.writeTicketEvent` for a user actor whose global role is ADMIN and who has no membership row succeeds.
+5. [unit] Validating an env object where `JWT_REFRESH_SECRET` equals `JWT_SECRET` throws a validation error naming `JWT_REFRESH_SECRET`.
+6. [unit] Validating an env object with distinct `JWT_SECRET` and `JWT_REFRESH_SECRET` passes.
+7. [unit] `KodaDomainWriter.writeTicketEvent` for a user actor whose payload carries `actorRole: 'ADMIN'` but who has no `ProjectMember` row and a non-ADMIN global role throws `ForbiddenAppException`.
+8. [unit] `KodaDomainWriter.writeTicketEvent` for a user actor with `ProjectMember.role` `DEVELOPER` and no payload role succeeds.
+9. [unit] `KodaDomainWriter.writeTicketEvent` for a user actor whose global role is ADMIN and who has no membership row succeeds.
 
 ### US-005
 
