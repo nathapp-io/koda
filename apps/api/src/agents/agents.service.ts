@@ -1,5 +1,5 @@
 import { Injectable, Optional, Inject } from '@nestjs/common';
-import { IsString, IsOptional, IsNumber, IsArray, IsIn, MinLength, Matches } from 'class-validator';
+import { IsString, IsArray, IsIn } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { NotFoundAppException, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
@@ -14,57 +14,8 @@ import { PrismaAgentRepository } from './prisma-agent.repository';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
 import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { isUniqueViolation } from '../common/utils/prisma-errors';
-
-export class CreateAgentDto {
-  @ApiProperty({ example: 'Subrina Coder' })
-  @IsString()
-  @MinLength(1)
-  name!: string;
-
-  @ApiProperty({ example: 'subrina-coder', required: false })
-  @IsOptional()
-  @IsString()
-  @MinLength(1)
-  @Matches(/^[a-z0-9]+(-[a-z0-9]+)*$/, {
-    message: '$t(common.validation.slugInvalid)',
-  })
-  slug?: string;
-
-  @ApiProperty({ required: false, minimum: 1 })
-  @IsOptional()
-  @IsNumber()
-  maxConcurrentTickets?: number;
-
-  @ApiProperty({ example: ['DEVELOPER', 'REVIEWER'] })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  @IsIn([...AGENT_ROLES], { each: true })
-  roles?: string[];
-
-  @ApiProperty({ required: false, example: ['typescript', 'nestjs'] })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  capabilities?: string[];
-}
-
-export class UpdateAgentDto {
-  @ApiProperty({ required: false })
-  @IsOptional()
-  @IsString()
-  name?: string;
-
-  @ApiProperty({ required: false })
-  @IsOptional()
-  @IsString()
-  status?: string;
-
-  @ApiProperty({ required: false })
-  @IsOptional()
-  @IsNumber()
-  maxConcurrentTickets?: number;
-}
+import { CreateAgentDto } from './dto/create-agent.dto';
+import { UpdateAgentDto } from './dto/update-agent.dto';
 
 export class UpdateRolesDto {
   @ApiProperty({ example: ['DEVELOPER', 'REVIEWER'] })

@@ -1,14 +1,16 @@
-import { Controller, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
+import { Controller, HttpCode, HttpStatus, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { ForbiddenAppException, JsonResponse } from '@nathapp/nestjs-common';
+import { JsonResponse } from '@nathapp/nestjs-common';
 import { Principal } from '@nathapp/nestjs-auth';
 import { EvaluationService } from './evaluation.service';
 import { ProjectAccessService } from '../projects/project-access.service';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
+import { ProjectMembershipGuard } from '../projects/project-membership.guard';
 
 @ApiTags('knowledge-base')
 @ApiBearerAuth()
 @Controller('projects/:slug/kb')
+@UseGuards(ProjectMembershipGuard)
 export class RetrievalController {
   constructor(
     private readonly evaluationService: EvaluationService,
@@ -21,18 +23,6 @@ export class RetrievalController {
     return { id };
   }
 
-  private async checkProjectMembership(
-    projectId: string,
-    principal: KodaPrincipal | null,
-  ): Promise<void> {
-    if (!principal) {
-      throw new ForbiddenAppException({}, 'projects');
-    }
-    // assertProjectMembership throws ForbiddenAppException when access is denied;
-    // agent and ADMIN-user bypass semantics are preserved inside the shared service.
-    await this.projectAccess.assertProjectMembership(projectId, principal);
-  }
-
   @Post('evaluate/retrieval')
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
@@ -42,10 +32,10 @@ export class RetrievalController {
   @ApiResponse({ status: 403, description: 'Forbidden - no project role' })
   async evaluateRetrieval(
     @Param('slug') slug: string,
-    @Principal() principal: KodaPrincipal,
+    @Principal() _principal: KodaPrincipal,
   ) {
+    // Membership decision is made by ProjectMembershipGuard at class level.
     const project = await this.resolveProject(slug);
-    await this.checkProjectMembership(project.id, principal);
     const { loadEvalQueries } = await import('./load-queries');
     const queries = loadEvalQueries();
     const projectQueries = queries.filter((q) => q.projectId === project.id);

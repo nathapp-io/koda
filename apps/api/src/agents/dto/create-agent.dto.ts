@@ -1,11 +1,11 @@
-import { IsString, IsNotEmpty, Matches } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber, IsIn, Min, Matches } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { AGENT_ROLES } from '../../common/enums';
 
 /**
- * US-003 — canonical CreateAgentDto. The slug must be kebab-case lowercase
+ * US-005 — canonical CreateAgentDto. The slug must be kebab-case lowercase
  * alphanumeric: `^[a-z0-9]+(-[a-z0-9]+)*$`. Roles and capabilities are
- * optional here and become required after US-005 wires this DTO into the HTTP
- * route.
+ * optional here.
  */
 export class CreateAgentDto {
   @ApiProperty({ description: 'Agent name' })
@@ -24,4 +24,23 @@ export class CreateAgentDto {
     message: '$t(common.validation.slugInvalid)',
   })
   slug!: string;
+
+  @ApiProperty({ description: 'Maximum concurrent tickets the agent can handle', required: false, minimum: 1 })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  maxConcurrentTickets?: number;
+
+  @ApiProperty({ description: 'Agent roles (e.g. DEVELOPER, REVIEWER)', example: ['DEVELOPER', 'REVIEWER'], required: false })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @IsIn([...AGENT_ROLES], { each: true })
+  roles?: string[];
+
+  @ApiProperty({ description: 'Agent capabilities (e.g. typescript, nestjs)', example: ['typescript', 'nestjs'], required: false })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  capabilities?: string[];
 }

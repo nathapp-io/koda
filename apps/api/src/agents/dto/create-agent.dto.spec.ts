@@ -1,15 +1,13 @@
 /**
- * US-003 — slug format validation on both CreateAgentDto classes.
+ * US-005 — slug format validation on the canonical CreateAgentDto.
  *
- * Two DTOs carry the same name: the service-local one exported by
- * `agents.service.ts` (currently bound to POST /api/agents) and the canonical
- * one in this folder (`agents/dto/create-agent.dto.ts`, canonical from US-005).
- * Both must reject malformed slugs and accept kebab-case ones.
+ * The service-local CreateAgentDto in `agents.service.ts` was removed in US-005.
+ * All callers now import the canonical DTO from this folder. This file tests
+ * the slug format validation and optional fields of the canonical DTO.
  */
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
-import { CreateAgentDto as ServiceLocalCreateAgentDto } from '../agents.service';
-import { CreateAgentDto as CanonicalCreateAgentDto } from './create-agent.dto';
+import { CreateAgentDto } from './create-agent.dto';
 
 async function errorProperties(
   dtoClass: new () => object,
@@ -19,10 +17,10 @@ async function errorProperties(
   return errors.map((error) => error.property);
 }
 
-describe('US-003 CreateAgentDto slug validation', () => {
+describe('CreateAgentDto slug validation (US-005)', () => {
   describe('canonical CreateAgentDto (agents/dto/create-agent.dto.ts)', () => {
-    it("AC3: rejects slug 'Bad Slug!'", async () => {
-      const properties = await errorProperties(CanonicalCreateAgentDto, {
+    it("rejects slug 'Bad Slug!'", async () => {
+      const properties = await errorProperties(CreateAgentDto, {
         name: 'Bad Agent',
         slug: 'Bad Slug!',
       });
@@ -30,8 +28,8 @@ describe('US-003 CreateAgentDto slug validation', () => {
       expect(properties).toContain('slug');
     });
 
-    it("AC4: accepts slug 'good-slug-1'", async () => {
-      const properties = await errorProperties(CanonicalCreateAgentDto, {
+    it("accepts slug 'good-slug-1'", async () => {
+      const properties = await errorProperties(CreateAgentDto, {
         name: 'Good Agent',
         slug: 'good-slug-1',
       });
@@ -39,8 +37,8 @@ describe('US-003 CreateAgentDto slug validation', () => {
       expect(properties).toEqual([]);
     });
 
-    it('AC4 boundary: roles and capabilities stay optional on the canonical DTO', async () => {
-      const properties = await errorProperties(CanonicalCreateAgentDto, {
+    it('roles and capabilities stay optional on the canonical DTO', async () => {
+      const properties = await errorProperties(CreateAgentDto, {
         name: 'Good Agent',
         slug: 'good-slug-1',
         roles: ['DEVELOPER'],
@@ -49,22 +47,10 @@ describe('US-003 CreateAgentDto slug validation', () => {
 
       expect(properties).toEqual([]);
     });
-  });
 
-  describe('service-local CreateAgentDto (exported from agents.service.ts)', () => {
-    it("AC3: rejects slug 'Bad Slug!'", async () => {
-      const properties = await errorProperties(ServiceLocalCreateAgentDto, {
-        name: 'Bad Agent',
-        slug: 'Bad Slug!',
-        roles: ['DEVELOPER'],
-      });
-
-      expect(properties).toContain('slug');
-    });
-
-    it('AC3 boundary: rejects uppercase, underscore and whitespace slug variants', async () => {
+    it('rejects uppercase, underscore and whitespace slug variants', async () => {
       for (const slug of ['Bad-Slug', 'bad_slug', 'bad slug', 'Bad Slug', 'bad-slug!']) {
-        const properties = await errorProperties(ServiceLocalCreateAgentDto, {
+        const properties = await errorProperties(CreateAgentDto, {
           name: 'Bad Agent',
           slug,
           roles: ['DEVELOPER'],
@@ -72,16 +58,6 @@ describe('US-003 CreateAgentDto slug validation', () => {
 
         expect(properties).toContain('slug');
       }
-    });
-
-    it("AC4: accepts slug 'good-slug-1'", async () => {
-      const properties = await errorProperties(ServiceLocalCreateAgentDto, {
-        name: 'Good Agent',
-        slug: 'good-slug-1',
-        roles: ['DEVELOPER'],
-      });
-
-      expect(properties).toEqual([]);
     });
   });
 });

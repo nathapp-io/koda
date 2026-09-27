@@ -8,7 +8,8 @@
  * write rolls the agent row back.
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { AgentsService, CreateAgentDto } from './agents.service';
+import { AgentsService } from './agents.service';
+import { CreateAgentDto } from './dto/create-agent.dto';
 import { PrismaAgentRepository } from './prisma-agent.repository';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
@@ -140,8 +141,8 @@ describe('AgentsService create path (US-003)', () => {
     expect(createArg.apiKeyHash).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  it('AC1 boundary: still derives the slug from the name when no slug is supplied', async () => {
-    await service.generateApiKey({ name: 'Subrina Coder', roles: ['DEVELOPER'] });
+  it('AC1 boundary: uses the provided slug directly', async () => {
+    await service.generateApiKey({ name: 'Subrina Coder', slug: 'subrina-coder', roles: ['DEVELOPER'] });
 
     const createArg = agentRepo.create.mock.calls[0][0];
     expect(createArg.slug).toBe('subrina-coder');

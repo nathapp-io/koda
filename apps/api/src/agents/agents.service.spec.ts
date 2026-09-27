@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { AgentsService, CreateAgentDto as _CreateAgentDto } from './agents.service';
+import { AgentsService } from './agents.service';
 import { PrismaAgentRepository } from './prisma-agent.repository';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';

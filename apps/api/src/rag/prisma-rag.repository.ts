@@ -197,13 +197,4 @@ export class PrismaRagRepository implements IRagRepository {
     });
   }
 
-  async findProjectMembership(
-    projectId: string,
-    userId: string,
-  ): Promise<{ role: string } | null> {
-    return this.prisma.client.projectMember.findUnique({
-      where: { projectId_userId: { projectId, userId } },
-      select: { role: true },
-    });
-  }
 }
