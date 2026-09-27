@@ -5,6 +5,7 @@ import { UpdateProjectDto } from './dto/update-project.dto';
 import { ProjectResponseDto } from './dto/project-response.dto';
 import { PrismaProjectRepository } from './prisma-project.repository';
 import { ProjectAccessService } from './project-access.service';
+import { ProjectDomain } from './domain/project.domain';
 import { RagService } from '../rag/rag.service';
 import { HybridRetrieverService } from '../rag/hybrid-retriever.service';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
@@ -67,6 +68,25 @@ export class ProjectsService {
 
   async findAll() {
     return ProjectResponseDto.fromMany(await this.projectRepo.findAll());
+  }
+
+  /**
+   * US-002: list projects scoped to the calling principal.
+   *  - User principals get only projects where they hold a `ProjectMember` row.
+   *  - Global ADMIN user principals and any agent principal see every
+   *    non-deleted project.
+   *  - Soft-deleted projects are never returned.
+   *
+   * Returns domain objects; callers wrap them in the HTTP DTO at the boundary.
+   */
+  async findAllForPrincipal(principal: KodaPrincipal): Promise<ProjectDomain[]> {
+    if (
+      principal.actorType === 'agent' ||
+      (principal.actorType === 'user' && principal.role === 'ADMIN')
+    ) {
+      return this.projectRepo.findAll();
+    }
+    return this.projectRepo.findAllForUser(principal.id);
   }
 
   async findBySlug(slug: string) {

@@ -14,6 +14,7 @@ import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { TicketEventService } from '../events/ticket-event.service';
 import { buildTicketEventOutboxPayload } from '../events/outbox-envelope.util';
+import { ProjectAccessService } from '../projects/project-access.service';
 
 @Injectable()
 export class CommentsService {
@@ -23,6 +24,7 @@ export class CommentsService {
     @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     private readonly ticketEventService: TicketEventService,
     private readonly outbox: NathappOutboxService,
+    private readonly access: ProjectAccessService,
   ) {}
 
   private async resolveTicketByRef(projectSlug: string, ticketRef: string) {
@@ -41,6 +43,41 @@ export class CommentsService {
     }
 
     return { project, ticket };
+  }
+
+  /**
+   * US-002: resolve a comment to its owning project so the slug-less mutation
+   * paths can gate by membership before the CASL check. Returns the resolved
+   * project id (throwing `NotFoundAppException` if the comment, ticket, or
+   * project is missing/soft-deleted).
+   */
+  private async assertCommentProjectMembership(
+    commentId: string,
+    principal: KodaPrincipal,
+  ): Promise<{ projectId: string }> {
+    const ownership = await this.commentRepo.findOwningProjectAndTicket(commentId);
+
+    if (!ownership || ownership.ticket.deletedAt || ownership.project.deletedAt) {
+      throw new NotFoundAppException({}, 'comments');
+    }
+
+    // Agent principals are cross-project: they skip the membership lookup and
+    // fall through to the CASL check (AC3). Global ADMIN users are admitted by
+    // ProjectAccessService without a ProjectMember row (AC5).
+    if (principal.actorType === 'user') {
+      try {
+        await this.access.assertProjectMembership(ownership.project.id, principal);
+      } catch (err) {
+        if (err instanceof ForbiddenAppException) {
+          // Hide the comment's existence from non-members, matching the
+          // slugged routes that 404 an unknown slug.
+          throw new NotFoundAppException({}, 'comments');
+        }
+        throw err;
+      }
+    }
+
+    return { projectId: ownership.project.id };
   }
 
   /**
@@ -126,6 +163,12 @@ export class CommentsService {
     updateCommentDto: UpdateCommentDto,
     principal: KodaPrincipal,
   ) {
+    // US-002: resolve comment → ticket → project and gate by membership before
+    // the CASL check. A non-member user gets 404 (their membership lookup is
+    // translated from ForbiddenAppException); agent principals skip the
+    // membership resolution entirely.
+    await this.assertCommentProjectMembership(commentId, principal);
+
     // Find the comment via repository
     const comment = await this.commentRepo.findById(commentId);
 
@@ -150,6 +193,11 @@ export class CommentsService {
     commentId: string,
     principal: KodaPrincipal,
   ) {
+    // US-002: same membership gate as `update`. Global ADMINs and agents
+    // proceed; non-member users get 404 (not 403) so the comment's existence
+    // stays hidden.
+    await this.assertCommentProjectMembership(commentId, principal);
+
     // Find the comment via repository
     const comment = await this.commentRepo.findById(commentId);
 

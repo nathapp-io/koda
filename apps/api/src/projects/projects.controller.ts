@@ -14,6 +14,7 @@ import {
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
+import { ProjectResponseDto } from './dto/project-response.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import {
   ApiTags,
@@ -61,11 +62,11 @@ export class ProjectsController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'List all projects (excluding soft-deleted)' })
+  @ApiOperation({ summary: 'List projects visible to the calling principal (excluding soft-deleted)' })
   @ApiResponse({ status: 200, description: 'List of projects' })
-  async findAll() {
-    const data = await this.projectsService.findAll();
-    return JsonResponse.Ok(data);
+  async findAll(@Principal() principal: KodaPrincipal) {
+    const data = await this.projectsService.findAllForPrincipal(principal);
+    return JsonResponse.Ok(ProjectResponseDto.fromMany(data));
   }
 
   @Get(':slug')

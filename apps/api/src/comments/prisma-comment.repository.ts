@@ -88,4 +88,41 @@ export class PrismaCommentRepository extends AbstractPrismaRepository<CommentDom
       select: { id: true, deletedAt: true },
     });
   }
+
+  /**
+   * US-002: resolve a comment to its owning ticket and project in a single
+   * query, so slug-less mutations can gate by project membership without
+   * exposing a route's `slug`. Returns null when the comment does not exist.
+   */
+  async findOwningProjectAndTicket(
+    commentId: string,
+  ): Promise<{
+    project: { id: string; slug: string; key: string; deletedAt: Date | null };
+    ticket: { id: string; deletedAt: Date | null };
+  } | null> {
+    const row = await this.prisma.client.comment.findUnique({
+      where: { id: commentId },
+      select: {
+        ticket: {
+          select: {
+            id: true,
+            deletedAt: true,
+            project: {
+              select: { id: true, slug: true, key: true, deletedAt: true },
+            },
+          },
+        },
+      },
+    });
+    if (!row) return null;
+    return {
+      project: {
+        id: row.ticket.project.id,
+        slug: row.ticket.project.slug,
+        key: row.ticket.project.key,
+        deletedAt: row.ticket.project.deletedAt,
+      },
+      ticket: { id: row.ticket.id, deletedAt: row.ticket.deletedAt },
+    };
+  }
 }

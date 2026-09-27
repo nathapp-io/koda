@@ -110,9 +110,9 @@ export class CommentsController {
   }
 
   @Delete('comments/:id')
-  @HttpCode(200)
+  @HttpCode(204)
   @ApiOperation({ summary: 'Delete a comment' })
-  @ApiResponse({ status: 200, description: 'Comment deleted' })
+  @ApiResponse({ status: 204, description: 'Comment deleted' })
   @ApiResponse({ status: 403, description: 'Not authorized to delete this comment' })
   @ApiResponse({ status: 404, description: 'Comment not found' })
   @RequiredPermission([CaslPermissionAction.DELETE, 'Comment'])
@@ -121,6 +121,5 @@ export class CommentsController {
     @Principal() principal: KodaPrincipal,
   ) {
     await this.delete(id, principal);
-    return JsonResponse.Ok(null);
   }
 }
