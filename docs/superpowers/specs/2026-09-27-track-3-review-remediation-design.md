@@ -190,8 +190,10 @@ ticket transition, assign, update and delete, and all label management. #143 wai
 `UserPrincipal.projectRole` (`auth/principal/koda-principal.types.ts:14`) is declared but never set anywhere in
 `apps/api/src`, so the factory's `projectRole === 'DEVELOPER'` branch (line 60, `READ CodeIntel`) is dead.
 
-**Why the check has to move.** `@RequiredPermission` is evaluated inside the global auth guard, before any
-route guard, with `caslAbilityFactory.createForUser(req.user)` and no request context (nestjs-auth 3.3.0
+**Why the check has to move.** `@RequiredPermission` is evaluated by the global `PermissionAuthGuard`, which
+`useAppGlobalGuards()` registers right after `CombinedAuthGuard`. Nest runs global guards before any
+controller or method `@UseGuards`, so the check happens before `ProjectMembershipGuard`. It calls
+`caslAbilityFactory.createForUser(req.user)` with no request context (nestjs-auth 3.3.0
 `permission/permission.provider.js:70`). It cannot see the project, so the project role must be applied after
 `ProjectMembershipGuard` has resolved it.
 
@@ -211,7 +213,9 @@ route guard, with `caslAbilityFactory.createForUser(req.user)` and no request co
 - Service-level CASL calls (`TicketTransitionsService.assertTransitionPermission`, `CommentsService`
   update/delete, the PATCH status delegation) receive the principal enriched with `projectRole`. The slug-less
   `comments/:id` routes already resolve comment → ticket → project in `CommentsService` (#143); that lookup
-  returns the membership role too, so no extra query is added.
+  returns the membership role too, so no extra query is added. These are the only `createForUser` / `.can(`
+  call sites in `apps/api/src` (verified at `c3458033`), so labels, webhooks and VCS paths need no change beyond
+  the route decorators.
 - The role comes only from the `ProjectMember` row of the project being accessed, never from the JWT, the
   request body, or a cached global value.
 
