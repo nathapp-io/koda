@@ -8,6 +8,7 @@ import { WebhookOutboxSubscriber } from './webhook-outbox.subscriber';
 import { PrismaWebhookRepository } from './prisma-webhook.repository';
 import { WEBHOOK_REPOSITORY } from './domain/webhook.domain';
 import { DnsResolver } from './outbound/dns-resolver';
+import { OutboundHttpClient } from './outbound/outbound-http-client';
 import { OutboundUrlGuard } from './outbound/outbound-url-guard';
 import { OutboxModule } from '../outbox/outbox.module';
 
@@ -23,6 +24,7 @@ import { OutboxModule } from '../outbox/outbox.module';
     WebhookOutboxSubscriber,
     DnsResolver,
     OutboundUrlGuard,
+    OutboundHttpClient,
   ],
   exports: [WebhookService, WebhookDispatcherService, WebhookDeliveryHandler],
 })
