@@ -113,6 +113,32 @@ export class TicketTransitionsService {
     });
   }
 
+  /** COMMENT_ADDED for a comment written inside a transition transaction. */
+  private async recordCommentAddedEvent(
+    projectId: string,
+    ticketId: string,
+    commentId: string,
+    principal: KodaPrincipal,
+  ): Promise<void> {
+    if (!this.ticketEventService || !this.outboxService) return;
+    const actorType = isUserPrincipal(principal) ? 'user' : 'agent';
+    const data = { commentId };
+    const event = await this.ticketEventService.create({
+      ticketId,
+      projectId,
+      action: 'COMMENT_ADDED',
+      actorId: principal.id,
+      actorType,
+      source: 'internal',
+      data,
+    });
+    await this.outboxService.record({
+      type: 'ticket_event',
+      payload: buildTicketEventOutboxPayload({ event, ticketId, projectId, actorId: principal.id, actorType, data }),
+      metadata: { projectId, eventId: event.id },
+    });
+  }
+
   /**
    * Records the STATUS_CHANGE webhook rows for a transition. Called inside the
    * transition transaction so they commit (or roll back) with it.
@@ -361,14 +387,18 @@ export class TicketTransitionsService {
   }
 
   /**
-   * Transition to CLOSED from any valid status (no comment required)
-   * Bypasses normal transition rules to allow closing from multiple states
+   * Admin override: close from IN_PROGRESS, VERIFIED or VERIFY_FIX with a
+   * required reason, written as a GENERAL comment in the same transaction as
+   * the status change. Authorization (global/project ADMIN) is decided by the
+   * controller from the request's ProjectContext; the normal path to CLOSED
+   * remains verify-fix approve.
    */
   async close(
     projectSlug: string,
     ticketRef: string,
+    reason: string,
     principal: KodaPrincipal,
-  ): Promise<TransitionResultWithoutComment> {
+  ): Promise<TransitionResultWithComment> {
     const project = await this.ticketRepo.findProjectBySlug(projectSlug);
     if (!project || project.deletedAt) {
       throw new NotFoundAppException({}, 'tickets');
@@ -392,8 +422,8 @@ export class TicketTransitionsService {
     const transaction = await this.txManager.run(async () => {
       const actorFields = actorForeignKeys(principal, 'actor');
 
-      // M3: conditional write — the pre-checked status is `from`, so a
-      // concurrent transition makes this update match 0 rows and fail closed.
+      // M3: conditional write first, so a lost race rolls back before any
+      // comment row exists.
       const updatedTicket = await repo.updateTicketStatusIf(ticket.id, ticket.status, TicketStatus.CLOSED);
       if (!updatedTicket) {
         // 409 pattern copied from webhook-replay.guard.ts:148 (ConflictAppException
@@ -401,6 +431,15 @@ export class TicketTransitionsService {
         // so PrismaTransactionManager.run propagates it and rolls back.
         throw new HttpException('Ticket state changed concurrently', HttpStatus.CONFLICT);
       }
+
+      const authorFields = actorForeignKeys(principal, 'authoredBy');
+      const comment = await repo.createComment({
+        ticketId: ticket.id,
+        body: reason,
+        type: CommentType.GENERAL,
+        authorUserId: authorFields.authorUserId,
+        authorAgentId: authorFields.authorAgentId,
+      });
 
       const activity = await repo.createTicketActivity({
         ticketId: ticket.id,
@@ -412,9 +451,11 @@ export class TicketTransitionsService {
 
       await this.recordStatusChangeWebhooks(project.id, project.key, updatedTicket as unknown as TicketDomain, ticket.status, TicketStatus.CLOSED);
       await this.recordStatusChangedEvent(project.id, ticket.id, ticket.status, TicketStatus.CLOSED, principal);
+      await this.recordCommentAddedEvent(project.id, ticket.id, comment.id, principal);
 
       return {
         ticket: updatedTicket as unknown as TransitionTicketShape,
+        comment: comment as unknown as TransitionCommentShape,
         activity: activity as unknown as TransitionActivityShape,
       };
     });

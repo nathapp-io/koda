@@ -3,6 +3,8 @@ import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { TicketStatus, CommentType, ActivityType } from '../../common/enums';
 import { TicketTransitionsService } from './ticket-transitions.service';
 import { AppException, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { TicketEventService } from '../../events/ticket-event.service';
+import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { TICKET_REPOSITORY } from '../domain/ticket.domain';
 import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
@@ -14,6 +16,10 @@ describe('TicketTransitionsService', () => {
   let mockTxManager: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let mockTicketRepo: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let mockTicketEventService: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let mockOutbox: any;
 
   const mockProject = {
     id: 'proj-123',
@@ -132,6 +138,9 @@ describe('TicketTransitionsService', () => {
       updateTicketLink: jest.fn(),
     };
 
+    mockTicketEventService = { create: jest.fn().mockResolvedValue({ id: 'ev-1', createdAt: new Date() }) };
+    mockOutbox = { record: jest.fn().mockResolvedValue(undefined) };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TicketTransitionsService,
@@ -143,6 +152,14 @@ describe('TicketTransitionsService', () => {
         {
           provide: TRANSACTION_MANAGER,
           useValue: mockTxManager,
+        },
+        {
+          provide: TicketEventService,
+          useValue: mockTicketEventService,
+        },
+        {
+          provide: NathappOutboxService,
+          useValue: mockOutbox,
         },
       ],
     }).compile();
@@ -430,31 +447,45 @@ describe('TicketTransitionsService', () => {
     });
   });
 
-  describe('close (any valid → CLOSED)', () => {
-    it('should close ticket from VERIFY_FIX status', async () => {
-      const verifyFixTicket = { ...mockTicket, status: TicketStatus.VERIFY_FIX };
-      const updatedTicket = { ...verifyFixTicket, status: TicketStatus.CLOSED };
-      const closedActivity = { ...mockActivity, fromStatus: TicketStatus.VERIFY_FIX, toStatus: TicketStatus.CLOSED };
+  describe('close (admin override with reason)', () => {
+    const inProgress = { ...mockTicket, status: TicketStatus.IN_PROGRESS };
 
+    beforeEach(() => {
       mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(verifyFixTicket);
-      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(updatedTicket);
-      mockTicketRepo.createTicketActivity.mockResolvedValue(closedActivity);
-
-      const result = await service.close('koda', 'KODA-1', mockUserPrincipal);
-
-      expect(result.ticket.status).toBe(TicketStatus.CLOSED);
-      expect(result.activity.toStatus).toBe(TicketStatus.CLOSED);
-      expect(mockTxManager.run).toHaveBeenCalled();
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(inProgress);
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue({ ...inProgress, status: TicketStatus.CLOSED });
+      mockTicketRepo.createTicketActivity.mockResolvedValue(mockActivity);
+      mockTicketRepo.createComment.mockResolvedValue({ ...mockComment, id: 'c-close', type: CommentType.GENERAL, body: 'duplicate of KODA-2' });
     });
 
-    it('should throw 400 if transition is invalid', async () => {
-      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
-      mockTicketRepo.findTicketByRefRaw.mockResolvedValue(mockTicket); // CREATED status
+    it('writes the reason as a GENERAL comment in the same transaction as the status change', async () => {
+      const result = await service.close('koda', 'KODA-1', 'duplicate of KODA-2', mockUserPrincipal);
+      expect(mockTxManager.run).toHaveBeenCalledTimes(1);
+      expect(mockTicketRepo.createComment).toHaveBeenCalledWith(expect.objectContaining({
+        ticketId: inProgress.id, body: 'duplicate of KODA-2', type: CommentType.GENERAL, authorUserId: 'user-123',
+      }));
+      expect(result.comment.id).toBe('c-close');
+      expect(result.ticket.status).toBe(TicketStatus.CLOSED);
+    });
 
-      await expect(
-        service.close('koda', 'KODA-1', mockUserPrincipal)
-      ).rejects.toThrow(AppException);
+    it('emits COMMENT_ADDED for the reason comment, like any comment', async () => {
+      await service.close('koda', 'KODA-1', 'duplicate of KODA-2', mockUserPrincipal);
+      expect(mockTicketEventService.create).toHaveBeenCalledWith(expect.objectContaining({
+        action: 'COMMENT_ADDED', ticketId: inProgress.id, data: { commentId: 'c-close' },
+      }));
+    });
+
+    it('does not write the comment when the conditional status write returns null (lost update, 409)', async () => {
+      mockTicketRepo.updateTicketStatusIf.mockResolvedValue(null);
+      mockTxManager.run.mockImplementation(async (fn: () => unknown) => fn());
+      await expect(service.close('koda', 'KODA-1', 'reason', mockUserPrincipal)).rejects.toMatchObject({ status: 409 });
+      expect(mockTicketRepo.createComment).not.toHaveBeenCalled();
+    });
+
+    it.each([TicketStatus.CREATED, TicketStatus.CLOSED, TicketStatus.REJECTED])('refuses from %s (400)', async (status) => {
+      mockTicketRepo.findTicketByRefRaw.mockResolvedValue({ ...mockTicket, status });
+      await expect(service.close('koda', 'KODA-1', 'reason', mockUserPrincipal)).rejects.toBeInstanceOf(AppException);
+      expect(mockTicketRepo.createComment).not.toHaveBeenCalled();
     });
   });
 
@@ -653,7 +684,7 @@ describe('TicketTransitionsService', () => {
       mockTicketRepo.updateTicketStatusIf.mockResolvedValue(null);
 
       await expect(
-        service.close('koda', 'KODA-1', mockUserPrincipal),
+        service.close('koda', 'KODA-1', 'reason', mockUserPrincipal),
       ).rejects.toMatchObject({ status: HttpStatus.CONFLICT });
 
       expect(mockTicketRepo.createTicketActivity).not.toHaveBeenCalled();

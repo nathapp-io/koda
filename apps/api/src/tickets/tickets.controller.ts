@@ -25,7 +25,7 @@ import { TransitionWithCommentDto } from './dto/transition-with-comment.dto';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { ListTicketsQuery } from './dto/list-tickets.query';
 import { parseQuery, toPageResult } from '../common/dto/koda-page.query';
-import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
+import { JsonResponse, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { Principal, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { isAgentPrincipal, KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { KodaAction } from '../auth/casl/koda-action.enum';
@@ -33,6 +33,7 @@ import { ProjectMembershipGuard } from '../projects/project-membership.guard';
 import { ProjectPermission } from '../projects/project-permission.decorator';
 import { CurrentProject } from '../projects/current-project.decorator';
 import { ProjectContext, withProjectRole } from '../projects/project-context';
+import { canOverrideClose } from './state-machine/allowed-actions';
 import { TicketListFilterInput } from './tickets.service';
 
 /** `assignedTo=self` means the caller: its user id, or its agent id for an agent. */
@@ -130,9 +131,10 @@ export class TicketsController {
   async closeTicket(
     slug: string,
     ref: string,
+    reason: string,
     principal: KodaPrincipal,
   ) {
-    return this.transitionsService.close(slug, ref, principal);
+    return this.transitionsService.close(slug, ref, reason, principal);
   }
 
   async rejectTicket(
@@ -337,19 +339,25 @@ export class TicketsController {
 
   @Post(':ref/close')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Close a ticket' })
+  @ApiOperation({ summary: 'Close a ticket (admin override; reason required, written as a GENERAL comment)' })
   @ApiResponse({ status: 200, description: 'Ticket closed', type: TicketResponseDto })
-  @ApiResponse({ status: 400, description: 'Invalid transition' })
+  @ApiResponse({ status: 400, description: 'Invalid transition or blank reason' })
+  @ApiResponse({ status: 403, description: 'Global ADMIN or project ADMIN required' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
   @ProjectPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
   async close(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
+    @Body() dto: TransitionWithCommentDto,
     @Principal() principal: KodaPrincipal,
     @CurrentProject() project: ProjectContext,
   ) {
-    // Task 7 rewrites close; for now it follows the same enriched-principal shape.
-    const result = await this.closeTicket(slug, ref, withProjectRole(principal, project.role));
+    const actor = withProjectRole(principal, project.role);
+    // Authorization before validation: a non-admin gets 403 whatever it sent.
+    if (!canOverrideClose(actor)) {
+      throw new ForbiddenAppException({}, 'tickets');
+    }
+    const result = await this.closeTicket(slug, ref, this.requireCommentBody(dto.body), actor);
     return JsonResponse.Ok(result.ticket);
   }
 

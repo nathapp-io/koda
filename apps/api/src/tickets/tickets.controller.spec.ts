@@ -6,7 +6,7 @@ import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { PERMISSION_KEY, CaslPermissionAction } from '@nathapp/nestjs-auth';
-import { ValidationAppException, Page } from '@nathapp/nestjs-common';
+import { ValidationAppException, ForbiddenAppException, Page } from '@nathapp/nestjs-common';
 import { KodaAction } from '../auth/casl/koda-action.enum';
 import { PROJECT_PERMISSION_KEY } from '../projects/project-permission.decorator';
 import { withProjectRole } from '../projects/project-context';
@@ -606,6 +606,34 @@ describe('TicketsController', () => {
       await controller.start('koda', 'KODA-1', mockAdminUser, adminProject);
 
       expect(mockTransitionsService.start).toHaveBeenCalledWith('koda', 'KODA-1', withProjectRole(mockAdminUser, 'ADMIN'));
+    });
+  });
+
+  describe('POST :ref/close (admin override)', () => {
+    const project = (role: string | null) => ({ project: { id: 'p1', slug: 'koda' }, role });
+
+    it('403 for a project DEVELOPER, before any service call', async () => {
+      await expect(controller.close('koda', 'KODA-1', { body: 'why' }, mockMemberUser, project('DEVELOPER')))
+        .rejects.toBeInstanceOf(ForbiddenAppException);
+      expect(mockTransitionsService.close).not.toHaveBeenCalled();
+    });
+
+    it('403 for an agent even with every agent role', async () => {
+      await expect(controller.close('koda', 'KODA-1', { body: 'why' }, mockAgent, project(null)))
+        .rejects.toBeInstanceOf(ForbiddenAppException);
+    });
+
+    it.each([undefined, '', '   '])('400 for a project ADMIN with reason %j', async (body) => {
+      await expect(controller.close('koda', 'KODA-1', { body }, mockMemberUser, project('ADMIN')))
+        .rejects.toBeInstanceOf(ValidationAppException);
+      expect(mockTransitionsService.close).not.toHaveBeenCalled();
+    });
+
+    it('closes for a project ADMIN with a reason, passing the enriched principal', async () => {
+      mockTransitionsService.close.mockResolvedValue({ ticket: { id: 't1', status: 'CLOSED' }, comment: {}, activity: {} });
+      const res = await controller.close('koda', 'KODA-1', { body: 'dup' }, mockMemberUser, project('ADMIN'));
+      expect(mockTransitionsService.close).toHaveBeenCalledWith('koda', 'KODA-1', 'dup', { ...mockMemberUser, projectRole: 'ADMIN' });
+      expect(res).toEqual(expect.objectContaining({ data: { id: 't1', status: 'CLOSED' } }));
     });
   });
 });
