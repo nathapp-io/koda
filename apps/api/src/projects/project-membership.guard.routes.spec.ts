@@ -25,6 +25,7 @@ import { RagController } from '../rag/rag.controller';
 import { RagService } from '../rag/rag.service';
 import { HybridRetrieverService } from '../rag/hybrid-retriever.service';
 import { PrismaRagRepository } from '../rag/prisma-rag.repository';
+import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
 import { KodaPrincipal, UserPrincipal } from '../auth/principal/koda-principal.types';
 
 interface MembershipRepoStub {
@@ -164,6 +165,9 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
         { provide: HybridRetrieverService, useValue: hybridRetriever },
         { provide: PrismaRagRepository, useValue: ragRepository },
         { provide: ProjectAccessService, useValue: accessService },
+        // #144: the guard's @ProjectPermission check builds an ability from this
+        // factory; without it the check fails closed with 403.
+        KodaCaslAbilityFactory,
       ],
     }).compile();
 
@@ -260,13 +264,16 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
   });
 
   it('AC8 boundary: an agent principal is admitted to POST :ref/assign with no membership row', async () => {
+    // #144: assign requires UPDATE Ticket; TRIAGER agents have it (DEVELOPER
+    // agents only get TRANSITION). This test is about membership semantics, so
+    // the agent carries a role that passes the permission check.
     currentPrincipal = {
       actorType: 'agent',
       id: 'agent-1',
       name: 'bot',
       slug: 'bot',
       status: 'ACTIVE',
-      agentRoles: ['DEVELOPER'],
+      agentRoles: ['TRIAGER'],
       capabilities: [],
       blacklisted: false,
       revoked: false,
