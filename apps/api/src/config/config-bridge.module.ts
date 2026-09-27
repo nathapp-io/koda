@@ -5,6 +5,7 @@ import { AUTH_CFG, IAuthConfig } from './auth.config';
 import { RAG_CFG, IRagConfig } from './rag.config';
 import { VCS_CFG, IVcsConfig } from './vcs.config';
 import { LIVE_CFG, ILiveConfig } from './live.config';
+import { WEBHOOK_CFG, IWebhookConfig } from './webhook.config';
 
 @Global()
 @Module({
@@ -54,7 +55,16 @@ import { LIVE_CFG, ILiveConfig } from './live.config';
       },
       inject: [ConfigService],
     },
+    {
+      provide: WEBHOOK_CFG,
+      useFactory: (cs: ConfigService) => {
+        const cfg = cs.get<IWebhookConfig>('webhook');
+        if (!cfg) throw new Error('ConfigBridgeModule: webhook config not loaded — ensure webhookConfig is in ConfigModule.forRoot load array');
+        return cfg;
+      },
+      inject: [ConfigService],
+    },
   ],
-  exports: [APP_CFG, AUTH_CFG, RAG_CFG, VCS_CFG, LIVE_CFG],
+  exports: [APP_CFG, AUTH_CFG, RAG_CFG, VCS_CFG, LIVE_CFG, WEBHOOK_CFG],
 })
 export class ConfigBridgeModule {}

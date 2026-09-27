@@ -1,5 +1,6 @@
 import * as Joi from 'joi';
 import { ValidationAppException } from '@nathapp/nestjs-common';
+import { parseAllowedHosts } from './webhook.config';
 
 const envSchema = Joi.object({
   NODE_ENV: Joi.string()
@@ -33,6 +34,21 @@ const envSchema = Joi.object({
   LIVE_HEARTBEAT_MS: Joi.string()
     .pattern(/^\d+$/)
     .custom((value: string, helpers) => (Number(value) >= 100 ? value : helpers.error('number.min')))
+    .optional(),
+  // US-001: `WEBHOOK_ALLOWED_HOSTS` is parsed through `parseAllowedHosts` so a bad
+  // entry refuses boot. The custom rule turns the parser's `Error` into a Joi
+  // detail keyed on `WEBHOOK_ALLOWED_HOSTS`.
+  WEBHOOK_ALLOWED_HOSTS: Joi.string()
+    .allow('')
+    .custom((value: string, helpers) => {
+      try {
+        parseAllowedHosts(value);
+        return value;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'invalid value';
+        return helpers.error('any.invalid', { message });
+      }
+    })
     .optional(),
 }).unknown(true);
 
