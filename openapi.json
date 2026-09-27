@@ -4586,25 +4586,21 @@
             "description": "Maximum concurrent tickets the agent can handle"
           },
           "roles": {
-            "type": "array",
             "items": {
-              "required": false,
-              "items": {
-                "type": "string",
-                "enum": [
-                  "DEVELOPER",
-                  "REVIEWER",
-                  "VERIFIER",
-                  "TRIAGER"
-                ]
-              },
-              "description": "Agent roles (e.g. DEVELOPER, REVIEWER)",
-              "example": [
+              "type": "string",
+              "enum": [
                 "DEVELOPER",
-                "REVIEWER"
-              ],
-              "type": "array"
-            }
+                "REVIEWER",
+                "VERIFIER",
+                "TRIAGER"
+              ]
+            },
+            "description": "Agent roles (e.g. DEVELOPER, REVIEWER)",
+            "example": [
+              "DEVELOPER",
+              "REVIEWER"
+            ],
+            "type": "array"
           },
           "capabilities": {
             "description": "Agent capabilities (e.g. typescript, nestjs)",
@@ -4620,8 +4616,7 @@
         },
         "required": [
           "name",
-          "slug",
-          "roles"
+          "slug"
         ]
       },
       "UpdateAgentDto": {
@@ -4650,25 +4645,21 @@
         "type": "object",
         "properties": {
           "roles": {
-            "type": "array",
             "items": {
-              "required": true,
-              "items": {
-                "type": "string",
-                "enum": [
-                  "DEVELOPER",
-                  "REVIEWER",
-                  "VERIFIER",
-                  "TRIAGER"
-                ]
-              },
-              "description": "Agent roles",
-              "example": [
+              "type": "string",
+              "enum": [
                 "DEVELOPER",
-                "REVIEWER"
-              ],
-              "type": "array"
-            }
+                "REVIEWER",
+                "VERIFIER",
+                "TRIAGER"
+              ]
+            },
+            "description": "Agent roles",
+            "example": [
+              "DEVELOPER",
+              "REVIEWER"
+            ],
+            "type": "array"
           }
         },
         "required": [
