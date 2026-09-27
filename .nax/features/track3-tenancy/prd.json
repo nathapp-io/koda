@@ -3,7 +3,7 @@
   "feature": "track3-tenancy",
   "branchName": "feat/track3-tenancy",
   "createdAt": "2026-09-27T00:00:00.000Z",
-  "updatedAt": "2026-09-27T09:03:14.618Z",
+  "updatedAt": "2026-09-27T09:22:41.691Z",
   "userStories": [
     {
       "id": "US-001",
@@ -300,8 +300,8 @@
         "US-001",
         "US-003"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
