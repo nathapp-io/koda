@@ -3,7 +3,7 @@
   "feature": "track3-outbound-ssrf",
   "branchName": "feat/track3-outbound-ssrf",
   "createdAt": "2026-09-27T00:00:00Z",
-  "updatedAt": "2026-09-27T14:17:26.029Z",
+  "updatedAt": "2026-09-27T14:57:53.846Z",
   "userStories": [
     {
       "id": "US-001",
@@ -176,8 +176,8 @@
       "dependencies": [
         "US-002"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -283,7 +283,10 @@
       "routing": {
         "complexity": "expert",
         "testStrategy": "three-session-tdd",
-        "reasoning": "Security-critical outbound trust boundary and preservation of HMAC signature; native HTTP/DNS/relay interactions and cryptography override require strict isolated TDD."
+        "reasoning": "Security-critical outbound trust boundary and preservation of HMAC signature; native HTTP/DNS/relay interactions and cryptography override require strict isolated TDD.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
       },
       "contextFiles": [
         "apps/api/src/webhook/webhook-delivery.handler.ts",
@@ -318,7 +321,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "fd3f8ae0f27adf67859649a7cdc4302f784e7eb5"
     }
   ],
   "analysis": "Existing Nest/Express API, Jest/Prisma monorepo; work is outbound project webhooks, not incoming CI/VCS webhooks. apps/api/src/webhook/webhook.dto.ts:3-5 and :19-22 currently use @IsUrl, which accepts private IPs and rejects allow-listed localhost; URL semantics must instead be centralized in the guard while DTOs enforce string/2048 length. apps/api/src/webhook/webhook.service.ts:9-23 stores URLs without validation; :25-53 implements existing list/remove/project lookup; guard injection changes its direct-instantiation tests at apps/api/src/webhook/webhook.service.spec.ts:31-38. apps/api/src/webhook/webhook.controller.ts:23-36 already gates create with @RequiredPermission('ADMIN') and looks up slug; :38-69 has list and two ADMIN deletes, with the project-scoped delete ignoring slug (do not alter). New PATCH must resolve slug, verify webhook.projectId via service, check only provided URL, and return a secret-free WebhookView. apps/api/src/webhook/domain/webhook.domain.ts:3-23 defines WebhookDomain (includes secret), WebhookListItem (excludes active/secret), so do not return the repository entity from PATCH. apps/api/src/webhook/prisma-webhook.repository.ts:17-54 maps url/secret/events/active and :56-101 already provides createWebhook, findById, findProjectBySlug; inherited update suffices, with partial fields only. apps/api/src/webhook/webhook-delivery.handler.ts:12-45 signs JSON body with HMAC-SHA256 and deterministic SHA256 delivery ID but calls redirect-following global fetch with raw network errors and status details; preserve exact headers/signature/id while delegating transport. apps/api/src/webhook/webhook-delivery.handler.spec.ts:51-248 assumes fetch and needs replacement; apps/api/src/webhook/webhook.module.spec.ts:46-78 currently injects handler with repository mock only and must inject client mock too. apps/api/src/webhook/webhook-outbox.subscriber.ts:13-20 registers the handler for webhook_delivery in onModuleInit; apps/api/src/outbox/fan-out-publisher.ts:13-20, :57-83 aggregates handler Error.message into persisted recordLastError and rethrows for normal relay retry, meaning only fixed delivery codes may cross this boundary, though the stored lastError includes the fan-out prefix. The prior payload-serialization error path in the handler also contains raw exception text; avoid leaking any raw delivery/socket text. apps/api/src/config/live.config.ts:6-34 establishes typed registerAs config conventions; apps/api/src/config/env.validation.ts:4-52 validates boot env and wraps Joi details in ValidationAppException args; apps/api/src/config/config-bridge.module.ts:6-60 globally exports typed config tokens; apps/api/src/app.module.ts:49-62 loads configs; apps/api/src/common/test-helpers/global-stubs.module.ts:70-99 must mock the new config token for DI tests. New outbound files do not exist. Use Node net.BlockList for classified IPv4/IPv6/mapped addresses and dns.promises.lookup(all:true) as a seam; check every DNS address both at registration and connect time to defeat rebinding, bypass DNS only for explicit allow-listed hostname, statically check IP literals because node:http skips lookup for them. Use native http(s).request with timeout and no redirects; log raw transport errors through Logger.warn once, never persist them. apps/api/src/webhook/webhook.module.ts:12-25 wires existing providers; add resolver, guard and client in dependency order. apps/api/src/i18n/en/webhooks.json:1-4 and apps/api/src/i18n/zh/webhooks.json:1-4 lack -2; apps/api/test/unit/i18n/projects-translation-keys.spec.ts:19-49 demonstrates runtime translation. apps/api/test/helpers/http-app.ts:12-45 boots full global guards/pipes/filters; new route integration tests belong in a new test/integration/webhook file, not oversized endpoint.e2e.spec.ts. package.json:20-24 says root bun run generate exports the API spec and regenerates clients; openapi-ts.config.ts:3-5 points the generated CLI SDK to apps/cli/src/generated (gitignored), while root openapi.json is tracked and must be regenerated in US-003, making that story cross-root/package and therefore without workdir. No Prisma schema migration or existing-row rewrite: previously stored rows are guarded when delivered; security risk remains if custom lookup fails to validate every address, if an allow-listed hostname is treated like a CIDR/IP, if HTTP redirects are followed, if any unsafe URL reaches a socket, or if raw error text enters outbox. Failure/retry semantics remain unchanged, including retries for blocked destinations; operator allowlist is global, validated at boot, and affects both registration and delivery at lookup time.",
