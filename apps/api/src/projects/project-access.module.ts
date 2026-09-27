@@ -4,6 +4,7 @@ import { ProjectAccessService } from './project-access.service';
 import { PrismaProjectRepository } from './prisma-project.repository';
 import { PROJECT_REPOSITORY } from './domain/project.domain';
 import { ProjectMembershipGuard } from './project-membership.guard';
+import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
 
 @Module({
   imports: [PrismaModule],
@@ -11,6 +12,7 @@ import { ProjectMembershipGuard } from './project-membership.guard';
     ProjectAccessService,
     PrismaProjectRepository,
     { provide: PROJECT_REPOSITORY, useExisting: PrismaProjectRepository },
+    KodaCaslAbilityFactory,
     ProjectMembershipGuard,
   ],
   exports: [

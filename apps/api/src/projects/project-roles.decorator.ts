@@ -5,10 +5,9 @@ import { SetMetadata } from '@nestjs/common';
  * ProjectMembershipGuard. The guard reads the value via Reflector and refuses a
  * user principal whose ProjectMember.role is not listed.
  *
- * Tickets, comments and labels intentionally do not use this decorator:
- * project membership alone gates their visibility (Track 3 ruling 2026-09-27).
- * KB write routes are the only exception and carry `@ProjectRoles('ADMIN',
- * 'DEVELOPER', 'AGENT')` to refuse a project VIEWER.
+ * KB write routes carry `@ProjectRoles('ADMIN', 'DEVELOPER', 'AGENT')` to refuse
+ * a project VIEWER. Ticket and label routes use `@ProjectPermission` instead
+ * (#144): their rules are CASL permissions derived from the project role.
  */
 export const PROJECT_ROLES_KEY = 'koda:projectRoles';
 

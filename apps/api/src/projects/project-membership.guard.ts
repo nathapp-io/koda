@@ -1,52 +1,77 @@
-import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
+import { CanActivate, ExecutionContext, Injectable, Optional } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { ProjectAccessService } from './project-access.service';
 import { PROJECT_ROLES_KEY } from './project-roles.decorator';
-import { KodaPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
+import { PROJECT_PERMISSION_KEY, ProjectPermissionMetadata } from './project-permission.decorator';
+import { ProjectScopedRequest, withProjectRole } from './project-context';
+import { KodaPrincipal, isAgentPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
+import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
 
 /**
  * Guards project-scoped routes by `params.slug`.
  *
  * Flow:
- *  1. If the route has no `slug` param, return true — sibling guards handle it.
- *  2. Resolve the project via ProjectAccessService.findProjectIdBySlug (404 if
- *     missing or soft-deleted).
- *  3. Call ProjectAccessService.assertProjectMembership (403 for a non-member
- *     user). Agents and global ADMIN users are admitted without a membership
- *     lookup.
- *  4. If the handler (or class) carries `@ProjectRoles(...)`, additionally
- *     refuse a user principal whose ProjectMember.role is not in the list.
- *     Agents and global ADMIN users skip this check.
+ *  1. No `slug` param: return true (sibling guards handle it), unless the route
+ *     carries @ProjectPermission, which fails closed.
+ *  2. Resolve the project (404 if missing or soft-deleted) and the caller's
+ *     membership role ONCE (403 for a non-member user; global ADMIN -> 'ADMIN',
+ *     agent -> null, no query for either).
+ *  3. Attach `request.projectContext` for @CurrentProject() (#145, guard half).
+ *  4. @ProjectRoles(...): refuse a non-admin user whose role is not listed.
+ *  5. @ProjectPermission(...): check it against the ability for
+ *     `{ ...principal, projectRole }` (#144). Agents are evaluated with their
+ *     agent-role ability unless the route exempts them.
  */
 @Injectable()
 export class ProjectMembershipGuard implements CanActivate {
   constructor(
     private readonly access: ProjectAccessService,
     private readonly reflector: Reflector,
+    @Optional() private readonly caslAbilityFactory?: KodaCaslAbilityFactory,
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
-    const req = ctx.switchToHttp().getRequest<{ params?: { slug?: string }; user?: KodaPrincipal }>();
+    const req = ctx.switchToHttp().getRequest<ProjectScopedRequest>();
+    const permission = this.reflector.getAllAndOverride<ProjectPermissionMetadata | undefined>(
+      PROJECT_PERMISSION_KEY,
+      [ctx.getHandler(), ctx.getClass()],
+    );
     const slug = req.params?.slug;
-    if (!slug) return true;
+    if (!slug) {
+      if (permission) throw new ForbiddenAppException({}, 'projects');
+      return true;
+    }
 
     if (!req.user) throw new ForbiddenAppException({}, 'projects');
 
     const projectId = await this.access.findProjectIdBySlug(slug);
-    await this.access.assertProjectMembership(projectId, req.user);
+    const role = await this.access.resolveMembership(projectId, req.user);
+    req.projectContext = { project: { id: projectId, slug }, role };
 
+    this.assertProjectRoles(ctx, req.user, role);
+    if (permission) await this.assertProjectPermission(permission, req.user, role);
+    return true;
+  }
+
+  private assertProjectRoles(ctx: ExecutionContext, user: KodaPrincipal, role: string | null): void {
     const roles = this.reflector.getAllAndOverride<string[]>(PROJECT_ROLES_KEY, [
       ctx.getHandler(),
       ctx.getClass(),
     ]);
-    if (roles?.length && isUserPrincipal(req.user) && req.user.role !== 'ADMIN') {
-      const role = await this.access.findMembershipRole(projectId, req.user.id);
-      if (!role || !roles.includes(role)) {
-        throw new ForbiddenAppException({}, 'projects');
-      }
-    }
+    if (!roles?.length || !isUserPrincipal(user) || user.role === 'ADMIN') return;
+    if (!role || !roles.includes(role)) throw new ForbiddenAppException({}, 'projects');
+  }
 
-    return true;
+  private async assertProjectPermission(
+    meta: ProjectPermissionMetadata,
+    user: KodaPrincipal,
+    role: string | null,
+  ): Promise<void> {
+    if (meta.exemptAgents && isAgentPrincipal(user)) return;
+    if (!this.caslAbilityFactory) throw new ForbiddenAppException({}, 'projects');
+    const ability = await this.caslAbilityFactory.createForUser(withProjectRole(user, role));
+    const [action, subject] = meta.permission;
+    if (!ability.can(action, subject)) throw new ForbiddenAppException({}, 'projects');
   }
 }
