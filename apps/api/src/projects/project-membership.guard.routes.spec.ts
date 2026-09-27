@@ -37,6 +37,7 @@ interface TicketsServiceStub {
   create: jest.Mock;
   findAll: jest.Mock;
   findByRef: jest.Mock;
+  findByRefWithActions: jest.Mock;
   update: jest.Mock;
   softDelete: jest.Mock;
   assign: jest.Mock;
@@ -119,6 +120,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
       create: jest.fn(),
       findAll: jest.fn(),
       findByRef: jest.fn(),
+      findByRefWithActions: jest.fn(),
       update: jest.fn(),
       softDelete: jest.fn(),
       assign: jest.fn(),

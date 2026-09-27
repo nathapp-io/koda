@@ -18,6 +18,11 @@ import { TicketEventService } from '../events/ticket-event.service';
 import { buildTicketEventOutboxPayload } from '../events/outbox-envelope.util';
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
+import { CaslPermissionAction } from '@nathapp/nestjs-auth';
+import { KodaAction } from '../auth/casl/koda-action.enum';
+import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
+import { allowedActions, canOverrideClose } from './state-machine/allowed-actions';
+import { TicketDetailResponseDto } from './dto/ticket-detail-response.dto';
 
 export type TicketListFilterInput = Omit<ListTicketsQuery, 'current' | 'size'> & { assignedToAgentId?: string };
 
@@ -34,6 +39,7 @@ export class TicketsService {
     private readonly ticketEventService: TicketEventService,
     private readonly outbox: NathappOutboxService,
     private readonly transitionsService: TicketTransitionsService,
+    private readonly caslAbilityFactory: KodaCaslAbilityFactory,
   ) {}
 
   /**
@@ -182,6 +188,20 @@ export class TicketsService {
       ticket.gitRefLine,
     );
     return TicketResponseDto.from(ticket, project.key, gitRefUrl);
+  }
+
+  /**
+   * M25: the detail view plus the actions the caller may take. `principal`
+   * must be role-enriched (withProjectRole) by the controller.
+   */
+  async findByRefWithActions(projectSlug: string, ref: string, principal: KodaPrincipal): Promise<TicketDetailResponseDto> {
+    const ticket = await this.findByRef(projectSlug, ref);
+    const ability = await this.caslAbilityFactory.createForUser(principal);
+    const actions = allowedActions(ticket.status as TicketStatus, {
+      canTransition: ability.can(KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'),
+      canClose: canOverrideClose(principal),
+    });
+    return { ...ticket, allowedActions: actions };
   }
 
   async update(

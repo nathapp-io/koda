@@ -21,6 +21,7 @@ import { TicketTransitionsService } from './state-machine/ticket-transitions.ser
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TicketResponseDto } from './dto/ticket-response.dto';
+import { TicketDetailResponseDto } from './dto/ticket-detail-response.dto';
 import { TransitionWithCommentDto } from './dto/transition-with-comment.dto';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { ListTicketsQuery } from './dto/list-tickets.query';
@@ -190,16 +191,16 @@ export class TicketsController {
   }
 
   @Get(':ref')
-  @ApiOperation({ summary: 'Get a ticket by reference (KODA-42 or CUID)' })
-  @ApiResponse({ status: 200, type: TicketResponseDto })
+  @ApiOperation({ summary: 'Get a ticket by reference (KODA-42 or CUID), with the caller\'s allowedActions' })
+  @ApiResponse({ status: 200, type: TicketDetailResponseDto })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async findByRef(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
+    @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
   ) {
-    const data = await this.getTicket(slug, ref);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = await this.ticketsService.findByRefWithActions(slug, ref, withProjectRole(principal, project.role));
     return JsonResponse.Ok(data);
   }
 

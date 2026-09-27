@@ -104,6 +104,7 @@ describe('TicketsController', () => {
     create: jest.fn(),
     findAll: jest.fn(),
     findByRef: jest.fn(),
+    findByRefWithActions: jest.fn(),
     update: jest.fn(),
     softDelete: jest.fn(),
     assign: jest.fn(),
@@ -313,6 +314,15 @@ describe('TicketsController', () => {
       await expect(
         controller.getTicket('nonexistent', 'KODA-1')
       ).rejects.toThrow();
+    });
+  });
+
+  describe('GET :ref (M25 allowedActions)', () => {
+    it('GET :ref returns allowedActions computed for the enriched principal', async () => {
+      mockTicketsService.findByRefWithActions.mockResolvedValue({ id: 't1', allowedActions: ['start'] });
+      const res = await controller.findByRef('koda', 'KODA-1', mockMemberUser, { project: { id: 'p1', slug: 'koda' }, role: 'DEVELOPER' });
+      expect(mockTicketsService.findByRefWithActions).toHaveBeenCalledWith('koda', 'KODA-1', { ...mockMemberUser, projectRole: 'DEVELOPER' });
+      expect(res).toEqual(expect.objectContaining({ data: { id: 't1', allowedActions: ['start'] } }));
     });
   });
 
