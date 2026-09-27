@@ -1,4 +1,3 @@
-<!-- spec-writing: completed-through-phase-5 -->
 # SPEC: Track 3 Slice 2a — Outbound webhook SSRF guard
 
 ## Summary
@@ -126,9 +125,25 @@ recognise is `blocked` (fail closed).
 
 Blocked ranges:
 
-| IPv4 | IPv6 |
+| Blocked range | Representative address (test fixture) |
 |:--|:--|
-| `0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10`, `127.0.0.0/8`, `169.254.0.0/16`, `172.16.0.0/12`, `192.168.0.0/16`, `224.0.0.0/3` (224.0.0.0-255.255.255.255) | `::/128`, `::1/128`, `fc00::/7`, `fe80::/10`, `ff00::/8`, and every `::ffff:0:0/96` mapped form of an IPv4 range on the left |
+| `0.0.0.0/8` | `0.1.2.3` |
+| `10.0.0.0/8` | `10.1.2.3` |
+| `100.64.0.0/10` | `100.64.0.1` |
+| `127.0.0.0/8` | `127.0.0.1` |
+| `169.254.0.0/16` | `169.254.169.254` |
+| `172.16.0.0/12` | `172.16.0.1` |
+| `192.168.0.0/16` | `192.168.1.1` |
+| `224.0.0.0/3` (224.0.0.0-255.255.255.255) | `224.0.0.1`, `255.255.255.255` |
+| `::/128` | `::` |
+| `::1/128` | `::1` |
+| `fc00::/7` | `fd00::1` |
+| `fe80::/10` | `fe80::1` |
+| `ff00::/8` | `ff02::1` |
+| `::ffff:0:0/96` mapped forms of the IPv4 ranges above | `::ffff:127.0.0.1`, `::ffff:a9fe:a9fe` |
+
+Allowed edge addresses (just outside a blocked range, or public), used as the negative fixture:
+`93.184.215.14`, `172.32.0.1`, `100.128.0.1`, `2606:2800:21f:cb07:6820:80da:af6b:8b2e`.
 
 `outbound/dns-resolver.ts`: an `@Injectable() class DnsResolver` with
 `resolve(hostname: string): Promise<string[]>`, implemented with `dns.promises.lookup(hostname, { all: true })`
@@ -153,7 +168,7 @@ export class OutboundUrlGuard {
   /** Create/update-time check. Resolves hostnames. Rejects with OutboundUrlRejection. */
   checkUrl(url: string): Promise<void>;
 
-  /** Delivery-time pre-connect check: steps 1-8 below, never resolves DNS. Throws OutboundUrlRejection. */
+  /** Delivery-time pre-connect check: steps 2-8 below, never resolves DNS. Throws OutboundUrlRejection. */
   assertStaticTarget(url: URL): void;
 
   /** A `lookup` for node:http(s).request that validates every resolved address at connect time. */
@@ -178,7 +193,7 @@ export class OutboundUrlGuard {
 9. `resolver.resolve(host)` throws, or returns an empty list → `unresolvable`.
 10. any resolved address classifies `blocked` → `blocked_destination`. Otherwise accept.
 
-`assertStaticTarget` runs steps 1-8 on an already-parsed URL. For a hostname that is not allow-listed it
+`assertStaticTarget` runs steps 2-8 on an already-parsed URL (the caller has done step 1). For a hostname that is not allow-listed it
 returns without resolving; the connect-time `lookup` does the address check.
 
 The function returned by `createLookup()` has the `net.LookupFunction` signature
@@ -364,7 +379,7 @@ Adds `OutboundHttpClient` and `WebhookDeliveryError`, registers the client in `W
 - `apps/api/src/webhook/webhook.dto.ts` — `url` on both DTOs changes from `@IsUrl()` to `@IsString() @MaxLength(2048)`.
 - `apps/api/src/webhook/domain/webhook.domain.ts` — adds the `WebhookView` type.
 - `apps/api/src/webhook/webhook.service.spec.ts` — `new WebhookService(webhookRepo)` becomes `new WebhookService(webhookRepo, urlGuard)` with a stub guard; the existing create cases keep their assertions with a guard that resolves.
-- `apps/api/src/webhook/webhook.dto.spec.ts` — the invariant that `url` is validated by `@IsUrl` is replaced by the invariant that `url` must be a string of at most 2048 characters; semantic URL checks belong to `OutboundUrlGuard`.
+- `apps/api/src/webhook/webhook.dto.spec.ts` — gains cases for the new invariant that `url` must be a string of at most 2048 characters (no existing case asserts `@IsUrl`; semantic URL checks belong to `OutboundUrlGuard`).
 - `apps/api/src/i18n/en/webhooks.json` — adds the `"-2"` message.
 - `apps/api/src/i18n/zh/webhooks.json` — adds the `"-2"` message.
 - `openapi.json` — regenerated for the PATCH route and the DTO change.
@@ -385,23 +400,21 @@ Adds `OutboundHttpClient` and `WebhookDeliveryError`, registers the client in `W
 
 ### US-001
 
-1. [unit] `classifyAddress` returns `'blocked'` with empty `allowedCidrs` for each of `0.1.2.3`, `10.1.2.3`, `100.64.0.1`, `127.0.0.1`, `169.254.169.254`, `172.16.0.1`, `192.168.1.1`, `224.0.0.1` and `255.255.255.255`.
-2. [unit] `classifyAddress` returns `'blocked'` with empty `allowedCidrs` for each of `::`, `::1`, `fd00::1`, `fe80::1` and `ff02::1`.
-3. [unit] `classifyAddress` returns `'blocked'` for the IPv4-mapped addresses `::ffff:127.0.0.1` and `::ffff:a9fe:a9fe`.
-4. [unit] `classifyAddress` returns `'allowed'` with empty `allowedCidrs` for `93.184.215.14`, `172.32.0.1`, `100.128.0.1` and `2606:2800:21f:cb07:6820:80da:af6b:8b2e`.
-5. [unit] `classifyAddress('10.0.0.5', ['10.0.0.0/24'])` returns `'allowed'`, and `classifyAddress('10.0.1.5', ['10.0.0.0/24'])` returns `'blocked'`.
-6. [unit] `classifyAddress('not-an-ip', [])` returns `'blocked'`.
-7. [unit] `parseAllowedHosts(' Hooks.Internal. ,10.0.0.0/24,, fd00::/8 ')` returns `allowedHostnames` `['hooks.internal']` and `allowedCidrs` `['10.0.0.0/24', 'fd00::/8']`.
-8. [unit] `parseAllowedHosts(undefined)` and `parseAllowedHosts('')` both return empty `allowedHostnames` and `allowedCidrs`.
-9. [unit] `parseAllowedHosts('10.0.0.0/33')` throws an `Error` whose message contains `10.0.0.0/33`.
-10. [unit] `parseAllowedHosts('bad_host!')` throws an `Error` whose message contains `bad_host!`.
-11. [unit] `validate` from `env.validation.ts`, given the required variables plus `WEBHOOK_ALLOWED_HOSTS: '10.0.0.0/33'`, throws `ValidationAppException` whose `args` has a `WEBHOOK_ALLOWED_HOSTS` key.
-12. [unit] `webhookConfig()` with `WEBHOOK_ALLOWED_HOSTS` unset returns `allowedHostnames: []`, `allowedCidrs: []` and `deliveryTimeoutMs: 5000`.
-13. [unit] A testing module importing `ConfigModule.forRoot({ load: [webhookConfig], ignoreEnvFile: true })` and `ConfigBridgeModule`, with `WEBHOOK_ALLOWED_HOSTS` set to `hooks.internal`, resolves `WEBHOOK_CFG` to a config whose `allowedHostnames` is `['hooks.internal']`.
+1. [unit] A table-driven test over the Design blocked-range table: `classifyAddress(address, [])` returns `'blocked'` for every representative address in the table.
+2. [unit] A table-driven test over the Design allowed edge addresses: `classifyAddress(address, [])` returns `'allowed'` for every one of them.
+3. [unit] `classifyAddress('10.0.0.5', ['10.0.0.0/24'])` returns `'allowed'`, and `classifyAddress('10.0.1.5', ['10.0.0.0/24'])` returns `'blocked'`.
+4. [unit] `classifyAddress('not-an-ip', [])` returns `'blocked'`.
+5. [unit] `parseAllowedHosts(' Hooks.Internal. ,10.0.0.0/24,, fd00::/8 ')` returns `allowedHostnames` `['hooks.internal']` and `allowedCidrs` `['10.0.0.0/24', 'fd00::/8']`.
+6. [unit] `parseAllowedHosts(undefined)` and `parseAllowedHosts('')` both return empty `allowedHostnames` and `allowedCidrs`.
+7. [unit] `parseAllowedHosts('10.0.0.0/33')` throws an `Error` whose message contains `10.0.0.0/33`.
+8. [unit] `parseAllowedHosts('bad_host!')` throws an `Error` whose message contains `bad_host!`.
+9. [unit] `validate` from `env.validation.ts`, given the required variables plus `WEBHOOK_ALLOWED_HOSTS: '10.0.0.0/33'`, throws `ValidationAppException` whose `args` has a `WEBHOOK_ALLOWED_HOSTS` key.
+10. [unit] `webhookConfig()` with `WEBHOOK_ALLOWED_HOSTS` unset returns `allowedHostnames: []`, `allowedCidrs: []` and `deliveryTimeoutMs: 5000`.
+11. [unit] A testing module importing `ConfigModule.forRoot({ load: [webhookConfig], ignoreEnvFile: true })` and `ConfigBridgeModule`, with `WEBHOOK_ALLOWED_HOSTS` set to `hooks.internal`, resolves `WEBHOOK_CFG` to a config whose `allowedHostnames` is `['hooks.internal']`.
 
 ### US-002
 
-1. [unit] `OutboundUrlGuard.checkUrl('http://hooks.example/x')` with empty allowlists rejects with `OutboundUrlRejection` whose `reason` is `'https_required'`, and the `DnsResolver` stub is not called.
+1. [unit] `OutboundUrlGuard.checkUrl('http://hooks.example/x')` with empty allowlists rejects with `OutboundUrlRejection` whose `reason` is `'https_required'`.
 2. [unit] `checkUrl('https://user:pw@hooks.example/')` rejects with reason `'credentials_not_allowed'`.
 3. [unit] `checkUrl('ftp://hooks.example/')` rejects with reason `'scheme_not_allowed'`.
 4. [unit] `checkUrl('not a url')` rejects with reason `'invalid_url'`.
