@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import * as net from 'net';
 import type { LookupAddress, LookupOptions } from 'node:dns';
 import { IWebhookConfig, WEBHOOK_CFG } from '../../config/webhook.config';
-import { classifyAddress } from './address-classifier';
+import { classifyAddress, isInsideAllowedCidrs } from './address-classifier';
 import { DnsResolver } from './dns-resolver';
 
 /** US-002: why an outbound webhook destination was refused. */
@@ -42,6 +42,11 @@ function normaliseHost(hostname: string): string {
 
 function lookupError(code: string, message: string): NodeJS.ErrnoException {
   return Object.assign(new Error(message), { code });
+}
+
+/** Keeps the original `ErrnoException` (code included); wraps anything else. */
+function asError(error: unknown): NodeJS.ErrnoException {
+  return error instanceof Error ? error : new Error('DNS lookup failed');
 }
 
 /**
@@ -100,6 +105,11 @@ export class OutboundUrlGuard {
     }
 
     const host = normaliseHost(url.hostname);
+    // `https://./hook` parses with hostname `.`, which normalisation strips to nothing.
+    // A URL without a host is malformed, not a destination that failed to resolve.
+    if (host === '') {
+      throw new OutboundUrlRejection('invalid_url');
+    }
     if (url.protocol === 'http:' && !this.isAllowListed(host)) {
       throw new OutboundUrlRejection('https_required');
     }
@@ -116,8 +126,34 @@ export class OutboundUrlGuard {
    * why `assertStaticTarget` covers those before the socket is created.
    */
   createLookup(): net.LookupFunction {
-    return (hostname, options, callback): void => {
-      void this.lookup(hostname, options, callback);
+    return (hostname: string, options: LookupOptions, callback: LookupCallback): void => {
+      let host: string;
+      let allowListed: boolean;
+      try {
+        host = normaliseHost(hostname);
+        allowListed = this.isAllowListed(host);
+      } catch (error) {
+        // The caller is a socket that is waiting for exactly one callback: an escaping
+        // throw here would leave it hanging instead of failing the request.
+        callback(asError(error));
+        return;
+      }
+
+      let answer: Promise<string[]>;
+      try {
+        answer = this.resolver.resolve(host);
+      } catch (error) {
+        // A resolver failure is passed through with its own code.
+        callback(asError(error));
+        return;
+      }
+
+      // Both handlers are supplied, so nothing below can reject into an unhandled
+      // promise: only a throwing consumer callback could, and that is its own bug.
+      answer.then(
+        (addresses) => this.completeLookup(host, allowListed, options, addresses, callback),
+        (error: unknown) => callback(asError(error)),
+      );
     };
   }
 
@@ -133,16 +169,20 @@ export class OutboundUrlGuard {
     return addresses;
   }
 
-  private async lookup(hostname: string, options: LookupOptions, callback: LookupCallback): Promise<void> {
-    const host = normaliseHost(hostname);
-    const allowListed = this.isAllowListed(host);
-
-    let addresses: string[];
-    try {
-      addresses = await this.resolver.resolve(host);
-    } catch (error) {
-      // A resolver failure is passed through with its own code.
-      callback(error instanceof Error ? error : new Error('DNS resolution failed'));
+  /**
+   * Connect-time verdict for one resolver answer. Mirrors `checkUrl`: an empty answer
+   * is a failure (handing the socket zero addresses would hide a TOCTOU answer change),
+   * and any blocked address fails the lookup unless the hostname is allow-listed.
+   */
+  private completeLookup(
+    host: string,
+    allowListed: boolean,
+    options: LookupOptions,
+    addresses: string[],
+    callback: LookupCallback,
+  ): void {
+    if (addresses.length === 0) {
+      callback(lookupError(ENOTFOUND, `ENOTFOUND ${host}`));
       return;
     }
 
@@ -163,29 +203,15 @@ export class OutboundUrlGuard {
     }
 
     const [first] = entries;
-    if (first === undefined) {
-      callback(lookupError(ENOTFOUND, `ENOTFOUND ${host}`));
-      return;
-    }
     callback(null, first.address, first.family);
   }
 
   /** Step 5: an allow-listed hostname, or an IP literal inside an `allowedCidrs` entry. */
   private isAllowListed(host: string): boolean {
-    return this.isAllowListedHostname(host) || (net.isIP(host) !== 0 && this.isInsideAllowedCidr(host));
+    return this.isAllowListedHostname(host) || isInsideAllowedCidrs(host, this.config.allowedCidrs);
   }
 
   private isAllowListedHostname(host: string): boolean {
     return this.config.allowedHostnames.includes(host);
-  }
-
-  /**
-   * `classifyAddress` answers `allowed` for any public address, so the allow-listed
-   * CIDR is what rescues this host only when the entry flipped a `blocked` verdict to
-   * `allowed` — i.e. the host really is inside an operator-allowed CIDR.
-   */
-  private isInsideAllowedCidr(host: string): boolean {
-    if (this.config.allowedCidrs.length === 0) return false;
-    return classifyAddress(host, []) === 'blocked' && classifyAddress(host, this.config.allowedCidrs) === 'allowed';
   }
 }

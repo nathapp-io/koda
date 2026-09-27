@@ -59,6 +59,20 @@ function buildAllowedList(allowedCidrs: readonly string[]): net.BlockList {
 }
 
 /**
+ * True when `address` is an IP literal inside one of the operator-allowed `allowedCidrs`
+ * subnets. `classifyAddress` answers `allowed` for every public address, so its verdict
+ * alone cannot tell "the operator allow-listed this address" apart from "nothing blocks
+ * it" — this membership test is what US-002 step 5 needs. A non-IP literal or an empty
+ * `allowedCidrs` is `false`.
+ */
+export function isInsideAllowedCidrs(address: string, allowedCidrs: readonly string[]): boolean {
+  const ipVersion = net.isIP(address);
+  if (ipVersion === 0 || allowedCidrs.length === 0) return false;
+  const family: 'ipv4' | 'ipv6' = ipVersion === 4 ? 'ipv4' : 'ipv6';
+  return buildAllowedList(allowedCidrs).check(new net.SocketAddress({ address, family }));
+}
+
+/**
  * Classifies an outbound destination IP (as returned by `URL.hostname` with brackets
  * removed, or by a DNS lookup). Fails closed: anything `net.isIP` does not recognise
  * is `blocked`.
