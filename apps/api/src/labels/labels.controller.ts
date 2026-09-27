@@ -20,9 +20,11 @@ import { CreateLabelDto } from './dto/create-label.dto';
 import { UpdateLabelDto } from './dto/update-label.dto';
 import { AssignLabelDto } from './dto/assign-label.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
-import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
+import { Principal, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
+import { ProjectPermission } from '../projects/project-permission.decorator';
+import { KodaAction } from '../auth/casl/koda-action.enum';
 
 @ApiTags('labels')
 @ApiBearerAuth()
@@ -87,7 +89,7 @@ export class LabelsController {
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  @RequiredPermission([CaslPermissionAction.MANAGE, 'Label'])
+  @ProjectPermission([CaslPermissionAction.CREATE, 'Label'])
   async createFromHttp(
     @Param('slug') slug: string,
     @Body() createLabelDto: CreateLabelDto,
@@ -115,7 +117,7 @@ export class LabelsController {
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Label or project not found' })
-  @RequiredPermission([CaslPermissionAction.MANAGE, 'Label'])
+  @ProjectPermission([CaslPermissionAction.UPDATE, 'Label'])
   async updateFromHttp(
     @Param('slug') slug: string,
     @Param('id') id: string,
@@ -133,7 +135,7 @@ export class LabelsController {
   @ApiResponse({ status: 204, description: 'Label deleted' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Label or project not found' })
-  @RequiredPermission([CaslPermissionAction.MANAGE, 'Label'])
+  @ProjectPermission([CaslPermissionAction.DELETE, 'Label'])
   async deleteFromHttp(
     @Param('slug') slug: string,
     @Param('id') id: string,
@@ -148,7 +150,9 @@ export class LabelsController {
   @ApiOperation({ summary: 'Assign a label to a ticket' })
   @ApiResponse({ status: 201, description: 'Label assigned to ticket' })
   @ApiResponse({ status: 400, description: 'Invalid request data or label already assigned' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Ticket or label not found' })
+  @ProjectPermission([KodaAction.UPDATE as CaslPermissionAction, 'Ticket'], { exemptAgents: true })
   async assignLabelFromHttp(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
@@ -164,7 +168,9 @@ export class LabelsController {
   @HttpCode(204)
   @ApiOperation({ summary: 'Remove a label from a ticket' })
   @ApiResponse({ status: 204, description: 'Label removed from ticket' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Ticket or label assignment not found' })
+  @ProjectPermission([KodaAction.UPDATE as CaslPermissionAction, 'Ticket'], { exemptAgents: true })
   async removeLabelFromHttp(
     @Param('slug') slug: string,
     @Param('ref') ref: string,

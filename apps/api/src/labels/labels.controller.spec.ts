@@ -4,6 +4,28 @@ import { LabelsService } from './labels.service';
 import { CreateLabelDto } from './dto/create-label.dto';
 import { LabelResponseDto } from './dto/label-response.dto';
 import { ProjectAccessService } from '../projects/project-access.service';
+import { PERMISSION_KEY, CaslPermissionAction } from '@nathapp/nestjs-auth';
+import { PROJECT_PERMISSION_KEY } from '../projects/project-permission.decorator';
+import { KodaAction } from '../auth/casl/koda-action.enum';
+
+describe('#144 project permissions on label routes', () => {
+  const U = KodaAction.UPDATE as CaslPermissionAction;
+  it.each([
+    ['createFromHttp', [CaslPermissionAction.CREATE, 'Label'], false],
+    ['updateFromHttp', [CaslPermissionAction.UPDATE, 'Label'], false],
+    ['deleteFromHttp', [CaslPermissionAction.DELETE, 'Label'], false],
+    ['assignLabelFromHttp', [U, 'Ticket'], true],
+    ['removeLabelFromHttp', [U, 'Ticket'], true],
+  ] as const)('%s carries @ProjectPermission(%j, exemptAgents=%s)', (handler, permission, exemptAgents) => {
+    const fn = (LabelsController.prototype as unknown as Record<string, object>)[handler];
+    expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, fn)).toEqual({ permission: [...permission], exemptAgents });
+    expect(Reflect.getMetadata(PERMISSION_KEY, fn)).toBeUndefined();
+  });
+
+  it('findByProjectFromHttp carries no project permission (read is membership only)', () => {
+    expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, LabelsController.prototype.findByProjectFromHttp)).toBeUndefined();
+  });
+});
 
 describe('LabelsController', () => {
   let controller: LabelsController;
