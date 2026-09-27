@@ -34,6 +34,12 @@ export interface TicketLink {
   createdAt: Date;
 }
 
+export interface TicketAssignee {
+  kind: 'user' | 'agent';
+  id: string;
+  name: string;
+}
+
 export interface TicketDomain {
   id: string;
   projectId: string;
@@ -55,6 +61,8 @@ export interface TicketDomain {
   deletedAt: Date | null;
   labels?: TicketLabel[];
   links?: TicketLink[];
+  /** M26: resolved name-only assignee; null when unassigned; undefined when not loaded. */
+  assignee?: TicketAssignee | null;
 }
 
 export interface TicketListFilters {

@@ -63,7 +63,17 @@ type PrismaTicketRow = {
   deletedAt: Date | null;
   labels?: PrismaTicketLabelRow[];
   links?: PrismaTicketLinkRow[];
-};
+  assignedToUser?: { id: string; name: string | null; email: string } | null;
+  assignedToAgent?: { id: string; name: string } | null;
+}
+
+/** One include for every ticket read, so every response carries labels, links and the assignee. */
+const TICKET_INCLUDE = {
+  labels: { include: { label: true } },
+  links: true,
+  assignedToUser: { select: { id: true, name: true, email: true } },
+  assignedToAgent: { select: { id: true, name: true } },
+} as const;
 
 @Injectable()
 export class PrismaTicketsRepository implements ITicketRepository {
@@ -112,6 +122,11 @@ export class PrismaTicketsRepository implements ITicketRepository {
         prUpdatedAt: l.prUpdatedAt,
         createdAt: l.createdAt,
       })),
+      assignee: row.assignedToUser
+        ? { kind: 'user', id: row.assignedToUser.id, name: row.assignedToUser.name ?? row.assignedToUser.email }
+        : row.assignedToAgent
+          ? { kind: 'agent', id: row.assignedToAgent.id, name: row.assignedToAgent.name }
+          : null,
     };
   }
 
@@ -138,7 +153,7 @@ export class PrismaTicketsRepository implements ITicketRepository {
   }
 
   async createTicket(data: CreateTicketData): Promise<TicketDomain> {
-    const row = await this.db.ticket.create({ data });
+    const row = await this.db.ticket.create({ data, include: TICKET_INCLUDE });
     return this.toDomain(row);
   }
 
@@ -161,7 +176,7 @@ export class PrismaTicketsRepository implements ITicketRepository {
     const rows = await Paginate(this.db.ticket, page, {
       where,
       orderBy: { number: 'asc' },
-      include: { labels: { include: { label: true } }, links: true },
+      include: TICKET_INCLUDE,
     });
     return rows.remap((row: PrismaTicketRow) => this.toDomain(row));
   }
@@ -172,10 +187,7 @@ export class PrismaTicketsRepository implements ITicketRepository {
   ): Promise<TicketDomain | null> {
     const row = await this.db.ticket.findUnique({
       where: { projectId_number: { projectId, number } },
-      include: {
-        labels: { include: { label: true } },
-        links: true,
-      },
+      include: TICKET_INCLUDE,
     });
     return row ? this.toDomain(row) : null;
   }
@@ -183,10 +195,7 @@ export class PrismaTicketsRepository implements ITicketRepository {
   async findTicketById(id: string): Promise<TicketDomain | null> {
     const row = await this.db.ticket.findUnique({
       where: { id },
-      include: {
-        labels: { include: { label: true } },
-        links: true,
-      },
+      include: TICKET_INCLUDE,
     });
     return row ? this.toDomain(row) : null;
   }
@@ -195,10 +204,7 @@ export class PrismaTicketsRepository implements ITicketRepository {
     const row = await this.db.ticket.update({
       where: { id },
       data,
-      include: {
-        labels: { include: { label: true } },
-        links: true,
-      },
+      include: TICKET_INCLUDE,
     });
     return this.toDomain(row);
   }
@@ -207,10 +213,7 @@ export class PrismaTicketsRepository implements ITicketRepository {
     const row = await this.db.ticket.update({
       where: { id },
       data,
-      include: {
-        labels: { include: { label: true } },
-        links: true,
-      },
+      include: TICKET_INCLUDE,
     });
     return this.toDomain(row);
   }
@@ -219,10 +222,7 @@ export class PrismaTicketsRepository implements ITicketRepository {
     const row = await this.db.ticket.update({
       where: { id },
       data: { deletedAt: new Date() },
-      include: {
-        labels: { include: { label: true } },
-        links: true,
-      },
+      include: TICKET_INCLUDE,
     });
     return this.toDomain(row);
   }
@@ -272,10 +272,7 @@ export class PrismaTicketsRepository implements ITicketRepository {
 
       const row = await this.db.ticket.findUnique({
         where: { projectId_number: { projectId, number: match.number } },
-        include: {
-          labels: { include: { label: true } },
-          links: true,
-        },
+        include: TICKET_INCLUDE,
       });
       return row && (opts.includeDeleted || !row.deletedAt) ? this.toDomain(row) : null;
     }
@@ -284,10 +281,7 @@ export class PrismaTicketsRepository implements ITicketRepository {
     // belonging to another project must not resolve.
     const row = await this.db.ticket.findFirst({
       where: { id: ref, projectId },
-      include: {
-        labels: { include: { label: true } },
-        links: true,
-      },
+      include: TICKET_INCLUDE,
     });
     return row && (opts.includeDeleted || !row.deletedAt) ? this.toDomain(row) : null;
   }
@@ -315,7 +309,7 @@ export class PrismaTicketsRepository implements ITicketRepository {
       data: { status: to },
     });
     if (rows.count === 0) return null;
-    const row = await this.db.ticket.findUnique({ where: { id } });
+    const row = await this.db.ticket.findUnique({ where: { id }, include: TICKET_INCLUDE });
     return row ? this.toDomain(row) : null;
   }
 

@@ -51,3 +51,21 @@ describe('TicketResponseDto', () => {
     ]);
   });
 });
+
+describe('TicketResponseDto.assignee (M26)', () => {
+  const base = { id: 't1', projectId: 'p1', number: 1, type: 'BUG', title: 'x', status: 'CREATED', priority: 'LOW', createdAt: new Date(), updatedAt: new Date() };
+
+  it('maps a resolved user assignee', () => {
+    const dto = TicketResponseDto.from({ ...base, assignee: { kind: 'user', id: 'u1', name: 'Ada' } }, 'KODA');
+    expect(dto.assignee).toEqual({ kind: 'user', id: 'u1', name: 'Ada' });
+  });
+
+  it('maps a resolved agent assignee', () => {
+    const dto = TicketResponseDto.from({ ...base, assignee: { kind: 'agent', id: 'a1', name: 'bot' } }, 'KODA');
+    expect(dto.assignee).toEqual({ kind: 'agent', id: 'a1', name: 'bot' });
+  });
+
+  it('is null when unassigned or unresolved', () => {
+    expect(TicketResponseDto.from(base, 'KODA').assignee).toBeNull();
+  });
+});

@@ -172,7 +172,7 @@ describe('TicketsService', () => {
       const result = await service.create('koda', createDto, mockUserPrincipal);
 
       // service adds ref: `${project.key}-${ticket.number}` to the response
-      expect(result).toEqual({ ...mockTicket, ref: 'KODA-1' });
+      expect(result).toEqual({ ...mockTicket, ref: 'KODA-1', assignee: null });
       expect(result.number).toBe(1);
       expect(mockTxManager.run).toHaveBeenCalled();
     });
@@ -412,7 +412,7 @@ describe('TicketsService', () => {
 
       const result = await service.findByRef('koda', 'KODA-1');
 
-      expect(result).toEqual({ ...mockTicket, ref: 'KODA-1', links: [] });
+      expect(result).toEqual({ ...mockTicket, ref: 'KODA-1', links: [], assignee: null });
       expect(mockTicketRepo.findTicketScoped).toHaveBeenCalledWith(
         mockProject.id,
         'KODA',
@@ -426,7 +426,7 @@ describe('TicketsService', () => {
 
       const result = await service.findByRef('koda', 'ticket-123');
 
-      expect(result).toEqual({ ...mockTicket, ref: 'KODA-1', links: [] });
+      expect(result).toEqual({ ...mockTicket, ref: 'KODA-1', links: [], assignee: null });
       expect(mockTicketRepo.findTicketScoped).toHaveBeenCalledWith(
         mockProject.id,
         'KODA',
