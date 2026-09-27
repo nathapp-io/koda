@@ -14,8 +14,9 @@ on:
       - "tsconfig*.json"
       - ".github/workflows/**"
       - "openapi.json"
-  # No path filter on PRs: every job is a required check on main, and a PR that
-  # skipped CI (docs-only, compose, deployments) could never be merged.
+  # No workflow-level path filter on PRs: every job is a required check on main,
+  # and a PR whose workflow never ran could not be merged. The `changes` job
+  # applies the same filter instead; the other jobs skip (= pass) without code changes.
   pull_request:
     branches: [main]
 env:
@@ -23,27 +24,69 @@ env:
   TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
 
 jobs:
+  # ─── Change detection (required check) ─────────────────────────────────────
+  # Keep CODE_PATHS in sync with on.push.paths. If this job fails, every job
+  # below is skipped, which counts as passing, so this job must stay required.
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          CODE_PATHS='^(apps/|packages/|prisma/|scripts/|\.github/workflows/)|^(bun\.lock|package\.json|openapi\.json)$|^tsconfig[^/]*\.json$'
+          changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA")
+          printf 'Changed files:\n%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -qE "$CODE_PATHS"; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+            echo "No code changes: the other CI jobs are skipped."
+          fi
+
   # ─── Typecheck + Lint (parallel) ────────────────────────────────────────────
   checks:
     name: ${{ matrix.check }}
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 5
     strategy:
       fail-fast: true
       matrix:
         check: [type-check, lint]
+    # Skipped per step, not per job: a skipped matrix job reports under its
+    # unexpanded name, so the required lint / type-check checks would never arrive.
     steps:
-      - uses: actions/checkout@v4
+      - if: needs.changes.outputs.code == 'true'
+        uses: actions/checkout@v4
 
-      - uses: oven-sh/setup-bun@v2
+      - if: needs.changes.outputs.code == 'true'
+        uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.2"
 
-      - uses: actions/setup-node@v4
+      - if: needs.changes.outputs.code == 'true'
+        uses: actions/setup-node@v4
         with:
           node-version: "24"
 
-      - name: Cache bun dependencies
+      - if: needs.changes.outputs.code == 'true'
+        name: Cache bun dependencies
         uses: actions/cache@v4
         with:
           path: ~/.bun/install/cache
@@ -51,21 +94,27 @@ jobs:
           restore-keys: |
             bun-${{ runner.os }}-
 
-      - name: Install dependencies
+      - if: needs.changes.outputs.code == 'true'
+        name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Generate Prisma client
+      - if: needs.changes.outputs.code == 'true'
+        name: Generate Prisma client
         run: bun run db:generate
 
-      - name: Generate OPENAPI types
+      - if: needs.changes.outputs.code == 'true'
+        name: Generate OPENAPI types
         run: bun run generate:cli
 
-      - name: ${{ matrix.check }}
+      - if: needs.changes.outputs.code == 'true'
+        name: ${{ matrix.check }}
         run: bun run ${{ matrix.check }}
 
   # ─── Web Build (H8 regression guard) ───────────────────────────────────────
   web-build:
     name: web build
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -96,6 +145,8 @@ jobs:
   # ─── Policy Gates ────────────────────────────────────────────────────────
   policy-gates:
     name: policy-gates
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -146,6 +197,8 @@ jobs:
   # ─── Tests ──────────────────────────────────────────────────────────────────
   test:
     name: test
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -182,6 +235,8 @@ jobs:
   # ─── Integration + e2e (Postgres) ───────────────────────────────────────────
   integration:
     name: integration
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -239,6 +294,8 @@ jobs:
   # ─── Web e2e (Playwright, Postgres, built web) ─────────────────────────────
   e2e:
     name: e2e
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -319,7 +376,8 @@ jobs:
     name: evaluate
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [checks, test]
+    needs: [changes, checks, test]
+    if: needs.changes.outputs.code == 'true'
     services:
       postgres:
         image: postgres:16
@@ -384,6 +442,8 @@ jobs:
   # ─── Smoke Test (API + CLI) ────────────────────────────────────────────────
   smoke:
     name: smoke
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     services:
