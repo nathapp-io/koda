@@ -396,4 +396,41 @@ describe('webhook routes (US-003)', () => {
     expect(res.status).toBe(400);
     expect(rowOf(webhook.id)?.url).toBe('https://93.184.215.14/hook');
   });
+
+  it('US-003 review: PATCH { events: null } returns 400 and leaves the stored events unchanged', async () => {
+    const webhook = seedWebhook(projectA.id, 'https://93.184.215.14/hook');
+
+    const res = await callApi('PATCH', `/api/projects/alpha/webhooks/${webhook.id}`, { events: null });
+
+    expect(res.status).toBe(400);
+    expect(rowOf(webhook.id)?.events).toBe('["STATUS_CHANGE"]');
+  });
+
+  it('US-003 review: PATCH { secret: null } returns 400 instead of a 500 from the required column', async () => {
+    const webhook = seedWebhook(projectA.id, 'https://93.184.215.14/hook');
+
+    const res = await callApi('PATCH', `/api/projects/alpha/webhooks/${webhook.id}`, { secret: null });
+
+    expect(res.status).toBe(400);
+    expect(rowOf(webhook.id)?.secret).toBe('seed-secret');
+  });
+
+  it('US-003 review: PATCH { active: null } returns 400 and leaves the webhook enabled', async () => {
+    const webhook = seedWebhook(projectA.id, 'https://93.184.215.14/hook');
+
+    const res = await callApi('PATCH', `/api/projects/alpha/webhooks/${webhook.id}`, { active: null });
+
+    expect(res.status).toBe(400);
+    expect(rowOf(webhook.id)?.active).toBe(true);
+  });
+
+  it('US-003 review: POST { events: null } returns 400 and creates no webhook', async () => {
+    const res = await callApi('POST', '/api/projects/alpha/webhooks', {
+      url: 'https://93.184.215.14/hook',
+      events: null,
+    });
+
+    expect(res.status).toBe(400);
+    expect(store.webhooks).toHaveLength(0);
+  });
 });

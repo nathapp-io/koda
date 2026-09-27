@@ -112,3 +112,31 @@ describe('Webhook DTO url validation (US-003)', () => {
     expect(urlError?.constraints).toHaveProperty('isString');
   });
 });
+
+/**
+ * US-003 review fix: an explicit `null` is not an omitted field.
+ *
+ * `@IsOptional()` skips `null`, which let `{"events": null}` through the DTO and store
+ * `JSON.stringify(null)` = `"null"` in the events column, and let `secret: null` /
+ * `active: null` reach Prisma's required String/Boolean columns as a 500.
+ */
+describe('Webhook DTO explicit null rejection (US-003)', () => {
+  it.each([
+    ['url', 'isString'],
+    ['secret', 'isString'],
+    ['events', 'isArray'],
+    ['active', 'isBoolean'],
+  ])('US-003: rejects an update url dto whose %s is null', async (field: string, constraint: string) => {
+    const dto = Object.assign(new UpdateWebhookDto(), { [field]: null });
+
+    const errors = await validate(dto);
+    const fieldError = errors.find((error) => error.property === field);
+    expect(fieldError?.constraints).toHaveProperty(constraint);
+  });
+
+  it('US-003 boundary: still accepts an update dto with every optional field omitted', async () => {
+    const errors = await validate(new UpdateWebhookDto());
+
+    expect(errors).toHaveLength(0);
+  });
+});

@@ -215,4 +215,17 @@ describeIntegration('webhook routes over HTTP (US-003)', () => {
     expect(res.status).toBe(404);
     expect(await storedUrl(id)).toBe(OTHER_ALLOWED_URL);
   });
+
+  it('US-003 review: PATCH { events: null } returns 400 and never stores the string "null"', async () => {
+    const id = await registerWebhook(projectASlug, ALLOWED_URL);
+
+    const res = await request(httpServer)
+      .patch(`/api/projects/${projectASlug}/webhooks/${id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ events: null });
+
+    expect(res.status).toBe(400);
+    const row = await prisma.client.webhook.findUniqueOrThrow({ where: { id } });
+    expect(row.events).toBe('["STATUS_CHANGE"]');
+  });
 });
