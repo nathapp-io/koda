@@ -268,7 +268,7 @@ export class TicketsController {
   async verify(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
-    @Body() dto: TransitionWithCommentDto,
+    @Body() dto: TransitionWithCommentDto = new TransitionWithCommentDto(),
     @Principal() principal: KodaPrincipal,
     @CurrentProject() project: ProjectContext,
   ) {
@@ -305,7 +305,7 @@ export class TicketsController {
   async fix(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
-    @Body() dto: TransitionWithCommentDto,
+    @Body() dto: TransitionWithCommentDto = new TransitionWithCommentDto(),
     @Principal() principal: KodaPrincipal,
     @CurrentProject() project: ProjectContext,
   ) {
@@ -326,7 +326,7 @@ export class TicketsController {
   async verifyFix(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
-    @Body() dto: TransitionWithCommentDto,
+    @Body() dto: TransitionWithCommentDto = new TransitionWithCommentDto(),
     @Query('approve') approve: boolean | string,
     @Principal() principal: KodaPrincipal,
     @CurrentProject() project: ProjectContext,
@@ -351,7 +351,7 @@ export class TicketsController {
   async close(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
-    @Body() dto: TransitionWithCommentDto,
+    @Body() dto: TransitionWithCommentDto = new TransitionWithCommentDto(),
     @Principal() principal: KodaPrincipal,
     @CurrentProject() project: ProjectContext,
   ) {
@@ -374,7 +374,7 @@ export class TicketsController {
   async reject(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
-    @Body() dto: TransitionWithCommentDto,
+    @Body() dto: TransitionWithCommentDto = new TransitionWithCommentDto(),
     @Principal() principal: KodaPrincipal,
     @CurrentProject() project: ProjectContext,
   ) {

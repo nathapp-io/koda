@@ -639,6 +639,15 @@ describe('TicketsController', () => {
       expect(mockTransitionsService.close).not.toHaveBeenCalled();
     });
 
+    // Regression (fix round 1, #144): a request with no body at all makes Nest
+    // pass undefined for @Body(), which used to TypeError on dto.body and 500.
+    // The controller now defaults the dto, so the missing reason is a 400.
+    it('400 for a project ADMIN when the request carries no body at all', async () => {
+      await expect(controller.close('koda', 'KODA-1', undefined, mockMemberUser, project('ADMIN')))
+        .rejects.toBeInstanceOf(ValidationAppException);
+      expect(mockTransitionsService.close).not.toHaveBeenCalled();
+    });
+
     it('closes for a project ADMIN with a reason, passing the enriched principal', async () => {
       mockTransitionsService.close.mockResolvedValue({ ticket: { id: 't1', status: 'CLOSED' }, comment: {}, activity: {} });
       const res = await controller.close('koda', 'KODA-1', { body: 'dup' }, mockMemberUser, project('ADMIN'));

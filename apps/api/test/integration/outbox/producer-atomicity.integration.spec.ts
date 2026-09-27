@@ -26,6 +26,7 @@ import { AgentAuthProvider } from '../../../src/auth/agent-auth.provider';
 import { TicketStatus, TicketType } from '../../../src/common/enums';
 import { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
 import { resetDb } from '../../helpers/reset-db';
+import { KodaCaslAbilityFactory } from '../../../src/auth/casl/koda-casl-ability.factory';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -60,6 +61,7 @@ describeIntegration('producers record outbox rows atomically', () => {
       providers: [
         TicketsService,
         TicketTransitionsService,
+        KodaCaslAbilityFactory,
         PrismaTicketsRepository,
         { provide: TICKET_REPOSITORY, useExisting: PrismaTicketsRepository },
         TicketEventService,
