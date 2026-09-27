@@ -15,6 +15,7 @@ import {
   ApiBearerAuth,
   ApiOperation,
   ApiResponse,
+  ApiQuery,
 } from '@nestjs/swagger';
 import { TicketsService } from './tickets.service';
 import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
@@ -317,6 +318,7 @@ export class TicketsController {
   @Post(':ref/verify-fix')
   @HttpCode(200)
   @ApiOperation({ summary: 'Approve or reject fix (VERIFY_FIX → CLOSED or IN_PROGRESS)' })
+  @ApiQuery({ name: 'approve', type: Boolean, required: false, description: 'true closes the ticket; false (default) returns it to IN_PROGRESS' })
   @ApiResponse({ status: 200, description: 'Fix reviewed', type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })

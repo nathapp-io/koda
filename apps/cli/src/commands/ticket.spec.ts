@@ -1506,39 +1506,24 @@ describe('ticketCommand', () => {
   });
 
   describe('ticket verify-fix', () => {
-    it('transitions VERIFY_FIX to CLOSED with --pass', async () => {
-      const mockTicket = {
-        id: 'ticket-1',
-        number: 1,
-        type: 'BUG',
-        title: 'Test bug',
-        status: 'closed',
-        priority: 'HIGH',
-      };
-
-      (ticketsControllerVerifyFix as jest.Mock).mockResolvedValue({
-        ret: 0,
-        data: mockTicket,
-      });
-
+    it('--pass sends approve=true in one call and never calls close', async () => {
+      (ticketsControllerVerifyFix as jest.Mock).mockResolvedValue({ data: {} });
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
       const verifyFixCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'verify-fix');
-
-      await verifyFixCmd?.parseAsync([
-        'node',
-        'test',
-        'KODA-1',
-        '--comment',
-        'Looks good',
-        '--pass',
-      ]);
-
-      expect(ticketsControllerVerifyFix).toHaveBeenCalledWith(
-        expect.objectContaining({ body: expect.objectContaining({
-            body: 'Looks good',
-          }), path: expect.objectContaining({ slug: 'koda', ref: 'KODA-1' })})
-      );
+      await verifyFixCmd?.parseAsync(['node', 'test', 'KODA-1', '--comment', 'Looks good', '--pass']);
+      expect(ticketsControllerVerifyFix).toHaveBeenCalledWith(expect.objectContaining({
+        body: { body: 'Looks good' }, path: { slug: 'koda', ref: 'KODA-1' }, query: { approve: true },
+      }));
+      expect(ticketsControllerClose).not.toHaveBeenCalled();
       expect(processExitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('--fail sends approve=false', async () => {
+      (ticketsControllerVerifyFix as jest.Mock).mockResolvedValue({ data: {} });
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const verifyFixCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'verify-fix');
+      await verifyFixCmd?.parseAsync(['node', 'test', 'KODA-1', '--comment', 'Broken', '--fail']);
+      expect(ticketsControllerVerifyFix).toHaveBeenCalledWith(expect.objectContaining({ query: { approve: false } }));
     });
 
     it('transitions VERIFY_FIX to IN_PROGRESS with --fail', async () => {
@@ -1624,30 +1609,32 @@ describe('ticketCommand', () => {
   });
 
   describe('ticket close', () => {
-    it('manually closes a ticket', async () => {
-      const mockTicket = {
-        id: 'ticket-1',
-        number: 1,
-        type: 'BUG',
-        title: 'Test bug',
-        status: 'closed',
-        priority: 'HIGH',
-      };
-
-      (ticketsControllerClose as jest.Mock).mockResolvedValue({
-        ret: 0,
-        data: mockTicket,
-      });
-
+    it('sends the reason as the comment body', async () => {
+      (ticketsControllerClose as jest.Mock).mockResolvedValue({ data: {} });
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
       const closeCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'close');
-
-      await closeCmd?.parseAsync(['node', 'test', 'KODA-1']);
-
-      expect(ticketsControllerClose).toHaveBeenCalledWith(
-        expect.objectContaining({ path: expect.objectContaining({ slug: 'koda', ref: 'KODA-1' })})
-      );
+      await closeCmd?.parseAsync(['node', 'test', 'KODA-1', '--reason', 'duplicate of KODA-2']);
+      expect(ticketsControllerClose).toHaveBeenCalledWith({
+        body: { body: 'duplicate of KODA-2' }, path: { slug: 'koda', ref: 'KODA-1' },
+      });
       expect(processExitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it.each([[[]], [['--reason', '   ']]])('exits 3 without calling the API when the reason is missing or blank (%j)', async (extra) => {
+      // handleApiError only records process.exit in beforeEach; make it throw so
+      // execution stops before the API call (mirrors the real exit semantics).
+      processExitSpy.mockImplementation(() => {
+        throw new Error('process.exit called');
+      });
+      const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
+      const closeCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'close');
+      try {
+        await closeCmd?.parseAsync(['node', 'test', 'KODA-1', ...extra]);
+      } catch {
+        // Expected: the mocked process.exit throws to stop execution
+      }
+      expect(ticketsControllerClose).not.toHaveBeenCalled();
+      expect(processExitSpy).toHaveBeenCalledWith(3);
     });
 
     it('displays error on invalid transition', async () => {
