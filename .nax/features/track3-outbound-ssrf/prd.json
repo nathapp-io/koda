@@ -3,7 +3,7 @@
   "feature": "track3-outbound-ssrf",
   "branchName": "feat/track3-outbound-ssrf",
   "createdAt": "2026-09-27T00:00:00Z",
-  "updatedAt": "2026-09-27T13:37:38.356Z",
+  "updatedAt": "2026-09-27T14:17:26.029Z",
   "userStories": [
     {
       "id": "US-001",
@@ -109,8 +109,8 @@
       "dependencies": [
         "US-001"
       ],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -183,7 +183,10 @@
       "routing": {
         "complexity": "expert",
         "testStrategy": "three-session-tdd",
-        "reasoning": "ADMIN access-control boundary and cross-project ID isolation plus API, database, translations and root OpenAPI regeneration; security override mandates strict TDD."
+        "reasoning": "ADMIN access-control boundary and cross-project ID isolation plus API, database, translations and root OpenAPI regeneration; security override mandates strict TDD.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
       },
       "contextFiles": [
         "apps/api/src/webhook/webhook.service.ts",
@@ -238,7 +241,8 @@
       "workdirSource": "derived",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "6e615e4c1a76d7b2a7f606e9b69dc0331bad0f28"
     },
     {
       "id": "US-004",
