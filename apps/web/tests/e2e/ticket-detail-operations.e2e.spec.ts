@@ -7,7 +7,7 @@ import {
   transitionTicket,
   E2E_ADMIN,
 } from './fixtures/api-client';
-import { webLogin, generateUniqueProjectKey } from './fixtures/page-helpers';
+import { webLogin, confirmTransitionDialog, generateUniqueProjectKey } from './fixtures/page-helpers';
 
 const API_URL = process.env['E2E_API_URL'] ?? 'http://localhost:3102';
 const ASSIGN_REGEX = /^Assign$|^指派$/i;
@@ -119,6 +119,7 @@ test.describe('Ticket Detail Operations', () => {
       request.url().includes(`/api/projects/${projectSlug}/tickets/${ticket.ref}/close`)
     );
     await page.getByRole('button', { name: CLOSE_REGEX }).first().click();
+    await confirmTransitionDialog(page, 'closing from e2e');
     await expect(closeRequest).resolves.toBeTruthy();
 
     page.once('dialog', dialog => dialog.accept());
