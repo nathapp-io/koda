@@ -61,13 +61,14 @@ export class RagController {
     // reached Hybrid's in-memory store). Index once via RagService
     // (VectorStore.indexDocument); HybridRetriever reads the same row through
     // the shared LanceTableManager.
-    await this.ragService.indexDocument(project.id, {
+    const id = await this.ragService.indexDocument(project.id, {
       source: dto.source,
       sourceId: dto.sourceId,
       content: dto.content,
       metadata: dto.metadata ?? {},
     });
-    return JsonResponse.Ok({ indexed: true });
+    if (id === null) return JsonResponse.Ok({ indexed: false, sourceId: dto.sourceId });
+    return JsonResponse.Ok({ indexed: true, id, sourceId: dto.sourceId });
   }
 
   @Get('documents')

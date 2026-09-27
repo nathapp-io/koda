@@ -188,12 +188,12 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
    * replaces the previous row (manager.addRecord) instead of duplicating it.
    * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
    */
-  async indexDocument(projectId: string, doc: IndexDocumentInput): Promise<void> {
+  async indexDocument(projectId: string, doc: IndexDocumentInput): Promise<string | null> {
     await this.validateProjectId(projectId);
 
     if (!this.embeddingService) {
       this.logger.warn('EmbeddingService not available — skipping RAG indexing');
-      return;
+      return null;
     }
 
     const tableName = `project_${projectId}`;
@@ -213,8 +213,9 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
     const createdAt =
       typeof createdAtOverride === 'string' ? createdAtOverride : new Date().toISOString();
 
+    const id = generateId();
     const record: LanceRecord = {
-      id: generateId(),
+      id,
       source: doc.source,
       source_id: doc.sourceId,
       content: doc.content,
@@ -234,6 +235,8 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
     if (this.lexicalIndex) {
       this.lexicalIndex.addDocument(projectId, { id: doc.sourceId, content: doc.content });
     }
+
+    return id;
   }
 
   /**

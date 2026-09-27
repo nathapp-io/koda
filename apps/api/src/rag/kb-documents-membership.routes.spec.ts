@@ -124,7 +124,7 @@ describe('RagController KB document membership gate (US-005 AC1)', () => {
       graphifyEnabled: false,
       deletedAt: null,
     });
-    ragService.indexDocument.mockResolvedValue(undefined);
+    ragService.indexDocument.mockResolvedValue('doc-id');
     projectRepo.findBySlug.mockResolvedValue({ id: 'proj-1', slug: 'alpha', deletedAt: null });
     projectRepo.findMembershipRole.mockResolvedValue('DEVELOPER');
   });

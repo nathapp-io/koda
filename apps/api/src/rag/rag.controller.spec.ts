@@ -107,7 +107,7 @@ describe('RagController', () => {
   describe('addDocument', () => {
     it('indexes only via ragService (single LanceDB write path — H7)', async () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
-      ragService.indexDocument.mockResolvedValue(undefined);
+      ragService.indexDocument.mockResolvedValue('doc-record-1');
 
       const result = await controller.addDocument(
         'alpha',
@@ -124,7 +124,7 @@ describe('RagController', () => {
       expect(ragService.indexDocument).toHaveBeenCalledWith('proj-1', expect.objectContaining({ sourceId: 'doc-1' }));
       // H7: HybridRetriever must NOT receive a second, duplicate index write.
       expect(hybridRetrieverService.indexDocument).not.toHaveBeenCalled();
-      expect((result as any).data).toEqual({ indexed: true });
+      expect((result as any).data).toEqual({ indexed: true, id: 'doc-record-1', sourceId: 'doc-1' });
     });
 
     it('throws NotFoundAppException when project not found', async () => {
@@ -153,7 +153,7 @@ describe('RagController', () => {
 
     it('allows agent principal to add a document', async () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
-      ragService.indexDocument.mockResolvedValue(undefined);
+      ragService.indexDocument.mockResolvedValue('doc-record-2');
 
       const result = await controller.addDocument(
         'alpha',
@@ -163,7 +163,7 @@ describe('RagController', () => {
 
       expect(ragService.indexDocument).toHaveBeenCalled();
       expect(hybridRetrieverService.indexDocument).not.toHaveBeenCalled();
-      expect((result as any).data).toEqual({ indexed: true });
+      expect((result as any).data).toEqual({ indexed: true, id: 'doc-record-2', sourceId: 'doc-2' });
     });
 
     // US-001: the membership gate for this route moved to ProjectMembershipGuard,

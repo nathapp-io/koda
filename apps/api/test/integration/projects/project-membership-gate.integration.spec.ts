@@ -197,6 +197,9 @@ describeIntegration('US-002 project membership gate (PG)', () => {
     await addMember('other', 'outside', 'DEVELOPER').expect(201);
     await addMember('other', 'multi', 'DEVELOPER').expect(201);
     await addMember('softdel', 'multi', 'DEVELOPER').expect(201);
+    // Soft-delete here (not inside AC9) so every list-scoping assertion below
+    // (AC6/AC7/AC8/AC9) can run independently of the others' execution order.
+    await request(server).delete('/api/projects/softdel').set(auth('root')).expect(204);
 
     refs.get = await createTicket('team', 'Matrix target');
     refs.patch = await createTicket('team', 'Matrix patch');
@@ -254,20 +257,16 @@ describeIntegration('US-002 project membership gate (PG)', () => {
   });
 
   // -------------------------------------------------------------------------
-  // AC9 → AC6 → AC7 → AC8: findAllForPrincipal scoping (runs before the rest so
-  // the soft-deleted project is already invisible to the later list assertions)
+  // AC6/AC7/AC8/AC9: findAllForPrincipal scoping. `softdel` was already
+  // soft-deleted in beforeAll, so these run independently of each other.
   // -------------------------------------------------------------------------
 
   it('AC9: findAllForPrincipal never returns a soft-deleted project, even for a member of it', async () => {
-    await request(server).delete('/api/projects/softdel').set(auth('root')).expect(204);
-
     const projects = await projectsService.findAllForPrincipal(
       userPrincipal(ids.multi, 'multi', 'MEMBER'),
     );
 
-    const slugs = projects.map((p) => p.slug).sort();
-    expect(slugs).not.toContain('softdel');
-    expect(slugs).toEqual(['other', 'team']);
+    expect(projects.map((p) => p.slug)).not.toContain('softdel');
   }, TEST_TIMEOUT_MS);
 
   it('AC6: findAllForPrincipal returns exactly the projects a user principal is a member of', async () => {

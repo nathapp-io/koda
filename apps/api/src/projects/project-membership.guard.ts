@@ -31,6 +31,8 @@ export class ProjectMembershipGuard implements CanActivate {
     const slug = req.params?.slug;
     if (!slug) return true;
 
+    if (!req.user) throw new ForbiddenAppException({}, 'projects');
+
     const projectId = await this.access.findProjectIdBySlug(slug);
     await this.access.assertProjectMembership(projectId, req.user);
 

@@ -210,7 +210,7 @@ describe('ProjectMembershipGuard on the project-scoped routes (US-001)', () => {
       deletedAt: null,
     });
     ragRepository.findProjectMembership.mockResolvedValue({ role: 'DEVELOPER' });
-    ragService.indexDocument.mockResolvedValue(undefined);
+    ragService.indexDocument.mockResolvedValue('doc-id');
     hybridRetriever.search.mockResolvedValue({
       results: [],
       scores: [],

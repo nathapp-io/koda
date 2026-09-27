@@ -44,13 +44,13 @@ export class ProjectsService {
     // Check slug uniqueness
     const existingSlug = await this.projectRepo.findBySlug(createProjectDto.slug);
     if (existingSlug) {
-      throw new ConflictAppException({ slug: 'slug already in use' }, 'projects');
+      throw new ConflictAppException({ field: 'slug' }, 'projects');
     }
 
     // Check key uniqueness
     const existingKey = await this.projectRepo.findByKey(createProjectDto.key);
     if (existingKey) {
-      throw new ConflictAppException({ key: 'key already in use' }, 'projects');
+      throw new ConflictAppException({ field: 'key' }, 'projects');
     }
 
     // Create project
@@ -128,7 +128,7 @@ export class ProjectsService {
       if (updateProjectDto.slug !== currentProject.slug) {
         const existingSlug = await this.projectRepo.findBySlug(updateProjectDto.slug);
         if (existingSlug && existingSlug.id !== currentProject.id) {
-          throw new ConflictAppException({ slug: 'slug already in use' }, 'projects');
+          throw new ConflictAppException({ field: 'slug' }, 'projects');
         }
       }
     }
@@ -144,7 +144,7 @@ export class ProjectsService {
       if (updateProjectDto.key !== currentProject.key) {
         const existingKey = await this.projectRepo.findByKey(updateProjectDto.key);
         if (existingKey && existingKey.id !== currentProject.id) {
-          throw new ConflictAppException({ key: 'key already in use' }, 'projects');
+          throw new ConflictAppException({ field: 'key' }, 'projects');
         }
       }
     }
