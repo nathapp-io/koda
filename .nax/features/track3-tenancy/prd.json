@@ -3,7 +3,7 @@
   "feature": "track3-tenancy",
   "branchName": "feat/track3-tenancy",
   "createdAt": "2026-09-27T00:00:00.000Z",
-  "updatedAt": "2026-09-27T05:31:13.243Z",
+  "updatedAt": "2026-09-27T06:29:48.022Z",
   "userStories": [
     {
       "id": "US-001",
@@ -42,7 +42,10 @@
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "A new Reflector-based access-control abstraction is injected into five Nest controllers and several modules, requiring isolated security tests."
+        "reasoning": "A new Reflector-based access-control abstraction is injected into five Nest controllers and several modules, requiring isolated security tests.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/projects/project-access.service.ts",
@@ -79,7 +82,11 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b840c0e8b01836b54396067f6c9b9b5be5bee9f5"
     },
     {
       "id": "US-002",
@@ -138,7 +145,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-003",
@@ -192,7 +202,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-004",
@@ -251,7 +264,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     },
     {
       "id": "US-005",
@@ -299,7 +315,10 @@
         }
       ],
       "workdir": "apps/api",
-      "workdirSource": "stated"
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1
     }
   ],
   "analysis": "Existing NestJS/Prisma API in apps/api; no new package or schema migration. ProjectAccessService resolves slugs and rejects soft-deleted projects, skips membership checks for agents and global ADMIN, and delegates membership lookup to PrismaProjectRepository.findMembershipRole (apps/api/src/projects/project-access.service.ts:10-28; apps/api/src/projects/prisma-project.repository.ts:62-69). ProjectAccessModule exports this service and should provide/export the new guard (apps/api/src/projects/project-access.module.ts:5-19). UserPrincipal.role is MEMBER|ADMIN; DEVELOPER and VIEWER are ProjectMember roles, not valid global user roles: HTTP fixtures describing a 'DEVELOPER user' should use a MEMBER principal and DEVELOPER project role (apps/api/src/auth/principal/koda-principal.types.ts:4-30). TicketsController is entirely under projects/:slug/tickets; only assign currently checks membership inline (apps/api/src/tickets/tickets.controller.ts:45-52,235-249). LabelsController and CommentsController use method-level project routes and CommentsController also has slug-less comments/:id routes, so do not apply a controller-level guard there (apps/api/src/labels/labels.controller.ts:75-122; apps/api/src/comments/comments.controller.ts:69-121). RagController and RetrievalController each have duplicated membership checks; RagController's KB write endpoints also need project VIEWER exclusion without changing read/search or global permissions (apps/api/src/rag/rag.controller.ts:23-76,80-211; apps/api/src/retrieval/retrieval.controller.ts:10-55). ProjectsController's GET :slug and PATCH :slug/agents/:agentSlug need method-level guard; ADMIN-only routes and already gated impact/agent-list routes remain unchanged (apps/api/src/projects/projects.controller.ts:59-105,112-211). CommentsModule, LabelsModule and RagModule need ProjectAccessModule for guard injection; TicketsModule imports ProjectsModule, which exports ProjectAccessModule; RetrievalModule imports ProjectAccessModule already (apps/api/src/comments/comments.module.ts:9-13; apps/api/src/labels/labels.module.ts:7-10; apps/api/src/rag/rag.module.ts:126-130; apps/api/src/tickets/tickets.module.ts:17-20; apps/api/src/projects/projects.module.ts:14-33; apps/api/src/retrieval/retrieval.module.ts:7-10). Existing project list is unscoped but PrismaProjectRepository.findAll filters deletedAt: add membership-filtered query, preserve response DTO mapping while passing @Principal() from controller (apps/api/src/projects/projects.service.ts:68-70; apps/api/src/projects/prisma-project.repository.ts:39-44; apps/api/src/projects/projects.controller.ts:64-67). Comment records have ticketId only; resolving comment -> ticket -> project requires repository support before the service CASL check. Agents and global ADMIN bypass membership, while user non-members get 404; DELETE comments/:id currently declares @HttpCode(200) and returns JsonResponse.Ok(null), but spec requires 204, so change the HTTP response (apps/api/src/comments/comments.service.ts:122-167; apps/api/src/comments/prisma-comment.repository.ts:17-31; apps/api/src/comments/comments.controller.ts:105-121). HTTP integration pattern uses PG/supertest and KODA_DB_TESTS=1, resetDb/bootHttpApp/loginToken (apps/api/test/integration/live/live-stream.integration.spec.ts:1-19,49-95). Existing agent service has service-local CreateAgentDto/UpdateAgentDto definitions, though canonical agents/dto/* files exist; controller imports local CreateAgentDto, and agent service specs import it, so eventual deletion needs caller/test changes (apps/api/src/agents/agents.service.ts:14-71; apps/api/src/agents/agents.controller.ts:2-4; apps/api/src/agents/agents.service.spec.ts:2; apps/api/src/agents/dto/create-agent.dto.ts:1-14). The canonical CreateAgentDto currently has only required name/slug; preserve optional roles/capabilities behavior when switching types in US-005. Agent create spreads scalarFields into agentRepo.create, then writes roles/capabilities separately, whose repository method nests $transaction; inject ITransactionManager into AgentsService and use ambient Prisma client with sequential creates (apps/api/src/agents/agents.service.ts:81-92,119-180; apps/api/src/agents/prisma-agent.repository.ts:42-51,79-94). Existing AgentsService unit provider stubs lack TRANSACTION_MANAGER and its pickup unit tests call the old two-argument signature; update them (apps/api/src/agents/agents.service.spec.ts:55-114,695-767). Pickup controller omits principal; service currently returns null for a missing project and repository lookup includes soft-deleted rows; restrict to agent-self/global ADMIN, return 404 for absent/deleted project (apps/api/src/agents/agents.controller.ts:37-44,106-115; apps/api/src/agents/agents.service.ts:259-269; apps/api/src/agents/prisma-agent.repository.ts:115-117). ProjectsService duplicate checks currently raise ValidationAppException and update accepts deleted projects; change conflicts to 409, update-deleted to 404 while retaining invalid-format validation (apps/api/src/projects/projects.service.ts:21-65,82-132). Both locales require missing projects.slugInvalid/keyInvalid in projects.json and common.validation.isIn in common.json (apps/api/src/i18n/en/projects.json:1-7; apps/api/src/i18n/zh/projects.json:1-7; apps/api/src/i18n/en/common.json:2-14; apps/api/src/i18n/zh/common.json:2-14). envSchema currently validates JWT secrets separately and validate wraps Joi error without exposing field name; ensure JWT_REFRESH_SECRET is identifiable in equal-secret validation error (apps/api/src/config/env.validation.ts:5-15,39-45). KodaDomainWriter currently trusts user-provided actorRole/role, while its repository only finds a project; fetch User.role and ProjectMember.role by project/user, ignore user payload roles, leave agent handling and WriteTicketEventInput unchanged (apps/api/src/koda-domain-writer/koda-domain-writer.service.ts:60-118; apps/api/src/koda-domain-writer/prisma-koda-domain-writer.repository.ts:1-12). Existing tests to adapt include tickets.controller.spec.ts, rag.controller.spec.ts, retrieval.controller.spec.ts, projects.controller.spec.ts, projects.service.spec.ts, comments.service.spec.ts, agents.service.spec.ts and koda-domain-writer.service.spec.ts; add specified guard, agent repository and HTTP integration specs. Risks: global CASL guard ordering may return a permission 403 before a handler; the spec's US-002 positive route-matrix requirement (every member DEVELOPER request is neither 403 nor 404) is in tension with the existing project-agent PATCH admin/self restriction and certain CASL write permissions (apps/api/src/projects/projects.controller.ts:190-208). Preserve the AC while avoiding inadvertent global permission changes; design fixtures and report any irreducible policy conflict. Integration should use real ProjectMember rows, not claims. US-001 precedes US-002 (integration exercises its new guard), and US-001/US-003 precede US-005 (cleanup consumes their changes). No database migration or new agent membership model.",

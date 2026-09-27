@@ -2,8 +2,9 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { RagController } from './rag.controller';
 import { RagService } from './rag.service';
 import { HybridRetrieverService } from './hybrid-retriever.service';
-import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { PrismaRagRepository } from './prisma-rag.repository';
+import { ProjectAccessService } from '../projects/project-access.service';
 
 const mockProject = {
   id: 'proj-1',
@@ -88,6 +89,10 @@ describe('RagController', () => {
         { provide: RagService, useValue: ragService },
         { provide: HybridRetrieverService, useValue: hybridRetrieverService },
         { provide: PrismaRagRepository, useValue: mockRagRepository },
+        // US-001: the class-level ProjectMembershipGuard is instantiated by the DI
+        // container even though these tests call the handlers directly, so its
+        // ProjectAccessService dependency must resolve.
+        { provide: ProjectAccessService, useValue: {} },
       ],
     }).compile();
 
@@ -161,20 +166,10 @@ describe('RagController', () => {
       expect((result as any).data).toEqual({ indexed: true });
     });
 
-    it('forbids user without project membership', async () => {
-      mockFindProjectBySlug.mockResolvedValue(mockProject);
-      mockFindProjectMembership.mockResolvedValue(null);
-
-      await expect(
-        controller.addDocument(
-          'alpha',
-          { source: 'doc', sourceId: 'x', content: 'y', metadata: {} },
-          mockMemberUser,
-        ),
-      ).rejects.toThrow(ForbiddenAppException);
-      expect(ragService.indexDocument).not.toHaveBeenCalled();
-      expect(hybridRetrieverService.indexDocument).not.toHaveBeenCalled();
-    });
+    // US-001: the membership gate for this route moved to ProjectMembershipGuard,
+    // which runs before the handler. Non-members, project VIEWERs on a write route
+    // and members are covered at the HTTP boundary in
+    // projects/project-membership.guard.routes.spec.ts.
   });
 
   describe('listDocuments', () => {
@@ -215,15 +210,8 @@ describe('RagController', () => {
       expect(ragService.listDocuments).toHaveBeenCalled();
     });
 
-    it('forbids user without project membership', async () => {
-      mockFindProjectBySlug.mockResolvedValue(mockProject);
-      mockFindProjectMembership.mockResolvedValue(null);
-
-      await expect(
-        controller.listDocuments('alpha', mockMemberUser),
-      ).rejects.toThrow(ForbiddenAppException);
-      expect(ragService.listDocuments).not.toHaveBeenCalled();
-    });
+    // US-001: the membership gate for this route moved to ProjectMembershipGuard
+    // (see projects/project-membership.guard.routes.spec.ts).
   });
 
   describe('deleteDocument', () => {
@@ -264,14 +252,9 @@ describe('RagController', () => {
       expect(mockFindProjectMembership).not.toHaveBeenCalled();
     });
 
-    it('forbids user without membership', async () => {
-      mockFindProjectBySlug.mockResolvedValue(mockProject);
-      mockFindProjectMembership.mockResolvedValue(null);
-
-      await expect(
-        controller.search('alpha', { query: 'test' }, mockMemberUser),
-      ).rejects.toThrow(ForbiddenAppException);
-    });
+    // US-001: the membership gate for this route moved to ProjectMembershipGuard
+    // (see projects/project-membership.guard.routes.spec.ts). A project VIEWER is
+    // still allowed to search — KB reads permit VIEWER.
 
     it('allows member with valid project role', async () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
