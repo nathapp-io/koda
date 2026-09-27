@@ -22,3 +22,8 @@ export interface WebhookProjectRef {
   id: string;
   deletedAt: Date | null;
 }
+
+/** The secret-free webhook shape returned by `WebhookService.update` and the PATCH route. */
+export interface WebhookView extends WebhookListItem {
+  active: boolean;
+}

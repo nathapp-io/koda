@@ -1,7 +1,11 @@
-import { IsUrl, IsString, IsArray, IsBoolean, IsOptional, MinLength } from 'class-validator';
+import { IsString, IsArray, IsBoolean, IsOptional, MinLength, MaxLength } from 'class-validator';
+
+/** URL semantics (scheme, credentials, resolved destination) belong to `OutboundUrlGuard`. */
+const MAX_URL_LENGTH = 2048;
 
 export class CreateWebhookDto {
-  @IsUrl()
+  @IsString()
+  @MaxLength(MAX_URL_LENGTH)
   url: string;
 
   @IsOptional()
@@ -16,7 +20,8 @@ export class CreateWebhookDto {
 
 export class UpdateWebhookDto {
   @IsOptional()
-  @IsUrl()
+  @IsString()
+  @MaxLength(MAX_URL_LENGTH)
   url?: string;
 
   @IsOptional()
