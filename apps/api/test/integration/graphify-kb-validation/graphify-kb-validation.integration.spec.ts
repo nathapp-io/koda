@@ -15,6 +15,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { ValidationAppException } from '@nathapp/nestjs-common';
 import { ImportGraphifyDto, GraphifyNodeDto, GraphifyLinkDto } from '../../../src/rag/dto/import-graphify.dto';
 import { PrismaRagRepository } from '../../../src/rag/prisma-rag.repository';
+import { ProjectAccessService } from '../../../src/projects/project-access.service';
 
 // Variable-path require helper for the not-yet-existing ImportGraphifyDto (US-003).
 // TypeScript only statically resolves string-literal require() paths.
@@ -550,6 +551,10 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
           { provide: HybridRetrieverService, useValue: { search: jest.fn(), indexDocument: jest.fn() } },
           { provide: EvaluationService, useValue: { evaluate: jest.fn() } },
           PrismaRagRepository,
+          // US-001: the class-level ProjectMembershipGuard is instantiated by the DI
+          // container even though these tests call the controller directly, so its
+          // ProjectAccessService dependency must resolve.
+          { provide: ProjectAccessService, useValue: {} },
         ],
       }).compile();
 
@@ -653,22 +658,14 @@ describe('Graphify KB Validation - Schema, DTO & i18n Extensions', () => {
       expect(updatedAt.getTime()).toBeGreaterThanOrEqual(beforeTs);
     });
 
-    // AC2: throws 403 for non-ADMIN callers
-    it('AC2: throws ForbiddenAppException when caller role is not ADMIN', async () => {
-      const dto: ImportGraphifyDto = { nodes: sampleNodes };
-
-      await expect(
-        controller.importGraphify('test-project', dto, { extra: { role: 'MEMBER' } } as unknown as import('../../../src/auth/principal/koda-principal.types').KodaPrincipal),
-      ).rejects.toThrow();
-    });
-
-    it('AC2: throws ForbiddenAppException when currentUser is null', async () => {
-      const dto: ImportGraphifyDto = { nodes: sampleNodes };
-
-      await expect(
-        controller.importGraphify('test-project', dto, null as unknown as import('../../../src/auth/principal/koda-principal.types').KodaPrincipal),
-      ).rejects.toThrow();
-    });
+    // AC2: US-001/US-005 moved membership and role enforcement out of the
+    // controller entirely — `importGraphify` no longer calls
+    // `checkProjectMembership` inline (that private method is deleted).
+    // Authorization is now `ProjectMembershipGuard` (class-level) plus
+    // `@RequiredPermission([IMPORT, 'CodeIntel'])`, both of which run in the
+    // guard pipeline before the handler and are exercised via real HTTP
+    // requests, not by calling the controller method directly. See
+    // rag.controller.spec.ts and the US-001 route-matrix integration spec.
 
     // AC4: throws 400 when graphifyEnabled is false
     it('AC4: throws ValidationAppException when project.graphifyEnabled is false', async () => {

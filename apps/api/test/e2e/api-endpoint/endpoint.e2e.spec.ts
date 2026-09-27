@@ -627,13 +627,10 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('DELETE /api/comments/:id — deletes a comment', async () => {
-      const res = await request(httpServer)
+      await request(httpServer)
         .delete(`/api/comments/${commentId}`)
         .set('Authorization', `Bearer ${userAccessToken}`)
-        .expect(200);
-
-      // JsonResponse.Ok wrapper
-      expect(res.body).toHaveProperty('ret', 0);
+        .expect(204);
     });
   });
 
