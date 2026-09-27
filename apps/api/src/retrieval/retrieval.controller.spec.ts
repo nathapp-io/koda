@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { RetrievalController } from './retrieval.controller';
 import { EvaluationService } from './evaluation.service';
 import { ProjectAccessService } from '../projects/project-access.service';
-import { NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 
 const mockAdminUser = {
   actorType: 'user' as const,
@@ -79,13 +79,17 @@ describe('RetrievalController', () => {
       ).rejects.toThrow(NotFoundAppException);
     });
 
-    it('forbids user without membership', async () => {
+    // US-005: the private `checkProjectMembership` copy is gone. Membership is
+    // decided by the class-level ProjectMembershipGuard (see
+    // retrieval-membership.routes.spec.ts for the HTTP-level 403); the handler
+    // must not evaluate the membership rule a second time.
+    it('US-005: leaves the membership decision to ProjectMembershipGuard instead of evaluating it in the handler', async () => {
       mockFindProjectIdBySlug.mockResolvedValue('proj-1');
-      mockAssertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'projects'));
 
-      await expect(
-        controller.evaluateRetrieval('alpha', mockMemberUser),
-      ).rejects.toThrow(ForbiddenAppException);
+      await controller.evaluateRetrieval('alpha', mockMemberUser);
+
+      expect(mockAssertProjectMembership).not.toHaveBeenCalled();
+      expect(evaluationService.runQueries).toHaveBeenCalled();
     });
   });
 });
