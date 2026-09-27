@@ -266,7 +266,7 @@ An `OutboundUrlRejection` from `checkUrl` in `create` or `update` becomes
 | No response within `deliveryTimeoutMs` | `OutboundHttpClient.post` | `timeout` |
 | 3xx response | `OutboundHttpClient.post` | `redirect_refused`; `Location` not requested |
 | 4xx / 5xx response | `OutboundHttpClient.post` | `http_4xx` / `http_5xx` |
-| Any delivery error | `WebhookDeliveryHandler` → `FanOutPublisher` | `lastError` holds only the code; the relay retries with its normal backoff, then marks the row `dead` |
+| Any delivery error | `WebhookDeliveryHandler` → `FanOutPublisher` | `lastError` holds only the code. Retry and dead-lettering are the existing, unchanged `@nathapp/nestjs-outbox` relay policy (see Out of Scope); this slice adds no retry behaviour and no test of it |
 | `WEBHOOK_ALLOWED_HOSTS` has an invalid entry | `envSchema` | boot refused with a `ValidationAppException` naming `WEBHOOK_ALLOWED_HOSTS` |
 
 ## Out of Scope
