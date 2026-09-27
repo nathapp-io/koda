@@ -1,3 +1,5 @@
+import { clientIpHeaders } from '~/server/utils/client-ip'
+
 /**
  * API response shape from @nathapp/nestjs-common JsonResponse.
  *
@@ -141,11 +143,20 @@ export const useApi = () => {
 
   const { locale } = useI18n()
 
-  const getHeaders = (caller?: Record<string, string>) =>
-    mergeHeaders(caller, {
+  // SSR: this server calls the API itself, so name the browser it serves
+  // (resolved by server/middleware/client-ip.ts; never a browser-sent header).
+  const ssrEvent = import.meta.server ? useRequestEvent() : undefined
+  const ssrClientIpHeaders = ssrEvent
+    ? clientIpHeaders(ssrEvent.context.clientIp)
+    : {}
+
+  const getHeaders = (caller?: Record<string, string>) => ({
+    ...mergeHeaders(caller, {
       'Accept-Language': locale.value,
       'lang': locale.value,
-    })
+    }),
+    ...ssrClientIpHeaders,
+  })
 
   // H9: on the server, route every call through useRequestFetch() so the
   // incoming request's cookie header is forwarded to the upstream API.

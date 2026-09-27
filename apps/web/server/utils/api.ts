@@ -1,3 +1,5 @@
+import { clientIpHeaders } from './client-ip'
+
 interface AuthEnvelope {
   ret?: number
   data?: {
@@ -88,6 +90,7 @@ export function forwardToApi<T = unknown>(
   )
   const headers: Record<string, string> = {
     Accept: 'application/json',
+    ...clientIpHeaders(event.context.clientIp),
   }
   if (cookieValue) headers['Authorization'] = `Bearer ${cookieValue}`
 
