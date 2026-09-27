@@ -4,6 +4,7 @@ import { RAG_CFG, IRagConfig } from '../config/rag.config';
 import { EmbeddingService } from './embedding.service';
 import { OllamaEmbeddingProvider } from './providers/ollama-embedding.provider';
 import { OpenAIEmbeddingProvider } from './providers/openai-embedding.provider';
+import { FakeEmbeddingProvider } from './providers/fake-embedding.provider';
 
 function makeRagConfig(overrides: Partial<IRagConfig> = {}): IRagConfig {
   return {
@@ -39,6 +40,14 @@ function buildModule(ragConfig: IRagConfig): Promise<TestingModule> {
 
 describe('EmbeddingService', () => {
   describe('provider factory', () => {
+    it('creates FakeEmbeddingProvider when provider is "fake" (e2e without an embeddings server)', async () => {
+      const module = await buildModule(makeRagConfig({ embeddingProvider: 'fake' }));
+      const service = module.get(EmbeddingService);
+      expect(service.providerName).toBe('fake');
+      expect(service.dimensions).toBe(768);
+      expect((service as unknown as { provider: unknown }).provider).toBeInstanceOf(FakeEmbeddingProvider);
+    });
+
     it('creates OllamaEmbeddingProvider when provider is "ollama"', async () => {
       const module = await buildModule(makeRagConfig({
         embeddingProvider: 'ollama',

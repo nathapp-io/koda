@@ -79,8 +79,15 @@ export class RagConfigSchema {
   GRAPHIFY_CACHE_TTL_SEC: number;
 }
 
+const isProduction = (): boolean =>
+  process.env['ENV_NAME'] === 'production' || process.env['NODE_ENV'] === 'production';
+
 export const ragConfig = registerAs(RAG_CFG, (): IRagConfig => {
   validateUtil(process.env, RagConfigSchema);
+  // The fake provider (e2e only) has no semantic meaning; never serve it for real.
+  if (process.env['EMBEDDING_PROVIDER'] === 'fake' && isProduction()) {
+    throw new Error('EMBEDDING_PROVIDER=fake is for tests only and is refused in production');
+  }
   return {
     embeddingProvider: process.env['EMBEDDING_PROVIDER'] ?? 'ollama',
     embeddingModel: process.env['EMBEDDING_MODEL'] ?? 'nomic-embed-text',

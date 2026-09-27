@@ -311,7 +311,6 @@ jobs:
           JWT_REFRESH_SECRET: e2e-jwt-refresh-secret-not-a-real-secret
           API_KEY_SECRET: e2e-api-key-secret-not-a-real-secret
           RAG_IN_MEMORY_ONLY: "true"
-          SKIP_KB_E2E: "1"
 
       - name: Upload Playwright report
         if: failure()

@@ -50,6 +50,10 @@ export default defineConfig({
         DATABASE_URL: E2E_DATABASE_URL,
         API_PORT: String(API_PORT),
         VCS_ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        // Deterministic offline embeddings so the KB specs run without Ollama.
+        EMBEDDING_PROVIDER: process.env['EMBEDDING_PROVIDER'] ?? 'fake',
+        // Keep e2e vectors out of the dev ./lancedb (CI sets this too).
+        RAG_IN_MEMORY_ONLY: process.env['RAG_IN_MEMORY_ONLY'] ?? 'true',
       },
     },
     {
