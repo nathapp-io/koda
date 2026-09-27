@@ -2,6 +2,8 @@
   "notFound": "未找到项目",
   "slugTaken": "该项目 slug 已被使用",
   "keyTaken": "该项目 key 已被使用",
+  "slugInvalid": "项目 slug 只能包含小写字母、数字和连字符",
+  "keyInvalid": "项目 key 必须为 2-6 个大写字母",
   "404": "未找到项目",
   "-2": "验证错误"
 }

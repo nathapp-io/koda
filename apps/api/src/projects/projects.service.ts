@@ -1,5 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ValidationAppException, NotFoundAppException } from '@nathapp/nestjs-common';
+import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { ProjectResponseDto } from './dto/project-response.dto';
@@ -43,13 +44,13 @@ export class ProjectsService {
     // Check slug uniqueness
     const existingSlug = await this.projectRepo.findBySlug(createProjectDto.slug);
     if (existingSlug) {
-      throw new ValidationAppException({}, 'projects');
+      throw new ConflictAppException({ slug: 'slug already in use' }, 'projects');
     }
 
     // Check key uniqueness
     const existingKey = await this.projectRepo.findByKey(createProjectDto.key);
     if (existingKey) {
-      throw new ValidationAppException({}, 'projects');
+      throw new ConflictAppException({ key: 'key already in use' }, 'projects');
     }
 
     // Create project
@@ -104,7 +105,7 @@ export class ProjectsService {
     // Find the current project
     const currentProject = await this.projectRepo.findBySlug(slug);
 
-    if (!currentProject) {
+    if (!currentProject || currentProject.deletedAt) {
       throw new NotFoundAppException({}, 'projects');
     }
 
@@ -127,7 +128,7 @@ export class ProjectsService {
       if (updateProjectDto.slug !== currentProject.slug) {
         const existingSlug = await this.projectRepo.findBySlug(updateProjectDto.slug);
         if (existingSlug && existingSlug.id !== currentProject.id) {
-          throw new ValidationAppException({}, 'projects');
+          throw new ConflictAppException({ slug: 'slug already in use' }, 'projects');
         }
       }
     }
@@ -143,7 +144,7 @@ export class ProjectsService {
       if (updateProjectDto.key !== currentProject.key) {
         const existingKey = await this.projectRepo.findByKey(updateProjectDto.key);
         if (existingKey && existingKey.id !== currentProject.id) {
-          throw new ValidationAppException({}, 'projects');
+          throw new ConflictAppException({ key: 'key already in use' }, 'projects');
         }
       }
     }
