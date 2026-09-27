@@ -15,6 +15,41 @@ const ALLOWED_ATTR = [
 
 const ALLOWED_URI_REGEXP = /^(?:(?:https?|mailto):|#|\/)/i
 
+const LANGUAGE_CLASS = /^language-[\w-]+$/
+
+/**
+ * `class` is kept only on <code> with a single `language-*` token (syntax
+ * highlighting). Anything else, e.g. `fixed inset-0`, could restyle page
+ * chrome from user content.
+ */
+export function keepClassAttribute(tagName: string, value: string): boolean {
+  return tagName.toLowerCase() === 'code' && LANGUAGE_CLASS.test(value.trim())
+}
+
+DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
+  if (data.attrName !== 'class') return
+  if (!keepClassAttribute(node.nodeName, data.attrValue)) data.keepAttr = false
+})
+
+export function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+/** M24: never throws and never returns unsanitized HTML. */
+export function renderMarkdownOrEscape(markdown: string): string {
+  if (!markdown) return ''
+  try {
+    return renderSafeMarkdown(markdown)
+  } catch {
+    return `<p>${escapeHtml(markdown)}</p>`
+  }
+}
+
 function sanitizeHtml(dirty: string): string {
   return DOMPurify.sanitize(dirty, {
     ALLOWED_TAGS,

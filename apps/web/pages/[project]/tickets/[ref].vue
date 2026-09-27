@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref as vueRef } from 'vue'
 import MarkdownEditor from '~/components/MarkdownEditor.vue'
 import { extractApiError } from '~/composables/useApi'
 import { createDebouncer } from '~/lib/debounce'
-import { renderSafeMarkdown } from '~/lib/markdown'
+import { renderMarkdownOrEscape } from '~/lib/markdown'
 import { safeHref } from '~/lib/safe-url'
 
 definePageMeta({ layout: 'default' })
@@ -164,14 +164,9 @@ async function saveEdit() {
   }
 }
 
-const renderedDescription = computed(() => {
-  if (!ticket.value?.description) return ''
-  try {
-    return renderSafeMarkdown(ticket.value.description)
-  } catch {
-    return ticket.value.description
-  }
-})
+const renderedDescription = computed(() =>
+  ticket.value?.description ? renderMarkdownOrEscape(ticket.value.description) : '',
+)
 
 function statusClass(status: string) {
   switch (status) {
