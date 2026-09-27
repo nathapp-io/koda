@@ -15,6 +15,8 @@ DO NOT EDIT MANUALLY — run `nax generate` to regenerate.
 
 **Key dependencies:** @nuxtjs/color-mode, @nuxtjs/i18n, @nuxtjs/tailwindcss, @vee-validate/zod, lucide-vue-next, nuxt, radix-vue, shadcn-nuxt, vue, vue-router
 
+**Commands:** test: `npx turbo test` | lint: `bunx turbo lint` | typecheck: `bunx turbo type-check`
+
 ---
 # Koda Web Context
 
