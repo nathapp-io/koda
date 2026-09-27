@@ -109,6 +109,10 @@ describe('test-scoped', () => {
       expect(hasUnresolvedTarget(['tenancy'])).toBe(true);
     });
 
+    it('does not count a jest flag as an unresolved target', () => {
+      expect(hasUnresolvedTarget([__filename, '--runInBand'])).toBe(false);
+    });
+
     it('is false when every target exists', () => {
       expect(hasUnresolvedTarget([__filename])).toBe(false);
     });

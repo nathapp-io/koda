@@ -13,7 +13,11 @@
  * the flag they would skip silently. globalSetup only ever resets a local `*_test`
  * database (test/helpers/test-database-url.ts).
  *
- * Usage: bun scripts/test-scoped.ts <file|dir|pattern>...
+ * Run it with `bun --no-env-file` (the `test:scoped` script does): Bun otherwise loads
+ * the developer's `apps/api/.env` (NODE_ENV, secrets, DATABASE_URL) into this process
+ * and jest inherits it, so scoped runs would diverge from `bun run test`.
+ *
+ * Usage: bun --no-env-file scripts/test-scoped.ts <file|dir|pattern>...
  */
 
 import { spawnSync } from 'child_process';
@@ -52,7 +56,7 @@ export function expandTargets(targets: readonly string[]): string[] {
 }
 
 export function hasUnresolvedTarget(targets: readonly string[]): boolean {
-  return targets.some((target) => !fs.existsSync(target));
+  return targets.some((target) => !target.startsWith('-') && !fs.existsSync(target));
 }
 
 export function buildScopedRun(
