@@ -12,5 +12,6 @@
   "contains": "{property}必须包含{constraints.0}",
   "isFQDN": "{property}不是有效的完全限定域名",
   "isDate": "{property}不是有效的日期",
-  "isNotEmptyObject": "{property}是一个空对象"
+  "isNotEmptyObject": "{property}是一个空对象",
+  "slugInvalid": "{property}只能包含小写字母、数字和连字符"
 }

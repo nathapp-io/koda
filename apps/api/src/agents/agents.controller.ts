@@ -35,11 +35,11 @@ export class AgentsController {
     return this.agentsService.findBySlug(slug);
   }
 
-  async pickupTicket(slug: string, project: string) {
+  async pickupTicket(slug: string, project: string, principal: KodaPrincipal) {
     if (!project) {
       throw new ValidationAppException({}, 'agents');
     }
-    return this.agentsService.suggestTicket(slug, project);
+    return this.agentsService.suggestTicket(slug, project, principal);
   }
 
   async updateAgent(slug: string, updateDto: UpdateAgentDto, _principal?: KodaPrincipal) {
@@ -108,9 +108,14 @@ export class AgentsController {
   @ApiQuery({ name: 'project', required: true, description: 'Project slug' })
   @ApiResponse({ status: 200, description: 'Suggested ticket or null' })
   @ApiResponse({ status: 400, description: 'Missing project query param' })
-  @ApiResponse({ status: 404, description: 'Agent not found' })
-  async suggestTicket(@Param('slug') slug: string, @Query('project') project: string) {
-    const data = await this.pickupTicket(slug, project);
+  @ApiResponse({ status: 403, description: 'Forbidden - agent only, or global ADMIN' })
+  @ApiResponse({ status: 404, description: 'Agent or project not found' })
+  async suggestTicket(
+    @Param('slug') slug: string,
+    @Query('project') project: string,
+    @Principal() principal: KodaPrincipal,
+  ) {
+    const data = await this.pickupTicket(slug, project, principal);
     return JsonResponse.Ok(data);
   }
 

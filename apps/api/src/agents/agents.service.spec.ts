@@ -221,6 +221,7 @@ describe('AgentsService', () => {
             AgentsService,
             { provide: PrismaAgentRepository, useValue: mockAgentRepo },
             { provide: AUTH_CFG, useValue: { ...mockAuthConfig, apiKeySecret: undefined } },
+            { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
             { provide: KodaDomainWriter, useValue: mockKodaDomainWriter },
           ],
         }).compile();

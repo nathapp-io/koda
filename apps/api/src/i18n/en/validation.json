@@ -12,5 +12,6 @@
   "contains": "{property} must contain {constraints.0}",
   "isFQDN": "{property} is not a valid Fully Qualified Domain Name",
   "isDate": "{property} is not a valid date",
-  "isNotEmptyObject": "{property} is an empty object"
+  "isNotEmptyObject": "{property} is an empty object",
+  "slugInvalid": "{property} must be lowercase alphanumeric with hyphens"
 }
