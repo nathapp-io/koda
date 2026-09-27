@@ -197,11 +197,14 @@ KODA_API_KEY="your-api-key"
 
 For server deployment with automatic Prisma migration step, see:
 
-- `deployments/koda-local/docker-compose.yml`
-- `deployments/koda-local/deploy.sh`
-- `deployments/koda-local/README.md`
+- `deployments/example/docker-compose.yml`
+- `deployments/example/deploy.sh`
+- `deployments/example/README.md`
 
-This pattern runs `prisma migrate deploy` as a dedicated one-off `migrate` service before starting `api` + `web`.
+`deploy.sh` runs `prisma migrate deploy` as a one-off step before starting `api` + `web`.
+The root `docker-compose.yml` (build from source) does the same with a one-off `migrate`
+service; `api` starts only after it succeeds. The api never migrates on boot.
+Both require `POSTGRES_PASSWORD` in `.env` (see `.env.example`).
 
 ---
 

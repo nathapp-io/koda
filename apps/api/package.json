@@ -2,10 +2,10 @@
   "name": "@nathapp/koda-api",
   "version": "0.4.2",
   "private": true,
-  "packageManager": "bun@1.3.7",
+  "packageManager": "bun@1.4.2",
   "scripts": {
-    "build": "nest build",
-    "build:generate": "prisma generate && nest build",
+    "build": "nest build && bun scripts/check-dist-requires.ts",
+    "build:generate": "prisma generate && bun run build",
     "dev": "nest start --watch",
     "start": "nest start --env-file=.env",
     "start:prod-runtime": "ENV_NAME=production bun /app/apps/runtime/dist/main",

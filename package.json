@@ -2,7 +2,7 @@
   "name": "koda",
   "version": "0.4.2",
   "private": true,
-  "packageManager": "bun@1.0.0",
+  "packageManager": "bun@1.4.2",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -31,7 +31,7 @@
     "ts-node": "^10.9.0",
     "tsconfig-paths": "^4.0.0",
     "tsx": "^4.21.0",
-    "turbo": "^2.8.17",
+    "turbo": "^2.11.4",
     "typescript": "^5.4.0"
   },
   "dependencies": {
