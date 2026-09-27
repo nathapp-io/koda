@@ -9,9 +9,9 @@ function randomUppercase(length: number): string {
 }
 
 /**
- * KB (RAG) E2E tests.
- * Requires Ollama running locally with nomic-embed-text model pulled.
- * Skip these if SKIP_KB_E2E=1 is set.
+ * KB (RAG) E2E tests. The e2e API runs with EMBEDDING_PROVIDER=fake (deterministic,
+ * offline; see playwright.config.ts), so no embeddings server is needed.
+ * SKIP_KB_E2E=1 still skips them.
  */
 test.describe('Knowledge Base (KB)', () => {
   const skipKb = process.env['SKIP_KB_E2E'] === '1';
@@ -81,6 +81,29 @@ test.describe('Knowledge Base (KB)', () => {
     const body = await res.json();
     expect(body.data.results).toBeDefined();
     expect(Array.isArray(body.data.results)).toBe(true);
+  });
+
+  test('Add Document dialog indexes the typed content', async ({ page }) => {
+    test.skip(skipKb, 'SKIP_KB_E2E=1');
+    // Regression: ui/textarea did not sync v-model, so Content was always empty.
+    const sourceId = `E2E-UI-${Date.now()}`;
+    const content = `Dialog content about refresh tokens ${Date.now()}`;
+
+    await webLogin(page);
+    await page.goto(`/${projectSlug}/kb`);
+    await page.getByRole('tab', { name: 'Documents' }).click();
+    await page.getByRole('button', { name: 'Add Document' }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByPlaceholder('e.g. DOC-123').fill(sourceId);
+    await dialog.getByPlaceholder('Enter document content...').fill(content);
+
+    const [response] = await Promise.all([
+      page.waitForResponse((r) => r.url().endsWith(`/kb/documents`) && r.request().method() === 'POST'),
+      dialog.getByRole('button', { name: 'Add Document' }).click(),
+    ]);
+
+    expect(response.status()).toBe(201);
+    expect(response.request().postDataJSON()).toMatchObject({ sourceId, content });
   });
 
   test('KB page renders for a project', async ({ page }) => {

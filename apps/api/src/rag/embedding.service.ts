@@ -3,6 +3,7 @@ import { RAG_CFG, IRagConfig } from '../config/rag.config';
 import { EmbeddingProvider } from './embedding.interface';
 import { OllamaEmbeddingProvider } from './providers/ollama-embedding.provider';
 import { OpenAIEmbeddingProvider } from './providers/openai-embedding.provider';
+import { FakeEmbeddingProvider } from './providers/fake-embedding.provider';
 
 @Injectable()
 export class EmbeddingService {
@@ -13,7 +14,9 @@ export class EmbeddingService {
     const { embeddingProvider, embeddingModel, openaiApiKey, ollamaBaseUrl } = ragConfig;
     this._modelName = embeddingModel;
 
-    if (embeddingProvider === 'openai') {
+    if (embeddingProvider === 'fake') {
+      this.provider = new FakeEmbeddingProvider();
+    } else if (embeddingProvider === 'openai') {
       this.provider = new OpenAIEmbeddingProvider(openaiApiKey, embeddingModel);
     } else {
       this.provider = new OllamaEmbeddingProvider(ollamaBaseUrl, embeddingModel);

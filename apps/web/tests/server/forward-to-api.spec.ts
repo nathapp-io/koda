@@ -13,7 +13,8 @@ import { forwardToApi, ACCESS_COOKIE, REFRESH_COOKIE } from '~/server/utils/api'
 
 const g = globalThis as Record<string, unknown>
 
-const makeEvent = () => ({}) as unknown as Parameters<typeof forwardToApi>[0]
+const makeEvent = (clientIp?: string) =>
+  ({ context: { clientIp } }) as unknown as Parameters<typeof forwardToApi>[0]
 
 let rawMock: jest.Mock
 
@@ -87,6 +88,28 @@ describe('M22: forwardToApi cookie selection', () => {
 
     const [, opts] = rawMock.mock.calls[0] as [string, { headers: Record<string, string> }]
     expect(opts.headers['Authorization']).toBeUndefined()
+  })
+})
+
+describe('forwardToApi client IP (see server/utils/client-ip.ts)', () => {
+  beforeEach(() => {
+    g.getCookie = () => undefined
+    // A browser-sent header must never reach the API as the client IP.
+    g.getRequestHeader = (_e: unknown, name: string) => (name === 'x-client-ip' ? '6.6.6.6' : undefined)
+  })
+
+  test('sends the event client IP as x-client-ip', async () => {
+    await forwardToApi(makeEvent('198.51.100.9'), '/auth/login', { body: {} })
+
+    const [, opts] = rawMock.mock.calls[0] as [string, { headers: Record<string, string> }]
+    expect(opts.headers['x-client-ip']).toBe('198.51.100.9')
+  })
+
+  test('fails closed to the shared placeholder when the client IP is unknown', async () => {
+    await forwardToApi(makeEvent(undefined), '/auth/login', { body: {} })
+
+    const [, opts] = rawMock.mock.calls[0] as [string, { headers: Record<string, string> }]
+    expect(opts.headers['x-client-ip']).toBe('0.0.0.0')
   })
 })
 

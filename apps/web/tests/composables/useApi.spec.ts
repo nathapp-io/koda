@@ -254,11 +254,14 @@ describe('H9: useApi routes server-side calls through useRequestFetch', () => {
       apiInternalUrl: 'http://localhost:3100',
     })
     g.useI18n = () => ({ locale: ref('en') })
+    // SSR reads the client IP resolved by server/middleware/client-ip.ts.
+    g.useRequestEvent = () => ({ context: { clientIp: '203.0.113.20' } })
   })
 
   afterEach(() => {
     g.__JEST_IS_SERVER__ = false
     g.useRequestFetch = undefined
+    delete g.useRequestEvent
   })
 
   test('source conditionally selects useRequestFetch on the server', () => {
@@ -303,6 +306,37 @@ describe('H9: useApi routes server-side calls through useRequestFetch', () => {
     const headers = (calledOpts?.headers ?? {}) as Record<string, string>
     expect(headers['X-Caller']).toBe('1')
     expect(headers['Accept-Language']).toBe('en')
+  })
+
+  test('server-side request names the browser socket peer, which a caller cannot override', async () => {
+    const requestFetchMock = makeFetchMock()
+    g.__JEST_IS_SERVER__ = true
+    g.useRequestFetch = () => requestFetchMock
+    g.$fetch = makeFetchMock()
+
+    const mod = await import(`${composablePath}`)
+    const { $api } = mod.useApi()
+
+    await $api.get('/projects/1', { headers: { 'x-client-ip': '6.6.6.6' } })
+
+    const [, calledOpts] = requestFetchMock.mock.calls[0]
+    const headers = (calledOpts?.headers ?? {}) as Record<string, string>
+    expect(headers['x-client-ip']).toBe('203.0.113.20')
+  })
+
+  test('client-side request sends no x-client-ip (the /api proxy sets it)', async () => {
+    const clientFetchMock = makeFetchMock()
+    g.__JEST_IS_SERVER__ = false
+    g.$fetch = clientFetchMock
+
+    const mod = await import(`${composablePath}`)
+    const { $api } = mod.useApi()
+
+    await $api.get('/projects/1')
+
+    const [, calledOpts] = clientFetchMock.mock.calls[0]
+    const headers = (calledOpts?.headers ?? {}) as Record<string, string>
+    expect(headers['x-client-ip']).toBeUndefined()
   })
 })
 
@@ -373,6 +407,7 @@ describe('M22: useApi client wrapper retries once through /api/auth/refresh on 4
   afterEach(() => {
     g.__JEST_IS_SERVER__ = false
     g.useAuth = undefined
+    delete g.useRequestEvent
   })
 
   function make401FetchMock(successBody: unknown = { ret: 0, data: 'ok' }) {
@@ -447,6 +482,7 @@ describe('M22: useApi client wrapper retries once through /api/auth/refresh on 4
     const refreshMock = jest.fn(() => Promise.resolve(true))
     g.__JEST_IS_SERVER__ = true
     g.useRequestFetch = () => requestFetchMock
+    g.useRequestEvent = () => ({ context: {} })
     g.$fetch = makeFetchMock()
     g.useAuth = () => ({ refresh: refreshMock })
 

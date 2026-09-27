@@ -75,6 +75,25 @@ test.describe('Ticket Lifecycle', () => {
     await expect(page.getByRole('button', { name: 'Start' })).toBeVisible({ timeout: 5000 });
   });
 
+  test('CREATED → VERIFIED through the Verify dialog sends the typed comment', async ({ page }) => {
+    // Regression: ui/textarea did not sync v-model, so Confirm posted {} and got 400.
+    const ticket = await createTicket(token, projectSlug, {
+      title: 'E2E Verify Dialog',
+      type: 'BUG',
+    });
+    const body = `Verified via dialog ${Date.now()}`;
+
+    await webLogin(page);
+    await page.goto(`/${projectSlug}/tickets/${ticket.ref}`);
+    await page.getByRole('button', { name: 'Verify' }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByPlaceholder('Enter a comment or reason...').fill(body);
+    await dialog.getByRole('button', { name: 'Confirm' }).click();
+
+    await expect(page.getByRole('button', { name: 'Start' })).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(body)).toBeVisible({ timeout: 5000 });
+  });
+
   test('VERIFIED → IN_PROGRESS: UI shows Submit Fix after start transition', async ({ page }) => {
     const ticket = await createTicket(token, projectSlug, { title: 'E2E Start', type: 'BUG' });
     await transitionTicket(token, projectSlug, ticket.ref, 'verify', { body: 'Verified in E2E' });
