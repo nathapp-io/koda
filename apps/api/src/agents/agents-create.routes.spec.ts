@@ -3,21 +3,27 @@
  *
  * The controller, AgentsService and PrismaAgentRepository are the real ones; only
  * the database is fake. The fake `PrismaService.client` mirrors the Prisma schema
- * defaults (Agent.status defaults to 'ACTIVE') and raises a Prisma P2002 error
- * on a duplicate slug. The injected TRANSACTION_MANAGER mimics the production
- * `PrismaTransactionManager`: it calls `prisma.$transaction(fn)`, and inside the
- * callback every write targets a per-transaction buffer that is only flushed to
- * the ambient store when the callback resolves. A rejection inside the callback
- * discards the buffer — exactly how the production `$transaction` rolls back.
- * Writes outside a transaction land directly in the ambient store.
+ * defaults (Agent.status defaults to 'ACTIVE') and raises a Prisma P2002 error on
+ * a duplicate slug. The `PrismaService.client` getter is wrapped in the same
+ * transparent Proxy the production `PrismaModule` installs, backed by an
+ * `AsyncLocalStorage` shared with the real `PrismaTransactionManager` from
+ * `@nathapp/nestjs-prisma`. So the test exercises the production transaction
+ * manager and proxy unchanged — only `$transaction` itself is stubbed (we have
+ * no real database to roll back).
+ *
+ * Inside the stubbed `$transaction` the `txClient` writes to a per-transaction
+ * buffer; the ambient client writes to the persistent store. On commit the
+ * buffer is merged into the persistent store, on rollback it is discarded —
+ * the same observable effect Prisma's real database transaction has.
  *
  * No database, no network: everything runs in-process.
  */
+import { AsyncLocalStorage } from 'async_hooks';
 import { CanActivate, ExecutionContext } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Prisma } from '@prisma/client';
-import { PrismaService, createMockPrismaService } from '@nathapp/nestjs-prisma';
+import { PrismaService, PrismaTransactionManager, createMockPrismaService } from '@nathapp/nestjs-prisma';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import request from 'supertest';
 import { AgentsController } from './agents.controller';
@@ -73,158 +79,190 @@ describe('POST /api/agents (US-003)', () => {
   let app: NestFastifyApplication;
   let prisma: MockPrismaService;
 
+  // The persistent store — every row that survived `$transaction` (i.e., was
+  // committed). Mirrors what a real Prisma database would hold after the
+  // transaction finished.
   let agents: AgentRow[];
   let roleEntries: EntryRow[];
   let capabilityEntries: EntryRow[];
-  // Per-transaction buffers. While inside `txManager.run` the mocked prisma
-  // client writes here, NOT to the ambient arrays above; on commit the buffer
-  // is flushed to the ambient arrays, on rollback it is discarded.
-  let txAgents: AgentRow[];
-  let txRoleEntries: EntryRow[];
-  let txCapabilityEntries: EntryRow[];
+
+  // The same transparent Proxy the production `PrismaModule` installs around
+  // `prismaService.client`, but backed by a test `AsyncLocalStorage` that the
+  // real `PrismaTransactionManager` writes into. When `als.getStore()` returns
+  // a transaction client, every property read on `prismaService.client` is
+  // served from that transaction client — production behaviour.
+  let als: AsyncLocalStorage<unknown>;
   let nextAgentId: number;
   let currentPrincipal: KodaPrincipal;
-  // Mirrors the AsyncLocalStorage branch in the production `PrismaTransactionManager`:
-  // while `inTransaction === true`, the proxy on `prismaService.client` (which
-  // we mimic here on the prisma mocks) returns the per-transaction client.
-  let txState: { inTransaction: boolean };
 
   beforeEach(async () => {
     agents = [];
     roleEntries = [];
     capabilityEntries = [];
-    txAgents = [];
-    txRoleEntries = [];
-    txCapabilityEntries = [];
     nextAgentId = 0;
-    txState = { inTransaction: false };
+    als = new AsyncLocalStorage();
 
     prisma = createMockPrismaService();
 
-    prisma.client.agent = {
-      create: jest.fn(async ({ data }: { data: Partial<AgentRow> }) => {
-        // Inside a transaction the proxy returns the transaction client, which
-        // sees both the already-committed rows (the ambient store) and the
-        // pending rows in the per-transaction buffer.
-        const visibleAgents = txState.inTransaction ? [...txAgents, ...agents] : agents;
-        if (visibleAgents.some((agent) => agent.slug === data.slug)) {
-          throw duplicateSlugError();
-        }
+    // Per-transaction buffer. Writes inside `$transaction` land here and are
+    // only merged into the persistent store above on commit; on rollback they
+    // are discarded — the same observable effect Prisma's database
+    // transaction has on rows read by either client.
+    const txRows: {
+      agents: AgentRow[];
+      roleEntries: EntryRow[];
+      capabilityEntries: EntryRow[];
+    } = { agents: [], roleEntries: [], capabilityEntries: [] };
 
-        const row: AgentRow = {
-          id: `agent-${++nextAgentId}`,
-          name: data.name as string,
-          slug: data.slug as string,
-          apiKeyHash: data.apiKeyHash as string,
-          // Absent columns fall back to the schema default, exactly like Prisma.
-          status: data.status ?? SCHEMA_DEFAULT_STATUS,
-          maxConcurrentTickets: data.maxConcurrentTickets ?? 3,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        };
+    // The ambient (non-transaction) client mocks and the per-transaction
+    // client mocks share the same `jest.fn` instances, so any
+    // `mockRejectedValue` / `mockResolvedValue` a test sets via
+    // `prisma.client.agentRoleEntry.createMany` takes effect whether the
+    // production code reads it from the ambient client or the transaction
+    // client — exactly the seam a real Prisma transaction client would have.
+    const agentCreate = jest.fn(async ({ data }: { data: Partial<AgentRow> }) => {
+      // Conflict detection sees both committed rows and any pending rows
+      // added by the same transaction — exactly what a real Prisma
+      // transaction client would see.
+      const visibleAgents = [...txRows.agents, ...agents];
+      if (visibleAgents.some((agent) => agent.slug === data.slug)) {
+        throw duplicateSlugError();
+      }
+      const row: AgentRow = {
+        id: `agent-${++nextAgentId}`,
+        name: data.name as string,
+        slug: data.slug as string,
+        apiKeyHash: data.apiKeyHash as string,
+        // Absent columns fall back to the schema default, exactly like Prisma.
+        status: data.status ?? SCHEMA_DEFAULT_STATUS,
+        maxConcurrentTickets: data.maxConcurrentTickets ?? 3,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      // Writes through `prisma.client` while inside a `$transaction` come
+      // from the transaction client and land in the tx buffer; writes
+      // outside a transaction come from the ambient client and land in the
+      // persistent store directly. The split is decided by which client the
+      // proxy returned for this property access — recorded here per-call.
+      const inTx = als.getStore() !== undefined;
+      if (inTx) {
+        txRows.agents.push(row);
+      } else {
+        agents.push(row);
+      }
+      return row;
+    });
+    const agentFindUnique = jest.fn(
+      async ({ where }: { where: { slug?: string; id?: string } }) => {
+        const visibleAgents = [...txRows.agents, ...agents];
+        return (
+          visibleAgents.find((agent) =>
+            where.slug !== undefined ? agent.slug === where.slug : agent.id === where.id,
+          ) ?? null
+        );
+      },
+    );
+    const agentFindMany = jest.fn(async () => [...txRows.agents, ...agents]);
+    const agentUpdate = jest.fn(async () => agents[0]);
+    const roleEntryCreateMany = jest.fn(async ({ data }: { data: EntryRow[] }) => {
+      const inTx = als.getStore() !== undefined;
+      (inTx ? txRows : { roleEntries }).roleEntries.push(...data);
+      return { count: data.length };
+    });
+    const capabilityEntryCreateMany = jest.fn(async ({ data }: { data: EntryRow[] }) => {
+      const inTx = als.getStore() !== undefined;
+      (inTx ? txRows : { capabilityEntries }).capabilityEntries.push(...data);
+      return { count: data.length };
+    });
 
-        // The production code reads `prismaService.client`, which is a Proxy
-        // that returns the transaction client while inside `txManager.run`.
-        // Writes through that transaction client would be undone by
-        // `prisma.$transaction` rolling back. We mirror that here: writes
-        // during a transaction land in the per-transaction buffer and only
-        // reach the ambient store when the transaction commits.
-        if (txState.inTransaction) {
-          txAgents.push(row);
-        } else {
-          agents.push(row);
-        }
-        return row;
-      }),
-      findUnique: jest.fn(
-        async ({ where }: { where: { slug?: string; id?: string } }) => {
-          const visibleAgents = txState.inTransaction ? [...txAgents, ...agents] : agents;
-          return (
-            visibleAgents.find((agent) =>
-              where.slug !== undefined ? agent.slug === where.slug : agent.id === where.id,
-            ) ?? null
-          );
-        },
-      ),
-      findMany: jest.fn(async () => (txState.inTransaction ? [...txAgents, ...agents] : agents)),
-      update: jest.fn(async () => agents[0]),
+    const buildClient = (): Record<string, unknown> => ({
+      agent: {
+        create: agentCreate,
+        findUnique: agentFindUnique,
+        findMany: agentFindMany,
+        update: agentUpdate,
+      },
+      agentRoleEntry: {
+        createMany: roleEntryCreateMany,
+      },
+      agentCapabilityEntry: {
+        createMany: capabilityEntryCreateMany,
+      },
+    });
+
+    // The ambient (non-transaction) prisma client. Writes here land directly
+    // in the persistent store — there is no rollback safety net, just like a
+    // real client outside a transaction.
+    const ambientClient: Record<string, unknown> = {
+      ...buildClient(),
+      $transaction: jest.fn(),
     };
 
-    prisma.client.agentRoleEntry = {
-      createMany: jest.fn(async ({ data }: { data: EntryRow[] }) => {
-        if (txState.inTransaction) {
-          txRoleEntries.push(...data);
-        } else {
-          roleEntries.push(...data);
-        }
-        return { count: data.length };
-      }),
-    };
-
-    prisma.client.agentCapabilityEntry = {
-      createMany: jest.fn(async ({ data }: { data: EntryRow[] }) => {
-        if (txState.inTransaction) {
-          txCapabilityEntries.push(...data);
-        } else {
-          capabilityEntries.push(...data);
-        }
-        return { count: data.length };
-      }),
-    };
-
-    // The production `$transaction(async (tx) => { ... })` is what the
-    // `PrismaTransactionManager` calls. We simulate its rollback semantics:
-    // if the callback throws, every write the callback did is undone; on
-    // success the writes are applied to the ambient store.
-    (prisma.client.$transaction as jest.Mock).mockImplementation(
+    // `$transaction(async (tx) => { ... })` is the one piece of production
+    // behaviour we have to fake: there is no real database to back the
+    // rollback. The fake mirrors the observable effect: the callback receives
+    // a transaction client that shares the read view but isolates its writes;
+    // on commit the writes are merged into the persistent store, on rejection
+    // they are discarded.
+    //
+    // The transaction client the proxy returns inside `$transaction` is the
+    // ambient client with a flag attached — it exposes the same jest.fn
+    // methods as the ambient client, so any `mockRejectedValue` a test sets
+    // on `prisma.client.agentRoleEntry.createMany` is in effect for both
+    // the ambient client and the transaction client.
+    (ambientClient.$transaction as jest.Mock).mockImplementation(
       async (callback: (tx: unknown) => Promise<unknown>) => {
-        const wasInTransaction = txState.inTransaction;
-        txState.inTransaction = true;
-        const txAgentsBefore = txAgents.length;
-        const txRoleEntriesBefore = txRoleEntries.length;
-        const txCapabilityEntriesBefore = txCapabilityEntries.length;
-
+        const txClient = Object.assign(Object.create(ambientClient), { __isTxClient: true });
+        const txAgentsBefore = txRows.agents.length;
+        const txRoleEntriesBefore = txRows.roleEntries.length;
+        const txCapabilityEntriesBefore = txRows.capabilityEntries.length;
         try {
-          const result = await callback(prisma.client);
-          // Commit: flush the per-transaction buffers to the ambient store.
-          agents.push(...txAgents);
-          roleEntries.push(...txRoleEntries);
-          capabilityEntries.push(...txCapabilityEntries);
-          txAgents = [];
-          txRoleEntries = [];
-          txCapabilityEntries = [];
+          // The real `PrismaTransactionManager` calls `als.run(tx, fn)` to
+          // install the transaction client in the AsyncLocalStorage so the
+          // proxy can find it. We replicate exactly that.
+          const result = await als.run(txClient, async () => callback(txClient));
+          // Commit: flush the per-transaction writes into the persistent store.
+          agents.push(...txRows.agents.splice(txAgentsBefore));
+          roleEntries.push(...txRows.roleEntries.splice(txRoleEntriesBefore));
+          capabilityEntries.push(
+            ...txRows.capabilityEntries.splice(txCapabilityEntriesBefore),
+          );
           return result;
         } catch (error) {
-          // Rollback: drop everything written during this transaction.
-          txAgents = txAgents.slice(0, txAgentsBefore);
-          txRoleEntries = txRoleEntries.slice(0, txRoleEntriesBefore);
-          txCapabilityEntries = txCapabilityEntries.slice(0, txCapabilityEntriesBefore);
+          // Rollback: discard every write made during this transaction.
+          txRows.agents.splice(txAgentsBefore);
+          txRows.roleEntries.splice(txRoleEntriesBefore);
+          txRows.capabilityEntries.splice(txCapabilityEntriesBefore);
           throw error;
-        } finally {
-          txState.inTransaction = wasInTransaction;
         }
       },
     );
 
-    // The injected TRANSACTION_MANAGER. Its `run` is what the production code
-    // uses to wrap the agent-row + roles/capabilities writes. To mirror the
-    // real `PrismaTransactionManager.run`, our mock routes through
-    // `prisma.$transaction` instead of doing its own snapshot-and-restore —
-    // otherwise the test would assume the very rollback behaviour it is meant
-    // to verify.
-    const txManager = {
-      run: jest.fn(async (fn: () => Promise<unknown>) => {
-        // Nested `run` calls reuse the active transaction, exactly like the
-        // production manager. We model that by skipping a second $transaction
-        // when we are already inside one.
-        if (txState.inTransaction) {
-          return fn();
-        }
-        return (prisma.client.$transaction as jest.Mock)(async () => fn());
-      }),
-      getClient: jest.fn(() => prisma.client),
-      isInTransaction: jest.fn(() => txState.inTransaction),
-    };
+    // Install the production-style transparent proxy on `prismaService.client`.
+    // This is the exact Proxy the production `PrismaModule` patches in: while
+    // the ALS carries a transaction client, every property read on the
+    // `client` getter is served from that transaction client. The production
+    // repository code reads `this.prisma.client.agent.create(...)` and
+    // transparently ends up writing through the transaction client.
+    Object.defineProperty(prisma, 'client', {
+      get: () =>
+        new Proxy(ambientClient, {
+          get(target, prop, receiver) {
+            const txClient = als.getStore() as Record<string, unknown> | undefined;
+            if (txClient) return Reflect.get(txClient, prop, receiver);
+            return Reflect.get(target, prop, receiver);
+          },
+        }),
+      configurable: true,
+    });
+
+    // The injected TRANSACTION_MANAGER is the real `PrismaTransactionManager`
+    // from `@nathapp/nestjs-prisma`, sharing the test ALS with the proxy above.
+    // This is the production transaction-manager code path, unchanged.
+    const txManager = new PrismaTransactionManager(
+      prisma.client as unknown as ConstructorParameters<typeof PrismaTransactionManager>[0],
+      als as unknown as ConstructorParameters<typeof PrismaTransactionManager>[1],
+    );
 
     testingModule = await Test.createTestingModule({
       controllers: [AgentsController],
