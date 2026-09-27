@@ -3,7 +3,7 @@
 **Date:** 2026-09-27
 **Base:** `main` @ `c5a955af` (after Track 1, PRs #133-#142)
 **Source:** whole-repo review `docs/20260925-review-whole-repo.md` (MEDIUM + LOW sections), fleet platform design doc §9.4 ("Track 3")
-**Status:** Approved design (sectioned, in chat); spec-reviewed 09-27 and corrected against `c5a955af`. No slice planned yet.
+**Status:** Approved design (sectioned, in chat); spec-reviewed 09-27 and corrected against `c5a955af`. Slice 1 merged (#143, `c3458033`). Slice 3 amended 09-27 for project-role permissions (#144) and single membership resolution (#145, guard half).
 
 ## Goal
 
@@ -31,8 +31,14 @@ since #134).
 - **Scope:** all open MEDIUMs plus same-module LOWs. Release-pipeline LOWs (`TURBO_TOKEN` build-arg,
   re-publish tag checkout, release not gated on CI) are **out of scope** under the 09-27 "no deployed koda"
   ruling. `PolicyGate` having no runtime caller is out of scope (wiring it is a feature, not a fix).
-- **M7 tenancy = visibility gate only.** Every project-scoped route requires project membership for users
-  (global ADMIN bypasses; agents stay global). Permissions stay on the global role. Fleet S1 revisits agents.
+- **M7 tenancy = visibility gate only** (Slice 1). Every project-scoped route requires project membership for users
+  (global ADMIN bypasses; agents stay global). Fleet S1 revisits agents.
+- **Project-role write permissions for users (#144, ruled 2026-09-27, amends the M7 ruling from Slice 3 on).**
+  A user's write permissions inside a project come from their `ProjectMember.role`, not their global role:
+  ADMIN manages the project's tickets and labels, DEVELOPER works tickets, VIEWER reads and comments. Global
+  ADMIN keeps full access everywhere. Agents are unchanged (global, agent-role derived; #61 / fleet S1).
+  Sub-rulings: DEVELOPER may create labels but not update or delete them; VIEWER may comment; a user with no
+  membership in a project keeps no access there (the Slice 1 gate is unchanged).
 - **`close()` = admin override with a reason.** Global ADMIN or project ADMIN only, GENERAL comment required.
 - **M25: the API returns `allowedActions`**; the web renders from it.
 - **M5: block private ranges, with an env allowlist** (`WEBHOOK_ALLOWED_HOSTS`).
@@ -58,10 +64,10 @@ Seven PRs, landed in order. One implementation plan per slice, written after the
 | 1 | Tenancy & principals | M7, M8, M16 (access); agent/project/auth LOWs |
 | 2a | Outbound webhook SSRF guard | M5 |
 | 2b | Inbound webhook hardening | inbound CI/VCS webhook LOWs; webhook delete scope |
-| 3 | Ticket workflow | M24, M25, M26, M28; `close()` LOW; sanitizer LOW |
+| 3 | Ticket workflow | #144 project-role permissions; #145 (guard half); M24, M25, M26, M28; `close()` LOW; sanitizer LOW |
 | 4 | VCS & code-intel | M9, M10, M11, M12, M13, BUG-14; VCS LOWs |
 | 5 | RAG & memory | M15, M16 (retriever), M17, M18, M19, M21; RAG LOWs; filter-guard dedup |
-| 6 | Web & CLI hygiene | web/CLI LOWs; CI path-filter LOW |
+| 6 | Web & CLI hygiene | web/CLI LOWs; CI path-filter LOW; #145 API cleanup LOWs |
 
 ---
 
@@ -175,13 +181,74 @@ New `webhook/outbound-url-guard.ts`: a pure address classifier plus a DNS-resolv
 
 ## Slice 3 — Ticket workflow
 
+### Project-role permissions (#144)
+
+**Problem (verified at `c3458033`).** `KodaCaslAbilityFactory.userPermissions`
+(`auth/casl/koda-casl-ability.factory.ts:52-63`) gives a global-`MEMBER` user read, create `Ticket`, create
+`Comment`, own-comment update/delete, and `IMPORT CodeIntel` only. So a project DEVELOPER is refused every
+ticket transition, assign, update and delete, and all label management. #143 waived AC-29 for this reason.
+`UserPrincipal.projectRole` (`auth/principal/koda-principal.types.ts:14`) is declared but never set anywhere in
+`apps/api/src`, so the factory's `projectRole === 'DEVELOPER'` branch (line 60, `READ CodeIntel`) is dead.
+
+**Why the check has to move.** `@RequiredPermission` is evaluated by the global `PermissionAuthGuard`, which
+`useAppGlobalGuards()` registers right after `CombinedAuthGuard`. Nest runs global guards before any
+controller or method `@UseGuards`, so the check happens before `ProjectMembershipGuard`. It calls
+`caslAbilityFactory.createForUser(req.user)` with no request context (nestjs-auth 3.3.0
+`permission/permission.provider.js:70`). It cannot see the project, so the project role must be applied after
+`ProjectMembershipGuard` has resolved it.
+
+**Design.**
+
+- `ProjectMembershipGuard` resolves the project and the caller's membership role **once** and attaches
+  `ProjectContext { project, role }` to the request (#145, guard half). A `@CurrentProject()` param decorator
+  reads it, and guarded handlers and services use it instead of re-resolving the slug. Global ADMIN gets
+  `role: 'ADMIN'`; agents get `role: null` (agents never use project roles).
+- New `@ProjectPermission(...perms)` decorator, checked by `ProjectMembershipGuard` after resolution, using
+  `caslAbilityFactory.createForUser({ ...principal, projectRole: role })`. On every route under
+  `projects/:slug/tickets` and `projects/:slug/labels` (and the ticket-label routes), `@RequiredPermission` is
+  replaced by `@ProjectPermission` with the same permission. Agents are evaluated exactly as today.
+- `KodaCaslAbilityFactory.userPermissions` derives from `projectRole` when present (the table below). With no
+  `projectRole` (routes outside a project) a non-admin user keeps today's global set. This also makes the dead
+  CodeIntel branch reachable.
+- Service-level CASL calls (`TicketTransitionsService.assertTransitionPermission`, `CommentsService`
+  update/delete, the PATCH status delegation) receive the principal enriched with `projectRole`. The slug-less
+  `comments/:id` routes already resolve comment → ticket → project in `CommentsService` (#143); that lookup
+  returns the membership role too, so no extra query is added. These are the only `createForUser` / `.can(`
+  call sites in `apps/api/src` (verified at `c3458033`), so labels, webhooks and VCS paths need no change beyond
+  the route decorators.
+- The role comes only from the `ProjectMember` row of the project being accessed, never from the JWT, the
+  request body, or a cached global value.
+
+| Capability | Project ADMIN | DEVELOPER | VIEWER |
+|:--|:--|:--|:--|
+| Read tickets, labels, comments | yes | yes | yes |
+| Create ticket | yes | yes | no |
+| Update ticket, assign | yes | yes | no |
+| Transition (verify, start, fix, verify-fix, reject) | yes | yes | no |
+| `close()` override (reason required) | yes | no | no |
+| Delete ticket | yes | no | no |
+| Create label | yes | yes | no |
+| Update / delete label | yes | no | no |
+| Assign / remove label on a ticket | yes | yes | no |
+| Create comment; update/delete own | yes | yes | yes |
+| Delete another user's comment | yes | no | no |
+| KB writes (Slice 1 rule, unchanged) | yes | yes | no |
+| Read CodeIntel | yes | yes | no |
+
+Global ADMIN: everything, in every project. Note that a VIEWER can no longer create tickets; today any global
+MEMBER can. The ticket-label assign/remove routes currently carry no permission decorator at all (membership
+only); they get `@ProjectPermission([UPDATE, 'Ticket'])`.
+
+**Web / CLI.** `allowedActions` (below) is computed from the same enriched principal, so the action panel
+follows the project role with no extra client logic. The web hides label edit/delete and ticket delete by the
+same rule (display only; the API decides). The CLI needs no change: it surfaces the API's 403.
+
 ### `close()` as an admin override
 
 - `POST :ref/close` takes a required `{ body }`; the reason is written as a GENERAL comment in the same
   transaction as the status change (and emits `COMMENT_ADDED` like any comment).
-- Allowed callers: global ADMIN or project ADMIN, via the existing non-throwing
-  `ProjectAccessService.canManageMembers` (same semantics; renamed `isProjectAdmin` with its one caller
-  updated, no duplicate added). Others → 403; agents always 403.
+- Allowed callers: global ADMIN or project ADMIN, read from the request's `ProjectContext.role` (no extra
+  query; `ProjectAccessService.canManageMembers` stays for the members routes). Others → 403; agents always 403.
 - `close()` (`ticket-transitions.service.ts:367-425`) has no comment or admin handling today, only the
   blanket `@RequiredPermission([TRANSITION, 'Ticket'])`; both are new code in the existing transaction.
 - Source states unchanged: IN_PROGRESS, VERIFIED, VERIFY_FIX. The M3 conditional write stays.
@@ -190,9 +257,9 @@ New `webhook/outbound-url-guard.ts`: a pure address classifier plus a DNS-resolv
 
 ### `allowedActions` (M25)
 
-- New pure `allowedActions(status, principal, isProjectAdmin)` next to `TRANSITION_RULES`, returning
+- New pure `allowedActions(status, principal, projectRole)` next to `TRANSITION_RULES`, returning
   endpoint-level actions `verify | start | fix | verify-fix | reject | close`, derived from the table,
-  filtered by the TRANSITION permission; `close` only for admins.
+  filtered by the TRANSITION permission of the project-role ability; `close` only for global or project ADMIN.
 - `GET :ref` returns `allowedActions`; list/board responses do not.
 - `TicketActionPanel` renders only from `allowedActions`; its hard-coded status blocks are removed.
 - `TRANSITION_RULES` already contains IN_PROGRESS → VERIFIED (GENERAL comment, `ticket-transitions.ts:20-23`).
@@ -221,10 +288,19 @@ plus a check that the shape they read matches.
 
 ### Tests
 
-Unit: `allowedActions` table test, close authz + reason + single transaction, assignee mapping, render
-error escapes, sanitizer strips `fixed inset-0` and keeps `language-ts`. E2E (extend the ticket flow spec):
-buttons match the API's actions; Close prompts for a reason and shows only for the project admin; the
-assignee name renders.
+Unit: ability factory table test (every capability row × ADMIN / DEVELOPER / VIEWER / no project role /
+agent), `ProjectMembershipGuard` resolves once and attaches `ProjectContext` (one membership query per
+request), `@ProjectPermission` refuses before the handler runs, `allowedActions` table test per project role,
+close authz + reason + single transaction, assignee mapping, render error escapes, sanitizer strips
+`fixed inset-0` and keeps `language-ts`.
+
+Integration: extend `test/integration/projects/project-membership-gate.integration.spec.ts` with a role column.
+The route matrix is replayed as project ADMIN, DEVELOPER and VIEWER, and each response must match the table.
+This replaces #143's waived AC-29. Also covers: a forged `projectRole` claim in a JWT is ignored; a user who is
+ADMIN in project A and VIEWER in project B gets VIEWER rights in B.
+
+E2E (extend the ticket flow spec): buttons match the API's actions; Close prompts for a reason and shows only
+for the project admin; a DEVELOPER can move a ticket through the flow; the assignee name renders.
 
 ---
 
@@ -373,6 +449,15 @@ heals, paging under mutation, filter escaping). The CI `evaluate` job must stay 
   `agents.validation.*` call sites repointed to the existing `agents.form.validation.*`.
 - `ui/input/Input.vue`: `defineOptions({ inheritAttrs: false })`.
 
+### API cleanup (#145, LOW half)
+
+- Drop `ProjectsService.findAll()` (no production caller since `findAllForPrincipal`).
+- Drop `@Principal()` parameters the RAG/retrieval handlers no longer read (the guard decides access).
+- Remove the unreachable slug fallback in `AgentsService` create (`agents.service.ts:109`) if the create DTO
+  requires `slug`; otherwise make `slug` optional on purpose and test the derivation.
+- `findUserProjectRoles`: one query (or `Promise.all`) instead of sequential lookups.
+- `CommentsService.update` / `delete`: one comment fetch serves both the project lookup and the CASL check.
+
 ### CLI
 
 - Secrets out of argv without breaking scripts: `--api-key` and `vcs --token` accept `-` (read stdin),
@@ -399,5 +484,5 @@ Unit: `apiPath` encoding, `parsePositiveInt`, secret-source precedence, SIGINT e
 - Release pipeline LOWs (no deployed koda).
 - `PolicyGate` runtime wiring.
 - GitLab inbound webhooks.
-- Project-role-based permissions and agent project membership (fleet S1).
+- Agent project membership and project roles for agents (#61, fleet S1). User project-role permissions are in Slice 3 (#144).
 - M21-adjacent `downrankStaleLowConfidence` (unaffected by the paging defect).
