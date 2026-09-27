@@ -43,9 +43,13 @@ function buildAllowedList(allowedCidrs: readonly string[]): net.BlockList {
     const slash = cidr.indexOf('/');
     if (slash < 0) continue;
     const address = cidr.slice(0, slash);
-    const prefix = Number(cidr.slice(slash + 1));
+    const prefixText = cidr.slice(slash + 1);
+    // Digits-only, so `Number('')`/`Number('+5')`/`Number('5.0')` cannot slip through
+    // as a valid prefix and turn the entry into an allow-all `/0`.
+    if (!/^\d+$/.test(prefixText)) continue;
+    const prefix = Number(prefixText);
     const ipVersion = net.isIP(address);
-    if (ipVersion === 0 || !Number.isInteger(prefix)) continue;
+    if (ipVersion === 0) continue;
     const family: 'ipv4' | 'ipv6' = ipVersion === 4 ? 'ipv4' : 'ipv6';
     if (family === 'ipv4' && (prefix < 0 || prefix > 32)) continue;
     if (family === 'ipv6' && (prefix < 0 || prefix > 128)) continue;

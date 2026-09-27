@@ -49,6 +49,7 @@ const envSchema = Joi.object({
         return helpers.error('any.invalid', { message });
       }
     })
+    .messages({ 'any.invalid': '{{#message}}' })
     .optional(),
 }).unknown(true);
 

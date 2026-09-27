@@ -22,7 +22,7 @@ export class OutboundUrlRejection extends Error {
   }
 }
 
-const EBLOCKED_DESTINATION = 'EBLOCKED_DESTINATION';
+export const EBLOCKED_DESTINATION = 'EBLOCKED_DESTINATION';
 const ENOTFOUND = 'ENOTFOUND';
 
 /** The `net.LookupFunction` callback, with the arguments node omits left optional. */

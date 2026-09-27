@@ -2,7 +2,7 @@ import * as http from 'node:http';
 import * as https from 'node:https';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { IWebhookConfig, WEBHOOK_CFG } from '../../config/webhook.config';
-import { OutboundUrlGuard } from './outbound-url-guard';
+import { EBLOCKED_DESTINATION, OutboundUrlGuard } from './outbound-url-guard';
 
 /** US-004: the fixed, non-oracular delivery codes an outbox `lastError` may show. */
 export type DeliveryErrorCode =
@@ -24,8 +24,6 @@ export class WebhookDeliveryError extends Error {
   }
 }
 
-/** The `lookup` error code the guard's connect-time callback raises. */
-const EBLOCKED_DESTINATION = 'EBLOCKED_DESTINATION';
 /** Node 22 and Bun 1.4.2 both report an aborted request (`AbortSignal.timeout`) as `ABORT_ERR`. */
 const ABORT_ERR = 'ABORT_ERR';
 
