@@ -1,6 +1,6 @@
 # ARGS: BUN_VERSION, BUILD_APP, BUILD_APP_PACKAGE, TURBO_VERSION, TURBO_TEAM, TURBO_API, DO_NOT_TRACK
 
-ARG BUN_VERSION=1.3.11
+ARG BUN_VERSION=1.4.2
 FROM oven/bun:${BUN_VERSION}-alpine AS base
 
 # -- stripe package.json version to avoid cache invalidation on only the app package.json changes
@@ -19,7 +19,7 @@ RUN jq 'del(.version)' /tmp/package.json > /tmp/deps.json && \
 # Prune dependencies using Turbo
 FROM base AS prune
 WORKDIR /app
-ARG TURBO_VERSION=2.8.17
+ARG TURBO_VERSION=2.11.4
 ARG BUILD_APP=api
 ARG BUILD_APP_PACKAGE=api
 ENV DO_NOT_TRACK=1

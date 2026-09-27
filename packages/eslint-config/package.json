@@ -19,7 +19,7 @@
     "./vue.js": "./vue.js"
   },
   "devDependencies": {
-    "eslint-config-turbo": "^2.0.0",
+    "eslint-config-turbo": "^2.11.4",
     "eslint-config-prettier": "^8.3.0",
     "eslint-plugin-prettier": "^4.0.0",
     "eslint-plugin-only-warn": "^1.1.0",
