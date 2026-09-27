@@ -48,5 +48,36 @@ export function useTicketBoardPages<T>(
     }
   }
 
-  return { tickets, hasNext, loadingMore, loadMoreTickets }
+  let reloadGeneration = 0
+
+  /**
+   * Live refresh (Track 1 Slice 5): refetch page 1 and every page already
+   * loaded, then swap them in together, so a live update neither collapses the
+   * board back to page 1 nor flips useAsyncData's `pending` (which would show
+   * the loading state). Pages are fetched one at a time so a board with many
+   * loaded pages does not burst the API on every live event. Failures are
+   * silent: the next event or resync retries.
+   */
+  async function reloadLoaded(): Promise<boolean> {
+    reloadGeneration += 1
+    const generation = reloadGeneration
+    const loadedThrough = (lastPage.value ?? firstPage.value)?.current ?? 1
+    const pages: TicketPage<T>[] = []
+    try {
+      for (let current = 1; current <= loadedThrough; current += 1) {
+        const page = await fetchPage(current)
+        if (generation !== reloadGeneration) return false
+        pages.push(page)
+      }
+      firstPage.value = pages[0]
+      moreTickets.value = pages.slice(1).flatMap(p => p.records)
+      lastPage.value = pages.length > 1 ? pages[pages.length - 1] : null
+      return true
+    }
+    catch {
+      return false
+    }
+  }
+
+  return { tickets, hasNext, loadingMore, loadMoreTickets, reloadLoaded }
 }

@@ -15,6 +15,12 @@ const E2E_DATABASE_URL =
 process.env['E2E_API_URL'] = API_URL;
 process.env['E2E_WEB_URL'] = WEB_URL;
 
+// E2E_WEB_MODE=build (CI): serve the production build instead of `nuxt dev`.
+// Build first: `bunx turbo run build --filter=@nathapp/koda-web`.
+const WEB_BUILD_MODE = process.env['E2E_WEB_MODE'] === 'build';
+const WEB_DEV_COMMAND = `bash -lc "bunx nuxt dev --port ${WEB_PORT} 2>&1 | grep -Ev 'Two component files resolving to the same name|/components/ui/.*/index.ts|/components/ui/.*/[A-Za-z]+\\.vue|MODULE_TYPELESS_PACKAGE_JSON|Reparsing as ES module because module syntax was detected|To eliminate this warning, add "type": "module"'"`;
+const WEB_BUILD_COMMAND = `bash -c "test -f .output/server/index.mjs || { echo 'E2E_WEB_MODE=build needs a web build first' >&2; exit 1; }; node .output/server/index.mjs"`;
+
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: false,
@@ -48,7 +54,7 @@ export default defineConfig({
     },
     {
       // Web
-      command: `bash -lc "bunx nuxt dev --port ${WEB_PORT} 2>&1 | grep -Ev 'Two component files resolving to the same name|/components/ui/.*/index.ts|/components/ui/.*/[A-Za-z]+\\.vue|MODULE_TYPELESS_PACKAGE_JSON|Reparsing as ES module because module syntax was detected|To eliminate this warning, add "type": "module"'"`,
+      command: WEB_BUILD_MODE ? WEB_BUILD_COMMAND : WEB_DEV_COMMAND,
       url: WEB_URL,
       cwd: path.resolve(__dirname),
       reuseExistingServer: false,
@@ -58,6 +64,7 @@ export default defineConfig({
       env: {
         NUXT_API_INTERNAL_URL: API_URL,
         E2E_RUN: '1',
+        PORT: String(WEB_PORT),
       },
     },
   ],

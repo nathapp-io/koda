@@ -18,6 +18,7 @@ async function createKbDoc(token: string, projectSlug: string, sourceId: string)
 }
 
 test.describe('KB Admin Operations', () => {
+  test.skip(process.env['SKIP_KB_E2E'] === '1', 'KB e2e needs an embeddings provider (SKIP_KB_E2E=1)');
   let token: string;
   let projectSlug: string;
 

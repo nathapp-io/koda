@@ -169,6 +169,7 @@
   "tickets": {
     "newTicket": "新建工单",
     "loadMore": "加载更多",
+    "live": { "deleted": "此工单已被删除。" },
     "status": {
       "CREATED": "CREATED",
       "VERIFIED": "VERIFIED",

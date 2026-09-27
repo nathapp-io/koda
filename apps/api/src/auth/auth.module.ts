@@ -42,7 +42,7 @@ function parseCookies(cookieHeader: string | undefined): Record<string, string> 
  * possible (WEB-02): the web app's Nuxt server sets the cookie and the
  * browser forwards it on every request, so JS never sees the raw token.
  */
-const kodaTokenExtractor: JwtFromRequestFunction = (req: unknown): string | null => {
+export const kodaTokenExtractor: JwtFromRequestFunction = (req: unknown): string | null => {
   const request = req as {
     headers?: Record<string, string | string[] | undefined>;
     cookies?: Record<string, string | undefined>;
@@ -145,6 +145,6 @@ export { KODA_TOKEN_COOKIE, KODA_REFRESH_COOKIE };
     KodaCaslAbilityFactory,
   ],
   controllers: [AuthController],
-  exports: [AuthService, CombinedAuthGuard, AgentAuthProvider, KodaCaslAbilityFactory, KodaJwtRefreshStrategyProvider],
+  exports: [AuthService, CombinedAuthGuard, AgentAuthProvider, KodaCaslAbilityFactory, KodaJwtRefreshStrategyProvider, JwtAuthProvider],
 })
 export class AuthModule {}

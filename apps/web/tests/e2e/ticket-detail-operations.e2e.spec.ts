@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import {
   login,
   createProject,
@@ -15,6 +15,19 @@ const CLOSE_REGEX = /^Close$|^关闭$/i;
 const DELETE_REGEX = /^Delete$|^删除$/i;
 const DELETE_TICKET_REGEX = /Delete Ticket|删除工单/i;
 const ADD_LINK_REGEX = /Add Link|添加链接/i;
+
+/**
+ * Nuxt hydration resets the SSR DOM to v-model state when the client takes
+ * over, so anything filled or clicked before hydration is lost. The old
+ * `waitForLoadState('networkidle')` hid that race; live pages never settle
+ * because they hold an EventSource open.
+ */
+async function waitForHydration(page: Page) {
+  await page.waitForFunction(() => {
+    const useNuxtApp = (window as { useNuxtApp?: () => { isHydrating: boolean } }).useNuxtApp;
+    return !!useNuxtApp && useNuxtApp().isHydrating === false;
+  }, undefined, { timeout: 15000 });
+}
 
 async function createLabel(token: string, projectSlug: string, name: string) {
   const res = await fetch(`${API_URL}/api/projects/${projectSlug}/labels`, {
@@ -78,11 +91,14 @@ test.describe('Ticket Detail Operations', () => {
   });
 
   test('sends assign, close, and delete ticket requests', async ({ page }) => {
-    const ticket = await createTicket(token, projectSlug, { title: `E2E Assign Close ${Date.now()}`, type: 'BUG' });
+    const title = `E2E Assign Close ${Date.now()}`;
+    const ticket = await createTicket(token, projectSlug, { title, type: 'BUG' });
     await transitionTicket(token, projectSlug, ticket.ref, 'verify', { body: 'verify for close action visibility' });
 
     await page.goto(`/${projectSlug}/tickets/${ticket.ref}`);
-    await page.waitForLoadState('networkidle');
+    // The page holds a live EventSource open, so 'networkidle' never settles.
+    await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible({ timeout: 10000 });
+    await waitForHydration(page);
     const assigneeInput = page.getByPlaceholder(/User ID|用户 ID/i).first();
     await assigneeInput.fill(userId);
     await expect(assigneeInput).toHaveValue(userId);
@@ -115,13 +131,16 @@ test.describe('Ticket Detail Operations', () => {
   });
 
   test('sends ticket label and link add/remove requests', async ({ page }) => {
-    const ticket = await createTicket(token, projectSlug, { title: `E2E Label Link ${Date.now()}`, type: 'BUG' });
+    const title = `E2E Label Link ${Date.now()}`;
+    const ticket = await createTicket(token, projectSlug, { title, type: 'BUG' });
     const label = await createLabel(token, projectSlug, `e2e-ticket-label-${Date.now()}`);
     await assignLabelToTicket(token, projectSlug, ticket.ref, label.id);
     await createTicketLink(token, projectSlug, ticket.ref, `https://example.com/remove/${Date.now()}`);
 
     await page.goto(`/${projectSlug}/tickets/${ticket.ref}`);
-    await page.waitForLoadState('networkidle');
+    // The page holds a live EventSource open, so 'networkidle' never settles.
+    await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible({ timeout: 10000 });
+    await waitForHydration(page);
 
     // Labels are rendered as Badge components - click the badge to send DELETE request
     const removeLabelRequest = page.waitForRequest(request =>
@@ -154,12 +173,15 @@ test.describe('Ticket Detail Operations', () => {
   });
 
   test('sends DELETE /comments/:id from ticket detail', async ({ page }) => {
-    const ticket = await createTicket(token, projectSlug, { title: `E2E Comment Delete ${Date.now()}`, type: 'BUG' });
+    const title = `E2E Comment Delete ${Date.now()}`;
+    const ticket = await createTicket(token, projectSlug, { title, type: 'BUG' });
     const commentBody = `e2e-comment-${Date.now()}`;
     await createComment(token, projectSlug, ticket.ref, commentBody);
 
     await page.goto(`/${projectSlug}/tickets/${ticket.ref}`);
-    await page.waitForLoadState('networkidle');
+    // The page holds a live EventSource open, so 'networkidle' never settles.
+    await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible({ timeout: 10000 });
+    await waitForHydration(page);
 
     // Wait for comment to appear
     const commentDiv = page.locator('div.border.rounded-md', { hasText: commentBody }).first();

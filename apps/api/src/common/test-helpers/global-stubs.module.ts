@@ -8,6 +8,7 @@ import { AUTH_CFG, IAuthConfig, authConfig } from '../../config/auth.config';
 import { RAG_CFG, IRagConfig } from '../../config/rag.config';
 import { VCS_CFG, IVcsConfig, vcsConfig } from '../../config/vcs.config';
 import { outboxConfig } from '../../config/outbox.config';
+import { LIVE_CFG, ILiveConfig } from '../../config/live.config';
 
 export const mockPrismaService = {
   client: {
@@ -69,6 +70,8 @@ export const mockVcsConfig: IVcsConfig = {
   githubApiUrl: 'https://api.github.com',
 };
 
+export const mockLiveConfig: ILiveConfig = { heartbeatMs: 25000, maxStreamsPerUser: 5 };
+
 @Global()
 @Module({
   imports: [
@@ -89,7 +92,8 @@ export const mockVcsConfig: IVcsConfig = {
     { provide: AUTH_CFG, useValue: mockAuthConfig },
     { provide: RAG_CFG, useValue: mockRagConfig },
     { provide: VCS_CFG, useValue: mockVcsConfig },
+    { provide: LIVE_CFG, useValue: mockLiveConfig },
   ],
-  exports: [PrismaService, TRANSACTION_MANAGER, ConfigModule, AgentsService, CacheManager, AUTH_CFG, RAG_CFG, VCS_CFG],
+  exports: [PrismaService, TRANSACTION_MANAGER, ConfigModule, AgentsService, CacheManager, AUTH_CFG, RAG_CFG, VCS_CFG, LIVE_CFG],
 })
 export class GlobalStubsModule {}

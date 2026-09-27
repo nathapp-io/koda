@@ -28,6 +28,7 @@ import { WebhookSecurityModule } from './webhook-security/webhook-security.modul
 import { KodaDomainWriterModule } from './koda-domain-writer/koda-domain-writer.module';
 import { OutboxModule } from './outbox/outbox.module';
 import { OutboxAdminModule } from './outbox/outbox-admin.module';
+import { LiveModule } from './live/live.module';
 import { MemoryModule } from './memory/memory.module';
 import { CodeIntelModule } from './code-intel/code-intel.module';
 import { EntityGraphModule } from './entity-graph/entity-graph.module';
@@ -40,6 +41,7 @@ import { databaseConfig } from './config/database.config';
 import { ragConfig } from './config/rag.config';
 import { vcsConfig } from './config/vcs.config';
 import { outboxConfig } from './config/outbox.config';
+import { liveConfig } from './config/live.config';
 import { validate } from './config/env.validation';
 import { ConfigBridgeModule } from './config/config-bridge.module';
 
@@ -48,7 +50,7 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
-      load: [appConfig, authConfig, databaseConfig, ragConfig, vcsConfig, outboxConfig, ServerSecurityConfig],
+      load: [appConfig, authConfig, databaseConfig, ragConfig, vcsConfig, outboxConfig, liveConfig, ServerSecurityConfig],
       validate: validate,
     }),
     ConfigBridgeModule,
@@ -97,6 +99,7 @@ import { ConfigBridgeModule } from './config/config-bridge.module';
     WebhookSecurityModule,
     OutboxModule,
     OutboxAdminModule,
+    LiveModule,
     KodaDomainWriterModule,
     MemoryModule,
     CodeIntelModule,

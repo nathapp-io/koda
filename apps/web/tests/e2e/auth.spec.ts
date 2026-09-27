@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { webLogin } from './fixtures/page-helpers';
+import { forgetSession } from './fixtures/session';
+import { E2E_ADMIN } from './fixtures/api-client';
 
 test.describe('Authentication', () => {
   test('login page is accessible', async ({ page }) => {
@@ -78,11 +80,13 @@ test.describe('Authentication', () => {
   });
 
   test('logout clears session and redirects to login', async ({ page }) => {
-    await webLogin(page);
+    await webLogin(page, undefined, undefined, { fresh: true });
     await expect(page).toHaveURL('/');
 
     // Target the visible logout action regardless of layout region.
     await page.getByRole('button', { name: 'Logout' }).first().click();
+    // Logout bumped tokenVersion: every cached admin token is now revoked.
+    forgetSession(E2E_ADMIN.email);
     await expect(page).toHaveURL('/login', { timeout: 5000 });
 
     // Verify session cleared by checking auth cookie removal

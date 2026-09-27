@@ -169,6 +169,7 @@
   "tickets": {
     "newTicket": "New Ticket",
     "loadMore": "Load more",
+    "live": { "deleted": "This ticket was deleted." },
     "status": {
       "CREATED": "CREATED",
       "VERIFIED": "VERIFIED",

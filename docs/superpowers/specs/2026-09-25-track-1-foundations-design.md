@@ -3,7 +3,7 @@
 **Date:** 2026-09-25
 **Base:** `main` @ `eb18be6c` (after PR #127 and HIGH remediation PRs #128-#132)
 **Source:** fleet platform design doc §9.3 (Track 1), whole-repo review `docs/20260925-review-whole-repo.md`
-**Status:** Approved design. Slice 1 merged (#133); Slice 2 implemented on `feat/track1-outbox`; Slice 3 merged (#137); Slice 4 implemented on `feat/track1-users-membership`.
+**Status:** Approved design. Slices 1-4 merged (#133, #134, #137, #139). Slice 5 implemented on `feat/track1-sse`.
 
 ## Goal
 
@@ -249,32 +249,151 @@ The timeline/context cursor is the one documented exception to the `Page<T>` rul
 
 ## Slice 5 — SSE live ticket updates
 
+Re-designed 2026-09-26 against `main` @ `bba91e23` (brainstorm rulings below supersede the
+original 09-25 sketch). Rulings: the envelope is generic so fleet S2 can add event types, while
+tickets remain the only producer; live events are an outbox subscriber (no second publish path);
+comment create emits a new `COMMENT_ADDED` ticket event; the web e2e suite is repaired and runs in a
+new CI job.
+
+### Verified facts this design depends on
+
+- The outbox relay runs in the API process: 1 s poll, batch 20, records processed serially
+  (`apps/api/src/config/outbox.config.ts`). A slow sibling handler (webhook fetch, 5 s timeout)
+  delays later records in the batch. Expected live latency: 1-2 s, worst case about 6 s.
+- `FanOutPublisher.publish` runs every handler; if any throws, the whole record retries and **all**
+  handlers run again, so live events can be delivered more than once.
+- `ticket_event` actions actually emitted: `TICKET_CREATED`, `TICKET_UPDATED`, `TICKET_DELETED`,
+  `assigned`, `status_changed` (all transitions, including PATCH with `status`). Payload:
+  `{ id, type, action, timestamp, ticketId, projectId, actorId, actorType, data }`; no ticket ref.
+  Comments, labels and links emit nothing today.
+- Nest `@Sse` (core 11.1.28) cannot write SSE comment lines and defers response headers until the
+  first message (`@nestjs/core/router/sse-stream.js`). It writes to the raw response on both
+  Express (integration tests, `test/helpers/http-app.ts`) and Fastify (production), and unsubscribes
+  the returned Observable when the client socket closes. No `@Sse` exists in koda yet, so the
+  Express/Fastify parity is framework behavior, first proven by this slice's integration and e2e
+  tests.
+- `CommentsService.create` (`src/comments/comments.service.ts`) runs no transaction today, and
+  `TicketsService.recordTicketEvent` is private.
+- The existing `ticket_event` handlers tolerate an unknown action: memory `extractFromEvent`
+  falls through to `return []`, `EntityGraphService.onTicketEvent` has no matching `case`, and
+  RAG `EntityStore.handleOutboxEvent` re-indexes the ticket on every event regardless of action
+  (redundant, harmless).
+- `kodaTokenExtractor` (Bearer, then `koda_token` cookie) is a module-local const in
+  `src/auth/auth.module.ts`; `JwtAuthProvider` is not exported from `AuthModule`.
+- Board and detail pages render `LoadingState` while their `useAsyncData` is `pending`, and
+  `refresh()` sets `pending`; `CommentThread` likewise swaps its list for a loading line.
+- Several e2e specs wait for `networkidle`, which never settles while an `EventSource` is open.
+- The h3 `proxyRequest` used by `apps/web/server/api/[...].ts` streams unbuffered but passes no
+  `AbortSignal` upstream: a closed browser tab leaves the API stream open.
+- The authenticated principal carries no token expiry; `JwtAuthProvider.getPrincipal()` re-checks
+  `tokenVersion` and `disabled` through the 60 s `user-auth-state` cache.
+- The API is single instance; the production API runs on Bun (`apps/runtime`).
+
 ### API
 
-- **`ProjectEventBus`** (`src/live/project-event-bus.ts`): in-process map `projectId → Set<callback>`; `subscribe` returns an unsubscribe function; `publish(projectId, event)` never throws (a failing callback is logged and skipped).
-- **`TicketLiveSubscriber`**: fan-out handler for `ticket_event`. Maps the payload to `LiveEvent { id, type: 'ticket', action, ticketId, ref, actorId, at }` with `action ∈ created|updated|transitioned|assigned|commented|deleted`. Carries no ticket content; clients refetch through access-checked endpoints. Never throws, so it never causes an outbox retry.
-- **`GET /projects/:slug/events`** (`LiveController`, Nest `@Sse()` on Fastify):
-  - `assertProjectMembership` on connect;
-  - `: ping` comment every 25 s;
-  - on each heartbeat re-validate: `tokenVersion` via the existing 60 s cache (`jwt-auth.provider.ts`), `disabled` and membership via a live query (one cheap indexed read per 25 s per stream); close the stream on failure; also close at access-token expiry (the browser `EventSource` reconnects with the refreshed cookie);
-  - unsubscribe on client close;
-  - excluded from the global throttler (a long-lived stream would miscount);
-  - max 5 concurrent streams per user, 429 beyond.
-- Auth needs no new code: the API already accepts the `koda_token` cookie (`src/auth/auth.module.ts`), and the browser `/api` proxy forwards cookies.
+- **`LiveEvent`** (`src/live/live-event.ts`):
+  `{ id, type: 'ticket', action, projectId, ticketId, actorId, at }`, `action ∈ created | updated |
+  transitioned | assigned | commented | deleted`. `type` is a union with one member now; fleet S2
+  extends it. No ticket content and no ref: clients refetch through access-checked endpoints. `id`
+  is the envelope's `id` (the `TicketEvent` row id, which the handler receives in the payload), so a
+  retried delivery keeps its id and clients drop duplicates.
+- **`ProjectEventBus`** (`src/live/project-event-bus.ts`): in-process map
+  `projectId → Set<callback>`; `subscribe` returns an unsubscribe function; `publish` never throws
+  (a failing callback is logged and skipped).
+- **`TicketLiveSubscriber`**: registers on `ticket_event` via `FanOutPublisher.register`. Maps
+  `TICKET_CREATED→created`, `TICKET_UPDATED→updated`, `status_changed→transitioned`,
+  `assigned→assigned`, `COMMENT_ADDED→commented`, `TICKET_DELETED→deleted`; unknown actions are
+  dropped. Never throws, so it never causes an outbox retry.
+- **`COMMENT_ADDED` producer**: `CommentsService.create` wraps the comment insert in
+  `txManager.run` (new; injects `TRANSACTION_MANAGER`) and, in the same transaction, writes the
+  `TicketEvent` row via `TicketEventService` (`CommentsModule` imports `EventsModule`) and the
+  `ticket_event` outbox row via the global `@nathapp/nestjs-outbox` `OutboxService`, with
+  `buildTicketEventOutboxPayload`, `data: { commentId }` (no comment body). This mirrors
+  `TicketsService.recordTicketEvent`; `TicketsService` is not imported (no module cycle). Comments
+  created inside a transition keep emitting only `status_changed` (one user action, one event).
+  Comment edit/delete emit nothing (out of scope). The new `TicketEvent` row also shows in the
+  ticket timeline. The three existing handlers need no change (see verified facts); tests pin that
+  `COMMENT_ADDED` produces no memory items and no entity-graph write.
+- **`GET /projects/:slug/events`** (`LiveController`, `@Sse`):
+  - on connect: resolve slug, `assertProjectMembership` (403); agent principals refused (403,
+    CLI/agent subscribers deferred); per-user cap of 5 concurrent streams, in-memory, 429 beyond;
+    emit a `ready` event immediately so headers flush;
+  - every `LIVE_HEARTBEAT_MS` (default 25 000): re-validate via `JwtAuthProvider.getPrincipal`
+    (`tokenVersion`, `disabled`, 60 s cache) and membership via a live query; close on failure,
+    otherwise emit a named `ping` event (`EventSource` ignores named events without a listener);
+  - close at the access token's `exp`: `AuthModule` exports `kodaTokenExtractor`, the controller
+    extracts the raw token (already verified by the guard) and base64url-decodes its payload for
+    `exp`; the browser reconnects with the refreshed cookie;
+  - on client close: unsubscribe and release the cap slot;
+  - `@SkipThrottle()` (a long-lived stream would miscount the global throttler);
+  - `@ApiExcludeEndpoint()`: browser-only, agents refused, so it stays out of `openapi.json` and the
+    generated CLI client.
+- `AuthModule` additionally exports `JwtAuthProvider` for the heartbeat re-validation.
+- Revocation bound: disabled user or bumped `tokenVersion` closes the stream within one heartbeat
+  plus the 60 s cache TTL (at most 85 s); membership removal within one heartbeat (at most 25 s).
+- Auth needs no new mechanism: the API already accepts the `koda_token` cookie and the web proxy
+  forwards cookies.
 
 ### Web
 
-- `server/api/[...].ts`: ensure the proxied response streams unbuffered for `text/event-stream` (pass through `cache-control: no-cache`, `x-accel-buffering: no`; no compression).
-- `composables/useProjectEvents.ts`: client-only `EventSource` wrapper, `on(action, handler)`, closes on unmount; on `onopen` after an error it fires a `resync` callback.
-- Ticket board: `created|transitioned|assigned|deleted` → debounced (300 ms) refetch of the current page; `resync` → refetch.
-- Ticket detail: any event for the open `ticketId` → refetch ticket + comments.
+- **Dedicated proxy route** `server/api/projects/[slug]/events.get.ts` (more specific than the
+  `[...]` catch-all): `fetch` upstream with an `AbortController` aborted when the browser request
+  closes; forward cookies; stream the body back with `content-type: text/event-stream`,
+  `cache-control: no-cache`, `x-accel-buffering: no`, no `content-length` or `content-encoding`.
+  All other `/api` traffic stays on `proxyRequest`.
+- **`composables/useProjectEvents.ts`** (client-only): wraps
+  `EventSource('/api/projects/:slug/events')`; exposes `on(action, handler)` and `onResync(handler)`;
+  closes on unmount; drops duplicate ids (bounded memory of the last 200). Transient drops and server
+  closes: the browser reconnects and the composable fires `resync` on reopen. Terminal failure
+  (`readyState === CLOSED`, e.g. 401 after cookie expiry, 403, 429): call `useAuth().refresh()`, then
+  reopen with backoff 1 s, 2 s, 4 s … capped at 30 s; if the refresh fails, stop silently and the
+  page keeps working as a static page.
+- **Silent refetch**: live updates never call `useAsyncData` `refresh()` (it sets `pending`, which
+  swaps the page for `LoadingState` and would unmount an open edit form). They fetch with `$api` and
+  assign the result to the existing data ref instead.
+- **Ticket board** (`pages/[project]/index.vue`): every action except `commented`, plus `resync`,
+  triggers a 300 ms debounced reload. New `reloadLoaded()` in `useTicketBoardPages` refetches page 1
+  and every already-loaded extra page and swaps them in together (today `refresh()` drops loaded
+  extra pages).
+- **Ticket detail** (`pages/[project]/tickets/[ref].vue`): any event for the open `ticketId`
+  silently refetches the ticket; `commented` and `resync` also refetch comments and assign them via
+  `useNuxtData('comments-<slug>-<ref>')` (the `CommentThread` key, component unchanged);
+  `deleted` for the open ticket shows a "ticket was deleted" notice instead of refetching into a 404.
 - No `Last-Event-ID` replay (single instance; reconnect triggers a refetch).
+
+### E2E repair and CI
+
+- **429 fix in the tests, not the product**: a worker-scoped auth fixture logs each role in once per
+  worker and reuses cookies via `storageState`, replacing `webLogin` in `beforeEach`. The login
+  throttle (5/min per IP) is unchanged. `networkidle` waits on pages that open the event stream
+  (board, ticket detail) are replaced by explicit locator waits. Remaining failures exposed after the 429 fix are fixed; a
+  failure that is a real product bug is escalated, not papered over.
+- `playwright.config.ts`: `E2E_WEB_MODE=build` runs the web server from the built
+  `.output/server/index.mjs` instead of `nuxt dev`.
+- **New CI job `e2e`** in `.github/workflows/ci.yml`: `postgres:16` on 5433, cached Playwright
+  Chromium, web build, Playwright with `E2E_WEB_MODE=build`; report and traces uploaded on failure.
+  Becomes a required check once green on `main`.
 
 ### Tests
 
-- Unit: bus subscribe/publish/unsubscribe, failing callback isolation; subscriber payload mapping; heartbeat revocation close.
-- Integration (PG + in-process app): member opens the stream, transitions a ticket, receives `transitioned` within 2 s; non-member → 403; removing the member closes the stream within one heartbeat.
-- E2E (Playwright through the real Nuxt proxy): two browser contexts on the same board; A transitions a ticket; B's board updates without reload. This is the proof that streaming survives the proxy.
+- Unit: bus subscribe/publish/unsubscribe and failing-callback isolation; subscriber mapping of all
+  six actions, unknown-action drop, never throws; controller heartbeat closes on revoked/disabled
+  user, lost membership and token `exp`, releases the cap slot; 6th stream → 429; composable dedup,
+  `resync` on reopen, refresh-then-backoff on terminal failure; `reloadLoaded()` keeps loaded pages.
+- Integration (PG, Express `bootHttpApp`, relay driven with `relay.dispatchPendingBatch()`, streams
+  read with `fetch` against `app.listen(0)`): member receives `ready`, then `transitioned` carrying
+  the outbox event id; non-member → 403; agent key → 403; member removal closes the stream within
+  one heartbeat (`LIVE_HEARTBEAT_MS` shortened); comment create records `COMMENT_ADDED`; memory,
+  entity-graph and RAG handlers pinned against it.
+- E2E `live-board.spec.ts`: two browser contexts on one board, A transitions a ticket, B's card moves
+  without reload within 5 s; B on ticket detail sees A's comment appear.
+- Manual (recorded in the PR): two tabs against `docker compose up` to prove SSE on the Bun
+  production runtime, which no automated suite exercises. A failure blocks the slice.
+
+### Deferred
+
+- CLI/agent subscribers (agent-key auth on the stream); live events for comment edit/delete, labels,
+  links, memory, timeline, agents; `Last-Event-ID` replay; multi-instance fan-out.
 
 ---
 
@@ -290,6 +409,6 @@ The timeline/context cursor is the one documented exception to the `Page<T>` rul
 ## Success criteria
 
 - `bun run test`, `bun run test:integration` (on Postgres), `bun run lint`, `bun run type-check` green; CI runs the new `integration` job.
-- M4, M6, M14, M20 re-verified closed against source at the final HEAD.
+- M4, M6, M14, M20 (defined in `docs/20260925-review-whole-repo.md`) re-verified closed against source at the final HEAD.
 - `koda-local` runs on Postgres with an admin bootstrap, registration closed, a second user created and added to a project.
-- Two browsers on one ticket board see each other's transitions live through the Nuxt proxy.
+- Two browsers on one ticket board see each other's transitions live through the Nuxt proxy, proven by the `e2e` CI job and a manual check on the Bun production runtime.

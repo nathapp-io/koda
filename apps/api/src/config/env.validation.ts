@@ -28,6 +28,12 @@ const envSchema = Joi.object({
     .integer()
     .min(0)
     .optional(),
+  // Digits-only to match the class-validator `@Matches(/^\d+$/)` rule in
+  // live.config.ts (`Joi.number()` would coerce '1e3' / '100.0' and diverge).
+  LIVE_HEARTBEAT_MS: Joi.string()
+    .pattern(/^\d+$/)
+    .custom((value: string, helpers) => (Number(value) >= 100 ? value : helpers.error('number.min')))
+    .optional(),
 }).unknown(true);
 
 export function validate(config: Record<string, unknown>): Record<string, unknown> {
