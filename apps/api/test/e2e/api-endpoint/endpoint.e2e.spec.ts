@@ -313,12 +313,42 @@ describeIntegration('API Integration Tests', () => {
       }
     });
 
-    it('POST /api/projects — 400 for duplicate key', async () => {
+    it('POST /api/projects — 409 for duplicate key', async () => {
       await request(httpServer)
         .post('/api/projects')
         .set('Authorization', `Bearer ${userAccessToken}`)
         .send({ name: 'Duplicate Key', slug: 'duplicate-key', key: 'KT' })
-        .expect(400);
+        .expect(409);
+    });
+
+    it('POST /api/projects — 409 for duplicate slug', async () => {
+      await request(httpServer)
+        .post('/api/projects')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: 'Duplicate Slug', slug: projectSlug, key: 'DUPS' })
+        .expect(409);
+    });
+
+    it('PATCH /api/projects/:slug — 409 when the requested slug belongs to another project', async () => {
+      await request(httpServer)
+        .post('/api/projects')
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: 'Other Project', slug: 'other-project', key: 'OTHR' })
+        .expect(201);
+
+      await request(httpServer)
+        .patch(`/api/projects/${projectSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ slug: 'other-project' })
+        .expect(409);
+    });
+
+    it('PATCH /api/projects/:slug — 409 when the requested key belongs to another project', async () => {
+      await request(httpServer)
+        .patch(`/api/projects/${projectSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ key: 'OTHR' })
+        .expect(409);
     });
 
     it('GET /api/projects — lists projects', async () => {
@@ -597,13 +627,10 @@ describeIntegration('API Integration Tests', () => {
     });
 
     it('DELETE /api/comments/:id — deletes a comment', async () => {
-      const res = await request(httpServer)
+      await request(httpServer)
         .delete(`/api/comments/${commentId}`)
         .set('Authorization', `Bearer ${userAccessToken}`)
-        .expect(200);
-
-      // JsonResponse.Ok wrapper
-      expect(res.body).toHaveProperty('ret', 0);
+        .expect(204);
     });
   });
 
@@ -866,6 +893,14 @@ describeIntegration('API Integration Tests', () => {
       await request(httpServer)
         .get(`/api/projects/${deleteProjectSlug}`)
         .set('Authorization', `Bearer ${userAccessToken}`)
+        .expect(404);
+    });
+
+    it('PATCH /api/projects/:slug — 404 for a soft-deleted project', async () => {
+      await request(httpServer)
+        .patch(`/api/projects/${deleteProjectSlug}`)
+        .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ name: 'Resurrected' })
         .expect(404);
     });
   });

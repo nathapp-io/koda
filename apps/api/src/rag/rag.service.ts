@@ -95,7 +95,7 @@ export class RagService {
    * Indexes a document in the knowledge base for a project.
    * @throws ForbiddenAppException if projectId is empty, invalid format, or non-existent
    */
-  async indexDocument(projectId: string, doc: IndexDocumentInput): Promise<void> {
+  async indexDocument(projectId: string, doc: IndexDocumentInput): Promise<string | null> {
     return this.vectorStore.indexDocument(projectId, doc);
   }
 

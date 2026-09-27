@@ -1,11 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { AgentsService, CreateAgentDto as _CreateAgentDto } from './agents.service';
+import { AgentsService } from './agents.service';
 import { PrismaAgentRepository } from './prisma-agent.repository';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { createHmac } from 'crypto';
 import { randomBytes } from 'crypto';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
+import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
+import { AgentPrincipal } from '../auth/principal/koda-principal.types';
 
 describe('AgentsService', () => {
   let service: AgentsService;
@@ -86,12 +88,21 @@ describe('AgentsService', () => {
     writeAgentAction: jest.fn().mockResolvedValue({ canonicalId: 'evt-1' }),
   };
 
+  // US-003: AgentsService wraps the agent create in txManager.run — the provider
+  // must exist or the module cannot be compiled.
+  const mockTxManager = {
+    run: jest.fn((fn: () => Promise<unknown>) => fn()),
+    getClient: jest.fn(),
+    isInTransaction: jest.fn(() => false),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AgentsService,
         { provide: PrismaAgentRepository, useValue: mockAgentRepo },
         { provide: AUTH_CFG, useValue: mockAuthConfig },
+        { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
         { provide: KodaDomainWriter, useValue: mockKodaDomainWriter },
       ],
     }).compile();
@@ -210,6 +221,7 @@ describe('AgentsService', () => {
             AgentsService,
             { provide: PrismaAgentRepository, useValue: mockAgentRepo },
             { provide: AUTH_CFG, useValue: { ...mockAuthConfig, apiKeySecret: undefined } },
+            { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
             { provide: KodaDomainWriter, useValue: mockKodaDomainWriter },
           ],
         }).compile();
@@ -670,6 +682,20 @@ describe('AgentsService', () => {
       ],
     };
 
+    // US-003: pickup is restricted to the agent itself (or a global ADMIN user).
+    const authorizedPrincipal: AgentPrincipal = {
+      actorType: 'agent',
+      id: 'agent-123',
+      name: 'test-agent',
+      slug: 'test-agent',
+      status: 'ACTIVE',
+      agentRoles: ['DEVELOPER'],
+      capabilities: [],
+      blacklisted: false,
+      revoked: false,
+      authorities: ['WORKER'],
+    };
+
     const makeTicket = (id: string, priority: string, labelNames: string[]) => ({
       id,
       priority,
@@ -692,7 +718,7 @@ describe('AgentsService', () => {
         makeTicket('ticket-2', 'CRITICAL', ['nestjs']),
       ]);
 
-      const result = await service.suggestTicket('test-agent', 'koda');
+      const result = await service.suggestTicket('test-agent', 'koda', authorizedPrincipal);
 
       expect(result).not.toBeNull();
       const safeResult = result as NonNullable<typeof result>;
@@ -710,7 +736,7 @@ describe('AgentsService', () => {
       mockAgentRepo.findProjectBySlug.mockResolvedValue(mockProject);
       mockAgentRepo.findVerifiedUnassignedTickets.mockResolvedValue([]);
 
-      const result = await service.suggestTicket('test-agent', 'koda');
+      const result = await service.suggestTicket('test-agent', 'koda', authorizedPrincipal);
 
       expect(result).toBeNull();
     });
@@ -718,7 +744,7 @@ describe('AgentsService', () => {
     it('should throw NotFoundAppException when agent slug is not found', async () => {
       mockAgentRepo.findBySlugWithCapabilities.mockResolvedValue(null);
 
-      await expect(service.suggestTicket('nonexistent', 'koda')).rejects.toThrow();
+      await expect(service.suggestTicket('nonexistent', 'koda', authorizedPrincipal)).rejects.toThrow();
     });
 
     it('should return highest-priority ticket when all scores are 0 (score-0 fallback)', async () => {
@@ -731,7 +757,7 @@ describe('AgentsService', () => {
         makeTicket('ticket-high', 'HIGH', ['unknown']),
       ]);
 
-      const result = await service.suggestTicket('test-agent', 'koda');
+      const result = await service.suggestTicket('test-agent', 'koda', authorizedPrincipal);
 
       expect(result).not.toBeNull();
       const safeResult = result as NonNullable<typeof result>;
@@ -748,7 +774,7 @@ describe('AgentsService', () => {
         makeTicket('ticket-low', 'LOW', ['nestjs']),
       ]);
 
-      const result = await service.suggestTicket('test-agent', 'koda');
+      const result = await service.suggestTicket('test-agent', 'koda', authorizedPrincipal);
 
       expect(result).not.toBeNull();
       const safeResult = result as NonNullable<typeof result>;
@@ -764,7 +790,7 @@ describe('AgentsService', () => {
       // The service should query via repo with the right filters
       mockAgentRepo.findVerifiedUnassignedTickets.mockResolvedValue([unassignedTicket]);
 
-      const result = await service.suggestTicket('test-agent', 'koda');
+      const result = await service.suggestTicket('test-agent', 'koda', authorizedPrincipal);
 
       expect(result).not.toBeNull();
       const safeResult = result as NonNullable<typeof result>;

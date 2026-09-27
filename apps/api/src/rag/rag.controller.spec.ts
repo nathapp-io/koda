@@ -2,8 +2,9 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { RagController } from './rag.controller';
 import { RagService } from './rag.service';
 import { HybridRetrieverService } from './hybrid-retriever.service';
-import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { PrismaRagRepository } from './prisma-rag.repository';
+import { ProjectAccessService } from '../projects/project-access.service';
 
 const mockProject = {
   id: 'proj-1',
@@ -59,12 +60,13 @@ describe('RagController', () => {
   let hybridRetrieverService: jest.Mocked<HybridRetrieverService>;
 
   const mockFindProjectBySlug = jest.fn();
-  const mockFindProjectMembership = jest.fn();
   const mockUpdateGraphifyLastImportedAt = jest.fn();
 
+  // US-005: PrismaRagRepository.findProjectMembership was deleted — membership
+  // is ProjectMembershipGuard's job, so the controller's repository stub no
+  // longer carries a membership lookup.
   const mockRagRepository: Partial<PrismaRagRepository> = {
     findProjectBySlug: mockFindProjectBySlug,
-    findProjectMembership: mockFindProjectMembership,
     updateGraphifyLastImportedAt: mockUpdateGraphifyLastImportedAt,
   };
 
@@ -88,6 +90,10 @@ describe('RagController', () => {
         { provide: RagService, useValue: ragService },
         { provide: HybridRetrieverService, useValue: hybridRetrieverService },
         { provide: PrismaRagRepository, useValue: mockRagRepository },
+        // US-001: the class-level ProjectMembershipGuard is instantiated by the DI
+        // container even though these tests call the handlers directly, so its
+        // ProjectAccessService dependency must resolve.
+        { provide: ProjectAccessService, useValue: {} },
       ],
     }).compile();
 
@@ -101,7 +107,7 @@ describe('RagController', () => {
   describe('addDocument', () => {
     it('indexes only via ragService (single LanceDB write path — H7)', async () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
-      ragService.indexDocument.mockResolvedValue(undefined);
+      ragService.indexDocument.mockResolvedValue('doc-record-1');
 
       const result = await controller.addDocument(
         'alpha',
@@ -118,7 +124,7 @@ describe('RagController', () => {
       expect(ragService.indexDocument).toHaveBeenCalledWith('proj-1', expect.objectContaining({ sourceId: 'doc-1' }));
       // H7: HybridRetriever must NOT receive a second, duplicate index write.
       expect(hybridRetrieverService.indexDocument).not.toHaveBeenCalled();
-      expect((result as any).data).toEqual({ indexed: true });
+      expect((result as any).data).toEqual({ indexed: true, id: 'doc-record-1', sourceId: 'doc-1' });
     });
 
     it('throws NotFoundAppException when project not found', async () => {
@@ -147,7 +153,7 @@ describe('RagController', () => {
 
     it('allows agent principal to add a document', async () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
-      ragService.indexDocument.mockResolvedValue(undefined);
+      ragService.indexDocument.mockResolvedValue('doc-record-2');
 
       const result = await controller.addDocument(
         'alpha',
@@ -155,26 +161,15 @@ describe('RagController', () => {
         mockAgentPrincipal,
       );
 
-      expect(mockFindProjectMembership).not.toHaveBeenCalled();
       expect(ragService.indexDocument).toHaveBeenCalled();
       expect(hybridRetrieverService.indexDocument).not.toHaveBeenCalled();
-      expect((result as any).data).toEqual({ indexed: true });
+      expect((result as any).data).toEqual({ indexed: true, id: 'doc-record-2', sourceId: 'doc-2' });
     });
 
-    it('forbids user without project membership', async () => {
-      mockFindProjectBySlug.mockResolvedValue(mockProject);
-      mockFindProjectMembership.mockResolvedValue(null);
-
-      await expect(
-        controller.addDocument(
-          'alpha',
-          { source: 'doc', sourceId: 'x', content: 'y', metadata: {} },
-          mockMemberUser,
-        ),
-      ).rejects.toThrow(ForbiddenAppException);
-      expect(ragService.indexDocument).not.toHaveBeenCalled();
-      expect(hybridRetrieverService.indexDocument).not.toHaveBeenCalled();
-    });
+    // US-001: the membership gate for this route moved to ProjectMembershipGuard,
+    // which runs before the handler. Non-members, project VIEWERs on a write route
+    // and members are covered at the HTTP boundary in
+    // projects/project-membership.guard.routes.spec.ts.
   });
 
   describe('listDocuments', () => {
@@ -211,19 +206,11 @@ describe('RagController', () => {
 
       await controller.listDocuments('alpha', mockAgentPrincipal);
 
-      expect(mockFindProjectMembership).not.toHaveBeenCalled();
       expect(ragService.listDocuments).toHaveBeenCalled();
     });
 
-    it('forbids user without project membership', async () => {
-      mockFindProjectBySlug.mockResolvedValue(mockProject);
-      mockFindProjectMembership.mockResolvedValue(null);
-
-      await expect(
-        controller.listDocuments('alpha', mockMemberUser),
-      ).rejects.toThrow(ForbiddenAppException);
-      expect(ragService.listDocuments).not.toHaveBeenCalled();
-    });
+    // US-001: the membership gate for this route moved to ProjectMembershipGuard
+    // (see projects/project-membership.guard.routes.spec.ts).
   });
 
   describe('deleteDocument', () => {
@@ -255,27 +242,21 @@ describe('RagController', () => {
       expect((result as any).data).toBeDefined();
     });
 
-    it('allows admin to search without membership check', async () => {
+    it('allows admin to search', async () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
       hybridRetrieverService.search.mockResolvedValue(mockSearchResult);
 
       await controller.search('alpha', { query: 'test' }, mockAdminUser);
 
-      expect(mockFindProjectMembership).not.toHaveBeenCalled();
+      expect(hybridRetrieverService.search).toHaveBeenCalled();
     });
 
-    it('forbids user without membership', async () => {
-      mockFindProjectBySlug.mockResolvedValue(mockProject);
-      mockFindProjectMembership.mockResolvedValue(null);
-
-      await expect(
-        controller.search('alpha', { query: 'test' }, mockMemberUser),
-      ).rejects.toThrow(ForbiddenAppException);
-    });
+    // US-001: the membership gate for this route moved to ProjectMembershipGuard
+    // (see projects/project-membership.guard.routes.spec.ts). A project VIEWER is
+    // still allowed to search — KB reads permit VIEWER.
 
     it('allows member with valid project role', async () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
-      mockFindProjectMembership.mockResolvedValue({ role: 'DEVELOPER' });
       hybridRetrieverService.search.mockResolvedValue(mockSearchResult);
 
       const result = await controller.search('alpha', { query: 'test' }, mockMemberUser);
@@ -322,7 +303,6 @@ describe('RagController', () => {
   describe('importGraphify', () => {
     it('returns immediately when nodes array is empty', async () => {
       mockFindProjectBySlug.mockResolvedValue({ ...mockProject, graphifyEnabled: true });
-      mockFindProjectMembership.mockResolvedValue({ role: 'DEVELOPER' });
 
       const result = await controller.importGraphify('alpha', { nodes: [], links: [] }, mockAdminUser);
 
@@ -332,7 +312,6 @@ describe('RagController', () => {
 
     it('throws ValidationAppException when graphify is disabled for project', async () => {
       mockFindProjectBySlug.mockResolvedValue({ ...mockProject, graphifyEnabled: false });
-      mockFindProjectMembership.mockResolvedValue({ role: 'ADMIN' });
 
       await expect(
         controller.importGraphify(
@@ -345,7 +324,6 @@ describe('RagController', () => {
 
     it('imports nodes and returns the import result (timestamp updated inside service)', async () => {
       mockFindProjectBySlug.mockResolvedValue({ ...mockProject, graphifyEnabled: true });
-      mockFindProjectMembership.mockResolvedValue({ role: 'ADMIN' });
       ragService.importGraphify.mockResolvedValue({ imported: 1, cleared: 0 } as any);
 
       const result = await controller.importGraphify(

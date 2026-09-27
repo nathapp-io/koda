@@ -9,6 +9,7 @@ import { PERMISSION_KEY, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { ValidationAppException, Page } from '@nathapp/nestjs-common';
 import { KodaAction } from '../auth/casl/koda-action.enum';
 import { ProjectsService } from '../projects/projects.service';
+import { ProjectAccessService } from '../projects/project-access.service';
 import { TransitionWithCommentDto } from './dto/transition-with-comment.dto';
 
 describe('TicketsController', () => {
@@ -122,6 +123,10 @@ describe('TicketsController', () => {
         { provide: TicketsService, useValue: mockTicketsService },
         { provide: TicketTransitionsService, useValue: mockTransitionsService },
         { provide: ProjectsService, useValue: mockProjectsService },
+        // US-001: the class-level ProjectMembershipGuard is instantiated by the DI
+        // container even though these tests call the handlers directly, so its
+        // ProjectAccessService dependency must resolve.
+        { provide: ProjectAccessService, useValue: {} },
       ],
     }).compile();
 
@@ -501,25 +506,24 @@ describe('TicketsController', () => {
       ).rejects.toThrow();
     });
 
-    it('should check project membership via findProjectIdBySlug + assertProjectMembership (BUG-2)', async () => {
-      mockProjectsService.findProjectIdBySlug.mockResolvedValue('proj-123');
+    // US-001 AC9: the membership gate for this route now lives in
+    // ProjectMembershipGuard (applied to TicketsController). The handler performs
+    // no project lookup and no membership check of its own.
+    it('AC9: assign called directly does not call ProjectsService.assertProjectMembership', async () => {
       mockTicketsService.assign.mockResolvedValue(mockTicket);
 
-      await controller.assign('koda', 'KODA-1', {} as AssignTicketDto, mockAdminUser);
+      await controller.assign('koda', 'KODA-1', {} as AssignTicketDto, mockMemberUser);
 
-      expect(mockProjectsService.findProjectIdBySlug).toHaveBeenCalledWith('koda');
-      expect(mockProjectsService.assertProjectMembership).toHaveBeenCalledWith('proj-123', mockAdminUser);
-      expect(service.assign).toHaveBeenCalledWith('koda', 'KODA-1', {}, mockAdminUser);
+      expect(mockProjectsService.assertProjectMembership).not.toHaveBeenCalled();
+      expect(service.assign).toHaveBeenCalledWith('koda', 'KODA-1', {}, mockMemberUser);
     });
 
-    it('should not assign when the caller is not a project member (BUG-2)', async () => {
-      mockProjectsService.assertProjectMembership.mockRejectedValueOnce(new Error('Forbidden'));
+    it('AC9 boundary: assign called directly does not resolve the project by slug either', async () => {
+      mockTicketsService.assign.mockResolvedValue(mockTicket);
 
-      await expect(
-        controller.assign('koda', 'KODA-1', {} as AssignTicketDto, mockMemberUser)
-      ).rejects.toThrow('Forbidden');
+      await controller.assign('koda', 'KODA-1', {} as AssignTicketDto, mockMemberUser);
 
-      expect(service.assign).not.toHaveBeenCalled();
+      expect(mockProjectsService.findProjectIdBySlug).not.toHaveBeenCalled();
     });
   });
 

@@ -74,19 +74,23 @@ export class PrismaAgentRepository {
     return this.db.agent.delete({ where: { slug } });
   }
 
+  /**
+   * US-003: writes roles and capabilities with sequential `createMany` calls
+   * on the ambient client so a failure rolls back as part of the caller's
+   * `txManager.run` — never wraps them in a nested `$transaction([...])`,
+   * which the caller's transaction manager cannot roll back.
+   */
   async createRolesAndCapabilities(
     agentId: string,
     roles: string[],
     capabilities: string[],
   ) {
-    await this.db.$transaction([
-      this.db.agentRoleEntry.createMany({
-        data: roles.map((role) => ({ agentId, role })),
-      }),
-      this.db.agentCapabilityEntry.createMany({
-        data: capabilities.map((capability) => ({ agentId, capability })),
-      }),
-    ]);
+    await this.db.agentRoleEntry.createMany({
+      data: roles.map((role) => ({ agentId, role })),
+    });
+    await this.db.agentCapabilityEntry.createMany({
+      data: capabilities.map((capability) => ({ agentId, capability })),
+    });
   }
 
   async replaceRoles(agentId: string, roles: string[]) {

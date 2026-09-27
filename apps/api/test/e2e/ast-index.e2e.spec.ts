@@ -82,7 +82,7 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
       const agentRes = await request(httpServer)
         .post('/api/agents')
         .set('Authorization', `Bearer ${adminAccessToken}`)
-        .send({ name: 'AST Developer Agent', roles: ['DEVELOPER'] });
+        .send({ name: 'AST Developer Agent', slug: 'ast-developer-agent', roles: ['DEVELOPER'] });
 
       expect(agentRes.status).toBe(201);
       const agentData = body<{ id: string; slug: string; apiKey: string }>(agentRes);
@@ -250,7 +250,7 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
       const agentRes = await request(httpServer)
         .post('/api/agents')
         .set('Authorization', `Bearer ${adminAccessToken}`)
-        .send({ name: 'Non-Developer Agent', roles: ['REVIEWER'] });
+        .send({ name: 'Non-Developer Agent', slug: 'non-developer-agent', roles: ['REVIEWER'] });
 
       expect(agentRes.status).toBe(201);
       const nonDevAgent = body<{ apiKey: string }>(agentRes);

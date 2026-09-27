@@ -1,63 +1,21 @@
 import { Injectable, Optional, Inject } from '@nestjs/common';
-import { IsString, IsOptional, IsNumber, IsArray, IsIn, MinLength, ArrayMinSize } from 'class-validator';
+import { IsString, IsArray, IsIn } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
+import { NotFoundAppException, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { createHmac, randomBytes } from 'crypto';
 import { AGENT_ROLES, type AgentRoleNames } from '../common/enums';
 import { AgentResponseDto } from './dto/agent-response.dto';
 import { TicketResponseDto } from '../tickets/dto/ticket-response.dto';
+import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { KodaDomainWriter } from '../koda-domain-writer/koda-domain-writer.service';
 import { AgentAuthProvider } from '../auth/agent-auth.provider';
 import { PrismaAgentRepository } from './prisma-agent.repository';
 import { AUTH_CFG, IAuthConfig } from '../config/auth.config';
-
-export class CreateAgentDto {
-  @ApiProperty({ example: 'Subrina Coder' })
-  @IsString()
-  @MinLength(1)
-  name!: string;
-
-  @ApiProperty({ example: 'subrina-coder', required: false })
-  @IsOptional()
-  @IsString()
-  @MinLength(1)
-  slug?: string;
-
-  @ApiProperty({ required: false, minimum: 1 })
-  @IsOptional()
-  @IsNumber()
-  maxConcurrentTickets?: number;
-
-  @ApiProperty({ example: ['DEVELOPER', 'REVIEWER'] })
-  @IsArray()
-  @ArrayMinSize(1)
-  @IsString({ each: true })
-  @IsIn([...AGENT_ROLES], { each: true })
-  roles!: string[];
-
-  @ApiProperty({ required: false, example: ['typescript', 'nestjs'] })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  capabilities?: string[];
-}
-
-export class UpdateAgentDto {
-  @ApiProperty({ required: false })
-  @IsOptional()
-  @IsString()
-  name?: string;
-
-  @ApiProperty({ required: false })
-  @IsOptional()
-  @IsString()
-  status?: string;
-
-  @ApiProperty({ required: false })
-  @IsOptional()
-  @IsNumber()
-  maxConcurrentTickets?: number;
-}
+import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
+import { isUniqueViolation } from '../common/utils/prisma-errors';
+import { CreateAgentDto } from './dto/create-agent.dto';
+import { UpdateAgentDto } from './dto/update-agent.dto';
 
 export class UpdateRolesDto {
   @ApiProperty({ example: ['DEVELOPER', 'REVIEWER'] })
@@ -79,6 +37,7 @@ export class AgentsService {
   constructor(
     private readonly agentRepo: PrismaAgentRepository,
     @Inject(AUTH_CFG) private readonly authConfig: IAuthConfig,
+    @Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager,
     @Optional() private readonly kodaDomainWriter?: KodaDomainWriter,
     @Optional() private readonly agentAuthProvider?: AgentAuthProvider,
   ) {}
@@ -141,31 +100,50 @@ export class AgentsService {
         agent: AgentResponseDto.from(agent),
       };
     } else {
-      // Separate scalar fields from relational fields
+      // US-003: whitelist the agent row's scalar columns only — anything the
+      // client stuffs into the request body (status, id, …) is dropped here.
+      // maxConcurrentTickets is intentionally omitted when undefined so the
+      // schema default applies.
       const { roles, capabilities, ...scalarFields } = agentIdOrDto;
       const validatedRoles = AgentsService.validateAgentRoles(roles);
       const slug = scalarFields.slug || scalarFields.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-      const agent = await this.agentRepo.create({
-        ...scalarFields,
+      const createData = {
+        name: scalarFields.name,
         slug,
         apiKeyHash,
+        ...(scalarFields.maxConcurrentTickets !== undefined
+          ? { maxConcurrentTickets: scalarFields.maxConcurrentTickets }
+          : {}),
+      };
+
+      // US-003: wrap the agent row, role and capability writes in a single
+      // `txManager.run` callback. A failed role/capability write rejects out of
+      // the callback and the transaction manager rolls back the agent row.
+      const result = await this.txManager.run(async () => {
+        const agent = await this.agentRepo.create(createData).catch((error: unknown) => {
+          if (isUniqueViolation(error, 'slug')) {
+            throw new ConflictAppException({}, 'agents');
+          }
+          throw error;
+        });
+        await this.agentRepo.createRolesAndCapabilities(agent.id, validatedRoles, capabilities ?? []);
+        return agent;
       });
-      await this.agentAuthProvider?.invalidateByTag(`AGENT:${agent.id}`);
-      await this.agentRepo.createRolesAndCapabilities(agent.id, validatedRoles, capabilities ?? []);
+      await this.agentAuthProvider?.invalidateByTag(`AGENT:${result.id}`);
       const agentWithRelations = {
-        ...agent,
+        ...result,
         roles: validatedRoles.map((role, index) => ({
           id: `generated-role-${index}`,
-          agentId: agent.id,
+          agentId: result.id,
           role,
         })),
         capabilities: (capabilities ?? []).map((capability, index) => ({
           id: `generated-capability-${index}`,
-          agentId: agent.id,
+          agentId: result.id,
           capability,
         })),
       };
-      await this.recordAgentAction(agent.id, 'AGENT_CREATED', { name: agent.name, slug: agent.slug });
+      await this.recordAgentAction(result.id, 'AGENT_CREATED', { name: result.name, slug: result.slug });
       // Return raw key ONCE to client (never return the hash)
       return {
         apiKey: rawKey,
@@ -256,12 +234,31 @@ export class AgentsService {
     LOW: 1,
   };
 
-  async suggestTicket(agentSlug: string, projectSlug: string) {
+  /**
+   * US-003: ticket pickup is gated to the agent itself, or to a global ADMIN
+   * user. 403 for everyone else; 404 when the project is missing or soft-deleted.
+   */
+  async suggestTicket(
+    agentSlug: string,
+    projectSlug: string,
+    principal: KodaPrincipal,
+  ) {
+    // Authorize: only the matching agent or a global ADMIN user may pick up.
+    const isOwningAgent = principal.actorType === 'agent' && principal.slug === agentSlug;
+    const isGlobalAdmin = principal.actorType === 'user' && principal.role === 'ADMIN';
+    if (!isOwningAgent && !isGlobalAdmin) {
+      throw new ForbiddenAppException({}, 'agents');
+    }
+
     const agent = await this.agentRepo.findBySlugWithCapabilities(agentSlug);
     if (!agent) throw new NotFoundAppException({}, 'agents');
 
     const project = await this.agentRepo.findProjectBySlug(projectSlug);
-    if (!project) return null;
+    // Soft-deleted projects 404 alongside missing ones — hides the project's
+    // existence from agents that should not see it.
+    if (!project || project.deletedAt) {
+      throw new NotFoundAppException({}, 'agents');
+    }
 
     const tickets = await this.agentRepo.findVerifiedUnassignedTickets(project.id);
 

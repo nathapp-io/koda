@@ -60,6 +60,20 @@ export class PrismaProjectRepository {
     return this.prisma.client.project.findMany({ where: { deletedAt: null }, select: { id: true } });
   }
 
+  /**
+   * US-002: list every non-deleted project the given user principal is a
+   * member of. Soft-deleted projects never appear, even for a member.
+   */
+  async findAllForUser(userId: string): Promise<ProjectDomain[]> {
+    const models = await this.prisma.client.project.findMany({
+      where: {
+        deletedAt: null,
+        members: { some: { userId } },
+      },
+    });
+    return models.map((m) => this.toDomain(m));
+  }
+
   async findMembershipRole(projectId: string, userId: string): Promise<string | null> {
     const m = await this.prisma.client.projectMember.findUnique({
       where: { projectId_userId: { projectId, userId } },

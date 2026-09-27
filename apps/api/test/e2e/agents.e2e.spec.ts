@@ -263,15 +263,12 @@ describeIntegration('Agents API E2E', () => {
     expect(data).toBeNull();
   });
 
-  it('GET /api/agents/:slug/pickup — returns null when project does not exist', async () => {
-    const res = await request(httpServer)
+  it('GET /api/agents/:slug/pickup — returns 404 when project does not exist', async () => {
+    await request(httpServer)
       .get(`/api/agents/${agentSlug}/pickup`)
       .query({ project: 'non-existent-project' })
       .set('Authorization', `Bearer ${adminAccessToken}`)
-      .expect(200);
-
-    const data = body<unknown>(res);
-    expect(data).toBeNull();
+      .expect(404);
   });
 
   it('DELETE /api/agents/:slug — deletes the agent', async () => {

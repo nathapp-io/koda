@@ -8,6 +8,7 @@ import {
   Param,
   Query,
   HttpCode,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -28,7 +29,7 @@ import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
 import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { isAgentPrincipal, KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { KodaAction } from '../auth/casl/koda-action.enum';
-import { ProjectsService } from '../projects/projects.service';
+import { ProjectMembershipGuard } from '../projects/project-membership.guard';
 import { TicketListFilterInput } from './tickets.service';
 
 /** `assignedTo=self` means the caller: its user id, or its agent id for an agent. */
@@ -46,11 +47,11 @@ export function resolveSelfAssignee(
 @ApiTags('tickets')
 @ApiBearerAuth()
 @Controller('projects/:slug/tickets')
+@UseGuards(ProjectMembershipGuard)
 export class TicketsController {
   constructor(
     private ticketsService: TicketsService,
     private transitionsService: TicketTransitionsService,
-    private readonly projectsService: ProjectsService,
   ) {}
 
   // Public methods for testing (called directly in tests)
@@ -239,10 +240,7 @@ export class TicketsController {
     @Body() assignInput: AssignTicketDto,
     @Principal() principal: KodaPrincipal,
   ) {
-    // BUG-2: match getChangeImpact — require project membership on top of CASL.
-    const projectId = await this.projectsService.findProjectIdBySlug(slug);
-    await this.projectsService.assertProjectMembership(projectId, principal);
-
+    // Membership is enforced by ProjectMembershipGuard before this handler runs.
     const data = await this.assignTicket(slug, ref, assignInput, principal);
     return JsonResponse.Ok(data);
   }

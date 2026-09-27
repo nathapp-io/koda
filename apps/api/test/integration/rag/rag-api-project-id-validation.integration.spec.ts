@@ -7,6 +7,7 @@ import { HybridRetrieverService } from '../../../src/rag/hybrid-retriever.servic
 import { EvaluationService } from '../../../src/retrieval/evaluation.service';
 import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaRagRepository } from '../../../src/rag/prisma-rag.repository';
+import { ProjectAccessService } from '../../../src/projects/project-access.service';
 
 /**
  * RAG API Project ID Validation Tests
@@ -85,6 +86,10 @@ describe('RagController — Project ID Validation at API Boundary (AC6)', () => 
           },
         },
         PrismaRagRepository,
+        // US-001: the class-level ProjectMembershipGuard is instantiated by the DI
+        // container even though these tests call the controller directly, so its
+        // ProjectAccessService dependency must resolve.
+        { provide: ProjectAccessService, useValue: {} },
       ],
     }).compile();
 

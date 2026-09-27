@@ -7,6 +7,7 @@ import {
   Body,
   Param,
   HttpCode,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -21,6 +22,7 @@ import { AssignLabelDto } from './dto/assign-label.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
+import { ProjectMembershipGuard } from '../projects/project-membership.guard';
 
 @ApiTags('labels')
 @ApiBearerAuth()
@@ -78,6 +80,7 @@ export class LabelsController {
 
   // HTTP route handlers
   @Post('projects/:slug/labels')
+  @UseGuards(ProjectMembershipGuard)
   @HttpCode(201)
   @ApiOperation({ summary: 'Create a label for a project' })
   @ApiResponse({ status: 201, description: 'Label created' })
@@ -95,6 +98,7 @@ export class LabelsController {
   }
 
   @Get('projects/:slug/labels')
+  @UseGuards(ProjectMembershipGuard)
   @ApiOperation({ summary: 'List all labels for a project' })
   @ApiResponse({ status: 200, description: 'List of labels' })
   @ApiResponse({ status: 404, description: 'Project not found' })
@@ -104,6 +108,7 @@ export class LabelsController {
   }
 
   @Patch('projects/:slug/labels/:id')
+  @UseGuards(ProjectMembershipGuard)
   @HttpCode(200)
   @ApiOperation({ summary: 'Update a label' })
   @ApiResponse({ status: 200, description: 'Label updated' })
@@ -122,6 +127,7 @@ export class LabelsController {
   }
 
   @Delete('projects/:slug/labels/:id')
+  @UseGuards(ProjectMembershipGuard)
   @HttpCode(204)
   @ApiOperation({ summary: 'Delete a label' })
   @ApiResponse({ status: 204, description: 'Label deleted' })
@@ -137,6 +143,7 @@ export class LabelsController {
   }
 
   @Post('projects/:slug/tickets/:ref/labels')
+  @UseGuards(ProjectMembershipGuard)
   @HttpCode(201)
   @ApiOperation({ summary: 'Assign a label to a ticket' })
   @ApiResponse({ status: 201, description: 'Label assigned to ticket' })
@@ -153,6 +160,7 @@ export class LabelsController {
   }
 
   @Delete('projects/:slug/tickets/:ref/labels/:labelId')
+  @UseGuards(ProjectMembershipGuard)
   @HttpCode(204)
   @ApiOperation({ summary: 'Remove a label from a ticket' })
   @ApiResponse({ status: 204, description: 'Label removed from ticket' })

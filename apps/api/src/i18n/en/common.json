@@ -8,6 +8,8 @@
     "isEnum": "Invalid value",
     "isUrl": "Must be a valid URL",
     "isBoolean": "Must be a boolean",
+    "isIn": "Must be one of the allowed values",
+    "slugInvalid": "Must be lowercase alphanumeric with hyphens",
     "passwordComplexity": "Password must include uppercase, lowercase, number, and symbol",
     "webhookSecretMinLength": "Webhook secret must be at least 32 characters"
   },

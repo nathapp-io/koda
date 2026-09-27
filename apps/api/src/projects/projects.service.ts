@@ -1,10 +1,12 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ValidationAppException, NotFoundAppException } from '@nathapp/nestjs-common';
+import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { ProjectResponseDto } from './dto/project-response.dto';
 import { PrismaProjectRepository } from './prisma-project.repository';
 import { ProjectAccessService } from './project-access.service';
+import { ProjectDomain } from './domain/project.domain';
 import { RagService } from '../rag/rag.service';
 import { HybridRetrieverService } from '../rag/hybrid-retriever.service';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
@@ -42,13 +44,13 @@ export class ProjectsService {
     // Check slug uniqueness
     const existingSlug = await this.projectRepo.findBySlug(createProjectDto.slug);
     if (existingSlug) {
-      throw new ValidationAppException({}, 'projects');
+      throw new ConflictAppException({ field: 'slug' }, 'projects');
     }
 
     // Check key uniqueness
     const existingKey = await this.projectRepo.findByKey(createProjectDto.key);
     if (existingKey) {
-      throw new ValidationAppException({}, 'projects');
+      throw new ConflictAppException({ field: 'key' }, 'projects');
     }
 
     // Create project
@@ -69,6 +71,25 @@ export class ProjectsService {
     return ProjectResponseDto.fromMany(await this.projectRepo.findAll());
   }
 
+  /**
+   * US-002: list projects scoped to the calling principal.
+   *  - User principals get only projects where they hold a `ProjectMember` row.
+   *  - Global ADMIN user principals and any agent principal see every
+   *    non-deleted project.
+   *  - Soft-deleted projects are never returned.
+   *
+   * Returns domain objects; callers wrap them in the HTTP DTO at the boundary.
+   */
+  async findAllForPrincipal(principal: KodaPrincipal): Promise<ProjectDomain[]> {
+    if (
+      principal.actorType === 'agent' ||
+      (principal.actorType === 'user' && principal.role === 'ADMIN')
+    ) {
+      return this.projectRepo.findAll();
+    }
+    return this.projectRepo.findAllForUser(principal.id);
+  }
+
   async findBySlug(slug: string) {
     const project = await this.projectRepo.findBySlug(slug);
 
@@ -84,7 +105,7 @@ export class ProjectsService {
     // Find the current project
     const currentProject = await this.projectRepo.findBySlug(slug);
 
-    if (!currentProject) {
+    if (!currentProject || currentProject.deletedAt) {
       throw new NotFoundAppException({}, 'projects');
     }
 
@@ -107,7 +128,7 @@ export class ProjectsService {
       if (updateProjectDto.slug !== currentProject.slug) {
         const existingSlug = await this.projectRepo.findBySlug(updateProjectDto.slug);
         if (existingSlug && existingSlug.id !== currentProject.id) {
-          throw new ValidationAppException({}, 'projects');
+          throw new ConflictAppException({ field: 'slug' }, 'projects');
         }
       }
     }
@@ -123,7 +144,7 @@ export class ProjectsService {
       if (updateProjectDto.key !== currentProject.key) {
         const existingKey = await this.projectRepo.findByKey(updateProjectDto.key);
         if (existingKey && existingKey.id !== currentProject.id) {
-          throw new ValidationAppException({}, 'projects');
+          throw new ConflictAppException({ field: 'key' }, 'projects');
         }
       }
     }

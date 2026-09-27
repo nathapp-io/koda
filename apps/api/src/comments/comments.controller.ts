@@ -7,6 +7,7 @@ import {
   Body,
   Param,
   HttpCode,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -20,6 +21,7 @@ import { UpdateCommentDto } from './dto/update-comment.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
 import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
+import { ProjectMembershipGuard } from '../projects/project-membership.guard';
 
 @ApiTags('comments')
 @ApiBearerAuth()
@@ -61,6 +63,7 @@ export class CommentsController {
 
   // HTTP route handlers
   @Post('projects/:slug/tickets/:ref/comments')
+  @UseGuards(ProjectMembershipGuard)
   @HttpCode(201)
   @ApiOperation({ summary: 'Create a comment on a ticket' })
   @ApiResponse({ status: 201, description: 'Comment created' })
@@ -77,6 +80,7 @@ export class CommentsController {
   }
 
   @Get('projects/:slug/tickets/:ref/comments')
+  @UseGuards(ProjectMembershipGuard)
   @ApiOperation({ summary: 'List all comments for a ticket' })
   @ApiResponse({ status: 200, description: 'List of comments' })
   @ApiResponse({ status: 404, description: 'Project or ticket not found' })
@@ -106,9 +110,9 @@ export class CommentsController {
   }
 
   @Delete('comments/:id')
-  @HttpCode(200)
+  @HttpCode(204)
   @ApiOperation({ summary: 'Delete a comment' })
-  @ApiResponse({ status: 200, description: 'Comment deleted' })
+  @ApiResponse({ status: 204, description: 'Comment deleted' })
   @ApiResponse({ status: 403, description: 'Not authorized to delete this comment' })
   @ApiResponse({ status: 404, description: 'Comment not found' })
   @RequiredPermission([CaslPermissionAction.DELETE, 'Comment'])
@@ -117,6 +121,5 @@ export class CommentsController {
     @Principal() principal: KodaPrincipal,
   ) {
     await this.delete(id, principal);
-    return JsonResponse.Ok(null);
   }
 }

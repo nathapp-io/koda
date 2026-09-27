@@ -1,11 +1,14 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { CommentsService } from './comments.service';
 import { CreateCommentDto, CommentTypeEnum } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { PrismaCommentRepository } from './prisma-comment.repository';
 import { COMMENT_REPOSITORY } from './domain/comment.domain';
 import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
-import type { KodaAgentRole } from '../auth/principal/koda-principal.types';
+import type { KodaAgentRole, KodaPrincipal } from '../auth/principal/koda-principal.types';
+import { ProjectAccessService } from '../projects/project-access.service';
+import { PrismaProjectRepository } from '../projects/prisma-project.repository';
 import { TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { TicketEventService } from '../events/ticket-event.service';
@@ -144,18 +147,88 @@ describe('CommentsService', () => {
     name: 'Admin User',
   };
 
-  // Comment repository mock
-  const mockCommentRepo = {
-    create: jest.fn(),
-    findById: jest.fn(),
-    findByTicketId: jest.fn(),
-    update: jest.fn(),
-    delete: jest.fn(),
-    findProjectBySlug: jest.fn(),
-    findTicketScoped: jest.fn(),
+  // US-002: the owning ticket/project of a comment, and the membership of the
+  // callers used in this file. `update`/`delete` resolve comment → ticket →
+  // project before any CASL check, so the repository double answers whatever
+  // resolution helper the implementation adds.
+  const OWNING_PROJECT = {
+    id: 'proj-123',
+    name: 'Koda',
+    slug: 'koda',
+    key: 'KODA',
+    deletedAt: null,
+  };
+  const OWNING_TICKET = {
+    id: 'ticket-123',
+    number: 1,
+    projectId: 'proj-123',
+    project: OWNING_PROJECT,
+    deletedAt: null,
+  };
+  const OWNING_RESOLUTION = {
+    ...OWNING_PROJECT,
+    ticketId: 'ticket-123',
+    projectId: 'proj-123',
+    project: OWNING_PROJECT,
+    ticket: OWNING_TICKET,
+  };
+
+  /** Users with a ProjectMember row on the comment's project. */
+  const memberUserIds = new Set(['user-123', 'user-456', 'admin-user']);
+
+  // Comment repository mock. Known methods are explicit; any resolution helper
+  // US-002 adds is answered by the proxy fallback (a membership/role lookup
+  // answers "no row", everything else answers with the owning ticket/project).
+  const mockCommentRepo: Record<string, jest.Mock> = new Proxy(
+    {
+      create: jest.fn(),
+      findById: jest.fn(),
+      findByTicketId: jest.fn(),
+      update: jest.fn(),
+      delete: jest.fn(),
+      findProjectBySlug: jest.fn(),
+      findTicketScoped: jest.fn(),
+    } as Record<string, jest.Mock>,
+    {
+      get(target: Record<string, jest.Mock>, prop: string | symbol) {
+        // Never fabricate a thenable: `await` on the double (Nest inspects
+        // provider values) would otherwise hang on a fabricated `then`.
+        if (typeof prop !== 'string') return undefined;
+        if (prop === 'then' || prop === 'catch' || prop === 'finally') return undefined;
+        if (!(prop in target)) {
+          if (/member|role/i.test(prop)) {
+            // Membership/role lookup: answers "no row" unless the argument is a
+            // user that the membership fixtures below mark as a member.
+            target[prop] = jest.fn(async (...args: unknown[]) =>
+              args.some((arg) => typeof arg === 'string' && memberUserIds.has(arg)) ? 'DEVELOPER' : null
+            );
+          } else {
+            // Ownership resolution: the comment's ticket and project.
+            target[prop] = jest.fn(async () => OWNING_RESOLUTION);
+          }
+        }
+        return target[prop];
+      },
+    },
+  );
+
+  // Mirrors ProjectAccessService: agents and global ADMINs are admitted without
+  // a lookup, a user without a ProjectMember row is refused.
+  const mockAccessService = {
+    assertProjectMembership: jest.fn(async (_projectId: string, principal: KodaPrincipal) => {
+      if (!principal || principal.actorType !== 'user') return;
+      if (principal.role === 'ADMIN') return;
+      if (memberUserIds.has(principal.id)) return;
+      throw new ForbiddenAppException({}, 'projects');
+    }),
+    findMembershipRole: jest.fn(async (_projectId: string, userId: string) =>
+      memberUserIds.has(userId) ? 'DEVELOPER' : null
+    ),
+    findProjectIdBySlug: jest.fn(async () => OWNING_PROJECT.id),
   };
 
   let mockCaslCan: jest.Mock;
+  let mockCaslFactory: { createForUser: jest.Mock };
 
   const callOrder: string[] = [];
   const mockTxManager = {
@@ -182,15 +255,28 @@ describe('CommentsService', () => {
 
   beforeEach(async () => {
     mockCaslCan = jest.fn().mockReturnValue(true);
+    mockCaslFactory = { createForUser: jest.fn().mockResolvedValue({ can: mockCaslCan }) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CommentsService,
         { provide: COMMENT_REPOSITORY, useValue: mockCommentRepo },
-        { provide: KodaCaslAbilityFactory, useValue: { createForUser: jest.fn().mockResolvedValue({ can: mockCaslCan }) } },
+        { provide: KodaCaslAbilityFactory, useValue: mockCaslFactory },
         { provide: TRANSACTION_MANAGER, useValue: mockTxManager },
         { provide: TicketEventService, useValue: mockTicketEventService },
         { provide: NathappOutboxService, useValue: mockOutbox },
+        // US-002: update/delete resolve the owning project and check membership
+        // before the CASL check.
+        { provide: ProjectAccessService, useValue: mockAccessService },
+        {
+          provide: PrismaProjectRepository,
+          useValue: {
+            findBySlug: jest.fn(async () => OWNING_PROJECT),
+            findMembershipRole: jest.fn(async (_projectId: string, userId: string) =>
+              memberUserIds.has(userId) ? 'DEVELOPER' : null
+            ),
+          },
+        },
       ],
     }).compile();
 
@@ -660,6 +746,110 @@ describe('CommentsService', () => {
       const result = await service.findById('nonexistent-123');
 
       expect(result).toBeNull();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // US-002 — slug-less comment mutations are resolved to a project and gated by
+  // membership before any CASL check.
+  // ---------------------------------------------------------------------------
+
+  describe('US-002 project membership gate', () => {
+    const outsiderPrincipal = {
+      id: 'user-outsider',
+      sub: 'user-outsider',
+      actorType: 'user' as const,
+      role: 'MEMBER' as const,
+      email: 'outsider@example.com',
+      blacklisted: false,
+      revoked: false,
+      authorities: [] as string[],
+      name: 'Outsider User',
+    };
+
+    it('AC1: throws NotFoundAppException for a comment whose ticket belongs to a project the user is not a member of', async () => {
+      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      mockCommentRepo.update.mockResolvedValue({ ...mockComment, body: 'hijacked' });
+
+      await expect(
+        service.update('comment-123', { body: 'hijacked' }, outsiderPrincipal)
+      ).rejects.toBeInstanceOf(NotFoundAppException);
+    });
+
+    it("AC1: does not call the comment repository's update for a non-member", async () => {
+      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      mockCommentRepo.update.mockResolvedValue({ ...mockComment, body: 'hijacked' });
+
+      await expect(
+        service.update('comment-123', { body: 'hijacked' }, outsiderPrincipal)
+      ).rejects.toBeInstanceOf(NotFoundAppException);
+
+      expect(mockCommentRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('AC1: refuses a non-member before building the CASL ability', async () => {
+      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      mockCommentRepo.update.mockResolvedValue({ ...mockComment, body: 'hijacked' });
+
+      await expect(
+        service.update('comment-123', { body: 'hijacked' }, outsiderPrincipal)
+      ).rejects.toBeInstanceOf(NotFoundAppException);
+
+      expect(mockCaslFactory.createForUser).not.toHaveBeenCalled();
+    });
+
+    it('AC1 boundary: a member user reaches the CASL check and the repository update', async () => {
+      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      mockCommentRepo.update.mockResolvedValue({ ...mockComment, body: 'member edit' });
+
+      const result = await service.update('comment-123', { body: 'member edit' }, mockUserPrincipal);
+
+      expect(result.body).toBe('member edit');
+      expect(mockCaslFactory.createForUser).toHaveBeenCalledWith(mockUserPrincipal);
+      expect(mockCommentRepo.update).toHaveBeenCalledWith('comment-123', { body: 'member edit' });
+    });
+
+    it('AC2: throws NotFoundAppException for a comment in a project the user is not a member of', async () => {
+      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      mockCommentRepo.delete.mockResolvedValue(undefined);
+
+      await expect(service.delete('comment-123', outsiderPrincipal)).rejects.toBeInstanceOf(
+        NotFoundAppException
+      );
+
+      expect(mockCommentRepo.delete).not.toHaveBeenCalled();
+    });
+
+    it('AC2 boundary: a member user deletes through the repository', async () => {
+      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      mockCommentRepo.delete.mockResolvedValue(undefined);
+
+      await service.delete('comment-123', mockUserPrincipal);
+
+      expect(mockCommentRepo.delete).toHaveBeenCalledWith('comment-123');
+    });
+
+    it('AC3: an agent principal proceeds to the CASL check without a membership lookup', async () => {
+      const agentComment = { ...mockComment, authorUserId: null, authorAgentId: 'agent-123' };
+      mockCommentRepo.findById.mockResolvedValue(agentComment);
+      mockCommentRepo.update.mockResolvedValue({ ...agentComment, body: 'agent edit' });
+
+      const result = await service.update('comment-123', { body: 'agent edit' }, mockAgentPrincipal);
+
+      expect(result.body).toBe('agent edit');
+      expect(mockCaslFactory.createForUser).toHaveBeenCalledWith(mockAgentPrincipal);
+      // Agents are cross-project: no ProjectMember row may be looked up.
+      expect(mockAccessService.findMembershipRole).not.toHaveBeenCalled();
+      expect(mockCommentRepo.findMembershipRole).not.toHaveBeenCalled();
+    });
+
+    it('AC5 boundary: a global ADMIN who is not a member deletes without a membership row', async () => {
+      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      mockCommentRepo.delete.mockResolvedValue(undefined);
+
+      await service.delete('comment-123', mockAdminPrincipal);
+
+      expect(mockCommentRepo.delete).toHaveBeenCalledWith('comment-123');
     });
   });
 });

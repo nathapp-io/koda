@@ -1,3 +1,9 @@
 .nax/
 deployments/
 scripts/
+
+# nax - scanning exclusions
+dist/
+build/
+coverage/
+node_modules/

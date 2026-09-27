@@ -2,6 +2,9 @@
   "notFound": "Project not found",
   "slugTaken": "Project slug is already in use",
   "keyTaken": "Project key is already in use",
+  "slugInvalid": "Project slug must be lowercase alphanumeric with hyphens",
+  "keyInvalid": "Project key must be 2-6 uppercase letters",
   "404": "Project not found",
+  "409": "Project {field} is already in use",
   "-2": "Validation error"
 }

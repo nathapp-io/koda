@@ -1,0 +1,349 @@
+{
+  "project": "koda",
+  "feature": "track3-tenancy",
+  "branchName": "feat/track3-tenancy",
+  "createdAt": "2026-09-27T00:00:00.000Z",
+  "updatedAt": "2026-09-27T09:22:41.691Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Gate project-scoped ticket, label, comment, KB and project routes",
+      "description": "**Goal** — Add a shared project membership guard on specified slug routes and refuse project VIEWER on KB writes.\n\n**Motivation** — Since #139 created real `ProjectMember` rows, a non-member DEVELOPER can still read and write every ticket in every project.\n\n**Approach** — Partial extension of existing `apps/api` modules. No new package. `ProjectAccessService.findProjectIdBySlug(slug): Promise<string>` throws `NotFoundAppException` for an unknown or soft-deleted project; `ProjectAccessService.assertProjectMembership(projectId, principal): Promise<void>` returns for agents and global ADMIN users and throws `ForbiddenAppException` for a user with no `ProjectMember` row. `ProjectAccessModule` exports `ProjectAccessService`; `@Principal()` reads `request.user`, and the global `CombinedAuthGuard` is registered before route guards run. Add `ProjectAccessService.findMembershipRole(projectId, userId): Promise<string | null>` as a thin wrapper over existing `PrismaProjectRepository.findMembershipRole`; provide/export `ProjectMembershipGuard` in ProjectAccessModule. Applied with `@UseGuards(ProjectMembershipGuard)`: TicketsController (`projects/:slug/tickets`) class; LabelsController routes under `projects/:slug/...` methods; CommentsController `projects/:slug/tickets/:ref/comments` POST/GET methods; RagController (`projects/:slug/kb`) class; ProjectsController GET `:slug` and PATCH `:slug/agents/:agentSlug` methods. Import ProjectAccessModule in CommentsModule, LabelsModule and RagModule; TicketsModule has access through ProjectsModule. Remove inline project lookup/membership calls from TicketsController.assign. RagController writes `POST documents`, `DELETE documents/:sourceId`, `POST import/graphify`, `POST optimize` carry `@ProjectRoles('ADMIN', 'DEVELOPER', 'AGENT')`; KB reads/search permit project VIEWER. Update existing direct-controller specs for the guard/handler boundary.\n\n**Interface** — verbatim design algorithm:\n```typescript\n// projects/project-roles.decorator.ts\nexport const PROJECT_ROLES_KEY = 'koda:projectRoles';\nexport const ProjectRoles = (...roles: string[]) => SetMetadata(PROJECT_ROLES_KEY, roles);\n\n// projects/project-membership.guard.ts\n@Injectable()\nexport class ProjectMembershipGuard implements CanActivate {\n  constructor(private readonly access: ProjectAccessService, private readonly reflector: Reflector) {}\n\n  async canActivate(ctx: ExecutionContext): Promise<boolean> {\n    const req = ctx.switchToHttp().getRequest();\n    const slug = req.params?.slug;\n    if (!slug) return true; // routes without :slug are gated elsewhere\n    const projectId = await this.access.findProjectIdBySlug(slug); // 404\n    await this.access.assertProjectMembership(projectId, req.user); // 403\n    const roles = this.reflector.getAllAndOverride<string[]>(PROJECT_ROLES_KEY, [ctx.getHandler(), ctx.getClass()]);\n    if (roles?.length && isUserPrincipal(req.user) && req.user.role !== 'ADMIN') {\n      const role = await this.access.findMembershipRole(projectId, req.user.id);\n      if (!role || !roles.includes(role)) throw new ForbiddenAppException({}, 'projects'); // 403\n    }\n    return true;\n  }\n}\n```\n\n**Scope** — In: specified previously ungated slug routes, KB write-role exception and ticket assign inline-check removal. Out: slug-less comment mutations and project list (US-002), RetrievalController migration and duplicate-check removal (US-005), already gated/ADMIN-permission routes. Project-role-based permissions: write permissions stay on the principal's global role and `ProjectMember.role` gates visibility only (Track 3 ruling 2026-09-27), with one exception ruled 2026-09-27: KB write routes refuse a project VIEWER via `@ProjectRoles`. Tickets, comments and labels do not use `@ProjectRoles`.",
+      "acceptanceCriteria": [
+        "ProjectMembershipGuard.canActivate returns true when params.slug resolves to a project of which the user principal is a member.",
+        "ProjectMembershipGuard.canActivate throws ForbiddenAppException when a user principal has no ProjectMember row for params.slug's project.",
+        "ProjectMembershipGuard.canActivate returns true for an agent principal without a membership lookup.",
+        "ProjectMembershipGuard.canActivate returns true for a global ADMIN user with no membership row.",
+        "ProjectMembershipGuard.canActivate throws NotFoundAppException when params.slug names a soft-deleted project.",
+        "ProjectMembershipGuard.canActivate returns true without calling ProjectAccessService when params.slug is absent.",
+        "GET /api/projects/:slug/tickets returns 403 for a non-member DEVELOPER user.",
+        "POST /api/projects/:slug/tickets/:ref/assign returns 403 for a non-member DEVELOPER user.",
+        "TicketsController.assign called directly with a member principal does not call ProjectsService.assertProjectMembership (the guard is the only membership check on the route).",
+        "GET /api/projects/:slug returns 403 for a non-member DEVELOPER user.",
+        "GET /api/projects/:slug returns 200 for a member DEVELOPER user.",
+        "POST /api/projects/:slug/kb/documents returns 403 for a member whose project role is VIEWER.",
+        "POST /api/projects/:slug/kb/documents returns a 2xx status for a member whose project role is DEVELOPER.",
+        "POST /api/projects/:slug/kb/search returns 200 for a member whose project role is VIEWER.",
+        "ProjectMembershipGuard.canActivate returns true for an agent principal on a handler carrying @ProjectRoles('ADMIN', 'DEVELOPER', 'AGENT') without calling ProjectAccessService.findMembershipRole.",
+        "ProjectMembershipGuard.canActivate returns true for a global ADMIN user on a handler carrying @ProjectRoles('ADMIN', 'DEVELOPER', 'AGENT') without calling ProjectAccessService.findMembershipRole.",
+        "A guarded route returns 404 when params.slug names an unknown or soft-deleted project."
+      ],
+      "tags": [
+        "feature",
+        "security",
+        "api",
+        "tenancy"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "A new Reflector-based access-control abstraction is injected into five Nest controllers and several modules, requiring isolated security tests.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/projects/project-access.service.ts",
+        "apps/api/src/projects/project-access.module.ts",
+        "apps/api/src/tickets/tickets.controller.ts",
+        "apps/api/src/rag/rag.controller.ts",
+        "apps/api/src/labels/labels.controller.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/projects/project-membership.guard.ts",
+        "apps/api/src/projects/project-membership.guard.spec.ts",
+        "apps/api/src/projects/project-roles.decorator.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/tickets/tickets.controller.spec.ts",
+          "reason": "assertions that `assign` calls `projectsService.assertProjectMembership` inline are replaced by the invariant that the membership check runs in `ProjectMembershipGuard` before the handler."
+        },
+        {
+          "path": "apps/api/src/rag/rag.controller.spec.ts",
+          "reason": "tests that stub `checkProjectMembership` / `ragRepository.findProjectMembership` for `addDocument` and `search` are rewritten for the guard: the controller no longer performs the membership check itself, and new tests cover the VIEWER write rule."
+        },
+        {
+          "path": "apps/api/src/comments/comments.module.ts",
+          "reason": "imports `ProjectAccessModule` so the guard resolves."
+        },
+        {
+          "path": "apps/api/src/labels/labels.module.ts",
+          "reason": "imports `ProjectAccessModule` so the guard resolves."
+        },
+        {
+          "path": "apps/api/src/rag/rag.module.ts",
+          "reason": "imports `ProjectAccessModule` so the guard resolves."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "b840c0e8b01836b54396067f6c9b9b5be5bee9f5"
+    },
+    {
+      "id": "US-002",
+      "title": "Constrain slug-less comment mutations and project listing by membership",
+      "description": "**Goal** — Scope slug-less comment edits and the project list to membership and verify the complete guarded route matrix over HTTP.\n\n**Motivation** — The 2026-09-25 review found membership enforced on links, VCS, memory, context and code-intel but not on tickets, comments, labels or the project list (M7).\n\n**Approach** — `CommentsService.update(commentId, dto, principal)` / `delete(commentId, principal)`: resolve comment → ticket → project first; a user who is not a member of that project gets `NotFoundAppException` (404) before any CASL check. Agent principals skip membership resolution and proceed to CASL; global ADMIN may delete without membership. Extend PrismaCommentRepository with the owning-ticket/project resolution and use ProjectAccessService's membership check, translating a non-member's ForbiddenAppException to NotFoundAppException; missing/deleted project must not become visible. `ProjectsService.findAll()` → `findAllForPrincipal(principal: KodaPrincipal): Promise<ProjectDomain[]>`: agents and global ADMIN users get every non-deleted project; other users get only projects where they have a `ProjectMember` row. Keep the existing ProjectResponseDto mapping at the HTTP boundary. Pass @Principal() from ProjectsController.findAll, filter via PrismaProjectRepository, and set CommentsController.deleteFromHttp to return HTTP 204 for the specified global ADMIN deletion. Add `apps/api/test/integration/projects/project-membership-gate.integration.spec.ts` following the PG-backed supertest `KODA_DB_TESTS=1` pattern: real HTTP requests for every specified route as member and non-member, plus comment-by-ID and project list. Test member statuses as specified, without redefining global CASL or existing agent-admin permissions.\n\n**Interface** — `ProjectsService.findAll()` → `findAllForPrincipal(principal: KodaPrincipal): Promise<ProjectDomain[]>`; `CommentsService.update(commentId, dto, principal)` / `delete(commentId, principal)`.\n\n**Scope** — In: slug-less comment ownership lookup and status, project list, complete HTTP route-matrix integration and affected unit specs. Out: guard creation and slug-route wiring (US-001), agent create/pickup (US-003); Project-role-based permissions: write permissions stay on the principal's global role and `ProjectMember.role` gates visibility only (Track 3 ruling 2026-09-27), with one exception ruled 2026-09-27: KB write routes refuse a project VIEWER via `@ProjectRoles`. Tickets, comments and labels do not use `@ProjectRoles`.",
+      "acceptanceCriteria": [
+        "CommentsService.update throws NotFoundAppException for a comment whose ticket belongs to a project the user principal is not a member of and does not call the comment repository's update.",
+        "CommentsService.delete throws NotFoundAppException for a comment in a project the user principal is not a member of.",
+        "CommentsService.update proceeds to the CASL check without membership resolution for an agent principal.",
+        "PATCH /api/comments/:id returns 404 for the comment's author after their project membership is removed.",
+        "DELETE /api/comments/:id returns 204 for a global ADMIN who is not a member.",
+        "ProjectsService.findAllForPrincipal returns exactly projects A and B for a user principal with memberships in A and B when project C also exists.",
+        "ProjectsService.findAllForPrincipal returns every non-deleted project for a global ADMIN user principal.",
+        "ProjectsService.findAllForPrincipal returns every non-deleted project for an agent principal.",
+        "ProjectsService.findAllForPrincipal never returns a soft-deleted project, even for a member of it.",
+        "GET /api/projects returns exactly one project for a DEVELOPER who is a member of one of two projects.",
+        "For every route in the route matrix (tickets list/create/get/patch/delete, each ticket transition, assign, comments list/create, labels list/create/update/delete, ticket-label assign/remove, KB documents list/add, KB search, KB graphify import, GET /projects/:slug, PATCH /projects/:slug/agents/:agentSlug), a non-member DEVELOPER receives 403.",
+        "For the same route matrix (tickets list/create/get/patch/delete, each ticket transition, assign, comments list/create, labels list/create/update/delete, ticket-label assign/remove, KB documents list/add, KB search, KB graphify import, GET /projects/:slug, PATCH /projects/:slug/agents/:agentSlug), the same request by a member DEVELOPER receives a status other than 403 and 404."
+      ],
+      "tags": [
+        "feature",
+        "security",
+        "api",
+        "tenancy"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "The comment-to-project ownership join, principal-filtered project query and PG-backed multi-route integration exercise access control across three modules.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/comments/comments.service.ts",
+        "apps/api/src/projects/projects.service.ts",
+        "apps/api/src/projects/prisma-project.repository.ts",
+        "apps/api/test/integration/live/live-stream.integration.spec.ts",
+        "apps/api/src/projects/project-membership.guard.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/projects/project-membership-gate.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/projects/projects.controller.spec.ts",
+          "reason": "assertions that the project list route calls `projectsService.findAll()` with no arguments are replaced by the invariant that it calls `findAllForPrincipal(principal)`."
+        },
+        {
+          "path": "apps/api/src/comments/comments.service.spec.ts",
+          "reason": "assertions that `update`/`delete` go straight to the CASL check are replaced by the invariant that project membership is resolved first and a non-member gets 404."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "7229a0e7b6afca198f1299396fa15df8afe1d07d"
+    },
+    {
+      "id": "US-003",
+      "title": "Harden agent creation and restrict agent ticket pickup",
+      "description": "**Goal** — Whitelist and atomically persist agent creation, map duplicate slugs to 409, and restrict pickup to self/global ADMIN.\n\n**Motivation** — Agent creation spreads the request body into Prisma (M8) and a duplicate slug returns 500.\n\n**Approach** — `AgentsService` create path (`agents/agents.service.ts`, the `else` branch that spreads `...scalarFields`): builds the create data from `name`, `slug`, `maxConcurrentTickets` only; writes the agent row, roles and capabilities inside one `txManager.run`. The constructor gains `@Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager` (the pattern used by `comments.service.ts`). Hash the generated key as before; call agentRepo.create with exactly name, slug, apiKeyHash and maxConcurrentTickets. Validate slug format in both the active HTTP-bound service-local CreateAgentDto and `agents/dto/create-agent.dto.ts` (which becomes canonical in US-005); reject 'Bad Slug!', allow 'good-slug-1'. Preserve optional roles/capabilities across the canonical DTO transition. Map duplicate agent slug to ConflictAppException (409). `PrismaAgentRepository.createRolesAndCapabilities`: sequential `createMany` calls on the ambient transaction client (no nested `$transaction([...])`); role/capability failure rolls back the new agent row. `AgentsController.suggestTicket` (`GET agents/:slug/pickup`) gains a `@Principal() principal: KodaPrincipal` parameter and passes it through, including its pickupTicket helper. `AgentsService.suggestTicket(agentSlug, projectSlug)` → `suggestTicket(agentSlug, projectSlug, principal)`: 403 unless the principal is that agent or a global ADMIN user; 404 when the project is missing or soft-deleted. Preserve ranking/response for authorized agents.\n\n**Interface** — `@Inject(TRANSACTION_MANAGER) private readonly txManager: ITransactionManager`; `AgentsService.suggestTicket(agentSlug, projectSlug, principal)`; `@Principal() principal: KodaPrincipal`.\n\n**Scope** — In: create whitelist and transaction, HTTP slug validation, duplicate conflict, pickup permission and affected specs. Out: service-local DTO deletion/import cleanup (US-005). US-003 only: the agent `update()` path, which already whitelists its fields. Agent project membership: agent principals remain cross-project and bypass the membership gate (revisited in fleet S1).",
+      "acceptanceCriteria": [
+        "AgentsService.generateApiKey called for create with status: 'OFFLINE' and id: 'x' passes PrismaAgentRepository.create an object whose keys are exactly name, slug, apiKeyHash, maxConcurrentTickets.",
+        "POST /api/agents with status: 'OFFLINE' creates an agent whose persisted status is the schema default, not OFFLINE.",
+        "CreateAgentDto validation rejects slug 'Bad Slug!'.",
+        "CreateAgentDto validation accepts slug 'good-slug-1'.",
+        "POST /api/agents returns 409 when the slug already exists.",
+        "When PrismaAgentRepository.createRolesAndCapabilities rejects during create, AgentsService.generateApiKey rejects with that error and both PrismaAgentRepository.create and createRolesAndCapabilities were called inside the same txManager.run callback.",
+        "When PrismaAgentRepository.createRolesAndCapabilities rejects during POST /api/agents, no agent row with the requested slug exists afterwards.",
+        "PrismaAgentRepository.createRolesAndCapabilities issues one agentRoleEntry.createMany and one agentCapabilityEntry.createMany on the ambient client without calling $transaction.",
+        "GET /api/agents/:slug/pickup?project=<slug> returns 200 when authenticated as that agent.",
+        "GET /api/agents/:slug/pickup?project=<slug> returns 403 when authenticated as a different agent.",
+        "GET /api/agents/:slug/pickup?project=<slug> returns 403 for a non-ADMIN user.",
+        "GET /api/agents/:slug/pickup?project=<slug> returns 200 for a global ADMIN user.",
+        "GET /api/agents/:slug/pickup?project=<slug> returns 404 when the project is soft-deleted.",
+        "GET /api/agents/:slug/pickup?project=<slug> returns 404 when the project is missing."
+      ],
+      "tags": [
+        "feature",
+        "security",
+        "api",
+        "agents"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Agent credential issuance and pickup authorization span a transaction boundary, HTTP DTO validation and Prisma writes; security-critical isolation is required.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/agents/agents.service.ts",
+        "apps/api/src/agents/prisma-agent.repository.ts",
+        "apps/api/src/agents/agents.controller.ts",
+        "apps/api/src/agents/dto/create-agent.dto.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/agents/prisma-agent.repository.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/agents/agents.service.spec.ts",
+          "reason": "assertions that `agentRepo.create` receives the spread body are replaced by the invariant that it receives only `name`, `slug`, `apiKeyHash`, `maxConcurrentTickets`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "abdf5d1a13e2d339689c51e15640054c16631035"
+    },
+    {
+      "id": "US-004",
+      "title": "Fix project conflict responses, auth secrets and domain-writer role provenance",
+      "description": "**Goal** — Resolve project/auth LOWs by normalizing project errors, adding translations, enforcing independent JWT secrets and deriving event roles from membership.\n\n**Motivation** — Six LOWs in the same modules remain open.\n\n**Approach** — `ProjectsService.create` / `update`: duplicate slug or key → `ConflictAppException` (409); `update` on a soft-deleted project → `NotFoundAppException`; preserve invalid-format validation. Add `projects.slugInvalid`, `projects.keyInvalid` and `common.validation.isIn` translations in both `en` and `zh` (projects.json and common.json). `envSchema` (`config/env.validation.ts`): validation fails when `JWT_REFRESH_SECRET` equals `JWT_SECRET`; throw a validation error naming JWT_REFRESH_SECRET rather than losing field detail in validate(). `KodaDomainWriter.writeTicketEvent`: for user actors, `projectRoles` is the actor's `ProjectMember.role` for `data.projectId` (plus 'ADMIN' when the user's global role is ADMIN); payload role fields are ignored. The data comes from a new `PrismaKodaDomainWriterRepository.findUserProjectRoles(projectId, userId): Promise<string[]>` (reads `User.role` and `ProjectMember.role`); `WriteTicketEventInput` is unchanged. Preserve agent actor role loading through AgentAuthProvider, event/outbox result, and project not-found checks. Adapt project and domain-writer specs to DB-derived roles.\n\n**Interface** — `PrismaKodaDomainWriterRepository.findUserProjectRoles(projectId, userId): Promise<string[]>`; `WriteTicketEventInput` is unchanged.\n\n**Scope** — In: project conflict/soft-delete responses, en/zh i18n keys, JWT env refinement, authenticated ticket-event role derivation. Out: slug guard and project list (US-001/US-002), agent create conflict (US-003); The webhook, ticket-workflow, VCS, RAG and web/CLI findings of Track 3 slices 2-6.",
+      "acceptanceCriteria": [
+        "POST /api/projects returns 409 when a project with the requested slug already exists.",
+        "POST /api/projects returns 409 when a project with the requested key already exists.",
+        "PATCH /api/projects/:slug returns 404 when the project is soft-deleted.",
+        "Translating projects.slugInvalid in en returns a string different from the key itself.",
+        "Translating projects.slugInvalid in zh returns a string different from the key itself.",
+        "Translating projects.keyInvalid in en returns a string different from the key itself.",
+        "Translating projects.keyInvalid in zh returns a string different from the key itself.",
+        "Translating common.validation.isIn in en returns a string different from the key itself.",
+        "Translating common.validation.isIn in zh returns a string different from the key itself.",
+        "validate throws a validation error naming JWT_REFRESH_SECRET when JWT_REFRESH_SECRET equals JWT_SECRET.",
+        "validate passes when JWT_SECRET and JWT_REFRESH_SECRET are distinct.",
+        "KodaDomainWriter.writeTicketEvent throws ForbiddenAppException for a non-ADMIN user actor with no ProjectMember row even when payload actorRole is 'ADMIN'.",
+        "KodaDomainWriter.writeTicketEvent succeeds for a user actor with ProjectMember.role DEVELOPER and no payload role.",
+        "KodaDomainWriter.writeTicketEvent succeeds for a global ADMIN user actor with no membership row.",
+        "PATCH /api/projects/:slug returns 409 when the requested slug or key belongs to another project.",
+        "When JWT_REFRESH_SECRET equals JWT_SECRET at boot, env validation throws and the app does not start."
+      ],
+      "tags": [
+        "feature",
+        "security",
+        "api",
+        "projects",
+        "auth"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Independent project status, JWT credential validation and DB-derived authorization changes touch four API subsystems, with authentication/role-check security isolation.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/projects/projects.service.ts",
+        "apps/api/src/config/env.validation.ts",
+        "apps/api/src/koda-domain-writer/koda-domain-writer.service.ts",
+        "apps/api/src/koda-domain-writer/prisma-koda-domain-writer.repository.ts",
+        "apps/api/src/i18n/en/common.json"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/projects/projects.service.spec.ts",
+          "reason": "assertions that a duplicate slug or key throws `ValidationAppException` are replaced by the invariant that it throws `ConflictAppException` (409)."
+        },
+        {
+          "path": "apps/api/src/koda-domain-writer/koda-domain-writer.service.spec.ts",
+          "reason": "assertions that a user actor's role is read from `data.actorRole` are replaced by the invariant that it is read from `ProjectMember`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "6a882e92527d31a29c65b383c15fde2e12f1cd51"
+    },
+    {
+      "id": "US-005",
+      "title": "Remove redundant RAG membership checks and service-local agent DTOs",
+      "description": "**Goal** — Remove duplicate membership and DTO implementations after the shared guard and hardened agent-create path are available.\n\n**Motivation** — Membership checks are duplicated and agent creation has duplicate DTO code that can diverge from HTTP validation.\n\n**Approach** — Deletion-only: delete `RagController.checkProjectMembership`, `RetrievalController.checkProjectMembership` (both private copies of the membership rule, replaced by `ProjectMembershipGuard` on those controllers), the now-unused `PrismaRagRepository.findProjectMembership`, and delete the service-local `CreateAgentDto` / `UpdateAgentDto` classes in `agents/agents.service.ts` so every caller imports `agents/dto/*`. Apply `ProjectMembershipGuard` at class level to RetrievalController (`projects/:slug/kb/evaluate/retrieval`), where RetrievalModule already imports ProjectAccessModule. Preserve RetrievalController's resolveProject project-existence check; remove both private check call sites and associated obsolete specs; change controller/service/spec DTO imports to canonical DTOs. Guard in RagController and hardened agent create remain from upstream stories.\n\n**Interface** — `@UseGuards(ProjectMembershipGuard)` on `RetrievalController`; `CreateAgentDto` / `UpdateAgentDto` imported from `agents/dto/*`.\n\n**Scope** — In: duplicate-check and local DTO removal, RetrievalController guard and canonical DTO caller imports, updating RagController and RetrievalController specs. Out: guard creation and KB role rules (US-001), agent create transaction and pickup restriction (US-003); Agent project membership: agent principals remain cross-project and bypass the membership gate (revisited in fleet S1).",
+      "acceptanceCriteria": [
+        "POST /api/projects/:slug/kb/documents by a non-member DEVELOPER still returns 403 after RagController.checkProjectMembership is deleted.",
+        "POST /api/projects/:slug/kb/evaluate/retrieval by a non-member DEVELOPER returns 403 with ProjectMembershipGuard applied to RetrievalController.",
+        "POST /api/agents with a valid body still returns 201 after the service-local DTO classes are deleted."
+      ],
+      "tags": [
+        "feature",
+        "security",
+        "api",
+        "refactor"
+      ],
+      "dependencies": [
+        "US-001",
+        "US-003"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "medium",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Mostly removal of duplicated code and import substitution, but moving retrieval to a guard changes access control and therefore requires isolated security tests.",
+        "initialComplexity": "medium",
+        "modelTier": "fast",
+        "initialModelTier": "fast"
+      },
+      "contextFiles": [
+        "apps/api/src/rag/rag.controller.ts",
+        "apps/api/src/retrieval/retrieval.controller.ts",
+        "apps/api/src/rag/prisma-rag.repository.ts",
+        "apps/api/src/agents/agents.service.ts",
+        "apps/api/src/projects/project-membership.guard.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/rag/rag.controller.spec.ts",
+          "reason": "tests of the private `checkProjectMembership` are deleted; guard behaviour is covered by US-001."
+        },
+        {
+          "path": "apps/api/src/retrieval/retrieval.controller.spec.ts",
+          "reason": "tests of the private `checkProjectMembership` are deleted; the invariant becomes that a non-member user gets 403 from `ProjectMembershipGuard`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "4ae82f97e662a68246e08bd0bd55b7c78484d71c"
+    }
+  ],
+  "analysis": "Existing NestJS/Prisma API in apps/api; no new package or schema migration. ProjectAccessService resolves slugs and rejects soft-deleted projects, skips membership checks for agents and global ADMIN, and delegates membership lookup to PrismaProjectRepository.findMembershipRole (apps/api/src/projects/project-access.service.ts:10-28; apps/api/src/projects/prisma-project.repository.ts:62-69). ProjectAccessModule exports this service and should provide/export the new guard (apps/api/src/projects/project-access.module.ts:5-19). UserPrincipal.role is MEMBER|ADMIN; DEVELOPER and VIEWER are ProjectMember roles, not valid global user roles: HTTP fixtures describing a 'DEVELOPER user' should use a MEMBER principal and DEVELOPER project role (apps/api/src/auth/principal/koda-principal.types.ts:4-30). TicketsController is entirely under projects/:slug/tickets; only assign currently checks membership inline (apps/api/src/tickets/tickets.controller.ts:45-52,235-249). LabelsController and CommentsController use method-level project routes and CommentsController also has slug-less comments/:id routes, so do not apply a controller-level guard there (apps/api/src/labels/labels.controller.ts:75-122; apps/api/src/comments/comments.controller.ts:69-121). RagController and RetrievalController each have duplicated membership checks; RagController's KB write endpoints also need project VIEWER exclusion without changing read/search or global permissions (apps/api/src/rag/rag.controller.ts:23-76,80-211; apps/api/src/retrieval/retrieval.controller.ts:10-55). ProjectsController's GET :slug and PATCH :slug/agents/:agentSlug need method-level guard; ADMIN-only routes and already gated impact/agent-list routes remain unchanged (apps/api/src/projects/projects.controller.ts:59-105,112-211). CommentsModule, LabelsModule and RagModule need ProjectAccessModule for guard injection; TicketsModule imports ProjectsModule, which exports ProjectAccessModule; RetrievalModule imports ProjectAccessModule already (apps/api/src/comments/comments.module.ts:9-13; apps/api/src/labels/labels.module.ts:7-10; apps/api/src/rag/rag.module.ts:126-130; apps/api/src/tickets/tickets.module.ts:17-20; apps/api/src/projects/projects.module.ts:14-33; apps/api/src/retrieval/retrieval.module.ts:7-10). Existing project list is unscoped but PrismaProjectRepository.findAll filters deletedAt: add membership-filtered query, preserve response DTO mapping while passing @Principal() from controller (apps/api/src/projects/projects.service.ts:68-70; apps/api/src/projects/prisma-project.repository.ts:39-44; apps/api/src/projects/projects.controller.ts:64-67). Comment records have ticketId only; resolving comment -> ticket -> project requires repository support before the service CASL check. Agents and global ADMIN bypass membership, while user non-members get 404; DELETE comments/:id currently declares @HttpCode(200) and returns JsonResponse.Ok(null), but spec requires 204, so change the HTTP response (apps/api/src/comments/comments.service.ts:122-167; apps/api/src/comments/prisma-comment.repository.ts:17-31; apps/api/src/comments/comments.controller.ts:105-121). HTTP integration pattern uses PG/supertest and KODA_DB_TESTS=1, resetDb/bootHttpApp/loginToken (apps/api/test/integration/live/live-stream.integration.spec.ts:1-19,49-95). Existing agent service has service-local CreateAgentDto/UpdateAgentDto definitions, though canonical agents/dto/* files exist; controller imports local CreateAgentDto, and agent service specs import it, so eventual deletion needs caller/test changes (apps/api/src/agents/agents.service.ts:14-71; apps/api/src/agents/agents.controller.ts:2-4; apps/api/src/agents/agents.service.spec.ts:2; apps/api/src/agents/dto/create-agent.dto.ts:1-14). The canonical CreateAgentDto currently has only required name/slug; preserve optional roles/capabilities behavior when switching types in US-005. Agent create spreads scalarFields into agentRepo.create, then writes roles/capabilities separately, whose repository method nests $transaction; inject ITransactionManager into AgentsService and use ambient Prisma client with sequential creates (apps/api/src/agents/agents.service.ts:81-92,119-180; apps/api/src/agents/prisma-agent.repository.ts:42-51,79-94). Existing AgentsService unit provider stubs lack TRANSACTION_MANAGER and its pickup unit tests call the old two-argument signature; update them (apps/api/src/agents/agents.service.spec.ts:55-114,695-767). Pickup controller omits principal; service currently returns null for a missing project and repository lookup includes soft-deleted rows; restrict to agent-self/global ADMIN, return 404 for absent/deleted project (apps/api/src/agents/agents.controller.ts:37-44,106-115; apps/api/src/agents/agents.service.ts:259-269; apps/api/src/agents/prisma-agent.repository.ts:115-117). ProjectsService duplicate checks currently raise ValidationAppException and update accepts deleted projects; change conflicts to 409, update-deleted to 404 while retaining invalid-format validation (apps/api/src/projects/projects.service.ts:21-65,82-132). Both locales require missing projects.slugInvalid/keyInvalid in projects.json and common.validation.isIn in common.json (apps/api/src/i18n/en/projects.json:1-7; apps/api/src/i18n/zh/projects.json:1-7; apps/api/src/i18n/en/common.json:2-14; apps/api/src/i18n/zh/common.json:2-14). envSchema currently validates JWT secrets separately and validate wraps Joi error without exposing field name; ensure JWT_REFRESH_SECRET is identifiable in equal-secret validation error (apps/api/src/config/env.validation.ts:5-15,39-45). KodaDomainWriter currently trusts user-provided actorRole/role, while its repository only finds a project; fetch User.role and ProjectMember.role by project/user, ignore user payload roles, leave agent handling and WriteTicketEventInput unchanged (apps/api/src/koda-domain-writer/koda-domain-writer.service.ts:60-118; apps/api/src/koda-domain-writer/prisma-koda-domain-writer.repository.ts:1-12). Existing tests to adapt include tickets.controller.spec.ts, rag.controller.spec.ts, retrieval.controller.spec.ts, projects.controller.spec.ts, projects.service.spec.ts, comments.service.spec.ts, agents.service.spec.ts and koda-domain-writer.service.spec.ts; add specified guard, agent repository and HTTP integration specs. Risks: global CASL guard ordering may return a permission 403 before a handler; the spec's US-002 positive route-matrix requirement (every member DEVELOPER request is neither 403 nor 404) is in tension with the existing project-agent PATCH admin/self restriction and certain CASL write permissions (apps/api/src/projects/projects.controller.ts:190-208). Preserve the AC while avoiding inadvertent global permission changes; design fixtures and report any irreducible policy conflict. Integration should use real ProjectMember rows, not claims. US-001 precedes US-002 (integration exercises its new guard), and US-001/US-003 precede US-005 (cleanup consumes their changes). No database migration or new agent membership model.",
+  "outOfScope": [
+    "Project-role-based permissions: write permissions stay on the principal's global role and `ProjectMember.role` gates visibility only (Track 3 ruling 2026-09-27), with one exception ruled 2026-09-27: KB write routes refuse a project VIEWER via `@ProjectRoles`. Tickets, comments and labels do not use `@ProjectRoles`.",
+    "Agent project membership: agent principals remain cross-project and bypass the membership gate (revisited in fleet S1).",
+    "Hiding project existence from authenticated non-members: an unknown slug returns 404 while a non-member gets 403, matching the modules already gated.",
+    "The webhook, ticket-workflow, VCS, RAG and web/CLI findings of Track 3 slices 2-6.",
+    "US-003 only: the agent `update()` path, which already whitelists its fields."
+  ],
+  "routingProfile": "native"
+}

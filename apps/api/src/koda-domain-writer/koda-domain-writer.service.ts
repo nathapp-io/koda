@@ -69,18 +69,6 @@ export class KodaDomainWriter {
     }
   }
 
-  private roleFromEventPayload(data: Record<string, unknown>): string | undefined {
-    const actorRole = data['actorRole'];
-    if (typeof actorRole === 'string' && actorRole.length > 0) {
-      return actorRole;
-    }
-    const role = data['role'];
-    if (typeof role === 'string' && role.length > 0) {
-      return role;
-    }
-    return undefined;
-  }
-
   async writeTicketEvent(data: WriteTicketEventInput): Promise<WriteResult> {
     this.assertNonEmpty(data.projectId, 'projectId');
     this.assertNonEmpty(data.ticketId, 'ticketId');
@@ -89,10 +77,12 @@ export class KodaDomainWriter {
 
     await this.assertProjectExists(data.projectId);
 
-    const payloadRole = this.roleFromEventPayload(data.data ?? {});
+    // US-004: a user actor's project roles come from the database
+    // (User.role + ProjectMember.role), never from the event payload.
+    // Agent actors continue to load roles through AgentAuthProvider.
     const projectRoles = data.actorType === 'agent'
       ? await this.agentAuthProvider.loadAgentRoles(data.actorId)
-      : (payloadRole ? [payloadRole] : []);
+      : await this.writerRepo.findUserProjectRoles(data.projectId, data.actorId);
     const actor = {
       actorType: data.actorType,
       actorId: data.actorId,

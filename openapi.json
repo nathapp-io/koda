@@ -1392,7 +1392,7 @@
             "bearer": []
           }
         ],
-        "summary": "List all projects (excluding soft-deleted)",
+        "summary": "List projects visible to the calling principal (excluding soft-deleted)",
         "tags": [
           "projects"
         ]
@@ -3795,7 +3795,7 @@
           }
         ],
         "responses": {
-          "200": {
+          "204": {
             "description": "Comment deleted"
           },
           "403": {

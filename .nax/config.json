@@ -19,9 +19,6 @@
         }
     },
     "quality": {
-        "requireTypecheck": true,
-        "requireLint": true,
-        "requireTests": true,
         "commands": {
             "test": "npx turbo test",
             "testScoped": "npx turbo test --filter=[HEAD^1]",

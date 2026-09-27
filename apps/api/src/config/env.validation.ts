@@ -10,7 +10,7 @@ const envSchema = Joi.object({
   DATABASE_URL: Joi.string().required(),
   JWT_SECRET: Joi.string().required(),
   JWT_EXPIRES_IN: Joi.string().default('15m'),
-  JWT_REFRESH_SECRET: Joi.string().required(),
+  JWT_REFRESH_SECRET: Joi.string().required().invalid(Joi.ref('JWT_SECRET')),
   JWT_REFRESH_EXPIRES_IN: Joi.string().default('7d'),
   API_KEY_SECRET: Joi.string().required(),
   VCS_ENCRYPTION_KEY: Joi.string().hex().length(64).optional(),
@@ -39,7 +39,14 @@ const envSchema = Joi.object({
 export function validate(config: Record<string, unknown>): Record<string, unknown> {
   const { error, value } = envSchema.validate(config, { abortEarly: false });
   if (error) {
-    throw new ValidationAppException();
+    // Preserve field-level detail (e.g. JWT_REFRESH_SECRET when it equals JWT_SECRET)
+    // instead of dropping it into a bare ValidationAppException.
+    const args: Record<string, string> = {};
+    for (const detail of error.details) {
+      const path = detail.path.join('.') || 'config';
+      args[path] = detail.message;
+    }
+    throw new ValidationAppException(args);
   }
   return value as Record<string, unknown>;
 }

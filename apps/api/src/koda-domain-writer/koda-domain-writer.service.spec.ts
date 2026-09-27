@@ -639,7 +639,7 @@ describe('KodaDomainWriter Unit Tests', () => {
         timestamp: new Date(),
         createdAt: new Date(),
       });
-      mockRagService.indexDocument.mockResolvedValue(undefined);
+      mockRagService.indexDocument.mockResolvedValue('doc-id');
 
       const result = await service.indexDocument(data);
 

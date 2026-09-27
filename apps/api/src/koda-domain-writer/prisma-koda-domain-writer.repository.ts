@@ -9,4 +9,29 @@ export class PrismaKodaDomainWriterRepository {
   async findProjectById(id: string): Promise<{ id: string } | null> {
     return this.prisma.client.project.findUnique({ where: { id }, select: { id: true } });
   }
+
+  /**
+   * US-004: project roles for a user actor in a specific project. The roles
+   * come from the database (User.role + ProjectMember.role), never from the
+   * write payload — see `KodaDomainWriter.writeTicketEvent`.
+   *
+   *  - Global ADMIN user → ['ADMIN'] (no membership row required).
+   *  - Project member → [ProjectMember.role] (e.g. ['DEVELOPER']).
+   *  - Global ADMIN who is also a member → ['ADMIN', ProjectMember.role].
+   */
+  async findUserProjectRoles(projectId: string, userId: string): Promise<string[]> {
+    const user = await this.prisma.client.user.findUnique({
+      where: { id: userId },
+      select: { role: true },
+    });
+    const membership = await this.prisma.client.projectMember.findUnique({
+      where: { projectId_userId: { projectId, userId } },
+      select: { role: true },
+    });
+
+    const roles: string[] = [];
+    if (user?.role === 'ADMIN') roles.push('ADMIN');
+    if (membership?.role) roles.push(membership.role);
+    return roles;
+  }
 }

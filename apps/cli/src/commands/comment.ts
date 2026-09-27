@@ -131,11 +131,11 @@ export function commentCommand(program: Command): void {
       try {
         await withContext({}, { requireProject: false });
 
-        const response = await commentsControllerDeleteFromHttp({ path: { id: options.id }});
-        const deleted = unwrap<Record<string, unknown> | undefined>(response);
+        // 204 No Content — no envelope to unwrap (same as `label delete`).
+        await commentsControllerDeleteFromHttp({ path: { id: options.id }});
 
         if (options.json) {
-          console.log(JSON.stringify(deleted ?? { id: options.id, deleted: true }, null, 2));
+          console.log(JSON.stringify({ id: options.id, deleted: true }, null, 2));
         } else {
           success(`Comment '${options.id}' deleted.`);
         }
