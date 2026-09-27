@@ -8,6 +8,12 @@ import { MemoryKind, ActorRole } from '../common/enums';
 import { MemoryItem } from './memory-item-repository';
 import type { KodaPrincipal, UserPrincipal, AgentPrincipal } from '../auth/principal/koda-principal.types';
 
+// Fixed timestamps: two independent makeMemoryItem() calls (e.g. the mock's
+// resolved value and the expected value in a toEqual) must be deep-equal even
+// when the wall clock advances between them, which previously caused a 1 ms
+// CI flake in this suite.
+const MEMORY_ITEM_TIMESTAMP = new Date('2026-01-01T00:00:00.000Z');
+
 const makeMemoryItem = (overrides: Partial<MemoryItem> = {}): MemoryItem => ({
   id: 'mem-1',
   projectId: 'project-123',
@@ -17,8 +23,8 @@ const makeMemoryItem = (overrides: Partial<MemoryItem> = {}): MemoryItem => ({
   object: 'active',
   status: 'active',
   confidence: 0.9,
-  createdAt: new Date(),
-  updatedAt: new Date(),
+  createdAt: new Date(MEMORY_ITEM_TIMESTAMP),
+  updatedAt: new Date(MEMORY_ITEM_TIMESTAMP),
   ...overrides,
 });
 
@@ -44,6 +50,23 @@ const makeAgentPrincipal = (): AgentPrincipal => ({
   status: 'ACTIVE',
   agentRoles: ['DEVELOPER'],
   capabilities: [],
+});
+
+describe('makeMemoryItem', () => {
+  // Guards the CI flake at memory.controller.spec.ts "allows a MEMBER-role …":
+  // two independent calls (the mock's resolved value and the expected value)
+  // must be deep-equal, so the helper cannot read the wall clock.
+  it('produces deep-equal items across calls even as time advances', () => {
+    jest.useFakeTimers();
+    try {
+      const first = makeMemoryItem();
+      jest.advanceTimersByTime(1);
+      const second = makeMemoryItem();
+      expect(second).toEqual(first);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });
 
 describe('MemoryController', () => {
