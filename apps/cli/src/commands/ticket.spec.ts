@@ -1650,11 +1650,17 @@ describe('ticketCommand', () => {
       const closeCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'close');
 
       try {
-        await closeCmd?.parseAsync(['node', 'test', 'KODA-1']);
+        await closeCmd?.parseAsync(['node', 'test', 'KODA-1', '--reason', 'no longer needed']);
       } catch {
         // Expected
       }
 
+      expect(ticketsControllerClose).toHaveBeenCalledWith({
+        body: { body: 'no longer needed' },
+        path: { slug: 'koda', ref: 'KODA-1' },
+      });
+      const errorOutput = consoleErrorSpy.mock.calls.flat().join('\n');
+      expect(errorOutput).toContain('Invalid transition');
       expect(processExitSpy).toHaveBeenCalledWith(3);
     });
   });
