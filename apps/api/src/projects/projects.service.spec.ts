@@ -1,9 +1,26 @@
+import { HttpException } from '@nestjs/common';
 import { ProjectsService } from './projects.service';
 import { ProjectAccessService } from './project-access.service';
 import { RagService } from '../rag/rag.service';
-import { NotFoundAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
+import {
+  NotFoundAppException,
+  ForbiddenAppException,
+  ValidationAppException,
+} from '@nathapp/nestjs-common';
+import { ConflictAppException } from '../common/exceptions/conflict-app.exception';
 import type { IProjectRepository } from './domain/project.domain';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
+
+/** The rejection of `promise`, or undefined when it resolved. */
+async function rejectionOf(promise: Promise<unknown>): Promise<HttpException | undefined> {
+  try {
+    await promise;
+    return undefined;
+  } catch (error) {
+    if (error instanceof HttpException) return error;
+    throw error;
+  }
+}
 
 describe('ProjectsService', () => {
   let service: ProjectsService;
@@ -225,6 +242,125 @@ describe('ProjectsService', () => {
         id: 'p1', slug: 'proj', deletedAt: null, ciWebhookToken: null,
       });
       expect(await service.findCiWebhookToken('proj')).toBeNull();
+    });
+  });
+
+  // US-004: a duplicate slug/key is a 409 state conflict, not a 400 validation
+  // error, and updating a soft-deleted project is a 404 — the same AppException
+  // types the HTTP layer maps to those statuses.
+  describe('US-004: conflict and soft-delete responses', () => {
+    const activeProject = {
+      id: 'project-1',
+      slug: 'alpha',
+      name: 'Alpha',
+      key: 'ALPH',
+      description: null,
+      gitRemoteUrl: null,
+      autoIndexOnClose: true,
+      autoAssign: 'OFF',
+      ciWebhookToken: null,
+      graphifyEnabled: false,
+      graphifyLastImportedAt: null,
+      deletedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const otherProject = {
+      ...activeProject,
+      id: 'project-2',
+      slug: 'other',
+      key: 'OTHR',
+    };
+
+    describe('create', () => {
+      it('AC1: throws ConflictAppException (409) when the slug already exists', async () => {
+        mockProjectRepo.findBySlug.mockResolvedValue(otherProject);
+
+        const error = await rejectionOf(service.create({ name: 'Beta', slug: 'other', key: 'BETA' }));
+
+        expect(error).toBeInstanceOf(ConflictAppException);
+        expect(error?.getStatus()).toBe(409);
+        expect(mockProjectRepo.createProject).not.toHaveBeenCalled();
+      });
+
+      it('AC2: throws ConflictAppException (409) when the key already exists', async () => {
+        mockProjectRepo.findBySlug.mockResolvedValue(null);
+        mockProjectRepo.findByKey.mockResolvedValue(otherProject);
+
+        const error = await rejectionOf(service.create({ name: 'Beta', slug: 'beta', key: 'OTHR' }));
+
+        expect(error).toBeInstanceOf(ConflictAppException);
+        expect(error?.getStatus()).toBe(409);
+        expect(mockProjectRepo.createProject).not.toHaveBeenCalled();
+      });
+
+      it('keeps invalid-format validation at 400 (ValidationAppException)', async () => {
+        const error = await rejectionOf(service.create({ name: 'Beta', slug: 'Not-A-Slug', key: 'BETA' }));
+
+        expect(error).toBeInstanceOf(ValidationAppException);
+        expect(error?.getStatus()).toBe(400);
+      });
+
+      it('creates the project when slug and key are free', async () => {
+        mockProjectRepo.findBySlug.mockResolvedValue(null);
+        mockProjectRepo.findByKey.mockResolvedValue(null);
+        mockProjectRepo.createProject.mockResolvedValue(activeProject);
+
+        await expect(service.create({ name: 'Alpha', slug: 'alpha', key: 'ALPH' })).resolves.toMatchObject({
+          slug: 'alpha',
+          key: 'ALPH',
+        });
+      });
+    });
+
+    describe('update', () => {
+      it('AC3: throws NotFoundAppException (404) when the project is soft-deleted', async () => {
+        mockProjectRepo.findBySlug.mockResolvedValue({ ...activeProject, deletedAt: new Date() });
+        // Keeps the RED run on an assertion: an implementation without the
+        // soft-delete guard resolves here instead of throwing.
+        mockProjectRepo.updateBySlug.mockResolvedValue(activeProject);
+
+        const error = await rejectionOf(service.update('alpha', { name: 'Renamed' }));
+
+        expect(error).toBeInstanceOf(NotFoundAppException);
+        expect(error?.getStatus()).toBe(404);
+        expect(mockProjectRepo.updateBySlug).not.toHaveBeenCalled();
+      });
+
+      it('AC15: throws ConflictAppException (409) when the requested slug belongs to another project', async () => {
+        mockProjectRepo.findBySlug.mockImplementation(async (slug: string) =>
+          slug === 'alpha' ? activeProject : otherProject,
+        );
+        mockProjectRepo.updateBySlug.mockResolvedValue(activeProject);
+
+        const error = await rejectionOf(service.update('alpha', { slug: 'other' }));
+
+        expect(error).toBeInstanceOf(ConflictAppException);
+        expect(error?.getStatus()).toBe(409);
+        expect(mockProjectRepo.updateBySlug).not.toHaveBeenCalled();
+      });
+
+      it('AC15: throws ConflictAppException (409) when the requested key belongs to another project', async () => {
+        mockProjectRepo.findBySlug.mockResolvedValue(activeProject);
+        mockProjectRepo.findByKey.mockResolvedValue(otherProject);
+        mockProjectRepo.updateBySlug.mockResolvedValue(activeProject);
+
+        const error = await rejectionOf(service.update('alpha', { key: 'OTHR' }));
+
+        expect(error).toBeInstanceOf(ConflictAppException);
+        expect(error?.getStatus()).toBe(409);
+        expect(mockProjectRepo.updateBySlug).not.toHaveBeenCalled();
+      });
+
+      it('allows re-submitting the project’s own slug and key', async () => {
+        mockProjectRepo.findBySlug.mockResolvedValue(activeProject);
+        mockProjectRepo.findByKey.mockResolvedValue(activeProject);
+        mockProjectRepo.updateBySlug.mockResolvedValue(activeProject);
+
+        await expect(service.update('alpha', { slug: 'alpha', key: 'ALPH' })).resolves.toBeDefined();
+        expect(mockProjectRepo.updateBySlug).toHaveBeenCalled();
+      });
     });
   });
 });
