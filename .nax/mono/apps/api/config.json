@@ -38,6 +38,6 @@
   },
   "acceptance": {
     "testFramework": "jest",
-    "command": "KODA_DB_TESTS=1 npx jest --config jest.nax.config.js {{FILE}}"
+    "command": "env KODA_DB_TESTS=1 npx jest --config jest.nax.config.js {{FILE}}"
   }
 }
