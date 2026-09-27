@@ -72,6 +72,9 @@ describe('RetrievalController membership gate (US-005 AC2)', () => {
         // membership decision is driven by the fake ProjectMember rows below.
         ProjectAccessService,
         { provide: PrismaProjectRepository, useValue: projectRepo },
+        // Register the guard so NestJS applies it to the controller's
+        // @UseGuards(ProjectMembershipGuard) class-level decorator.
+        ProjectMembershipGuard,
       ],
     }).compile();
 
