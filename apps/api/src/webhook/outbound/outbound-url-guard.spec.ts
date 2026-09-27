@@ -54,7 +54,17 @@ function makeGuard(
   return { guard, resolve };
 }
 
-/** Settles `checkUrl`, asserts the rejection type, and returns the rejection reason. */
+/** Asserts the guard rejected with `OutboundUrlRejection` and returns its reason. */
+function rejectionReasonOf(caught: unknown): OutboundRejectionReason {
+  expect(caught).toBeInstanceOf(OutboundUrlRejection);
+  if (!(caught instanceof OutboundUrlRejection)) {
+    throw new Error('the guard did not reject with OutboundUrlRejection');
+  }
+
+  return caught.reason;
+}
+
+/** Settles `checkUrl` and returns its rejection reason. */
 async function rejectionReason(check: Promise<void>): Promise<OutboundRejectionReason> {
   let caught: unknown;
   try {
@@ -63,12 +73,24 @@ async function rejectionReason(check: Promise<void>): Promise<OutboundRejectionR
     caught = error;
   }
 
-  expect(caught).toBeInstanceOf(OutboundUrlRejection);
-  if (!(caught instanceof OutboundUrlRejection)) {
-    throw new Error('checkUrl resolved instead of rejecting with OutboundUrlRejection');
+  return rejectionReasonOf(caught);
+}
+
+/**
+ * Invokes the synchronous `assertStaticTarget` and returns its rejection reason. A call
+ * that returns instead of throwing — or that only rejects asynchronously — leaves the
+ * assertion unmatched, so the delivery-time contract (throw before the socket is
+ * created) is what is pinned here.
+ */
+function staticRejectionReason(invoke: () => void): OutboundRejectionReason {
+  let caught: unknown;
+  try {
+    invoke();
+  } catch (error) {
+    caught = error;
   }
 
-  return caught.reason;
+  return rejectionReasonOf(caught);
 }
 
 interface LookupResult {
@@ -413,6 +435,155 @@ describe('US-002: OutboundUrlGuard.checkUrl', () => {
       const { guard } = makeGuard({ config: { allowedCidrs: ['10.0.0.0/24'] } });
 
       await expect(guard.checkUrl('http://10.0.0.255:8080/hook')).resolves.toBeUndefined();
+    });
+  });
+});
+
+describe('US-002: OutboundUrlGuard.assertStaticTarget (delivery-time pre-connect check)', () => {
+  describe('the static check is the only guard for an IP-literal host, which node:http(s) never resolves', () => {
+    it('US-002: assertStaticTarget on "https://2130706433/hook" throws blocked_destination without resolving DNS', () => {
+      const { guard, resolve } = makeGuard();
+
+      expect(
+        staticRejectionReason(() => guard.assertStaticTarget(new URL('https://2130706433/hook'))),
+      ).toBe('blocked_destination');
+      expect(resolve).not.toHaveBeenCalled();
+    });
+
+    it('US-002: assertStaticTarget on "https://[::ffff:127.0.0.1]/hook" throws blocked_destination without resolving DNS', () => {
+      const { guard, resolve } = makeGuard();
+
+      expect(
+        staticRejectionReason(() =>
+          guard.assertStaticTarget(new URL('https://[::ffff:127.0.0.1]/hook')),
+        ),
+      ).toBe('blocked_destination');
+      expect(resolve).not.toHaveBeenCalled();
+    });
+
+    it('US-002 boundary: assertStaticTarget on the IPv6 loopback literal throws blocked_destination', () => {
+      const { guard } = makeGuard();
+
+      expect(staticRejectionReason(() => guard.assertStaticTarget(new URL('https://[::1]/hook')))).toBe(
+        'blocked_destination',
+      );
+    });
+
+    it('US-002 boundary: assertStaticTarget on the dotted private literal "https://10.0.0.5/hook" throws blocked_destination', () => {
+      const { guard } = makeGuard();
+
+      expect(
+        staticRejectionReason(() => guard.assertStaticTarget(new URL('https://10.0.0.5/hook'))),
+      ).toBe('blocked_destination');
+    });
+
+    it('US-002: assertStaticTarget on the public literal "https://93.184.215.14/hook" returns without throwing', () => {
+      const { guard, resolve } = makeGuard();
+
+      expect(() =>
+        guard.assertStaticTarget(new URL(`https://${PUBLIC_IPV4}/hook`)),
+      ).not.toThrow();
+      expect(resolve).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the static check repeats the ordered syntax steps of checkUrl without resolving DNS', () => {
+    it('US-002: assertStaticTarget on "ftp://hooks.example/" throws scheme_not_allowed', () => {
+      const { guard, resolve } = makeGuard();
+
+      expect(
+        staticRejectionReason(() => guard.assertStaticTarget(new URL('ftp://hooks.example/'))),
+      ).toBe('scheme_not_allowed');
+      expect(resolve).not.toHaveBeenCalled();
+    });
+
+    it('US-002: assertStaticTarget on "https://user:pw@hooks.example/" throws credentials_not_allowed', () => {
+      const { guard, resolve } = makeGuard();
+
+      expect(
+        staticRejectionReason(() =>
+          guard.assertStaticTarget(new URL('https://user:pw@hooks.example/')),
+        ),
+      ).toBe('credentials_not_allowed');
+      expect(resolve).not.toHaveBeenCalled();
+    });
+
+    it('US-002: assertStaticTarget on "http://hooks.example/x" throws https_required with empty allowlists', () => {
+      const { guard, resolve } = makeGuard();
+
+      expect(
+        staticRejectionReason(() => guard.assertStaticTarget(new URL('http://hooks.example/x'))),
+      ).toBe('https_required');
+      expect(resolve).not.toHaveBeenCalled();
+    });
+
+    it('US-002: assertStaticTarget on "https://hooks.example/" returns without resolving — the connect-time lookup does the address check', () => {
+      const { guard, resolve } = makeGuard();
+
+      expect(() => guard.assertStaticTarget(new URL('https://hooks.example/'))).not.toThrow();
+      expect(resolve).not.toHaveBeenCalled();
+    });
+
+    it('US-002 boundary: the scheme is decided before the credentials', () => {
+      const { guard } = makeGuard();
+
+      expect(
+        staticRejectionReason(() =>
+          guard.assertStaticTarget(new URL('ftp://user:pw@hooks.example/')),
+        ),
+      ).toBe('scheme_not_allowed');
+    });
+
+    it('US-002 boundary: the scheme is decided before the address', () => {
+      const { guard } = makeGuard();
+
+      expect(
+        staticRejectionReason(() => guard.assertStaticTarget(new URL('http://127.0.0.1/hook'))),
+      ).toBe('https_required');
+    });
+  });
+
+  describe('the static check honours both allowlists', () => {
+    it('US-002: assertStaticTarget accepts "http://Hooks.Internal./hook" with allowedHostnames ["hooks.internal"] without DNS', () => {
+      const { guard, resolve } = makeGuard({ config: { allowedHostnames: ['hooks.internal'] } });
+
+      expect(() => guard.assertStaticTarget(new URL('http://Hooks.Internal./hook'))).not.toThrow();
+      expect(resolve).not.toHaveBeenCalled();
+    });
+
+    it('US-002: assertStaticTarget accepts "http://10.0.0.5:8080/hook" with allowedCidrs ["10.0.0.0/24"] without DNS', () => {
+      const { guard, resolve } = makeGuard({ config: { allowedCidrs: ['10.0.0.0/24'] } });
+
+      expect(() =>
+        guard.assertStaticTarget(new URL('http://10.0.0.5:8080/hook')),
+      ).not.toThrow();
+      expect(resolve).not.toHaveBeenCalled();
+    });
+
+    it('US-002 boundary: an https literal outside the allow-listed CIDR throws blocked_destination', () => {
+      const { guard, resolve } = makeGuard({ config: { allowedCidrs: ['10.0.0.0/24'] } });
+
+      expect(
+        staticRejectionReason(() => guard.assertStaticTarget(new URL('https://10.0.1.5/hook'))),
+      ).toBe('blocked_destination');
+      expect(resolve).not.toHaveBeenCalled();
+    });
+
+    it('US-002 boundary: a host that merely contains the allow-listed name still throws https_required', () => {
+      const { guard } = makeGuard({ config: { allowedHostnames: ['hooks.internal'] } });
+
+      expect(
+        staticRejectionReason(() =>
+          guard.assertStaticTarget(new URL('http://hooks.internal.evil.example/hook')),
+        ),
+      ).toBe('https_required');
+    });
+
+    it('US-002 boundary: an uppercase scheme and an uppercase host with a trailing dot are accepted', () => {
+      const { guard, resolve } = makeGuard();
+
+      expect(() => guard.assertStaticTarget(new URL('HTTPS://Hooks.Example./hook'))).not.toThrow();
+      expect(resolve).not.toHaveBeenCalled();
     });
   });
 });
