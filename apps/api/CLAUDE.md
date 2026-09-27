@@ -190,6 +190,7 @@ Rationale: `bun run test` runs without a database, so DI/module-registration bre
 - nax's scoped test command (`bun run test:scoped <files>`) sets `KODA_DB_TESTS=1` whenever a targeted path matches `integration` or `e2e`, and the acceptance command always sets it
 - start the database before a nax run that touches `apps/api`: `bun run test:db:up`. With it down, those steps fail with `P1001: Can't reach database server at localhost:5433` instead of skipping
 - a story that writes a `test/integration/**` spec must see it run and pass under `test:scoped`, not just compile
+- every DB-mode run force-resets the test database (only a local `*_test` database is accepted; `.env.test` overrides an inherited `DATABASE_URL`), so do not run two DB-mode jest runs against the same database at once
 
 Useful scripts (run from `apps/api`):
 - `bun run test`

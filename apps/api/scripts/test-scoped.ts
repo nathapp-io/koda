@@ -8,19 +8,21 @@
  * schema to the test Postgres (`bun run test:db:up`, port 5433); with no database
  * the run fails instead of skipping. Unit-only targets stay database-free.
  *
- * Run it with `bun --no-env-file` (the `test:scoped` script does): Bun otherwise loads
- * the developer's `apps/api/.env` into this process, and its DATABASE_URL would shadow
- * the test database from `.env.test` in jest globalSetup.
+ * A target that is not an existing path (a jest name pattern, a renamed file) also
+ * turns DB mode on: jest may still match integration specs through it, and without
+ * the flag they would skip silently. globalSetup only ever resets a local `*_test`
+ * database (test/helpers/test-database-url.ts).
  *
- * Usage: bun --no-env-file scripts/test-scoped.ts <file|dir>...
+ * Usage: bun scripts/test-scoped.ts <file|dir|pattern>...
  */
 
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 
-// Same selector as `test:integration` (`--testPathPattern='(integration|e2e)'`).
-const DB_GATED = /(integration|e2e)/;
+// DB-gated specs live under test/integration or test/e2e, or are named *.integration /
+// *.e2e specs. Anchored so a parent directory such as `koda-e2e-fix/` does not match.
+const DB_GATED = [/(^|\/)test\/(integration|e2e)\//, /\.(integration|e2e)\.spec\.ts$/];
 const SPEC_FILE = /\.spec\.ts$/;
 const BASE_ARGS = ['--forceExit', '--passWithNoTests'] as const;
 const UNIT_ONLY_ARGS = ['--testPathIgnorePatterns=integration', '--testPathIgnorePatterns=e2e'] as const;
@@ -31,7 +33,7 @@ export interface ScopedRun {
 }
 
 export function needsDatabase(specPaths: readonly string[]): boolean {
-  return specPaths.some((specPath) => DB_GATED.test(specPath));
+  return specPaths.some((specPath) => DB_GATED.some((pattern) => pattern.test(specPath.replace(/\\/g, '/'))));
 }
 
 function listSpecs(dir: string): string[] {
@@ -49,21 +51,29 @@ export function expandTargets(targets: readonly string[]): string[] {
   );
 }
 
-export function buildScopedRun(targets: readonly string[], expanded: readonly string[]): ScopedRun {
+export function hasUnresolvedTarget(targets: readonly string[]): boolean {
+  return targets.some((target) => !fs.existsSync(target));
+}
+
+export function buildScopedRun(
+  targets: readonly string[],
+  expanded: readonly string[],
+  unresolved = false,
+): ScopedRun {
   if (targets.length === 0) {
     return { args: ['jest', ...BASE_ARGS, ...UNIT_ONLY_ARGS], env: {} };
   }
   return {
     args: ['jest', ...targets, ...BASE_ARGS],
-    env: needsDatabase(expanded) ? { KODA_DB_TESTS: '1' } : {},
+    env: unresolved || needsDatabase(expanded) ? { KODA_DB_TESTS: '1' } : {},
   };
 }
 
 function main(): void {
   const targets = process.argv.slice(2);
-  const run = buildScopedRun(targets, expandTargets(targets));
+  const run = buildScopedRun(targets, expandTargets(targets), hasUnresolvedTarget(targets));
   if (run.env.KODA_DB_TESTS) {
-    process.stderr.write('test-scoped: DB-gated specs targeted, running with KODA_DB_TESTS=1\n');
+    process.stderr.write('test-scoped: DB-gated or unresolved targets, running with KODA_DB_TESTS=1\n');
   }
   const result = spawnSync('bunx', run.args, {
     stdio: 'inherit',

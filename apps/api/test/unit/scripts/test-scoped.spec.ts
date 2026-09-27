@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { buildScopedRun, expandTargets, needsDatabase } from '../../../scripts/test-scoped';
+import { buildScopedRun, expandTargets, hasUnresolvedTarget, needsDatabase } from '../../../scripts/test-scoped';
 
 describe('test-scoped', () => {
   describe('needsDatabase', () => {
@@ -24,6 +24,23 @@ describe('test-scoped', () => {
 
     it('is false for no paths', () => {
       expect(needsDatabase([])).toBe(false);
+    });
+
+    it('ignores integration/e2e in parent directory names', () => {
+      expect(
+        needsDatabase([
+          '/work/koda-e2e-fix/apps/api/src/x.spec.ts',
+          '/work/integration-sandbox/apps/api/test/unit/y.spec.ts',
+        ]),
+      ).toBe(false);
+    });
+
+    it('is true for a DB-gated spec name outside test/integration', () => {
+      expect(needsDatabase(['src/foo/foo.integration.spec.ts'])).toBe(true);
+    });
+
+    it('is true for a unit-named spec under test/integration', () => {
+      expect(needsDatabase(['test/integration/memory/memory-governance.unit.spec.ts'])).toBe(true);
     });
   });
 
@@ -81,8 +98,26 @@ describe('test-scoped', () => {
       expect(expanded).toEqual(['a.spec.ts', path.join('integration', 'b.integration.spec.ts')]);
     });
 
-    it('keeps file and non-existent targets as given', () => {
-      expect(expandTargets(['src/missing.spec.ts'])).toEqual(['src/missing.spec.ts']);
+    it('keeps an existing file target as given', () => {
+      const file = path.join(dir, 'a.spec.ts');
+      expect(expandTargets([file])).toEqual([file]);
+    });
+  });
+
+  describe('hasUnresolvedTarget', () => {
+    it('is true when a target is not an existing path (name pattern or renamed file)', () => {
+      expect(hasUnresolvedTarget(['tenancy'])).toBe(true);
+    });
+
+    it('is false when every target exists', () => {
+      expect(hasUnresolvedTarget([__filename])).toBe(false);
+    });
+  });
+
+  describe('buildScopedRun with an unresolved target', () => {
+    it('turns DB mode on so matched integration specs cannot skip silently', () => {
+      const run = buildScopedRun(['tenancy'], ['tenancy'], true);
+      expect(run.env.KODA_DB_TESTS).toBe('1');
     });
   });
 });
