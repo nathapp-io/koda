@@ -94,6 +94,26 @@ describe('useTicketBoardPages', () => {
     expect(board.hasNext.value).toBe(false)
   })
 
+  test('reloadLoaded refetches loaded pages one at a time, not all at once', async () => {
+    const firstPage = ref<TicketPage<Ticket> | null>(page(1, ['a'], true))
+    let active = 0
+    let maxActive = 0
+    const fetchPage = jest.fn(async (current: number) => {
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      await Promise.resolve()
+      active -= 1
+      return current === 1 ? page(1, ['a'], true) : page(2, ['b'], false)
+    })
+    const board = useTicketBoardPages(firstPage, fetchPage, jest.fn())
+
+    await board.loadMoreTickets()
+    maxActive = 0
+    await board.reloadLoaded()
+
+    expect(maxActive).toBe(1)
+  })
+
   test('reloadLoaded with only the first page fetches page 1 only', async () => {
     const firstPage = ref<TicketPage<Ticket> | null>(page(1, ['a'], false))
     const fetchPage = jest.fn(async (_current: number) => page(1, ['a-new'], false))

@@ -52,6 +52,12 @@ describe('ticket detail live wiring', () => {
     expect(detail).toContain('useNuxtData(`comments-${slug}-${ref}`)')
   })
 
+  test('reloads comments for any event on the open ticket, not only commented', () => {
+    const handlers = liveHandlers(detail)
+    expect(handlers).toContain('void reloadCommentsSilently()')
+    expect(handlers).not.toContain("event.action === 'commented'")
+  })
+
   test('shows a notice instead of refetching a deleted ticket', () => {
     expect(detail).toContain("event.action === 'deleted'")
     expect(detail).toContain('data-testid="ticket-deleted-notice"')

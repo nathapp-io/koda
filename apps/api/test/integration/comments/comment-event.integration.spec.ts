@@ -8,6 +8,7 @@ import { PrismaService } from '@nathapp/nestjs-prisma';
 import { PrismaClient } from '@prisma/client';
 import { resetDb } from '../../helpers/reset-db';
 import { bootHttpApp, data, TEST_PASSWORD } from '../../helpers/http-app';
+import { TicketEventService } from '../../../src/events/ticket-event.service';
 
 const describeIntegration = process.env.KODA_DB_TESTS === '1' ? describe : describe.skip;
 
@@ -61,5 +62,22 @@ describeIntegration('comment create → COMMENT_ADDED (PG)', () => {
 
     expect(await prisma.ticketEvent.count({ where: { action: 'COMMENT_ADDED' } })).toBe(before);
     expect(await prisma.ticketEvent.count({ where: { action: 'status_changed' } })).toBe(1);
+  });
+
+  it('rolls the comment back when the event write fails', async () => {
+    const before = await prisma.comment.count();
+    const events = app.get(TicketEventService);
+    const spy = jest.spyOn(events, 'create').mockRejectedValueOnce(new Error('event write failed'));
+
+    try {
+      await request(server).post('/api/projects/comments/tickets/CMT-1/comments')
+        .set({ Authorization: `Bearer ${token}` })
+        .send({ body: 'rolled back', type: 'GENERAL' });
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(await prisma.comment.count()).toBe(before);
+    expect(await prisma.comment.findFirst({ where: { body: 'rolled back' } })).toBeNull();
   });
 });

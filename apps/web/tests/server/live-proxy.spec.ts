@@ -91,6 +91,8 @@ describe('LIVE_STREAM_HEADERS', () => {
       'cache-control': 'no-cache, no-transform',
       'x-accel-buffering': 'no',
     }))
+    // Hop-by-hop: invalid under HTTP/2 and stripped by some proxies, so not sent.
+    expect(LIVE_STREAM_HEADERS).not.toHaveProperty('connection')
   })
 })
 

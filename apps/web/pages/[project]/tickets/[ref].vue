@@ -114,7 +114,9 @@ useProjectEvents(slug, {
       return
     }
     liveTicketReload.trigger()
-    if (event.action === 'commented') void reloadCommentsSilently()
+    // Any ticket event may have changed the comment thread (transitions create
+    // a VERIFICATION/FIX_REPORT/REVIEW comment), so reload it unconditionally.
+    void reloadCommentsSilently()
   },
   onResync: () => {
     if (ticketDeleted.value) return

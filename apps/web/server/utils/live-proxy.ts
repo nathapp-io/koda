@@ -15,7 +15,6 @@ export const LIVE_STREAM_HEADERS: Readonly<Record<string, string>> = Object.free
   'content-type': 'text/event-stream',
   'cache-control': 'no-cache, no-transform',
   'x-accel-buffering': 'no',
-  connection: 'keep-alive',
 })
 
 export interface LiveProxyRequest {

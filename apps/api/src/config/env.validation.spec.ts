@@ -22,4 +22,9 @@ describe('env validation', () => {
     expect(() => validate({ ...REQUIRED, LIVE_HEARTBEAT_MS: '99' })).toThrow();
     expect(() => validate({ ...REQUIRED, LIVE_HEARTBEAT_MS: '100' })).not.toThrow();
   });
+
+  it('rejects non-digit heartbeat values Joi.number() would coerce', () => {
+    expect(() => validate({ ...REQUIRED, LIVE_HEARTBEAT_MS: '1e3' })).toThrow();
+    expect(() => validate({ ...REQUIRED, LIVE_HEARTBEAT_MS: '100.0' })).toThrow();
+  });
 });
