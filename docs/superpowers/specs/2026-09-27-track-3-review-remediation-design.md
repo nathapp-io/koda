@@ -3,12 +3,12 @@
 **Date:** 2026-09-27
 **Base:** `main` @ `c5a955af` (after Track 1, PRs #133-#142)
 **Source:** whole-repo review `docs/20260925-review-whole-repo.md` (MEDIUM + LOW sections), fleet platform design doc §9.4 ("Track 3")
-**Status:** Approved design (sectioned, in chat). No slice planned yet.
+**Status:** Approved design (sectioned, in chat); spec-reviewed 09-27 and corrected against `c5a955af`. No slice planned yet.
 
 ## Goal
 
 Close every review MEDIUM still open at `c5a955af`, plus the LOWs that live in the same modules, as six
-independently mergeable slices ordered security-first.
+independently mergeable slices (seven PRs; slice 2 ships as 2a + 2b) ordered security-first.
 
 ## Open-finding inventory (verified at `c5a955af`)
 
@@ -20,10 +20,10 @@ since #134).
 | Area | Open | Slice |
 |:--|:--|:--|
 | Tenancy / principals | M7 (partial), M8, M16 (access), agent/project/auth LOWs, latent role trust | 1 |
-| Webhooks | M5, inbound signature-order LOWs, webhook delete scope, VCS webhook `isActive`/`syncMode` | 2 |
+| Webhooks | M5 (2a); inbound signature-order LOWs, webhook delete scope, VCS webhook `isActive`/`syncMode` (2b) | 2a, 2b |
 | Ticket workflow | `close()` bypass LOW, M24, M25 (partial), M26, M28, sanitizer `class` LOW | 3 |
 | VCS / code-intel | M9-M13, BUG-14, VCS LOWs | 4 |
-| RAG / memory | M15, M16 (retriever), M17-M19, M21, RAG LOWs, LanceDB filter injection (new) | 5 |
+| RAG / memory | M15, M16 (retriever), M17-M19, M21, RAG LOWs, LanceDB filter-guard dedup | 5 |
 | Web / CLI / CI | web + CLI LOWs, `ui/input` attrs, CI path filter | 6 |
 
 ## Decisions (user rulings, 2026-09-27)
@@ -51,15 +51,16 @@ since #134).
 
 ## Delivery
 
-Six PRs, landed in order. One implementation plan per slice, written after the previous slice merges.
+Seven PRs, landed in order. One implementation plan per slice, written after the previous slice merges.
 
 | # | Slice | Closes |
 |:--|:--|:--|
 | 1 | Tenancy & principals | M7, M8, M16 (access); agent/project/auth LOWs |
-| 2 | Webhooks | M5; inbound webhook LOWs |
+| 2a | Outbound webhook SSRF guard | M5 |
+| 2b | Inbound webhook hardening | inbound CI/VCS webhook LOWs; webhook delete scope |
 | 3 | Ticket workflow | M24, M25, M26, M28; `close()` LOW; sanitizer LOW |
 | 4 | VCS & code-intel | M9, M10, M11, M12, M13, BUG-14; VCS LOWs |
-| 5 | RAG & memory | M15, M16 (retriever), M17, M18, M19, M21; RAG LOWs; LanceDB filter injection |
+| 5 | RAG & memory | M15, M16 (retriever), M17, M18, M19, M21; RAG LOWs; filter-guard dedup |
 | 6 | Web & CLI hygiene | web/CLI LOWs; CI path-filter LOW |
 
 ---
@@ -69,18 +70,24 @@ Six PRs, landed in order. One implementation plan per slice, written after the p
 ### Membership gate (M7)
 
 Rule unchanged from `ProjectAccessService.assertProjectMembership`: a user needs a `ProjectMember` row
-unless global ADMIN; agents pass; failure is 403. Apply it where it is missing today:
+unless global ADMIN; agents pass; failure is 403. Route status at `c5a955af`:
 
-- **Tickets** (`projects/:slug/tickets*`): every route, not only `assign`. The check lives in
-  `TicketsService` and `TicketTransitionsService` (one check per request, not per controller method).
-- **Comments:** `projects/:slug/tickets/:ref/comments` checks by slug. `PATCH/DELETE comments/:id` has no
-  slug: resolve comment → ticket → project, then check. Non-members get **404** there (no comment-id oracle).
-- **Labels:** every `projects/:slug/labels*` and `projects/:slug/tickets/:ref/labels*` route.
-- **KB** (`projects/:slug/kb`, `rag.controller.ts`): gated (not listed in the review; found open).
-- **Projects:** `GET /projects` returns only the caller's member projects (global ADMIN: all; agents: all)
-  via a new repository query joining `ProjectMember`. `GET :slug`, `GET :slug/agents` and
-  `PATCH :slug/agents/:agentSlug` are gated. `ci-webhook-token`, `PATCH :slug` and `DELETE :slug` keep their
-  existing permission requirements.
+| Routes | Today | Slice 1 |
+|:--|:--|:--|
+| links, vcs, memory, timeline, context, retrieval, code-intel, live, members | gated | unchanged |
+| `POST tickets/:ref/assign` | gated in controller (`tickets.controller.ts:244`) | check moves into the service; controller call **removed** (no double check) |
+| all other `projects/:slug/tickets*` incl. transitions | ungated | gated in `TicketsService` / `TicketTransitionsService` |
+| `projects/:slug/tickets/:ref/comments` | ungated | gated by slug |
+| `PATCH/DELETE comments/:id` | no project resolution at all | **new** comment → ticket → project resolution, then the check; non-members get **404** (no comment-id oracle) |
+| `projects/:slug/labels*`, `projects/:slug/tickets/:ref/labels*` | ungated | gated |
+| `projects/:slug/kb*` | gated by a private copy (`rag.controller.ts` `checkProjectMembership`) | copy replaced by `ProjectAccessService.assertProjectMembership` |
+| `GET projects/:slug/codeintel/impact`, `GET :slug/agents` | gated | unchanged |
+| `GET /projects` | lists all | member projects only (global ADMIN and agents: all), new repository query joining `ProjectMember` |
+| `GET projects/:slug`, `PATCH :slug/agents/:agentSlug` | ungated | gated |
+| `ci-webhook-token`, `PATCH :slug`, `DELETE :slug`, `projects/:slug/webhooks*` | permission-gated (ADMIN) | unchanged |
+
+The plan starts by re-enumerating every `@Controller` route with a `:slug` or project-owned id and records
+each in the table-driven test below, so nothing in this table is trusted blindly.
 
 ### KB writes (M16, access half)
 
@@ -89,8 +96,9 @@ above; `VIEWER` is removed from their `allowedRoles`. VIEWER keeps read and sear
 
 ### Agents (M8)
 
-- Create and update build the Prisma data from named fields only (no `...scalarFields` spread); unknown
-  body fields such as `status` or `id` are dropped.
+- Create builds the Prisma data from named fields only (no `...scalarFields` spread at
+  `agents.service.ts:145-151`); unknown body fields such as `status` or `id` are dropped. `update()` already
+  whitelists and is unchanged apart from the DTO swap.
 - The service-local DTOs are replaced by `agents/dto/*` (update keeps the `ACTIVE|PAUSED|OFFLINE` enum);
   the unused `create-agent.dto.ts` is merged into the one DTO that remains.
 - Slug validated with `^[a-z0-9-]+$`. Duplicate slug (P2002) → **409**.
@@ -115,9 +123,12 @@ above; `VIEWER` is removed from their `allowedRoles`. VIEWER keeps read and sear
 
 ---
 
-## Slice 2 — Webhooks
+## Slice 2 — Webhooks (two PRs: 2a outbound, 2b inbound)
 
-### Outbound delivery (M5)
+The outbound guard is greenfield (new HTTP client path, Bun spike); the inbound fixes are small edits to
+existing controllers. They ship separately so neither blocks the other; 2a lands first.
+
+### 2a — Outbound delivery (M5)
 
 New `webhook/outbound-url-guard.ts`: a pure address classifier plus a DNS-resolver seam.
 
@@ -136,10 +147,13 @@ New `webhook/outbound-url-guard.ts`: a pure address classifier plus a DNS-resolv
 - **Plan task 1 is a Bun spike:** prove Bun's `node:https` honours a custom `lookup`. If it does not, the
   fallback is resolve → validate → connect to the pinned IP with `servername` and `Host` set.
 
-### Inbound CI and VCS webhooks (LOWs)
+### 2b — Inbound CI and VCS webhooks (LOWs)
 
 - **No slug enumeration:** unknown slug, missing secret, missing connection and bad signature all return
-  the same 401 with the same body. Replay dedup still runs after verification.
+  the same 401 with the same body. This removes the CI controller's early `NotFoundAppException` branch
+  (`ci-webhook.controller.ts`, after `resolveProject`) and the VCS controller's 404-throwing
+  `projectsService.findBySlug`; both collapse into one lookup that yields "no secret" on any miss.
+  Replay dedup still runs after verification.
 - **Signature before DTO validation:** the `@Body()` DTO parameter is removed. The controller verifies
   `rawBody`, then parses and validates with class-validator (`plainToInstance` + `validate`), 400 on
   failure. An unauthenticated caller never sees validation errors.
@@ -147,13 +161,14 @@ New `webhook/outbound-url-guard.ts`: a pure address classifier plus a DNS-resolv
 - The VCS webhook returns 200 `{ ignored: true, reason }` unless the connection `isActive` is true **and**
   `syncMode === 'webhook'` (values are `off | polling | webhook`). 200 avoids GitHub retry storms.
 - `DELETE projects/:slug/webhooks/:id` looks the webhook up by project id; another project's id → 404.
+  The slug-less `DELETE webhooks/:id` (global ADMIN only) stays as the deliberate cross-project admin route.
 
 ### Tests
 
-- Unit: address classifier (v4, v6, mapped, allowlist host and CIDR), error-class mapping.
-- Integration with a local HTTP server: a hostname resolving to 127.0.0.1 is refused unless allow-listed;
+- 2a unit: address classifier (v4, v6, mapped, allowlist host and CIDR), error-class mapping.
+- 2a integration with a local HTTP server: a hostname resolving to 127.0.0.1 is refused unless allow-listed;
   a 302 is refused; a success delivers.
-- Controller specs: every inbound failure mode yields the identical 401; validation runs only after a valid
+- 2b controller specs: every inbound failure mode yields the identical 401; validation runs only after a valid
   signature; ignored deliveries return 200.
 
 ---
@@ -164,8 +179,11 @@ New `webhook/outbound-url-guard.ts`: a pure address classifier plus a DNS-resolv
 
 - `POST :ref/close` takes a required `{ body }`; the reason is written as a GENERAL comment in the same
   transaction as the status change (and emits `COMMENT_ADDED` like any comment).
-- Allowed callers: global ADMIN or project ADMIN (new non-throwing `ProjectAccessService.isProjectAdmin`).
-  Others → 403; agents always 403.
+- Allowed callers: global ADMIN or project ADMIN, via the existing non-throwing
+  `ProjectAccessService.canManageMembers` (same semantics; renamed `isProjectAdmin` with its one caller
+  updated, no duplicate added). Others → 403; agents always 403.
+- `close()` (`ticket-transitions.service.ts:367-425`) has no comment or admin handling today, only the
+  blanket `@RequiredPermission([TRANSITION, 'Ticket'])`; both are new code in the existing transaction.
 - Source states unchanged: IN_PROGRESS, VERIFIED, VERIFY_FIX. The M3 conditional write stays.
 - **Breaking:** CLI `ticket close` gains a required `--reason`; the web Close action opens the comment
   dialog. The normal path to CLOSED remains verify-fix approve.
@@ -177,15 +195,17 @@ New `webhook/outbound-url-guard.ts`: a pure address classifier plus a DNS-resolv
   filtered by the TRANSITION permission; `close` only for admins.
 - `GET :ref` returns `allowedActions`; list/board responses do not.
 - `TicketActionPanel` renders only from `allowedActions`; its hard-coded status blocks are removed.
-- `TRANSITION_RULES` also allows IN_PROGRESS → VERIFIED (GENERAL comment). The plan checks whether an
-  endpoint reaches it: if yes it becomes an action; if not, the rule is recorded as dead and left alone.
+- `TRANSITION_RULES` already contains IN_PROGRESS → VERIFIED (GENERAL comment, `ticket-transitions.ts:20-23`).
+  No route supplies a comment for it (`PATCH :ref {status}` passes no comment type, so it always fails
+  validation). It is **not** an `allowedActions` entry; the rule is left in the table and noted as unreachable.
 - Table-driven test: for every status × role, `allowedActions` agrees with `validateTransition`.
 
 ### `assignee` (M26)
 
 `TicketResponseDto.assignee: { kind: 'user' | 'agent'; id: string; name: string } | null`, populated by the
-repository with a name-only `select` on User/Agent, on list and detail. Web `[ref].vue`, `TicketBoard.vue`
-and CLI `ticket.ts` read sites move to it.
+repository with a name-only `select` on User/Agent, on list and detail. The web (`[ref].vue`, `TicketBoard.vue`)
+and CLI (`ticket.ts`) already read `ticket.assignee.name` (always undefined today); only their types change,
+plus a check that the shape they read matches.
 
 ### `approve` (M28)
 
@@ -236,8 +256,11 @@ assignee name renders.
 
 ### M12 `merged` is terminal
 
-Enforced once in `updateTicketLinkWithPrState` as a conditional write (`updateMany where prState <> 'merged'`).
-Every webhook handler and the PR-sync poller go through it.
+Enforced once in `updateTicketLinkWithPrState` (`prisma-vcs.repository.ts`, today an unconditional alias) as
+a conditional write (`updateMany where prState <> 'merged'`). Every `prState` write site must go through it:
+the `opened`, `closed`, `ready_for_review`, `reopened`, `converted_to_draft` and `merged` handlers in
+`vcs-webhook.service.ts`, and `vcs-pr-sync.service.ts`. The plan greps for every `prState` write and a test
+fails if any bypasses the repository method.
 
 ### M13 symbol ids
 
@@ -255,7 +278,8 @@ Every webhook handler and the PR-sync poller go through it.
 
 ### BUG-14 GitLab (polling + outbound only)
 
-- `GITLAB` added to `VcsProviderType`.
+- `GITLAB` added to the DTO enum `VcsProviderType` (`create-vcs-connection.dto.ts`). The `provider` column is
+  a plain `String`, so no migration.
 - New `VCS_GITLAB_API_URL` config (default `https://gitlab.com/api/v4`) beside `githubApiUrl`; the
   `repoUrl` parser is host-agnostic (self-hosted GitLab).
 - GitLab provider: `per_page=100` + `X-Next-Page` pagination with the same page cap.
@@ -274,15 +298,17 @@ migrations (backfill; symbol wipe).
 
 ### M15 KB lifecycle
 
-- A `ticket_event` outbox handler for ticket deletion calls `deleteBySource` (at-least-once, idempotent).
+- A `ticket_event` outbox handler that acts **only** on `TICKET_DELETED` (every `ticket_event` subscriber
+  receives all actions) calls `deleteBySource` (at-least-once, idempotent).
 - `indexDocument` becomes an upsert: delete-by-source then add, inside the per-table `exclusive` lock.
   This also makes `evaluate-retrieval.ts` seeding idempotent (LOW).
 
-### LanceDB filter injection (new)
+### LanceDB filter guard dedup
 
-`deleteBySource` and `deleteAllBySourceType` interpolate caller values into LanceDB filter strings
-(`source_id = '${sourceId}'`); `sourceId` reaches it from `DELETE /kb/documents/:sourceId`. Validate the
-identifier shape and escape quotes through one helper used by every filter builder.
+Not a live injection: `deleteBySource` already rejects quotes and control characters inline
+(`vector-store.service.ts:460-478`), and `deleteAllBySourceType` uses a fixed allowlist. The inline check
+duplicates `isSafeFilterValue` (`lance-table-manager.ts:37`); `deleteBySource` imports the shared helper
+instead, and a test pins that a quote in `sourceId` is rejected.
 
 ### M16 retriever half
 
@@ -304,7 +330,8 @@ Cross-store atomicity is impossible, so the write is made retry-safe:
 
 1. Delete LanceDB vectors for removed and updated nodes (idempotent).
 2. One Prisma transaction: node upserts, links deduped in memory + `createMany({ skipDuplicates })`, and
-   `GraphNode.vectorStale = true` on changed nodes (new column, migration).
+   `GraphNode.vectorStale = true` on changed nodes (new column `Boolean @default(false)`; existing rows
+   backfill to false).
 3. Index stale nodes into LanceDB, clearing the flag per node.
 
 Every run first re-indexes leftover `vectorStale` nodes, so a crash or LanceDB failure heals on the next
@@ -318,8 +345,10 @@ import or outbox retry.
 ### RAG LOWs
 
 - `.catch(log)` on the three fire-and-forget `optimize()` calls.
-- **Delete `LexicalIndex`**: its `search` has no callers; remove the index, its startup warmup (50k rows
-  per project) and its outbox handler, followed by an orphan pass.
+- **Delete `LexicalIndex`**: its `search` has no callers. Remove the class, `LexicalIndexWarmup` and its
+  startup load (50k rows per project) and outbox handler registration in `rag.module.ts`, and the optional
+  `lexicalIndex` calls in `vector-store.service.ts` (`addDocument`, `removeDocument`, `clearProject`),
+  followed by an orphan pass.
 - `GetContextQueryDto` gets validators and goes through `parseQuery`.
 - `GET /kb/documents?limit=` validated (`@IsInt @Min(1) @Max(500)`).
 
@@ -336,7 +365,9 @@ heals, paging under mutation, filter escaping). The CI `evaluate` job must stay 
 ### Web
 
 - `apiPath` tagged-template helper applies `encodeURIComponent` to every interpolated value; all `$api`
-  call sites move to it; a unit test fails on raw `${slug}` / `${ref}` inside `$api(` strings.
+  call sites move to it; a unit test fails on raw `${slug}` / `${ref}` inside `$api(` strings. Sites that
+  already call `encodeURIComponent` (`useProjectMembers`, `useAdminUsers`, `useProjectEvents`,
+  `[project]/code-intel.vue`) drop it when moving, so nothing is double-encoded.
 - Duplicate comment toast removed (only `CommentThread` toasts).
 - Missing `agents.*` i18n keys: `agents.empty` and `agents.toast.created` / `createFailed` added (en + zh);
   `agents.validation.*` call sites repointed to the existing `agents.form.validation.*`.
