@@ -73,9 +73,8 @@ test.describe('Live updates (SSE through the Nuxt proxy)', () => {
       await expect(b.page.getByTestId('board-column-CREATED').getByText(title)).toBeVisible();
       await b.page.evaluate(() => { (window as unknown as { __noReload: boolean }).__noReload = true; });
 
-      // A (the admin) verifies via the API, exactly like ticket-lifecycle.spec.ts:
-      // the ticket detail transition dialog silently drops its comment (the shared
-      // ui/textarea never syncs v-model), so the dialog path 400s outside this slice.
+      // A (the admin) verifies via the API: this test is about B's live board, and
+      // the dialog path is covered in ticket-lifecycle.spec.ts.
       await transitionTicket(token, projectSlug, ticket.ref, 'verify', { body: 'verified while B watches' });
 
       await expect(b.page.getByTestId('board-column-VERIFIED').getByText(title)).toBeVisible({ timeout: 5000 });
