@@ -1,6 +1,7 @@
 import { Controller, Get, HttpCode, HttpStatus, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { OutboxAdminService } from './outbox-admin.service';
+import { OutboxStatus } from '@nathapp/nestjs-outbox';
 import { OutboxListQueryDto } from './dto/outbox-list-query.dto';
 import { JwtAuthGuard, Principal, RequiredPermission } from '@nathapp/nestjs-auth';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
@@ -23,7 +24,8 @@ export class AdminController {
     @Principal() _principal: KodaPrincipal,
     @Query() query: OutboxListQueryDto,
   ) {
-    return this.outboxAdmin.list(query.status);
+    // @IsEnum(OutboxStatus) on the DTO has validated the value.
+    return this.outboxAdmin.list(query.status as OutboxStatus | undefined);
   }
 
   @Post('outbox/:eventId/retry')

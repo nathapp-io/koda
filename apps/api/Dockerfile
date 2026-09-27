@@ -85,9 +85,6 @@ RUN --mount=type=cache,id=bun-install,target=/root/.bun/install/cache \
            /app/apps/runtime/node_modules/.bun/@lancedb+lancedb-linux-x64-gnu@* \
            /app/apps/runtime/node_modules/@lancedb/lancedb-linux-x64-gnu && \
     find /app/apps/runtime/node_modules -type f -name '*.map' -delete && \
-    find /app/apps/runtime/node_modules -type d \
-      \( -name test -o -name tests -o -name __tests__ -o -name docs -o -name doc -o -name examples -o -name example \) \
-      -prune -exec rm -rf '{}' + && \
     find /app/apps/runtime/node_modules/@prisma/client/runtime -type f \
       \( -name 'edge*' -o -name 'react-native*' -o -name 'index-browser*' -o -name 'wasm-*' -o -name 'query_*wasm-base64*' \) \
       -delete

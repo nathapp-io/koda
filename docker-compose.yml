@@ -1,13 +1,17 @@
+# api and migrate run the same image; one build definition so they cannot drift.
+x-api-build: &api-build
+  context: .
+  dockerfile: apps/api/Dockerfile
+  args:
+    BUN_VERSION: 1.3.11
+    TURBO_VERSION: 2.8.17
+    BUILD_APP: api
+    BUILD_APP_PACKAGE: "@nathapp/koda-api"
+
 services:
   api:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
-      args:
-        BUN_VERSION: 1.3.11
-        TURBO_VERSION: 2.8.17
-        BUILD_APP: api
-        BUILD_APP_PACKAGE: "@nathapp/koda-api"
+    image: koda-api
+    build: *api-build
     ports:
       - "${API_PORT:-3100}:3100"
     environment:
@@ -27,8 +31,8 @@ services:
     volumes:
       - koda_data:/data
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3100/api/health"]
       interval: 30s
@@ -36,6 +40,21 @@ services:
       retries: 3
       start_period: 10s
     restart: unless-stopped
+
+  # One-off: applies Prisma migrations, then exits. The api never migrates on boot
+  # (see deployments/example/README.md); it starts only after this succeeds.
+  migrate:
+    image: koda-api
+    build: *api-build
+    command: ["bunx", "--package", "prisma@6.19.2", "prisma", "migrate", "deploy"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-koda}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-koda}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    restart: "no"
 
   postgres:
     image: postgres:16
