@@ -240,7 +240,8 @@
       "submitFix": "提交修复",
       "approveFix": "批准修复",
       "failFix": "修复失败",
-      "close": "关闭"
+      "close": "关闭",
+      "closeReasonTitle": "关闭原因"
     },
     "assign": {
       "userIdPlaceholder": "用户 ID",

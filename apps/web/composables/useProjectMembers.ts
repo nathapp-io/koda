@@ -18,6 +18,8 @@ interface MemberPage {
   hasNext: boolean
   /** Computed server-side (global ADMIN, or a project ADMIN member). */
   canManage?: boolean
+  /** The caller's role in this project (null when the server omits it). */
+  viewerRole?: string | null
 }
 
 export function useProjectMembers(slug: string) {
@@ -28,6 +30,7 @@ export function useProjectMembers(slug: string) {
   const current = ref(1)
   const hasNext = ref(false)
   const canManage = ref(false)
+  const viewerRole = ref<string | null>(null)
 
   async function fetchPage(pageNumber: number): Promise<MemberPage> {
     const query: Record<string, string> = pageNumber > 1 ? { current: String(pageNumber) } : {}
@@ -43,6 +46,7 @@ export function useProjectMembers(slug: string) {
     // The API computes this from live membership, so it is correct even when
     // the caller's own ADMIN row is on a later page. Absent only on old servers.
     if (typeof res.canManage === 'boolean') canManage.value = res.canManage
+    if (res.viewerRole !== undefined) viewerRole.value = res.viewerRole
   }
 
   async function load(): Promise<void> {
@@ -75,5 +79,5 @@ export function useProjectMembers(slug: string) {
     total.value = Math.max(0, total.value - 1)
   }
 
-  return { members, total, current, hasNext, canManage, load, reload, loadMore, add, changeRole, remove }
+  return { members, total, current, hasNext, canManage, viewerRole, load, reload, loadMore, add, changeRole, remove }
 }

@@ -7,7 +7,7 @@ interface Ticket {
   type: 'BUG' | 'ENHANCEMENT'
   priority: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
   status: 'CREATED' | 'VERIFIED' | 'IN_PROGRESS' | 'VERIFY_FIX' | 'CLOSED' | 'REJECTED'
-  assignee?: { name: string; email?: string } | null
+  assignee?: { kind: 'user' | 'agent'; id: string; name: string } | null
 }
 
 // Simulate handleOpenTicket as implemented in pages/[project]/index.vue

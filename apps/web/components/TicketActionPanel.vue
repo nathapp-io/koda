@@ -2,10 +2,15 @@
 import { ref } from 'vue'
 import { extractApiError } from '~/composables/useApi'
 
+type TicketAction = 'verify' | 'start' | 'fix' | 'verify-fix' | 'reject' | 'close'
+type DialogAction = 'verify' | 'fix' | 'reject' | 'close' | 'verify-fix-approve' | 'verify-fix-fail'
+
 interface Ticket {
   id: string
   ref: string
   status: 'CREATED' | 'VERIFIED' | 'IN_PROGRESS' | 'VERIFY_FIX' | 'CLOSED' | 'REJECTED'
+  /** Computed by the API for the current user (M25); absent means no actions. */
+  allowedActions?: TicketAction[]
   [key: string]: unknown
 }
 
@@ -24,9 +29,15 @@ const toast = useAppToast()
 
 const isOpen = ref(false)
 const comment = ref('')
-const pendingAction = ref<string | null>(null)
+const pendingAction = ref<DialogAction | null>(null)
 
-function openDialog(action: string) {
+const actions = computed(() => new Set(props.ticket.allowedActions ?? []))
+const canSubmit = computed(() => comment.value.trim().length > 0)
+const dialogTitle = computed(() =>
+  pendingAction.value === 'close' ? t('tickets.actions.closeReasonTitle') : t('common.addComment'),
+)
+
+function openDialog(action: DialogAction) {
   pendingAction.value = action
   comment.value = ''
   isOpen.value = true
@@ -40,7 +51,7 @@ function closeDialog() {
 
 const baseUrl = computed(() => `/projects/${props.projectSlug}/tickets/${props.ticket.ref}`)
 
-async function performAction(action: string, body: Record<string, unknown> = {}) {
+async function performAction(action: DialogAction | 'start', body: Record<string, unknown> = {}) {
   try {
     if (action === 'verify-fix-approve') {
       await $api.post(`${baseUrl.value}/verify-fix?approve=true`, body)
@@ -59,14 +70,10 @@ async function handleStart() {
   await performAction('start')
 }
 
-async function handleApproveFix() {
-  await performAction('verify-fix-approve')
-}
-
 async function handleDialogSubmit() {
   const action = pendingAction.value
-  if (!action) return
-  const body = comment.value ? { body: comment.value } : {}
+  if (!action || !canSubmit.value) return
+  const body = { body: comment.value.trim() }
   closeDialog()
   await performAction(action, body)
 }
@@ -74,42 +81,20 @@ async function handleDialogSubmit() {
 
 <template>
   <div class="space-y-2">
-    <!-- CREATED: Verify + Reject -->
-    <template v-if="ticket.status === 'CREATED'">
-      <Button class="w-full" @click="openDialog('verify')">{{ t('tickets.actions.verify') }}</Button>
-      <Button class="w-full" variant="destructive" @click="openDialog('reject')">{{ t('tickets.actions.reject') }}</Button>
-    </template>
-
-    <!-- VERIFIED: Start -->
-    <template v-else-if="ticket.status === 'VERIFIED'">
-      <Button class="w-full" @click="handleStart">{{ t('tickets.actions.start') }}</Button>
-      <Button class="w-full" variant="outline" @click="performAction('close')">{{ t('tickets.actions.close') }}</Button>
-    </template>
-
-    <!-- IN_PROGRESS: Submit Fix + Reject -->
-    <template v-else-if="ticket.status === 'IN_PROGRESS'">
-      <Button class="w-full" @click="openDialog('fix')">{{ t('tickets.actions.submitFix') }}</Button>
-      <Button class="w-full" variant="outline" @click="performAction('close')">{{ t('tickets.actions.close') }}</Button>
-      <Button class="w-full" variant="destructive" @click="openDialog('reject')">{{ t('tickets.actions.reject') }}</Button>
-    </template>
-
-    <!-- VERIFY_FIX: Approve Fix + Fail Fix -->
-    <template v-else-if="ticket.status === 'VERIFY_FIX'">
-      <Button class="w-full" @click="handleApproveFix">{{ t('tickets.actions.approveFix') }}</Button>
-      <Button class="w-full" variant="outline" @click="performAction('close')">{{ t('tickets.actions.close') }}</Button>
+    <Button v-if="actions.has('verify')" class="w-full" @click="openDialog('verify')">{{ t('tickets.actions.verify') }}</Button>
+    <Button v-if="actions.has('start')" class="w-full" @click="handleStart">{{ t('tickets.actions.start') }}</Button>
+    <Button v-if="actions.has('fix')" class="w-full" @click="openDialog('fix')">{{ t('tickets.actions.submitFix') }}</Button>
+    <template v-if="actions.has('verify-fix')">
+      <Button class="w-full" @click="openDialog('verify-fix-approve')">{{ t('tickets.actions.approveFix') }}</Button>
       <Button class="w-full" variant="outline" @click="openDialog('verify-fix-fail')">{{ t('tickets.actions.failFix') }}</Button>
     </template>
+    <Button v-if="actions.has('close')" class="w-full" variant="outline" @click="openDialog('close')">{{ t('tickets.actions.close') }}</Button>
+    <Button v-if="actions.has('reject')" class="w-full" variant="destructive" @click="openDialog('reject')">{{ t('tickets.actions.reject') }}</Button>
 
-    <!-- CLOSED / REJECTED: no buttons -->
-    <template v-else-if="ticket.status === 'CLOSED' || ticket.status === 'REJECTED'">
-      <!-- terminal state — no actions available -->
-    </template>
-
-    <!-- Comment Dialog -->
     <Dialog :open="isOpen" @update:open="isOpen = $event">
       <DialogContent class="sm:max-w-[400px]">
         <DialogHeader>
-          <DialogTitle>{{ t('common.addComment') }}</DialogTitle>
+          <DialogTitle>{{ dialogTitle }}</DialogTitle>
         </DialogHeader>
         <div class="space-y-4">
           <Textarea
@@ -119,7 +104,7 @@ async function handleDialogSubmit() {
           />
           <div class="flex justify-end gap-2">
             <Button variant="outline" @click="closeDialog">{{ t('common.cancel') }}</Button>
-            <Button @click="handleDialogSubmit">{{ t('common.confirm') }}</Button>
+            <Button :disabled="!canSubmit" @click="handleDialogSubmit">{{ t('common.confirm') }}</Button>
           </div>
         </div>
       </DialogContent>

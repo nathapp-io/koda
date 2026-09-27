@@ -6,8 +6,9 @@ import { createDebouncer } from '~/lib/debounce'
 definePageMeta({ layout: 'default' })
 
 interface Assignee {
+  kind: 'user' | 'agent'
+  id: string
   name: string
-  email?: string
 }
 
 interface Ticket {

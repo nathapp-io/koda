@@ -240,7 +240,8 @@
       "submitFix": "Submit Fix",
       "approveFix": "Approve Fix",
       "failFix": "Fail Fix",
-      "close": "Close"
+      "close": "Close",
+      "closeReasonTitle": "Reason for closing"
     },
     "assign": {
       "userIdPlaceholder": "User ID",

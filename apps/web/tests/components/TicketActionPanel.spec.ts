@@ -39,141 +39,40 @@ describe('US-005-2 AC1: TicketActionPanel.vue accepts a typed ticket prop', () =
     expect(hasTypedProps).toBe(true)
   })
 
-  test('source references ticket.status to drive rendering', () => {
-    const source = readFileSync(panelPath, 'utf-8')
-    expect(source).toContain('ticket.status')
-  })
 })
 
 // ──────────────────────────────────────────────────────────────────────────────
-// AC2 — CREATED status renders Verify and Reject buttons only
+// M25 — panel renders only from the API-provided allowedActions
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('US-005-2 AC2: CREATED status renders Verify and Reject buttons', () => {
-  test('source references CREATED status', () => {
-    const source = readFileSync(panelPath, 'utf-8')
-    expect(source).toContain('CREATED')
+describe('M25: panel renders only from the API allowedActions', () => {
+  const source = () => readFileSync(panelPath, 'utf-8')
+
+  test('reads ticket.allowedActions', () => {
+    expect(source()).toContain('allowedActions')
   })
 
-  test('source includes a Verify button label', () => {
-    const source = readFileSync(panelPath, 'utf-8')
-    const hasVerify =
-      source.includes('Verify') ||
-      source.includes('verify')
-    expect(hasVerify).toBe(true)
+  test('has no hard-coded status blocks', () => {
+    expect(source()).not.toMatch(/ticket\.status\s*===/)
   })
 
-  test('source includes a Reject button label for CREATED state', () => {
-    const source = readFileSync(panelPath, 'utf-8')
-    const hasReject =
-      source.includes('Reject') ||
-      source.includes('reject')
-    expect(hasReject).toBe(true)
+  test.each(['verify', 'start', 'fix', 'verify-fix', 'reject', 'close'])('handles the %s action', (action) => {
+    expect(source()).toContain(`'${action}'`)
   })
 
-  test('source conditionally renders buttons based on CREATED status', () => {
-    const source = readFileSync(panelPath, 'utf-8')
-    const hasConditional =
-      source.includes('v-if') ||
-      source.includes('v-show') ||
-      source.includes('computed')
-    expect(hasConditional).toBe(true)
-  })
-})
-
-// ──────────────────────────────────────────────────────────────────────────────
-// AC3 — VERIFIED status renders Start button only
-// ──────────────────────────────────────────────────────────────────────────────
-
-describe('US-005-2 AC3: VERIFIED status renders Start button', () => {
-  test('source references VERIFIED status', () => {
-    const source = readFileSync(panelPath, 'utf-8')
-    expect(source).toContain('VERIFIED')
+  test('close opens the reason dialog instead of posting directly', () => {
+    expect(source()).not.toContain("performAction('close')")
+    expect(source()).toContain("openDialog('close')")
+    expect(source()).toContain('tickets.actions.closeReasonTitle')
   })
 
-  test('source includes a Start button label', () => {
-    const source = readFileSync(panelPath, 'utf-8')
-    const hasStart =
-      source.includes('Start') ||
-      source.includes('start')
-    expect(hasStart).toBe(true)
-  })
-})
-
-// ──────────────────────────────────────────────────────────────────────────────
-// AC4 — IN_PROGRESS status renders Submit Fix and Reject buttons only
-// ──────────────────────────────────────────────────────────────────────────────
-
-describe('US-005-2 AC4: IN_PROGRESS status renders Submit Fix and Reject buttons', () => {
-  test('source references IN_PROGRESS status', () => {
-    const source = readFileSync(panelPath, 'utf-8')
-    expect(source).toContain('IN_PROGRESS')
+  test('approve fix opens the dialog (the API requires a review comment)', () => {
+    expect(source()).toContain("openDialog('verify-fix-approve')")
   })
 
-  test('source includes a Submit Fix button label', () => {
-    const source = readFileSync(panelPath, 'utf-8')
-    const hasSubmitFix =
-      source.includes('Submit Fix') ||
-      source.includes('submitFix') ||
-      source.includes('submit-fix') ||
-      source.includes('Submit fix')
-    expect(hasSubmitFix).toBe(true)
-  })
-})
-
-// ──────────────────────────────────────────────────────────────────────────────
-// AC5 — VERIFY_FIX status renders Approve Fix and Fail Fix buttons only
-// ──────────────────────────────────────────────────────────────────────────────
-
-describe('US-005-2 AC5: VERIFY_FIX status renders Approve Fix and Fail Fix buttons', () => {
-  test('source references VERIFY_FIX status', () => {
-    const source = readFileSync(panelPath, 'utf-8')
-    expect(source).toContain('VERIFY_FIX')
-  })
-
-  test('source includes an Approve Fix button label', () => {
-    const source = readFileSync(panelPath, 'utf-8')
-    const hasApproveFix =
-      source.includes('Approve Fix') ||
-      source.includes('approveFix') ||
-      source.includes('Approve fix')
-    expect(hasApproveFix).toBe(true)
-  })
-
-  test('source includes a Fail Fix button label', () => {
-    const source = readFileSync(panelPath, 'utf-8')
-    const hasFailFix =
-      source.includes('Fail Fix') ||
-      source.includes('failFix') ||
-      source.includes('Fail fix')
-    expect(hasFailFix).toBe(true)
-  })
-})
-
-// ──────────────────────────────────────────────────────────────────────────────
-// AC6 — CLOSED and REJECTED statuses render no action buttons
-// ──────────────────────────────────────────────────────────────────────────────
-
-describe('US-005-2 AC6: CLOSED and REJECTED statuses render no action buttons', () => {
-  test('source references CLOSED status', () => {
-    const source = readFileSync(panelPath, 'utf-8')
-    expect(source).toContain('CLOSED')
-  })
-
-  test('source references REJECTED status', () => {
-    const source = readFileSync(panelPath, 'utf-8')
-    expect(source).toContain('REJECTED')
-  })
-
-  test('source handles CLOSED/REJECTED with no-button branch', () => {
-    const source = readFileSync(panelPath, 'utf-8')
-    // Component must have logic that covers terminal states (no buttons)
-    // Could be v-if checking status, a computed array, or an exhaustive switch
-    const hasTerminalHandling =
-      source.includes('CLOSED') &&
-      source.includes('REJECTED') &&
-      (source.includes('v-if') || source.includes('computed') || source.includes('switch'))
-    expect(hasTerminalHandling).toBe(true)
+  test('confirm is disabled for a blank comment and never sends an empty body', () => {
+    expect(source()).toMatch(/:disabled="!canSubmit"/)
+    expect(source()).not.toContain('comment.value ? { body: comment.value } : {}')
   })
 })
 
