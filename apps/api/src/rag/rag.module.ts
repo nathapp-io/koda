@@ -20,6 +20,7 @@ import { CronOptimizeStrategy } from './strategies/cron-optimize.strategy';
 import { ManualOptimizeStrategy } from './strategies/manual-optimize.strategy';
 import { OutboxModule } from '../outbox/outbox.module';
 import { FanOutPublisher } from '../outbox/fan-out-publisher';
+import { ProjectAccessModule } from '../projects/project-access.module';
 
 @Injectable()
 class LexicalIndexWarmup implements OnModuleInit {
@@ -121,7 +122,7 @@ class EntityStoreWarmup implements OnModuleInit {
 }
 
 @Module({
-  imports: [ScheduleModule.forRoot(), OutboxModule, PrismaModule],
+  imports: [ScheduleModule.forRoot(), OutboxModule, PrismaModule, ProjectAccessModule],
   controllers: [RagController],
   providers: [
     PrismaRagRepository,

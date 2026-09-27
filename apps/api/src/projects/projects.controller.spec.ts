@@ -6,6 +6,7 @@ import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
 import { AgentsService } from '../agents/agents.service';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
+import { ProjectAccessService } from './project-access.service';
 import { ProjectResponseDto } from './dto/project-response.dto';
 
 const mockProject = {
@@ -95,6 +96,10 @@ describe('ProjectsController', () => {
         { provide: ProjectsService, useValue: projectsService },
         { provide: ImpactAnalysisService, useValue: impactAnalysisService },
         { provide: AgentsService, useValue: agentsService },
+        // US-001: the route-level ProjectMembershipGuard is instantiated by the DI
+        // container even though these tests call the handlers directly, so its
+        // ProjectAccessService dependency must resolve.
+        { provide: ProjectAccessService, useValue: {} },
       ],
     }).compile();
 

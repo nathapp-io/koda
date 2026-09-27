@@ -25,6 +25,15 @@ export class ProjectAccessService {
   }
 
   /**
+   * Thin wrapper over PrismaProjectRepository.findMembershipRole: the guard
+   * resolves a project's role for a user principal to enforce an optional
+   * `@ProjectRoles(...)` gate.
+   */
+  async findMembershipRole(projectId: string, userId: string): Promise<string | null> {
+    return this.projectRepo.findMembershipRole(projectId, userId);
+  }
+
+  /**
    * Membership management: global ADMIN, or a user whose project role is ADMIN.
    * Agents never manage membership. Reads the role live (membership is not cached).
    */

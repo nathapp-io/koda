@@ -3,6 +3,7 @@ import { LabelsController } from './labels.controller';
 import { LabelsService } from './labels.service';
 import { CreateLabelDto } from './dto/create-label.dto';
 import { LabelResponseDto } from './dto/label-response.dto';
+import { ProjectAccessService } from '../projects/project-access.service';
 
 describe('LabelsController', () => {
   let controller: LabelsController;
@@ -76,7 +77,13 @@ describe('LabelsController', () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [LabelsController],
-      providers: [{ provide: LabelsService, useValue: mockLabelsService }],
+      providers: [
+        { provide: LabelsService, useValue: mockLabelsService },
+        // US-001: the route-level ProjectMembershipGuard is instantiated by the DI
+        // container even though these tests call the handlers directly, so its
+        // ProjectAccessService dependency must resolve.
+        { provide: ProjectAccessService, useValue: {} },
+      ],
     }).compile();
 
     controller = module.get<LabelsController>(LabelsController);

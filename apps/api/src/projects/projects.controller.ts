@@ -9,6 +9,7 @@ import {
   Query,
   HttpCode,
   BadRequestException,
+  UseGuards,
 } from '@nestjs/common';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
@@ -33,6 +34,7 @@ import { KodaAction } from '../auth/casl/koda-action.enum';
 import { AgentsService } from '../agents/agents.service';
 import { UpdateAgentDto } from '../agents/dto/update-agent.dto';
 import { ActorRole } from '../common/enums';
+import { ProjectMembershipGuard } from './project-membership.guard';
 
 @ApiTags('projects')
 @ApiBearerAuth()
@@ -67,6 +69,7 @@ export class ProjectsController {
   }
 
   @Get(':slug')
+  @UseGuards(ProjectMembershipGuard)
   @ApiOperation({ summary: 'Get a project by slug' })
   @ApiResponse({ status: 200, description: 'Project found' })
   @ApiResponse({ status: 404, description: 'Project not found' })
@@ -176,6 +179,7 @@ export class ProjectsController {
   }
 
   @Patch(':slug/agents/:agentSlug')
+  @UseGuards(ProjectMembershipGuard)
   @ApiOperation({ summary: 'Update an agent status within a project context (admin or the agent itself)' })
   @ApiResponse({ status: 200, description: 'Agent updated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })

@@ -3,6 +3,7 @@ import { CommentsController } from './comments.controller';
 import { CommentsService } from './comments.service';
 import { CreateCommentDto, CommentTypeEnum } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
+import { ProjectAccessService } from '../projects/project-access.service';
 
 describe('CommentsController', () => {
   let controller: CommentsController;
@@ -79,7 +80,13 @@ describe('CommentsController', () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [CommentsController],
-      providers: [{ provide: CommentsService, useValue: mockCommentsService }],
+      providers: [
+        { provide: CommentsService, useValue: mockCommentsService },
+        // US-001: the route-level ProjectMembershipGuard is instantiated by the DI
+        // container even though these tests call the handlers directly, so its
+        // ProjectAccessService dependency must resolve.
+        { provide: ProjectAccessService, useValue: {} },
+      ],
     }).compile();
 
     controller = module.get<CommentsController>(CommentsController);

@@ -3,8 +3,10 @@ import { LabelsController } from './labels.controller';
 import { LabelsService } from './labels.service';
 import { PrismaLabelRepository } from './prisma-label.repository';
 import { LABEL_REPOSITORY } from './domain/label.domain';
+import { ProjectAccessModule } from '../projects/project-access.module';
 
 @Module({
+  imports: [ProjectAccessModule],
   controllers: [LabelsController],
   providers: [
     PrismaLabelRepository,

@@ -4,6 +4,7 @@ import { ProjectsService } from './projects.service';
 import { AgentsService } from '../agents/agents.service';
 import { MemoryGovernanceService } from '../memory/memory-governance.service';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
+import { ProjectAccessService } from './project-access.service';
 
 describe('ProjectsModule — DI wiring', () => {
   let module: TestingModule;
@@ -16,6 +17,10 @@ describe('ProjectsModule — DI wiring', () => {
         { provide: AgentsService, useValue: {} },
         { provide: MemoryGovernanceService, useValue: {} },
         { provide: ImpactAnalysisService, useValue: {} },
+        // US-001: the route-level ProjectMembershipGuard is instantiated by the DI
+        // container even though these tests check controller wiring only, so its
+        // ProjectAccessService dependency must resolve.
+        { provide: ProjectAccessService, useValue: {} },
       ],
     }).compile();
   });
