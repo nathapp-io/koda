@@ -15,6 +15,8 @@ DO NOT EDIT MANUALLY — run `nax generate` to regenerate.
 
 **Key dependencies:** @types/jest, jest, ts-jest, typescript
 
+**Commands:** test: `npx turbo test` | lint: `bunx turbo lint` | typecheck: `bunx turbo type-check`
+
 ---
 # Koda CLI Context
 

@@ -17,6 +17,8 @@ These instructions apply to all AI coding agents in this project.
 
 **Key dependencies:** @types/jest, jest, ts-jest, typescript
 
+**Commands:** test: `npx turbo test` | lint: `bunx turbo lint` | typecheck: `bunx turbo type-check`
+
 ---
 # Koda CLI Context
 

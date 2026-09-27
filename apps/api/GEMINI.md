@@ -13,7 +13,9 @@ DO NOT EDIT MANUALLY — run `nax generate` to regenerate.
 
 **Language:** TypeScript
 
-**Key dependencies:** @fastify/helmet, @fastify/static, @nathapp/nestjs-prisma, @nestjs/cache-manager, @nestjs/common, @nestjs/config, @nestjs/core, @nestjs/platform-fastify, @nestjs/schedule, @nestjs/swagger
+**Key dependencies:** @fastify/static, @fastify/helmet, @nathapp/nestjs-prisma, @nestjs/cache-manager, @nestjs/common, @nestjs/config, @nestjs/core, @nestjs/platform-fastify, @nestjs/schedule, @nestjs/swagger
+
+**Commands:** test: `npx turbo test` | lint: `bunx turbo lint` | typecheck: `bunx turbo type-check`
 
 ---
 # Koda API Context
@@ -180,10 +182,20 @@ Integration details:
 - they must NOT require a database: compile the module with `Test.createTestingModule({ imports: [FeatureModule] }).compile()` and mock external collaborators (`PrismaService`, `TRANSACTION_MANAGER`, `ConfigService`) via provider `useValue`
 - `test/integration/` is reserved for behavior that genuinely needs a real DB: repository round-trips, constraints, soft-delete semantics, transactions
 
-Rationale: `bun run test` runs without a database, so DI/module-registration breakage must surface there. `test:integration` requires a DB (`koda-test.ephemeral.db`) and is not always run, so module-wiring tests hidden inside it can mask failures.
+Rationale: `bun run test` runs without a database, so DI/module-registration breakage must surface there. `test:integration` requires a real Postgres (`bun run test:db:up` starts a disposable one on port 5433 from the root `docker-compose.test.yml`) and is not always run, so module-wiring tests hidden inside it can mask failures.
 
-Useful scripts:
+### nax runs need the test Postgres
+
+- integration and e2e specs only run under `KODA_DB_TESTS=1`; without it they are `describe.skip` and pass as zero tests
+- nax's scoped test command (`bun run test:scoped <files>`) sets `KODA_DB_TESTS=1` whenever a targeted path matches `integration` or `e2e`, and the acceptance command always sets it
+- start the database before a nax run that touches `apps/api`: `bun run test:db:up`. With it down, those steps fail with `P1001: Can't reach database server at localhost:5433` instead of skipping
+- a story that writes a `test/integration/**` spec must see it run and pass under `test:scoped`, not just compile
+- every DB-mode run force-resets the test database (only a local `*_test` database is accepted; `.env.test` overrides an inherited `DATABASE_URL`), so do not run two DB-mode jest runs against the same database at once
+
+Useful scripts (run from `apps/api`):
 - `bun run test`
+- `bun run test:scoped <files>` (jest on the given files; DB mode when any is an integration/e2e spec)
+- `bun run test:db:up` (start test Postgres on 5433; `test:db:down` stops it)
 - `bun run test:integration`
 - `bun run db:generate`
 - `bun run db:migrate`
