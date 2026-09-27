@@ -9,10 +9,10 @@ describe('ProjectMembersController', () => {
 
   it('list parses paging strings and returns the page envelope with canManage', async () => {
     const page = { total: 0, current: 2, size: 5, hasNext: false, hasPrev: true, records: [] };
-    service.list.mockResolvedValue({ page, canManage: true });
+    service.list.mockResolvedValue({ page, canManage: true, viewerRole: 'ADMIN' });
     const res = await controller.list('proj', { current: '2', size: '5' } as never, principal);
     expect(service.list).toHaveBeenCalledWith('proj', principal, { current: 2, size: 5 });
-    expect(res).toEqual(expect.objectContaining({ ret: 0, data: { ...page, canManage: true } }));
+    expect(res).toEqual(expect.objectContaining({ ret: 0, data: { ...page, canManage: true, viewerRole: 'ADMIN' } }));
   });
 
   it('list ignores undeclared query keys', async () => {
