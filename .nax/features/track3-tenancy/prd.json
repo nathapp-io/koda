@@ -3,7 +3,7 @@
   "feature": "track3-tenancy",
   "branchName": "feat/track3-tenancy",
   "createdAt": "2026-09-27T00:00:00.000Z",
-  "updatedAt": "2026-09-27T06:29:48.022Z",
+  "updatedAt": "2026-09-27T07:00:27.371Z",
   "userStories": [
     {
       "id": "US-001",
@@ -35,8 +35,8 @@
         "tenancy"
       ],
       "dependencies": [],
-      "status": "pending",
-      "passes": false,
+      "status": "passed",
+      "passes": true,
       "attempts": 0,
       "escalations": [],
       "routing": {
@@ -122,7 +122,10 @@
       "routing": {
         "complexity": "complex",
         "testStrategy": "three-session-tdd",
-        "reasoning": "The comment-to-project ownership join, principal-filtered project query and PG-backed multi-route integration exercise access control across three modules."
+        "reasoning": "The comment-to-project ownership join, principal-filtered project query and PG-backed multi-route integration exercise access control across three modules.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
       },
       "contextFiles": [
         "apps/api/src/comments/comments.service.ts",
@@ -148,7 +151,8 @@
       "workdirSource": "stated",
       "priorErrors": [],
       "priorFailures": [],
-      "storyPoints": 1
+      "storyPoints": 1,
+      "storyGitRef": "7229a0e7b6afca198f1299396fa15df8afe1d07d"
     },
     {
       "id": "US-003",

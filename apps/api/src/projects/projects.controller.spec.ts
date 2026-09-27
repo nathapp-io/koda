@@ -65,7 +65,9 @@ const agentPrincipal: KodaPrincipal = {
 
 describe('ProjectsController', () => {
   let controller: ProjectsController;
-  let projectsService: jest.Mocked<ProjectsService>;
+  // US-002: the list route is `findAllForPrincipal(principal)`; the mock carries
+  // that member explicitly so these tests type against the finished service.
+  let projectsService: jest.Mocked<ProjectsService> & { findAllForPrincipal: jest.Mock };
   let impactAnalysisService: jest.Mocked<ImpactAnalysisService>;
   let agentsService: jest.Mocked<AgentsService>;
 
@@ -73,13 +75,14 @@ describe('ProjectsController', () => {
     projectsService = {
       create: jest.fn(),
       findAll: jest.fn(),
+      findAllForPrincipal: jest.fn(),
       findBySlug: jest.fn(),
       update: jest.fn(),
       softDelete: jest.fn(),
       assertProjectMembership: jest.fn(),
       findMembershipRole: jest.fn(),
       findCiWebhookToken: jest.fn(),
-    } as unknown as jest.Mocked<ProjectsService>;
+    } as unknown as jest.Mocked<ProjectsService> & { findAllForPrincipal: jest.Mock };
 
     impactAnalysisService = {
       getChangeImpact: jest.fn(),
@@ -122,13 +125,21 @@ describe('ProjectsController', () => {
   });
 
   describe('findAll', () => {
-    it('returns all projects', async () => {
-      projectsService.findAll.mockResolvedValue([mockProject] as any);
+    it('scopes the project list to the calling principal', async () => {
+      projectsService.findAllForPrincipal.mockResolvedValue([mockProject] as any);
 
-      const result = await controller.findAll();
+      const result = await controller.findAll(memberPrincipal);
 
-      expect(projectsService.findAll).toHaveBeenCalled();
+      expect(projectsService.findAllForPrincipal).toHaveBeenCalledWith(memberPrincipal);
       expect((result as any).data).toHaveLength(1);
+    });
+
+    it('does not use the unscoped list', async () => {
+      projectsService.findAllForPrincipal.mockResolvedValue([mockProject] as any);
+
+      await controller.findAll(memberPrincipal);
+
+      expect(projectsService.findAll).not.toHaveBeenCalled();
     });
   });
 
@@ -153,11 +164,11 @@ describe('ProjectsController', () => {
     const projectWithToken = { ...mockProject, ciWebhookToken: 'secret-token' };
 
     it('H3: list responses do not contain ciWebhookToken', async () => {
-      projectsService.findAll.mockResolvedValue(
+      projectsService.findAllForPrincipal.mockResolvedValue(
         [ProjectResponseDto.from(projectWithToken)] as any,
       );
 
-      const res = await controller.findAll();
+      const res = await controller.findAll(adminPrincipal);
 
       expect(JSON.stringify(res)).not.toContain('ciWebhookToken');
       expect(JSON.stringify(res)).not.toContain('secret-token');
