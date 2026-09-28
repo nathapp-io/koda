@@ -4,6 +4,7 @@ import { PrismaRagRepository } from './prisma-rag.repository';
 import { EmbeddingService } from './embedding.service';
 import { EntityStore } from './entity-store';
 import { LanceTableManager } from './lance-table-manager';
+import { resolveCreatedAt } from './created-at-override';
 import type { LanceRecord, LanceTable } from './lance-table-manager';
 import {
   HybridSearchQuery,
@@ -100,9 +101,10 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
       vector = Array(dims).fill(0) as number[];
     }
 
-    const createdAtOverride = doc.metadata?.['createdAtOverride'];
-    const createdAt =
-      typeof createdAtOverride === 'string' ? createdAtOverride : new Date().toISOString();
+    const { createdAt, rejectedOverride } = resolveCreatedAt(doc.metadata);
+    if (rejectedOverride !== undefined) {
+      this.logger.warn({ storyId: 'US-004', msg: `Ignoring unparseable createdAtOverride for ${doc.sourceId}` });
+    }
 
     const record: LanceRecord = {
       id: generateId(),
@@ -242,15 +244,11 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
 
       if (!effectiveGraphifyEnabled && record.source === 'code') continue;
 
-      if (query.timeWindow?.from) {
-        const startTime = new Date(query.timeWindow.from).getTime();
-        const docTime = new Date(record.created_at).getTime();
-        if (docTime < startTime) continue;
-      }
-      if (query.timeWindow?.to) {
-        const endTime = new Date(query.timeWindow.to).getTime();
-        const docTime = new Date(record.created_at).getTime();
-        if (docTime > endTime) continue;
+      if (query.timeWindow?.from || query.timeWindow?.to) {
+        const docTime = Date.parse(record.created_at);
+        if (!Number.isFinite(docTime)) continue;
+        if (query.timeWindow.from && docTime < new Date(query.timeWindow.from).getTime()) continue;
+        if (query.timeWindow.to && docTime > new Date(query.timeWindow.to).getTime()) continue;
       }
 
       const hasVector = simMap.has(id);
@@ -277,19 +275,17 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
       return { results: [], scores: [], retrievedAt };
     }
 
-    const normalizeMinMax = (scores: number[], hasPresence: boolean[]): number[] => {
-      if (scores.length === 0) return [];
+    const normalizeMinMax = (rawScores: number[], hasPresence: boolean[]): number[] => {
+      if (rawScores.length === 0) return [];
+      // M16: a non-finite input (e.g. recency from an unparseable created_at) counts as 0
+      const scores = rawScores.map((s) => (Number.isFinite(s) ? s : 0));
       const min = Math.min(...scores);
       const max = Math.max(...scores);
       const range = max - min;
       if (range < 1e-9) {
         return scores.map((s, i) => (s > 0 && hasPresence[i] ? 1 : 0));
       }
-      const result: number[] = new Array(scores.length);
-      for (let i = 0; i < scores.length; i++) {
-        result[i] = hasPresence[i] ? (scores[i] - min) / range : 0;
-      }
-      return result;
+      return scores.map((s, i) => (hasPresence[i] ? (s - min) / range : 0));
     };
 
     const hasVectorArr = rawScores.map((s) => s.hasVector);
@@ -404,10 +400,11 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
   }
 
   private calcRawRecencyScore(createdAt: string): number {
-    const docDate = new Date(createdAt).getTime();
-    const now = Date.now();
-    const ageDays = (now - docDate) / (1000 * 60 * 60 * 24);
-    return Math.pow(0.5, ageDays / 30);
+    const docDate = Date.parse(createdAt);
+    if (!Number.isFinite(docDate)) return 0;
+    const ageDays = (Date.now() - docDate) / (1000 * 60 * 60 * 24);
+    const score = Math.pow(0.5, ageDays / 30);
+    return Number.isFinite(score) ? score : 0;
   }
 
   private getSimilarityTier(score: number): 'high' | 'medium' | 'low' | 'none' {

@@ -7,6 +7,7 @@ import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-opt
 import { LexicalIndex } from './lexical-index';
 import { EntityStore } from './entity-store';
 import { LanceTableManager, isSafeFilterValue } from './lance-table-manager';
+import { resolveCreatedAt } from './created-at-override';
 import type { LanceRecord, LanceTable } from './lance-table-manager';
 import { simpleFtsScore, reciprocalRankFusion, getSimilarityTier, getVerdict } from './rag.service';
 import type { IndexDocumentInput } from './rag.service';
@@ -207,11 +208,10 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
       vector = Array(dims).fill(0) as number[];
     }
 
-    // createdAtOverride lets callers backdate a record's created_at (matches
-    // the previous HybridRetrieverService.indexDocument behavior).
-    const createdAtOverride = doc.metadata?.['createdAtOverride'];
-    const createdAt =
-      typeof createdAtOverride === 'string' ? createdAtOverride : new Date().toISOString();
+    const { createdAt, rejectedOverride } = resolveCreatedAt(doc.metadata);
+    if (rejectedOverride !== undefined) {
+      this.logger.warn(`Ignoring unparseable createdAtOverride for ${doc.sourceId}`);
+    }
 
     const id = generateId();
     const record: LanceRecord = {
