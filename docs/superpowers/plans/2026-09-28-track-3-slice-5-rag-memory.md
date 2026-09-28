@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-27-track-3-review-remediation-design.md`, section "Slice 5 — RAG & memory" and its "Tests and the eval gate" bullets. Source findings: `docs/20260925-review-whole-repo.md` lines 289-297 (M15-M21 table and verification note) and 351-354 (RAG LOWs).
 
-**Branch:** `feat/track3-rag-memory` in the git worktree `repos/koda-slice5`, branched from `main` `8fc552bb`. **Slice 2b is under development at the same time** in the main checkout (`repos/koda`, branch `feat/track3-inbound-webhooks`). The two slices touch no common source file (2b: `ci-webhook/`, `vcs/`, `webhook/`, `webhook-security/`; this slice: `rag/`, `memory/`, `context/`, `tickets/state-machine/`, `apps/cli/src/commands/{kb,context}.ts`). The only overlap is the generated `openapi.json` and `apps/cli/src/generated/**`; whichever PR merges second regenerates them after rebasing (Task 9).
+**Branch:** `feat/track3-rag-memory` in the git worktree `repos/koda-slice5`, branched from `main` `8fc552bb`. **Slice 2b is under development at the same time** in the main checkout (`repos/koda`, branch `feat/track3-inbound-webhooks`). The two slices touch no common source file (2b: `ci-webhook/`, `vcs/`, `webhook/`, `webhook-security/`; this slice: `rag/`, `memory/`, `context/`, `tickets/state-machine/`, `apps/cli/src/commands/{kb,context}.ts`). The only overlap is the generated `openapi.json` and `apps/cli/src/generated/**`; whichever PR merges second regenerates them after rebasing (Task 9). **Do not read, write, check out or run anything inside `repos/koda` (the main checkout) for any task in this plan.** All work, commits and test runs happen in `repos/koda-slice5`.
 
 ---
 
@@ -142,8 +142,17 @@ Expected: `DATABASE_URL="postgresql://koda:koda@localhost:5433/koda_slice5_test"
 
 - [ ] **Step 4: Start the test Postgres and prove the new database resets**
 
-Run: `cd apps/api && bun run test:db:up && bun run test:scoped test/integration/memory/memory-upsert-replay.integration.spec.ts`
-Expected: PASS. Jest's globalSetup runs `prisma db push --force-reset`, which creates `koda_slice5_test` on first use. If it fails with "database does not exist", create it once: `docker compose -f ../../docker-compose.test.yml exec -T postgres createdb -U koda koda_slice5_test` (the service name is in `docker-compose.test.yml`), then rerun.
+Start the container and create this slice's three databases once. The Compose service is `postgres-test` (`docker-compose.test.yml:4`). `createdb` fails harmlessly when a database already exists, so the loop is safe to rerun:
+
+```bash
+cd apps/api && bun run test:db:up
+for db in koda_slice5_test koda_slice5_eval_test koda_slice5_shadow_test; do
+  docker compose -f ../../docker-compose.test.yml exec -T postgres-test createdb -U koda "$db" || true
+done
+bun run test:scoped test/integration/memory/memory-upsert-replay.integration.spec.ts
+```
+
+Expected: PASS. `koda_slice5_test` is the Jest database (globalSetup runs `prisma db push --force-reset` on it), `koda_slice5_eval_test` is for the eval runs (Task 0 Step 5, Task 9 Step 2), and `koda_slice5_shadow_test` is the shadow database for `prisma migrate diff` (Task 5 Step 3). Never create or reset `koda_test`: Slice 2b uses it.
 
 - [ ] **Step 5: Record the eval baseline (before any code change)**
 
@@ -703,7 +712,7 @@ git commit -m "fix(rag): validate createdAtOverride and guard non-finite recency
 ### Task 3: M17 FTS-only hits and M18 tiers in the hybrid retriever
 
 **Files:**
-- Modify: `apps/api/src/rag/hybrid-retriever.service.ts:145-171, 223-226, 339-353, 413-418`
+- Modify: `apps/api/src/rag/hybrid-retriever.service.ts:145-169, 223-225, 339-353, 413-418`
 - Modify: `apps/api/src/rag/hybrid-retriever.scoring.spec.ts` (append)
 
 **Interfaces:**
@@ -863,6 +872,7 @@ git commit -m "fix(rag): keep FTS-only hits and tier on raw cosine in hybrid sea
 - Create: `apps/api/src/rag/kb-ticket-lifecycle.subscriber.ts`
 - Create: `apps/api/src/rag/kb-ticket-lifecycle.subscriber.spec.ts`
 - Create: `apps/api/src/tickets/state-machine/ticket-transitions.autoindex.spec.ts`
+- Modify: `apps/api/src/rag/rag-config-and-module.spec.ts` (append the module-wiring test)
 - Modify: `apps/api/src/rag/rag.module.ts` (providers)
 - Modify: `apps/api/src/tickets/state-machine/ticket-transitions.service.ts:180`
 
@@ -939,7 +949,7 @@ describe('KbTicketLifecycleSubscriber', () => {
     expect(ragService.deleteBySource).not.toHaveBeenCalled();
   });
 
-  it('removes the document end to end through a real VectorStore', async () => {
+  it('handleTicketEvent removes the document through a real VectorStore', async () => {
     const ragConfig = { lancedbPath: './lancedb-kb-lifecycle-test', inMemoryOnly: true, ftsIndexMode: 'simple' } as IRagConfig;
     const embedding = { embed: jest.fn().mockResolvedValue(Array(8).fill(0.1)), providerName: 'fake', modelName: 'fake-v1', dimensions: 8 };
     const ragService = new RagService(new VectorStore(ragConfig, embedding as never));
@@ -1008,10 +1018,21 @@ describe('TicketTransitionsService.autoIndexTicket', () => {
 });
 ```
 
+Append to `apps/api/src/rag/rag-config-and-module.spec.ts` (inside its top-level `describe`). This test proves the fix actually runs in production: the unit tests above build the subscriber by hand and never go through Nest DI.
+
+```ts
+  it('registers KbTicketLifecycleSubscriber as a RagModule provider (M15 wiring)', () => {
+    const providers = (Reflect.getMetadata('providers', RagModule) ?? []) as Array<{ name?: string; provide?: unknown }>;
+    expect(providers.map((p) => p.name ?? String(p.provide))).toContain('KbTicketLifecycleSubscriber');
+  });
+```
+
+Add `import { RagModule } from './rag.module';` if the file does not import it yet.
+
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd apps/api && bun run test -- src/rag/kb-ticket-lifecycle.subscriber.spec.ts src/tickets/state-machine/ticket-transitions.autoindex.spec.ts`
-Expected: FAIL. The subscriber module does not exist, and the deleted ticket is indexed. The upsert pin passes (expected: it pins existing behaviour).
+Run: `cd apps/api && bun run test -- src/rag/kb-ticket-lifecycle.subscriber.spec.ts src/tickets/state-machine/ticket-transitions.autoindex.spec.ts src/rag/rag-config-and-module.spec.ts`
+Expected: FAIL. The subscriber module does not exist, the deleted ticket is indexed, and `RagModule` does not provide the subscriber. The upsert pin passes (expected: it pins existing behaviour).
 
 - [ ] **Step 3: Implement**
 
@@ -1079,7 +1100,7 @@ Expected: PASS. If `rag-config-and-module.spec.ts` asserts the exact number of r
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/api/src/rag/kb-ticket-lifecycle.subscriber.ts apps/api/src/rag/kb-ticket-lifecycle.subscriber.spec.ts apps/api/src/rag/rag.module.ts apps/api/src/tickets/state-machine/ticket-transitions.service.ts apps/api/src/tickets/state-machine/ticket-transitions.autoindex.spec.ts
+git add apps/api/src/rag/kb-ticket-lifecycle.subscriber.ts apps/api/src/rag/kb-ticket-lifecycle.subscriber.spec.ts apps/api/src/rag/rag.module.ts apps/api/src/rag/rag-config-and-module.spec.ts apps/api/src/tickets/state-machine/ticket-transitions.service.ts apps/api/src/tickets/state-machine/ticket-transitions.autoindex.spec.ts
 git commit -m "fix(rag): remove a deleted ticket's KB document via the outbox (M15)"
 ```
 
@@ -1998,7 +2019,7 @@ Append to `apps/api/src/rag/rag-config-and-module.spec.ts` (inside its top-level
   });
 ```
 
-Add `import { RagModule } from './rag.module';` if the file does not import it yet.
+The `RagModule` import already exists from Task 4.
 
 - [ ] **Step 2: Run it to verify it fails**
 
@@ -2044,7 +2065,7 @@ git commit -m "refactor(rag): delete the unused LexicalIndex and its startup war
 - Create: `apps/api/src/rag/dto/list-kb-documents.query.ts`
 - Create: `apps/api/src/rag/dto/list-kb-documents.query.spec.ts`
 - Modify: `apps/api/src/rag/rag.controller.ts:74-88`
-- Modify: `apps/api/src/rag/rag.controller.spec.ts:175-200`
+- Modify: `apps/api/src/rag/rag.controller.spec.ts:176-201`
 - Regenerate: `openapi.json`, `apps/cli/src/generated/**`
 - Modify: `apps/cli/src/commands/kb.ts:91`, `apps/cli/src/commands/kb.spec.ts:356`
 
@@ -2135,7 +2156,7 @@ describe('ListKbDocumentsQuery', () => {
 });
 ```
 
-In `src/rag/rag.controller.spec.ts`, replace the three limit tests in the `listDocuments` block (lines 176-200) with:
+In `src/rag/rag.controller.spec.ts`, replace the three limit tests in the `listDocuments` block (lines 176-201; replace by content, and keep the block's closing `});`) with:
 
 ```ts
     it('lists documents with default limit 100', async () => {
@@ -2157,7 +2178,7 @@ In `src/rag/rag.controller.spec.ts`, replace the three limit tests in the `listD
     });
 ```
 
-and add `import type { ListKbDocumentsQuery } from './dto/list-kb-documents.query';`. (The old "capped at 500" test encoded silent clamping. An out-of-range limit is now a 400 from the global `ValidationPipe`, and the DTO spec covers that.) Other `controller.listDocuments('alpha', mockAdminUser)` calls in the block keep working because the controller defaults a missing query to `{}`.
+and add `import type { ListKbDocumentsQuery } from './dto/list-kb-documents.query';`. (The old "capped at 500" test encoded silent clamping. An out-of-range limit is now a 400 from the global `ValidationPipe`, and the DTO spec covers that.) Other `controller.listDocuments('alpha', mockAdminUser)` calls in the block keep working because the controller defaults a missing query to `{}`. The existing `context.controller.spec.ts` calls (`controller.getContext('my-project', { intent: 'answer' }, adminUser)` and so on) also keep passing unchanged: `buildQuery` now runs them through `parseQuery`, whose `@Type(() => Number)` reproduces the old manual `Number(dto.tokenBudget)` conversion.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
