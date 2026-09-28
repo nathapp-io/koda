@@ -74,7 +74,9 @@ export class VcsConnectionService {
       syncMode,
       allowedAuthors: JSON.stringify(dto.allowedAuthors ?? []),
       pollingIntervalMs,
-      webhookSecret: syncMode === 'webhook' ? randomBytes(16).toString('hex') : null,
+      // Keep a secret in every mode so late webhook deliveries can be
+      // authenticated before the controller acknowledges them as ignored.
+      webhookSecret: randomBytes(16).toString('hex'),
       isActive: true,
     });
 
@@ -137,12 +139,11 @@ export class VcsConnectionService {
       updateData.pollingIntervalMs = dto.pollingIntervalMs;
     }
 
-    if (dto.syncMode === 'webhook') {
-      updateData.webhookSecret = connection.webhookSecret ?? randomBytes(16).toString('hex');
-    }
-
-    if (dto.syncMode && dto.syncMode !== 'webhook') {
-      updateData.webhookSecret = null;
+    // Generate a secret when enabling webhooks on a legacy row, and keep it
+    // when switching away so senders can sign in-flight deliveries while sync
+    // is off or polling.
+    if (dto.syncMode === 'webhook' && !connection.webhookSecret) {
+      updateData.webhookSecret = randomBytes(16).toString('hex');
     }
 
     // Only update if there are changes
