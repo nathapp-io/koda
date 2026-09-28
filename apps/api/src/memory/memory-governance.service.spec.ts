@@ -6,6 +6,9 @@ import { MemoryItem } from './memory-item-repository';
 const createMockRepository = () => ({
   findByProject: jest.fn(),
   findByProjectMemory: jest.fn(),
+  findActiveAfterId: jest.fn(),
+  findDuplicateActiveKeys: jest.fn(),
+  findActiveByKey: jest.fn(),
   upsert: jest.fn(),
   findActive: jest.fn(),
   updateDirect: jest.fn(),
@@ -82,18 +85,15 @@ describe('MemoryGovernanceService', () => {
         { id: 'mem-2', projectId, kind: 'FACT', subject: 'ticket:2', predicate: 'status', status: 'active', confidence: 0.8, ttlAt: pastDate, activeKey: 'FACT:ticket:2:status', createdAt: now, updatedAt: now },
       ];
 
-      mockRepository.findByProject
-        .mockResolvedValueOnce({ records: expiredItems, total: 2, current: 1, size: 100, hasNext: false, hasPrev: false })
-        .mockResolvedValueOnce({ records: [], total: 2, current: 2, size: 100, hasNext: false, hasPrev: false });
+      mockRepository.findActiveAfterId
+        .mockResolvedValueOnce(expiredItems)
+        .mockResolvedValueOnce([]);
       mockRepository.updateDirect.mockResolvedValue(undefined);
 
       const result = await service.expireMemories(projectId);
 
       expect(result.count).toBe(2);
-      expect(mockRepository.findByProject).toHaveBeenCalledWith(
-        expect.objectContaining({ projectId: 'project-123', status: 'active' }),
-        expect.objectContaining({ current: 1, size: 100 }),
-      );
+      expect(mockRepository.findActiveAfterId).toHaveBeenCalledWith('project-123', null, 100);
       expect(mockRepository.updateDirect).toHaveBeenCalledTimes(2);
       expect(mockRepository.updateDirect).toHaveBeenCalledWith('mem-1', expect.objectContaining({ status: 'rejected', activeKey: null }));
       expect(mockRepository.updateDirect).toHaveBeenCalledWith('mem-2', expect.objectContaining({ status: 'rejected', activeKey: null }));
@@ -104,14 +104,9 @@ describe('MemoryGovernanceService', () => {
       const now = new Date();
       const futureDate = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
-      mockRepository.findByProject.mockResolvedValue({
-        records: [{ id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.8, ttlAt: futureDate, createdAt: now, updatedAt: now }],
-        total: 1,
-        current: 1,
-        size: 100,
-        hasNext: false,
-        hasPrev: false,
-      });
+      mockRepository.findActiveAfterId.mockResolvedValue([
+        { id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.8, ttlAt: futureDate, createdAt: now, updatedAt: now },
+      ]);
 
       const result = await service.expireMemories(projectId);
 
@@ -122,14 +117,7 @@ describe('MemoryGovernanceService', () => {
     it('should not expire memories that are not active', async () => {
       const projectId = 'project-123';
 
-      mockRepository.findByProject.mockResolvedValue({
-        records: [],
-        total: 0,
-        current: 1,
-        size: 100,
-        hasNext: false,
-        hasPrev: false,
-      });
+      mockRepository.findActiveAfterId.mockResolvedValue([]);
 
       const result = await service.expireMemories(projectId);
 
@@ -141,14 +129,9 @@ describe('MemoryGovernanceService', () => {
       const projectId = 'project-123';
       const now = new Date();
 
-      mockRepository.findByProject.mockResolvedValue({
-        records: [{ id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.8, ttlAt: undefined as unknown as null, createdAt: now, updatedAt: now }],
-        total: 1,
-        current: 1,
-        size: 100,
-        hasNext: false,
-        hasPrev: false,
-      });
+      mockRepository.findActiveAfterId.mockResolvedValue([
+        { id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.8, ttlAt: undefined as unknown as null, createdAt: now, updatedAt: now },
+      ]);
 
       const result = await service.expireMemories(projectId);
 
@@ -233,9 +216,8 @@ describe('MemoryGovernanceService', () => {
         { id: 'mem-3', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', activeKey: 'FACT:ticket:1:status-3', confidence: 0.5, createdAt: now, updatedAt: now },
       ];
 
-      mockRepository.findByProject
-        .mockResolvedValueOnce({ records: items, total: 3, current: 1, size: 100, hasNext: false, hasPrev: false })
-        .mockResolvedValueOnce({ records: [], total: 3, current: 2, size: 100, hasNext: false, hasPrev: false });
+      mockRepository.findDuplicateActiveKeys.mockResolvedValue([{ kind: 'FACT', subject: 'ticket:1', predicate: 'status' }]);
+      mockRepository.findActiveByKey.mockResolvedValue(items);
       mockRepository.updateDirect.mockResolvedValue(undefined);
 
       const result = await service.deduplicate(projectId);
@@ -248,15 +230,13 @@ describe('MemoryGovernanceService', () => {
 
     it('should not affect single memories with unique (kind, subject, predicate)', async () => {
       const projectId = 'project-123';
-      const now = new Date();
 
-      mockRepository.findByProject
-        .mockResolvedValueOnce({ records: [{ id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', activeKey: 'key1', confidence: 0.9, createdAt: now, updatedAt: now }], total: 1, current: 1, size: 100, hasNext: false, hasPrev: false })
-        .mockResolvedValueOnce({ records: [], total: 1, current: 2, size: 100, hasNext: false, hasPrev: false });
+      mockRepository.findDuplicateActiveKeys.mockResolvedValue([]);
 
       const result = await service.deduplicate(projectId);
 
       expect(result.count).toBe(0);
+      expect(mockRepository.findActiveByKey).not.toHaveBeenCalled();
       expect(mockRepository.updateDirect).not.toHaveBeenCalled();
     });
 
@@ -264,13 +244,16 @@ describe('MemoryGovernanceService', () => {
       const projectId = 'project-123';
       const now = new Date();
 
-      mockRepository.findByProject
-        .mockResolvedValueOnce({ records: [], total: 0, current: 1, size: 100, hasNext: false, hasPrev: false })
-        .mockResolvedValueOnce({ records: [], total: 0, current: 2, size: 100, hasNext: false, hasPrev: false });
+      mockRepository.findDuplicateActiveKeys.mockResolvedValue([{ kind: 'FACT', subject: 'ticket:1', predicate: 'status' }]);
+      mockRepository.findActiveByKey.mockResolvedValue([
+        { id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', activeKey: 'key1', confidence: 0.9, createdAt: now, updatedAt: now },
+        { id: 'mem-2', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.7, createdAt: now, updatedAt: now },
+      ]);
 
       const result = await service.deduplicate(projectId);
 
       expect(result.count).toBe(0);
+      expect(mockRepository.updateDirect).not.toHaveBeenCalled();
     });
   });
 
@@ -285,36 +268,34 @@ describe('MemoryGovernanceService', () => {
         { id: 'dec-3', projectId, kind: 'DECISION', subject: 'topic:a', predicate: 'resolution', status: 'active', activeKey: 'DECISION:topic:a:resolution-3', confidence: 0.7, createdAt: now, updatedAt: now },
       ];
 
-      mockRepository.findByProject
-        .mockResolvedValueOnce({ records: decisions, total: 3, current: 1, size: 100, hasNext: false, hasPrev: false })
-        .mockResolvedValueOnce({ records: [], total: 3, current: 2, size: 100, hasNext: false, hasPrev: false });
+      mockRepository.findDuplicateActiveKeys.mockResolvedValue([{ kind: 'DECISION', subject: 'topic:a', predicate: 'resolution' }]);
+      mockRepository.findActiveByKey.mockResolvedValue(decisions);
       mockRepository.updateDirect.mockResolvedValue(undefined);
 
       const result = await service.applySupersession(projectId);
 
       expect(result.count).toBe(2);
+      expect(mockRepository.findDuplicateActiveKeys).toHaveBeenCalledWith('project-123', 'DECISION');
       expect(mockRepository.updateDirect).toHaveBeenCalledWith('dec-1', expect.objectContaining({ status: 'superseded', supersededBy: 'dec-3', activeKey: null }));
       expect(mockRepository.updateDirect).toHaveBeenCalledWith('dec-2', expect.objectContaining({ status: 'superseded', supersededBy: 'dec-3', activeKey: null }));
     });
 
     it('should not modify when only one DECISION is active', async () => {
       const projectId = 'project-123';
-      const now = new Date();
 
-      mockRepository.findByProject
-        .mockResolvedValueOnce({ records: [{ id: 'dec-1', projectId, kind: 'DECISION', subject: 'topic:a', predicate: 'resolution', status: 'active', activeKey: 'dec-key-1', confidence: 0.9, createdAt: now, updatedAt: now }], total: 1, current: 1, size: 100, hasNext: false, hasPrev: false })
-        .mockResolvedValueOnce({ records: [], total: 1, current: 2, size: 100, hasNext: false, hasPrev: false });
+      mockRepository.findDuplicateActiveKeys.mockResolvedValue([]);
 
       const result = await service.applySupersession(projectId);
 
       expect(result.count).toBe(0);
+      expect(mockRepository.findActiveByKey).not.toHaveBeenCalled();
       expect(mockRepository.updateDirect).not.toHaveBeenCalled();
     });
 
     it('should not affect non-DECISION kind memories', async () => {
       const projectId = 'project-123';
 
-      mockRepository.findByProject.mockResolvedValue({ records: [], total: 0, current: 1, size: 100, hasNext: false, hasPrev: false });
+      mockRepository.findDuplicateActiveKeys.mockResolvedValue([]);
 
       const result = await service.applySupersession(projectId);
 
@@ -328,17 +309,11 @@ describe('MemoryGovernanceService', () => {
       const projectId = 'project-123';
       const now = new Date();
 
-      mockRepository.findByProject.mockResolvedValue({
-        records: [
-          { id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'superseded', supersededBy: 'mem-2', activeKey: null, confidence: 0.7, createdAt: now, updatedAt: now },
-          { id: 'mem-2', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', activeKey: 'key2', confidence: 0.9, createdAt: now, updatedAt: now },
-        ],
-        total: 2,
-        current: 1,
-        size: 100,
-        hasNext: false,
-        hasPrev: false,
-      });
+      mockRepository.findDuplicateActiveKeys.mockResolvedValue([{ kind: 'FACT', subject: 'ticket:1', predicate: 'status' }]);
+      mockRepository.findActiveByKey.mockResolvedValue([
+        { id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'superseded', supersededBy: 'mem-2', activeKey: null, confidence: 0.7, createdAt: now, updatedAt: now },
+        { id: 'mem-2', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', activeKey: 'key2', confidence: 0.9, createdAt: now, updatedAt: now },
+      ]);
 
       const result = await service.deduplicate(projectId);
 
@@ -353,14 +328,14 @@ describe('MemoryGovernanceService', () => {
       const now = new Date();
       const pastDate = new Date(now.getTime() - 100 * 24 * 60 * 60 * 1000);
 
-      mockRepository.findByProject.mockResolvedValue({
-        records: [{ id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.8, ttlAt: pastDate, createdAt: pastDate, updatedAt: pastDate }],
-        total: 1,
-        current: 1,
-        size: 100,
-        hasNext: false,
-        hasPrev: false,
-      });
+      // runCleanup drives expireMemories through the keyset repository; the
+      // downrank job is out of scope here (covered by AC-4) and is stubbed so
+      // the whole pipeline runs.
+      mockRepository.findActiveAfterId.mockResolvedValue([
+        { id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.8, ttlAt: pastDate, createdAt: pastDate, updatedAt: pastDate },
+      ]);
+      mockRepository.findDuplicateActiveKeys.mockResolvedValue([]);
+      jest.spyOn(service, 'downrankStaleLowConfidence').mockResolvedValue({ count: 0 });
       mockRepository.updateDirect.mockResolvedValue(undefined);
 
       await service.runCleanup(projectId);
@@ -373,14 +348,11 @@ describe('MemoryGovernanceService', () => {
       const now = new Date();
       const pastDate = new Date(now.getTime() - 100 * 24 * 60 * 60 * 1000);
 
-      mockRepository.findByProject.mockResolvedValue({
-        records: [{ id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.8, ttlAt: pastDate, createdAt: pastDate, updatedAt: pastDate }],
-        total: 1,
-        current: 1,
-        size: 100,
-        hasNext: false,
-        hasPrev: false,
-      });
+      mockRepository.findActiveAfterId.mockResolvedValue([
+        { id: 'mem-1', projectId, kind: 'FACT', subject: 'ticket:1', predicate: 'status', status: 'active', confidence: 0.8, ttlAt: pastDate, createdAt: pastDate, updatedAt: pastDate },
+      ]);
+      mockRepository.findDuplicateActiveKeys.mockResolvedValue([]);
+      jest.spyOn(service, 'downrankStaleLowConfidence').mockResolvedValue({ count: 0 });
       mockRepository.updateDirect.mockResolvedValue(undefined);
 
       await service.runCleanup(projectId);

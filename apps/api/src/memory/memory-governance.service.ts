@@ -46,37 +46,22 @@ export class MemoryGovernanceService {
 
   async expireMemories(projectId: string): Promise<{ count: number }> {
     const now = new Date();
-    let page = 1;
     let expiredCount = 0;
-    let hasMore = true;
+    let afterId: string | null = null;
 
-    do {
-      if (page > MAX_PAGES) {
-        this.logger.warn(`expireMemories: pagination exceeded ${MAX_PAGES} pages for project ${projectId}`);
-        break;
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const batch = await this.repository.findActiveAfterId(projectId, afterId, PAGE_SIZE);
+      for (const item of batch) {
+        if (item.ttlAt && item.ttlAt < now) {
+          await this.repository.updateDirect(item.id, { status: 'rejected', activeKey: null });
+          expiredCount++;
+        }
       }
-      const result = await this.repository.findByProject(
-        { projectId, status: 'active' },
-        PageOption.from(page, PAGE_SIZE),
-      );
+      if (batch.length < PAGE_SIZE) return { count: expiredCount };
+      afterId = batch[batch.length - 1].id;
+    }
 
-      hasMore = result.records.length >= PAGE_SIZE;
-
-      const expiredItems = result.records.filter(
-        (item) => item.ttlAt && item.ttlAt < now,
-      );
-
-      for (const item of expiredItems) {
-        await this.repository.updateDirect(item.id, {
-          status: 'rejected',
-          activeKey: null,
-        });
-        expiredCount++;
-      }
-
-      page++;
-    } while (hasMore);
-
+    this.logger.warn(`expireMemories: pagination exceeded ${MAX_PAGES} pages for project ${projectId}`);
     return { count: expiredCount };
   }
 
@@ -117,112 +102,34 @@ export class MemoryGovernanceService {
   }
 
   async deduplicate(projectId: string): Promise<{ count: number }> {
-    let page = 1;
     let supersededCount = 0;
-    let hasMore = true;
-
-    while (hasMore && page <= MAX_PAGES) {
-      if (page > MAX_PAGES) {
-        this.logger.warn(`deduplicate: pagination exceeded ${MAX_PAGES} pages for project ${projectId}`);
-        break;
-      }
-      const result = await this.repository.findByProject(
-        { projectId, status: 'active' },
-        PageOption.from(page, PAGE_SIZE),
-      );
-
-      hasMore = result.records.length >= PAGE_SIZE;
-
-      const groups = new Map<string, MemoryItem[]>();
-      for (const item of result.records) {
-        const key = `${item.kind}:${item.subject}:${item.predicate}`;
-        if (!groups.has(key)) {
-          groups.set(key, []);
-        }
-        const group = groups.get(key);
-        if (group) {
-          group.push(item);
-        }
-      }
-
-      for (const [, group] of groups) {
-        if (group.length <= 1) {
-          continue;
-        }
-
-        const sorted = [...group].sort((a, b) => b.confidence - a.confidence);
-        const winner = sorted[0];
-
-        for (let i = 1; i < sorted.length; i++) {
-          if (sorted[i].activeKey) {
-            await this.repository.updateDirect(sorted[i].id, {
-              status: 'superseded',
-              supersededBy: winner.id,
-              activeKey: null,
-            });
-            supersededCount++;
-          }
-        }
-      }
-
-      page++;
+    for (const key of await this.repository.findDuplicateActiveKeys(projectId)) {
+      const group = await this.repository.findActiveByKey(projectId, key);
+      supersededCount += await this.supersedeAllBut(group, (a, b) => b.confidence - a.confidence);
     }
-
     return { count: supersededCount };
   }
 
   async applySupersession(projectId: string): Promise<{ count: number }> {
-    let page = 1;
     let supersededCount = 0;
-    let hasMore = true;
-
-    while (hasMore && page <= MAX_PAGES) {
-      if (page > MAX_PAGES) {
-        this.logger.warn(`applySupersession: pagination exceeded ${MAX_PAGES} pages for project ${projectId}`);
-        break;
-      }
-      const result = await this.repository.findByProject(
-        { projectId, kind: MemoryKind.DECISION, status: 'active' },
-        PageOption.from(page, PAGE_SIZE),
-      );
-
-      hasMore = result.records.length >= PAGE_SIZE;
-
-      const topicGroups = new Map<string, MemoryItem[]>();
-      for (const item of result.records) {
-        const topicKey = `${item.subject}:${item.predicate}`;
-        if (!topicGroups.has(topicKey)) {
-          topicGroups.set(topicKey, []);
-        }
-        const group = topicGroups.get(topicKey);
-        if (group) {
-          group.push(item);
-        }
-      }
-
-      for (const [, topicDecisions] of topicGroups) {
-        if (topicDecisions.length <= 1) {
-          continue;
-        }
-
-        const sorted = [...topicDecisions].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-        const newest = sorted[0];
-
-        for (let i = 1; i < sorted.length; i++) {
-          if (sorted[i].activeKey) {
-            await this.repository.updateDirect(sorted[i].id, {
-              status: 'superseded',
-              supersededBy: newest.id,
-              activeKey: null,
-            });
-            supersededCount++;
-          }
-        }
-      }
-
-      page++;
+    for (const key of await this.repository.findDuplicateActiveKeys(projectId, MemoryKind.DECISION)) {
+      const group = await this.repository.findActiveByKey(projectId, key);
+      supersededCount += await this.supersedeAllBut(group, (a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     }
-
     return { count: supersededCount };
+  }
+
+  /** Keeps the first row under `rank` and supersedes the keyed rest; returns how many changed. */
+  private async supersedeAllBut(group: MemoryItem[], rank: (a: MemoryItem, b: MemoryItem) => number): Promise<number> {
+    if (group.length <= 1) return 0;
+    const [winner, ...rest] = [...group].sort(rank);
+    let count = 0;
+    for (const item of rest) {
+      if (item.activeKey) {
+        await this.repository.updateDirect(item.id, { status: 'superseded', supersededBy: winner.id, activeKey: null });
+        count++;
+      }
+    }
+    return count;
   }
 }
