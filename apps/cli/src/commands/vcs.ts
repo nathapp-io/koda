@@ -16,6 +16,7 @@ import {
   vcsControllerGetConnection,
   vcsControllerDeleteConnection,
   vcsControllerUpdateConnection,
+  vcsControllerRotateWebhookSecret,
   vcsControllerTestConnection,
   vcsControllerSyncAll,
   vcsControllerSyncIssue,
@@ -80,7 +81,7 @@ export function vcsCommand(program: Command): void {
 
   vcs
     .command('connect')
-    .option('--provider <provider>', 'VCS provider (e.g., github)')
+    .option('--provider <provider>', 'VCS provider (github or gitlab)')
     .option('--owner <owner>', 'Repository owner')
     .option('--repo <repo>', 'Repository name')
     .option('--token <token>', 'API token for provider')
@@ -120,6 +121,9 @@ export function vcsCommand(program: Command): void {
           const rows = formatConnection(data);
           console.log(VCS_MESSAGES.CONNECTED(ctx.projectSlug));
           table(['Field', 'Value'], rows);
+          if (typeof data.webhookSecret === 'string') {
+            console.log(VCS_MESSAGES.WEBHOOK_SECRET_ONCE(data.webhookSecret));
+          }
         }
 
         process.exit(0);
@@ -203,12 +207,16 @@ export function vcsCommand(program: Command): void {
           requestBody.pollingIntervalMs = Number(options.pollingIntervalMs);
         }
 
-        await vcsControllerUpdateConnection({
+        const response = await vcsControllerUpdateConnection({
   body: requestBody,
   path: { slug: ctx.projectSlug }
   });
+        const data = unwrap<ConnectionRecord>(response);
 
         console.log(VCS_MESSAGES.SETTINGS_UPDATED(ctx.projectSlug));
+        if (typeof data.webhookSecret === 'string') {
+          console.log(VCS_MESSAGES.WEBHOOK_SECRET_ONCE(data.webhookSecret));
+        }
 
         process.exit(0);
       } catch (err: unknown) {
@@ -237,6 +245,30 @@ export function vcsCommand(program: Command): void {
           error(result.error || VCS_MESSAGES.CONNECTION_TEST_FAILED);
           process.exit(1);
           return;
+        }
+
+        process.exit(0);
+      } catch (err: unknown) {
+        handleApiError(err);
+      }
+    });
+
+  vcs
+    .command('rotate-secret')
+    .description('Rotate the webhook secret (project ADMIN or global ADMIN); prints the new secret once')
+    .option('--project <slug>', 'Project slug (uses config if not provided)')
+    .option('--json', 'Output as JSON')
+    .action(async (options) => {
+      try {
+        const ctx = await withContext({ projectSlug: options.project });
+
+        const response = await vcsControllerRotateWebhookSecret({ path: { slug: ctx.projectSlug } });
+        const data = unwrap<{ webhookSecret: string }>(response);
+
+        if (options.json) {
+          console.log(JSON.stringify(data, null, 2));
+        } else {
+          console.log(VCS_MESSAGES.WEBHOOK_SECRET_ROTATED(ctx.projectSlug, data.webhookSecret));
         }
 
         process.exit(0);
