@@ -1,14 +1,16 @@
-import { Controller, Post, Body, Param, HttpCode, Headers, Req } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { Controller, Post, Param, HttpCode, Headers, Req } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import { Public } from '@nathapp/nestjs-auth';
-import { AuthException, NotFoundAppException } from '@nathapp/nestjs-common';
+import { AuthException, JsonResponse } from '@nathapp/nestjs-common';
 import { CiWebhookService } from './ci-webhook.service';
 import { CiWebhookPayloadDto, CiWebhookResponseDto } from './ci-webhook.dto';
-import { JsonResponse } from '@nathapp/nestjs-common';
 import { WebhookReplayGuard } from '../webhook-security/webhook-replay.guard';
+import {
+  InboundWebhookRequest,
+  parseInboundPayload,
+  signedBytesOf,
+} from '../webhook-security/inbound-webhook-request';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-
-type RawBodyRequest = { rawBody?: Buffer };
 
 @ApiTags('ci-webhooks')
 @Controller()
@@ -22,48 +24,37 @@ export class CiWebhookController {
   @HttpCode(200)
   @Public()
   @ApiOperation({ summary: 'Receive CI pipeline failure webhook and auto-create ticket' })
+  @ApiBody({ type: CiWebhookPayloadDto })
   @ApiResponse({ status: 200, type: CiWebhookResponseDto, description: 'Webhook processed' })
-  @ApiResponse({ status: 400, description: 'Invalid request data' })
-  @ApiResponse({ status: 404, description: 'Project not found' })
+  @ApiResponse({ status: 400, description: 'Invalid payload (checked only after a valid signature)' })
+  @ApiResponse({ status: 401, description: 'Unknown project, no CI webhook token, or invalid signature' })
   async handleCiWebhook(
     @Param('slug') slug: string,
-    @Body() payload: CiWebhookPayloadDto,
-    @Req() request: RawBodyRequest,
+    @Req() request: InboundWebhookRequest,
     @Headers('x-ci-signature') signature?: string,
     @Headers('x-ci-delivery') deliveryId?: string,
     @Headers('date') dateHeader?: string,
   ) {
-    const project = await this.ciWebhookService.resolveProject(slug);
-    if (!project) {
-      throw new NotFoundAppException({}, 'projects');
-    }
-
-    const secret = await this.ciWebhookService.getWebhookSecret(slug);
-    if (!secret) {
+    // One lookup. An unknown slug, a missing token and a bad signature all get
+    // the same 401, so the route does not reveal which slugs exist.
+    const target = await this.ciWebhookService.findInboundTarget(slug);
+    if (!target || !this.verifySignature(signedBytesOf(request), signature ?? '', target.secret)) {
       throw new AuthException({}, 'ci_webhook');
     }
 
-    const rawBody = request.rawBody;
-    // Prefer the raw bytes captured by the Fastify preParsing hook (KODA-02).
-    // Fall back to the re-serialized JSON when the hook is unavailable (e.g.
-    // older test setups using Express, where the JSON body is round-tripped
-    // by the platform anyway).
-    const bodyBytes = rawBody ? rawBody.toString('utf8') : JSON.stringify(payload);
-
-    const isValid = this.verifySignature(bodyBytes, signature ?? '', secret);
-    if (!isValid) {
-      throw new AuthException({}, 'ci_webhook');
-    }
+    // Validate only after the signature, and before the replay record, so an
+    // invalid delivery does not consume its id.
+    const payload = await parseInboundPayload(CiWebhookPayloadDto, request.body);
 
     // SEC-1: reject replayed deliveries; forget on failure so the sender's
     // retry with the same delivery id is accepted.
-    await this.replayGuard.assertFresh({ projectId: project.id, source: 'ci', deliveryId, dateHeader });
+    await this.replayGuard.assertFresh({ projectId: target.projectId, source: 'ci', deliveryId, dateHeader });
 
     try {
       const result = await this.ciWebhookService.processCiWebhook(slug, payload);
       return JsonResponse.Ok(result);
     } catch (err) {
-      await this.replayGuard.forget({ projectId: project.id, source: 'ci', deliveryId });
+      await this.replayGuard.forget({ projectId: target.projectId, source: 'ci', deliveryId });
       throw err;
     }
   }

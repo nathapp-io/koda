@@ -1,6 +1,6 @@
 import { HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
-import type { VcsConnectionDomain } from './domain/vcs.domain';
+import type { VcsConnectionDomain, VcsConnectionWithProjectDomain } from './domain/vcs.domain';
 import { randomBytes } from 'crypto';
 import { encryptToken, decryptToken } from '../common/utils/encryption.util';
 import { CreateVcsConnectionDto } from './dto/create-vcs-connection.dto';
@@ -74,7 +74,9 @@ export class VcsConnectionService {
       syncMode,
       allowedAuthors: JSON.stringify(dto.allowedAuthors ?? []),
       pollingIntervalMs,
-      webhookSecret: syncMode === 'webhook' ? randomBytes(16).toString('hex') : null,
+      // Keep a secret in every mode so late webhook deliveries can be
+      // authenticated before the controller acknowledges them as ignored.
+      webhookSecret: randomBytes(16).toString('hex'),
       isActive: true,
     });
 
@@ -137,12 +139,11 @@ export class VcsConnectionService {
       updateData.pollingIntervalMs = dto.pollingIntervalMs;
     }
 
-    if (dto.syncMode === 'webhook') {
-      updateData.webhookSecret = connection.webhookSecret ?? randomBytes(16).toString('hex');
-    }
-
-    if (dto.syncMode && dto.syncMode !== 'webhook') {
-      updateData.webhookSecret = null;
+    // Generate a secret when enabling webhooks on a legacy row, and keep it
+    // when switching away so senders can sign in-flight deliveries while sync
+    // is off or polling.
+    if (dto.syncMode === 'webhook' && !connection.webhookSecret) {
+      updateData.webhookSecret = randomBytes(16).toString('hex');
     }
 
     // Only update if there are changes
@@ -231,6 +232,16 @@ export class VcsConnectionService {
     }
 
     return connection;
+  }
+
+  /**
+   * The connection (with its project) that receives inbound webhooks for
+   * `slug`, or null when the slug is unknown, the project is soft-deleted, or it
+   * has no connection. Never throws NotFound: the webhook route answers every
+   * miss with the same 401.
+   */
+  async findInboundTarget(slug: string): Promise<VcsConnectionWithProjectDomain | null> {
+    return this.vcsRepo.findVcsConnectionByProjectSlug(slug);
   }
 
   /**

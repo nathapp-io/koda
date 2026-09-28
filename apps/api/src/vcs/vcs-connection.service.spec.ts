@@ -57,6 +57,7 @@ function createMockRepo(): jest.Mocked<IVcsRepository> {
     findProjectById: jest.fn().mockResolvedValue({ id: 'proj-1' }),
     findVcsConnectionByProjectId: jest.fn().mockResolvedValue(null),
     findVcsConnectionById: jest.fn().mockResolvedValue(null),
+    findVcsConnectionByProjectSlug: jest.fn().mockResolvedValue(null),
     findPollingConnections: jest.fn().mockResolvedValue([]),
     createVcsConnection: jest.fn().mockResolvedValue(makeConnection()),
     updateVcsConnection: jest.fn().mockResolvedValue(makeConnection()),
@@ -102,6 +103,22 @@ describe('VcsConnectionService', () => {
     }).compile();
 
     service = module.get<VcsConnectionService>(VcsConnectionService);
+  });
+
+  describe('findInboundTarget', () => {
+    it('returns the connection with its project from the slug lookup', async () => {
+      const target = { ...makeConnection({ syncMode: 'webhook' }), project: { id: 'proj-1', key: 'P', slug: 'p' } };
+      mockRepo.findVcsConnectionByProjectSlug.mockResolvedValue(target);
+
+      await expect(service.findInboundTarget('p')).resolves.toBe(target);
+      expect(mockRepo.findVcsConnectionByProjectSlug).toHaveBeenCalledWith('p');
+    });
+
+    it('returns null instead of throwing NotFound when nothing matches', async () => {
+      mockRepo.findVcsConnectionByProjectSlug.mockResolvedValue(null);
+
+      await expect(service.findInboundTarget('missing')).resolves.toBeNull();
+    });
   });
 
   describe('create', () => {
@@ -184,21 +201,21 @@ describe('VcsConnectionService', () => {
       );
     });
 
-    it('should generate a webhookSecret when syncMode is webhook', async () => {
+    it('should generate a webhookSecret when created with syncMode off', async () => {
       mockRepo.findProjectById.mockResolvedValue({ id: 'proj-1' });
       mockRepo.findVcsConnectionByProjectId.mockResolvedValue(null);
-      mockRepo.createVcsConnection.mockResolvedValue(makeConnection({ syncMode: 'webhook', webhookSecret: 'some-secret' }));
+      mockRepo.createVcsConnection.mockResolvedValue(makeConnection({ syncMode: 'off', webhookSecret: 'some-secret' }));
 
-      const webhookDto: CreateVcsConnectionDto = {
+      const offModeDto: CreateVcsConnectionDto = {
         ...dto,
-        syncMode: 'webhook',
+        syncMode: 'off',
       } as CreateVcsConnectionDto;
 
-      await service.create('proj-1', ENCRYPTION_KEY, webhookDto);
+      await service.create('proj-1', ENCRYPTION_KEY, offModeDto);
 
       expect(mockRepo.createVcsConnection).toHaveBeenCalledWith(
         expect.objectContaining({
-          syncMode: 'webhook',
+          syncMode: 'off',
           webhookSecret: expect.any(String),
         }),
       );
@@ -272,17 +289,18 @@ describe('VcsConnectionService', () => {
       );
     });
 
-    it('should clear webhookSecret when syncMode changes away from webhook', async () => {
+    it('should retain webhookSecret when syncMode changes away from webhook', async () => {
       const existing = makeConnection({ syncMode: 'webhook', webhookSecret: 'old-secret' });
       mockRepo.findVcsConnectionByProjectId.mockResolvedValue(existing);
-      mockRepo.updateVcsConnection.mockResolvedValue(makeConnection({ syncMode: 'polling', webhookSecret: null }));
+      mockRepo.updateVcsConnection.mockResolvedValue(makeConnection({ syncMode: 'polling', webhookSecret: 'old-secret' }));
 
       await service.update('proj-1', ENCRYPTION_KEY, { syncMode: 'polling' } as UpdateVcsConnectionDto);
 
       expect(mockRepo.updateVcsConnection).toHaveBeenCalledWith(
         'proj-1',
-        expect.objectContaining({ webhookSecret: null }),
+        expect.objectContaining({ syncMode: 'polling' }),
       );
+      expect(mockRepo.updateVcsConnection.mock.calls[0][1]).not.toHaveProperty('webhookSecret');
     });
   });
 

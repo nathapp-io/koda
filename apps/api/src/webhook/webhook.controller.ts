@@ -65,6 +65,7 @@ export class WebhookController {
     return JsonResponse.Ok(data);
   }
 
+  /** Deliberate cross-project admin route (global ADMIN only); see the project-scoped route below. */
   @Delete('webhooks/:id')
   @HttpCode(204)
   @RequiredPermission('ADMIN')
@@ -80,8 +81,9 @@ export class WebhookController {
   @RequiredPermission('ADMIN')
   @ApiOperation({ summary: 'Remove a webhook (project-scoped)' })
   @ApiResponse({ status: 204, description: 'Webhook deleted' })
-  @ApiResponse({ status: 404, description: 'Webhook not found' })
-  async removeByProject(@Param('id') id: string) {
-    await this.webhookService.remove(id);
+  @ApiResponse({ status: 404, description: 'Project or webhook not found, or the webhook belongs to another project' })
+  async removeByProject(@Param('slug') slug: string, @Param('id') id: string) {
+    const project = await this.webhookService.getProjectBySlug(slug);
+    await this.webhookService.removeForProject(project.id, id);
   }
 }

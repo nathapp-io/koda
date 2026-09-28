@@ -1796,15 +1796,22 @@ describeIntegration('API Integration Tests', () => {
         .expect(404);
     });
 
-    it('POST /api/projects/:slug/vcs-webhook — returns 404 when project has no VCS connection', async () => {
-      // Without a VCS connection configured, the project lookup via getFullByProject fails
-      // Note: This endpoint requires webhook secret to be configured, returns 404 if no connection
-      await request(httpServer)
+    it('POST /api/projects/:slug/vcs-webhook — no VCS connection and an unknown slug get the same 401', async () => {
+      const noConnection = await request(httpServer)
         .post(`/api/projects/${projectSlug}/vcs-webhook`)
         .set('x-github-event', 'push')
         .set('x-hub-signature-256', 'sha256=invalid')
         .send({ action: 'push', ref: 'refs/heads/main' })
-        .expect(404); // Returns 404 because VCS connection not found
+        .expect(401);
+
+      const unknownSlug = await request(httpServer)
+        .post('/api/projects/no-such-project/vcs-webhook')
+        .set('x-github-event', 'push')
+        .set('x-hub-signature-256', 'sha256=invalid')
+        .send({ action: 'push', ref: 'refs/heads/main' })
+        .expect(401);
+
+      expect(unknownSlug.body).toEqual(noConnection.body);
     });
   });
 
@@ -2028,7 +2035,7 @@ describeIntegration('API Integration Tests', () => {
         .expect(409);
     });
 
-    it('POST /api/projects/:slug/ci-webhook — returns 400 for invalid payload', async () => {
+    it('POST /api/projects/:slug/ci-webhook — an unsigned invalid payload gets 401, not a validation error', async () => {
       await request(httpServer)
         .post(`/api/projects/${projectSlug}/ci-webhook`)
         .send({
@@ -2037,19 +2044,57 @@ describeIntegration('API Integration Tests', () => {
           commit: { sha: 'abc123' },
           failures: [],
         })
-        .expect(400);
+        .expect(401);
     });
 
-    it('POST /api/projects/:slug/ci-webhook — returns 404 for nonexistent project', async () => {
+    it('POST /api/projects/:slug/ci-webhook — a signed invalid payload returns 400 and creates no ticket', async () => {
+      const prisma = app.get<PrismaService<PrismaClient>>(PrismaService);
+      const project = await prisma.client.project.findUniqueOrThrow({ where: { slug: projectSlug } });
+      const ticketsBefore = await prisma.client.ticket.count({ where: { projectId: project.id } });
+      const payload = {
+        event: 'pipeline_failed',
+        pipeline: { id: '12347' },
+        commit: { sha: 'abc123def458' },
+        failures: [{ test: 'LineZero', line: 0 }],
+      };
+      const signature = `sha256=${createHmac('sha256', ciWebhookSecret).update(JSON.stringify(payload)).digest('hex')}`;
+
       await request(httpServer)
+        .post(`/api/projects/${projectSlug}/ci-webhook`)
+        .set('x-ci-signature', signature)
+        .set('x-ci-delivery', 'e2e-ci-delivery-invalid')
+        .send(payload)
+        .expect(400);
+
+      expect(await prisma.client.ticket.count({ where: { projectId: project.id } })).toBe(ticketsBefore);
+    });
+
+    it('POST /api/projects/:slug/ci-webhook — unknown slug, missing signature and bad signature get the same 401', async () => {
+      const payload = {
+        event: 'pipeline_failed',
+        pipeline: { id: '99999' },
+        commit: { sha: 'deadbeef' },
+        failures: [{ test: 'AlwaysFail' }],
+      };
+      const signature = `sha256=${createHmac('sha256', ciWebhookSecret).update(JSON.stringify(payload)).digest('hex')}`;
+
+      const unknownSlug = await request(httpServer)
         .post('/api/projects/nonexistent/ci-webhook')
-        .send({
-          event: 'pipeline_failed',
-          pipeline: { id: '99999' },
-          commit: { sha: 'deadbeef' },
-          failures: [{ test: 'AlwaysFail' }],
-        })
-        .expect(404);
+        .set('x-ci-signature', signature)
+        .send(payload)
+        .expect(401);
+      const unsigned = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/ci-webhook`)
+        .send(payload)
+        .expect(401);
+      const badSignature = await request(httpServer)
+        .post(`/api/projects/${projectSlug}/ci-webhook`)
+        .set('x-ci-signature', `sha256=${'0'.repeat(64)}`)
+        .send(payload)
+        .expect(401);
+
+      expect(unknownSlug.body).toEqual(badSignature.body);
+      expect(unsigned.body).toEqual(badSignature.body);
     });
   });
 

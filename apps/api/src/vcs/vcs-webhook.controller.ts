@@ -1,19 +1,17 @@
-import { Body, Controller, Headers, HttpCode, HttpStatus, Param, Post, Req } from '@nestjs/common';
+import { Controller, Headers, HttpCode, HttpStatus, Param, Post, Req } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Public } from '@nathapp/nestjs-auth';
 import { AuthException } from '@nathapp/nestjs-common';
-import { ProjectsService } from '../projects/projects.service';
 import { VcsConnectionService } from './vcs-connection.service';
-import { VcsWebhookService, GitHubWebhookPayload } from './vcs-webhook.service';
+import { VcsWebhookService, GitHubWebhookPayload, WebhookHandleResult } from './vcs-webhook.service';
 import { WebhookReplayGuard } from '../webhook-security/webhook-replay.guard';
-
-type RawBodyRequest = { rawBody?: Buffer };
+import { InboundWebhookRequest, signedBytesOf } from '../webhook-security/inbound-webhook-request';
+import type { VcsConnectionWithProjectDomain } from './domain/vcs.domain';
 
 @ApiTags('vcs')
 @Controller()
 export class VcsWebhookController {
   constructor(
-    private readonly projectsService: ProjectsService,
     private readonly vcsConnectionService: VcsConnectionService,
     private readonly webhookService: VcsWebhookService,
     private readonly replayGuard: WebhookReplayGuard,
@@ -23,47 +21,42 @@ export class VcsWebhookController {
   @HttpCode(HttpStatus.OK)
   @Public()
   @ApiOperation({ summary: 'Receive GitHub VCS issue webhook' })
-  @ApiResponse({ status: 200, description: 'Webhook processed' })
-  @ApiResponse({ status: 401, description: 'Invalid webhook signature' })
+  @ApiResponse({
+    status: 200,
+    description: 'Webhook processed, or ignored because the connection is inactive or not in webhook sync mode',
+  })
+  @ApiResponse({ status: 401, description: 'Unknown project, no VCS connection or webhook secret, or invalid signature' })
   async handleWebhook(
     @Param('slug') slug: string,
     @Headers('x-hub-signature-256') signature: string,
-    @Body() payload: GitHubWebhookPayload,
-    @Req() request: RawBodyRequest,
+    @Req() request: InboundWebhookRequest,
     @Headers('x-github-event') githubEvent?: string,
     @Headers('x-github-delivery') deliveryId?: string,
     @Headers('date') dateHeader?: string,
-  ): Promise<{ ignored?: boolean; success: boolean; reason?: string }> {
-    const project = await this.projectsService.findBySlug(slug);
-    const connection = await this.vcsConnectionService.getFullByProject(project.id);
-
-    if (!connection.webhookSecret) {
+  ): Promise<WebhookHandleResult> {
+    // One lookup. An unknown slug, a missing connection or secret, and a bad
+    // signature all get the same 401, so the route does not reveal which slugs
+    // exist or which projects have a VCS connection.
+    const connection = await this.vcsConnectionService.findInboundTarget(slug);
+    if (
+      !connection?.webhookSecret ||
+      !this.webhookService.verifySignature(signedBytesOf(request), signature || '', connection.webhookSecret)
+    ) {
       throw new AuthException({}, 'vcs_webhook');
     }
 
-    // GitHub HMACs the raw bytes. JSON.stringify of the parsed body is not
-    // guaranteed to reproduce them, so verify against the raw body captured
-    // by the preParsing hook in main.ts.
-    const rawBody = request.rawBody;
-    // Prefer the raw bytes captured by the Fastify preParsing hook (KODA-02).
-    // Fall back to the re-serialized JSON when the hook is unavailable (e.g.
-    // older test setups using Express, where the JSON body is round-tripped
-    // by the platform anyway).
-    const bodyBytes = rawBody ? rawBody.toString('utf8') : JSON.stringify(payload);
-
-    const isValid = this.webhookService.verifySignature(
-      bodyBytes,
-      signature || '',
-      connection.webhookSecret,
-    );
-
-    if (!isValid) {
-      throw new AuthException({}, 'vcs_webhook');
+    // After the signature, so an unsigned caller cannot learn the connection
+    // state. 200, not 4xx: GitHub retries non-2xx deliveries.
+    const ignoreReason = this.ignoreReasonFor(connection);
+    if (ignoreReason) {
+      return { success: true, ignored: true, reason: ignoreReason };
     }
+
+    const payload = (request.body !== null && typeof request.body === 'object' ? request.body : {}) as GitHubWebhookPayload;
 
     // SEC-1: reject replayed deliveries; forget on failure so GitHub's retry
     // with the same X-GitHub-Delivery id is accepted.
-    await this.replayGuard.assertFresh({ projectId: project.id, source: 'github', deliveryId, dateHeader });
+    await this.replayGuard.assertFresh({ projectId: connection.projectId, source: 'github', deliveryId, dateHeader });
 
     const eventType = githubEvent
       || (payload.pull_request ? 'pull_request' : payload.issue ? 'issues' : 'unknown');
@@ -72,14 +65,20 @@ export class VcsWebhookController {
       : eventType;
 
     try {
-      return await this.webhookService.handleWebhook(
-        { ...connection, project } as Parameters<typeof this.webhookService.handleWebhook>[0],
-        event,
-        payload,
-      );
+      return await this.webhookService.handleWebhook(connection, event, payload);
     } catch (err) {
-      await this.replayGuard.forget({ projectId: project.id, source: 'github', deliveryId });
+      await this.replayGuard.forget({ projectId: connection.projectId, source: 'github', deliveryId });
       throw err;
     }
+  }
+
+  private ignoreReasonFor(connection: VcsConnectionWithProjectDomain): string | null {
+    if (!connection.isActive) {
+      return 'VCS connection is inactive';
+    }
+    if (connection.syncMode !== 'webhook') {
+      return `VCS connection syncMode is '${connection.syncMode}'; webhook deliveries are processed only in 'webhook' mode`;
+    }
+    return null;
   }
 }

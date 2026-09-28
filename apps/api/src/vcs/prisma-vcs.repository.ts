@@ -100,6 +100,14 @@ export class PrismaVcsRepository implements IVcsRepository {
     return m ? this.toConnectionWithProjectDomain(m) : null;
   }
 
+  async findVcsConnectionByProjectSlug(slug: string): Promise<VcsConnectionWithProjectDomain | null> {
+    const m = await this.db.vcsConnection.findFirst({
+      where: { project: { slug, deletedAt: null } },
+      include: { project: true },
+    });
+    return m ? this.toConnectionWithProjectDomain(m) : null;
+  }
+
   async findPollingConnections(): Promise<VcsConnectionWithProjectDomain[]> {
     const rows = await this.db.vcsConnection.findMany({
       where: { syncMode: 'polling', isActive: true },

@@ -3075,6 +3075,14 @@
         "operationId": "WebhookController_removeByProject",
         "parameters": [
           {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "id",
             "required": true,
             "in": "path",
@@ -3088,7 +3096,7 @@
             "description": "Webhook deleted"
           },
           "404": {
-            "description": "Webhook not found"
+            "description": "Project or webhook not found, or the webhook belongs to another project"
           }
         },
         "summary": "Remove a webhook (project-scoped)",
@@ -3534,10 +3542,10 @@
         ],
         "responses": {
           "200": {
-            "description": "Webhook processed"
+            "description": "Webhook processed, or ignored because the connection is inactive or not in webhook sync mode"
           },
           "401": {
-            "description": "Invalid webhook signature"
+            "description": "Unknown project, no VCS connection or webhook secret, or invalid signature"
           }
         },
         "summary": "Receive GitHub VCS issue webhook",
@@ -4284,10 +4292,10 @@
             }
           },
           "400": {
-            "description": "Invalid request data"
+            "description": "Invalid payload (checked only after a valid signature)"
           },
-          "404": {
-            "description": "Project not found"
+          "401": {
+            "description": "Unknown project, no CI webhook token, or invalid signature"
           }
         },
         "summary": "Receive CI pipeline failure webhook and auto-create ticket",
@@ -6164,7 +6172,8 @@
             "example": "apps/api/src/auth/auth.service.ts"
           },
           "line": {
-            "type": "number",
+            "type": "integer",
+            "minimum": 1,
             "description": "Line number where failure occurred",
             "example": 87
           }
