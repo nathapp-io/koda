@@ -742,9 +742,10 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
       const connectionWithoutSecret = {
         ...mockVcsConnection,
         webhookSecret: null,
+        project: { id: mockProject.id, key: mockProject.key, slug: mockProject.slug },
       };
 
-      connectionService.findByProject.mockResolvedValue(connectionWithoutSecret as any);
+      connectionService.findInboundTarget.mockResolvedValue(connectionWithoutSecret as any);
 
       const payload = createGitHubPayload({ action: 'opened' });
       const signature = calculateSignature(JSON.stringify(payload));
