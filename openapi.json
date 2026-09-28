@@ -1653,14 +1653,6 @@
         "operationId": "ProjectsController_getChangeImpact",
         "parameters": [
           {
-            "name": "slug",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
             "name": "repoId",
             "required": true,
             "in": "query",
@@ -1688,6 +1680,14 @@
             "name": "ticketId",
             "required": false,
             "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
             "schema": {
               "type": "string"
             }

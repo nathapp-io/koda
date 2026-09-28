@@ -4,6 +4,7 @@ import { ForbiddenAppException } from '@nathapp/nestjs-common';
 import { ProjectAccessService } from './project-access.service';
 import { PROJECT_ROLES_KEY } from './project-roles.decorator';
 import { PROJECT_PERMISSION_KEY, ProjectPermissionMetadata } from './project-permission.decorator';
+import { PROJECT_SLUG_FROM_KEY, ProjectSlugSource } from './project-slug-from.decorator';
 import { ProjectScopedRequest, withProjectRole } from './project-context';
 import { KodaPrincipal, isAgentPrincipal, isUserPrincipal } from '../auth/principal/koda-principal.types';
 import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
@@ -12,8 +13,9 @@ import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
  * Guards project-scoped routes by `params.slug`.
  *
  * Flow:
- *  1. No `slug` param: return true (sibling guards handle it), unless the route
- *     carries @ProjectPermission, which fails closed.
+ *  1. No slug (`params.slug`, or the @ProjectSlugFrom query key): return true
+ *     (sibling guards handle it), unless the route carries @ProjectPermission,
+ *     which fails closed.
  *  2. Resolve the project (404 if missing or soft-deleted) and the caller's
  *     membership role ONCE (403 for a non-member user; global ADMIN -> 'ADMIN',
  *     agent -> null, no query for either).
@@ -37,7 +39,7 @@ export class ProjectMembershipGuard implements CanActivate {
       PROJECT_PERMISSION_KEY,
       [ctx.getHandler(), ctx.getClass()],
     );
-    const slug = req.params?.slug;
+    const slug = this.resolveSlug(ctx, req);
     if (!slug) {
       if (permission) throw new ForbiddenAppException({}, 'projects');
       return true;
@@ -52,6 +54,22 @@ export class ProjectMembershipGuard implements CanActivate {
     this.assertProjectRoles(ctx, req.user, role);
     if (permission) await this.assertProjectPermission(permission, req.user, role);
     return true;
+  }
+
+  /**
+   * `params.slug`, else the query key a route opted into with @ProjectSlugFrom.
+   * A missing, empty or repeated (array) query value is no slug, so a
+   * @ProjectPermission route fails closed instead of guessing.
+   */
+  private resolveSlug(ctx: ExecutionContext, req: ProjectScopedRequest): string | undefined {
+    if (req.params?.slug) return req.params.slug;
+    const from = this.reflector.getAllAndOverride<ProjectSlugSource | undefined>(PROJECT_SLUG_FROM_KEY, [
+      ctx.getHandler(),
+      ctx.getClass(),
+    ]);
+    if (!from) return undefined;
+    const value = req.query?.[from.key];
+    return typeof value === 'string' && value.length > 0 ? value : undefined;
   }
 
   private assertProjectRoles(ctx: ExecutionContext, user: KodaPrincipal, role: string | null): void {

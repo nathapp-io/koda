@@ -22,6 +22,7 @@ import {
   ApiOperation,
   ApiResponse,
   ApiQuery,
+  ApiParam,
 } from '@nestjs/swagger';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
@@ -31,11 +32,13 @@ import {
   isUserPrincipal,
 } from '../auth/principal/koda-principal.types';
 import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
-import { KodaAction } from '../auth/casl/koda-action.enum';
 import { AgentsService } from '../agents/agents.service';
 import { UpdateAgentDto } from '../agents/dto/update-agent.dto';
 import { ActorRole } from '../common/enums';
 import { ProjectMembershipGuard } from './project-membership.guard';
+import { ProjectPermission } from './project-permission.decorator';
+import { CurrentProject } from './current-project.decorator';
+import { ProjectContext } from './project-context';
 
 @ApiTags('projects')
 @ApiBearerAuth()
@@ -130,30 +133,28 @@ export class ProjectsController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Project not found' })
+  @ApiParam({ name: 'slug', required: true, schema: { type: 'string' } })
   @ApiQuery({ name: 'repoId', required: true })
   @ApiQuery({ name: 'commitHash', required: true })
   @ApiQuery({ name: 'changedFiles', required: true })
   @ApiQuery({ name: 'ticketId', required: false })
-  @RequiredPermission([KodaAction.READ as CaslPermissionAction, 'CodeIntel'])
+  @UseGuards(ProjectMembershipGuard)
+  @ProjectPermission([CaslPermissionAction.READ, 'CodeIntel'])
   async getChangeImpact(
-    @Param('slug') slug: string,
     @Query('repoId') repoId: string,
     @Query('commitHash') commitHash: string,
     @Query('changedFiles') changedFilesStr: string,
-    @Principal() principal: KodaPrincipal,
+    @CurrentProject() ctx: ProjectContext,
     @Query('ticketId') ticketId?: string,
   ) {
     if (!repoId || !commitHash || !changedFilesStr) {
       throw new BadRequestException('Missing required query parameters: repoId, commitHash, changedFiles');
     }
 
-    const project = await this.projectsService.findBySlug(slug);
-    await this.projectsService.assertProjectMembership(project.id, principal);
-
     const changedFiles = changedFilesStr.split(',').map((f) => f.trim());
 
     const result = await this.impactAnalysisService.getChangeImpact({
-      projectId: project.id,
+      projectId: ctx.project.id,
       repoId,
       commitHash,
       changedFiles,

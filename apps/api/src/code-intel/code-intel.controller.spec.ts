@@ -3,9 +3,10 @@ import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-com
 import { CodeIntelController } from './code-intel.controller';
 import { AstIndexService, SymbolIndexResult, Symbol } from './ast-index.service';
 import { CallerInfo, CalleeInfo } from './symbol-store';
-import { UserPrincipal, AgentPrincipal, KodaPrincipal } from '../auth/principal/koda-principal.types';
+import { UserPrincipal, AgentPrincipal } from '../auth/principal/koda-principal.types';
 import { IndexCommitDto, SourceFileDto } from './dto/index-commit.dto';
 import { ProjectAccessService } from '../projects/project-access.service';
+import { ProjectContext } from '../projects/project-context';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -54,6 +55,15 @@ function makeAgent(): AgentPrincipal {
 
 function makeProject(id = 'proj-1', slug = 'my-project') {
   return { id, slug };
+}
+
+/**
+ * Slice 4: the read routes receive the ProjectContext the project guard
+ * resolved (project membership and role are asserted by ProjectMembershipGuard,
+ * covered by project-membership.guard.spec.ts and the integration specs).
+ */
+function makeCtx(id = 'proj-1', slug = 'my-project', role: string | null = 'ADMIN'): ProjectContext {
+  return { project: makeProject(id, slug), role };
 }
 
 function makeIndexResult(): SymbolIndexResult {
@@ -200,12 +210,10 @@ describe('CodeIntelController', () => {
   // -------------------------------------------------------------------------
 
   describe('getSymbol()', () => {
-    it('returns JsonResponse.Ok with symbol data for admin', async () => {
-      mockFindProjectIdBySlug.mockResolvedValue('proj-1');
-      mockAssertProjectMembership.mockResolvedValue(undefined);
+    it('returns JsonResponse.Ok with symbol data for the guarded project', async () => {
       astIndexService.getSymbol.mockResolvedValue(makeSymbol());
 
-      const result = await controller.getSymbol('repo-1:src/a.ts::Foo', 'my-project', makeAdminUser());
+      const result = await controller.getSymbol('repo-1:src/a.ts::Foo', makeCtx());
 
       const sym = result.data as import('./ast-index.service').Symbol;
       expect(sym.name).toBe('Foo');
@@ -213,40 +221,19 @@ describe('CodeIntelController', () => {
     });
 
     it('throws NotFoundAppException when symbol is not found', async () => {
-      mockFindProjectIdBySlug.mockResolvedValue('proj-1');
-      mockAssertProjectMembership.mockResolvedValue(undefined);
       astIndexService.getSymbol.mockResolvedValue(null);
 
       await expect(
-        controller.getSymbol('nonexistent', 'my-project', makeAdminUser()),
+        controller.getSymbol('nonexistent', makeCtx()),
       ).rejects.toBeInstanceOf(NotFoundAppException);
     });
 
-    it('throws NotFoundAppException when project slug is unknown', async () => {
-      mockFindProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
-
-      await expect(
-        controller.getSymbol('any-id', 'no-such-project', makeAdminUser()),
-      ).rejects.toBeInstanceOf(NotFoundAppException);
-    });
-
-    it('throws ForbiddenAppException for MEMBER without membership', async () => {
-      mockFindProjectIdBySlug.mockResolvedValue('proj-1');
-      mockAssertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'code-intel'));
-
-      await expect(
-        controller.getSymbol('sym-id', 'my-project', makeMemberUser()),
-      ).rejects.toBeInstanceOf(ForbiddenAppException);
-    });
-
-    it('returns symbol for agent principal', async () => {
-      mockFindProjectIdBySlug.mockResolvedValue('proj-1');
-      mockAssertProjectMembership.mockResolvedValue(undefined);
+    it('uses the project id from the guard-resolved ProjectContext', async () => {
       astIndexService.getSymbol.mockResolvedValue(makeSymbol());
 
-      const result = await controller.getSymbol('sym-id', 'my-project', makeAgent());
+      await controller.getSymbol('sym-id', makeCtx('proj-9', 'other'));
 
-      expect(result.data).toBeDefined();
+      expect(astIndexService.getSymbol).toHaveBeenCalledWith('proj-9', 'sym-id');
     });
   });
 
@@ -255,43 +242,22 @@ describe('CodeIntelController', () => {
   // -------------------------------------------------------------------------
 
   describe('getCallers()', () => {
-    it('returns JsonResponse.Ok with caller list for admin', async () => {
+    it('returns JsonResponse.Ok with caller list for the guarded project', async () => {
       const callers: CallerInfo[] = [{ symbolId: 'other', file: 'src/b.ts', name: 'bar', kind: 'function' }];
-      mockFindProjectIdBySlug.mockResolvedValue('proj-1');
-      mockAssertProjectMembership.mockResolvedValue(undefined);
       astIndexService.getCallers.mockResolvedValue(callers);
 
-      const result = await controller.getCallers('my-sym', 'my-project', makeAdminUser());
+      const result = await controller.getCallers('my-sym', makeCtx());
 
       expect(result.data).toEqual(callers);
       expect(astIndexService.getCallers).toHaveBeenCalledWith('proj-1', 'my-sym');
     });
 
     it('returns empty array when no callers exist', async () => {
-      mockFindProjectIdBySlug.mockResolvedValue('proj-1');
-      mockAssertProjectMembership.mockResolvedValue(undefined);
       astIndexService.getCallers.mockResolvedValue([]);
 
-      const result = await controller.getCallers('lonely-sym', 'my-project', makeAdminUser());
+      const result = await controller.getCallers('lonely-sym', makeCtx());
 
       expect(result.data).toHaveLength(0);
-    });
-
-    it('throws NotFoundAppException when project not found', async () => {
-      mockFindProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
-
-      await expect(
-        controller.getCallers('sym', 'no-project', makeAdminUser()),
-      ).rejects.toBeInstanceOf(NotFoundAppException);
-    });
-
-    it('throws ForbiddenAppException for MEMBER without membership', async () => {
-      mockFindProjectIdBySlug.mockResolvedValue('proj-1');
-      mockAssertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'code-intel'));
-
-      await expect(
-        controller.getCallers('sym', 'my-project', makeMemberUser()),
-      ).rejects.toBeInstanceOf(ForbiddenAppException);
     });
   });
 
@@ -300,69 +266,22 @@ describe('CodeIntelController', () => {
   // -------------------------------------------------------------------------
 
   describe('getCallees()', () => {
-    it('returns JsonResponse.Ok with callee list for admin', async () => {
+    it('returns JsonResponse.Ok with callee list for the guarded project', async () => {
       const callees: CalleeInfo[] = [{ symbolId: 'util', file: 'src/util.ts', name: 'utilFn', kind: 'function' }];
-      mockFindProjectIdBySlug.mockResolvedValue('proj-1');
-      mockAssertProjectMembership.mockResolvedValue(undefined);
       astIndexService.getCallees.mockResolvedValue(callees);
 
-      const result = await controller.getCallees('my-sym', 'my-project', makeAdminUser());
+      const result = await controller.getCallees('my-sym', makeCtx());
 
       expect(result.data).toEqual(callees);
       expect(astIndexService.getCallees).toHaveBeenCalledWith('proj-1', 'my-sym');
     });
 
     it('returns empty array when no callees exist', async () => {
-      mockFindProjectIdBySlug.mockResolvedValue('proj-1');
-      mockAssertProjectMembership.mockResolvedValue(undefined);
       astIndexService.getCallees.mockResolvedValue([]);
 
-      const result = await controller.getCallees('leaf-sym', 'my-project', makeAdminUser());
+      const result = await controller.getCallees('leaf-sym', makeCtx());
 
       expect(result.data).toHaveLength(0);
-    });
-
-    it('throws NotFoundAppException when project not found', async () => {
-      mockFindProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
-
-      await expect(
-        controller.getCallees('sym', 'no-project', makeAdminUser()),
-      ).rejects.toBeInstanceOf(NotFoundAppException);
-    });
-
-    it('throws ForbiddenAppException for MEMBER without membership', async () => {
-      mockFindProjectIdBySlug.mockResolvedValue('proj-1');
-      mockAssertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'code-intel'));
-
-      await expect(
-        controller.getCallees('sym', 'my-project', makeMemberUser()),
-      ).rejects.toBeInstanceOf(ForbiddenAppException);
-    });
-
-    it('allows agent principal to call getCallees', async () => {
-      mockFindProjectIdBySlug.mockResolvedValue('proj-1');
-      mockAssertProjectMembership.mockResolvedValue(undefined);
-      astIndexService.getCallees.mockResolvedValue([]);
-
-      const result = await controller.getCallees('sym', 'my-project', makeAgent());
-
-      expect(result.data).toBeDefined();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // checkProjectMembership — null principal edge case
-  // -------------------------------------------------------------------------
-
-  describe('checkProjectMembership() with null principal', () => {
-    it('throws ForbiddenAppException when principal is null', async () => {
-      mockFindProjectIdBySlug.mockResolvedValue('proj-1');
-      mockAssertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'code-intel'));
-      astIndexService.getSymbol.mockResolvedValue(makeSymbol());
-
-      await expect(
-        controller.getSymbol('sym-id', 'my-project', null as unknown as KodaPrincipal),
-      ).rejects.toBeInstanceOf(ForbiddenAppException);
     });
   });
 });
