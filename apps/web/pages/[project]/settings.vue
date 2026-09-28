@@ -15,6 +15,10 @@ interface VcsConnection {
   allowedAuthors: string[]
 }
 
+interface VcsConnectionWithSecret extends VcsConnection {
+  webhookSecret?: string
+}
+
 interface SyncResult {
   syncType: string
   issuesSynced: number
@@ -126,7 +130,7 @@ const formSchema = toTypedSchema(z.object({
   authors: z.string().optional(),
 }))
 
-const { handleSubmit, setValues, isSubmitting } = useForm({
+const { handleSubmit, setValues, isSubmitting, values } = useForm({
   validationSchema: formSchema,
   initialValues: {
     provider: '',
@@ -176,11 +180,10 @@ const onSubmit = handleSubmit(async (values) => {
         : undefined,
     }
 
-    if (existingConnection.value) {
-      await $api.patch(`/projects/${slug}/vcs`, payload)
-    } else {
-      await $api.post(`/projects/${slug}/vcs`, payload)
-    }
+    const saved = existingConnection.value
+      ? await $api.patch<VcsConnectionWithSecret>(`/projects/${slug}/vcs`, payload)
+      : await $api.post<VcsConnectionWithSecret>(`/projects/${slug}/vcs`, payload)
+    revealSecret(saved?.webhookSecret)
 
     toast.success(t('vcs.toast.connectionSuccess'))
     await refreshConnection()
@@ -188,6 +191,38 @@ const onSubmit = handleSubmit(async (values) => {
     toast.error(extractApiError(err))
   }
 })
+
+// M9: the API returns the webhook secret only on create, on a legacy row
+// switching to webhook mode, and on rotation. Show it until the page reloads.
+const revealedSecret = ref<string | null>(null)
+
+function revealSecret(secret: string | undefined) {
+  if (secret) revealedSecret.value = secret
+}
+
+async function copySecret() {
+  if (!revealedSecret.value) return
+  try {
+    await navigator.clipboard.writeText(revealedSecret.value)
+    toast.success(t('vcs.secret.copied'))
+  } catch {
+    toast.error(t('vcs.secret.copyFailed'))
+  }
+}
+
+const rotatingSecret = ref(false)
+async function rotateSecret() {
+  if (!window.confirm(t('vcs.secret.rotateConfirm'))) return
+  rotatingSecret.value = true
+  try {
+    const result = await $api.post<{ webhookSecret: string }>(`/projects/${slug}/vcs/webhook-secret/rotate`)
+    revealSecret(result.webhookSecret)
+  } catch (err) {
+    toast.error(extractApiError(err))
+  } finally {
+    rotatingSecret.value = false
+  }
+}
 
 // Test connection handler
 const testingConnection = ref(false)
@@ -241,6 +276,7 @@ async function disconnect() {
   try {
     await $api.delete(`/projects/${slug}/vcs`)
     toast.success(t('vcs.toast.disconnectSuccess'))
+    revealedSecret.value = null
     await refreshConnection()
   } catch {
     toast.error(t('vcs.toast.disconnectFailed'))
@@ -326,6 +362,7 @@ async function disconnect() {
                 </FormControl>
                 <SelectContent>
                   <SelectItem value="github">{{ t('vcs.form.providerGithub') }}</SelectItem>
+                  <SelectItem value="gitlab">{{ t('vcs.form.providerGitlab') }}</SelectItem>
                 </SelectContent>
               </Select>
               <FormMessage />
@@ -365,10 +402,11 @@ async function disconnect() {
                   <label>{{ t('vcs.form.syncModePolling') }}</label>
                 </div>
                 <div class="flex items-center space-x-2">
-                  <RadioGroupItem value="webhook" />
+                  <RadioGroupItem value="webhook" :disabled="values.provider === 'gitlab'" />
                   <label>{{ t('vcs.form.syncModeWebhook') }}</label>
                 </div>
               </RadioGroup>
+              <p v-if="values.provider === 'gitlab'" class="text-xs text-muted-foreground">{{ t('vcs.form.gitlabPollingOnly') }}</p>
               <FormMessage />
             </FormField>
 
@@ -422,6 +460,16 @@ async function disconnect() {
               <Button
                 v-if="existingConnection"
                 type="button"
+                variant="outline"
+                :disabled="rotatingSecret"
+                @click="rotateSecret"
+              >
+                {{ rotatingSecret ? t('common.loading') : t('vcs.secret.rotate') }}
+              </Button>
+
+              <Button
+                v-if="existingConnection"
+                type="button"
                 variant="destructive"
                 @click="disconnect"
               >
@@ -429,6 +477,21 @@ async function disconnect() {
               </Button>
             </div>
           </form>
+
+          <div
+            v-if="revealedSecret"
+            data-testid="webhook-secret"
+            class="rounded-md border border-amber-500/50 bg-amber-500/10 p-4 space-y-2"
+          >
+            <p class="text-sm font-medium">{{ t('vcs.secret.title') }}</p>
+            <p class="text-xs text-muted-foreground">{{ t('vcs.secret.onceNotice') }}</p>
+            <div class="flex items-center gap-2">
+              <code class="flex-1 break-all rounded bg-muted px-2 py-1 text-sm">{{ revealedSecret }}</code>
+              <Button type="button" variant="outline" size="sm" @click="copySecret">
+                {{ t('vcs.secret.copy') }}
+              </Button>
+            </div>
+          </div>
         </div>
       </TabsContent>
     </Tabs>

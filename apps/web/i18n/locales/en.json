@@ -532,6 +532,7 @@
       "provider": "Provider",
       "providerPlaceholder": "Select a provider",
       "providerGithub": "GitHub",
+      "providerGitlab": "GitLab",
       "owner": "Repository Owner",
       "ownerPlaceholder": "e.g. octocat",
       "repo": "Repository Name",
@@ -553,7 +554,17 @@
       "update": "Update Connection",
       "disconnect": "Disconnect",
       "testing": "Testing...",
-      "syncing": "Syncing..."
+      "syncing": "Syncing...",
+      "gitlabPollingOnly": "GitLab connections support polling only; webhook sync is not available."
+    },
+    "secret": {
+      "title": "Webhook secret",
+      "onceNotice": "Copy this secret now. It will not be shown again.",
+      "copy": "Copy",
+      "copied": "Secret copied",
+      "copyFailed": "Could not copy the secret",
+      "rotate": "Rotate webhook secret",
+      "rotateConfirm": "Rotate the webhook secret? Deliveries signed with the old secret will be rejected."
     },
     "validation": {
       "providerRequired": "Please select a provider",
