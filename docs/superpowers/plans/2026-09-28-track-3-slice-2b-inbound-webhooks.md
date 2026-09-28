@@ -19,7 +19,8 @@
 - API stays single-instance. Postgres only. String-typed enum / JSON-as-String columns stay.
 - Follow `nathapp-nestjs-patterns`: `JsonResponse.Ok`, `AppException` subclasses (`AuthException`, `NotFoundAppException`, `ValidationAppException` from `@nathapp/nestjs-common`), repository -> service -> controller.
 - TDD for every task: failing test first, then implementation.
-- DB-backed behaviour gets integration tests on real Postgres (`KODA_DB_TESTS=1`, via `bun run test:integration`). Run `cd apps/api && bun run test:db:up` once before the first DB-backed command (idempotent).
+- DB-backed behaviour gets integration tests on real Postgres (`KODA_DB_TESTS=1`). Run `cd apps/api && bun run test:db:up` once before the first DB-backed command (idempotent).
+- **Test commands (verified 2026-09-28):** unit specs run with `cd apps/api && bun run test -- <path>` (narrows to the given file). DB-backed and `test/integration`/`test/e2e` specs run with `cd apps/api && bun run test:scoped <path>...`: it sets `KODA_DB_TESTS=1` for those paths and runs under `bun --no-env-file`. **Never use `bun run test:integration -- <path>`**: its baked-in `--testPathPattern` overrides the path, so it runs all ~103 integration and e2e files.
 - Contract changes regenerate `openapi.json` and the CLI client in the same PR (`bun run generate` at the repo root). Never hand-edit `openapi.json` or `apps/cli/src/generated/**`.
 - All ten CI checks are required on `main` (`changes`, `lint`, `type-check`, `web build`, `policy-gates`, `test`, `integration`, `e2e`, `evaluate`, `smoke`).
 - **No slug enumeration (spec, verbatim):** "unknown slug, missing secret, missing connection and bad signature all return the same 401 with the same body." Replay dedup still runs after verification.
@@ -71,17 +72,17 @@ Inputs the spec implies but does not spell out. Each has a test in the task that
 
 ---
 
-### Task 0: Commit the plan
+### Task 0: Commit the plan (DONE: `100deb57`; executors start at Task 1)
 
 **Files:**
 - Create: `docs/superpowers/plans/2026-09-28-track-3-slice-2b-inbound-webhooks.md` (this file)
 
-- [ ] **Step 1: Confirm the branch**
+- [x] **Step 1: Confirm the branch**
 
 Run: `git -C repos/koda branch --show-current && git -C repos/koda log --oneline -1`
 Expected: `feat/track3-inbound-webhooks` and `8fc552bb ...`
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add docs/superpowers/plans/2026-09-28-track-3-slice-2b-inbound-webhooks.md
@@ -730,7 +731,7 @@ Create `apps/api/test/integration/vcs/vcs-inbound-target.integration.spec.ts`:
  * connection all come back as null, so the controller can answer each with the
  * same 401.
  *
- * Run: cd apps/api && bun run test:db:up && bun run test:integration -- test/integration/vcs/vcs-inbound-target.integration.spec.ts
+ * Run: cd apps/api && bun run test:db:up && bun run test:scoped test/integration/vcs/vcs-inbound-target.integration.spec.ts
  */
 import { PrismaClient } from '@prisma/client';
 import { PrismaService } from '@nathapp/nestjs-prisma';
@@ -819,7 +820,7 @@ describeIntegration('PrismaVcsRepository.findVcsConnectionByProjectSlug (Slice 2
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `cd apps/api && bun run test:db:up && bun run test:integration -- test/integration/vcs/vcs-inbound-target.integration.spec.ts`
+Run: `cd apps/api && bun run test:db:up && bun run test:scoped test/integration/vcs/vcs-inbound-target.integration.spec.ts`
 Expected: FAIL. `ts-jest` reports "Property 'findVcsConnectionByProjectSlug' does not exist on type 'PrismaVcsRepository'".
 
 - [ ] **Step 3: Add the repository method**
@@ -845,7 +846,7 @@ In `apps/api/src/vcs/prisma-vcs.repository.ts`, add after `findVcsConnectionById
 
 - [ ] **Step 4: Run the integration test to verify it passes**
 
-Run: `cd apps/api && bun run test:integration -- test/integration/vcs/vcs-inbound-target.integration.spec.ts`
+Run: `cd apps/api && bun run test:scoped test/integration/vcs/vcs-inbound-target.integration.spec.ts`
 Expected: PASS (4 tests)
 
 - [ ] **Step 5: Write the failing service test**
@@ -1469,9 +1470,9 @@ In the `VcsConnectionService` `useValue` (in `beforeEach`), add after `getFullBy
 
 - [ ] **Step 9: Run the VCS webhook specs**
 
-These two files are mock-based. They sit under `test/integration`, so only `test:integration` picks them up, and they need no database rows.
+These two files are mock-based. They sit under `test/integration`, so the unit `test` script ignores them; `test:scoped` runs them in DB mode, though they need no database rows.
 
-Run: `cd apps/api && bun run test:integration -- test/integration/vcs/vcs-webhook.integration.spec.ts test/integration/vcs/vcs-webhook-pull-request.integration.spec.ts`
+Run: `cd apps/api && bun run test:scoped test/integration/vcs/vcs-webhook.integration.spec.ts test/integration/vcs/vcs-webhook-pull-request.integration.spec.ts`
 Expected: PASS. If a test fails because it expected a `NotFoundAppException`, a lookup through `ProjectsService`, or a positional payload argument, change it to the new contract (one `findInboundTarget` lookup, `AuthException` for every miss). Do not revert the controller.
 
 - [ ] **Step 10: Run all VCS unit tests, lint and type-check**
@@ -1615,7 +1616,7 @@ Append these tests inside the `describeIntegration('webhook routes over HTTP (US
 
 - [ ] **Step 6: Run them to verify the cross-project case fails**
 
-Run: `cd apps/api && bun run test:integration -- test/integration/webhook/webhook-routes.integration.spec.ts`
+Run: `cd apps/api && bun run test:scoped test/integration/webhook/webhook-routes.integration.spec.ts`
 Expected: FAIL on the first new test only (`expected 404, received 204`). The route ignores `:slug`, so it deletes project B's row. The other three new tests pass already.
 
 - [ ] **Step 7: Scope the controller route**
@@ -1648,7 +1649,7 @@ In `apps/api/src/webhook/webhook.controller.ts`, replace the two `@Delete` handl
 
 - [ ] **Step 8: Run the webhook tests to verify they pass**
 
-Run: `cd apps/api && bun run test -- src/webhook && bun run test:integration -- test/integration/webhook/webhook-routes.integration.spec.ts`
+Run: `cd apps/api && bun run test -- src/webhook && bun run test:scoped test/integration/webhook/webhook-routes.integration.spec.ts`
 Expected: PASS (unit and HTTP integration)
 
 - [ ] **Step 9: Commit**
@@ -1767,7 +1768,7 @@ In `apps/api/test/e2e/api-endpoint/endpoint.e2e.spec.ts`:
 
 - [ ] **Step 2: Run the affected e2e tests**
 
-Run: `cd apps/api && bun run test:integration -- test/e2e/api-endpoint/endpoint.e2e.spec.ts -t "webhook"`
+Run: `cd apps/api && bun run test:scoped test/e2e/api-endpoint/endpoint.e2e.spec.ts -t "webhook"`
 Expected: PASS for every `vcs-webhook` / `ci-webhook` test, including the pre-existing "creates ticket on pipeline failure" and "rejects a replayed delivery with 409". If an unrelated test in the filtered set fails with 429 (the known local login-throttle cascade from #150), re-run that test alone before treating it as a regression.
 
 - [ ] **Step 3: Regenerate the contract**
@@ -1781,7 +1782,7 @@ Expected: changes only to the `ci-webhook` operation (response `404` becomes `40
 Run:
 ```bash
 cd apps/api && bun run lint && bun run type-check && bun run test
-cd apps/api && bun run test:integration -- test/integration/vcs test/integration/webhook
+cd apps/api && bun run test:scoped test/integration/vcs test/integration/webhook
 cd apps/cli && bun run test
 ```
 Expected: 0 lint warnings, no type errors, all unit tests pass, all VCS + webhook integration tests pass, CLI tests pass.
