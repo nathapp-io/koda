@@ -2012,7 +2012,7 @@ bunx jest src/vcs src/code-intel
 bun run test:scoped test/integration/vcs
 ```
 
-Every `fetchIssues: jest.fn().mockResolvedValue([...])` becomes `mockResolvedValue({ issues: [...], cursor: null, capped: false })`. Every `MockVcsProvider implements IVcsProvider` returns that shape. The provider integration specs (`github.provider.integration.spec.ts`, `gitlab.provider.integration.spec.ts`) that asserted the old query params (`sort: 'created'`, `order_by: 'created_at'`, `created_after`) now assert the new ones from Steps 5-6. Their mocked `get` needs no `headers`, because a missing header ends pagination. Expected: all green.
+tsc does NOT find every broken mock here: specs that stub the provider through `(createVcsProvider as jest.Mock).mockReturnValue({ fetchIssues: ... })` are untyped, so only the jest run exposes them (for example `vcs-sync.service.spec.ts`, `code-commit-outbox-handler.spec.ts`, `vcs.controller.spec.ts`, `vcs-pr-sync.service.spec.ts`, `vcs-link-extractor.service.spec.ts`, `test/integration/vcs/vcs-manual-sync.spec.ts`). Also run `grep -rn "fetchIssues" apps/api/src apps/api/test | grep -v "providers/"` and check every hit. Every `fetchIssues: jest.fn().mockResolvedValue([...])` becomes `mockResolvedValue({ issues: [...], cursor: null, capped: false })`. Every `MockVcsProvider implements IVcsProvider` returns that shape. The provider integration specs (`github.provider.integration.spec.ts`, `gitlab.provider.integration.spec.ts`) that asserted the old query params (`sort: 'created'`, `order_by: 'created_at'`, `created_after`) now assert the new ones from Steps 5-6. Their mocked `get` needs no `headers`, because a missing header ends pagination. Expected: all green.
 
 - [ ] **Step 9: Commit**
 
@@ -3473,7 +3473,7 @@ Update the class JSDoc flow step 1 to "No slug (`params.slug`, or the @ProjectSl
 ```
 
 - drop the `@Query('projectSlug') projectSlug` and `@Principal() principal` parameters, add `@CurrentProject() ctx: ProjectContext`, delete the `resolveProject`/`checkProjectMembership` lines, and use `ctx.project.id`;
-- keep `@ApiQuery({ name: 'projectSlug', required: true })`, and add it to `searchSymbols` too, so `openapi.json` still documents the parameter.
+- keep `@ApiQuery({ name: 'projectSlug', required: true })` on the three `:symbolId` routes, so `openapi.json` still documents the parameter. Do not add it to `searchSymbols`: its `SearchSymbolsQueryDto` already documents `projectSlug`, and a second `@ApiQuery` would duplicate the parameter.
 
 `searchSymbols` becomes:
 
@@ -4092,7 +4092,17 @@ Record in the PR body: the date, `testConnection ok`, the issue count, and wheth
 
 Dispatch a whole-branch review (`superpowers:requesting-code-review`, or the code-reviewer agent) on `git diff main...HEAD`, with this plan and the spec section as context. Fix Critical/Important findings with tests, re-run Step 1, and commit.
 
-- [ ] **Step 5: Push and open the PR (ask first)**
+- [ ] **Step 5: Check Slice 5's migrations**
+
+```bash
+git fetch -q origin
+ls ../koda-slice5/apps/api/prisma/migrations 2>/dev/null | tail -3
+git ls-tree --name-only origin/main apps/api/prisma/migrations/ | tail -3
+```
+
+Slice 5 adds `20260928120000_graph_node_vector_stale`. It sorts before this slice's `20260929090000` and `20260929090100`, which is the intended order. If Slice 5 has merged, rebase onto `origin/main` now, re-run `bun run generate`, and re-run Step 1. If any Slice 5 migration sorts after `20260929090100`, stop and tell the user before pushing.
+
+- [ ] **Step 6: Push and open the PR (ask first)**
 
 Ask the user before pushing. Then:
 
@@ -4117,6 +4127,6 @@ The PR body must include:
 - **Rebase note:** Slice 5 (`feat/track3-rag-memory`) shares `schema.prisma`, migrations, `openapi.json`, and the generated CLI. The second PR to merge rebases and runs `bun run generate`.
 - **Out of scope:** GitLab inbound webhooks, `listPrCommits` pagination, the CLI token-in-argv change (Slice 6), and the #145 LOW half (Slice 6).
 
-- [ ] **Step 6: After CI is green, report back**
+- [ ] **Step 7: After CI is green, report back**
 
 Report the PR URL, CI status of all ten required checks, and any skipped item with its reason. Do not merge without the user's go-ahead.
