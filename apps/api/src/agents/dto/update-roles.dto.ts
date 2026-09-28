@@ -6,6 +6,8 @@ export class UpdateRolesDto {
   @ApiProperty({
     description: 'Agent roles',
     example: ['DEVELOPER', 'REVIEWER'],
+    isArray: true,
+    type: String,
   })
   @IsArray()
   @IsString({ each: true })

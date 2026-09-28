@@ -7,12 +7,12 @@ import {
   agentsControllerUpdate,
   agentsControllerRemove,
   agentsControllerRotateApiKey,
+  type CreateAgentDto,
 } from '../generated';
 import { table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
-import type { CreateAgentDto } from '../generated';
 
 function maskApiKey(apiKey: string): string {
   if (apiKey.length <= 8) {

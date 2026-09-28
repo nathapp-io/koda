@@ -31,7 +31,13 @@ export class CreateAgentDto {
   @Min(1)
   maxConcurrentTickets?: number;
 
-  @ApiProperty({ description: 'Agent roles (e.g. DEVELOPER, REVIEWER)', example: ['DEVELOPER', 'REVIEWER'], required: false, type: [String] })
+  @ApiProperty({
+    description: 'Agent roles (e.g. DEVELOPER, REVIEWER)',
+    example: ['DEVELOPER', 'REVIEWER'],
+    required: false,
+    isArray: true,
+    type: String,
+  })
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
