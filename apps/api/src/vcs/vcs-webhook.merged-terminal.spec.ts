@@ -87,12 +87,21 @@ describe('VcsWebhookService — merged is terminal (M12)', () => {
     ['converted_to_draft', { draft: true }, 'draft'],
   ])('a late %s delivery on a merged link is ignored', async (action, pr, attempted) => {
     repo.findTicketLinkByPrNumber.mockResolvedValue(link('merged'));
-    repo.updateTicketLinkWithPrState.mockResolvedValue(false);
+    repo.updateTicketLinkWithPrState.mockResolvedValue('already-merged');
 
     const result = await service.handleWebhook(connection, 'pull_request', payload(action, pr));
 
     expect(repo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-1', attempted);
     expect(result).toEqual({ success: true, ignored: true, reason: 'PR is already merged' });
+  });
+
+  it('reports a vanished link as missing, not as already merged', async () => {
+    repo.findTicketLinkByPrNumber.mockResolvedValue(link('open'));
+    repo.updateTicketLinkWithPrState.mockResolvedValue('not-found');
+
+    const result = await service.handleWebhook(connection, 'pull_request', payload('closed', { state: 'closed' }));
+
+    expect(result).toEqual({ success: true, ignored: true, reason: 'TicketLink no longer exists' });
   });
 
   it('a duplicate merged delivery neither re-runs the transition nor rewrites the link', async () => {
@@ -111,7 +120,7 @@ describe('VcsWebhookService — merged is terminal (M12)', () => {
 
   it('an open link still moves to merged', async () => {
     repo.findTicketLinkByPrNumber.mockResolvedValue(link('open'));
-    repo.updateTicketLinkWithPrState.mockResolvedValue(true);
+    repo.updateTicketLinkWithPrState.mockResolvedValue('updated');
 
     const result = await service.handleWebhook(
       connection,

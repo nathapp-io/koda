@@ -8,10 +8,24 @@ export const MAX_ISSUE_PAGES = 10;
 export function nextLinkUrl(linkHeader: string | undefined): string | null {
   if (!linkHeader) return null;
   for (const part of linkHeader.split(',')) {
-    const match = part.match(/<([^>]+)>\s*;\s*rel="?next"?/);
+    // The trailing lookahead stops `rel="next-page"` (or any other rel token that
+    // merely starts with `next`) from matching a real rel="next".
+    const match = part.match(/<([^>]+)>\s*;\s*rel\s*=\s*"?next"?(?![-\w])/);
     if (match) return match[1];
   }
   return null;
+}
+
+/**
+ * M10: the resume lower bound, backed off by one second. GitHub's `since` and
+ * GitLab's `updated_after` filter on an exact boundary; when a poll is capped at
+ * MAX_ISSUE_PAGES and more items share the cursor's `updated_at` than fit in the
+ * fetched pages, an exclusive filter would skip them on the next tick. Backing
+ * the bound off by a second re-fetches the boundary (import dedup skips it) and
+ * guarantees nothing is missed.
+ */
+export function inclusiveSince(cursor: Date): string {
+  return new Date(cursor.getTime() - 1000).toISOString();
 }
 
 /** GitLab's `X-Next-Page` header as a page number; empty or invalid means no next page. */

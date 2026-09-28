@@ -183,7 +183,9 @@ const onSubmit = handleSubmit(async (values) => {
     const saved = existingConnection.value
       ? await $api.patch<VcsConnectionWithSecret>(`/projects/${slug}/vcs`, payload)
       : await $api.post<VcsConnectionWithSecret>(`/projects/${slug}/vcs`, payload)
-    revealSecret(saved?.webhookSecret)
+    // GitLab is polling-only (the API refuses webhook mode), so its stored secret
+    // is not usable and is not surfaced.
+    if (saved?.provider !== 'gitlab') revealSecret(saved?.webhookSecret)
 
     toast.success(t('vcs.toast.connectionSuccess'))
     await refreshConnection()

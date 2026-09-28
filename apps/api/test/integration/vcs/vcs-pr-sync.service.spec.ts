@@ -137,7 +137,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
             findExistingTicketByExternalId: jest.fn(),
             createTicketFromIssue: jest.fn(),
             findActiveTicketLinksWithPrs: jest.fn(),
-            updateTicketLinkWithPrState: jest.fn(),
+            updateTicketLinkWithPrState: jest.fn().mockResolvedValue('updated'),
             applyMergedPrTransition: jest.fn(),
           },
         },
@@ -256,7 +256,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
 
       vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinks[0]] as any);
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
-      vcsRepo.updateTicketLinkWithPrState.mockResolvedValueOnce(true);
+      vcsRepo.updateTicketLinkWithPrState.mockResolvedValueOnce('updated');
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
@@ -302,7 +302,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
 
       vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinks[0]] as any);
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
-      vcsRepo.updateTicketLinkWithPrState.mockResolvedValueOnce(true);
+      vcsRepo.updateTicketLinkWithPrState.mockResolvedValueOnce('updated');
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
@@ -324,7 +324,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
 
       vcsRepo.findActiveTicketLinksWithPrs.mockResolvedValueOnce([mockTicketLinks[0]] as any);
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(mergedPrStatus);
-      vcsRepo.updateTicketLinkWithPrState.mockResolvedValueOnce(true);
+      vcsRepo.updateTicketLinkWithPrState.mockResolvedValueOnce('updated');
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
@@ -365,7 +365,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
           title: 'PR 103',
         });
 
-      vcsRepo.updateTicketLinkWithPrState.mockResolvedValue(true);
+      vcsRepo.updateTicketLinkWithPrState.mockResolvedValue('updated');
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
@@ -408,7 +408,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
         new NotFoundAppException('PR not found'),
       );
 
-      vcsRepo.updateTicketLinkWithPrState.mockResolvedValueOnce(true);
+      vcsRepo.updateTicketLinkWithPrState.mockResolvedValueOnce('updated');
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
@@ -422,7 +422,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
         new NotFoundAppException('PR not found'),
       );
 
-      vcsRepo.updateTicketLinkWithPrState.mockResolvedValueOnce(true);
+      vcsRepo.updateTicketLinkWithPrState.mockResolvedValueOnce('updated');
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
@@ -475,7 +475,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
           title: 'PR 103',
         });
 
-      vcsRepo.updateTicketLinkWithPrState.mockResolvedValue(true);
+      vcsRepo.updateTicketLinkWithPrState.mockResolvedValue('updated');
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
@@ -523,7 +523,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
       // First update fails DB; second succeeds
       vcsRepo.updateTicketLinkWithPrState
         .mockRejectedValueOnce(new Error('DB error'))
-        .mockResolvedValueOnce(true);
+        .mockResolvedValueOnce('updated');
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
@@ -542,7 +542,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
         new NotFoundAppException('PR not found'),
       );
 
-      vcsRepo.updateTicketLinkWithPrState.mockResolvedValueOnce(true);
+      vcsRepo.updateTicketLinkWithPrState.mockResolvedValueOnce('updated');
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
@@ -567,7 +567,7 @@ describe('VcsPrSyncService.syncPrStatus', () => {
       };
 
       mockVcsProvider.getPullRequestStatus.mockResolvedValueOnce(closedPrStatus);
-      vcsRepo.updateTicketLinkWithPrState.mockResolvedValueOnce(true);
+      vcsRepo.updateTicketLinkWithPrState.mockResolvedValueOnce('updated');
 
       await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 

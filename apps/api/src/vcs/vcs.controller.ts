@@ -16,6 +16,7 @@ import {
   ApiTags,
   ApiBearerAuth,
   ApiOperation,
+  ApiParam,
   ApiResponse,
 } from '@nestjs/swagger';
 import { Principal, RequiredPermission } from '@nathapp/nestjs-auth';
@@ -196,12 +197,12 @@ export class VcsController {
   @ProjectRoles('ADMIN')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Rotate the VCS webhook secret and return the new secret once' })
+  @ApiParam({ name: 'slug', required: true, schema: { type: 'string' } })
   @ApiResponse({ status: 200, type: WebhookSecretResponseDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - project ADMIN or global ADMIN required' })
   @ApiResponse({ status: 404, description: 'Project or VCS connection not found' })
   async rotateWebhookSecret(
-    @Param('slug') slug: string,
     @CurrentProject() ctx: ProjectContext,
     @Principal() principal: KodaPrincipal,
   ) {

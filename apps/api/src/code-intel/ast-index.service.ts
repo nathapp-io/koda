@@ -58,9 +58,13 @@ export class AstIndexService {
     let symbolsIndexed = 0;
 
     const allExtractedSymbols: ResolvedSymbol[] = [];
-    const parsedFiles: string[] = [];
+    const filesToReplace: string[] = [];
 
     for (const file of files) {
+      // Replace, don't merge: a file in this commit loses its old symbols even if
+      // its new content fails to parse, so a parse regression cannot leave stale
+      // rows behind. Files skipped before this point were never indexed.
+      filesToReplace.push(file.path);
       try {
         const parsed = this.codeGraph.parseSourceFile(file.path, file.content);
         const symbols = this.codeGraph.extractSymbols(parsed);
@@ -70,7 +74,6 @@ export class AstIndexService {
         }
 
         filesIndexed++;
-        parsedFiles.push(file.path);
       } catch (error) {
         fileErrors.push({
           path: file.path,
@@ -86,7 +89,7 @@ export class AstIndexService {
     await this.txManager.run(async () => {
       // A re-indexed file is replaced, not merged: symbols its new version no
       // longer declares must not survive.
-      for (const file of parsedFiles) {
+      for (const file of filesToReplace) {
         await this.symbolStore.deleteByFile(projectId, repoId, file);
       }
 

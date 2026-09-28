@@ -5,6 +5,7 @@ import type { ITransactionManager } from '@nathapp/nestjs-data';
 
 describe('AstIndexService project-scoped ids (M13)', () => {
   let store: { upsertSymbol: jest.Mock; deleteByFile: jest.Mock };
+  let graph: { parseSourceFile: jest.Mock; extractSymbols: jest.Mock; resolveRelationships: jest.Mock };
   let service: AstIndexService;
   const calls: string[] = [];
 
@@ -14,7 +15,7 @@ describe('AstIndexService project-scoped ids (M13)', () => {
       upsertSymbol: jest.fn(async (s: SymbolData) => { calls.push(`upsert:${s.file}`); return s; }),
       deleteByFile: jest.fn(async (_p: string, _r: string, file: string) => { calls.push(`delete:${file}`); }),
     };
-    const graph = {
+    graph = {
       parseSourceFile: jest.fn((path: string) => ({ path })),
       extractSymbols: jest.fn(({ path }: { path: string }) => [
         { name: 'alpha', kind: 'function', file: path, startLine: 1, endLine: 2, callers: [], callees: [], symbolId: '' },
@@ -38,6 +39,18 @@ describe('AstIndexService project-scoped ids (M13)', () => {
     await service.indexCommit('acme/widgets', 'c1', [{ path: 'src/a.ts', content: 'x' }], 'proj-1');
 
     expect(calls).toEqual(['delete:src/a.ts', 'upsert:src/a.ts']);
+  });
+
+  it('deletes a file\'s old symbols even when its new content fails to parse', async () => {
+    graph.parseSourceFile.mockImplementationOnce(() => {
+      throw new Error('parse error');
+    });
+
+    const result = await service.indexCommit('acme/widgets', 'c2', [{ path: 'src/broken.ts', content: 'x' }], 'proj-1');
+
+    expect(calls).toEqual(['delete:src/broken.ts']);
+    expect(result.filesIndexed).toBe(0);
+    expect(result.fileErrors).toEqual([{ path: 'src/broken.ts', error: 'parse error' }]);
   });
 
   it('removeFiles deletes each file\'s symbols in the project', async () => {

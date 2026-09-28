@@ -667,6 +667,19 @@ describe('vcsCommand', () => {
       expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('shown once'));
     });
 
+    it('connect does not print a secret for a polling-only GitLab connection', async () => {
+      mockData.projectSlug = 'my-project';
+      (vcsControllerCreateConnection as jest.Mock).mockResolvedValue({
+        ret: 0,
+        data: { provider: 'gitlab', repoOwner: 'g', repoName: 'r', syncMode: 'polling', webhookSecret: 'e'.repeat(32) },
+      });
+      const connect = program.commands.find((c) => c.name() === 'vcs')?.commands.find((c) => c.name() === 'connect');
+
+      await connect?.parseAsync(['node', 'test', '--provider', 'gitlab', '--owner', 'g', '--repo', 'r', '--token', 'glpat-x']);
+
+      expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('e'.repeat(32)));
+    });
+
     it('rotate-secret prints the new secret', async () => {
       mockData.projectSlug = 'my-project';
       (vcsControllerRotateWebhookSecret as jest.Mock).mockResolvedValue({ ret: 0, data: { webhookSecret: 'b'.repeat(32) } });

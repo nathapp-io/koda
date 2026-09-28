@@ -2,7 +2,7 @@ import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-co
 import { IVcsProvider } from '../vcs-provider';
 import { VcsIssue, VcsPullRequest, VcsPrStatus, VcsCommit, CreatePrParams, SourceFile, IssueFetchResult } from '../types';
 import { HttpClient } from '../factory';
-import { ISSUES_PER_PAGE, MAX_ISSUE_PAGES, laterOf, nextLinkUrl, sameOrigin } from './pagination';
+import { ISSUES_PER_PAGE, MAX_ISSUE_PAGES, inclusiveSince, laterOf, nextLinkUrl, sameOrigin } from './pagination';
 
 /**
  * GitHub REST API response for an issue
@@ -113,7 +113,7 @@ export class GitHubProvider implements IVcsProvider {
       sort: 'updated',
       direction: 'asc',
       per_page: ISSUES_PER_PAGE,
-      ...(since ? { since: since.toISOString() } : {}),
+      ...(since ? { since: inclusiveSince(since) } : {}),
     };
 
     for (let pages = 0; url && pages < MAX_ISSUE_PAGES; pages++) {

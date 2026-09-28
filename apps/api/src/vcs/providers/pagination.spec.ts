@@ -1,4 +1,4 @@
-import { laterOf, nextLinkUrl, nextPageNumber, sameOrigin } from './pagination';
+import { inclusiveSince, laterOf, nextLinkUrl, nextPageNumber, sameOrigin } from './pagination';
 
 describe('pagination helpers (M10)', () => {
   it('reads rel="next" from a Link header', () => {
@@ -9,6 +9,10 @@ describe('pagination helpers (M10)', () => {
   it('returns null without a next link', () => {
     expect(nextLinkUrl('<https://api.github.com/x?page=1>; rel="prev"')).toBeNull();
     expect(nextLinkUrl(undefined)).toBeNull();
+  });
+
+  it('does not treat rel="next-page" as a next link', () => {
+    expect(nextLinkUrl('<https://api.github.com/x?page=2>; rel="next-page"')).toBeNull();
   });
 
   it.each([['3', 3], ['', null], [undefined, null], ['0', null], ['abc', null]])('X-Next-Page %j → %j', (header, expected) => {
@@ -22,6 +26,10 @@ describe('pagination helpers (M10)', () => {
     expect(laterOf(a, '2026-10-01T00:00:00Z')).toEqual(new Date('2026-10-01T00:00:00Z'));
     expect(laterOf(a, 'garbage')).toBe(a);
     expect(laterOf(a, undefined)).toBe(a);
+  });
+
+  it('backs the resume bound off one second so a boundary item is not skipped', () => {
+    expect(inclusiveSince(new Date('2026-09-01T00:00:00.000Z'))).toBe('2026-08-31T23:59:59.000Z');
   });
 
   it('compares origins', () => {

@@ -121,7 +121,9 @@ export function vcsCommand(program: Command): void {
           const rows = formatConnection(data);
           console.log(VCS_MESSAGES.CONNECTED(ctx.projectSlug));
           table(['Field', 'Value'], rows);
-          if (typeof data.webhookSecret === 'string') {
+          // GitLab is polling-only (the API refuses webhook mode), so its stored
+          // secret is not usable and is not surfaced.
+          if (data.provider !== 'gitlab' && typeof data.webhookSecret === 'string') {
             console.log(VCS_MESSAGES.WEBHOOK_SECRET_ONCE(data.webhookSecret));
           }
         }
@@ -214,7 +216,7 @@ export function vcsCommand(program: Command): void {
         const data = unwrap<ConnectionRecord>(response);
 
         console.log(VCS_MESSAGES.SETTINGS_UPDATED(ctx.projectSlug));
-        if (typeof data.webhookSecret === 'string') {
+        if (data.provider !== 'gitlab' && typeof data.webhookSecret === 'string') {
           console.log(VCS_MESSAGES.WEBHOOK_SECRET_ONCE(data.webhookSecret));
         }
 

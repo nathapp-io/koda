@@ -96,7 +96,7 @@ export class VcsPrSyncService {
             }
 
             // Always update prState regardless of transition outcome
-            if (await this.vcsRepo.updateTicketLinkWithPrState(link.id, newPrState)) {
+            if ((await this.vcsRepo.updateTicketLinkWithPrState(link.id, newPrState)) === 'updated') {
               updated++;
             }
 
@@ -128,7 +128,7 @@ export class VcsPrSyncService {
       } catch (error) {
         if (error instanceof NotFoundAppException) {
           // 404: mark as closed
-          if (await this.vcsRepo.updateTicketLinkWithPrState(link.id, 'closed')) {
+          if ((await this.vcsRepo.updateTicketLinkWithPrState(link.id, 'closed')) === 'updated') {
             updated++;
           }
         } else {

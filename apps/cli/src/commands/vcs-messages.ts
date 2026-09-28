@@ -20,7 +20,7 @@ export const VCS_MESSAGES = {
   CONNECTION_TEST_FAILED: 'Connection test failed',
   ISSUE_IMPORTED: (ticketRef: string) => `Issue imported: ${ticketRef}`,
   WEBHOOK_SECRET_ONCE: (secret: string) =>
-    `\nWebhook secret (shown once, store it now; use it to sign GitHub webhook deliveries): ${secret}`,
+    `\nWebhook secret (shown once, store it now; use it to sign webhook deliveries): ${secret}`,
   WEBHOOK_SECRET_ROTATED: (projectSlug: string, secret: string) =>
     `Webhook secret rotated for project ${projectSlug}. New secret (shown once): ${secret}`,
 } as const;

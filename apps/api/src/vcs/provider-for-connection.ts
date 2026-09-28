@@ -17,6 +17,12 @@ const DEFAULT_GITLAB_API_URL = 'https://gitlab.com/api/v4';
 const isGitLab = (target: VcsRepoTarget): boolean => target.provider.toLowerCase() === 'gitlab';
 const trimSlashes = (url: string): string => url.replace(/\/+$/, '');
 
+/**
+ * The web host derived from the configured API base. Assumes the standard
+ * suffixes: GitHub/GHES ends in `/api/v3` (or is api.github.com), GitLab ends in
+ * `/api/v4`. A self-hosted instance behind a non-standard API path would need an
+ * explicit web-URL override; the defaults and the documented suffixes are exact.
+ */
 function webBaseUrl(target: VcsRepoTarget, urls: VcsApiUrls): string {
   if (isGitLab(target)) {
     return trimSlashes(urls.gitlabApiUrl ?? DEFAULT_GITLAB_API_URL).replace(/\/api\/v4$/, '');

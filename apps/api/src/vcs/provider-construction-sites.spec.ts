@@ -3,6 +3,10 @@
  * the repository URL and API base from the connection's provider. A direct
  * createVcsProvider call, or a hard-coded github.com repository URL, would send
  * a GitLab connection to GitHub.
+ *
+ * Best-effort tripwire, not a proof: it matches literal call/template patterns.
+ * A string-concatenated URL or an aliased import would slip past, so this
+ * complements — never replaces — review of new provider construction paths.
  */
 import { readFileSync } from 'fs';
 import { join, relative } from 'path';

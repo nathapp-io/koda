@@ -30,7 +30,7 @@ describe('GitLabProvider.fetchIssues pagination (M10)', () => {
 
     const result = await provider.fetchIssues(new Date('2026-08-01T00:00:00Z'));
 
-    const base = { state: 'opened', order_by: 'updated_at', sort: 'asc', per_page: 100, updated_after: '2026-08-01T00:00:00.000Z' };
+    const base = { state: 'opened', order_by: 'updated_at', sort: 'asc', per_page: 100, updated_after: '2026-07-31T23:59:59.000Z' };
     expect(get).toHaveBeenNthCalledWith(1, 'https://gitlab.com/api/v4/projects/g%2Fr/issues', { headers: { 'PRIVATE-TOKEN': 'tok' }, params: { ...base, page: 1 } });
     expect(get).toHaveBeenNthCalledWith(2, 'https://gitlab.com/api/v4/projects/g%2Fr/issues', { headers: { 'PRIVATE-TOKEN': 'tok' }, params: { ...base, page: 2 } });
     expect(result.issues.map((i) => i.number)).toEqual([1, 2]);

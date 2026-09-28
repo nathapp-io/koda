@@ -26,6 +26,10 @@ describe('Track 3 Slice 4: VCS settings', () => {
     expect(source).toContain('/vcs/webhook-secret/rotate')
   })
 
+  test('does not surface the secret for a polling-only GitLab connection', () => {
+    expect(source).toContain("saved?.provider !== 'gitlab'")
+  })
+
   test.each([
     'form.providerGitlab', 'form.gitlabPollingOnly',
     'secret.title', 'secret.onceNotice', 'secret.copy', 'secret.copied', 'secret.copyFailed', 'secret.rotate', 'secret.rotateConfirm',

@@ -3,6 +3,10 @@
  * PrismaVcsRepository.updateTicketLinkWithPrState, which never overwrites
  * `merged`. This spec fails when any other ticketLink update/upsert call
  * appears in src, so a reviewer must decide whether it may touch prState.
+ *
+ * Best-effort tripwire, not a proof: it matches Prisma client method calls. Raw
+ * SQL (`$executeRaw`) that writes prState would bypass it, so this complements —
+ * never replaces — review of new write paths.
  */
 import { readFileSync } from 'fs';
 import { join, relative } from 'path';

@@ -14,6 +14,7 @@ import {
   IVcsRepository,
   MergedPrTransitionInput,
   OutboxDedupQuery,
+  PrStateWriteResult,
   TicketLinkData,
   UpdateVcsConnectionData,
 } from './domain/vcs.repository';
@@ -279,13 +280,20 @@ export class PrismaVcsRepository implements IVcsRepository {
    * delivery id, so replay protection lets it through) must not regress a merged
    * PR, so the write skips rows already `merged`. NULL is matched explicitly:
    * `prState <> 'merged'` alone is NULL, not true, for a NULL row.
+   *
+   * `count === 0` is ambiguous (already merged vs deleted), so the miss is
+   * disambiguated with one existence read; callers must not report a vanished
+   * link as already merged.
    */
-  async updateTicketLinkWithPrState(id: string, prState: string): Promise<boolean> {
+  async updateTicketLinkWithPrState(id: string, prState: string): Promise<PrStateWriteResult> {
     const { count } = await this.db.ticketLink.updateMany({
       where: { id, OR: [{ prState: null }, { prState: { not: 'merged' } }] },
       data: { prState, prUpdatedAt: new Date() },
     });
-    return count === 1;
+    if (count === 1) return 'updated';
+
+    const existing = await this.db.ticketLink.findUnique({ where: { id }, select: { id: true } });
+    return existing ? 'already-merged' : 'not-found';
   }
 
   /**

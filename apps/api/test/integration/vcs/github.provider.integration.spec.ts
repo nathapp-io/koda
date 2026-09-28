@@ -317,7 +317,9 @@ describe('GitHubProvider (Integration)', () => {
           expect.any(String),
           expect.objectContaining({
             params: expect.objectContaining({
-              since: sinceDate.toISOString(),
+              // M10: the resume bound is backed off one second so a boundary item
+              // (updated_at == cursor) is re-fetched instead of skipped.
+              since: new Date(sinceDate.getTime() - 1000).toISOString(),
             }),
           }),
         );
@@ -339,7 +341,7 @@ describe('GitHubProvider (Integration)', () => {
         await provider.fetchIssues(sinceDate);
 
         const callArgs = mockHttpClient.get.mock.calls[0];
-        expect(callArgs[1].params.since).toBe('2025-03-15T14:30:45.123Z');
+        expect(callArgs[1].params.since).toBe('2025-03-15T14:30:44.123Z');
       });
     });
 

@@ -87,6 +87,18 @@ export class VcsWebhookService implements OnModuleDestroy {
     ignored: true,
     reason: 'PR is already merged',
   };
+
+  // M12: the link was deleted between the lookup and the write. Not "already merged".
+  private static readonly LINK_MISSING: WebhookHandleResult = {
+    success: true,
+    ignored: true,
+    reason: 'TicketLink no longer exists',
+  };
+
+  /** M12: map a non-`updated` write result to the ignored response it deserves. */
+  private static ignoredWrite(result: 'already-merged' | 'not-found'): WebhookHandleResult {
+    return result === 'not-found' ? VcsWebhookService.LINK_MISSING : VcsWebhookService.ALREADY_MERGED;
+  }
   private readonly cleanupInterval: ReturnType<typeof setInterval>;
   private dbDedupVerified = false;
   private dbDedupWorks = false;
@@ -304,8 +316,9 @@ export class VcsWebhookService implements OnModuleDestroy {
 
     const newPrState = pr.draft ? 'draft' : 'open';
 
-    if (!(await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, newPrState))) {
-      return VcsWebhookService.ALREADY_MERGED;
+    const outcome = await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, newPrState);
+    if (outcome !== 'updated') {
+      return VcsWebhookService.ignoredWrite(outcome);
     }
 
     this.logger.debug(`Updated TicketLink ${ticketLink.id} prState to '${newPrState}' for PR #${prNumber}`);
@@ -392,8 +405,9 @@ export class VcsWebhookService implements OnModuleDestroy {
       };
     }
 
-    if (!(await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'closed'))) {
-      return VcsWebhookService.ALREADY_MERGED;
+    const outcome = await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'closed');
+    if (outcome !== 'updated') {
+      return VcsWebhookService.ignoredWrite(outcome);
     }
 
     this.logger.debug(`Updated TicketLink ${ticketLink.id} prState to 'closed' for PR #${prNumber}`);
@@ -426,8 +440,9 @@ export class VcsWebhookService implements OnModuleDestroy {
       };
     }
 
-    if (!(await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'open'))) {
-      return VcsWebhookService.ALREADY_MERGED;
+    const outcome = await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'open');
+    if (outcome !== 'updated') {
+      return VcsWebhookService.ignoredWrite(outcome);
     }
 
     this.logger.debug(`Updated TicketLink ${ticketLink.id} prState to 'open' for PR #${prNumber}`);
@@ -457,8 +472,9 @@ export class VcsWebhookService implements OnModuleDestroy {
       };
     }
 
-    if (!(await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'open'))) {
-      return VcsWebhookService.ALREADY_MERGED;
+    const outcome = await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'open');
+    if (outcome !== 'updated') {
+      return VcsWebhookService.ignoredWrite(outcome);
     }
 
     return {
@@ -485,8 +501,9 @@ export class VcsWebhookService implements OnModuleDestroy {
       };
     }
 
-    if (!(await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'draft'))) {
-      return VcsWebhookService.ALREADY_MERGED;
+    const outcome = await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'draft');
+    if (outcome !== 'updated') {
+      return VcsWebhookService.ignoredWrite(outcome);
     }
 
     return {

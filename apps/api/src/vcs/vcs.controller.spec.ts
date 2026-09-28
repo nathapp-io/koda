@@ -331,7 +331,7 @@ describe('VcsController', () => {
     it('wraps the rotated secret in JsonResponse.Ok for a user', async () => {
       mockVcsService.rotateWebhookSecret.mockResolvedValue({ webhookSecret: 'b'.repeat(32) });
 
-      const result = await controller.rotateWebhookSecret('test-project', projectContext(), adminUser);
+      const result = await controller.rotateWebhookSecret(projectContext(), adminUser);
 
       expect(result.ret).toBe(0);
       expect(result.data).toEqual({ webhookSecret: 'b'.repeat(32) });
@@ -340,7 +340,7 @@ describe('VcsController', () => {
 
     it('refuses agents: they never hold webhook secrets', async () => {
       await expect(
-        controller.rotateWebhookSecret('test-project', projectContext(), agentPrincipal),
+        controller.rotateWebhookSecret(projectContext(), agentPrincipal),
       ).rejects.toThrow(ForbiddenAppException);
       expect(mockVcsService.rotateWebhookSecret).not.toHaveBeenCalled();
     });

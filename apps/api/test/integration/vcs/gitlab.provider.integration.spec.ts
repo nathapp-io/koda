@@ -86,7 +86,8 @@ describe('GitLabProvider (Integration)', () => {
       await provider.fetchIssues(sinceDate);
 
       const callArgs = mockHttpClient.get.mock.calls[0];
-      expect(callArgs[1].params.updated_after).toBe(sinceDate.toISOString());
+      // M10: backed off one second so the cursor's exact second is re-fetched.
+      expect(callArgs[1].params.updated_after).toBe(new Date(sinceDate.getTime() - 1000).toISOString());
     });
 
     it('should handle null description', async () => {

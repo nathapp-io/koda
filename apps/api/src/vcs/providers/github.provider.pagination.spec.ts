@@ -37,7 +37,7 @@ describe('GitHubProvider.fetchIssues pagination (M10)', () => {
 
     expect(get).toHaveBeenCalledWith(`${API}/repos/o/r/issues`, {
       headers: { Authorization: 'Bearer tok' },
-      params: { state: 'open', sort: 'updated', direction: 'asc', per_page: 100, since: '2026-09-01T00:00:00.000Z' },
+      params: { state: 'open', sort: 'updated', direction: 'asc', per_page: 100, since: '2026-08-31T23:59:59.000Z' },
     });
   });
 

@@ -223,7 +223,7 @@ export class TicketTransitionsService {
     const projectId = project.id;
     const ticketId = ticket.id;
     const projectKey = project.key;
-    let createdPrNumber = 0;
+    let createdPrNumber: number | undefined;
     const repo = this.ticketRepo as import('../prisma-tickets.repository').PrismaTicketsRepository;
 
     return vcsService.getFullByProject(projectId)
@@ -267,6 +267,10 @@ export class TicketTransitionsService {
             }) as unknown as Promise<void>;
           }).then((): Promise<void> => {
             // AC5: After createPrForTicket() completes, extractLinksFromPr() is called
+            if (createdPrNumber === undefined) {
+              // Defensive: never fall back to /pulls/0 if this chain is refactored.
+              return Promise.resolve();
+            }
             return vcsLinkExtractor.extractLinksFromPr(
               project,
               { id: ticket.id, number: ticket.number, externalVcsId: null },

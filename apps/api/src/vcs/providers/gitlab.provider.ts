@@ -2,7 +2,7 @@ import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-co
 import { IVcsProvider } from '../vcs-provider';
 import { VcsIssue, VcsPullRequest, VcsPrStatus, VcsCommit, CreatePrParams, SourceFile, IssueFetchResult } from '../types';
 import { HttpClient } from '../factory';
-import { ISSUES_PER_PAGE, MAX_ISSUE_PAGES, laterOf, nextPageNumber } from './pagination';
+import { ISSUES_PER_PAGE, MAX_ISSUE_PAGES, inclusiveSince, laterOf, nextPageNumber } from './pagination';
 
 /**
  * GitLab REST API (v4) response for an issue
@@ -107,7 +107,7 @@ export class GitLabProvider implements IVcsProvider {
       order_by: 'updated_at',
       sort: 'asc',
       per_page: ISSUES_PER_PAGE,
-      ...(since ? { updated_after: since.toISOString() } : {}),
+      ...(since ? { updated_after: inclusiveSince(since) } : {}),
     };
     const issues: VcsIssue[] = [];
     let cursor: Date | null = null;
