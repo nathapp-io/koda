@@ -9,6 +9,7 @@ import { RAG_CFG, IRagConfig } from '../../config/rag.config';
 import { VCS_CFG, IVcsConfig, vcsConfig } from '../../config/vcs.config';
 import { outboxConfig } from '../../config/outbox.config';
 import { LIVE_CFG, ILiveConfig } from '../../config/live.config';
+import { WEBHOOK_CFG, IWebhookConfig } from '../../config/webhook.config';
 
 export const mockPrismaService = {
   client: {
@@ -72,6 +73,12 @@ export const mockVcsConfig: IVcsConfig = {
 
 export const mockLiveConfig: ILiveConfig = { heartbeatMs: 25000, maxStreamsPerUser: 5 };
 
+export const mockWebhookConfig: IWebhookConfig = {
+  allowedHostnames: [],
+  allowedCidrs: [],
+  deliveryTimeoutMs: 5000,
+};
+
 @Global()
 @Module({
   imports: [
@@ -93,7 +100,8 @@ export const mockLiveConfig: ILiveConfig = { heartbeatMs: 25000, maxStreamsPerUs
     { provide: RAG_CFG, useValue: mockRagConfig },
     { provide: VCS_CFG, useValue: mockVcsConfig },
     { provide: LIVE_CFG, useValue: mockLiveConfig },
+    { provide: WEBHOOK_CFG, useValue: mockWebhookConfig },
   ],
-  exports: [PrismaService, TRANSACTION_MANAGER, ConfigModule, AgentsService, CacheManager, AUTH_CFG, RAG_CFG, VCS_CFG, LIVE_CFG],
+  exports: [PrismaService, TRANSACTION_MANAGER, ConfigModule, AgentsService, CacheManager, AUTH_CFG, RAG_CFG, VCS_CFG, LIVE_CFG, WEBHOOK_CFG],
 })
 export class GlobalStubsModule {}

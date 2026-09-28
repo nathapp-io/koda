@@ -7,6 +7,7 @@ import {
   agentsControllerUpdate,
   agentsControllerRemove,
   agentsControllerRotateApiKey,
+  type CreateAgentDto,
 } from '../generated';
 import { table } from '../utils/output';
 import { unwrap } from '../utils/api';
@@ -132,7 +133,7 @@ const response = await agentsControllerGenerateApiKey({
   body: {
             name: options.name,
             slug: options.slug,
-            roles: options.roles ? String(options.roles).split(',').map((r: string) => r.trim()).filter(Boolean) : [],
+            roles: options.roles ? (String(options.roles).split(',').map((r: string) => r.trim()).filter(Boolean) as NonNullable<CreateAgentDto['roles']>) : [],
             maxConcurrentTickets: options.maxConcurrentTickets !== undefined ? Number(options.maxConcurrentTickets) : undefined,
           }
   });

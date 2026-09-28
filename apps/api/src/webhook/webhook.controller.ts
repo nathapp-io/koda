@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Get,
+  Patch,
   Delete,
   Body,
   Param,
@@ -14,7 +15,7 @@ import {
 } from '@nestjs/swagger';
 import { RequiredPermission } from '@nathapp/nestjs-auth';
 import { WebhookService } from './webhook.service';
-import { CreateWebhookDto } from './webhook.dto';
+import { CreateWebhookDto, UpdateWebhookDto } from './webhook.dto';
 import { JsonResponse } from '@nathapp/nestjs-common';
 
 @ApiTags('webhooks')
@@ -45,6 +46,22 @@ export class WebhookController {
   @ApiResponse({ status: 404, description: 'Project not found' })
   async list(@Param('slug') slug: string) {
     const data = await this.webhookService.findByProjectSlug(slug);
+    return JsonResponse.Ok(data);
+  }
+
+  @Patch('projects/:slug/webhooks/:id')
+  @RequiredPermission('ADMIN')
+  @ApiOperation({ summary: 'Update a webhook for a project' })
+  @ApiResponse({ status: 200, description: 'Webhook updated' })
+  @ApiResponse({ status: 400, description: 'Invalid request data' })
+  @ApiResponse({ status: 404, description: 'Webhook not found' })
+  async update(
+    @Param('slug') slug: string,
+    @Param('id') id: string,
+    @Body() updateWebhookDto: UpdateWebhookDto,
+  ) {
+    const project = await this.webhookService.getProjectBySlug(slug);
+    const data = await this.webhookService.update(project.id, id, updateWebhookDto);
     return JsonResponse.Ok(data);
   }
 

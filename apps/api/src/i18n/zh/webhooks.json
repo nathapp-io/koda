@@ -1,4 +1,5 @@
 {
   "notFound": "未找到 webhook",
-  "404": "未找到 webhook"
+  "404": "未找到 webhook",
+  "-2": "Webhook URL 被拒绝：{reason}"
 }

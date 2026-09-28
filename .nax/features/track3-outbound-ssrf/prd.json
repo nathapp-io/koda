@@ -1,0 +1,342 @@
+{
+  "project": "koda",
+  "feature": "track3-outbound-ssrf",
+  "branchName": "feat/track3-outbound-ssrf",
+  "createdAt": "2026-09-27T00:00:00Z",
+  "updatedAt": "2026-09-27T15:39:26.755Z",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Classify outbound addresses and validate operator allowlist",
+      "description": "**Goal** — Block sensitive outbound IP ranges unless explicitly allowed by the global boot-validated operator config.\n\n**Motivation** — Outbound project webhooks can currently be pointed at any address the API host can reach, including loopback, private networks and cloud metadata.\n\n**Approach** — `WEBHOOK_ALLOWED_HOSTS` is comma-separated; entries are trimmed and empty entries dropped. An entry with a `/` is a CIDR (IPv4 prefix 0-32, IPv6 prefix 0-128). Anything else is a hostname, which must match `^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$` after lower-casing and stripping one trailing dot. `envSchema` gains `WEBHOOK_ALLOWED_HOSTS: Joi.string().allow('').custom(...)`, where the custom rule calls `parseAllowedHosts` and turns a thrown error into a Joi error, so a bad entry refuses boot. `webhookConfig` is added to the `ConfigModule.forRoot` `load` array in `app.module.ts`, and `ConfigBridgeModule` gains a `WEBHOOK_CFG` provider built the same way as `LIVE_CFG`.\n\nIt uses one module-level `net.BlockList` for the blocked ranges and builds a second `net.BlockList` from `allowedCidrs`. `BlockList.check` matches an IPv4-mapped IPv6 address (`::ffff:127.0.0.1`, `::ffff:7f00:1`) against IPv4 rules on both Node 22 and Bun 1.4.2 (spike 2026-09-27). An address inside an allow-listed CIDR is `allowed` even when it is in a blocked range. A string that `net.isIP` does not recognise is `blocked` (fail closed).\n\nBlocked ranges: `0.0.0.0/8` (`0.1.2.3`), `10.0.0.0/8` (`10.1.2.3`), `100.64.0.0/10` (`100.64.0.1`), `127.0.0.0/8` (`127.0.0.1`), `169.254.0.0/16` (`169.254.169.254`), `172.16.0.0/12` (`172.16.0.1`), `192.168.0.0/16` (`192.168.1.1`), `224.0.0.0/3` (`224.0.0.1`, `255.255.255.255`), `::/128` (`::`), `::1/128` (`::1`), `fc00::/7` (`fd00::1`), `fe80::/10` (`fe80::1`), `ff00::/8` (`ff02::1`), and `::ffff:0:0/96` mapped forms of the IPv4 ranges above (`::ffff:127.0.0.1`, `::ffff:a9fe:a9fe`). Allowed edge addresses: `93.184.215.14`, `172.32.0.1`, `100.128.0.1`, `2606:2800:21f:cb07:6820:80da:af6b:8b2e`. `GlobalStubsModule` provides and exports a `mockWebhookConfig` for `WEBHOOK_CFG` (empty allowlists, `deliveryTimeoutMs: 5000`).\n\n**Scope** — In: classifier, allowlist parsing, config registration, boot rejection and DI stub. Out: URL/DNS policy and transport (US-002/US-004); route handling (US-003); Blocking NAT64 (`64:ff9b::/96`), 6to4 (`2002::/16`) and Teredo (`2001::/32`) prefixes: only the ranges in the Design table are blocked. A per-project allowlist: `WEBHOOK_ALLOWED_HOSTS` is one global setting.\n\n**Interface**\n```typescript\nexport const WEBHOOK_CFG = 'webhook';\nexport const DEFAULT_WEBHOOK_DELIVERY_TIMEOUT_MS = 5_000;\nexport interface IWebhookConfig {\n  allowedHostnames: readonly string[]; // lower-cased, trailing dot stripped\n  allowedCidrs: readonly string[];     // e.g. '10.0.0.0/24', 'fd00::/8'\n  deliveryTimeoutMs: number;           // always DEFAULT_WEBHOOK_DELIVERY_TIMEOUT_MS\n}\n/** Throws Error naming the bad entry when an entry is neither a hostname nor a valid CIDR. */\nexport function parseAllowedHosts(raw: string | undefined): Pick<IWebhookConfig, 'allowedHostnames' | 'allowedCidrs'>;\nexport const webhookConfig = registerAs(WEBHOOK_CFG, (): IWebhookConfig => ({ ... }));\nexport type AddressVerdict = 'allowed' | 'blocked';\n/** `address` is an IP string as returned by URL.hostname (brackets removed) or by DNS lookup. */\nexport function classifyAddress(address: string, allowedCidrs: readonly string[]): AddressVerdict;\n```",
+      "acceptanceCriteria": [
+        "Given every representative address in the blocked-range table (`0.1.2.3`, `10.1.2.3`, `100.64.0.1`, `127.0.0.1`, `169.254.169.254`, `172.16.0.1`, `192.168.1.1`, `224.0.0.1`, `255.255.255.255`, `::`, `::1`, `fd00::1`, `fe80::1`, `ff02::1`, `::ffff:127.0.0.1`, `::ffff:a9fe:a9fe`), when classifyAddress(address, []) is called, then it returns 'blocked' for every address.",
+        "Given each allowed edge address (`93.184.215.14`, `172.32.0.1`, `100.128.0.1`, `2606:2800:21f:cb07:6820:80da:af6b:8b2e`), when classifyAddress(address, []) is called, then it returns 'allowed' for every address.",
+        "classifyAddress('10.0.0.5', ['10.0.0.0/24']) returns 'allowed', and classifyAddress('10.0.1.5', ['10.0.0.0/24']) returns 'blocked'.",
+        "classifyAddress('not-an-ip', []) returns 'blocked'.",
+        "parseAllowedHosts(' Hooks.Internal. ,10.0.0.0/24,, fd00::/8 ') returns allowedHostnames ['hooks.internal'] and allowedCidrs ['10.0.0.0/24', 'fd00::/8'].",
+        "parseAllowedHosts(undefined) and parseAllowedHosts('') both return empty allowedHostnames and allowedCidrs.",
+        "parseAllowedHosts('10.0.0.0/33') throws an Error whose message contains '10.0.0.0/33'.",
+        "parseAllowedHosts('bad_host!') throws an Error whose message contains 'bad_host!'.",
+        "Given required variables plus WEBHOOK_ALLOWED_HOSTS: '10.0.0.0/33', when validate() runs, then it throws ValidationAppException whose args has a WEBHOOK_ALLOWED_HOSTS key.",
+        "webhookConfig() with WEBHOOK_ALLOWED_HOSTS unset returns allowedHostnames: [], allowedCidrs: [] and deliveryTimeoutMs: 5000.",
+        "Given a testing module importing ConfigModule.forRoot({ load: [webhookConfig], ignoreEnvFile: true }) and ConfigBridgeModule with WEBHOOK_ALLOWED_HOSTS set to 'hooks.internal', when WEBHOOK_CFG is resolved, then its allowedHostnames is ['hooks.internal']."
+      ],
+      "tags": [
+        "feature",
+        "security",
+        "api",
+        "configuration"
+      ],
+      "dependencies": [],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "complex",
+        "testStrategy": "three-session-tdd-lite",
+        "reasoning": "Cross-module boot configuration plus network address classifier; no authentication, token, cryptography, or role-check changes in this story.",
+        "initialComplexity": "complex",
+        "modelTier": "balanced",
+        "initialModelTier": "balanced"
+      },
+      "contextFiles": [
+        "apps/api/src/config/live.config.ts",
+        "apps/api/src/config/env.validation.ts",
+        "apps/api/src/config/config-bridge.module.ts",
+        "apps/api/src/common/test-helpers/global-stubs.module.ts",
+        "apps/api/src/app.module.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/webhook/outbound/address-classifier.ts",
+        "apps/api/src/webhook/outbound/address-classifier.spec.ts",
+        "apps/api/src/config/webhook.config.ts",
+        "apps/api/src/config/webhook.config.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/config/env.validation.ts",
+          "reason": "`envSchema` gains `WEBHOOK_ALLOWED_HOSTS` with a custom rule that calls `parseAllowedHosts`."
+        },
+        {
+          "path": "apps/api/src/config/config-bridge.module.ts",
+          "reason": "gains a `WEBHOOK_CFG` provider and export built like `LIVE_CFG`."
+        },
+        {
+          "path": "apps/api/src/app.module.ts",
+          "reason": "`webhookConfig` is added to the `ConfigModule.forRoot` `load` array."
+        },
+        {
+          "path": "apps/api/src/common/test-helpers/global-stubs.module.ts",
+          "reason": "provides and exports a `mockWebhookConfig` for `WEBHOOK_CFG` (empty allowlists, `deliveryTimeoutMs: 5000`) so DI tests that import `GlobalStubsModule` can resolve the new providers."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "151bb2f9703cb5a6e051aec1d0dfa87280bc8315"
+    },
+    {
+      "id": "US-002",
+      "title": "Guard webhook URL syntax, credentials and resolved destinations",
+      "description": "**Goal** — Validate webhook destinations before persistence and again at connection using a typed, testable DNS seam.\n\n**Motivation** — `CreateWebhookDto.url` is only `@IsUrl()`; it accepts IP literals such as `http://169.254.169.254/` and dotted internal names.\n\n**Approach** — `outbound/dns-resolver.ts`: an `@Injectable() class DnsResolver` with `resolve(hostname: string): Promise<string[]>`, implemented with `dns.promises.lookup(hostname, { all: true })` mapped to addresses. It is the DNS seam: tests provide `{ provide: DnsResolver, useValue: stub }` (typed class injection, no string token).\n\n`checkUrl` is one ordered pipeline. The first failing step decides the reason:\n1. `new URL(url)` throws → `invalid_url`.\n2. protocol is not `http:` or `https:` → `scheme_not_allowed`.\n3. `username` or `password` is non-empty → `credentials_not_allowed`.\n4. host = `URL.hostname` lower-cased, one trailing dot stripped, `[`/`]` removed. WHATWG URL has already normalised numeric forms (`127.1`, `2130706433`, `0x7f.0.0.1` all become `127.0.0.1`), so the guard only ever sees canonical addresses.\n5. allow-listed = host equals an entry of `allowedHostnames`, or host is an IP literal inside an `allowedCidrs` entry.\n6. protocol is `http:` and the host is not allow-listed → `https_required`.\n7. host is an allow-listed hostname → accept. No DNS lookup.\n8. host is an IP literal → `classifyAddress(host, allowedCidrs)`; `blocked` → `blocked_destination`, otherwise accept.\n9. `resolver.resolve(host)` throws, or returns an empty list → `unresolvable`.\n10. any resolved address classifies `blocked` → `blocked_destination`. Otherwise accept.\n\n`assertStaticTarget` runs steps 2-8 on an already-parsed URL (the caller has done step 1). For a hostname that is not allow-listed it returns without resolving; the connect-time `lookup` does the address check.\n\nThe function returned by `createLookup()` has the `net.LookupFunction` signature `(hostname, options, callback)`. It calls `resolver.resolve(hostname)`. If the hostname (normalised as in step 4) is allow-listed, all addresses pass. Otherwise, if any address classifies `blocked`, it calls back with an `Error` whose `code` is `'EBLOCKED_DESTINATION'`. A resolver failure is passed through with its own code. On success it calls back `callback(null, [{ address, family }])` when `options.all` is true, else `callback(null, address, family)` with the first address. Node 22 and Bun 1.4.2 both call `lookup` with `all: true` for `http` and `https`, honour its error, and skip `lookup` entirely for IP-literal hosts (spike 2026-09-27). That is why the static check exists. Register `DnsResolver` and `OutboundUrlGuard` in `WebhookModule`.\n\n**Scope** — In: resolver, guard, DNS rebinding prevention and guard DI. Out: address/config implementation (US-001), create/PATCH service integration (US-003), network client (US-004). US-002 only: `createLookup()` called with `options.all` false. Node 22 and Bun 1.4.2 always pass `all: true` (spike 2026-09-27); the single-address callback form is implemented but not pinned by a test. Blocking NAT64 (`64:ff9b::/96`), 6to4 (`2002::/16`) and Teredo (`2001::/32`) prefixes: only the ranges in the Design table are blocked.\n\n**Interface**\n```typescript\nexport type OutboundRejectionReason =\n  | 'invalid_url' | 'scheme_not_allowed' | 'credentials_not_allowed'\n  | 'https_required' | 'blocked_destination' | 'unresolvable';\nexport class OutboundUrlRejection extends Error {\n  constructor(readonly reason: OutboundRejectionReason) { super(reason); this.name = 'OutboundUrlRejection'; }\n}\n@Injectable()\nexport class DnsResolver { resolve(hostname: string): Promise<string[]>; }\n@Injectable()\nexport class OutboundUrlGuard {\n  constructor(@Inject(WEBHOOK_CFG) config: IWebhookConfig, resolver: DnsResolver) {}\n  /** Create/update-time check. Resolves hostnames. Rejects with OutboundUrlRejection. */\n  checkUrl(url: string): Promise<void>;\n  /** Delivery-time pre-connect check: steps 2-8 above, never resolves DNS. Throws OutboundUrlRejection. */\n  assertStaticTarget(url: URL): void;\n  /** A `lookup` for node:http(s).request that validates every resolved address at connect time. */\n  createLookup(): net.LookupFunction;\n}\n```",
+      "acceptanceCriteria": [
+        "OutboundUrlGuard.checkUrl('http://hooks.example/x') with empty allowlists rejects with OutboundUrlRejection whose reason is 'https_required'.",
+        "checkUrl('https://user:pw@hooks.example/') rejects with reason 'credentials_not_allowed'.",
+        "checkUrl('ftp://hooks.example/') rejects with reason 'scheme_not_allowed'.",
+        "checkUrl('not a url') rejects with reason 'invalid_url'.",
+        "checkUrl('https://2130706433/hook') rejects with reason 'blocked_destination', and the DnsResolver stub is not called.",
+        "checkUrl('https://[::ffff:127.0.0.1]/hook') rejects with reason 'blocked_destination'.",
+        "Given a DnsResolver stub returning ['93.184.215.14', '10.0.0.1'], when checkUrl('https://hooks.example/') runs, then it rejects with reason 'blocked_destination'.",
+        "Given a DnsResolver stub that throws an error with code ENOTFOUND, when checkUrl('https://hooks.example/') runs, then it rejects with reason 'unresolvable'.",
+        "Given a DnsResolver stub returning [], when checkUrl('https://hooks.example/') runs, then it rejects with reason 'unresolvable'.",
+        "Given a DnsResolver stub returning ['93.184.215.14'], when checkUrl('https://hooks.example/hook') runs, then it resolves, and the stub was called once with 'hooks.example'.",
+        "Given allowedHostnames ['hooks.internal'], when checkUrl('http://Hooks.Internal./hook') runs, then it resolves, and the DnsResolver stub is not called.",
+        "Given allowedCidrs ['10.0.0.0/24'], when checkUrl('http://10.0.0.5:8080/hook') runs, then it resolves.",
+        "Given a DnsResolver stub returning ['127.0.0.1'], when createLookup() is called with ('rebind.example', { all: true }, callback), then callback receives an error whose code is 'EBLOCKED_DESTINATION'.",
+        "Given a DnsResolver stub returning ['93.184.215.14'], when createLookup() is called with ('hooks.example', { all: true }, callback), then callback receives (null, [{ address: '93.184.215.14', family: 4 }]).",
+        "Given allowedHostnames ['hooks.internal'] and a DnsResolver stub returning ['10.0.0.7'], when createLookup() is called with ('hooks.internal', { all: true }, callback), then callback receives (null, [{ address: '10.0.0.7', family: 4 }])."
+      ],
+      "tags": [
+        "feature",
+        "security",
+        "api",
+        "dns"
+      ],
+      "dependencies": [
+        "US-001"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "SSRF trust boundary with credential rejection and DNS rebinding prevention; security override requires isolated three-session TDD.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
+      },
+      "contextFiles": [
+        "apps/api/src/webhook/webhook.module.ts",
+        "apps/api/src/webhook/outbound/address-classifier.ts",
+        "apps/api/src/config/webhook.config.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/webhook/outbound/dns-resolver.ts",
+        "apps/api/src/webhook/outbound/outbound-url-guard.ts",
+        "apps/api/src/webhook/outbound/outbound-url-guard.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/webhook/webhook.module.ts",
+          "reason": "registers `DnsResolver` and `OutboundUrlGuard` as providers."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "86dbe19fe0d80bd768af65e4ba8817829d2fb133"
+    },
+    {
+      "id": "US-003",
+      "title": "Validate create URLs and expose ADMIN-only webhook PATCH",
+      "description": "**Goal** — Refuse unsafe registrations and updates while exposing an ADMIN-only project-scoped PATCH with a secret-free response.\n\n**Motivation** — Registering a webhook needs `@RequiredPermission('ADMIN')`, so the attacker is an admin or a stolen admin token; the API runs with network access the admin does not otherwise have.\n\n**Approach** — `CreateWebhookDto.url` / `UpdateWebhookDto.url`: Target: `@IsString() @MaxLength(2048)`. `OutboundUrlGuard` is the only URL validator, so `@IsUrl`'s TLD rule no longer refuses an allow-listed `localhost`.\n\n`WebhookService`: Target: `constructor(webhookRepo: PrismaWebhookRepository, urlGuard: OutboundUrlGuard)`; `create(projectId, dto)` awaits `urlGuard.checkUrl(dto.url)` before `createWebhook`; new `update(projectId: string, id: string, dto: UpdateWebhookDto): Promise<WebhookView>`.\n\n`WebhookController`: Target: adds `@Patch('projects/:slug/webhooks/:id') @RequiredPermission('ADMIN') update(slug, id, dto)` returning `JsonResponse.Ok(view)`.\n\n`WebhookView` (returned by `WebhookService.update` and the PATCH route) is `WebhookListItem` plus `active: boolean`, never `secret`. It lives in `webhook/domain/webhook.domain.ts`.\n\n`WebhookService.update(projectId, id, dto)`:\n1. `findById(id)`; missing, or `projectId` differs from the webhook's → `NotFoundAppException({}, 'webhooks')`.\n2. if `dto.url !== undefined`, `await urlGuard.checkUrl(dto.url)`.\n3. `webhookRepo.update(id, { url, secret, events: JSON.stringify(events), active })` with only the provided fields, then returns the `WebhookView`.\n\nAn `OutboundUrlRejection` from `checkUrl` in `create` or `update` becomes `new ValidationAppException({ reason: rejection.reason }, 'webhooks')`. `webhooks.json` (en and zh) gains `\"-2\"`: en `\"Webhook URL rejected: {reason}\"`, zh `\"Webhook URL 被拒绝：{reason}\"`. Add HTTP integration tests in `test/integration/webhook/webhook-routes.integration.spec.ts`; run `bun run generate` from the repo root and commit regenerated `openapi.json`.\n\n**Scope** — In: DTO, service, ADMIN PATCH, localized validation, HTTP integration and root OpenAPI regeneration (the root `bun run generate` also writes the gitignored generated client in `apps/cli/src/generated/`; do not hand-edit it). Out: guard internals (US-002), HTTP delivery/retries (US-004). Inbound CI and VCS webhook hardening and the scope of `DELETE projects/:slug/webhooks/:id` (it ignores the slug today): Track 3 Slice 2b. A CLI `webhook update` command and any web UI for webhooks: the PATCH route is exposed through the API and `openapi.json` only. Re-validating or migrating existing webhook rows: rows created before this slice are checked at delivery time only. Extending `test/e2e/api-endpoint/endpoint.e2e.spec.ts`: it is past the 1000-line limit in `.nax/rules/api-testing.md`, so the HTTP-level webhook coverage lives in the new `test/integration/webhook/webhook-routes.integration.spec.ts`.\n\n**Interface**\n```typescript\nexport interface WebhookView extends WebhookListItem { active: boolean; }\nclass WebhookService {\n  constructor(webhookRepo: PrismaWebhookRepository, urlGuard: OutboundUrlGuard);\n  create(projectId: string, dto: CreateWebhookDto): Promise<WebhookDomain>;\n  update(projectId: string, id: string, dto: UpdateWebhookDto): Promise<WebhookView>;\n}\n@Patch('projects/:slug/webhooks/:id')\n@RequiredPermission('ADMIN')\nupdate(slug: string, id: string, dto: UpdateWebhookDto);\n```",
+      "acceptanceCriteria": [
+        "Given a guard stub whose checkUrl rejects with OutboundUrlRejection('blocked_destination'), when WebhookService.create runs, then it throws ValidationAppException whose args is { reason: 'blocked_destination' }, and PrismaWebhookRepository.createWebhook is not called.",
+        "Given a guard stub that resolves, when WebhookService.create runs, then it calls createWebhook once with the given url.",
+        "Given a webhook in project p1, when WebhookService.update('p1', 'w1', { url: 'https://hooks.example/new' }) runs, then it calls checkUrl('https://hooks.example/new') before PrismaWebhookRepository.update.",
+        "When WebhookService.update('p1', 'w1', { active: false }) runs, then it does not call checkUrl and calls PrismaWebhookRepository.update('w1', { active: false }).",
+        "When WebhookService.update('p1', 'w1', { events: ['STATUS_CHANGE'] }) runs, then it calls PrismaWebhookRepository.update('w1', { events: '[\"STATUS_CHANGE\"]' }).",
+        "Given a webhook whose projectId is p2, when WebhookService.update('p1', 'w1', ...) runs, then it throws NotFoundAppException and does not call PrismaWebhookRepository.update.",
+        "Given findById does not find the id, when WebhookService.update runs, then it throws NotFoundAppException.",
+        "When WebhookService.update succeeds, then it returns an object with id, projectId, url, events, active and createdAt, and no secret property.",
+        "Given a global ADMIN, when POST /api/projects/:slug/webhooks receives url 'https://10.0.0.5/hook', then it returns 400, and no webhook row exists for the project afterwards.",
+        "Given a global ADMIN, when POST /api/projects/:slug/webhooks receives url 'https://93.184.215.14/hook', then it returns 201.",
+        "Given a global ADMIN, when PATCH /api/projects/:slug/webhooks/:id receives { \"url\": \"http://93.184.215.14/hook\" }, then it returns 400, and the stored url is unchanged.",
+        "Given a global ADMIN, when PATCH /api/projects/:slug/webhooks/:id receives { \"active\": false }, then it returns 200 with data.active false and no data.secret.",
+        "Given a user who is not a global ADMIN, when PATCH /api/projects/:slug/webhooks/:id is called, then it returns 403.",
+        "Given the id of a webhook in another project, when PATCH /api/projects/:slug/webhooks/:id is called, then it returns 404.",
+        "Given the real i18n runtime (I18nCoreModule over src/i18n), when webhooks.-2 is translated with args { reason: 'blocked_destination' } in both en and zh, then each translation differs from the key and contains 'blocked_destination'.",
+        "Given a URL whose DNS hostname is unresolvable, when WebhookService.create or WebhookService.update checks the URL, then it throws ValidationAppException with args { reason: 'unresolvable' } and leaves the webhook uncreated or unchanged."
+      ],
+      "tags": [
+        "feature",
+        "security",
+        "api",
+        "access-control",
+        "openapi"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "ADMIN access-control boundary and cross-project ID isolation plus API, database, translations and root OpenAPI regeneration; security override mandates strict TDD.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
+      },
+      "contextFiles": [
+        "apps/api/src/webhook/webhook.service.ts",
+        "apps/api/src/webhook/webhook.controller.ts",
+        "apps/api/src/webhook/prisma-webhook.repository.ts",
+        "apps/api/test/helpers/http-app.ts",
+        "apps/api/src/webhook/outbound/outbound-url-guard.ts",
+        "apps/api/test/unit/i18n/projects-translation-keys.spec.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/test/integration/webhook/webhook-routes.integration.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/webhook/webhook.service.ts",
+          "reason": "the constructor gains `OutboundUrlGuard`; `create` checks the URL and `update` is added."
+        },
+        {
+          "path": "apps/api/src/webhook/webhook.controller.ts",
+          "reason": "adds the PATCH handler for projects/:slug/webhooks/:id."
+        },
+        {
+          "path": "apps/api/src/webhook/webhook.dto.ts",
+          "reason": "`url` on both DTOs changes from `@IsUrl()` to `@IsString() @MaxLength(2048)`."
+        },
+        {
+          "path": "apps/api/src/webhook/domain/webhook.domain.ts",
+          "reason": "adds the `WebhookView` type."
+        },
+        {
+          "path": "apps/api/src/webhook/webhook.service.spec.ts",
+          "reason": "`new WebhookService(webhookRepo)` becomes `new WebhookService(webhookRepo, urlGuard)` with a stub guard; the existing create cases keep their assertions with a guard that resolves."
+        },
+        {
+          "path": "apps/api/src/webhook/webhook.dto.spec.ts",
+          "reason": "gains cases for the new invariant that `url` must be a string of at most 2048 characters (no existing case asserts `@IsUrl`; semantic URL checks belong to `OutboundUrlGuard`)."
+        },
+        {
+          "path": "apps/api/src/i18n/en/webhooks.json",
+          "reason": "adds the `\"-2\"` message."
+        },
+        {
+          "path": "apps/api/src/i18n/zh/webhooks.json",
+          "reason": "adds the `\"-2\"` message."
+        },
+        {
+          "path": "openapi.json",
+          "reason": "regenerated for the PATCH route and the DTO change."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "derived",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "6e615e4c1a76d7b2a7f606e9b69dc0331bad0f28"
+    },
+    {
+      "id": "US-004",
+      "title": "Deliver signed webhooks using guarded native HTTP transport",
+      "description": "**Goal** — Prevent redirect and rebinding SSRF during delivery and expose only fixed, non-oracular HTTP-delivery error codes to the outbox.\n\n**Motivation** — `WebhookDeliveryHandler.handle` calls global `fetch`, which follows redirects; failed deliveries throw raw socket errors that `FanOutPublisher` stores as admin-visible `lastError`, making internal ports scannable.\n\n**Approach** — `WebhookDeliveryHandler`: Target: `constructor(webhookRepo: PrismaWebhookRepository, http: OutboundHttpClient)`; signs the body as today (same three `X-Koda-*` headers, same signature and delivery-id derivation) and calls `http.post(...)`; HTTP delivery failures propagate as `WebhookDeliveryError` whose `message` is exactly one delivery error code.\n\n`post`:\n1. parses the URL and calls `urlGuard.assertStaticTarget`; any `OutboundUrlRejection` → `blocked_destination`.\n2. calls `https.request` or `http.request` (by protocol) with `method: 'POST'`, the headers, `lookup: urlGuard.createLookup()`, and `signal: AbortSignal.timeout(config.deliveryTimeoutMs)`.\n3. drains and discards the response body. Status 200-299 → resolve; 300-399 → `redirect_refused` (the `Location` is never requested); 400-499 → `http_4xx`; 500-599 → `http_5xx`.\n4. maps request errors: `code === 'EBLOCKED_DESTINATION'` → `blocked_destination`; `code === 'ABORT_ERR'` (Node 22 and Bun 1.4.2 both raise `AbortError` / `ABORT_ERR` with cause `TimeoutError`, spike 2026-09-27) → `timeout`; anything else (refused, reset, TLS failure, DNS failure) → `connect_failed`.\n5. logs the raw error once with `Logger.warn` (`OutboundHttpClient`), including the error code and the URL's host, so operators can still diagnose. The raw text never reaches `WebhookDeliveryError.message`.\n\n`WebhookModule` registers `OutboundHttpClient` as a provider. `FanOutPublisher.publish` runs every handler registered for a record type and, if any throws, records `\"<n> fan-out handler(s) failed for <type>: <messages>\"` via `PrismaOutboxRepository.recordLastError` and rethrows, so the relay retries. The handler's `Error.message` is therefore exactly what an admin sees within the aggregate prefix. `WebhookOutboxSubscriber` registers `WebhookDeliveryHandler.handle` for `webhook_delivery` in `onModuleInit`. Blocked deliveries keep the normal relay retries and backoff, then become dead.\n\n**Scope** — In: native client, signed handler delegation, guarded lookup, fixed error codes, raw operator logging and relay seam. Out: guard internals (US-002), create/PATCH policy (US-003). Non-retryable delivery errors: a `blocked_destination` delivery keeps the relay's normal retry and backoff before it becomes `dead` (Slice 2a ruling 2026-09-27). HTTP(S) proxy support: deliveries connect directly, and `HTTP_PROXY` / `HTTPS_PROXY` are ignored. Blocking NAT64 (`64:ff9b::/96`), 6to4 (`2002::/16`) and Teredo (`2001::/32`) prefixes: only the ranges in the Design table are blocked. Re-validating or migrating existing webhook rows: rows created before this slice are checked at delivery time only. Storing or logging response bodies: the body is drained and discarded.\n\n**Interface**\n```typescript\nexport type DeliveryErrorCode =\n  | 'blocked_destination' | 'connect_failed' | 'timeout'\n  | 'redirect_refused' | 'http_4xx' | 'http_5xx';\nexport class WebhookDeliveryError extends Error {\n  constructor(readonly code: DeliveryErrorCode) { super(code); this.name = 'WebhookDeliveryError'; }\n}\n@Injectable()\nexport class OutboundHttpClient {\n  constructor(urlGuard: OutboundUrlGuard, @Inject(WEBHOOK_CFG) config: IWebhookConfig) {}\n  /** Resolves on 2xx. Otherwise throws WebhookDeliveryError. */\n  post(url: string, headers: Record<string, string>, body: string): Promise<void>;\n}\n```",
+      "acceptanceCriteria": [
+        "Given a local HTTP server on 127.0.0.1, allowedHostnames ['allowed.test'] and a DnsResolver stub returning ['127.0.0.1'], when OutboundHttpClient.post sends to http://allowed.test:<port>/hook and the server answers 204, then exactly one POST with the supplied body and headers arrives and post resolves.",
+        "Given empty allowlists and a DnsResolver stub returning ['127.0.0.1'], when post targets https://rebind.test:<port>/hook, then it rejects with WebhookDeliveryError.message 'blocked_destination', and the local server receives no request.",
+        "Given empty allowlists, when post targets https://127.0.0.1:<port>/hook, then it rejects with message 'blocked_destination', the DnsResolver stub is not called, and the local server receives no request.",
+        "Given an allow-listed URL whose server answers 302 with Location: /elsewhere, when post runs, then it rejects with message 'redirect_refused', and the server receives exactly one request.",
+        "Given an allow-listed URL whose server answers 404, when post runs, then it rejects with message 'http_4xx'.",
+        "Given an allow-listed URL whose server answers 503, when post runs, then it rejects with message 'http_5xx'.",
+        "Given an allow-listed URL whose server never answers and deliveryTimeoutMs 200, when post runs, then it rejects with message 'timeout' in under 1000 ms.",
+        "Given an allow-listed URL on a port with no listener, when post runs, then it rejects with message 'connect_failed'.",
+        "Given an allow-listed hostname whose DnsResolver stub throws with code ENOTFOUND, when post runs, then it rejects with message 'connect_failed'.",
+        "Given post fails with 'connect_failed' after ECONNREFUSED for allowed.test, when the error is logged, then Logger.warn is called once with text containing ECONNREFUSED and allowed.test.",
+        "Given an active webhook, when WebhookDeliveryHandler.handle runs, then it calls OutboundHttpClient.post once with the webhook url, a body equal to JSON.stringify(payload), and headers Content-Type: application/json, X-Koda-Event, X-Koda-Signature: sha256=<hmac of the body> and X-Koda-Delivery-Id.",
+        "When WebhookDeliveryHandler.handle runs, then it never calls globalThis.fetch.",
+        "Given a missing or inactive webhook, when WebhookDeliveryHandler.handle runs, then it does not call OutboundHttpClient.post.",
+        "Given the real WebhookOutboxSubscriber, WebhookDeliveryHandler, OutboundHttpClient and OutboundUrlGuard, a webhook whose url is https://rebind.test/hook and a DnsResolver stub returning ['127.0.0.1'], when FanOutPublisher.publish processes a webhook_delivery record, then it rejects and recordLastError is called with the outbox record id and exactly '1 fan-out handler(s) failed for webhook_delivery: blocked_destination'.",
+        "Given a previously stored HTTP webhook URL not on the allowlist, when OutboundHttpClient.post attempts delivery, then it rejects with WebhookDeliveryError.message 'blocked_destination' without attempting a connection.",
+        "Given OutboundHttpClient.post rejects with WebhookDeliveryError('http_5xx'), when WebhookDeliveryHandler.handle awaits it, then the same WebhookDeliveryError propagates unchanged."
+      ],
+      "tags": [
+        "feature",
+        "security",
+        "api",
+        "network",
+        "cryptography"
+      ],
+      "dependencies": [
+        "US-002"
+      ],
+      "status": "passed",
+      "passes": true,
+      "attempts": 0,
+      "escalations": [],
+      "routing": {
+        "complexity": "expert",
+        "testStrategy": "three-session-tdd",
+        "reasoning": "Security-critical outbound trust boundary and preservation of HMAC signature; native HTTP/DNS/relay interactions and cryptography override require strict isolated TDD.",
+        "initialComplexity": "expert",
+        "modelTier": "powerful",
+        "initialModelTier": "powerful"
+      },
+      "contextFiles": [
+        "apps/api/src/webhook/webhook-delivery.handler.ts",
+        "apps/api/src/outbox/fan-out-publisher.ts",
+        "apps/api/src/webhook/webhook-outbox.subscriber.ts",
+        "apps/api/src/webhook/webhook.module.ts",
+        "apps/api/src/webhook/outbound/outbound-url-guard.ts"
+      ],
+      "expectedFiles": [
+        "apps/api/src/webhook/outbound/outbound-http-client.ts",
+        "apps/api/src/webhook/outbound/outbound-http-client.spec.ts"
+      ],
+      "modifiedFiles": [
+        {
+          "path": "apps/api/src/webhook/webhook-delivery.handler.ts",
+          "reason": "the constructor gains `OutboundHttpClient`, and delivery goes through `OutboundHttpClient.post` instead of global `fetch`."
+        },
+        {
+          "path": "apps/api/src/webhook/webhook-delivery.handler.spec.ts",
+          "reason": "the assertions that global `fetch` is called with the method, headers, signal and body, and that a non-ok response rejects with `Webhook delivery failed with status N`, are replaced by the invariant that `OutboundHttpClient.post` receives the same URL, the same three `X-Koda-*` headers plus `Content-Type`, and the same body, and that a `WebhookDeliveryError` from it propagates unchanged."
+        },
+        {
+          "path": "apps/api/src/webhook/webhook.module.ts",
+          "reason": "registers `OutboundHttpClient` as a provider."
+        },
+        {
+          "path": "apps/api/src/webhook/webhook.module.spec.ts",
+          "reason": "the invariant that `WebhookDeliveryHandler` resolves with only a mocked `PrismaWebhookRepository` becomes: it resolves with a mocked `PrismaWebhookRepository` and a mocked `OutboundHttpClient`."
+        }
+      ],
+      "workdir": "apps/api",
+      "workdirSource": "stated",
+      "priorErrors": [],
+      "priorFailures": [],
+      "storyPoints": 1,
+      "storyGitRef": "fd3f8ae0f27adf67859649a7cdc4302f784e7eb5"
+    }
+  ],
+  "analysis": "Existing Nest/Express API, Jest/Prisma monorepo; work is outbound project webhooks, not incoming CI/VCS webhooks. apps/api/src/webhook/webhook.dto.ts:3-5 and :19-22 currently use @IsUrl, which accepts private IPs and rejects allow-listed localhost; URL semantics must instead be centralized in the guard while DTOs enforce string/2048 length. apps/api/src/webhook/webhook.service.ts:9-23 stores URLs without validation; :25-53 implements existing list/remove/project lookup; guard injection changes its direct-instantiation tests at apps/api/src/webhook/webhook.service.spec.ts:31-38. apps/api/src/webhook/webhook.controller.ts:23-36 already gates create with @RequiredPermission('ADMIN') and looks up slug; :38-69 has list and two ADMIN deletes, with the project-scoped delete ignoring slug (do not alter). New PATCH must resolve slug, verify webhook.projectId via service, check only provided URL, and return a secret-free WebhookView. apps/api/src/webhook/domain/webhook.domain.ts:3-23 defines WebhookDomain (includes secret), WebhookListItem (excludes active/secret), so do not return the repository entity from PATCH. apps/api/src/webhook/prisma-webhook.repository.ts:17-54 maps url/secret/events/active and :56-101 already provides createWebhook, findById, findProjectBySlug; inherited update suffices, with partial fields only. apps/api/src/webhook/webhook-delivery.handler.ts:12-45 signs JSON body with HMAC-SHA256 and deterministic SHA256 delivery ID but calls redirect-following global fetch with raw network errors and status details; preserve exact headers/signature/id while delegating transport. apps/api/src/webhook/webhook-delivery.handler.spec.ts:51-248 assumes fetch and needs replacement; apps/api/src/webhook/webhook.module.spec.ts:46-78 currently injects handler with repository mock only and must inject client mock too. apps/api/src/webhook/webhook-outbox.subscriber.ts:13-20 registers the handler for webhook_delivery in onModuleInit; apps/api/src/outbox/fan-out-publisher.ts:13-20, :57-83 aggregates handler Error.message into persisted recordLastError and rethrows for normal relay retry, meaning only fixed delivery codes may cross this boundary, though the stored lastError includes the fan-out prefix. The prior payload-serialization error path in the handler also contains raw exception text; avoid leaking any raw delivery/socket text. apps/api/src/config/live.config.ts:6-34 establishes typed registerAs config conventions; apps/api/src/config/env.validation.ts:4-52 validates boot env and wraps Joi details in ValidationAppException args; apps/api/src/config/config-bridge.module.ts:6-60 globally exports typed config tokens; apps/api/src/app.module.ts:49-62 loads configs; apps/api/src/common/test-helpers/global-stubs.module.ts:70-99 must mock the new config token for DI tests. New outbound files do not exist. Use Node net.BlockList for classified IPv4/IPv6/mapped addresses and dns.promises.lookup(all:true) as a seam; check every DNS address both at registration and connect time to defeat rebinding, bypass DNS only for explicit allow-listed hostname, statically check IP literals because node:http skips lookup for them. Use native http(s).request with timeout and no redirects; log raw transport errors through Logger.warn once, never persist them. apps/api/src/webhook/webhook.module.ts:12-25 wires existing providers; add resolver, guard and client in dependency order. apps/api/src/i18n/en/webhooks.json:1-4 and apps/api/src/i18n/zh/webhooks.json:1-4 lack -2; apps/api/test/unit/i18n/projects-translation-keys.spec.ts:19-49 demonstrates runtime translation. apps/api/test/helpers/http-app.ts:12-45 boots full global guards/pipes/filters; new route integration tests belong in a new test/integration/webhook file, not oversized endpoint.e2e.spec.ts. package.json:20-24 says root bun run generate exports the API spec and regenerates clients; openapi-ts.config.ts:3-5 points the generated CLI SDK to apps/cli/src/generated (gitignored), while root openapi.json is tracked and must be regenerated in US-003, making that story cross-root/package and therefore without workdir. No Prisma schema migration or existing-row rewrite: previously stored rows are guarded when delivered; security risk remains if custom lookup fails to validate every address, if an allow-listed hostname is treated like a CIDR/IP, if HTTP redirects are followed, if any unsafe URL reaches a socket, or if raw error text enters outbox. Failure/retry semantics remain unchanged, including retries for blocked destinations; operator allowlist is global, validated at boot, and affects both registration and delivery at lookup time.",
+  "outOfScope": [
+    "Non-retryable delivery errors: a `blocked_destination` delivery keeps the relay's normal retry and backoff before it becomes `dead` (Slice 2a ruling 2026-09-27).",
+    "Inbound CI and VCS webhook hardening and the scope of `DELETE projects/:slug/webhooks/:id` (it ignores the slug today): Track 3 Slice 2b.",
+    "A CLI `webhook update` command and any web UI for webhooks: the PATCH route is exposed through the API and `openapi.json` only.",
+    "HTTP(S) proxy support: deliveries connect directly, and `HTTP_PROXY` / `HTTPS_PROXY` are ignored.",
+    "Blocking NAT64 (`64:ff9b::/96`), 6to4 (`2002::/16`) and Teredo (`2001::/32`) prefixes: only the ranges in the Design table are blocked.",
+    "Re-validating or migrating existing webhook rows: rows created before this slice are checked at delivery time only.",
+    "Storing or logging response bodies: the body is drained and discarded.",
+    "A per-project allowlist: `WEBHOOK_ALLOWED_HOSTS` is one global setting.",
+    "Extending `test/e2e/api-endpoint/endpoint.e2e.spec.ts`: it is past the 1000-line limit in `.nax/rules/api-testing.md`, so the HTTP-level webhook coverage lives in the new `test/integration/webhook/webhook-routes.integration.spec.ts`.",
+    "US-002 only: `createLookup()` called with `options.all` false. Node 22 and Bun 1.4.2 always pass `all: true` (spike 2026-09-27); the single-address callback form is implemented but not pinned by a test."
+  ],
+  "routingProfile": "native"
+}

@@ -548,8 +548,11 @@
           "400": {
             "description": "Missing project query param"
           },
+          "403": {
+            "description": "Forbidden - agent only, or global ADMIN"
+          },
           "404": {
-            "description": "Agent not found"
+            "description": "Agent or project not found"
           }
         },
         "security": [
@@ -2996,6 +2999,79 @@
         ]
       }
     },
+    "/api/projects/{slug}/webhooks/{id}": {
+      "patch": {
+        "operationId": "WebhookController_update",
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateWebhookDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook updated"
+          },
+          "400": {
+            "description": "Invalid request data"
+          },
+          "404": {
+            "description": "Webhook not found"
+          }
+        },
+        "summary": "Update a webhook for a project",
+        "tags": [
+          "webhooks"
+        ]
+      },
+      "delete": {
+        "operationId": "WebhookController_removeByProject",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Webhook deleted"
+          },
+          "404": {
+            "description": "Webhook not found"
+          }
+        },
+        "summary": "Remove a webhook (project-scoped)",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
     "/api/webhooks/{id}": {
       "delete": {
         "operationId": "WebhookController_remove",
@@ -3018,33 +3094,6 @@
           }
         },
         "summary": "Remove a webhook",
-        "tags": [
-          "webhooks"
-        ]
-      }
-    },
-    "/api/projects/{slug}/webhooks/{id}": {
-      "delete": {
-        "operationId": "WebhookController_removeByProject",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Webhook deleted"
-          },
-          "404": {
-            "description": "Webhook not found"
-          }
-        },
-        "summary": "Remove a webhook (project-scoped)",
         "tags": [
           "webhooks"
         ]
@@ -4523,27 +4572,38 @@
         "properties": {
           "name": {
             "type": "string",
-            "example": "Subrina Coder"
+            "description": "Agent name"
           },
           "slug": {
             "type": "string",
-            "example": "subrina-coder"
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+            "description": "Agent slug (unique identifier, lowercase alphanumeric with hyphens)",
+            "example": "good-slug-1"
           },
           "maxConcurrentTickets": {
             "type": "number",
-            "minimum": 1
+            "minimum": 1,
+            "description": "Maximum concurrent tickets the agent can handle"
           },
           "roles": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "DEVELOPER",
+                "REVIEWER",
+                "VERIFIER",
+                "TRIAGER"
+              ]
+            },
+            "description": "Agent roles (e.g. DEVELOPER, REVIEWER)",
             "example": [
               "DEVELOPER",
               "REVIEWER"
             ],
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
+            "type": "array"
           },
           "capabilities": {
+            "description": "Agent capabilities (e.g. typescript, nestjs)",
             "example": [
               "typescript",
               "nestjs"
@@ -4556,7 +4616,7 @@
         },
         "required": [
           "name",
-          "roles"
+          "slug"
         ]
       },
       "UpdateAgentDto": {
@@ -4585,25 +4645,21 @@
         "type": "object",
         "properties": {
           "roles": {
-            "type": "array",
             "items": {
-              "required": true,
-              "items": {
-                "type": "string",
-                "enum": [
-                  "DEVELOPER",
-                  "REVIEWER",
-                  "VERIFIER",
-                  "TRIAGER"
-                ]
-              },
-              "description": "Agent roles",
-              "example": [
+              "type": "string",
+              "enum": [
                 "DEVELOPER",
-                "REVIEWER"
-              ],
-              "type": "array"
-            }
+                "REVIEWER",
+                "VERIFIER",
+                "TRIAGER"
+              ]
+            },
+            "description": "Agent roles",
+            "example": [
+              "DEVELOPER",
+              "REVIEWER"
+            ],
+            "type": "array"
           }
         },
         "required": [
@@ -5471,7 +5527,7 @@
         "properties": {
           "url": {
             "type": "string",
-            "format": "uri"
+            "maxLength": 2048
           },
           "secret": {
             "type": "string",
@@ -5488,6 +5544,28 @@
           "url",
           "events"
         ]
+      },
+      "UpdateWebhookDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "secret": {
+            "type": "string",
+            "minLength": 32
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "active": {
+            "type": "boolean"
+          }
+        }
       },
       "CreateVcsConnectionDto": {
         "type": "object",

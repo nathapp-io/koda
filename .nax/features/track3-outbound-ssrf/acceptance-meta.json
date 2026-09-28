@@ -1,0 +1,16 @@
+{
+  "generatedAt": "2026-09-27T12:58:43.961Z",
+  "acFingerprint": "sha256:9c60ba582da5b8fa0d89b1011a25bc0af3cab0388f58c5a0f2b9c43ef1ad6d1f",
+  "layoutFingerprint": "sha256:3df6642ec8fd20016d8a9376009811d93a60ba884144299d81ff2afdd9db5bd8",
+  "storyCount": 4,
+  "acCount": 58,
+  "generator": "nax",
+  "coverage": [
+    {
+      "testPath": "apps/api/.nax/features/track3-outbound-ssrf/.nax-acceptance.test.ts",
+      "expected": 58,
+      "found": 58,
+      "missing": []
+    }
+  ]
+}
