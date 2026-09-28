@@ -22,7 +22,7 @@ import { VcsSyncService } from '../../../src/vcs/vcs-sync.service';
 import { VcsWebhookService, GitHubWebhookPayload } from '../../../src/vcs/vcs-webhook.service';
 import { ProjectsService } from '../../../src/projects/projects.service';
 import { WebhookReplayGuard } from '../../../src/webhook-security/webhook-replay.guard';
-import { AuthException, NotFoundAppException } from '@nathapp/nestjs-common';
+import { AuthException } from '@nathapp/nestjs-common';
 
 describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
   let controller: VcsWebhookController;
@@ -38,6 +38,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
     projectsService?.findBySlug.mockClear();
     connectionService?.findByProject.mockClear();
     connectionService?.getFullByProject.mockClear();
+    connectionService?.findInboundTarget.mockClear();
     webhookService?.verifySignature.mockClear();
     webhookService?.handleWebhook.mockClear();
     syncService?.syncIssue.mockClear();
@@ -45,6 +46,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
     projectsService.findBySlug.mockResolvedValue(mockProject);
     connectionService.findByProject.mockResolvedValue(mockVcsConnection as any);
     connectionService.getFullByProject.mockResolvedValue(mockVcsConnection as any);
+    connectionService.findInboundTarget.mockResolvedValue(mockTarget as any);
   }
 
   const mockProject = {
@@ -83,6 +85,11 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
 
   const webhookSecret = mockVcsConnection.webhookSecret;
 
+  const mockTarget = {
+    ...mockVcsConnection,
+    project: { id: mockProject.id, key: mockProject.key, slug: mockProject.slug },
+  };
+
   /**
    * Helper: Create valid GitHub webhook payload for issues.opened
    */
@@ -116,8 +123,8 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
    * Helper: Build the request argument for handleWebhook. GitHub signs the raw
    * bytes, so the request carries the rawBody captured by the preParsing hook.
    */
-  function webhookRequest(payload: unknown): { rawBody: Buffer } {
-    return { rawBody: Buffer.from(JSON.stringify(payload), 'utf8') };
+  function webhookRequest(payload: unknown): { rawBody: Buffer; body: unknown } {
+    return { rawBody: Buffer.from(JSON.stringify(payload), 'utf8'), body: payload };
   }
 
   /**
@@ -133,6 +140,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
     const mockVcsServiceInstance = {
       findByProject: jest.fn().mockResolvedValue(mockVcsConnection),
       getFullByProject: jest.fn().mockResolvedValue(mockVcsConnection),
+      findInboundTarget: jest.fn().mockResolvedValue(mockTarget),
     };
 
     const mockSyncServiceInstance = {
@@ -200,7 +208,6 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
       const result = await controller.handleWebhook(
         mockProject.slug,
         validSignature,
-        payload,
         webhookRequest(payload),
         'issues',
       );
@@ -238,7 +245,6 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
       const result = await controller.handleWebhook(
         mockProject.slug,
         validSignature,
-        payload,
         webhookRequest(payload),
         'issues',
       );
@@ -266,7 +272,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
       webhookService.verifySignature.mockReturnValue(true);
       webhookService.handleWebhook.mockResolvedValue(syncResult);
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, webhookRequest(payload));
 
       expect(webhookService.handleWebhook).toHaveBeenCalled();
       expect(result.success).toBe(true);
@@ -286,7 +292,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
       webhookService.verifySignature.mockReturnValue(true);
       webhookService.handleWebhook.mockResolvedValue(syncResult);
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, webhookRequest(payload));
 
       expect(result).toHaveProperty('success');
       expect(typeof result.success).toBe('boolean');
@@ -306,7 +312,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
       webhookService.verifySignature.mockReturnValue(false);
 
       // The controller should throw AuthException which becomes 401
-      await expect(controller.handleWebhook(mockProject.slug, invalidSignature, payload, webhookRequest(payload))).rejects.toThrow(
+      await expect(controller.handleWebhook(mockProject.slug, invalidSignature, webhookRequest(payload))).rejects.toThrow(
         AuthException,
       );
 
@@ -320,7 +326,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
 
       webhookService.verifySignature.mockReturnValue(false);
 
-      await expect(controller.handleWebhook(mockProject.slug, invalidSignature, payload, webhookRequest(payload))).rejects.toThrow(
+      await expect(controller.handleWebhook(mockProject.slug, invalidSignature, webhookRequest(payload))).rejects.toThrow(
         AuthException,
       );
 
@@ -333,7 +339,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
 
       webhookService.verifySignature.mockReturnValue(false);
 
-      await expect(controller.handleWebhook(mockProject.slug, corruptedSignature, payload, webhookRequest(payload))).rejects.toThrow(
+      await expect(controller.handleWebhook(mockProject.slug, corruptedSignature, webhookRequest(payload))).rejects.toThrow(
         AuthException,
       );
 
@@ -346,7 +352,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
 
       webhookService.verifySignature.mockReturnValue(false);
 
-      await expect(controller.handleWebhook(mockProject.slug, invalidSignature, payload, webhookRequest(payload))).rejects.toThrow();
+      await expect(controller.handleWebhook(mockProject.slug, invalidSignature, webhookRequest(payload))).rejects.toThrow();
 
       expect(syncService.syncIssue).not.toHaveBeenCalled();
     });
@@ -371,7 +377,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
       webhookService.verifySignature.mockReturnValue(true);
       webhookService.handleWebhook.mockResolvedValue(result);
 
-      const response = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
+      const response = await controller.handleWebhook(mockProject.slug, validSignature, webhookRequest(payload));
 
       expect(response.ignored).toBe(true);
       expect(webhookService.handleWebhook).toHaveBeenCalledWith(
@@ -393,7 +399,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
         reason: "Event type 'issues.closed' is not processed",
       });
 
-      await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
+      await controller.handleWebhook(mockProject.slug, validSignature, webhookRequest(payload));
 
       // syncService.syncIssue should not be called for closed issues
       expect(syncService.syncIssue).not.toHaveBeenCalled();
@@ -410,7 +416,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
         ignored: true,
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, webhookRequest(payload));
 
       expect(result.success).toBe(true);
       expect(result.ignored).toBe(true);
@@ -428,7 +434,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
         reason: "Event type 'issues.edited' is not processed",
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, webhookRequest(payload));
 
       expect(result.ignored).toBe(true);
     });
@@ -457,7 +463,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
         reason: 'Author not in allowed list',
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, webhookRequest(payload));
 
       expect(result.ignored).toBe(true);
       expect(result.reason).toContain('Author not in allowed list');
@@ -481,7 +487,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
         reason: 'Author not in allowed list',
       });
 
-      await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
+      await controller.handleWebhook(mockProject.slug, validSignature, webhookRequest(payload));
 
       expect(syncService.syncIssue).not.toHaveBeenCalled();
     });
@@ -504,7 +510,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
         reason: 'Author not in allowed list',
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, webhookRequest(payload));
 
       expect(result.ignored).toBe(true);
       expect(webhookService.handleWebhook).toHaveBeenCalled();
@@ -527,7 +533,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
         ignored: false,
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, webhookRequest(payload));
 
       expect(result.ignored).toBe(false);
     });
@@ -551,7 +557,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
         reason: 'Author not in allowed list',
       });
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, webhookRequest(payload));
 
       expect(result.ignored).toBe(true);
     });
@@ -677,31 +683,29 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
       webhookService.verifySignature.mockReturnValue(false);
 
       // Should throw AuthException due to invalid/missing signature
-      await expect(controller.handleWebhook(mockProject.slug, '', payload, webhookRequest(payload))).rejects.toThrow(
+      await expect(controller.handleWebhook(mockProject.slug, '', webhookRequest(payload))).rejects.toThrow(
         AuthException,
       );
     });
 
-    it('should handle project not found error', async () => {
+    it('answers an unknown slug (or deleted project, or no connection) with the same 401 as a bad signature', async () => {
       const payload = createGitHubPayload({ action: 'opened' });
       const validSignature = calculateSignature(JSON.stringify(payload));
 
-      projectsService.findBySlug.mockRejectedValue(new NotFoundAppException('Project not found'));
+      webhookService.verifySignature.mockReturnValue(false);
+      const badSignature = await controller
+        .handleWebhook(mockProject.slug, validSignature, webhookRequest(payload))
+        .catch((err: AuthException) => err);
 
-      await expect(controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload))).rejects.toThrow(
-        NotFoundAppException,
-      );
-    });
+      webhookService.verifySignature.mockReturnValue(true);
+      connectionService.findInboundTarget.mockResolvedValue(null);
+      const unknownSlug = await controller
+        .handleWebhook('no-such-project', validSignature, webhookRequest(payload))
+        .catch((err: AuthException) => err);
 
-    it('should handle VCS connection not found', async () => {
-      const payload = createGitHubPayload({ action: 'opened' });
-      const validSignature = calculateSignature(JSON.stringify(payload));
-
-      connectionService.getFullByProject.mockRejectedValue(new NotFoundAppException('No VCS connection'));
-
-      await expect(controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload))).rejects.toThrow(
-        NotFoundAppException,
-      );
+      expect(unknownSlug).toBeInstanceOf(AuthException);
+      expect((unknownSlug as AuthException).getResponse()).toEqual((badSignature as AuthException).getResponse());
+      expect(webhookService.handleWebhook).not.toHaveBeenCalled();
     });
 
     it('should handle webhook service errors gracefully', async () => {
@@ -711,7 +715,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
       webhookService.verifySignature.mockReturnValue(true);
       webhookService.handleWebhook.mockRejectedValue(new Error('Sync failed'));
 
-      await expect(controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload))).rejects.toThrow(
+      await expect(controller.handleWebhook(mockProject.slug, validSignature, webhookRequest(payload))).rejects.toThrow(
         Error,
       );
     });
@@ -727,7 +731,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
       });
 
       // Should attempt to handle the webhook even with malformed payload
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, invalidPayload, webhookRequest(invalidPayload));
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, webhookRequest(invalidPayload));
 
       // The webhook handler should process it
       expect(webhookService.handleWebhook).toHaveBeenCalled();
@@ -748,7 +752,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
       webhookService.verifySignature.mockReturnValue(false);
 
       // Should fail verification with null secret
-      await expect(controller.handleWebhook(mockProject.slug, signature, payload, webhookRequest(payload))).rejects.toThrow(
+      await expect(controller.handleWebhook(mockProject.slug, signature, webhookRequest(payload))).rejects.toThrow(
         AuthException,
       );
     });
@@ -889,11 +893,10 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
       webhookService.verifySignature.mockReturnValue(true);
       webhookService.handleWebhook.mockResolvedValue(syncResult);
 
-      const result = await controller.handleWebhook(mockProject.slug, validSignature, payload, webhookRequest(payload));
+      const result = await controller.handleWebhook(mockProject.slug, validSignature, webhookRequest(payload));
 
       // Verify complete flow was executed
-      expect(projectsService.findBySlug).toHaveBeenCalledWith(mockProject.slug);
-      expect(connectionService.getFullByProject).toHaveBeenCalledWith(mockProject.id);
+      expect(connectionService.findInboundTarget).toHaveBeenCalledWith(mockProject.slug);
       expect(webhookService.verifySignature).toHaveBeenCalledWith(
         payloadString,
         validSignature,
@@ -909,7 +912,7 @@ describe('VCS Webhook Handler (VCS-P1-004-C)', () => {
 
       webhookService.verifySignature.mockReturnValue(false);
 
-      await expect(controller.handleWebhook(mockProject.slug, invalidSignature, payload, webhookRequest(payload))).rejects.toThrow(
+      await expect(controller.handleWebhook(mockProject.slug, invalidSignature, webhookRequest(payload))).rejects.toThrow(
         AuthException,
       );
 

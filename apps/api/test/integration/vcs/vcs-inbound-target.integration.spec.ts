@@ -73,12 +73,14 @@ describeIntegration('PrismaVcsRepository.findVcsConnectionByProjectSlug (Slice 2
   it('returns the connection with its project for a live project', async () => {
     const result = await repo.findVcsConnectionByProjectSlug('inbound-live');
 
-    expect(result).not.toBeNull();
-    expect(result!.projectId).toBe(liveProjectId);
-    expect(result!.webhookSecret).toBe('secret-INL');
-    expect(result!.syncMode).toBe('webhook');
-    expect(result!.isActive).toBe(true);
-    expect(result!.project).toEqual({ id: liveProjectId, key: 'INL', slug: 'inbound-live' });
+    if (!result) {
+      throw new Error('expected a connection for a live project');
+    }
+    expect(result.projectId).toBe(liveProjectId);
+    expect(result.webhookSecret).toBe('secret-INL');
+    expect(result.syncMode).toBe('webhook');
+    expect(result.isActive).toBe(true);
+    expect(result.project).toEqual({ id: liveProjectId, key: 'INL', slug: 'inbound-live' });
   });
 
   it.each([

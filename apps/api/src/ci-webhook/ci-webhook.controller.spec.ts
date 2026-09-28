@@ -81,8 +81,9 @@ describe('CiWebhookController', () => {
       };
       mockCiWebhookService.processCiWebhook.mockResolvedValue(expectedResult);
       const request = requestOf(validPayload);
+      const rawBytes = request.rawBody ?? Buffer.alloc(0);
 
-      const result = await controller.handleCiWebhook('koda', request, sign(request.rawBody!.toString('utf8')));
+      const result = await controller.handleCiWebhook('koda', request, sign(rawBytes.toString('utf8')));
 
       expect(result.data).toEqual(expectedResult);
       expect(mockCiWebhookService.findInboundTarget).toHaveBeenCalledTimes(1);
@@ -130,9 +131,10 @@ describe('CiWebhookController', () => {
       const reference = await badSignatureRejection();
       mockCiWebhookService.findInboundTarget.mockResolvedValueOnce(null);
       const request = requestOf(validPayload);
+      const rawBytes = request.rawBody ?? Buffer.alloc(0);
 
       const err = await rejectionOf(
-        controller.handleCiWebhook('nonexistent', request, sign(request.rawBody!.toString('utf8'))),
+        controller.handleCiWebhook('nonexistent', request, sign(rawBytes.toString('utf8'))),
       );
 
       expect(err).toBeInstanceOf(AuthException);
@@ -190,8 +192,9 @@ describe('CiWebhookController', () => {
   describe('replay protection (SEC-1)', () => {
     it('checks replay after verification and validation, with the resolved project id', async () => {
       const request = requestOf(validPayload);
+      const rawBytes = request.rawBody ?? Buffer.alloc(0);
 
-      await controller.handleCiWebhook('koda', request, sign(request.rawBody!.toString('utf8')), 'delivery-abc-123');
+      await controller.handleCiWebhook('koda', request, sign(rawBytes.toString('utf8')), 'delivery-abc-123');
 
       expect(mockReplayGuard.assertFresh).toHaveBeenCalledWith({
         projectId: 'proj-1',
@@ -204,9 +207,10 @@ describe('CiWebhookController', () => {
     it('rejects a replayed delivery with 409 and does not process it', async () => {
       mockReplayGuard.assertFresh.mockRejectedValueOnce(new HttpException('Webhook already processed', HttpStatus.CONFLICT));
       const request = requestOf(validPayload);
+      const rawBytes = request.rawBody ?? Buffer.alloc(0);
 
       await expect(
-        controller.handleCiWebhook('koda', request, sign(request.rawBody!.toString('utf8')), 'delivery-dup'),
+        controller.handleCiWebhook('koda', request, sign(rawBytes.toString('utf8')), 'delivery-dup'),
       ).rejects.toMatchObject({ status: HttpStatus.CONFLICT });
 
       expect(mockCiWebhookService.processCiWebhook).not.toHaveBeenCalled();
@@ -215,9 +219,10 @@ describe('CiWebhookController', () => {
     it('forgets the delivery when processing fails so sender retries are accepted', async () => {
       mockCiWebhookService.processCiWebhook.mockRejectedValueOnce(new Error('boom'));
       const request = requestOf(validPayload);
+      const rawBytes = request.rawBody ?? Buffer.alloc(0);
 
       await expect(
-        controller.handleCiWebhook('koda', request, sign(request.rawBody!.toString('utf8')), 'delivery-retry-1'),
+        controller.handleCiWebhook('koda', request, sign(rawBytes.toString('utf8')), 'delivery-retry-1'),
       ).rejects.toThrow('boom');
 
       expect(mockReplayGuard.forget).toHaveBeenCalledWith({
