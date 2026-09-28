@@ -20,14 +20,16 @@ export class PrismaKodaDomainWriterRepository {
    *  - Global ADMIN who is also a member → ['ADMIN', ProjectMember.role].
    */
   async findUserProjectRoles(projectId: string, userId: string): Promise<string[]> {
-    const user = await this.prisma.client.user.findUnique({
-      where: { id: userId },
-      select: { role: true },
-    });
-    const membership = await this.prisma.client.projectMember.findUnique({
-      where: { projectId_userId: { projectId, userId } },
-      select: { role: true },
-    });
+    const [user, membership] = await Promise.all([
+      this.prisma.client.user.findUnique({
+        where: { id: userId },
+        select: { role: true },
+      }),
+      this.prisma.client.projectMember.findUnique({
+        where: { projectId_userId: { projectId, userId } },
+        select: { role: true },
+      }),
+    ]);
 
     const roles: string[] = [];
     if (user?.role === 'ADMIN') roles.push('ADMIN');

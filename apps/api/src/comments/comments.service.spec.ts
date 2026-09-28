@@ -212,6 +212,13 @@ describe('CommentsService', () => {
     },
   );
 
+  /** update/delete read the comment with its ticket and project in one call. */
+  function givenComment(comment: unknown): void {
+    mockCommentRepo.findOwningProjectAndTicket.mockResolvedValue(
+      comment ? { ...OWNING_RESOLUTION, comment } : null,
+    );
+  }
+
   // Mirrors ProjectAccessService.resolveMembership: agents and global ADMINs
   // resolve without a lookup, a member gets their raw ProjectMember.role, a
   // user without a ProjectMember row is refused.
@@ -542,7 +549,7 @@ describe('CommentsService', () => {
         body: 'Updated comment body',
       };
 
-      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      givenComment(mockComment);
       mockCommentRepo.update.mockResolvedValue({
         ...mockComment,
         body: 'Updated comment body',
@@ -560,7 +567,7 @@ describe('CommentsService', () => {
         body: 'Updated by agent',
       };
 
-      mockCommentRepo.findById.mockResolvedValue(agentComment);
+      givenComment(agentComment);
       mockCommentRepo.update.mockResolvedValue({
         ...agentComment,
         body: 'Updated by agent',
@@ -577,7 +584,7 @@ describe('CommentsService', () => {
       };
 
       mockCaslCan.mockReturnValue(false);
-      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      givenComment(mockComment);
 
       await expect(
         service.update('comment-123', updateDto, mockUser456Principal)
@@ -590,7 +597,7 @@ describe('CommentsService', () => {
       };
 
       mockCaslCan.mockReturnValue(false);
-      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      givenComment(mockComment);
 
       await expect(
         service.update('comment-123', updateDto, mockAgent456Principal)
@@ -602,7 +609,7 @@ describe('CommentsService', () => {
         body: 'Admin edited',
       };
 
-      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      givenComment(mockComment);
       mockCommentRepo.update.mockResolvedValue({
         ...mockComment,
         body: 'Admin edited',
@@ -622,7 +629,7 @@ describe('CommentsService', () => {
         body: 'Updated body',
       };
 
-      mockCommentRepo.findById.mockResolvedValue(null);
+      givenComment(null);
 
       await expect(
         service.update('nonexistent-123', updateDto, mockUserPrincipal)
@@ -635,7 +642,7 @@ describe('CommentsService', () => {
       };
 
       const verificationComment = { ...mockComment, type: 'VERIFICATION' };
-      mockCommentRepo.findById.mockResolvedValue(verificationComment);
+      givenComment(verificationComment);
       mockCommentRepo.update.mockResolvedValue({
         ...verificationComment,
         body: 'Updated body only',
@@ -653,7 +660,7 @@ describe('CommentsService', () => {
       };
 
       const now = new Date();
-      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      givenComment(mockComment);
       mockCommentRepo.update.mockResolvedValue({
         ...mockComment,
         body: 'Updated',
@@ -664,11 +671,21 @@ describe('CommentsService', () => {
 
       expect(result.updatedAt).toEqual(now);
     });
+
+    it('#145: reads the comment once (no separate findById)', async () => {
+      givenComment(mockComment);
+      mockCommentRepo.update.mockResolvedValue({ ...mockComment, body: 'x' });
+
+      await service.update('comment-123', { body: 'x' }, mockUserPrincipal);
+
+      expect(mockCommentRepo.findOwningProjectAndTicket).toHaveBeenCalledTimes(1);
+      expect(mockCommentRepo.findById).not.toHaveBeenCalled();
+    });
   });
 
   describe('delete', () => {
     it('should allow author (user) to delete own comment', async () => {
-      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      givenComment(mockComment);
       mockCommentRepo.delete.mockResolvedValue(undefined);
 
       await service.delete('comment-123', mockUserPrincipal);
@@ -678,7 +695,7 @@ describe('CommentsService', () => {
 
     it('should allow author (agent) to delete own comment', async () => {
       const agentComment = { ...mockComment, authorUserId: null, authorAgentId: 'agent-123' };
-      mockCommentRepo.findById.mockResolvedValue(agentComment);
+      givenComment(agentComment);
       mockCommentRepo.delete.mockResolvedValue(undefined);
 
       await service.delete('comment-123', mockAgentPrincipal);
@@ -688,7 +705,7 @@ describe('CommentsService', () => {
 
     it('should return 403 when non-author user tries to delete comment', async () => {
       mockCaslCan.mockReturnValue(false);
-      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      givenComment(mockComment);
 
       await expect(
         service.delete('comment-123', mockUser456Principal)
@@ -697,7 +714,7 @@ describe('CommentsService', () => {
 
     it('should return 403 when non-author agent tries to delete comment', async () => {
       mockCaslCan.mockReturnValue(false);
-      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      givenComment(mockComment);
 
       await expect(
         service.delete('comment-123', mockAgent456Principal)
@@ -705,7 +722,7 @@ describe('CommentsService', () => {
     });
 
     it('should allow ADMIN user to delete any comment', async () => {
-      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      givenComment(mockComment);
       mockCommentRepo.delete.mockResolvedValue(undefined);
 
       await service.delete('comment-123', mockAdminPrincipal);
@@ -714,7 +731,7 @@ describe('CommentsService', () => {
     });
 
     it('should return 404 if comment not found', async () => {
-      mockCommentRepo.findById.mockResolvedValue(null);
+      givenComment(null);
 
       await expect(
         service.delete('nonexistent-123', mockUserPrincipal)
@@ -723,11 +740,20 @@ describe('CommentsService', () => {
 
     it('should not allow MEMBER users to delete others\' comments', async () => {
       mockCaslCan.mockReturnValue(false);
-      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      givenComment(mockComment);
 
       await expect(
         service.delete('comment-123', mockUser456Principal)
       ).rejects.toThrow();
+    });
+
+    it('#145: reads the comment once (no separate findById)', async () => {
+      givenComment(mockComment);
+
+      await service.delete('comment-123', mockUserPrincipal);
+
+      expect(mockCommentRepo.findOwningProjectAndTicket).toHaveBeenCalledTimes(1);
+      expect(mockCommentRepo.findById).not.toHaveBeenCalled();
     });
   });
 
@@ -769,7 +795,7 @@ describe('CommentsService', () => {
     };
 
     it('AC1: throws NotFoundAppException for a comment whose ticket belongs to a project the user is not a member of', async () => {
-      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      givenComment(mockComment);
       mockCommentRepo.update.mockResolvedValue({ ...mockComment, body: 'hijacked' });
 
       await expect(
@@ -778,7 +804,7 @@ describe('CommentsService', () => {
     });
 
     it("AC1: does not call the comment repository's update for a non-member", async () => {
-      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      givenComment(mockComment);
       mockCommentRepo.update.mockResolvedValue({ ...mockComment, body: 'hijacked' });
 
       await expect(
@@ -789,7 +815,7 @@ describe('CommentsService', () => {
     });
 
     it('AC1: refuses a non-member before building the CASL ability', async () => {
-      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      givenComment(mockComment);
       mockCommentRepo.update.mockResolvedValue({ ...mockComment, body: 'hijacked' });
 
       await expect(
@@ -800,7 +826,7 @@ describe('CommentsService', () => {
     });
 
     it('AC1 boundary: a member user reaches the CASL check and the repository update', async () => {
-      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      givenComment(mockComment);
       mockCommentRepo.update.mockResolvedValue({ ...mockComment, body: 'member edit' });
 
       const result = await service.update('comment-123', { body: 'member edit' }, mockUserPrincipal);
@@ -815,7 +841,7 @@ describe('CommentsService', () => {
     });
 
     it('AC2: throws NotFoundAppException for a comment in a project the user is not a member of', async () => {
-      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      givenComment(mockComment);
       mockCommentRepo.delete.mockResolvedValue(undefined);
 
       await expect(service.delete('comment-123', outsiderPrincipal)).rejects.toBeInstanceOf(
@@ -826,7 +852,7 @@ describe('CommentsService', () => {
     });
 
     it('AC2 boundary: a member user deletes through the repository', async () => {
-      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      givenComment(mockComment);
       mockCommentRepo.delete.mockResolvedValue(undefined);
 
       await service.delete('comment-123', mockUserPrincipal);
@@ -836,7 +862,7 @@ describe('CommentsService', () => {
 
     it('AC3: an agent principal proceeds to the CASL check without a membership lookup', async () => {
       const agentComment = { ...mockComment, authorUserId: null, authorAgentId: 'agent-123' };
-      mockCommentRepo.findById.mockResolvedValue(agentComment);
+      givenComment(agentComment);
       mockCommentRepo.update.mockResolvedValue({ ...agentComment, body: 'agent edit' });
 
       const result = await service.update('comment-123', { body: 'agent edit' }, mockAgentPrincipal);
@@ -849,7 +875,7 @@ describe('CommentsService', () => {
     });
 
     it('AC5 boundary: a global ADMIN who is not a member deletes without a membership row', async () => {
-      mockCommentRepo.findById.mockResolvedValue(mockComment);
+      givenComment(mockComment);
       mockCommentRepo.delete.mockResolvedValue(undefined);
 
       await service.delete('comment-123', mockAdminPrincipal);
@@ -879,8 +905,7 @@ describe('CommentsService', () => {
     };
 
     beforeEach(() => {
-      mockCommentRepo.findOwningProjectAndTicket.mockResolvedValue(ownership);
-      mockCommentRepo.findById.mockResolvedValue(othersComment);
+      mockCommentRepo.findOwningProjectAndTicket.mockResolvedValue({ ...ownership, comment: othersComment });
       // Mirror the real factory's Comment rules: UPDATE is author-only, DELETE
       // is author-only or unconditional for a project/global ADMIN. The suite
       // default `mockCaslCan` always grants, which would make these tests
