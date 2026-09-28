@@ -37,7 +37,7 @@ describe('Web OpenAPI gap operations are wired in source', () => {
     const panelSource = src(actionPanelPath)
     expect(source).toContain('/tickets/${ref}/assign')
     expect(source).toContain('/tickets/${ref}')
-    expect(panelSource).toContain("performAction('close')")
+    expect(panelSource).toContain("openDialog('close')")
   })
 
   test('ticket detail uses ticket label assign/remove endpoints', () => {

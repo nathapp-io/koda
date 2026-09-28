@@ -63,6 +63,12 @@ test.describe('Authentication', () => {
   });
 
   test('invalid credentials shows error', async ({ page }) => {
+    // Mock /auth/login with 401: a real call would hit the 5/min/IP login
+    // throttle and burn one slot we need later in this run (every spec file
+    // shares the same client IP). The login-form UX is what this test covers.
+    await page.route('**/api/auth/login', (route) =>
+      route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: 'Invalid credentials' }) }),
+    );
     await page.goto('/login');
     await page.locator('input[type="email"]').fill('wrong@example.com');
     await page.locator('input[type="password"]').fill('wrongpassword');

@@ -11,6 +11,18 @@ export function generateUniqueProjectKey(prefix = 'EE'): string {
 }
 
 /**
+ * Nuxt hydration resets the SSR DOM to v-model state when the client takes
+ * over, so anything clicked before hydration is lost (the click handler is
+ * not attached yet). Await this after `page.goto` before clicking buttons.
+ */
+export async function waitForHydration(page: Page) {
+  await page.waitForFunction(() => {
+    const useNuxtApp = (window as { useNuxtApp?: () => { isHydrating: boolean } }).useNuxtApp;
+    return !!useNuxtApp && useNuxtApp().isHydrating === false;
+  }, undefined, { timeout: 15000 });
+}
+
+/**
  * Performs login by calling the API directly, then injecting the auth cookie
  * into the Playwright browser context.
  *

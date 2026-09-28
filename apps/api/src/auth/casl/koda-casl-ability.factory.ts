@@ -49,18 +49,56 @@ export class KodaCaslAbilityFactory extends BaseCaslAbilityFactory {
         { action: CaslPermissionAction.MANAGE, subject: 'AstIndex' },
       ];
     }
-    const perms: CaslPermission[] = [
+    // #144: inside a project (ProjectMembershipGuard attached the role) the
+    // ProjectMember.role decides; outside one the global MEMBER set applies.
+    if (principal.projectRole !== undefined) {
+      return this.projectRolePermissions(principal);
+    }
+    return this.ownCommentPermissions(principal).concat([
+      { action: CaslPermissionAction.CREATE, subject: 'Ticket' },
+    ]);
+  }
+
+  /**
+   * #144 permission matrix. VIEWER and any unrecognised legacy role (AGENT,
+   * MEMBER rows written before PROJECT_MEMBER_ROLES narrowed) get the
+   * least-privileged set.
+   */
+  private projectRolePermissions(principal: UserPrincipal): CaslPermission[] {
+    const base = this.ownCommentPermissions(principal);
+    switch (principal.projectRole) {
+      case 'ADMIN':
+        return [
+          ...base,
+          { action: CaslPermissionAction.MANAGE, subject: 'Ticket' },
+          { action: CaslPermissionAction.MANAGE, subject: 'Label' },
+          // Delete any comment in the project; editing stays author-only.
+          { action: CaslPermissionAction.DELETE, subject: 'Comment' },
+          { action: CaslPermissionAction.READ, subject: 'CodeIntel' },
+        ];
+      case 'DEVELOPER':
+        return [
+          ...base,
+          { action: CaslPermissionAction.CREATE, subject: 'Ticket' },
+          { action: KodaAction.UPDATE as CaslPermissionAction, subject: 'Ticket' },
+          { action: KodaAction.TRANSITION as CaslPermissionAction, subject: 'Ticket' },
+          { action: CaslPermissionAction.CREATE, subject: 'Label' },
+          { action: CaslPermissionAction.READ, subject: 'CodeIntel' },
+        ];
+      default:
+        return base;
+    }
+  }
+
+  /** Read everything readable, comment, and edit/delete one's own comments. */
+  private ownCommentPermissions(principal: UserPrincipal): CaslPermission[] {
+    return [
       ...this.readPermissions(),
       { action: CaslPermissionAction.CREATE, subject: 'Comment' },
       { action: CaslPermissionAction.UPDATE, subject: 'Comment', conditions: { authorUserId: principal.id } },
       { action: CaslPermissionAction.DELETE, subject: 'Comment', conditions: { authorUserId: principal.id } },
-      { action: CaslPermissionAction.CREATE, subject: 'Ticket' },
       { action: KodaAction.IMPORT as CaslPermissionAction, subject: 'CodeIntel' },
     ];
-    if (principal.projectRole === 'DEVELOPER') {
-      perms.push({ action: CaslPermissionAction.READ, subject: 'CodeIntel' });
-    }
-    return perms;
   }
 
   private agentPermissions(principal: AgentPrincipal): CaslPermission[] {

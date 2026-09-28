@@ -54,6 +54,11 @@ export default defineConfig({
         EMBEDDING_PROVIDER: process.env['EMBEDDING_PROVIDER'] ?? 'fake',
         // Keep e2e vectors out of the dev ./lancedb (CI sets this too).
         RAG_IN_MEMORY_ONLY: process.env['RAG_IN_MEMORY_ONLY'] ?? 'true',
+        // #144: raise the auth login throttle from 5/min to 50/min so the
+        // cumulative logins across the whole e2e suite (all spec files share
+        // a single client IP) stay under the limit even with CI retries that
+        // restart workers and clear the per-worker session cache.
+        AUTH_LOGIN_THROTTLE_LIMIT: process.env['AUTH_LOGIN_THROTTLE_LIMIT'] ?? '50',
       },
     },
     {

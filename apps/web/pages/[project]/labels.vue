@@ -24,6 +24,15 @@ const { $api } = useApi()
 const { t } = useI18n()
 const toast = useAppToast()
 
+// #144: controls follow the caller's role in THIS project (the API decides;
+// this only avoids offering actions that would 403). useProjectViewerRole
+// is SSR-friendly so canManage/viewerRole are populated before hydration —
+// no flash of "no controls" → "controls appear" on first paint.
+const { data: viewerRoleData } = useProjectViewerRole(slug)
+const canManage = computed(() => viewerRoleData.value?.canManage === true)
+const viewerRole = computed(() => viewerRoleData.value?.viewerRole ?? null)
+const canCreate = computed(() => canManage.value || viewerRole.value === 'DEVELOPER')
+
 const { data: labelsData, pending, error, refresh } = useAsyncData(
   `labels-${slug}`,
   () => $api.get(`/projects/${slug}/labels`) as Promise<Label[]>,
@@ -112,35 +121,37 @@ async function saveEdit(label: Label) {
   <div class="space-y-6">
     <PageHeader :title="t('labels.title')" />
 
-    <!-- Create Label Form -->
-    <div class="rounded-md border border-border p-4 space-y-4">
-      <h2 class="text-lg font-semibold">{{ t('labels.form.create') }}</h2>
-      <form @submit="onSubmit" class="flex items-end gap-4">
-        <FormField name="name" v-slot="{ componentField }">
-          <FormItem class="flex-1">
-            <FormLabel>{{ t('labels.form.name') }}</FormLabel>
-            <FormControl>
-              <Input :placeholder="t('labels.form.namePlaceholder')" v-bind="componentField" />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </FormField>
+    <!-- Create Label Form (hidden from VIEWER) -->
+    <template v-if="canCreate">
+      <div class="rounded-md border border-border p-4 space-y-4">
+        <h2 class="text-lg font-semibold">{{ t('labels.form.create') }}</h2>
+        <form @submit="onSubmit" class="flex items-end gap-4">
+          <FormField name="name" v-slot="{ componentField }">
+            <FormItem class="flex-1">
+              <FormLabel>{{ t('labels.form.name') }}</FormLabel>
+              <FormControl>
+                <Input :placeholder="t('labels.form.namePlaceholder')" v-bind="componentField" />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          </FormField>
 
-        <FormField name="color" v-slot="{ componentField }">
-          <FormItem>
-            <FormLabel>{{ t('labels.form.color') }}</FormLabel>
-            <FormControl>
-              <ColorPicker v-bind="componentField" defaultColor="#6366F1" />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </FormField>
+          <FormField name="color" v-slot="{ componentField }">
+            <FormItem>
+              <FormLabel>{{ t('labels.form.color') }}</FormLabel>
+              <FormControl>
+                <ColorPicker v-bind="componentField" defaultColor="#6366F1" />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          </FormField>
 
-        <Button type="submit">
-          {{ t('labels.form.submit') }}
-        </Button>
-      </form>
-    </div>
+          <Button type="submit">
+            {{ t('labels.form.submit') }}
+          </Button>
+        </form>
+      </div>
+    </template>
 
     <LoadingState v-if="pending" />
     <ErrorState v-else-if="error" @retry="refresh()" />
@@ -175,12 +186,14 @@ async function saveEdit(label: Label) {
                 <Button size="sm" variant="outline" @click="cancelEdit">{{ t('common.cancel') }}</Button>
               </template>
               <template v-else>
-                <Button size="sm" variant="outline" @click="startEdit(label)">
-                  {{ t('common.edit') }}
-                </Button>
-                <Button variant="destructive" size="sm" @click="deleteLabel(label.id)">
-                  {{ t('labels.actions.delete') }}
-                </Button>
+                <template v-if="canManage">
+                  <Button size="sm" variant="outline" @click="startEdit(label)">
+                    {{ t('common.edit') }}
+                  </Button>
+                  <Button variant="destructive" size="sm" @click="deleteLabel(label.id)">
+                    {{ t('labels.actions.delete') }}
+                  </Button>
+                </template>
               </template>
             </div>
           </TableCell>

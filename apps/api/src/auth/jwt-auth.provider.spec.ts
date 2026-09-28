@@ -65,4 +65,26 @@ describe('JwtAuthProvider', () => {
     mockAuthRepository.findUserById.mockResolvedValue(null);
     expect((await provider.getPrincipal(payload(0))).revoked).toBe(true);
   });
+
+  // SECURITY (#144): the CASL ability factory reads UserPrincipal.projectRole
+  // when deciding permission for routes that don't go through
+  // ProjectMembershipGuard (e.g. PATCH/DELETE /api/comments/:id via the
+  // global permission guard). A forged JWT carrying `projectRole: 'ADMIN'`
+  // would otherwise grant unconditional DELETE Comment. This test pins the
+  // invariant that the JWT auth provider NEVER carries projectRole onto the
+  // principal — only ProjectMembershipGuard sets it, and only from the DB.
+  it('SECURITY: never carries projectRole from the JWT onto the principal', async () => {
+    mockCacheManager.get.mockResolvedValue({ tokenVersion: 0, disabled: false });
+    const forged = { sub: 'user-1', email: 'a@b.com', role: 'MEMBER', tokenVersion: 0, projectRole: 'ADMIN' };
+    const principal = await provider.getPrincipal(forged);
+    expect(principal.projectRole).toBeUndefined();
+  });
+
+  it('SECURITY: an empty/garbage projectRole claim still does not leak onto the principal', async () => {
+    mockCacheManager.get.mockResolvedValue({ tokenVersion: 0, disabled: false });
+    for (const claim of ['DEVELOPER', 'VIEWER', 'owner', '', null, 42]) {
+      const principal = await provider.getPrincipal({ sub: 'user-1', email: 'a@b.com', role: 'MEMBER', tokenVersion: 0, projectRole: claim });
+      expect(principal.projectRole).toBeUndefined();
+    }
+  });
 });

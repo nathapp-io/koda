@@ -8,10 +8,14 @@
 import { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
+import { CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { ProjectAccessService } from './project-access.service';
 import { PrismaProjectRepository } from './prisma-project.repository';
 import { ProjectMembershipGuard } from './project-membership.guard';
 import { ProjectRoles } from './project-roles.decorator';
+import { ProjectPermission } from './project-permission.decorator';
+import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
+import { KodaAction } from '../auth/casl/koda-action.enum';
 import {
   AgentPrincipal,
   KodaPrincipal,
@@ -38,6 +42,19 @@ class KbClassRolesStub {
     return 'listed';
   }
 }
+
+/** Controller stub carrying @ProjectPermission, as the ticket/label routes do (#144). */
+class TicketRoutesStub {
+  @ProjectPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
+  transition(): string { return 'ok'; }
+
+  @ProjectPermission([CaslPermissionAction.DELETE, 'Ticket'])
+  remove(): string { return 'ok'; }
+
+  @ProjectPermission([KodaAction.UPDATE as CaslPermissionAction, 'Ticket'], { exemptAgents: true })
+  assignLabel(): string { return 'ok'; }
+}
+const routes = new TicketRoutesStub();
 
 const memberUser: UserPrincipal = {
   actorType: 'user',
@@ -306,7 +323,7 @@ describe('ProjectMembershipGuard (US-001)', () => {
     );
 
     expect(result).toBe(true);
-    expect(findMembershipRoleSpy).toHaveBeenCalledWith('proj-1', 'user-1');
+    expect(membershipRepo.findMembershipRole).toHaveBeenCalledWith('proj-1', 'user-1');
   });
 
   it('AC12: throws ForbiddenAppException for a member whose project role is VIEWER on a @ProjectRoles write handler', async () => {
@@ -364,5 +381,83 @@ describe('ProjectMembershipGuard (US-001)', () => {
 
     expect(result).toBe(true);
     expect(findMembershipRoleSpy).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------------
+  // #144/#145 — ProjectContext and @ProjectPermission
+  // ---------------------------------------------------------------------------
+
+  describe('ProjectMembershipGuard - ProjectContext and @ProjectPermission (#144/#145)', () => {
+    let guardWithCasl: ProjectMembershipGuard;
+
+    beforeEach(() => {
+      guardWithCasl = new ProjectMembershipGuard(access, new Reflector(), new KodaCaslAbilityFactory());
+      membershipRepo.findBySlug.mockResolvedValue({ id: 'p1', slug: 'team', deletedAt: null });
+    });
+
+    it('attaches ProjectContext with the membership role, querying membership exactly once', async () => {
+      membershipRepo.findMembershipRole.mockResolvedValue('DEVELOPER');
+      const req: Record<string, unknown> = { params: { slug: 'team' }, user: memberUser };
+      await expect(guardWithCasl.canActivate(makeExecutionContext(req, routes.transition, TicketRoutesStub))).resolves.toBe(true);
+      expect(req.projectContext).toEqual({ project: { id: 'p1', slug: 'team' }, role: 'DEVELOPER' });
+      expect(membershipRepo.findMembershipRole).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses a VIEWER on a TRANSITION route before the handler runs', async () => {
+      membershipRepo.findMembershipRole.mockResolvedValue('VIEWER');
+      const req = { params: { slug: 'team' }, user: memberUser };
+      await expect(guardWithCasl.canActivate(makeExecutionContext(req, routes.transition, TicketRoutesStub)))
+        .rejects.toBeInstanceOf(ForbiddenAppException);
+    });
+
+    it('refuses a DEVELOPER on DELETE Ticket and allows a project ADMIN', async () => {
+      membershipRepo.findMembershipRole.mockResolvedValueOnce('DEVELOPER').mockResolvedValueOnce('ADMIN');
+      const ctx = () => makeExecutionContext({ params: { slug: 'team' }, user: memberUser }, routes.remove, TicketRoutesStub);
+      await expect(guardWithCasl.canActivate(ctx())).rejects.toBeInstanceOf(ForbiddenAppException);
+      await expect(guardWithCasl.canActivate(ctx())).resolves.toBe(true);
+    });
+
+    it('evaluates agents with their agent-role ability, exactly as @RequiredPermission did', async () => {
+      const reviewer = { ...agentPrincipal, agentRoles: ['REVIEWER'] as const };
+      const noTransition = { ...agentPrincipal, agentRoles: ['TRIAGER'] as const };
+      await expect(guardWithCasl.canActivate(makeExecutionContext({ params: { slug: 'team' }, user: reviewer }, routes.transition, TicketRoutesStub))).resolves.toBe(true);
+      await expect(guardWithCasl.canActivate(makeExecutionContext({ params: { slug: 'team' }, user: noTransition }, routes.transition, TicketRoutesStub)))
+        .rejects.toBeInstanceOf(ForbiddenAppException);
+      expect(membershipRepo.findMembershipRole).not.toHaveBeenCalled();
+    });
+
+    it('exemptAgents skips the permission for agents but still enforces it for users', async () => {
+      const triager = { ...agentPrincipal, agentRoles: [] as const };
+      await expect(guardWithCasl.canActivate(makeExecutionContext({ params: { slug: 'team' }, user: triager }, routes.assignLabel, TicketRoutesStub))).resolves.toBe(true);
+      membershipRepo.findMembershipRole.mockResolvedValue('VIEWER');
+      await expect(guardWithCasl.canActivate(makeExecutionContext({ params: { slug: 'team' }, user: memberUser }, routes.assignLabel, TicketRoutesStub)))
+        .rejects.toBeInstanceOf(ForbiddenAppException);
+    });
+
+    it('fails closed when a @ProjectPermission route has no :slug param', async () => {
+      await expect(guardWithCasl.canActivate(makeExecutionContext({ params: {}, user: memberUser }, routes.transition, TicketRoutesStub)))
+        .rejects.toBeInstanceOf(ForbiddenAppException);
+    });
+
+    it('fails closed on a @ProjectPermission route when no ability factory is wired', async () => {
+      const bare = new ProjectMembershipGuard(access, new Reflector());
+      membershipRepo.findMembershipRole.mockResolvedValue('ADMIN');
+      await expect(bare.canActivate(makeExecutionContext({ params: { slug: 'team' }, user: memberUser }, routes.transition, TicketRoutesStub)))
+        .rejects.toBeInstanceOf(ForbiddenAppException);
+    });
+
+    it('ignores a projectRole already on the principal (e.g. a forged claim)', async () => {
+      membershipRepo.findMembershipRole.mockResolvedValue('VIEWER');
+      const forged = { ...memberUser, projectRole: 'ADMIN' };
+      await expect(guardWithCasl.canActivate(makeExecutionContext({ params: { slug: 'team' }, user: forged }, routes.remove, TicketRoutesStub)))
+        .rejects.toBeInstanceOf(ForbiddenAppException);
+    });
+
+    it('a @ProjectRoles route reads the resolved role without a second membership query', async () => {
+      membershipRepo.findMembershipRole.mockResolvedValue('DEVELOPER');
+      const kb = new KbWriteRouteStub();
+      await expect(guardWithCasl.canActivate(makeExecutionContext({ params: { slug: 'team' }, user: memberUser }, kb.addDocument, KbWriteRouteStub))).resolves.toBe(true);
+      expect(membershipRepo.findMembershipRole).toHaveBeenCalledTimes(1);
+    });
   });
 });

@@ -36,6 +36,7 @@ import { FanOutPublisher } from '../../../src/outbox/fan-out-publisher';
 import { PrismaOutboxStore } from '../../../src/outbox/prisma-outbox.store';
 import { PrismaEventsRepository } from '../../../src/events/prisma-events.repository';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
+import { KodaCaslAbilityFactory } from '../../../src/auth/casl/koda-casl-ability.factory';
 import { PrismaMemoryItemRepository } from '../../../src/memory/prisma-memory-item.repository';
 import { ExtractionService } from '../../../src/memory/extraction.service';
 import { MemoryOutboxSubscriber } from '../../../src/memory/memory-outbox.subscriber';
@@ -142,7 +143,7 @@ describeIntegration('H13: outbox ticket_event envelope drives memory extraction 
       ticketEventService,
       packageOutbox,
     );
-    ticketsService = new TicketsService(ticketRepo, txManager, ticketEventService, packageOutbox, transitionsService);
+    ticketsService = new TicketsService(ticketRepo, txManager, ticketEventService, packageOutbox, transitionsService, new KodaCaslAbilityFactory());
 
     // Seed: project, ADMIN user (assignee), and two tickets.
     const project = await prisma.project.create({

@@ -12,15 +12,11 @@
  * plus the Postgres-backed forms of AC1, AC2, AC3, AC6, AC7, AC8 and AC9
  * (real repository + real membership rows, no repository double).
  *
- * Assumption: the AC12 requester is a project member whose `ProjectMember.role`
- * is DEVELOPER. Routes that also carry a global `@RequiredPermission` are
- * exercised with the member whose *global* role is ADMIN (created with
- * `role: 'ADMIN'`), because the project CASL factory grants Ticket/Label write
- * actions to global ADMINs only — write permissions stay on the principal's
- * global role while `ProjectMember.role` gates visibility (Track 3 ruling
- * 2026-09-27). Routes without such a gate are exercised with a plain
- * global-MEMBER DEVELOPER, so the membership gate's positive path is covered as
- * well. No CASL rule is redefined here.
+ * Visibility only: AC11/AC12 prove the membership gate (non-member 403, member
+ * not 403/404). Write routes are exercised with a global-ADMIN member so that
+ * this file keeps asserting visibility, not role rights. Project-role write
+ * permissions (#144) are proven in project-role-permissions.integration.spec.ts,
+ * which replaces #143's waived AC-29.
  *
  * Run: cd apps/api && bun run test:db:up && bun run test:integration -- test/integration/projects/project-membership-gate
  */

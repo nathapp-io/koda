@@ -33,12 +33,12 @@ export class ProjectMembersService {
     slug: string,
     principal: KodaPrincipal,
     page: IPageOption,
-  ): Promise<{ page: IPageResult<ProjectMemberDto>; canManage: boolean }> {
+  ): Promise<{ page: IPageResult<ProjectMemberDto>; canManage: boolean; viewerRole: string | null }> {
     const projectId = await this.access.findProjectIdBySlug(slug);
-    await this.access.assertProjectMembership(projectId, principal);
-    const canManage = await this.access.canManageMembers(projectId, principal);
+    // One membership read serves the gate, canManage and viewerRole.
+    const viewerRole = await this.access.resolveMembership(projectId, principal);
     const mapped = remapPage(await this.membersRepo.findMemberPage(projectId, page), ProjectMemberDto.from);
-    return { page: mapped, canManage };
+    return { page: mapped, canManage: viewerRole === ActorRole.ADMIN, viewerRole };
   }
 
   async add(slug: string, dto: AddMemberDto, principal: KodaPrincipal): Promise<ProjectMemberDto> {

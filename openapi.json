@@ -2037,7 +2037,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Page of members: { total, current, size, hasNext, hasPrev, records, canManage }"
+            "description": "Page of members: { total, current, size, hasNext, hasPrev, records, canManage, viewerRole }"
           },
           "403": {
             "description": "Not a project member"
@@ -2408,7 +2408,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TicketResponseDto"
+                  "$ref": "#/components/schemas/TicketDetailResponseDto"
                 }
               }
             }
@@ -2422,7 +2422,7 @@
             "bearer": []
           }
         ],
-        "summary": "Get a ticket by reference (KODA-42 or CUID)",
+        "summary": "Get a ticket by reference (KODA-42 or CUID), with the caller's allowedActions",
         "tags": [
           "tickets"
         ]
@@ -2471,6 +2471,9 @@
           "400": {
             "description": "Invalid request data"
           },
+          "403": {
+            "description": "Project role lacks UPDATE Ticket"
+          },
           "404": {
             "description": "Ticket or project not found"
           }
@@ -2517,7 +2520,7 @@
             }
           },
           "403": {
-            "description": "Forbidden - admin role required"
+            "description": "Project ADMIN or global ADMIN required"
           },
           "404": {
             "description": "Ticket or project not found"
@@ -2783,6 +2786,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "approve",
+            "required": false,
+            "in": "query",
+            "description": "true closes the ticket; false (default) returns it to IN_PROGRESS",
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "requestBody": {
@@ -2845,6 +2857,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransitionWithCommentDto"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Ticket closed",
@@ -2857,7 +2879,10 @@
             }
           },
           "400": {
-            "description": "Invalid transition"
+            "description": "Invalid transition or blank reason"
+          },
+          "403": {
+            "description": "Global ADMIN or project ADMIN required"
           },
           "404": {
             "description": "Ticket or project not found"
@@ -2868,7 +2893,7 @@
             "bearer": []
           }
         ],
-        "summary": "Close a ticket",
+        "summary": "Close a ticket (admin override; reason required, written as a GENERAL comment)",
         "tags": [
           "tickets"
         ]
@@ -4078,6 +4103,9 @@
           "400": {
             "description": "Invalid request data or label already assigned"
           },
+          "403": {
+            "description": "Forbidden"
+          },
           "404": {
             "description": "Ticket or label not found"
           }
@@ -4125,6 +4153,9 @@
         "responses": {
           "204": {
             "description": "Label removed from ticket"
+          },
+          "403": {
+            "description": "Forbidden"
           },
           "404": {
             "description": "Ticket or label assignment not found"
@@ -5359,6 +5390,26 @@
             "nullable": true,
             "description": "Assigned to agent ID"
           },
+          "assignee": {
+            "type": "object",
+            "nullable": true,
+            "description": "Resolved assignee (user or agent), or null when unassigned",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "user",
+                  "agent"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          },
           "createdByUserId": {
             "type": "string",
             "nullable": true,
@@ -5453,10 +5504,218 @@
           "title",
           "status",
           "priority",
+          "assignee",
           "createdAt",
           "updatedAt",
           "links",
           "labels"
+        ]
+      },
+      "TicketDetailResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Ticket ID (CUID)"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "Project ID"
+          },
+          "number": {
+            "type": "number",
+            "description": "Sequential ticket number within project"
+          },
+          "ref": {
+            "type": "string",
+            "description": "Project-scoped ticket reference, e.g. NAX-1"
+          },
+          "type": {
+            "enum": [
+              "BUG",
+              "ENHANCEMENT",
+              "TASK",
+              "QUESTION"
+            ],
+            "type": "string",
+            "description": "Ticket type"
+          },
+          "title": {
+            "type": "string",
+            "description": "Ticket title"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true,
+            "description": "Ticket description"
+          },
+          "status": {
+            "enum": [
+              "CREATED",
+              "VERIFIED",
+              "IN_PROGRESS",
+              "VERIFY_FIX",
+              "CLOSED",
+              "REJECTED"
+            ],
+            "type": "string",
+            "description": "Ticket status"
+          },
+          "priority": {
+            "enum": [
+              "LOW",
+              "MEDIUM",
+              "HIGH",
+              "CRITICAL"
+            ],
+            "type": "string",
+            "description": "Ticket priority"
+          },
+          "assignedToUserId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Assigned to user ID"
+          },
+          "assignedToAgentId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Assigned to agent ID"
+          },
+          "assignee": {
+            "type": "object",
+            "nullable": true,
+            "description": "Resolved assignee (user or agent), or null when unassigned",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "user",
+                  "agent"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          },
+          "createdByUserId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Created by user ID"
+          },
+          "createdByAgentId": {
+            "type": "string",
+            "nullable": true,
+            "description": "Created by agent ID"
+          },
+          "gitRefVersion": {
+            "type": "string",
+            "nullable": true,
+            "description": "Git reference version"
+          },
+          "gitRefFile": {
+            "type": "string",
+            "nullable": true,
+            "description": "Git reference file"
+          },
+          "gitRefLine": {
+            "type": "number",
+            "nullable": true,
+            "description": "Git reference line"
+          },
+          "gitRefUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Git reference URL"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Created at timestamp"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Updated at timestamp"
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Soft delete timestamp"
+          },
+          "links": {
+            "description": "Related ticket links",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TicketLinkResponseDto"
+            }
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "projectId": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "color": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                },
+                "required": [
+                  "id",
+                  "projectId",
+                  "name",
+                  "color"
+                ]
+              },
+              "selfRequired": true
+            }
+          },
+          "allowedActions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "verify",
+                "start",
+                "fix",
+                "verify-fix",
+                "reject",
+                "close"
+              ]
+            },
+            "description": "Transition endpoints the caller may use on this ticket now (M25)"
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "number",
+          "ref",
+          "type",
+          "title",
+          "status",
+          "priority",
+          "assignee",
+          "createdAt",
+          "updatedAt",
+          "links",
+          "labels",
+          "allowedActions"
         ]
       },
       "UpdateTicketDto": {

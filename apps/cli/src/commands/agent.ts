@@ -133,7 +133,9 @@ const response = await agentsControllerGenerateApiKey({
   body: {
             name: options.name,
             slug: options.slug,
-            roles: options.roles ? (String(options.roles).split(',').map((r: string) => r.trim()).filter(Boolean) as NonNullable<CreateAgentDto['roles']>) : [],
+            roles: ((options.roles
+              ? String(options.roles).split(',').map((r: string) => r.trim()).filter(Boolean)
+              : []) as CreateAgentDto['roles']),
             maxConcurrentTickets: options.maxConcurrentTickets !== undefined ? Number(options.maxConcurrentTickets) : undefined,
           }
   });

@@ -1154,10 +1154,11 @@ describeIntegration('API Integration Tests', () => {
         .expect(200);
     });
 
-    it('POST .../close — IN_PROGRESS → CLOSED', async () => {
+    it('POST .../close — IN_PROGRESS → CLOSED (admin override with required reason)', async () => {
       const res = await request(httpServer)
         .post(`/api/projects/${projectSlug}/tickets/${closeTicketRef}/close`)
         .set('Authorization', `Bearer ${userAccessToken}`)
+        .send({ body: 'Closing via admin override' })
         .expect(200);
 
       const data = body<{ status: string }>(res);

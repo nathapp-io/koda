@@ -15,6 +15,7 @@ import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.t
 import { TicketEventService } from '../../../src/events/ticket-event.service';
 import { OutboxService } from '@nathapp/nestjs-outbox';
 import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
+import { KodaCaslAbilityFactory } from '../../../src/auth/casl/koda-casl-ability.factory';
 
 describe('TicketsService — agent permissions', () => {
   let service: TicketsService;
@@ -87,6 +88,7 @@ describe('TicketsService — agent permissions', () => {
         { provide: TicketEventService, useValue: { create: jest.fn().mockResolvedValue({ id: 'evt-1' }) } },
         { provide: OutboxService, useValue: { record: jest.fn().mockResolvedValue(undefined) } },
         { provide: TicketTransitionsService, useValue: { executeTransitionPublic: jest.fn() } },
+        KodaCaslAbilityFactory,
       ],
     }).compile();
 

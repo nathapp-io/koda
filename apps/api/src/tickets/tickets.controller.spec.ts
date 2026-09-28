@@ -6,8 +6,10 @@ import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { PERMISSION_KEY, CaslPermissionAction } from '@nathapp/nestjs-auth';
-import { ValidationAppException, Page } from '@nathapp/nestjs-common';
+import { ValidationAppException, ForbiddenAppException, Page } from '@nathapp/nestjs-common';
 import { KodaAction } from '../auth/casl/koda-action.enum';
+import { PROJECT_PERMISSION_KEY } from '../projects/project-permission.decorator';
+import { withProjectRole } from '../projects/project-context';
 import { ProjectsService } from '../projects/projects.service';
 import { ProjectAccessService } from '../projects/project-access.service';
 import { TransitionWithCommentDto } from './dto/transition-with-comment.dto';
@@ -102,10 +104,14 @@ describe('TicketsController', () => {
     create: jest.fn(),
     findAll: jest.fn(),
     findByRef: jest.fn(),
+    findByRefWithActions: jest.fn(),
     update: jest.fn(),
     softDelete: jest.fn(),
     assign: jest.fn(),
   };
+
+  // ProjectContext a global-ADMIN caller would receive from ProjectMembershipGuard.
+  const adminProject = { project: { id: 'proj-1', slug: 'koda' }, role: 'ADMIN' };
 
   const mockTransitionsService = {
     verify: jest.fn(),
@@ -311,13 +317,16 @@ describe('TicketsController', () => {
     });
   });
 
-  describe('PATCH /api/projects/:slug/tickets/:ref', () => {
-    it('requires UPDATE Ticket permission on the HTTP route', () => {
-      expect(Reflect.getMetadata(PERMISSION_KEY, controller.update)).toEqual([
-        [KodaAction.UPDATE as CaslPermissionAction, 'Ticket'],
-      ]);
+  describe('GET :ref (M25 allowedActions)', () => {
+    it('GET :ref returns allowedActions computed for the enriched principal', async () => {
+      mockTicketsService.findByRefWithActions.mockResolvedValue({ id: 't1', allowedActions: ['start'] });
+      const res = await controller.findByRef('koda', 'KODA-1', mockMemberUser, { project: { id: 'p1', slug: 'koda' }, role: 'DEVELOPER' });
+      expect(mockTicketsService.findByRefWithActions).toHaveBeenCalledWith('koda', 'KODA-1', { ...mockMemberUser, projectRole: 'DEVELOPER' });
+      expect(res).toEqual(expect.objectContaining({ data: { id: 't1', allowedActions: ['start'] } }));
     });
+  });
 
+  describe('PATCH /api/projects/:slug/tickets/:ref', () => {
     it('should update ticket', async () => {
       const updateDto: UpdateTicketDto = {
         title: 'Updated title',
@@ -396,12 +405,6 @@ describe('TicketsController', () => {
   });
 
   describe('DELETE /api/projects/:slug/tickets/:ref', () => {
-    it('requires DELETE Ticket permission on the HTTP route', () => {
-      expect(Reflect.getMetadata(PERMISSION_KEY, controller.softDelete)).toEqual([
-        [CaslPermissionAction.DELETE, 'Ticket'],
-      ]);
-    });
-
     it('should soft-delete ticket for ADMIN user', async () => {
       mockTicketsService.softDelete.mockResolvedValue({
         ...mockTicket,
@@ -512,37 +515,50 @@ describe('TicketsController', () => {
     it('AC9: assign called directly does not call ProjectsService.assertProjectMembership', async () => {
       mockTicketsService.assign.mockResolvedValue(mockTicket);
 
-      await controller.assign('koda', 'KODA-1', {} as AssignTicketDto, mockMemberUser);
+      await controller.assign('koda', 'KODA-1', {} as AssignTicketDto, mockMemberUser, adminProject);
 
       expect(mockProjectsService.assertProjectMembership).not.toHaveBeenCalled();
-      expect(service.assign).toHaveBeenCalledWith('koda', 'KODA-1', {}, mockMemberUser);
+      expect(service.assign).toHaveBeenCalledWith('koda', 'KODA-1', {}, withProjectRole(mockMemberUser, 'ADMIN'));
     });
 
     it('AC9 boundary: assign called directly does not resolve the project by slug either', async () => {
       mockTicketsService.assign.mockResolvedValue(mockTicket);
 
-      await controller.assign('koda', 'KODA-1', {} as AssignTicketDto, mockMemberUser);
+      await controller.assign('koda', 'KODA-1', {} as AssignTicketDto, mockMemberUser, adminProject);
 
       expect(mockProjectsService.findProjectIdBySlug).not.toHaveBeenCalled();
     });
   });
 
-  describe('ticket transition route permissions', () => {
-    const transitionPermission = [[KodaAction.TRANSITION as CaslPermissionAction, 'Ticket']];
+  describe('#144 project permissions on ticket routes', () => {
+    const T = KodaAction.TRANSITION as CaslPermissionAction;
+    const U = KodaAction.UPDATE as CaslPermissionAction;
+    const cases: Array<[keyof TicketsController, [CaslPermissionAction, string]]> = [
+      ['create', [CaslPermissionAction.CREATE, 'Ticket']],
+      ['update', [U, 'Ticket']],
+      ['softDelete', [CaslPermissionAction.DELETE, 'Ticket']],
+      ['assign', [U, 'Ticket']],
+      ['verify', [T, 'Ticket']],
+      ['start', [T, 'Ticket']],
+      ['fix', [T, 'Ticket']],
+      ['verifyFix', [T, 'Ticket']],
+      ['close', [T, 'Ticket']],
+      ['reject', [T, 'Ticket']],
+    ];
 
-    it('requires TRANSITION Ticket permission on all transition HTTP routes', () => {
-      expect(Reflect.getMetadata(PERMISSION_KEY, controller.verify)).toEqual(transitionPermission);
-      expect(Reflect.getMetadata(PERMISSION_KEY, controller.start)).toEqual(transitionPermission);
-      expect(Reflect.getMetadata(PERMISSION_KEY, controller.fix)).toEqual(transitionPermission);
-      expect(Reflect.getMetadata(PERMISSION_KEY, controller.verifyFix)).toEqual(transitionPermission);
-      expect(Reflect.getMetadata(PERMISSION_KEY, controller.close)).toEqual(transitionPermission);
-      expect(Reflect.getMetadata(PERMISSION_KEY, controller.reject)).toEqual(transitionPermission);
+    it.each(cases)('%s carries @ProjectPermission(%j) and no global @RequiredPermission', (handler, permission) => {
+      const fn = TicketsController.prototype[handler] as unknown as object;
+      expect(Reflect.getMetadata(PROJECT_PERMISSION_KEY, fn)).toEqual({ permission, exemptAgents: false });
+      expect(Reflect.getMetadata(PERMISSION_KEY, fn)).toBeUndefined();
     });
 
-    it('requires UPDATE Ticket permission on the assign HTTP route (BUG-2)', () => {
-      expect(Reflect.getMetadata(PERMISSION_KEY, controller.assign)).toEqual([
-        [KodaAction.UPDATE as CaslPermissionAction, 'Ticket'],
-      ]);
+    it('passes the principal enriched with the resolved project role to the service', async () => {
+      const project = { project: { id: 'p1', slug: 'koda' }, role: 'DEVELOPER' };
+      mockTicketsService.update.mockResolvedValue({ id: 't1' });
+      await controller.update('koda', 'KODA-1', { title: 'x' }, mockMemberUser, project);
+      expect(mockTicketsService.update).toHaveBeenCalledWith(
+        'koda', 'KODA-1', { title: 'x' }, { ...mockMemberUser, projectRole: 'DEVELOPER' },
+      );
     });
   });
 
@@ -553,7 +569,7 @@ describe('TicketsController', () => {
       'M1: blank body on %s route throws ValidationAppException and never reaches the transitions service',
       async (route) => {
         await expect(
-          (controller as any)[route]('koda', 'KODA-1', { body: '   ' } as TransitionWithCommentDto, mockAdminUser),
+          (controller as any)[route]('koda', 'KODA-1', { body: '   ' } as TransitionWithCommentDto, mockAdminUser, adminProject),
         ).rejects.toThrow(ValidationAppException);
 
         expect(mockTransitionsService[route]).not.toHaveBeenCalled();
@@ -564,7 +580,7 @@ describe('TicketsController', () => {
       'M1: missing body on %s route throws ValidationAppException and never reaches the transitions service',
       async (route) => {
         await expect(
-          (controller as any)[route]('koda', 'KODA-1', {} as TransitionWithCommentDto, mockAdminUser),
+          (controller as any)[route]('koda', 'KODA-1', {} as TransitionWithCommentDto, mockAdminUser, adminProject),
         ).rejects.toThrow(ValidationAppException);
 
         expect(mockTransitionsService[route]).not.toHaveBeenCalled();
@@ -574,7 +590,7 @@ describe('TicketsController', () => {
     it('M1: blank body on verify-fix throws before any approve/reject branching', async () => {
       for (const approve of [true, false]) {
         await expect(
-          controller.verifyFix('koda', 'KODA-1', { body: '  ' } as TransitionWithCommentDto, approve, mockAdminUser),
+          controller.verifyFix('koda', 'KODA-1', { body: '  ' } as TransitionWithCommentDto, approve, mockAdminUser, adminProject),
         ).rejects.toThrow(ValidationAppException);
       }
 
@@ -584,22 +600,69 @@ describe('TicketsController', () => {
     it('M1: non-blank body passes through to the transitions service (positive control)', async () => {
       mockTransitionsService.verify.mockResolvedValue({ ticket: mockTicket });
 
-      await controller.verify('koda', 'KODA-1', { body: 'Verified against staging' }, mockAdminUser);
+      await controller.verify('koda', 'KODA-1', { body: 'Verified against staging' }, mockAdminUser, adminProject);
 
       expect(mockTransitionsService.verify).toHaveBeenCalledWith(
         'koda',
         'KODA-1',
         'Verified against staging',
-        mockAdminUser,
+        withProjectRole(mockAdminUser, 'ADMIN'),
       );
     });
 
     it('M1: start route has no required comment and still works without a body', async () => {
       mockTransitionsService.start.mockResolvedValue({ ticket: mockTicket });
 
-      await controller.start('koda', 'KODA-1', mockAdminUser);
+      await controller.start('koda', 'KODA-1', mockAdminUser, adminProject);
 
-      expect(mockTransitionsService.start).toHaveBeenCalledWith('koda', 'KODA-1', mockAdminUser);
+      expect(mockTransitionsService.start).toHaveBeenCalledWith('koda', 'KODA-1', withProjectRole(mockAdminUser, 'ADMIN'));
+    });
+  });
+
+  describe('POST :ref/close (admin override)', () => {
+    const project = (role: string | null) => ({ project: { id: 'p1', slug: 'koda' }, role });
+
+    it('403 for a project DEVELOPER, before any service call', async () => {
+      await expect(controller.close('koda', 'KODA-1', { body: 'why' }, mockMemberUser, project('DEVELOPER')))
+        .rejects.toBeInstanceOf(ForbiddenAppException);
+      expect(mockTransitionsService.close).not.toHaveBeenCalled();
+    });
+
+    it('403 for an agent even with every agent role', async () => {
+      await expect(controller.close('koda', 'KODA-1', { body: 'why' }, mockAgent, project(null)))
+        .rejects.toBeInstanceOf(ForbiddenAppException);
+    });
+
+    // Authorization runs BEFORE body validation: a non-admin gets 403 even
+    // when their request body is malformed. Pin the ordering so a future
+    // re-order does not silently turn the 403 into a 400 (the body's
+    // validation only fires for callers who passed the admin check).
+    it.each([undefined, '', '   '])('403 for a non-admin with malformed body %j (authz runs before validation)', async (body) => {
+      await expect(controller.close('koda', 'KODA-1', { body }, mockMemberUser, project('DEVELOPER')))
+        .rejects.toBeInstanceOf(ForbiddenAppException);
+      expect(mockTransitionsService.close).not.toHaveBeenCalled();
+    });
+
+    it.each([undefined, '', '   '])('400 for a project ADMIN with reason %j', async (body) => {
+      await expect(controller.close('koda', 'KODA-1', { body }, mockMemberUser, project('ADMIN')))
+        .rejects.toBeInstanceOf(ValidationAppException);
+      expect(mockTransitionsService.close).not.toHaveBeenCalled();
+    });
+
+    // Regression (fix round 1, #144): a request with no body at all makes Nest
+    // pass undefined for @Body(), which used to TypeError on dto.body and 500.
+    // The controller now defaults the dto, so the missing reason is a 400.
+    it('400 for a project ADMIN when the request carries no body at all', async () => {
+      await expect(controller.close('koda', 'KODA-1', undefined, mockMemberUser, project('ADMIN')))
+        .rejects.toBeInstanceOf(ValidationAppException);
+      expect(mockTransitionsService.close).not.toHaveBeenCalled();
+    });
+
+    it('closes for a project ADMIN with a reason, passing the enriched principal', async () => {
+      mockTransitionsService.close.mockResolvedValue({ ticket: { id: 't1', status: 'CLOSED' }, comment: {}, activity: {} });
+      const res = await controller.close('koda', 'KODA-1', { body: 'dup' }, mockMemberUser, project('ADMIN'));
+      expect(mockTransitionsService.close).toHaveBeenCalledWith('koda', 'KODA-1', 'dup', { ...mockMemberUser, projectRole: 'ADMIN' });
+      expect(res).toEqual(expect.objectContaining({ data: { id: 't1', status: 'CLOSED' } }));
     });
   });
 });

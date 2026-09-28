@@ -8,7 +8,9 @@ type TransitionRule = {
   };
 };
 
-const TRANSITION_RULES: TransitionRule = {
+// IN_PROGRESS -> VERIFIED (GENERAL) is kept but unreachable: no route supplies
+// a comment for it (PATCH {status} passes none). It is not an allowedActions entry.
+export const TRANSITION_RULES: Readonly<TransitionRule> = {
   [TicketStatus.CREATED]: {
     [TicketStatus.VERIFIED]: CommentType.VERIFICATION,
     [TicketStatus.IN_PROGRESS]: 'NONE',

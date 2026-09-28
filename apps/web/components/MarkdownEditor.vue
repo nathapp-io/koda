@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '~/components/ui/tabs'
 import { Textarea } from '~/components/ui/textarea'
-import { renderSafeMarkdown } from '~/lib/markdown'
+import { renderMarkdownOrEscape } from '~/lib/markdown'
 
 interface Props {
   modelValue: string
@@ -16,13 +16,9 @@ const emit = defineEmits<{
 
 const activeTab = ref<'write' | 'preview'>('write')
 
-const renderedHtml = computed(() => {
-  try {
-    return renderSafeMarkdown(props.modelValue || '')
-  } catch {
-    return props.modelValue || ''
-  }
-})
+// M24: renderMarkdownOrEscape catches renderer errors and escapes the raw text,
+// so the v-html below never receives unsanitized input.
+const renderedHtml = computed(() => renderMarkdownOrEscape(props.modelValue || ''))
 
 function handleInput(event: Event) {
   const target = event.target as HTMLTextAreaElement

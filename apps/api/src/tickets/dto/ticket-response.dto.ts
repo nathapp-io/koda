@@ -36,6 +36,18 @@ export class TicketResponseDto {
   @ApiProperty({ description: 'Assigned to agent ID', nullable: true })
   assignedToAgentId?: string | null;
 
+  @ApiProperty({
+    description: 'Resolved assignee (user or agent), or null when unassigned',
+    nullable: true,
+    type: 'object',
+    properties: {
+      kind: { type: 'string', enum: ['user', 'agent'] },
+      id: { type: 'string' },
+      name: { type: 'string' },
+    },
+  })
+  assignee!: { kind: 'user' | 'agent'; id: string; name: string } | null;
+
   @ApiProperty({ description: 'Created by user ID', nullable: true })
   createdByUserId?: string | null;
 
@@ -122,6 +134,7 @@ export class TicketResponseDto {
       priority: ticket.priority,
       assignedToUserId: ticket.assignedToUserId,
       assignedToAgentId: ticket.assignedToAgentId,
+      assignee: ticket.assignee ?? null,
       createdByUserId: ticket.createdByUserId,
       createdByAgentId: ticket.createdByAgentId,
       gitRefVersion: ticket.gitRefVersion,

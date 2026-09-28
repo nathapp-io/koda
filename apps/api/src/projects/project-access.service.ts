@@ -14,14 +14,29 @@ export class ProjectAccessService {
     return project.id;
   }
 
-  async assertProjectMembership(projectId: string, principal: KodaPrincipal): Promise<void> {
-    if (!isUserPrincipal(principal)) return;
-    if (principal.role === 'ADMIN') return;
+  /**
+   * Resolves the caller's role in a project with at most one query.
+   * Global ADMIN -> 'ADMIN' (no query); agent -> null (no query); member ->
+   * their ProjectMember.role; non-member user -> 403.
+   *
+   * The allow-list keeps the legacy 'AGENT' / 'MEMBER' values so older rows
+   * continue to authenticate (the CASL factory collapses them to the VIEWER
+   * least-privilege set — see KodaCaslAbilityFactory.projectRolePermissions).
+   * New code should type the return as ProjectMemberRole.
+   */
+  async resolveMembership(projectId: string, principal: KodaPrincipal): Promise<string | null> {
+    if (!isUserPrincipal(principal)) return null;
+    if (principal.role === 'ADMIN') return ActorRole.ADMIN;
     const role = await this.projectRepo.findMembershipRole(projectId, principal.id);
     const allowed = [ActorRole.ADMIN, ActorRole.DEVELOPER, ActorRole.AGENT, ActorRole.VIEWER] as const;
     if (!role || !allowed.includes(role as typeof allowed[number])) {
       throw new ForbiddenAppException({}, 'projects');
     }
+    return role;
+  }
+
+  async assertProjectMembership(projectId: string, principal: KodaPrincipal): Promise<void> {
+    await this.resolveMembership(projectId, principal);
   }
 
   /**

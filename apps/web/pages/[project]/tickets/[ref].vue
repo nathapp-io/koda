@@ -3,15 +3,15 @@ import { computed, reactive, ref as vueRef } from 'vue'
 import MarkdownEditor from '~/components/MarkdownEditor.vue'
 import { extractApiError } from '~/composables/useApi'
 import { createDebouncer } from '~/lib/debounce'
-import { renderSafeMarkdown } from '~/lib/markdown'
+import { renderMarkdownOrEscape } from '~/lib/markdown'
 import { safeHref } from '~/lib/safe-url'
 
 definePageMeta({ layout: 'default' })
 
 interface Assignee {
+  kind: 'user' | 'agent'
   id: string
   name: string
-  email?: string
 }
 
 interface TicketLink {
@@ -37,6 +37,7 @@ interface Ticket {
   priority: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
   status: 'CREATED' | 'VERIFIED' | 'IN_PROGRESS' | 'VERIFY_FIX' | 'CLOSED' | 'REJECTED'
   assignee?: Assignee | null
+  allowedActions?: Array<'verify' | 'start' | 'fix' | 'verify-fix' | 'reject' | 'close'>
   createdAt: string
   gitRefFile?: string | null
   gitRefLine?: number | null
@@ -163,14 +164,9 @@ async function saveEdit() {
   }
 }
 
-const renderedDescription = computed(() => {
-  if (!ticket.value?.description) return ''
-  try {
-    return renderSafeMarkdown(ticket.value.description)
-  } catch {
-    return ticket.value.description
-  }
-})
+const renderedDescription = computed(() =>
+  ticket.value?.description ? renderMarkdownOrEscape(ticket.value.description) : '',
+)
 
 function statusClass(status: string) {
   switch (status) {
@@ -287,10 +283,14 @@ function extractCommitSha(url: string): string {
 const assigneeUserId = vueRef('')
 const assigning = vueRef(false)
 
-// ENH-4: the assign route requires UPDATE Ticket permission (ADMIN/agent);
-// hide the controls from members/viewers so the 403 toast never happens.
-const { user: currentUser } = useAuth()
-const canAssign = computed(() => currentUser.value?.role === 'ADMIN')
+// #144: controls follow the caller's role in THIS project (the API decides;
+// this only avoids offering actions that would 403). useProjectViewerRole
+// is SSR-friendly so canManage/viewerRole are populated before hydration —
+// no flash of "no controls" → "controls appear" on first paint.
+const { data: viewerRoleData } = useProjectViewerRole(slug)
+const canManage = computed(() => viewerRoleData.value?.canManage === true)
+const viewerRole = computed(() => viewerRoleData.value?.viewerRole ?? null)
+const canWork = computed(() => canManage.value || viewerRole.value === 'DEVELOPER')
 
 async function assignTicket() {
   if (!assigneeUserId.value.trim()) return
@@ -592,7 +592,7 @@ async function removeLink(linkId: string) {
                 <span class="text-sm">{{ ticket.assignee.name }}</span>
               </div>
               <p v-else class="text-sm text-muted-foreground">{{ t('common.unassigned') }}</p>
-              <div v-if="canAssign" class="mt-2 space-y-2">
+              <div v-if="canWork" class="mt-2 space-y-2">
                 <Input v-model="assigneeUserId" :placeholder="t('tickets.assign.userIdPlaceholder')" />
                 <div class="flex items-center gap-2">
                   <Button size="sm" :disabled="assigning || !assigneeUserId.trim()" @click="assignTicket">
@@ -653,15 +653,15 @@ async function removeLink(linkId: string) {
                   v-for="label in ticketLabels"
                   :key="label.id"
                   variant="outline"
-                  class="cursor-pointer"
+                  :class="canWork ? 'cursor-pointer' : ''"
                   :style="{ borderColor: label.color, color: label.color }"
-                  @click="removeLabel(label.id)"
+                  @click="canWork && removeLabel(label.id)"
                 >
                   {{ label.name }}
                 </Badge>
                 <span v-if="ticketLabels.length === 0" class="text-xs text-muted-foreground">{{ t('labels.empty') }}</span>
               </div>
-              <div class="flex items-center gap-2">
+              <div v-if="canWork" class="flex items-center gap-2">
                 <Select v-model="selectedLabelId">
                   <SelectTrigger class="w-[180px]">
                     <SelectValue :placeholder="t('tickets.labels.select')" />
@@ -716,7 +716,7 @@ async function removeLink(linkId: string) {
           :project-slug="slug"
           @transition="onTransition"
         />
-        <Button variant="destructive" class="w-full" :disabled="deletingTicket" @click="deleteTicket">
+        <Button v-if="canManage" variant="destructive" class="w-full" :disabled="deletingTicket" @click="deleteTicket">
           {{ deletingTicket ? t('common.loading') : t('tickets.delete.button') }}
         </Button>
       </div>

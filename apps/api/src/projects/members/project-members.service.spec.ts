@@ -30,22 +30,41 @@ describe('ProjectMembersService', () => {
       assertProjectMembership: jest.fn(),
       assertProjectAdmin: jest.fn(),
       canManageMembers: jest.fn(),
+      resolveMembership: jest.fn(),
     };
     const txManager = { run: <T>(fn: () => Promise<T>) => fn(), isInTransaction: () => false };
     service = new ProjectMembersService(repo as never, access as never, txManager as never);
   });
 
-  it('list checks membership, not admin rights, and reports canManage', async () => {
+  it('list resolves membership once and derives canManage and viewerRole from it', async () => {
     repo.findMemberPage.mockResolvedValue({ total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] });
-    access.canManageMembers.mockResolvedValue(true);
+    access.resolveMembership.mockResolvedValue('ADMIN');
 
     const result = await service.list('proj', projectAdmin, { current: 1, size: 20 });
 
-    expect(access.assertProjectMembership).toHaveBeenCalledWith('p1', projectAdmin);
-    expect(access.assertProjectAdmin).not.toHaveBeenCalled();
-    expect(access.canManageMembers).toHaveBeenCalledWith('p1', projectAdmin);
+    expect(access.resolveMembership).toHaveBeenCalledTimes(1);
+    expect(access.canManageMembers).not.toHaveBeenCalled();
     expect(result.canManage).toBe(true);
+    expect(result.viewerRole).toBe('ADMIN');
     expect(result.page.total).toBe(0);
+  });
+
+  it('list reports viewerRole DEVELOPER and canManage false for a developer', async () => {
+    repo.findMemberPage.mockResolvedValue({ total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] });
+    access.resolveMembership.mockResolvedValue('DEVELOPER');
+
+    const result = await service.list('proj', projectAdmin, { current: 1, size: 20 });
+
+    expect(result).toEqual(expect.objectContaining({ canManage: false, viewerRole: 'DEVELOPER' }));
+  });
+
+  it('list reports viewerRole null and canManage false for an agent', async () => {
+    repo.findMemberPage.mockResolvedValue({ total: 0, current: 1, size: 20, hasNext: false, hasPrev: false, records: [] });
+    access.resolveMembership.mockResolvedValue(null);
+
+    const result = await service.list('proj', projectAdmin, { current: 1, size: 20 });
+
+    expect(result).toEqual(expect.objectContaining({ canManage: false, viewerRole: null }));
   });
 
   it('writes are gated by assertProjectAdmin', async () => {

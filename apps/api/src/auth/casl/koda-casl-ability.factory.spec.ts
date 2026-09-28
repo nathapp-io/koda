@@ -1,5 +1,7 @@
+import { subject } from '@casl/ability';
 import { KodaCaslAbilityFactory } from './koda-casl-ability.factory';
 import { CaslPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
+import { KodaAction } from './koda-action.enum';
 import type { UserPrincipal, AgentPrincipal } from '../principal/koda-principal.types';
 
 function makeUser(overrides: Partial<UserPrincipal> = {}): UserPrincipal {
@@ -245,5 +247,85 @@ describe('KodaCaslAbilityFactory', () => {
       const derivedCount = 2; // TRANSITION Ticket + AstIndex.manage (both from DEVELOPER role)
       expect(perms).toHaveLength(baseCount + derivedCount);
     });
+  });
+});
+
+describe('project-role permissions (#144)', () => {
+  const factory = new KodaCaslAbilityFactory();
+  const A = CaslPermissionAction;
+  const T = KodaAction.TRANSITION as CaslPermissionAction;
+  const U = KodaAction.UPDATE as CaslPermissionAction;
+
+  type Row = [label: string, action: CaslPermissionAction, subjectType: string, admin: boolean, dev: boolean, viewer: boolean];
+  const rows: Row[] = [
+    ['read ticket', A.READ, 'Ticket', true, true, true],
+    ['read label', A.READ, 'Label', true, true, true],
+    ['read comment', A.READ, 'Comment', true, true, true],
+    ['create ticket', A.CREATE, 'Ticket', true, true, false],
+    ['update ticket', U, 'Ticket', true, true, false],
+    ['transition ticket', T, 'Ticket', true, true, false],
+    ['delete ticket', A.DELETE, 'Ticket', true, false, false],
+    ['create label', A.CREATE, 'Label', true, true, false],
+    ['update label', A.UPDATE, 'Label', true, false, false],
+    ['delete label', A.DELETE, 'Label', true, false, false],
+    ['create comment', A.CREATE, 'Comment', true, true, true],
+    ['read code-intel', A.READ, 'CodeIntel', true, true, false],
+  ];
+
+  it.each(rows)('%s: ADMIN=%s DEVELOPER=%s VIEWER=%s', async (_label, action, subjectType, admin, dev, viewer) => {
+    for (const [projectRole, expected] of [['ADMIN', admin], ['DEVELOPER', dev], ['VIEWER', viewer]] as const) {
+      const ability = await factory.createForUser(makeUser({ projectRole }));
+      expect({ projectRole, can: ability.can(action, subjectType) }).toEqual({ projectRole, can: expected });
+    }
+  });
+
+  it('own comments: every project role may update and delete its own comment', async () => {
+    for (const projectRole of ['ADMIN', 'DEVELOPER', 'VIEWER']) {
+      const ability = await factory.createForUser(makeUser({ id: 'u1', projectRole }));
+      const own = subject('Comment', { authorUserId: 'u1' });
+      expect(ability.can(A.UPDATE, own)).toBe(true);
+      expect(ability.can(A.DELETE, own)).toBe(true);
+    }
+  });
+
+  it("another user's comment: only project ADMIN may delete it, nobody may edit it", async () => {
+    const other = subject('Comment', { authorUserId: 'someone-else' });
+    const admin = await factory.createForUser(makeUser({ id: 'u1', projectRole: 'ADMIN' }));
+    const dev = await factory.createForUser(makeUser({ id: 'u1', projectRole: 'DEVELOPER' }));
+    const viewer = await factory.createForUser(makeUser({ id: 'u1', projectRole: 'VIEWER' }));
+    expect(admin.can(A.DELETE, other)).toBe(true);
+    expect(admin.can(A.UPDATE, other)).toBe(false);
+    expect(dev.can(A.DELETE, other)).toBe(false);
+    expect(viewer.can(A.DELETE, other)).toBe(false);
+  });
+
+  it('an unrecognised legacy project role (AGENT, MEMBER, garbage) gets VIEWER rights only', async () => {
+    for (const projectRole of ['AGENT', 'MEMBER', 'owner', '']) {
+      const ability = await factory.createForUser(makeUser({ projectRole }));
+      expect(ability.can(A.READ, 'Ticket')).toBe(true);
+      expect(ability.can(A.CREATE, 'Ticket')).toBe(false);
+      expect(ability.can(T, 'Ticket')).toBe(false);
+      expect(ability.can(A.CREATE, 'Label')).toBe(false);
+    }
+  });
+
+  it('no project role (route outside a project): a global MEMBER keeps today\'s global set', async () => {
+    const ability = await factory.createForUser(makeUser());
+    expect(ability.can(A.CREATE, 'Ticket')).toBe(true);
+    expect(ability.can(T, 'Ticket')).toBe(false);
+    expect(ability.can(A.READ, 'CodeIntel')).toBe(false);
+  });
+
+  it('global ADMIN is unaffected by a lower project role', async () => {
+    const ability = await factory.createForUser(makeUser({ role: 'ADMIN', projectRole: 'VIEWER' }));
+    expect(ability.can(A.DELETE, 'Ticket')).toBe(true);
+    expect(ability.can(A.DELETE, 'Label')).toBe(true);
+  });
+
+  it('agents ignore projectRole entirely', async () => {
+    const agent = { ...makeAgent({ agentRoles: ['REVIEWER'] }), projectRole: 'ADMIN' } as unknown as AgentPrincipal;
+    const ability = await factory.createForUser(agent);
+    expect(ability.can(T, 'Ticket')).toBe(true);
+    expect(ability.can(U, 'Ticket')).toBe(false);
   });
 });

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 
 interface Assignee {
+  kind: 'user' | 'agent'
+  id: string
   name: string
-  email?: string
 }
 
 interface TicketLink {

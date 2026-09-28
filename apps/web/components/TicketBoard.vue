@@ -2,8 +2,9 @@
 import TicketCard from '~/components/TicketCard.vue'
 
 interface Assignee {
+  kind: 'user' | 'agent'
+  id: string
   name: string
-  email?: string
 }
 
 interface Ticket {

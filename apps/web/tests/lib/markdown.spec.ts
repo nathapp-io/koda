@@ -69,11 +69,20 @@ jest.mock('isomorphic-dompurify', () => {
     __esModule: true,
     default: {
       sanitize: (dirty: string, _opts?: unknown) => sanitizeHtml(dirty),
+      addHook: jest.fn(),
     },
   }
 })
 
-import { renderSafeMarkdown, sanitizeHtmlFragment } from '../../lib/markdown'
+import DOMPurify from 'isomorphic-dompurify'
+import {
+  renderSafeMarkdown,
+  sanitizeHtmlFragment,
+  escapeHtml,
+  renderMarkdownOrEscape,
+  keepClassAttribute,
+} from '../../lib/markdown'
+import { marked } from 'marked'
 
 describe('renderSafeMarkdown - basic rendering', () => {
   test('returns empty string for empty input', () => {
@@ -155,5 +164,52 @@ describe('sanitizeHtmlFragment', () => {
     const result = sanitizeHtmlFragment('<div>safe</div><script>alert(1)</script>')
     expect(result).toContain('<div>safe</div>')
     expect(result).not.toContain('<script')
+  })
+})
+
+describe('escapeHtml', () => {
+  test('escapes every HTML-significant character', () => {
+    expect(escapeHtml(`<img src=x onerror="a('b')">&`)).toBe('&lt;img src=x onerror=&quot;a(&#39;b&#39;)&quot;&gt;&amp;')
+  })
+})
+
+describe('renderMarkdownOrEscape (M24)', () => {
+  test('returns the sanitized render when rendering succeeds', () => {
+    expect(renderMarkdownOrEscape('**hi**')).toContain('hi')
+  })
+
+  test('returns escaped text in a <p> when the renderer throws', () => {
+    const spy = jest.spyOn(marked, 'parse').mockImplementationOnce(() => { throw new Error('boom') })
+    expect(renderMarkdownOrEscape('<script>alert(1)</script>')).toBe('<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>')
+    spy.mockRestore()
+  })
+
+  test('returns an empty string for empty input', () => {
+    expect(renderMarkdownOrEscape('')).toBe('')
+  })
+})
+
+describe('keepClassAttribute (sanitizer LOW)', () => {
+  test.each([
+    ['code', 'language-ts', true],
+    ['code', 'language-c-sharp', true],
+    ['code', 'fixed inset-0', false],
+    ['code', 'language-ts fixed', false],
+    ['div', 'language-ts', false],
+    ['span', 'fixed inset-0 z-50', false],
+  ])('<%s class="%s"> keep=%s', (tag, value, keep) => {
+    expect(keepClassAttribute(tag, value)).toBe(keep)
+  })
+
+  test('is registered as an uponSanitizeAttribute hook', () => {
+    const calls = (DOMPurify.addHook as jest.Mock).mock.calls
+    const hook = calls.find(([name]) => name === 'uponSanitizeAttribute')?.[1]
+    expect(hook).toBeDefined()
+    const drop = { attrName: 'class', attrValue: 'fixed inset-0', keepAttr: true }
+    hook({ nodeName: 'DIV' }, drop)
+    expect(drop.keepAttr).toBe(false)
+    const keep = { attrName: 'class', attrValue: 'language-ts', keepAttr: true }
+    hook({ nodeName: 'CODE' }, keep)
+    expect(keep.keepAttr).toBe(true)
   })
 })

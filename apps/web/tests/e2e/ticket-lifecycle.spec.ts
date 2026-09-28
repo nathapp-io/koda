@@ -7,16 +7,16 @@ import {
   transitionTicket,
   E2E_ADMIN,
 } from './fixtures/api-client';
-import { webLogin, generateUniqueProjectKey } from './fixtures/page-helpers';
+import { webLogin, generateUniqueProjectKey, waitForHydration } from './fixtures/page-helpers';
 
 /**
  * Ticket lifecycle: CREATED → VERIFIED → IN_PROGRESS → VERIFY_FIX → CLOSED
  *
- * Transition map (from TicketActionPanel.vue):
- *   CREATED    → "Verify" (opens dialog) or "Reject"
- *   VERIFIED   → "Start" (no dialog)
- *   IN_PROGRESS → "Submit Fix" (opens dialog) or "Reject"
- *   VERIFY_FIX  → "Approve Fix" (opens dialog) or "Fail Fix"
+ * The action buttons come from the API's `allowedActions` for the current
+ * user (M25), not from a client-side transition map. Dialog behavior:
+ *   "Verify", "Submit Fix", "Approve Fix" and "Close" open the comment
+ *   dialog; "Start" transitions without a dialog. "Close" is offered only
+ *   to a project or global ADMIN, and requires a non-empty reason.
  */
 test.describe('Ticket Lifecycle', () => {
   let token: string;
@@ -85,6 +85,7 @@ test.describe('Ticket Lifecycle', () => {
 
     await webLogin(page);
     await page.goto(`/${projectSlug}/tickets/${ticket.ref}`);
+    await waitForHydration(page);
     await page.getByRole('button', { name: 'Verify' }).click();
     const dialog = page.getByRole('dialog');
     await dialog.getByPlaceholder('Enter a comment or reason...').fill(body);

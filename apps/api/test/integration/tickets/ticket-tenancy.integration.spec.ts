@@ -25,6 +25,7 @@ import { TicketsService } from '../../../src/tickets/tickets.service';
 import { TicketTransitionsService } from '../../../src/tickets/state-machine/ticket-transitions.service';
 import { PrismaTicketsRepository } from '../../../src/tickets/prisma-tickets.repository';
 import { TICKET_REPOSITORY } from '../../../src/tickets/domain/ticket.domain';
+import { KodaCaslAbilityFactory } from '../../../src/auth/casl/koda-casl-ability.factory';
 import { TicketLinksService } from '../../../src/ticket-links/ticket-links.service';
 import { PrismaTicketLinkRepository } from '../../../src/ticket-links/prisma-ticket-link.repository';
 import { TicketEventService } from '../../../src/events/ticket-event.service';
@@ -42,6 +43,9 @@ describeIntegration('H5 ticket tenancy', () => {
   let ticketLinksService: TicketLinksService;
   let prisma: PrismaService<PrismaClient>;
 
+  // The close() positive control writes a GENERAL comment authored by this
+  // principal, so its id must reference a real seeded User row (author FK).
+  let principalId = '';
   const principal = {
     id: 'user-tenancy-1',
     sub: 'user-tenancy-1',
@@ -67,6 +71,7 @@ describeIntegration('H5 ticket tenancy', () => {
       providers: [
         TicketsService,
         TicketTransitionsService,
+        KodaCaslAbilityFactory,
         PrismaTicketsRepository,
         { provide: TICKET_REPOSITORY, useExisting: PrismaTicketsRepository },
         TicketLinksService,
@@ -108,6 +113,13 @@ describeIntegration('H5 ticket tenancy', () => {
     });
     projectAId = projectA.id;
     projectBId = projectB.id;
+
+    const principalUser = await prisma.client.user.create({
+      data: { email: 'tenancy@example.com', name: 'Tenancy Tester', passwordHash: 'x', role: 'MEMBER' },
+    });
+    principalId = principalUser.id;
+    (principal as { id: string }).id = principalId;
+    (principal as { sub: string }).sub = principalId;
 
     // Project A has its own ticket #5 (transitionable target of OTHER-5).
     const ticketA5 = await prisma.client.ticket.create({
@@ -169,11 +181,11 @@ describeIntegration('H5 ticket tenancy', () => {
     // Cross-project close must be a 404, not a silent success on B's ticket
     // (ticketB is IN_PROGRESS, so an unscoped close would succeed here).
     await expect(
-      transitionsService.close('proj-a', ticketBId, principal),
+      transitionsService.close('proj-a', ticketBId, 'cross-project close', principal),
     ).rejects.toThrow(NotFoundAppException);
 
     // Positive control: the ticket is transitionable in its own project.
-    await transitionsService.close('proj-b', ticketBId, principal);
+    await transitionsService.close('proj-b', ticketBId, 'tenancy positive control', principal);
     const closed = await prisma.client.ticket.findUnique({ where: { id: ticketBId } });
     expect(closed?.status).toBe('CLOSED');
   });
@@ -182,7 +194,7 @@ describeIntegration('H5 ticket tenancy', () => {
     // deletedTicketBId is IN_PROGRESS but soft-deleted: an unscoped
     // findUnique would resolve it and close() would succeed.
     await expect(
-      transitionsService.close('proj-b', deletedTicketBId, principal),
+      transitionsService.close('proj-b', deletedTicketBId, 'deleted ticket close', principal),
     ).rejects.toThrow(NotFoundAppException);
   });
 

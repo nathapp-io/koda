@@ -109,21 +109,11 @@ describe('US-002 AC2: preview mode renders current markdown source', () => {
 //        component shows plain-text fallback instead of breaking UI
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe('US-002 AC3: markdown renderer error shows plain-text fallback', () => {
-  test('source wraps markdown rendering in try-catch', () => {
+describe('US-002 AC3 / M24: renderer errors show escaped plain text', () => {
+  test('component renders through renderMarkdownOrEscape', () => {
     const source = readFileSync(componentPath, 'utf-8')
-    const hasTryCatch =
-      source.includes('try') &&
-      (source.includes('catch') || source.includes('} catch'))
-    expect(hasTryCatch).toBe(true)
-  })
-
-  test('source falls back to v-html or innerHTML with raw text on error', () => {
-    const source = readFileSync(componentPath, 'utf-8')
-    const hasFallback =
-      (source.includes('catch') && source.includes('v-html')) ||
-      (source.includes('catch') && source.includes('innerHTML'))
-    expect(hasFallback).toBe(true)
+    expect(source).toContain('renderMarkdownOrEscape(')
+    expect(source).toContain('v-html')
   })
 })
 

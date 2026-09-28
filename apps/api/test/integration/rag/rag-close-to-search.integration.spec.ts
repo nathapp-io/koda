@@ -56,6 +56,9 @@ describe('RAG close-to-search integration', () => {
   let tmpDir: string;
   let projectId: string;
   let projectSlug: string;
+  // A real user row: close() writes the reason as a GENERAL comment authored
+  // by this principal, so actorForeignKeys needs a valid User FK.
+  let principalId: string;
 
   beforeAll(async () => {
     tmpDir = join(require('node:os').tmpdir(), `koda-rag-close-search-${Date.now()}`);
@@ -132,6 +135,16 @@ describe('RAG close-to-search integration', () => {
     });
     projectId = project.id;
     projectSlug = slug;
+
+    const user = await prisma.client.user.create({
+      data: {
+        email: `rag-test-${Date.now()}@koda.test`,
+        name: 'Rag Tester',
+        passwordHash: 'x',
+        role: 'ADMIN',
+      },
+    });
+    principalId = user.id;
   });
 
   afterAll(async () => {
@@ -159,7 +172,7 @@ describe('RAG close-to-search integration', () => {
     await transitionsService.start(
       projectSlug,
       ticket.id,
-      { id: 'test-user', sub: 'test-user' } as unknown as import('../../../src/auth/principal/koda-principal.types').KodaPrincipal,
+      { id: principalId, sub: principalId, actorType: 'user', role: 'ADMIN' } as unknown as import('../../../src/auth/principal/koda-principal.types').KodaPrincipal,
     );
 
     // Verify ticket is in IN_PROGRESS
@@ -171,7 +184,8 @@ describe('RAG close-to-search integration', () => {
     await transitionsService.close(
       projectSlug,
       ticket.id,
-      { id: 'test-user', sub: 'test-user' } as unknown as import('../../../src/auth/principal/koda-principal.types').KodaPrincipal,
+      'closed for RAG indexing',
+      { id: principalId, sub: principalId, actorType: 'user', role: 'ADMIN' } as unknown as import('../../../src/auth/principal/koda-principal.types').KodaPrincipal,
     );
 
     // Verify ticket is CLOSED

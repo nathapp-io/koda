@@ -75,6 +75,42 @@ describe('ProjectAccessService', () => {
     });
   });
 
+  describe('resolveMembership', () => {
+    const adminUser: KodaPrincipal = {
+      actorType: 'user', id: 'u1', role: 'ADMIN', email: 'a@a.com',
+    } as KodaPrincipal;
+
+    const memberUser: KodaPrincipal = {
+      actorType: 'user', id: 'u2', role: 'MEMBER', email: 'm@m.com',
+    } as KodaPrincipal;
+
+    const agentPrincipal = {
+      actorType: 'agent', id: 'ag1', slug: 'agent-1', status: 'ACTIVE',
+      agentRoles: [], capabilities: [],
+    } as unknown as KodaPrincipal;
+
+    it('returns ADMIN for a global ADMIN without a membership lookup', async () => {
+      await expect(service.resolveMembership('p1', adminUser)).resolves.toBe('ADMIN');
+      expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
+    });
+
+    it('returns null for an agent without a membership lookup', async () => {
+      await expect(service.resolveMembership('p1', agentPrincipal)).resolves.toBeNull();
+      expect(mockProjectRepo.findMembershipRole).not.toHaveBeenCalled();
+    });
+
+    it('returns the member row role with exactly one lookup', async () => {
+      mockProjectRepo.findMembershipRole.mockResolvedValue('VIEWER');
+      await expect(service.resolveMembership('p1', memberUser)).resolves.toBe('VIEWER');
+      expect(mockProjectRepo.findMembershipRole).toHaveBeenCalledTimes(1);
+    });
+
+    it('throws ForbiddenAppException for a non-member', async () => {
+      mockProjectRepo.findMembershipRole.mockResolvedValue(null);
+      await expect(service.resolveMembership('p1', memberUser)).rejects.toBeInstanceOf(ForbiddenAppException);
+    });
+  });
+
   describe('assertProjectAdmin', () => {
     const globalAdmin = { actorType: 'user', id: 'g1', role: 'ADMIN', email: 'g@g.com' } as KodaPrincipal;
     const member = { actorType: 'user', id: 'm1', role: 'MEMBER', email: 'm@m.com' } as KodaPrincipal;

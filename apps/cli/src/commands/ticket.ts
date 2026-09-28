@@ -31,7 +31,7 @@ type TicketRow = {
   type: string;
   priority?: string;
   status: string;
-  assignee?: { name?: string } | null;
+  assignee?: { kind?: 'user' | 'agent'; id?: string; name?: string } | null;
   title: string;
 };
 
@@ -98,14 +98,14 @@ export function ticketCommand(program: Command): void {
         }
 
         const response = await ticketsControllerCreate({
-  body: {
+          body: {
             type: options.type as 'BUG' | 'ENHANCEMENT' | 'TASK' | 'QUESTION',
             title: options.title,
             description: options.desc,
             priority: options.priority,
           },
-  path: { slug: ctx.projectSlug }
-  });
+          path: { slug: ctx.projectSlug },
+        });
         const ticketData = unwrap<{ ref?: string; number?: number }>(response);
 
         if (options.json) {
@@ -433,18 +433,14 @@ export function ticketCommand(program: Command): void {
         const ctx = await withContext({ projectSlug: options.project });
 
         await ticketsControllerVerifyFix({
-  body: { body: options.comment },
-  path: { slug: ctx.projectSlug, ref }
-  });
+          body: { body: options.comment },
+          path: { slug: ctx.projectSlug, ref },
+          query: { approve: Boolean(options.pass) },
+        });
 
-        // The generated client currently does not expose the approve query param.
-        // Preserve expected CLI semantics: --pass should conclude with CLOSED.
-        if (options.pass) {
-          await ticketsControllerClose({ path: { slug: ctx.projectSlug, ref }});
-          console.log(`✓ Fix verified and ticket closed successfully`);
-        } else {
-          console.log(`✓ Fix verification submitted successfully`);
-        }
+        console.log(options.pass
+          ? `✓ Fix verified and ticket closed successfully`
+          : `✓ Fix verification submitted successfully`);
         process.exit(0);
       } catch (err: unknown) {
         handleApiError(err, { notFoundMessage: `Ticket not found: ${ref}` });
@@ -453,14 +449,18 @@ export function ticketCommand(program: Command): void {
 
   ticket
     .command('close <ref>')
-    .description('Close a ticket')
+    .description('Close a ticket (project or global ADMIN only; the reason is recorded as a comment)')
     .option('--project <slug>', 'Project slug')
+    .option('--reason <text>', 'Why the ticket is being closed (required)')
     .option('--json', 'Output as JSON')
     .action(async (ref: string, options) => {
       try {
+        if (!options.reason || !String(options.reason).trim()) {
+          handleApiError(new Error('--reason is required'), { validationError: true });
+        }
         const ctx = await withContext({ projectSlug: options.project });
 
-        await ticketsControllerClose({ path: { slug: ctx.projectSlug, ref }});
+        await ticketsControllerClose({ body: { body: options.reason }, path: { slug: ctx.projectSlug, ref } });
         console.log(`✓ Ticket closed successfully`);
         process.exit(0);
       } catch (err: unknown) {

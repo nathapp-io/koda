@@ -15,21 +15,27 @@ import {
   ApiBearerAuth,
   ApiOperation,
   ApiResponse,
+  ApiQuery,
 } from '@nestjs/swagger';
 import { TicketsService } from './tickets.service';
 import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TicketResponseDto } from './dto/ticket-response.dto';
+import { TicketDetailResponseDto } from './dto/ticket-detail-response.dto';
 import { TransitionWithCommentDto } from './dto/transition-with-comment.dto';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { ListTicketsQuery } from './dto/list-tickets.query';
 import { parseQuery, toPageResult } from '../common/dto/koda-page.query';
-import { JsonResponse, ValidationAppException } from '@nathapp/nestjs-common';
-import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/nestjs-auth';
+import { JsonResponse, ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-common';
+import { Principal, CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { isAgentPrincipal, KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { KodaAction } from '../auth/casl/koda-action.enum';
 import { ProjectMembershipGuard } from '../projects/project-membership.guard';
+import { ProjectPermission } from '../projects/project-permission.decorator';
+import { CurrentProject } from '../projects/current-project.decorator';
+import { ProjectContext, withProjectRole } from '../projects/project-context';
+import { canOverrideClose } from './state-machine/allowed-actions';
 import { TicketListFilterInput } from './tickets.service';
 
 /** `assignedTo=self` means the caller: its user id, or its agent id for an agent. */
@@ -127,9 +133,10 @@ export class TicketsController {
   async closeTicket(
     slug: string,
     ref: string,
+    reason: string,
     principal: KodaPrincipal,
   ) {
-    return this.transitionsService.close(slug, ref, principal);
+    return this.transitionsService.close(slug, ref, reason, principal);
   }
 
   async rejectTicket(
@@ -158,12 +165,14 @@ export class TicketsController {
   @ApiResponse({ status: 201, type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
   @ApiResponse({ status: 404, description: 'Project not found' })
+  @ProjectPermission([CaslPermissionAction.CREATE, 'Ticket'])
   async create(
     @Param('slug') slug: string,
     @Body() createTicketDto: CreateTicketDto,
     @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
   ) {
-    const data = await this.createTicket(slug, createTicketDto, principal);
+    const data = await this.createTicket(slug, createTicketDto, withProjectRole(principal, project.role));
     return JsonResponse.Ok(data);
   }
 
@@ -183,16 +192,16 @@ export class TicketsController {
   }
 
   @Get(':ref')
-  @ApiOperation({ summary: 'Get a ticket by reference (KODA-42 or CUID)' })
-  @ApiResponse({ status: 200, type: TicketResponseDto })
+  @ApiOperation({ summary: 'Get a ticket by reference (KODA-42 or CUID), with the caller\'s allowedActions' })
+  @ApiResponse({ status: 200, type: TicketDetailResponseDto })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async findByRef(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
+    @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
   ) {
-    const data = await this.getTicket(slug, ref);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = await this.ticketsService.findByRefWithActions(slug, ref, withProjectRole(principal, project.role));
     return JsonResponse.Ok(data);
   }
 
@@ -200,30 +209,33 @@ export class TicketsController {
   @ApiOperation({ summary: 'Update a ticket' })
   @ApiResponse({ status: 200, type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid request data' })
+  @ApiResponse({ status: 403, description: 'Project role lacks UPDATE Ticket' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
-  @RequiredPermission([KodaAction.UPDATE as CaslPermissionAction, 'Ticket'])
+  @ProjectPermission([KodaAction.UPDATE as CaslPermissionAction, 'Ticket'])
   async update(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Body() updateTicketDto: UpdateTicketDto,
     @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
   ) {
-    const data = await this.updateTicket(slug, ref, updateTicketDto, principal);
+    const data = await this.updateTicket(slug, ref, updateTicketDto, withProjectRole(principal, project.role));
     return JsonResponse.Ok(data);
   }
 
   @Delete(':ref')
   @ApiOperation({ summary: 'Soft delete a ticket (admin only)' })
   @ApiResponse({ status: 200, type: TicketResponseDto })
-  @ApiResponse({ status: 403, description: 'Forbidden - admin role required' })
+  @ApiResponse({ status: 403, description: 'Project ADMIN or global ADMIN required' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
-  @RequiredPermission([CaslPermissionAction.DELETE, 'Ticket'])
+  @ProjectPermission([CaslPermissionAction.DELETE, 'Ticket'])
   async softDelete(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
   ) {
-    const data = await this.deleteTicket(slug, ref, principal);
+    const data = await this.deleteTicket(slug, ref, withProjectRole(principal, project.role));
     return JsonResponse.Ok(data);
   }
 
@@ -233,15 +245,16 @@ export class TicketsController {
   @ApiResponse({ status: 200, type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Cannot assign to both user and agent' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
-  @RequiredPermission([KodaAction.UPDATE as CaslPermissionAction, 'Ticket'])
+  @ProjectPermission([KodaAction.UPDATE as CaslPermissionAction, 'Ticket'])
   async assign(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Body() assignInput: AssignTicketDto,
     @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
   ) {
     // Membership is enforced by ProjectMembershipGuard before this handler runs.
-    const data = await this.assignTicket(slug, ref, assignInput, principal);
+    const data = await this.assignTicket(slug, ref, assignInput, withProjectRole(principal, project.role));
     return JsonResponse.Ok(data);
   }
 
@@ -251,14 +264,17 @@ export class TicketsController {
   @ApiResponse({ status: 200, description: 'Ticket verified', type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
-  @RequiredPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
+  @ProjectPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
   async verify(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
-    @Body() dto: TransitionWithCommentDto,
+    @Body() dto: TransitionWithCommentDto = new TransitionWithCommentDto(),
     @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
   ) {
-    const result = await this.verifyTicket(slug, ref, this.requireCommentBody(dto.body), principal);
+    const result = await this.verifyTicket(
+      slug, ref, this.requireCommentBody(dto.body), withProjectRole(principal, project.role),
+    );
     return JsonResponse.Ok(result.ticket);
   }
 
@@ -268,13 +284,14 @@ export class TicketsController {
   @ApiResponse({ status: 200, description: 'Ticket started', type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
-  @RequiredPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
+  @ProjectPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
   async start(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
     @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
   ) {
-    const result = await this.startTicket(slug, ref, principal);
+    const result = await this.startTicket(slug, ref, withProjectRole(principal, project.role));
     return JsonResponse.Ok(result.ticket);
   }
 
@@ -284,51 +301,66 @@ export class TicketsController {
   @ApiResponse({ status: 200, description: 'Fix submitted', type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
-  @RequiredPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
+  @ProjectPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
   async fix(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
-    @Body() dto: TransitionWithCommentDto,
+    @Body() dto: TransitionWithCommentDto = new TransitionWithCommentDto(),
     @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
   ) {
-    const result = await this.fixTicket(slug, ref, this.requireCommentBody(dto.body), principal);
+    const result = await this.fixTicket(
+      slug, ref, this.requireCommentBody(dto.body), withProjectRole(principal, project.role),
+    );
     return JsonResponse.Ok(result.ticket);
   }
 
   @Post(':ref/verify-fix')
   @HttpCode(200)
   @ApiOperation({ summary: 'Approve or reject fix (VERIFY_FIX → CLOSED or IN_PROGRESS)' })
+  @ApiQuery({ name: 'approve', type: Boolean, required: false, description: 'true closes the ticket; false (default) returns it to IN_PROGRESS' })
   @ApiResponse({ status: 200, description: 'Fix reviewed', type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
-  @RequiredPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
+  @ProjectPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
   async verifyFix(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
-    @Body() dto: TransitionWithCommentDto,
+    @Body() dto: TransitionWithCommentDto = new TransitionWithCommentDto(),
     @Query('approve') approve: boolean | string,
     @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
   ) {
     // M1: validate the required comment body before any approve/reject branching.
     const commentBody = this.requireCommentBody(dto.body);
     const isApproved = approve === 'true' || approve === true;
-    const result = await this.verifyFixTicket(slug, ref, commentBody, isApproved, principal);
+    const result = await this.verifyFixTicket(
+      slug, ref, commentBody, isApproved, withProjectRole(principal, project.role),
+    );
     return JsonResponse.Ok(result.ticket);
   }
 
   @Post(':ref/close')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Close a ticket' })
+  @ApiOperation({ summary: 'Close a ticket (admin override; reason required, written as a GENERAL comment)' })
   @ApiResponse({ status: 200, description: 'Ticket closed', type: TicketResponseDto })
-  @ApiResponse({ status: 400, description: 'Invalid transition' })
+  @ApiResponse({ status: 400, description: 'Invalid transition or blank reason' })
+  @ApiResponse({ status: 403, description: 'Global ADMIN or project ADMIN required' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
-  @RequiredPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
+  @ProjectPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
   async close(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
+    @Body() dto: TransitionWithCommentDto = new TransitionWithCommentDto(),
     @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
   ) {
-    const result = await this.closeTicket(slug, ref, principal);
+    const actor = withProjectRole(principal, project.role);
+    // Authorization before validation: a non-admin gets 403 whatever it sent.
+    if (!canOverrideClose(actor)) {
+      throw new ForbiddenAppException({}, 'tickets');
+    }
+    const result = await this.closeTicket(slug, ref, this.requireCommentBody(dto.body), actor);
     return JsonResponse.Ok(result.ticket);
   }
 
@@ -338,14 +370,17 @@ export class TicketsController {
   @ApiResponse({ status: 200, description: 'Ticket rejected', type: TicketResponseDto })
   @ApiResponse({ status: 400, description: 'Invalid transition' })
   @ApiResponse({ status: 404, description: 'Ticket or project not found' })
-  @RequiredPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
+  @ProjectPermission([KodaAction.TRANSITION as CaslPermissionAction, 'Ticket'])
   async reject(
     @Param('slug') slug: string,
     @Param('ref') ref: string,
-    @Body() dto: TransitionWithCommentDto,
+    @Body() dto: TransitionWithCommentDto = new TransitionWithCommentDto(),
     @Principal() principal: KodaPrincipal,
+    @CurrentProject() project: ProjectContext,
   ) {
-    const result = await this.rejectTicket(slug, ref, this.requireCommentBody(dto.body), principal);
+    const result = await this.rejectTicket(
+      slug, ref, this.requireCommentBody(dto.body), withProjectRole(principal, project.role),
+    );
     return JsonResponse.Ok(result.ticket);
   }
 }

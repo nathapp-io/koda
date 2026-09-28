@@ -10,6 +10,7 @@ import type { KodaAgentRole } from '../auth/principal/koda-principal.types';
 import { TicketEventService } from '../events/ticket-event.service';
 import { OutboxService as NathappOutboxService } from '@nathapp/nestjs-outbox';
 import { TicketTransitionsService } from './state-machine/ticket-transitions.service';
+import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
 import { TicketType, TicketStatus, Priority } from '../common/enums';
 
 describe('TicketsService', () => {
@@ -144,6 +145,7 @@ describe('TicketsService', () => {
         { provide: TicketEventService, useValue: mockTicketEventService },
         { provide: NathappOutboxService, useValue: mockOutbox },
         { provide: TicketTransitionsService, useValue: mockTransitionsService },
+        KodaCaslAbilityFactory,
       ],
     }).compile();
 
@@ -170,7 +172,7 @@ describe('TicketsService', () => {
       const result = await service.create('koda', createDto, mockUserPrincipal);
 
       // service adds ref: `${project.key}-${ticket.number}` to the response
-      expect(result).toEqual({ ...mockTicket, ref: 'KODA-1' });
+      expect(result).toEqual({ ...mockTicket, ref: 'KODA-1', assignee: null });
       expect(result.number).toBe(1);
       expect(mockTxManager.run).toHaveBeenCalled();
     });
@@ -410,7 +412,7 @@ describe('TicketsService', () => {
 
       const result = await service.findByRef('koda', 'KODA-1');
 
-      expect(result).toEqual({ ...mockTicket, ref: 'KODA-1', links: [] });
+      expect(result).toEqual({ ...mockTicket, ref: 'KODA-1', links: [], assignee: null });
       expect(mockTicketRepo.findTicketScoped).toHaveBeenCalledWith(
         mockProject.id,
         'KODA',
@@ -424,7 +426,7 @@ describe('TicketsService', () => {
 
       const result = await service.findByRef('koda', 'ticket-123');
 
-      expect(result).toEqual({ ...mockTicket, ref: 'KODA-1', links: [] });
+      expect(result).toEqual({ ...mockTicket, ref: 'KODA-1', links: [], assignee: null });
       expect(mockTicketRepo.findTicketScoped).toHaveBeenCalledWith(
         mockProject.id,
         'KODA',
@@ -468,6 +470,28 @@ describe('TicketsService', () => {
         // Invalid refs result in a not-found lookup, which throws AppException
         await expect(service.findByRef('koda', ref)).rejects.toThrow();
       }
+    });
+  });
+
+  describe('findByRefWithActions (M25)', () => {
+    beforeEach(() => {
+      mockTicketRepo.findProjectBySlug.mockResolvedValue(mockProject);
+      mockTicketRepo.findTicketScoped.mockResolvedValue({ ...mockTicket, status: 'VERIFIED' });
+    });
+
+    it.each([
+      ['ADMIN', ['start', 'reject', 'close']],
+      ['DEVELOPER', ['start', 'reject']],
+      ['VIEWER', []],
+    ])('project %s on a VERIFIED ticket -> %j', async (projectRole, expected) => {
+      const res = await service.findByRefWithActions('koda', 'KODA-1', { ...mockUserPrincipal, projectRole });
+      expect(res.allowedActions).toEqual(expected);
+      expect(res.ref).toBe('KODA-1');
+    });
+
+    it('an agent gets transitions from its agent roles and never close', async () => {
+      const res = await service.findByRefWithActions('koda', 'KODA-1', { ...mockAgentPrincipal, agentRoles: ['REVIEWER'] });
+      expect(res.allowedActions).toEqual(['start', 'reject']);
     });
   });
 
