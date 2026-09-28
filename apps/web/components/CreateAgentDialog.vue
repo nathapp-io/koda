@@ -169,9 +169,9 @@ const copyButtonText = ref(t('agents.rotateKey.apiKeyReveal.copy'))
 
 const formSchema = toTypedSchema(
   z.object({
-    name: z.string().min(1, t('agents.validation.nameRequired')),
-    slug: z.string().min(1, t('agents.validation.slugRequired')).regex(/^[a-z0-9-]+$/, t('agents.validation.slugFormat')),
-    roles: z.array(z.string()).min(1, t('agents.validation.rolesRequired')),
+    name: z.string().min(1, t('agents.form.validation.nameRequired')),
+    slug: z.string().min(1, t('agents.form.validation.slugRequired')).regex(/^[a-z0-9-]+$/, t('agents.form.validation.slugFormat')),
+    roles: z.array(z.string()).min(1, t('agents.form.validation.rolesRequired')),
     capabilities: z.array(z.string()).default([]),
     maxConcurrentTickets: z.number().int().min(1).default(3),
   })

@@ -213,10 +213,6 @@ async function onTransition() {
   await refresh()
 }
 
-function onCommentAdded() {
-  toast.success(t('comments.toast.added'))
-}
-
 function extractIssueNumber(url: string): string | null {
   const parts = url.split('/')
   return parts[parts.length - 1] || null
@@ -517,7 +513,6 @@ async function removeLink(linkId: string) {
         <CommentThread
           :project-slug="slug"
           :ticket-ref="ref"
-          @comment-added="onCommentAdded"
         />
 
         <!-- VCS Links Section grouped by linkType -->

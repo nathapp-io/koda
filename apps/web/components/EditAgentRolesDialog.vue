@@ -73,7 +73,7 @@ const availableRoles = AGENT_ROLES
 
 const formSchema = toTypedSchema(
   z.object({
-    roles: z.array(z.string()).min(1, t('agents.validation.rolesRequired')),
+    roles: z.array(z.string()).min(1, t('agents.form.validation.rolesRequired')),
   })
 )
 
