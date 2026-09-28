@@ -100,7 +100,7 @@ export function handleApiError(err: unknown, opts?: HandleApiErrorOpts): never {
   const { status, message } = getStatusAndMessage(err);
 
   if (status === 401 || status === 403) {
-    emitError(message, 'UNAUTHORIZED', status, 'Check your API key: koda config set apiKey <key>');
+    emitError(message, 'UNAUTHORIZED', status, 'Check your API key: koda config set --api-key <key>');
     process.exit(2);
   }
 

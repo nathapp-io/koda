@@ -13,6 +13,7 @@ import { error } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
+import { requireForce } from '../utils/force';
 
 function scoreLabel(score: number): string {
   if (score >= 0.8) return 'HIGH';
@@ -162,11 +163,7 @@ export function kbCommand(program: Command): void {
     .option('--force', 'Confirm deletion')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
-      if (!options.force) {
-        error('Use --force to confirm deletion');
-        process.exit(1);
-        return;
-      }
+      if (!requireForce(options.force)) return;
 
       try {
         const ctx = await withContext({ projectSlug: options.project });

@@ -25,6 +25,7 @@ import { userCommand } from './commands/user';
 import { memberCommand } from './commands/member';
 import { ciWebhookCommand } from './commands/ci-webhook';
 import { setJsonMode } from './utils/json-mode';
+import { installSignalHandlers } from './utils/signals';
 
 // Read package.json to get version
 let version = '0.1.0';
@@ -264,17 +265,8 @@ process.on('unhandledRejection', (reason: unknown) => {
   process.exit(1);
 });
 
-// Graceful shutdown on SIGINT (Ctrl+C)
-process.on('SIGINT', () => {
-  console.log('\nShutting down gracefully...');
-  process.exit(0);
-});
-
-// Graceful shutdown on SIGTERM (kill signal)
-process.on('SIGTERM', () => {
-  console.log('\nShutting down gracefully...');
-  process.exit(0);
-});
+// Graceful shutdown on SIGINT (Ctrl+C) / SIGTERM — exits 130 / 143
+installSignalHandlers();
 
 program.parse(process.argv);
 

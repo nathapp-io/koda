@@ -11,6 +11,7 @@ import { configureApiClient } from '../utils/api-client';
 import { table, error } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
+import { requireForce } from '../utils/force';
 
 export function projectCommand(program: Command): void {
   const project = program.command('project');
@@ -148,10 +149,7 @@ export function projectCommand(program: Command): void {
     .command('delete <slug>')
     .option('--force', 'Confirm deletion')
     .action(async (slug: string, options) => {
-      if (!options.force) {
-        error('Use --force to confirm deletion');
-        process.exit(1);
-      }
+      if (!requireForce(options.force)) return;
 
       try {
         const auth = await resolveAuth({});

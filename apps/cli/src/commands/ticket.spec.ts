@@ -1915,13 +1915,13 @@ describe('ticketCommand', () => {
       expect(processExitSpy).toHaveBeenCalledWith(0);
     });
 
-    it('exits 3 with hint when --force is omitted (AC4)', async () => {
+    it('exits 1 with hint when --force is omitted (AC4)', async () => {
       const ticketCmd = program.commands.find((cmd) => cmd.name() === 'ticket');
       const deleteCmd = ticketCmd?.commands.find((cmd) => cmd.name() === 'delete');
 
       await deleteCmd?.parseAsync(['node', 'test', 'KODA-1', '--project', 'koda']);
 
-      expect(processExitSpy).toHaveBeenCalledWith(3);
+      expect(processExitSpy).toHaveBeenCalledWith(1);
       expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('--force'));
     });
 

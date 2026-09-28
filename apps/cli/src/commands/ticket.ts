@@ -23,6 +23,7 @@ import type { AssignTicketDto } from '../generated';
 import { table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
+import { requireForce } from '../utils/force';
 import { withContext } from '../utils/context';
 import { parsePositiveInt } from '../utils/parse-positive-int';
 
@@ -532,11 +533,9 @@ export function ticketCommand(program: Command): void {
     .option('--project <slug>', 'Project slug')
     .option('--force', 'Confirm deletion')
     .action(async (ref: string, options) => {
-      try {
-        if (!options.force) {
-          handleApiError(new Error('Deletion requires --force flag.'), { validationError: true });
-        }
+      if (!requireForce(options.force)) return;
 
+      try {
         const ctx = await withContext({ projectSlug: options.project });
 
         await ticketsControllerSoftDelete({ path: { slug: ctx.projectSlug, ref }});

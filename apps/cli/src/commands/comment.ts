@@ -9,6 +9,7 @@ import { success, error, table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
+import { requireForce } from '../utils/force';
 
 export function commentCommand(program: Command): void {
   const comment = program.command('comment');
@@ -123,10 +124,7 @@ export function commentCommand(program: Command): void {
     .option('--force', 'Confirm deletion')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
-      if (!options.force) {
-        error('Use --force to confirm deletion');
-        process.exit(1);
-      }
+      if (!requireForce(options.force)) return;
 
       try {
         await withContext({}, { requireProject: false });
