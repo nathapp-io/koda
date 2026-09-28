@@ -26,6 +26,7 @@ import { memberCommand } from './commands/member';
 import { ciWebhookCommand } from './commands/ci-webhook';
 import { setJsonMode } from './utils/json-mode';
 import { installSignalHandlers } from './utils/signals';
+import { resolveSecret, API_KEY_SECRET, LOGIN_API_KEY_SECRET } from './utils/secret-input';
 
 // Read package.json to get version
 let version = '0.1.0';
@@ -78,15 +79,15 @@ program.hook('preAction', (_thisCommand, actionCommand) => {
 program
   .command('login')
   .description('Save API credentials locally')
-  .requiredOption('--api-key <key>', 'API key for authentication')
+  .option('--api-key [key]', 'API key (- reads stdin; omit the value to be prompted; or set KODA_API_KEY)')
   .option('--api-url <url>', 'API URL (default: http://localhost:3100)')
   .action(async (options) => {
     try {
-      const result = await loginCommand(
-        options.apiKey,
-        options.apiUrl,
-        {}
-      );
+      const apiKey = await resolveSecret(options.apiKey, LOGIN_API_KEY_SECRET);
+      if (!apiKey) {
+        throw new Error('API key is required: use --api-key - (stdin), --api-key (prompt), or KODA_API_KEY');
+      }
+      const result = await loginCommand(apiKey, options.apiUrl, {});
       console.log(result.message);
       process.exit(0);
     } catch (error) {
@@ -103,10 +104,17 @@ program
   .option('--project <slug>', 'Project slug')
   .option('--default-type <type>', 'Default ticket type')
   .option('--default-priority <priority>', 'Default ticket priority')
-  .option('--api-key <key>', 'API key for authentication')
+  .option('--api-key [key]', 'API key (- reads stdin; omit the value to be prompted)')
   .option('--api-url <url>', 'API URL (default: http://localhost:3100)')
   .action(async (options) => {
-    await initCommand(options);
+    try {
+      const apiKey = await resolveSecret(options.apiKey, API_KEY_SECRET);
+      await initCommand({ ...options, apiKey });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`Error: ${errorMessage}`);
+      process.exit(2);
+    }
   });
 
 // Config command
@@ -132,15 +140,16 @@ program
   .addCommand(
     new Command('set')
       .description('Update configuration')
-      .option('--api-key <key>', 'API key')
+      .option('--api-key [key]', 'API key (- reads stdin; omit the value to be prompted)')
       .option('--api-url <url>', 'API URL')
-      .action((options) => {
+      .action(async (options) => {
         try {
-          if (!options.apiKey && !options.apiUrl) {
+          const apiKey = await resolveSecret(options.apiKey, API_KEY_SECRET);
+          if (!apiKey && !options.apiUrl) {
             throw new Error('Must provide at least one option: --api-key or --api-url');
           }
           const result = configSet({
-            apiKey: options.apiKey,
+            apiKey,
             apiUrl: options.apiUrl,
           });
           console.log(result.message);
@@ -167,10 +176,14 @@ program
           .description('Add or update a profile')
           .argument('<name>', 'Profile name')
           .requiredOption('--api-url <url>', 'API URL for this profile')
-          .requiredOption('--api-key <key>', 'API key for this profile')
-          .action((name, options) => {
+          .option('--api-key [key]', 'API key for this profile (- reads stdin; omit the value to be prompted)')
+          .action(async (name, options) => {
             try {
-              configProfileAddAction(name, options.apiUrl, options.apiKey, { getProfiles, setProfile, removeProfile });
+              const apiKey = await resolveSecret(options.apiKey, API_KEY_SECRET);
+              if (!apiKey) {
+                throw new Error('API key is required for a profile: use --api-key - (stdin) or --api-key (prompt)');
+              }
+              configProfileAddAction(name, options.apiUrl, apiKey, { getProfiles, setProfile, removeProfile });
               console.log(`Profile '${name}' saved.`);
               process.exit(0);
             } catch (error) {

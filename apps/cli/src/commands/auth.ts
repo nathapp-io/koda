@@ -54,7 +54,7 @@ export function authCommand(program: Command): void {
       try {
         const ctx = await resolveContext({});
         if (!ctx.apiUrl) {
-          handleApiError(new Error('API URL not configured. Run: koda login --api-key <key>'), { configError: true });
+          handleApiError(new Error('API URL not configured. Run: koda login --api-key -'), { configError: true });
         }
 
         configureApiClient(ctx.apiUrl.replace(/\/api\/?$/, ''));

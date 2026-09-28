@@ -11,6 +11,7 @@ import { handleApiError } from '../utils/error';
 import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
 import { parsePositiveInt } from '../utils/parse-positive-int';
+import { resolveSecret, VCS_TOKEN_SECRET, SecretInputError } from '../utils/secret-input';
 import { VCS_MESSAGES } from './vcs-messages';
 import {
   vcsControllerCreateConnection,
@@ -85,13 +86,14 @@ export function vcsCommand(program: Command): void {
     .option('--provider <provider>', 'VCS provider (github or gitlab)')
     .option('--owner <owner>', 'Repository owner')
     .option('--repo <repo>', 'Repository name')
-    .option('--token <token>', 'API token for provider')
+    .option('--token [token]', 'Provider API token (- reads stdin; omit the value to be prompted; or set KODA_VCS_TOKEN)')
     .option('--project <slug>', 'Project slug (uses config if not provided)')
     .option('--sync-mode <mode>', 'Sync mode (off, polling, webhook)')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        if (!options.provider || !options.owner || !options.repo || !options.token) {
+        const token = await resolveSecret(options.token, VCS_TOKEN_SECRET);
+        if (!options.provider || !options.owner || !options.repo || !token) {
           error(VCS_MESSAGES.MISSING_REQUIRED_OPTIONS);
           process.exit(3);
           return;
@@ -103,7 +105,7 @@ export function vcsCommand(program: Command): void {
           provider: options.provider,
           repoOwner: options.owner,
           repoName: options.repo,
-          token: options.token,
+          token,
           syncMode: options.syncMode || 'off',
         };
 
@@ -131,6 +133,11 @@ export function vcsCommand(program: Command): void {
 
         process.exit(0);
       } catch (err: unknown) {
+        if (err instanceof SecretInputError) {
+          error(err.message);
+          process.exit(3);
+          return;
+        }
         handleApiError(err);
       }
     });

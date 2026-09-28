@@ -24,7 +24,7 @@ export function projectCommand(program: Command): void {
         const auth = await resolveAuth({});
 
         if (!auth.apiKey || !auth.apiUrl) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
+          error('API key or URL not configured. Run: koda login --api-key -');
           process.exit(2);
           return;
         }
@@ -58,7 +58,7 @@ export function projectCommand(program: Command): void {
         const auth = await resolveAuth({});
 
         if (!auth.apiKey || !auth.apiUrl) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
+          error('API key or URL not configured. Run: koda login --api-key -');
           process.exit(2);
           return;
         }
@@ -110,7 +110,7 @@ export function projectCommand(program: Command): void {
         const auth = await resolveAuth({});
 
         if (!auth.apiKey || !auth.apiUrl) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
+          error('API key or URL not configured. Run: koda login --api-key -');
           process.exit(2);
           return;
         }
@@ -155,7 +155,7 @@ export function projectCommand(program: Command): void {
         const auth = await resolveAuth({});
 
         if (!auth.apiKey || !auth.apiUrl) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
+          error('API key or URL not configured. Run: koda login --api-key -');
           process.exit(2);
           return;
         }
@@ -193,7 +193,7 @@ export function projectCommand(program: Command): void {
         const auth = await resolveAuth({});
 
         if (!auth.apiKey || !auth.apiUrl) {
-          error('API key or URL not configured. Run: koda login --api-key <key>');
+          error('API key or URL not configured. Run: koda login --api-key -');
           process.exit(2);
           return;
         }

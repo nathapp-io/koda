@@ -356,6 +356,53 @@ describe('vcsCommand', () => {
       expect(exitSpy).toHaveBeenCalledWith(3);
       expect(errorSpy).toHaveBeenCalled();
     });
+
+    it('takes the token from KODA_VCS_TOKEN when --token is absent', async () => {
+      mockData.projectSlug = 'my-project';
+      process.env.KODA_VCS_TOKEN = 'env_token_1234567890';
+      (vcsControllerCreateConnection as jest.Mock).mockResolvedValue({
+        ret: 0,
+        data: { id: 'conn-1', provider: 'github', repoOwner: 'o', repoName: 'r', syncMode: 'off', isActive: true },
+      });
+      const connectCmd = program.commands.find((c) => c.name() === 'vcs')?.commands.find((c) => c.name() === 'connect');
+
+      try {
+        await connectCmd?.parseAsync(['node', 'test', '--provider', 'github', '--owner', 'o', '--repo', 'r']);
+      } finally {
+        delete process.env.KODA_VCS_TOKEN;
+      }
+
+      expect(vcsControllerCreateConnection).toHaveBeenCalledWith(
+        expect.objectContaining({ body: expect.objectContaining({ token: 'env_token_1234567890' }) }),
+      );
+    });
+
+    it('warns on stderr when the token is passed as a literal', async () => {
+      mockData.projectSlug = 'my-project';
+      const stderrSpy = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      (vcsControllerCreateConnection as jest.Mock).mockResolvedValue({
+        ret: 0,
+        data: { id: 'conn-1', provider: 'github', repoOwner: 'o', repoName: 'r', syncMode: 'off', isActive: true },
+      });
+      const connectCmd = program.commands.find((c) => c.name() === 'vcs')?.commands.find((c) => c.name() === 'connect');
+
+      await connectCmd?.parseAsync(['node', 'test', '--provider', 'github', '--owner', 'o', '--repo', 'r', '--token', 'ghp_literal_123456']);
+
+      expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('Warning: --token'));
+      expect(vcsControllerCreateConnection).toHaveBeenCalledWith(
+        expect.objectContaining({ body: expect.objectContaining({ token: 'ghp_literal_123456' }) }),
+      );
+    });
+
+    it('exits 3 when no token comes from the flag or the environment', async () => {
+      delete process.env.KODA_VCS_TOKEN;
+      const connectCmd = program.commands.find((c) => c.name() === 'vcs')?.commands.find((c) => c.name() === 'connect');
+
+      await connectCmd?.parseAsync(['node', 'test', '--provider', 'github', '--owner', 'o', '--repo', 'r']);
+
+      expect(exitSpy).toHaveBeenCalledWith(3);
+      expect(vcsControllerCreateConnection).not.toHaveBeenCalled();
+    });
   });
 
   describe('vcs status', () => {
