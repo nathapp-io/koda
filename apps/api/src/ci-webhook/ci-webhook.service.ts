@@ -9,24 +9,21 @@ import { PrismaCiWebhookRepository } from './prisma-ci-webhook.repository';
 export class CiWebhookService {
   constructor(private readonly repo: PrismaCiWebhookRepository) {}
 
-  async getWebhookSecret(projectSlug: string): Promise<string | null> {
+  /**
+   * The project id and HMAC secret for an inbound CI webhook, or null when the
+   * slug is unknown, the project is soft-deleted, or no token is configured.
+   * Callers answer every null with the same 401 as a bad signature, so slugs
+   * are not enumerable. An empty-string token counts as "no token": an HMAC
+   * keyed with '' could be forged by anyone.
+   */
+  async findInboundTarget(projectSlug: string): Promise<{ projectId: string; secret: string } | null> {
     const project = await this.repo.findProjectBySlug(projectSlug);
 
-    if (!project || project.deletedAt) {
-      throw new NotFoundAppException({}, 'projects');
-    }
-
-    return project.ciWebhookToken ?? null;
-  }
-
-  async resolveProject(projectSlug: string): Promise<{ id: string } | null> {
-    const project = await this.repo.findProjectBySlug(projectSlug);
-
-    if (!project || project.deletedAt) {
+    if (!project || project.deletedAt || !project.ciWebhookToken) {
       return null;
     }
 
-    return { id: project.id };
+    return { projectId: project.id, secret: project.ciWebhookToken };
   }
 
   async processCiWebhook(projectSlug: string, payload: CiWebhookPayloadDto) {

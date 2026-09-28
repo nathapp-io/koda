@@ -47,6 +47,26 @@ describe('CiWebhookService', () => {
     jest.clearAllMocks();
   });
 
+  describe('findInboundTarget', () => {
+    it('returns the project id and secret for a live project with a token', async () => {
+      mockRepo.findProjectBySlug.mockResolvedValue({ ...mockProject, ciWebhookToken: 'tok-123' });
+
+      await expect(service.findInboundTarget('koda')).resolves.toEqual({ projectId: 'proj-123', secret: 'tok-123' });
+      expect(mockRepo.findProjectBySlug).toHaveBeenCalledWith('koda');
+    });
+
+    it.each([
+      ['an unknown slug', null],
+      ['a soft-deleted project', { ...mockProject, ciWebhookToken: 'tok-123', deletedAt: new Date() }],
+      ['a project without a token', { ...mockProject, ciWebhookToken: null }],
+      ['a project with an empty-string token', { ...mockProject, ciWebhookToken: '' }],
+    ])('returns null (never throws) for %s', async (_label, row) => {
+      mockRepo.findProjectBySlug.mockResolvedValue(row);
+
+      await expect(service.findInboundTarget('koda')).resolves.toBeNull();
+    });
+  });
+
   describe('processCiWebhook', () => {
     const validPayload: CiWebhookPayloadDto = {
       event: 'pipeline_failed',

@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsString, IsOptional, IsArray, ValidateNested, IsIn } from 'class-validator';
+import { IsString, IsOptional, IsArray, ValidateNested, IsIn, IsInt, Min } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CiPipelineDto {
@@ -34,9 +34,11 @@ export class CiFailureDto {
   @IsString()
   file?: string;
 
-  @ApiPropertyOptional({ description: 'Line number where failure occurred', example: 87 })
+  @ApiPropertyOptional({ description: 'Line number where failure occurred', example: 87, type: 'integer', minimum: 1 })
   @IsOptional()
   @Type(() => Number)
+  @IsInt()
+  @Min(1)
   line?: number;
 }
 
