@@ -99,7 +99,6 @@ function buildServices(ragConfig: IRagConfig, manager: LanceTableManager): { vec
     undefined,
     undefined,
     undefined,
-    undefined,
     manager,
   );
   const hybrid = new HybridRetrieverService(
@@ -469,7 +468,6 @@ describe('LanceTableManager', () => {
       ragConfig,
       embedding as never,
       strategy as never,
-      undefined,
       undefined,
       undefined,
       manager,

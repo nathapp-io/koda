@@ -4,7 +4,6 @@ import { ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-c
 import { PrismaRagRepository } from './prisma-rag.repository';
 import { EmbeddingService } from './embedding.service';
 import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interface';
-import { LexicalIndex } from './lexical-index';
 import { EntityStore } from './entity-store';
 import { LanceTableManager, isSafeFilterValue } from './lance-table-manager';
 import { resolveCreatedAt } from './created-at-override';
@@ -39,7 +38,6 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
     @Optional() private readonly embeddingService?: EmbeddingService,
     @Optional() @Inject(FTS_OPTIMIZE_STRATEGY) private readonly optimizeStrategy?: FtsOptimizeStrategy,
     @Optional() private readonly ragRepository?: PrismaRagRepository,
-    @Optional() private readonly lexicalIndex?: LexicalIndex,
     @Optional() private readonly entityStore?: EntityStore,
     @Optional() lanceTableManager?: LanceTableManager,
   ) {
@@ -106,7 +104,6 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
 
   clearProjectCaches(projectId: string): void {
     this.lanceTable.evictTable(`project_${projectId}`);
-    this.lexicalIndex?.clearProject(projectId);
     this.entityStore?.clear(projectId);
     this.optimizeStrategy?.clearProject?.(projectId);
   }
@@ -231,9 +228,6 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
 
     if (this.lanceTable.available && this.optimizeStrategy) {
       await this.optimizeStrategy.onInsert(projectId, table);
-    }
-    if (this.lexicalIndex) {
-      this.lexicalIndex.addDocument(projectId, { id: doc.sourceId, content: doc.content });
     }
 
     return id;
@@ -470,9 +464,6 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
     }
     const table = await this.getOrCreateTable(projectId);
     await this.lanceTable.exclusive(`project_${projectId}`, () => table.delete(`source_id = '${sourceId}'`));
-    if (this.lexicalIndex) {
-      this.lexicalIndex.removeDocument(projectId, sourceId);
-    }
   }
 
   /**

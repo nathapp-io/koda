@@ -154,4 +154,13 @@ describe('RAG Config & Module Wiring (US-002)', () => {
     const providers = (Reflect.getMetadata('providers', RagModule) ?? []) as Array<{ name?: string; provide?: unknown }>;
     expect(providers.map((p) => p.name ?? String(p.provide))).toContain('KbTicketLifecycleSubscriber');
   });
+
+  it('no longer provides the unused LexicalIndex or its 50k-row warmup', () => {
+    const providers = (Reflect.getMetadata('providers', RagModule) ?? []) as Array<{ name?: string; provide?: unknown }>;
+    const names = providers.map((p) => p.name ?? String(p.provide));
+    expect(names).not.toContain('LexicalIndex');
+    expect(names).not.toContain('LexicalIndexWarmup');
+    const exported = (Reflect.getMetadata('exports', RagModule) ?? []) as Array<{ name?: string }>;
+    expect(exported.map((e) => e.name)).not.toContain('LexicalIndex');
+  });
 });

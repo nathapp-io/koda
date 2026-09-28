@@ -19,7 +19,7 @@ describe('VectorStore.deleteBySource filter guard', () => {
 
   beforeEach(async () => {
     manager = new LanceTableManager(ragConfig);
-    store = new VectorStore(ragConfig, undefined, undefined, undefined, undefined, undefined, manager);
+    store = new VectorStore(ragConfig, undefined, undefined, undefined, undefined, manager);
     const table = await manager.getOrCreateTable('project_proj-1');
     deleteSpy = jest.spyOn(table, 'delete');
   });
