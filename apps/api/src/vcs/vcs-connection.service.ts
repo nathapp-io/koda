@@ -8,6 +8,7 @@ import { UpdateVcsConnectionDto } from './dto/update-vcs-connection.dto';
 import { VcsConnectionResponseDto } from './dto/vcs-connection-response.dto';
 import { TestConnectionResultDto } from './dto/test-connection-result.dto';
 import { providerForConnection } from './provider-for-connection';
+import { parseRepoPath } from './factory';
 import { VcsPollingService } from './vcs-polling.service';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
@@ -47,7 +48,7 @@ export class VcsConnectionService {
     let repoName = dto.repoName;
 
     if (dto.repoUrl) {
-      const parsed = this.parseRepoUrl(dto.repoUrl);
+      const parsed = parseRepoPath(dto.provider, dto.repoUrl);
       if (!parsed) {
         throw new ValidationAppException({}, 'vcs');
       }
@@ -63,6 +64,7 @@ export class VcsConnectionService {
     const encryptedToken = encryptToken(dto.token, encryptionKey);
 
     const syncMode = dto.syncMode ?? 'off';
+    this.assertSyncModeSupported(dto.provider, syncMode);
     const pollingIntervalMs = dto.pollingIntervalMs ?? this.vcsConfig.defaultPollingIntervalMs;
 
     const connection = await this.vcsRepo.createVcsConnection({
@@ -111,6 +113,10 @@ export class VcsConnectionService {
 
     if (!connection) {
       throw new NotFoundAppException({}, 'vcs');
+    }
+
+    if (dto.syncMode) {
+      this.assertSyncModeSupported(connection.provider, dto.syncMode);
     }
 
     const updateData: {
@@ -271,11 +277,14 @@ export class VcsConnectionService {
     }
   }
 
-  private parseRepoUrl(repoUrl: string): { repoOwner: string; repoName: string } | null {
-    const match = repoUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
-    if (!match) {
-      return null;
+  /**
+   * BUG-14: GitLab is polling + outbound only. Inbound GitLab webhooks are out of
+   * scope (Track 3 ruling 2026-09-27), so webhook mode is refused up front
+   * rather than accepted and then ignored on every delivery.
+   */
+  private assertSyncModeSupported(provider: string, syncMode: string): void {
+    if (provider.toLowerCase() === 'gitlab' && syncMode === 'webhook') {
+      throw new ValidationAppException({}, 'vcs.gitlabWebhook');
     }
-    return { repoOwner: match[1], repoName: match[2].replace(/\.git$/, '') };
   }
 }

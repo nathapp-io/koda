@@ -2,6 +2,7 @@ import { IsArray, IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validat
 
 export enum VcsProviderType {
   GITHUB = 'github',
+  GITLAB = 'gitlab',
 }
 
 export enum VcsSyncModeType {
@@ -28,8 +29,8 @@ export class CreateVcsConnectionDto {
   token: string;
 
   @IsOptional()
-  @IsString()
-  syncMode?: string;
+  @IsEnum(VcsSyncModeType)
+  syncMode?: VcsSyncModeType;
 
   @IsOptional()
   @IsArray()

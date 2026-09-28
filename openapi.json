@@ -5972,7 +5972,8 @@
           "provider": {
             "type": "string",
             "enum": [
-              "github"
+              "github",
+              "gitlab"
             ]
           },
           "repoOwner": {
@@ -5988,7 +5989,12 @@
             "type": "string"
           },
           "syncMode": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "off",
+              "polling",
+              "webhook"
+            ]
           },
           "allowedAuthors": {
             "type": "array",

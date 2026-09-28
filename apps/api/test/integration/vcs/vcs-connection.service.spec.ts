@@ -111,7 +111,7 @@ describe('VcsConnectionService', () => {
       repoOwner: 'owner',
       repoName: 'repo',
       repoUrl: 'https://github.com/owner/repo',
-      syncMode: 'polling',
+      syncMode: VcsSyncModeType.POLLING,
     };
 
     it('AC1: encrypts the plaintext token using the encryption utility before persisting to the database', async () => {

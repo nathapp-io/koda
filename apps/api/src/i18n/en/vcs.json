@@ -1,4 +1,7 @@
 {
+  "gitlabWebhook": {
+    "-2": "GitLab connections support polling only: webhook sync is not available for GitLab"
+  },
   "links": {
     "branch": "Branch",
     "commit": "Commit",
@@ -49,7 +52,6 @@
     "repositoryNotFound": "Repository not found or no access to repository",
     "providerTypeInvalid": "Provider type must be a non-empty string",
     "invalidRepositoryUrl": "Invalid GitHub repository URL format. Expected: https://github.com/owner/repo",
-    "gitlabNotSupported": "GitLab VCS provider is not yet supported",
     "unsupportedProvider": "Unsupported VCS provider: {provider}"
   }
 }

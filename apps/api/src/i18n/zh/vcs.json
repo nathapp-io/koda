@@ -1,4 +1,7 @@
 {
+  "gitlabWebhook": {
+    "-2": "GitLab 连接仅支持轮询同步，不支持 Webhook 同步"
+  },
   "links": {
     "branch": "分支",
     "commit": "提交",
@@ -49,7 +52,6 @@
     "repositoryNotFound": "仓库未找到或无权访问仓库",
     "providerTypeInvalid": "提供商类型必须是非空字符串",
     "invalidRepositoryUrl": "GitHub 仓库 URL 格式无效。预期格式：https://github.com/owner/repo",
-    "gitlabNotSupported": "GitLab VCS 提供商尚不支持",
     "unsupportedProvider": "不支持的 VCS 提供商：{provider}"
   }
 }

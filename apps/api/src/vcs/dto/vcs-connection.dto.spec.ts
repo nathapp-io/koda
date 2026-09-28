@@ -151,6 +151,25 @@ describe('VCS Connection DTOs', () => {
       const errors = await validate(dto);
       expect(errors).toHaveLength(0);
     });
+
+    describe('Slice 4: provider and syncMode enums', () => {
+      const base = { repoOwner: 'o', repoName: 'r', token: 't' };
+
+      it('accepts gitlab', async () => {
+        const errors = await validate(plainToInstance(CreateVcsConnectionDto, { ...base, provider: 'gitlab' }));
+        expect(errors).toHaveLength(0);
+      });
+
+      it('rejects an unknown provider', async () => {
+        const errors = await validate(plainToInstance(CreateVcsConnectionDto, { ...base, provider: 'bitbucket' }));
+        expect(errors.map((e) => e.property)).toContain('provider');
+      });
+
+      it('rejects an unknown syncMode on create', async () => {
+        const errors = await validate(plainToInstance(CreateVcsConnectionDto, { ...base, provider: 'github', syncMode: 'hourly' }));
+        expect(errors.map((e) => e.property)).toContain('syncMode');
+      });
+    });
   });
 
   describe('UpdateVcsConnectionDto', () => {

@@ -140,7 +140,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
         token: 'ghp_test_token_123456',
         repoOwner: 'owner',
         repoName: 'repo',
-        syncMode: 'polling',
+        syncMode: VcsSyncModeType.POLLING,
       };
 
       vcsService.create.mockResolvedValue(mockVcsConnection);
@@ -489,7 +489,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
         token: 'ghp_abc123',
         repoOwner: 'test',
         repoName: 'repo',
-        syncMode: 'webhook',
+        syncMode: VcsSyncModeType.WEBHOOK,
       };
 
       vcsService.create.mockResolvedValue(mockVcsConnection);

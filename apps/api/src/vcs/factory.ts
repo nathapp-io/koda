@@ -27,6 +27,16 @@ export interface VcsProviderConfig {
 }
 
 /**
+ * An HTTP error that keeps the status and the parsed JSON body (GitLab reports conflicts in the body).
+ */
+async function httpError(response: Response): Promise<Error> {
+  const data: unknown = await response.json().catch(() => undefined);
+  const error = new Error(`HTTP ${response.status}`);
+  (error as unknown as Record<string, unknown>).response = { status: response.status, data };
+  return error;
+}
+
+/**
  * Create a default HTTP client using native fetch API
  */
 function createDefaultHttpClient(): HttpClient {
@@ -45,9 +55,7 @@ function createDefaultHttpClient(): HttpClient {
       });
 
       if (!response.ok) {
-        const error = new Error(`HTTP ${response.status}`);
-        (error as unknown as Record<string, unknown>).response = { status: response.status };
-        throw error;
+        throw await httpError(response);
       }
 
       const data = await response.json();
@@ -64,9 +72,7 @@ function createDefaultHttpClient(): HttpClient {
       });
 
       if (!response.ok) {
-        const error = new Error(`HTTP ${response.status}`);
-        (error as unknown as Record<string, unknown>).response = { status: response.status };
-        throw error;
+        throw await httpError(response);
       }
 
       const data = await response.json();
