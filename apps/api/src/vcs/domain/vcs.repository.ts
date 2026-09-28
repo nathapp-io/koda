@@ -105,7 +105,7 @@ export interface IVcsRepository {
   findPollingConnections(): Promise<VcsConnectionWithProjectDomain[]>;
   createVcsConnection(data: CreateVcsConnectionData): Promise<VcsConnectionDomain>;
   updateVcsConnection(projectId: string, data: UpdateVcsConnectionData): Promise<VcsConnectionDomain>;
-  updateVcsConnectionLastSynced(connectionId: string): Promise<void>;
+  updateVcsConnectionLastSynced(connectionId: string, syncedAt: Date): Promise<void>;
   deleteVcsConnection(projectId: string): Promise<void>;
 
   // VcsSyncLog operations

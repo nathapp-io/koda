@@ -127,10 +127,11 @@ export class PrismaVcsRepository implements IVcsRepository {
     return this.toConnectionDomain(await this.db.vcsConnection.update({ where: { projectId }, data }));
   }
 
-  async updateVcsConnectionLastSynced(connectionId: string): Promise<void> {
+  /** M10: the poll cursor, the newest issue update seen (never "now"). */
+  async updateVcsConnectionLastSynced(connectionId: string, syncedAt: Date): Promise<void> {
     await this.db.vcsConnection.update({
       where: { id: connectionId },
-      data: { lastSyncedAt: new Date() },
+      data: { lastSyncedAt: syncedAt },
     });
   }
 

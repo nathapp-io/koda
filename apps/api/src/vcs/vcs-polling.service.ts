@@ -7,6 +7,15 @@ import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
+import { ISSUES_PER_PAGE, MAX_ISSUE_PAGES } from './providers/pagination';
+
+const messageOf = (error: unknown): string => (error instanceof Error ? error.message : 'Unknown error');
+
+/** Sync-log warning for a fetch that hit MAX_ISSUE_PAGES. */
+function cappedWarning(cursor: Date | null): string {
+  const from = cursor ? cursor.toISOString() : 'the previous cursor';
+  return `Issue fetch capped at ${MAX_ISSUE_PAGES} pages of ${ISSUES_PER_PAGE}; the next poll resumes from ${from}`;
+}
 
 /**
  * Polling service for syncing issues on a schedule
@@ -64,9 +73,10 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
       // Interval doesn't exist yet, that's fine
     }
 
-    // Create interval
-    const interval = setInterval(async () => {
-      await this.poll(connection);
+    // M10: each tick re-reads the connection, so it polls with the current token,
+    // cursor and mode, and stops once the connection is gone.
+    const interval = setInterval(() => {
+      void this.tick(connection.id);
     }, connection.pollingIntervalMs);
 
     this.schedulerRegistry.addInterval(scheduleName, interval);
@@ -96,6 +106,20 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
     this.schedulePolling(connection);
   }
 
+  /** One polling tick. Never rejects: an interval callback has no caller to catch it. */
+  private async tick(connectionId: string): Promise<void> {
+    try {
+      const connection = await this.vcsRepo.findVcsConnectionById(connectionId);
+      if (!connection || !connection.isActive || connection.syncMode !== 'polling') {
+        this.unschedulePolling(connectionId);
+        return;
+      }
+      await this.poll(connection);
+    } catch (error) {
+      this.logger.error(`Polling tick failed for connection ${connectionId}: ${messageOf(error)}`);
+    }
+  }
+
   /**
    * Poll a single connection for new issues
    */
@@ -116,7 +140,7 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
       const provider = providerForConnection(connection, decryptedToken, this.vcsConfig);
 
       // Fetch issues since last sync
-      const { issues } = await provider.fetchIssues(connection.lastSyncedAt ?? undefined);
+      const { issues, cursor, capped } = await provider.fetchIssues(connection.lastSyncedAt ?? undefined);
 
       // Filter by allowed authors
       const filteredIssues = this.syncService.filterByAllowedAuthors(
@@ -137,8 +161,11 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      // Update connection lastSyncedAt
-      await this.vcsRepo.updateVcsConnectionLastSynced(connection.id);
+      // M10: resume from the newest issue update seen, not from "now", so a capped
+      // poll picks up where it stopped. Nothing seen keeps the old cursor.
+      if (cursor) {
+        await this.vcsRepo.updateVcsConnectionLastSynced(connection.id, cursor);
+      }
 
       // Write sync log
       await this.vcsRepo.createVcsSyncLog({
@@ -146,6 +173,7 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
         syncType: 'polling',
         issuesSynced,
         issuesSkipped,
+        ...(capped ? { errorMessage: cappedWarning(cursor) } : {}),
         startedAt: startTime,
         completedAt: new Date(),
       });
@@ -164,21 +192,24 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
         `PR sync complete for connection ${connection.id}: updated=${prResult.updated}, skipped=${prResult.skipped}`,
       );
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-
-      // Write sync log with error
-      await this.vcsRepo.createVcsSyncLog({
-        vcsConnectionId: connection.id,
-        syncType: 'polling',
-        issuesSynced: 0,
-        issuesSkipped: 0,
-        errorMessage,
-        startedAt: startTime,
-        completedAt: new Date(),
-      });
-
+      const errorMessage = messageOf(error);
       this.logger.error(`Polling failed for connection ${connection.id}: ${errorMessage}`);
-      // Don't update lastSyncedAt on error - will retry on next interval
+      // VCS LOW: the error-path log write is guarded too; an interval callback
+      // that rejects is an unhandled rejection. lastSyncedAt is not moved, so
+      // the next tick retries from the same cursor.
+      try {
+        await this.vcsRepo.createVcsSyncLog({
+          vcsConnectionId: connection.id,
+          syncType: 'polling',
+          issuesSynced: 0,
+          issuesSkipped: 0,
+          errorMessage,
+          startedAt: startTime,
+          completedAt: new Date(),
+        });
+      } catch (logError) {
+        this.logger.error(`Failed to write the polling sync log for connection ${connection.id}: ${messageOf(logError)}`);
+      }
     }
   }
 }
