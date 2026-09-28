@@ -65,7 +65,7 @@ describe('GitLabProvider (Integration)', () => {
 
       const result = await provider.fetchIssues();
 
-      expect(result).toEqual([
+      expect(result.issues).toEqual([
         {
           number: 42,
           title: 'Test Issue',
@@ -76,16 +76,18 @@ describe('GitLabProvider (Integration)', () => {
           createdAt: new Date('2024-01-01T00:00:00Z'),
         },
       ]);
+      expect(result.capped).toBe(false);
     });
 
-    it('should pass created_after when since is provided', async () => {
+    it('should pass updated_after when since is provided', async () => {
       const sinceDate = new Date('2024-01-15T10:30:00Z');
       mockHttpClient.get.mockResolvedValue({ data: [] });
 
       await provider.fetchIssues(sinceDate);
 
       const callArgs = mockHttpClient.get.mock.calls[0];
-      expect(callArgs[1].params.created_after).toBe(sinceDate.toISOString());
+      // M10: backed off one second so the cursor's exact second is re-fetched.
+      expect(callArgs[1].params.updated_after).toBe(new Date(sinceDate.getTime() - 1000).toISOString());
     });
 
     it('should handle null description', async () => {
@@ -105,7 +107,7 @@ describe('GitLabProvider (Integration)', () => {
 
       const result = await provider.fetchIssues();
 
-      expect(result[0].body).toBeNull();
+      expect(result.issues[0].body).toBeNull();
     });
   });
 

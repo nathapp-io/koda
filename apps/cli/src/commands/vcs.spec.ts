@@ -30,6 +30,7 @@ jest.mock('../generated', () => ({
   vcsControllerGetConnection: jest.fn(),
   vcsControllerDeleteConnection: jest.fn(),
   vcsControllerUpdateConnection: jest.fn(),
+  vcsControllerRotateWebhookSecret: jest.fn(),
   vcsControllerTestConnection: jest.fn(),
   vcsControllerSyncAll: jest.fn(),
   vcsControllerSyncIssue: jest.fn(),
@@ -62,6 +63,8 @@ import {
   vcsControllerCreateConnection,
   vcsControllerGetConnection,
   vcsControllerDeleteConnection,
+  vcsControllerUpdateConnection,
+  vcsControllerRotateWebhookSecret,
 } from '../generated';
 
 describe('vcsCommand', () => {
@@ -646,6 +649,67 @@ describe('vcsCommand', () => {
 
       expect(exitSpy).toHaveBeenCalledWith(1);
       expect(errorSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('Slice 4: webhook secret output', () => {
+    it('connect prints the webhook secret once', async () => {
+      mockData.projectSlug = 'my-project';
+      (vcsControllerCreateConnection as jest.Mock).mockResolvedValue({
+        ret: 0,
+        data: { provider: 'github', repoOwner: 'o', repoName: 'r', syncMode: 'webhook', webhookSecret: 'a'.repeat(32) },
+      });
+      const connect = program.commands.find((c) => c.name() === 'vcs')?.commands.find((c) => c.name() === 'connect');
+
+      await connect?.parseAsync(['node', 'test', '--provider', 'github', '--owner', 'o', '--repo', 'r', '--token', 'ghp_1234567890']);
+
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('a'.repeat(32)));
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('shown once'));
+    });
+
+    it('connect does not print a secret for a polling-only GitLab connection', async () => {
+      mockData.projectSlug = 'my-project';
+      (vcsControllerCreateConnection as jest.Mock).mockResolvedValue({
+        ret: 0,
+        data: { provider: 'gitlab', repoOwner: 'g', repoName: 'r', syncMode: 'polling', webhookSecret: 'e'.repeat(32) },
+      });
+      const connect = program.commands.find((c) => c.name() === 'vcs')?.commands.find((c) => c.name() === 'connect');
+
+      await connect?.parseAsync(['node', 'test', '--provider', 'gitlab', '--owner', 'g', '--repo', 'r', '--token', 'glpat-x']);
+
+      expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('e'.repeat(32)));
+    });
+
+    it('rotate-secret prints the new secret', async () => {
+      mockData.projectSlug = 'my-project';
+      (vcsControllerRotateWebhookSecret as jest.Mock).mockResolvedValue({ ret: 0, data: { webhookSecret: 'b'.repeat(32) } });
+      const rotate = program.commands.find((c) => c.name() === 'vcs')?.commands.find((c) => c.name() === 'rotate-secret');
+
+      await rotate?.parseAsync(['node', 'test']);
+
+      expect(vcsControllerRotateWebhookSecret).toHaveBeenCalledWith({ path: { slug: 'my-project' } });
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('b'.repeat(32)));
+      expect(exitSpy).toHaveBeenCalledWith(0);
+    });
+
+    it('rotate-secret --json prints the payload', async () => {
+      mockData.projectSlug = 'my-project';
+      (vcsControllerRotateWebhookSecret as jest.Mock).mockResolvedValue({ ret: 0, data: { webhookSecret: 'c'.repeat(32) } });
+      const rotate = program.commands.find((c) => c.name() === 'vcs')?.commands.find((c) => c.name() === 'rotate-secret');
+
+      await rotate?.parseAsync(['node', 'test', '--json']);
+
+      expect(logSpy).toHaveBeenCalledWith(JSON.stringify({ webhookSecret: 'c'.repeat(32) }, null, 2));
+    });
+
+    it('update prints a secret the API generated', async () => {
+      mockData.projectSlug = 'my-project';
+      (vcsControllerUpdateConnection as jest.Mock).mockResolvedValue({ ret: 0, data: { syncMode: 'webhook', webhookSecret: 'd'.repeat(32) } });
+      const update = program.commands.find((c) => c.name() === 'vcs')?.commands.find((c) => c.name() === 'update');
+
+      await update?.parseAsync(['node', 'test', '--sync-mode', 'webhook']);
+
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('d'.repeat(32)));
     });
   });
 });

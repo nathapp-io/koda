@@ -39,6 +39,7 @@ describe('VcsConnectionService', () => {
     encryptionKey,
     defaultPollingIntervalMs: 300000,
     githubApiUrl: 'https://api.github.com',
+    gitlabApiUrl: 'https://gitlab.com/api/v4',
   };
 
   const mockPrismaDelegate = {
@@ -110,7 +111,7 @@ describe('VcsConnectionService', () => {
       repoOwner: 'owner',
       repoName: 'repo',
       repoUrl: 'https://github.com/owner/repo',
-      syncMode: 'polling',
+      syncMode: VcsSyncModeType.POLLING,
     };
 
     it('AC1: encrypts the plaintext token using the encryption utility before persisting to the database', async () => {
@@ -559,7 +560,6 @@ describe('VcsConnectionService', () => {
       const updateDto: UpdateVcsConnectionDto = {
         token: newToken,
         syncMode: VcsSyncModeType.WEBHOOK,
-        webhookSecret: 'new-secret',
       };
 
       const updatedConnection = {
@@ -672,6 +672,7 @@ describe('VcsConnectionService', () => {
         token, // Decrypted token
         repoUrl: 'https://github.com/owner/repo',
         githubApiUrl: 'https://api.github.com',
+        gitlabApiUrl: 'https://gitlab.com/api/v4',
       });
 
       // Verify provider.testConnection() was called

@@ -25,6 +25,7 @@ import { VcsSyncService } from '../../../src/vcs/vcs-sync.service';
 import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
 import { VcsWebhookService } from '../../../src/vcs/vcs-webhook.service';
 import { ProjectsService } from '../../../src/projects/projects.service';
+import { ProjectAccessService } from '../../../src/projects/project-access.service';
 import { ConfigService } from '@nestjs/config';
 import { VCS_CFG, IVcsConfig } from '../../../src/config/vcs.config';
 import { CreateVcsConnectionDto, VcsProviderType } from '../../../src/vcs/dto/create-vcs-connection.dto';
@@ -52,6 +53,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
     encryptionKey,
     defaultPollingIntervalMs: 300000,
     githubApiUrl: 'https://api.github.com',
+    gitlabApiUrl: 'https://gitlab.com/api/v4',
   };
 
   const principal: KodaPrincipal = {
@@ -113,6 +115,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
         { provide: VcsPrSyncService, useValue: {} },
         { provide: VcsWebhookService, useValue: {} },
         { provide: ProjectsService, useValue: mockProjectsServiceInstance },
+        { provide: ProjectAccessService, useValue: {} },
         { provide: ConfigService, useValue: mockConfigServiceInstance },
         { provide: VCS_CFG, useValue: mockVcsConfig },
       ],
@@ -139,21 +142,21 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
         token: 'ghp_test_token_123456',
         repoOwner: 'owner',
         repoName: 'repo',
-        syncMode: 'polling',
+        syncMode: VcsSyncModeType.POLLING,
       };
 
-      vcsService.create.mockResolvedValue(mockVcsConnection);
+      vcsService.create.mockResolvedValue({ ...mockVcsConnection, webhookSecret: 's'.repeat(32) });
 
       const result = await controller.createConnection(projectSlug, createDto, principal);
 
       expect(projectsService.findBySlug).toHaveBeenCalledWith(projectSlug);
       expect(vcsService.create).toHaveBeenCalledWith(projectId, encryptionKey, createDto);
-      expect(result).toEqual(mockVcsConnection);
-      expect(result).toHaveProperty('id');
-      expect(result).toHaveProperty('projectId', projectId);
-      expect(result).toHaveProperty('provider', 'github');
-      expect(result).not.toHaveProperty('token');
-      expect(result).not.toHaveProperty('encryptedToken');
+      expect(result.data).toEqual({ ...mockVcsConnection, webhookSecret: 's'.repeat(32) });
+      expect(result.data).toHaveProperty('id');
+      expect(result.data).toHaveProperty('projectId', projectId);
+      expect(result.data).toHaveProperty('provider', 'github');
+      expect(result.data).not.toHaveProperty('token');
+      expect(result.data).not.toHaveProperty('encryptedToken');
     });
 
     it('AC2: propagates 409 ConflictException when project already has a connection', async () => {
@@ -202,9 +205,9 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       expect(projectsService.findBySlug).toHaveBeenCalledWith(projectSlug);
       expect(vcsService.findByProject).toHaveBeenCalledWith(projectId);
-      expect(result).toEqual(mockVcsConnection);
-      expect(result).not.toHaveProperty('token');
-      expect(result).not.toHaveProperty('encryptedToken');
+      expect(result.data).toEqual(mockVcsConnection);
+      expect(result.data).not.toHaveProperty('token');
+      expect(result.data).not.toHaveProperty('encryptedToken');
     });
 
     it('AC5: returns 404 when no connection exists for the project', async () => {
@@ -230,9 +233,9 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       expect(projectsService.findBySlug).toHaveBeenCalledWith(projectSlug);
       expect(vcsService.update).toHaveBeenCalledWith(projectId, encryptionKey, updateDto);
-      expect(result).toEqual(updatedConnection);
-      expect(result.syncMode).toBe('webhook');
-      expect(result).not.toHaveProperty('token');
+      expect(result.data).toEqual(updatedConnection);
+      expect(result.data).toMatchObject({ syncMode: 'webhook' });
+      expect(result.data).not.toHaveProperty('token');
     });
 
     it('returns 200 when updating token', async () => {
@@ -243,20 +246,20 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
       const result = await controller.updateConnection(projectSlug, updateDto, principal);
 
       expect(vcsService.update).toHaveBeenCalledWith(projectId, encryptionKey, updateDto);
-      expect(result).toBeTruthy();
-      expect(result).not.toHaveProperty('token');
+      expect(result.data).toBeTruthy();
+      expect(result.data).not.toHaveProperty('token');
     });
 
-    it('returns 200 when updating webhookSecret and never echoes the secret back', async () => {
-      const updateDto: UpdateVcsConnectionDto = { webhookSecret: 'new-secret' };
-      const updatedConnection = { ...mockVcsConnection, webhookSecretConfigured: true };
+    it('returns 200 on update and never echoes the secret back (M9: clients cannot set webhookSecret)', async () => {
+      const updateDto: UpdateVcsConnectionDto = { syncMode: VcsSyncModeType.WEBHOOK };
+      const updatedConnection = { ...mockVcsConnection, syncMode: 'webhook', webhookSecretConfigured: true };
 
       vcsService.update.mockResolvedValue(updatedConnection);
 
       const result = await controller.updateConnection(projectSlug, updateDto, principal);
 
-      expect(result).not.toHaveProperty('webhookSecret');
-      expect(result.webhookSecretConfigured).toBe(true);
+      expect(result.data).not.toHaveProperty('webhookSecret');
+      expect(result.data).toMatchObject({ webhookSecretConfigured: true });
     });
 
     it('returns 404 when no connection exists', async () => {
@@ -308,11 +311,11 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       expect(projectsService.findBySlug).toHaveBeenCalledWith(projectSlug);
       expect(vcsService.testConnection).toHaveBeenCalledWith(projectId, encryptionKey);
-      expect(result).toEqual(testResult);
-      expect(result).toHaveProperty('ok');
-      expect(result).toHaveProperty('latencyMs');
-      expect(typeof result.ok).toBe('boolean');
-      expect(typeof result.latencyMs).toBe('number');
+      expect(result.data).toEqual(testResult);
+      expect(result.data).toHaveProperty('ok');
+      expect(result.data).toHaveProperty('latencyMs');
+      expect(typeof (result.data as TestConnectionResultDto).ok).toBe('boolean');
+      expect(typeof (result.data as TestConnectionResultDto).latencyMs).toBe('number');
     });
 
     it('returns 200 with success=true when connection test succeeds', async () => {
@@ -325,9 +328,9 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       const result = await controller.testConnection(projectSlug, principal);
 
-      expect(result.ok).toBe(true);
-      expect(result.latencyMs).toBeGreaterThanOrEqual(0);
-      expect(result.error).toBeUndefined();
+      expect((result.data as TestConnectionResultDto).ok).toBe(true);
+      expect((result.data as TestConnectionResultDto).latencyMs).toBeGreaterThanOrEqual(0);
+      expect((result.data as TestConnectionResultDto).error).toBeUndefined();
     });
 
     it('returns 200 with success=false and error when connection test fails', async () => {
@@ -341,8 +344,8 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       const result = await controller.testConnection(projectSlug, principal);
 
-      expect(result.ok).toBe(false);
-      expect(result.error).toBe('Invalid token');
+      expect((result.data as TestConnectionResultDto).ok).toBe(false);
+      expect((result.data as TestConnectionResultDto).error).toBe('Invalid token');
     });
 
     it('throws 404 when no connection exists', async () => {
@@ -363,17 +366,17 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       const result = await controller.getConnection(projectSlug, principal);
 
-      expect(result).toHaveProperty('id');
-      expect(result).toHaveProperty('provider');
-      expect(result).toHaveProperty('repoOwner');
-      expect(result).toHaveProperty('repoName');
-      expect(result).toHaveProperty('syncMode');
-      expect(result).toHaveProperty('isActive');
-      expect(result).toHaveProperty('createdAt');
-      expect(result).toHaveProperty('updatedAt');
+      expect(result.data).toHaveProperty('id');
+      expect(result.data).toHaveProperty('provider');
+      expect(result.data).toHaveProperty('repoOwner');
+      expect(result.data).toHaveProperty('repoName');
+      expect(result.data).toHaveProperty('syncMode');
+      expect(result.data).toHaveProperty('isActive');
+      expect(result.data).toHaveProperty('createdAt');
+      expect(result.data).toHaveProperty('updatedAt');
       // Token should never be included
-      expect(result).not.toHaveProperty('token');
-      expect(result).not.toHaveProperty('encryptedToken');
+      expect(result.data).not.toHaveProperty('token');
+      expect(result.data).not.toHaveProperty('encryptedToken');
     });
 
     it('TestConnectionResultDto includes required fields', async () => {
@@ -386,11 +389,11 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
 
       const result = await controller.testConnection(projectSlug, principal);
 
-      expect(result).toHaveProperty('ok');
-      expect(result).toHaveProperty('latencyMs');
-      expect(typeof result.ok).toBe('boolean');
-      expect(typeof result.latencyMs).toBe('number');
-      expect(result.latencyMs).toBeGreaterThanOrEqual(0);
+      expect(result.data).toHaveProperty('ok');
+      expect(result.data).toHaveProperty('latencyMs');
+      expect(typeof (result.data as TestConnectionResultDto).ok).toBe('boolean');
+      expect(typeof (result.data as TestConnectionResultDto).latencyMs).toBe('number');
+      expect((result.data as TestConnectionResultDto).latencyMs).toBeGreaterThanOrEqual(0);
     });
   });
 
@@ -458,7 +461,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
         repoName: 'repo',
       };
 
-      vcsService.create.mockResolvedValue(mockVcsConnection);
+      vcsService.create.mockResolvedValue({ ...mockVcsConnection, webhookSecret: 's'.repeat(32) });
 
       await controller.createConnection(projectSlug, createDto, principal);
 
@@ -467,7 +470,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
     });
 
     it('retrieves encryption key from VCS config for operations that need it', async () => {
-      vcsService.create.mockResolvedValue(mockVcsConnection);
+      vcsService.create.mockResolvedValue({ ...mockVcsConnection, webhookSecret: 's'.repeat(32) });
 
       const createDto: CreateVcsConnectionDto = {
         provider: VcsProviderType.GITHUB,
@@ -488,10 +491,10 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
         token: 'ghp_abc123',
         repoOwner: 'test',
         repoName: 'repo',
-        syncMode: 'webhook',
+        syncMode: VcsSyncModeType.WEBHOOK,
       };
 
-      vcsService.create.mockResolvedValue(mockVcsConnection);
+      vcsService.create.mockResolvedValue({ ...mockVcsConnection, webhookSecret: 's'.repeat(32) });
 
       await controller.createConnection(projectSlug, createDto, principal);
 

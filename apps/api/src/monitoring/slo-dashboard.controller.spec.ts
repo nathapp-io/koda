@@ -70,19 +70,21 @@ describe('SloDashboardController', () => {
       expect(result.ret).toBe(0);
     });
 
-    it('defaults to 7-day window when no params provided', async () => {
+    it('defaults to 24-hour window when no params provided', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-09-28T12:00:00Z'));
       service.getSloMetrics.mockResolvedValue(sampleMetrics);
 
-      const before = Date.now();
-      const result = await controller.getSloMetrics(undefined, undefined);
-      const after = Date.now();
+      try {
+        const result = await controller.getSloMetrics(undefined, undefined);
 
-      const callArgs = service.getSloMetrics.mock.calls[0][0];
-      expect(callArgs.to.getTime()).toBeGreaterThanOrEqual(before);
-      expect(callArgs.to.getTime()).toBeLessThanOrEqual(after + 1000);
-      const weekMs = 7 * 24 * 60 * 60 * 1000;
-      expect(callArgs.to.getTime() - callArgs.from.getTime()).toBe(weekMs);
-      expect(result.ret).toBe(0);
+        const callArgs = service.getSloMetrics.mock.calls[0][0];
+        expect(callArgs.to.getTime()).toBe(new Date('2026-09-28T12:00:00Z').getTime());
+        const dayMs = 24 * 60 * 60 * 1000;
+        expect(callArgs.to.getTime() - callArgs.from.getTime()).toBe(dayMs);
+        expect(result.ret).toBe(0);
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('wraps result with JsonResponse.Ok', async () => {

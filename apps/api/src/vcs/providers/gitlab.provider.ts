@@ -1,7 +1,8 @@
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { IVcsProvider } from '../vcs-provider';
-import { VcsIssue, VcsPullRequest, VcsPrStatus, VcsCommit, CreatePrParams, SourceFile } from '../types';
+import { VcsIssue, VcsPullRequest, VcsPrStatus, VcsCommit, CreatePrParams, SourceFile, IssueFetchResult } from '../types';
 import { HttpClient } from '../factory';
+import { ISSUES_PER_PAGE, MAX_ISSUE_PAGES, inclusiveSince, laterOf, nextPageNumber } from './pagination';
 
 /**
  * GitLab REST API (v4) response for an issue
@@ -16,6 +17,7 @@ interface GitLabIssueResponse {
   web_url: string;
   labels: string[];
   created_at: string;
+  updated_at: string;
 }
 
 /**
@@ -71,46 +73,59 @@ interface GitLabFileResponse {
 }
 
 /**
- * GitLab VCS provider implementation (targets gitlab.com API v4)
+ * GitLab VCS provider implementation (GitLab API v4, gitlab.com or self-hosted)
  */
 export class GitLabProvider implements IVcsProvider {
   private readonly projectId: string;
+  private readonly apiBaseUrl: string;
+  private readonly webBaseUrl: string;
 
   constructor(
     private readonly repoOwner: string,
     private readonly repoName: string,
     private readonly token: string,
     private readonly httpClient: HttpClient,
+    apiBaseUrl?: string,
   ) {
     this.projectId = encodeURIComponent(`${repoOwner}/${repoName}`);
+    // BUG-14: self-hosted GitLab sets VCS_GITLAB_API_URL; default to gitlab.com.
+    this.apiBaseUrl = (apiBaseUrl ?? 'https://gitlab.com/api/v4').replace(/\/+$/, '');
+    this.webBaseUrl = this.apiBaseUrl.replace(/\/api\/v4$/, '');
   }
 
   private get baseUrl(): string {
-    return `https://gitlab.com/api/v4/projects/${this.projectId}`;
+    return `${this.apiBaseUrl}/projects/${this.projectId}`;
   }
 
   private get authHeaders(): Record<string, string> {
     return { 'PRIVATE-TOKEN': this.token };
   }
 
-  async fetchIssues(since?: Date): Promise<VcsIssue[]> {
-    const params: Record<string, unknown> = {
+  async fetchIssues(since?: Date): Promise<IssueFetchResult> {
+    const baseParams: Record<string, unknown> = {
       state: 'opened',
-      order_by: 'created_at',
+      order_by: 'updated_at',
       sort: 'asc',
+      per_page: ISSUES_PER_PAGE,
+      ...(since ? { updated_after: inclusiveSince(since) } : {}),
     };
+    const issues: VcsIssue[] = [];
+    let cursor: Date | null = null;
+    let page: number | null = 1;
 
-    if (since) {
-      params.created_after = since.toISOString();
+    for (let pages = 0; page !== null && pages < MAX_ISSUE_PAGES; pages++) {
+      const response = await this.httpClient.get(`${this.baseUrl}/issues`, {
+        headers: this.authHeaders,
+        params: { ...baseParams, page },
+      });
+      for (const item of response.data as GitLabIssueResponse[]) {
+        cursor = laterOf(cursor, item.updated_at);
+        issues.push(this.mapGitLabIssueToVcsIssue(item));
+      }
+      page = nextPageNumber(response.headers?.['x-next-page']);
     }
 
-    const response = await this.httpClient.get(`${this.baseUrl}/issues`, {
-      headers: this.authHeaders,
-      params,
-    });
-
-    const data = response.data as GitLabIssueResponse[];
-    return data.map((issue) => this.mapGitLabIssueToVcsIssue(issue));
+    return { issues, cursor, capped: page !== null };
   }
 
   async fetchIssue(issueNumber: number): Promise<VcsIssue> {
@@ -175,9 +190,10 @@ export class GitLabProvider implements IVcsProvider {
       });
     } catch (error: unknown) {
       const errorObj = error as Record<string, unknown>;
-      const status = (errorObj?.response as Record<string, unknown>)?.status;
+      const response = errorObj?.response as { status?: number; data?: unknown } | undefined;
       const message = typeof errorObj?.message === 'string' ? errorObj.message : '';
-      if (status === 400 && /already exists/i.test(message)) {
+      const body = response?.data === undefined ? '' : JSON.stringify(response.data);
+      if (response?.status === 400 && /already exists/i.test(`${message} ${body}`)) {
         // Branch already exists, proceed to MR creation
       } else {
         throw error;
@@ -287,7 +303,7 @@ export class GitLabProvider implements IVcsProvider {
       sha: gitLabCommit.id,
       message: gitLabCommit.message,
       authorLogin: gitLabCommit.author_name,
-      url: `https://gitlab.com/${this.repoOwner}/${this.repoName}/-/commit/${gitLabCommit.id}`,
+      url: `${this.webBaseUrl}/${this.repoOwner}/${this.repoName}/-/commit/${gitLabCommit.id}`,
       date: new Date(gitLabCommit.authored_date),
     };
   }

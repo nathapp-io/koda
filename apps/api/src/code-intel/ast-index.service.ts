@@ -1,6 +1,7 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { CodeGraphService, ExtractedSymbol, ResolvedSymbol } from './code-graph.service';
 import { SymbolStore, SymbolData, CallerInfo, CalleeInfo } from './symbol-store';
+import { symbolFullId } from './symbol-id';
 import { ITransactionManager, TRANSACTION_MANAGER } from '@nathapp/nestjs-data';
 
 export type { CallerInfo, CalleeInfo } from './symbol-store';
@@ -57,8 +58,13 @@ export class AstIndexService {
     let symbolsIndexed = 0;
 
     const allExtractedSymbols: ResolvedSymbol[] = [];
+    const filesToReplace: string[] = [];
 
     for (const file of files) {
+      // Replace, don't merge: a file in this commit loses its old symbols even if
+      // its new content fails to parse, so a parse regression cannot leave stale
+      // rows behind. Files skipped before this point were never indexed.
+      filesToReplace.push(file.path);
       try {
         const parsed = this.codeGraph.parseSourceFile(file.path, file.content);
         const symbols = this.codeGraph.extractSymbols(parsed);
@@ -81,9 +87,14 @@ export class AstIndexService {
     this.codeGraph.resolveRelationships(allExtractedSymbols);
 
     await this.txManager.run(async () => {
+      // A re-indexed file is replaced, not merged: symbols its new version no
+      // longer declares must not survive.
+      for (const file of filesToReplace) {
+        await this.symbolStore.deleteByFile(projectId, repoId, file);
+      }
+
       for (const sym of allExtractedSymbols) {
-        const localSymbolId = sym.symbolId;
-        const fullId = `${repoId}:${sym.file}::${localSymbolId}`;
+        const fullId = symbolFullId(projectId, repoId, sym.file, sym.symbolId);
 
         const symbolData: SymbolData = {
           id: fullId,
@@ -99,11 +110,11 @@ export class AstIndexService {
           signature: sym.signature,
           callers: sym.callers.map((callerId) => {
             const caller = allExtractedSymbols.find((candidate) => candidate.symbolId === callerId);
-            return `${repoId}:${caller?.file ?? sym.file}::${callerId}`;
+            return symbolFullId(projectId, repoId, caller?.file ?? sym.file, callerId);
           }),
           callees: sym.callees.map((calleeId) => {
             const callee = allExtractedSymbols.find((candidate) => candidate.symbolId === calleeId);
-            return `${repoId}:${callee?.file ?? sym.file}::${calleeId}`;
+            return symbolFullId(projectId, repoId, callee?.file ?? sym.file, calleeId);
           }),
           docComment: sym.docComment,
         };
@@ -122,6 +133,15 @@ export class AstIndexService {
       fileErrors,
       durationMs,
     };
+  }
+
+  /** Drop the symbols of files a commit deleted (renames arrive as removed + added). */
+  async removeFiles(projectId: string, repoId: string, files: string[]): Promise<void> {
+    await this.txManager.run(async () => {
+      for (const file of files) {
+        await this.symbolStore.deleteByFile(projectId, repoId, file);
+      }
+    });
   }
 
   async getSymbol(projectId: string, symbolId: string): Promise<Symbol | null> {

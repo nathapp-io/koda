@@ -10,7 +10,7 @@ export const VCS_MESSAGES = {
   NO_CONNECTION: 'No VCS connection configured',
   CONNECTION_OK: 'Connection OK',
   DISCONNECTED: (projectSlug: string) => `VCS connection disconnected for project ${projectSlug}`,
-  MISSING_REQUIRED_OPTIONS: 'Missing required options: --provider, --owner, --repo, --token',
+  MISSING_REQUIRED_OPTIONS: 'Missing required options: --provider (github|gitlab), --owner, --repo, --token',
   MISSING_AUTH: 'API key or URL not configured. Run: koda login --api-key <key>',
   MISSING_PROJECT: 'Project slug not specified. Use --project flag or set via config',
   CONNECTED: (projectSlug: string) => `\nVCS connection established for project ${projectSlug}:`,
@@ -19,4 +19,8 @@ export const VCS_MESSAGES = {
   SETTINGS_UPDATED: (projectSlug: string) => `VCS settings updated for project ${projectSlug}`,
   CONNECTION_TEST_FAILED: 'Connection test failed',
   ISSUE_IMPORTED: (ticketRef: string) => `Issue imported: ${ticketRef}`,
+  WEBHOOK_SECRET_ONCE: (secret: string) =>
+    `\nWebhook secret (shown once, store it now; use it to sign webhook deliveries): ${secret}`,
+  WEBHOOK_SECRET_ROTATED: (projectSlug: string, secret: string) =>
+    `Webhook secret rotated for project ${projectSlug}. New secret (shown once): ${secret}`,
 } as const;

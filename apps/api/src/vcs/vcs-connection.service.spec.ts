@@ -27,6 +27,7 @@ jest.mock('../common/utils/encryption.util', () => ({
 }));
 
 jest.mock('./factory', () => ({
+  ...jest.requireActual('./factory'),
   createVcsProvider: jest.fn(),
 }));
 
@@ -68,8 +69,7 @@ function createMockRepo(): jest.Mocked<IVcsRepository> {
     createTicketFromIssue: jest.fn(),
     findActiveTicketLinksWithPrs: jest.fn().mockResolvedValue([]),
     findTicketLinkByPrNumber: jest.fn().mockResolvedValue(null),
-    updateTicketLinkPrState: jest.fn().mockResolvedValue(undefined),
-    updateTicketLinkWithPrState: jest.fn().mockResolvedValue(undefined),
+    updateTicketLinkWithPrState: jest.fn().mockResolvedValue('updated'),
     applyMergedPrTransition: jest.fn().mockResolvedValue(undefined),
     findTicketWithProject: jest.fn().mockResolvedValue(null),
     findPendingOutboxEvents: jest.fn().mockResolvedValue([]),
@@ -189,11 +189,12 @@ describe('VcsConnectionService', () => {
       mockRepo.findProjectById.mockResolvedValue({ id: 'proj-1' });
       mockRepo.findVcsConnectionByProjectId.mockResolvedValue(null);
 
-      // URL that does NOT contain "github.com" as a substring
+      // Host-agnostic parsing accepts any host, so an invalid URL is one with
+      // fewer than two path segments.
       const dtoWithBadUrl: CreateVcsConnectionDto = {
         provider: 'github',
         token: 'ghp_abc123',
-        repoUrl: 'https://gitlab.com/owner/repo',
+        repoUrl: 'https://github.com/only-owner',
       } as CreateVcsConnectionDto;
 
       await expect(service.create('proj-1', ENCRYPTION_KEY, dtoWithBadUrl)).rejects.toThrow(

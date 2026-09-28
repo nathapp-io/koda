@@ -128,7 +128,7 @@ describe('vcsCommand - update, test, sync, import', () => {
         updatedAt: new Date('2026-04-06T10:00:00Z'),
       };
 
-      (vcsControllerUpdateConnection as jest.Mock).mockResolvedValue(mockConnection);
+      (vcsControllerUpdateConnection as jest.Mock).mockResolvedValue(envelope(mockConnection));
 
       const vcsCmd = program.commands.find((cmd) => cmd.name() === 'vcs');
       const updateCmd = vcsCmd?.commands.find((cmd) => cmd.name() === 'update');
@@ -148,6 +148,7 @@ describe('vcsCommand - update, test, sync, import', () => {
             allowedAuthors: ['user1', 'user2'],
           }), path: expect.objectContaining({ slug: 'my-project' })})
       );
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('VCS settings updated'));
     });
 
     it('calls PATCH with only sync-mode when authors not provided', async () => {
@@ -165,7 +166,7 @@ describe('vcsCommand - update, test, sync, import', () => {
         updatedAt: new Date('2026-04-06T10:00:00Z'),
       };
 
-      (vcsControllerUpdateConnection as jest.Mock).mockResolvedValue(mockConnection);
+      (vcsControllerUpdateConnection as jest.Mock).mockResolvedValue(envelope(mockConnection));
 
       const vcsCmd = program.commands.find((cmd) => cmd.name() === 'vcs');
       const updateCmd = vcsCmd?.commands.find((cmd) => cmd.name() === 'update');
@@ -194,7 +195,7 @@ describe('vcsCommand - update, test, sync, import', () => {
         updatedAt: new Date('2026-04-06T10:00:00Z'),
       };
 
-      (vcsControllerUpdateConnection as jest.Mock).mockResolvedValue(mockConnection);
+      (vcsControllerUpdateConnection as jest.Mock).mockResolvedValue(envelope(mockConnection));
 
       const vcsCmd = program.commands.find((cmd) => cmd.name() === 'vcs');
       const updateCmd = vcsCmd?.commands.find((cmd) => cmd.name() === 'update');
@@ -223,7 +224,7 @@ describe('vcsCommand - update, test, sync, import', () => {
         updatedAt: new Date('2026-04-06T10:00:00Z'),
       };
 
-      (vcsControllerUpdateConnection as jest.Mock).mockResolvedValue(mockConnection);
+      (vcsControllerUpdateConnection as jest.Mock).mockResolvedValue(envelope(mockConnection));
 
       const vcsCmd = program.commands.find((cmd) => cmd.name() === 'vcs');
       const updateCmd = vcsCmd?.commands.find((cmd) => cmd.name() === 'update');

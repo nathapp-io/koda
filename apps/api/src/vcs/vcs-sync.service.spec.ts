@@ -61,8 +61,7 @@ function createMockRepo(): jest.Mocked<IVcsRepository> {
     createTicketFromIssue: jest.fn().mockResolvedValue({ id: 't-1', number: 1, title: 'Test issue' }),
     findActiveTicketLinksWithPrs: jest.fn().mockResolvedValue([]),
     findTicketLinkByPrNumber: jest.fn().mockResolvedValue(null),
-    updateTicketLinkPrState: jest.fn().mockResolvedValue(undefined),
-    updateTicketLinkWithPrState: jest.fn().mockResolvedValue(undefined),
+    updateTicketLinkWithPrState: jest.fn().mockResolvedValue('updated'),
     applyMergedPrTransition: jest.fn().mockResolvedValue(undefined),
     findTicketWithProject: jest.fn().mockResolvedValue(null),
     findProjectById: jest.fn().mockResolvedValue(null),
@@ -104,7 +103,7 @@ describe('VcsSyncService', () => {
       mockRepo.findExistingTicketByExternalId.mockResolvedValue(null);
       mockRepo.createTicketFromIssue.mockResolvedValue({ id: 't-1', number: 5, title: issue.title });
 
-      const result = await service.syncIssue(project, issue, 'manual');
+      const result = await service.syncIssue(project, issue, 'manual', makeConnection());
 
       expect(result.action).toBe('created');
       expect(result.ticketId).toBe('t-1');
@@ -112,6 +111,7 @@ describe('VcsSyncService', () => {
       expect(mockRepo.createTicketFromIssue).toHaveBeenCalledWith(
         project,
         expect.objectContaining({ number: issue.number }),
+        'owner/repo#1',
       );
     });
 
@@ -121,7 +121,7 @@ describe('VcsSyncService', () => {
 
       mockRepo.findExistingTicketByExternalId.mockResolvedValue({ id: 'existing-t' } as any);
 
-      const result = await service.syncIssue(project, issue, 'polling');
+      const result = await service.syncIssue(project, issue, 'polling', makeConnection());
 
       expect(result.action).toBe('skipped');
       expect(mockRepo.createTicketFromIssue).not.toHaveBeenCalled();
@@ -131,9 +131,25 @@ describe('VcsSyncService', () => {
       const project = makeProject();
       const issue = makeIssue({ number: 99 });
 
-      await service.syncIssue(project, issue, 'webhook');
+      await service.syncIssue(project, issue, 'webhook', makeConnection());
 
-      expect(mockRepo.findExistingTicketByExternalId).toHaveBeenCalledWith(project.id, '99');
+      expect(mockRepo.findExistingTicketByExternalId).toHaveBeenCalledWith(project.id, 'owner/repo#99');
+    });
+  });
+
+  describe('M11: repo-qualified external ids', () => {
+    it('dedups and creates with owner/repo#N', async () => {
+      const repo = {
+        findExistingTicketByExternalId: jest.fn().mockResolvedValue(null),
+        createTicketFromIssue: jest.fn().mockResolvedValue({ id: 't1', number: 1, title: 'Issue' }),
+      };
+      const service = new VcsSyncService(repo as unknown as IVcsRepository);
+      const issue = { number: 5, title: 'Issue', body: null, authorLogin: 'a', url: 'u', labels: [], createdAt: new Date() };
+
+      await service.syncIssue({ id: 'p1' }, issue, 'polling', { repoOwner: 'acme', repoName: 'widgets' });
+
+      expect(repo.findExistingTicketByExternalId).toHaveBeenCalledWith('p1', 'acme/widgets#5');
+      expect(repo.createTicketFromIssue).toHaveBeenCalledWith({ id: 'p1' }, issue, 'acme/widgets#5');
     });
   });
 
@@ -175,10 +191,14 @@ describe('VcsSyncService', () => {
       const encryptionKey = 'test-key-32-chars-exactly-padded!!';
 
       const mockProvider = {
-        fetchIssues: jest.fn().mockResolvedValue([
-          makeIssue({ number: 1, title: 'Issue 1' }),
-          makeIssue({ number: 2, title: 'Issue 2' }),
-        ]),
+        fetchIssues: jest.fn().mockResolvedValue({
+          issues: [
+            makeIssue({ number: 1, title: 'Issue 1' }),
+            makeIssue({ number: 2, title: 'Issue 2' }),
+          ],
+          cursor: null,
+          capped: false,
+        }),
         testConnection: jest.fn(),
         fetchIssue: jest.fn(),
         getPullRequestStatus: jest.fn(),
@@ -205,7 +225,7 @@ describe('VcsSyncService', () => {
       const encryptionKey = 'test-key-32-chars-exactly-padded!!';
 
       const mockProvider = {
-        fetchIssues: jest.fn().mockResolvedValue([makeIssue({ number: 1 })]),
+        fetchIssues: jest.fn().mockResolvedValue({ issues: [makeIssue({ number: 1 })], cursor: null, capped: false }),
         testConnection: jest.fn(),
         fetchIssue: jest.fn(),
         getPullRequestStatus: jest.fn(),
@@ -227,10 +247,14 @@ describe('VcsSyncService', () => {
       const encryptionKey = 'test-key-32-chars-exactly-padded!!';
 
       const mockProvider = {
-        fetchIssues: jest.fn().mockResolvedValue([
-          makeIssue({ number: 1 }),
-          makeIssue({ number: 2 }),
-        ]),
+        fetchIssues: jest.fn().mockResolvedValue({
+          issues: [
+            makeIssue({ number: 1 }),
+            makeIssue({ number: 2 }),
+          ],
+          cursor: null,
+          capped: false,
+        }),
         testConnection: jest.fn(),
         fetchIssue: jest.fn(),
         getPullRequestStatus: jest.fn(),

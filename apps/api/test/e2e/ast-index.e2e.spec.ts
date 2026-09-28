@@ -143,7 +143,7 @@ describeE2E('AST/Symbol Index E2E Tests', () => {
     });
   });
 
-  describe('AC-2: symbolId convention {repoId}:{filePath}::{SymbolName}', () => {
+  describe('AC-2: symbolId convention {projectId}:{repoId}:{filePath}::{SymbolName}', () => {
     it('should store symbols with properly formatted symbolId', async () => {
       const files = [
         {

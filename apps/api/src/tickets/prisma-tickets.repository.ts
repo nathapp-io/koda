@@ -346,15 +346,4 @@ export class PrismaTicketsRepository implements ITicketRepository {
   }): Promise<{ id: string }> {
     return this.db.ticketLink.create({ data });
   }
-
-  async updateTicketLink(id: string, data: {
-    url?: string;
-    externalRef?: string;
-    prNumber?: number;
-    prState?: string;
-    prUpdatedAt?: Date;
-    linkType?: string;
-  }): Promise<{ id: string }> {
-    return this.db.ticketLink.update({ where: { id }, data });
-  }
 }

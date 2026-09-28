@@ -1,9 +1,11 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { VcsConnectionDomain } from './domain/vcs.domain';
 import { VcsIssue } from './types';
-import { createVcsProvider } from './factory';
+import { providerForConnection } from './provider-for-connection';
 import { decryptToken } from '../common/utils/encryption.util';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
+import { externalVcsIdFor, VcsRepoRef } from './external-vcs-id';
+import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 
 /**
  * Result of syncing a single issue
@@ -18,7 +20,10 @@ export interface SyncIssueResult {
 
 @Injectable()
 export class VcsSyncService {
-  constructor(@Inject(VCS_REPOSITORY) private readonly vcsRepo: IVcsRepository) {}
+  constructor(
+    @Inject(VCS_REPOSITORY) private readonly vcsRepo: IVcsRepository,
+    @Optional() @Inject(VCS_CFG) private readonly vcsConfig?: IVcsConfig,
+  ) {}
 
   /**
    * Sync a single issue into a ticket
@@ -27,12 +32,12 @@ export class VcsSyncService {
     project: { id: string },
     issue: VcsIssue,
     syncMode: 'manual' | 'polling' | 'webhook',
+    repo: VcsRepoRef,
   ): Promise<SyncIssueResult> {
-    // Check if issue already exists (deduplication)
-    const existingTicket = await this.vcsRepo.findExistingTicketByExternalId(
-      project.id,
-      `${issue.number}`,
-    );
+    const externalVcsId = externalVcsIdFor(repo, issue.number);
+
+    // Dedup includes soft-deleted tickets (M11): a deleted import stays deleted.
+    const existingTicket = await this.vcsRepo.findExistingTicketByExternalId(project.id, externalVcsId);
 
     if (existingTicket) {
       return {
@@ -42,7 +47,7 @@ export class VcsSyncService {
     }
 
     // Allocate ticket number in transaction and create ticket
-    const result = await this.vcsRepo.createTicketFromIssue(project, issue);
+    const result = await this.vcsRepo.createTicketFromIssue(project, issue, externalVcsId);
 
     return {
       action: 'created',
@@ -95,14 +100,10 @@ export class VcsSyncService {
       const decryptedToken = decryptToken(connection.encryptedToken, encryptionKey);
 
       // Create provider
-      const provider = createVcsProvider(connection.provider, {
-        provider: connection.provider,
-        token: decryptedToken,
-        repoUrl: `https://github.com/${connection.repoOwner}/${connection.repoName}`,
-      });
+      const provider = providerForConnection(connection, decryptedToken, this.vcsConfig);
 
       // Fetch all issues
-      const issues = await provider.fetchIssues();
+      const { issues } = await provider.fetchIssues();
 
       // Filter by allowed authors
       const filteredIssues = this.filterByAllowedAuthors(issues, connection.allowedAuthors);
@@ -110,7 +111,7 @@ export class VcsSyncService {
       // Sync each issue
       for (const issue of filteredIssues) {
         try {
-          const result = await this.syncIssue(project, issue, 'manual');
+          const result = await this.syncIssue(project, issue, 'manual', connection);
           if (result.action === 'created') {
             issuesSynced++;
             if (result.ticketId && result.ticketNumber) {

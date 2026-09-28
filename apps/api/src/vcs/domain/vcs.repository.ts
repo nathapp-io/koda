@@ -72,16 +72,31 @@ export interface OutboxDedupQuery {
   since: Date;
 }
 
+/**
+ * M12: outcome of the single TicketLink.prState write. `already-merged` is the
+ * terminal-state skip; `not-found` means the link vanished between the caller's
+ * lookup and the write (so the caller must not report it as already merged).
+ */
+export type PrStateWriteResult = 'updated' | 'already-merged' | 'not-found';
+
 export interface IVcsRepository {
   // Ticket + Issue operations
   findExistingTicketByExternalId(projectId: string, externalVcsId: string): Promise<VcsTicketDomain | null>;
-  createTicketFromIssue(project: { id: string }, issue: { number: number; title: string; body: string | null }): Promise<CreateTicketFromIssueResult>;
+  createTicketFromIssue(
+    project: { id: string },
+    issue: { number: number; title: string; body: string | null },
+    externalVcsId: string,
+  ): Promise<CreateTicketFromIssueResult>;
 
   // TicketLink operations
   findActiveTicketLinksWithPrs(projectId: string): Promise<TicketLinkData[]>;
   findTicketLinkByPrNumber(projectId: string, prNumber: number): Promise<TicketLinkData | null>;
-  updateTicketLinkPrState(id: string, prState: string): Promise<void>;
-  updateTicketLinkWithPrState(id: string, prState: string): Promise<void>;
+  /**
+   * M12: the only TicketLink.prState write. `merged` is terminal: a link already
+   * merged is left unchanged. Resolves `updated` when the row changed,
+   * `already-merged` when it was skipped, and `not-found` when no such link exists.
+   */
+  updateTicketLinkWithPrState(id: string, prState: string): Promise<PrStateWriteResult>;
 
   // Merged PR auto-transition
   applyMergedPrTransition(input: MergedPrTransitionInput): Promise<void>;
@@ -98,7 +113,7 @@ export interface IVcsRepository {
   findPollingConnections(): Promise<VcsConnectionWithProjectDomain[]>;
   createVcsConnection(data: CreateVcsConnectionData): Promise<VcsConnectionDomain>;
   updateVcsConnection(projectId: string, data: UpdateVcsConnectionData): Promise<VcsConnectionDomain>;
-  updateVcsConnectionLastSynced(connectionId: string): Promise<void>;
+  updateVcsConnectionLastSynced(connectionId: string, syncedAt: Date): Promise<void>;
   deleteVcsConnection(projectId: string): Promise<void>;
 
   // VcsSyncLog operations

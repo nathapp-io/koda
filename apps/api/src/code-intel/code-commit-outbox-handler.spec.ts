@@ -19,7 +19,7 @@ import { createVcsProvider } from '../vcs/factory';
 
 function createMockVcsProvider(overrides?: Partial<IVcsProvider>): IVcsProvider {
   return {
-    fetchIssues: jest.fn().mockResolvedValue([]),
+    fetchIssues: jest.fn().mockResolvedValue({ issues: [], cursor: null, capped: false }),
     fetchIssue: jest.fn().mockResolvedValue(null),
     testConnection: jest.fn().mockResolvedValue({ ok: true }),
     getDefaultBranch: jest.fn().mockResolvedValue('main'),
@@ -47,6 +47,7 @@ function createMockVcsConfig(encryptionKey?: string): IVcsConfig {
     encryptionKey,
     defaultPollingIntervalMs: 600000,
     githubApiUrl: 'https://api.github.com',
+    gitlabApiUrl: 'https://gitlab.com/api/v4',
   };
 }
 

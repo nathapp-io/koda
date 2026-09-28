@@ -1,4 +1,4 @@
-import { IsArray, IsEnum, IsInt, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import { IsArray, IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
 import { VcsSyncModeType } from './create-vcs-connection.dto';
 
 export class UpdateVcsConnectionDto {
@@ -19,9 +19,4 @@ export class UpdateVcsConnectionDto {
   @IsInt()
   @Min(60000)
   pollingIntervalMs?: number;
-
-  @IsOptional()
-  @IsString()
-  @MinLength(32, { message: '$t(common.validation.webhookSecretMinLength)' })
-  webhookSecret?: string;
 }

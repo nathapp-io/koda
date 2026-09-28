@@ -81,17 +81,34 @@ export class PrismaCodeIntelRepository implements ICodeIntelRepository {
 
   // Symbol store methods
 
+  /**
+   * M13: keyed on (projectId, symbolId). `id`, `symbolId` and `projectId` are
+   * written on create only, so an update can never move a row to another project.
+   */
   async upsertSymbol(symbol: SymbolData): Promise<SymbolData> {
-    const data = {
+    const create = {
       ...symbol,
       callers: symbol.callers as unknown as string[],
       callees: symbol.callees as unknown as string[],
     };
+    const update = {
+      repoId: symbol.repoId,
+      commitHash: symbol.commitHash,
+      name: symbol.name,
+      kind: symbol.kind,
+      file: symbol.file,
+      startLine: symbol.startLine,
+      endLine: symbol.endLine,
+      signature: symbol.signature,
+      callers: symbol.callers as unknown as string[],
+      callees: symbol.callees as unknown as string[],
+      docComment: symbol.docComment,
+    };
 
     const result = await this.prisma.client.symbol.upsert({
-      where: { id: symbol.id },
-      create: data as Parameters<typeof this.prisma.client.symbol.upsert>[0]['create'],
-      update: data as Parameters<typeof this.prisma.client.symbol.upsert>[0]['update'],
+      where: { projectId_symbolId: { projectId: symbol.projectId, symbolId: symbol.symbolId } },
+      create: create as Parameters<typeof this.prisma.client.symbol.upsert>[0]['create'],
+      update: update as Parameters<typeof this.prisma.client.symbol.upsert>[0]['update'],
     });
 
     return {

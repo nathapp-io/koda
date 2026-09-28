@@ -1,8 +1,7 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { AstIndexService, SourceFile } from './ast-index.service';
-import { createVcsProvider } from '../vcs/factory';
+import { providerForConnection } from '../vcs/provider-for-connection';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
-import type { VcsProviderConfig } from '../vcs/factory';
 import { PrismaCodeIntelRepository } from './prisma-code-intel.repository';
 
 interface CodeCommitPayload {
@@ -10,6 +9,8 @@ interface CodeCommitPayload {
   commitHash: string;
   ref: string;
   changedFiles: string[];
+  /** Files the commit deleted. Absent on events recorded before Track 3 Slice 4. */
+  removedFiles?: string[];
   projectId: string;
   webhookOnly?: boolean;
 }
@@ -34,6 +35,20 @@ export class CodeCommitOutboxHandler {
 
     this.logger.log(`code_commit: processing ${p.repoId} ${p.commitHash} (${p.changedFiles.length} files)`);
 
+    // VCS LOW: deleted or renamed-away files lose their symbols; they are not fetched.
+    const removedFiles = p.removedFiles ?? [];
+    if (removedFiles.length > 0) {
+      await this.astIndexService.removeFiles(p.projectId, p.repoId, removedFiles);
+    }
+    const removed = new Set(removedFiles);
+    const filesToIndex = p.changedFiles.filter((file) => !removed.has(file));
+    if (filesToIndex.length === 0) {
+      this.logger.debug(
+        `code_commit: all ${removedFiles.length} changed files removed for ${p.repoId} ${p.commitHash}, nothing to index (project ${p.projectId})`,
+      );
+      return;
+    }
+
     const connection = await this.codeIntelRepository.findVcsConnectionByProjectId(p.projectId);
     if (!connection) {
       this.logger.warn(`code_commit: no VCS connection found for project ${p.projectId}`);
@@ -55,17 +70,11 @@ export class CodeCommitOutboxHandler {
       return;
     }
 
-    const providerConfig: VcsProviderConfig = {
-      provider: connection.provider,
-      token,
-      repoUrl: `https://github.com/${connection.repoOwner}/${connection.repoName}`,
-      githubApiUrl: this.vcsConfig?.githubApiUrl,
-    };
-    const provider = createVcsProvider(connection.provider, providerConfig);
+    const provider = providerForConnection(connection, token, this.vcsConfig);
 
     let sourceFiles: SourceFile[];
     try {
-      sourceFiles = await provider.fetchCommitFiles(p.repoId, p.commitHash, p.changedFiles);
+      sourceFiles = await provider.fetchCommitFiles(p.repoId, p.commitHash, filesToIndex);
     } catch (err) {
       this.logger.error(`code_commit: failed to fetch commit files: ${err instanceof Error ? err.message : String(err)}`);
       throw err;

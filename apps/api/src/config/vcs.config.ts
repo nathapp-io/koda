@@ -8,6 +8,7 @@ export interface IVcsConfig {
   encryptionKey: string | undefined;
   defaultPollingIntervalMs: number;
   githubApiUrl: string;
+  gitlabApiUrl: string;
 }
 
 export class VcsConfigSchema {
@@ -22,6 +23,10 @@ export class VcsConfigSchema {
   @IsOptional()
   @IsString()
   GITHUB_API_URL: string;
+
+  @IsOptional()
+  @IsString()
+  VCS_GITLAB_API_URL: string;
 }
 
 export const vcsConfig = registerAs(VCS_CFG, (): IVcsConfig => {
@@ -33,5 +38,6 @@ export const vcsConfig = registerAs(VCS_CFG, (): IVcsConfig => {
       10,
     ),
     githubApiUrl: process.env['GITHUB_API_URL'] ?? 'https://api.github.com',
+    gitlabApiUrl: process.env['VCS_GITLAB_API_URL'] ?? 'https://gitlab.com/api/v4',
   };
 });

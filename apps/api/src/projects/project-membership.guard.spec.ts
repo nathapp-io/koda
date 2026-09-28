@@ -14,6 +14,7 @@ import { PrismaProjectRepository } from './prisma-project.repository';
 import { ProjectMembershipGuard } from './project-membership.guard';
 import { ProjectRoles } from './project-roles.decorator';
 import { ProjectPermission } from './project-permission.decorator';
+import { ProjectSlugFrom } from './project-slug-from.decorator';
 import { KodaCaslAbilityFactory } from '../auth/casl/koda-casl-ability.factory';
 import { KodaAction } from '../auth/casl/koda-action.enum';
 import {
@@ -55,6 +56,19 @@ class TicketRoutesStub {
   assignLabel(): string { return 'ok'; }
 }
 const routes = new TicketRoutesStub();
+
+/** Controller stub for the code-intel read routes: slug in `?projectSlug=` (Slice 4). */
+class CodeIntelRoutesStub {
+  @ProjectSlugFrom('query', 'projectSlug')
+  @ProjectPermission([CaslPermissionAction.READ, 'CodeIntel'])
+  searchSymbols(): string { return 'ok'; }
+
+  @ProjectPermission([CaslPermissionAction.READ, 'CodeIntel'])
+  withoutSlugSource(): string { return 'ok'; }
+
+  plainRoute(): string { return 'ok'; }
+}
+const intel = new CodeIntelRoutesStub();
 
 const memberUser: UserPrincipal = {
   actorType: 'user',
@@ -458,6 +472,59 @@ describe('ProjectMembershipGuard (US-001)', () => {
       const kb = new KbWriteRouteStub();
       await expect(guardWithCasl.canActivate(makeExecutionContext({ params: { slug: 'team' }, user: memberUser }, kb.addDocument, KbWriteRouteStub))).resolves.toBe(true);
       expect(membershipRepo.findMembershipRole).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('ProjectMembershipGuard - query slug (Track 3 Slice 4)', () => {
+    let guardWithCasl: ProjectMembershipGuard;
+
+    beforeEach(() => {
+      guardWithCasl = new ProjectMembershipGuard(access, new Reflector(), new KodaCaslAbilityFactory());
+      membershipRepo.findBySlug.mockResolvedValue({ id: 'p1', slug: 'team', deletedAt: null });
+    });
+
+    const run = (query: Record<string, unknown>, handler = intel.searchSymbols, user: KodaPrincipal = memberUser) => {
+      const req: Record<string, unknown> = { params: {}, query, user };
+      return { req, result: guardWithCasl.canActivate(makeExecutionContext(req, handler, CodeIntelRoutesStub)) };
+    };
+
+    it('resolves the project from the opted-in query key and admits a DEVELOPER', async () => {
+      membershipRepo.findMembershipRole.mockResolvedValue('DEVELOPER');
+      const { req, result } = run({ projectSlug: 'team' });
+      await expect(result).resolves.toBe(true);
+      expect(req.projectContext).toEqual({ project: { id: 'p1', slug: 'team' }, role: 'DEVELOPER' });
+    });
+
+    it('refuses a VIEWER (no READ CodeIntel)', async () => {
+      membershipRepo.findMembershipRole.mockResolvedValue('VIEWER');
+      await expect(run({ projectSlug: 'team' }).result).rejects.toBeInstanceOf(ForbiddenAppException);
+    });
+
+    it('refuses a non-member', async () => {
+      membershipRepo.findMembershipRole.mockResolvedValue(null);
+      await expect(run({ projectSlug: 'team' }).result).rejects.toBeInstanceOf(ForbiddenAppException);
+    });
+
+    it.each([
+      ['missing', {}],
+      ['empty', { projectSlug: '' }],
+      ['repeated', { projectSlug: ['team', 'other'] }],
+    ])('fails closed on a %s projectSlug without looking the project up', async (_label, query) => {
+      await expect(run(query).result).rejects.toBeInstanceOf(ForbiddenAppException);
+      expect(membershipRepo.findBySlug).not.toHaveBeenCalled();
+    });
+
+    it('ignores the query on routes that did not opt in', async () => {
+      await expect(run({ projectSlug: 'team' }, intel.withoutSlugSource).result).rejects.toBeInstanceOf(ForbiddenAppException);
+      await expect(run({ projectSlug: 'team' }, intel.plainRoute).result).resolves.toBe(true);
+      expect(membershipRepo.findBySlug).not.toHaveBeenCalled();
+    });
+
+    it('prefers params.slug over the query', async () => {
+      membershipRepo.findMembershipRole.mockResolvedValue('DEVELOPER');
+      const req: Record<string, unknown> = { params: { slug: 'team' }, query: { projectSlug: 'elsewhere' }, user: memberUser };
+      await expect(guardWithCasl.canActivate(makeExecutionContext(req, intel.searchSymbols, CodeIntelRoutesStub))).resolves.toBe(true);
+      expect(membershipRepo.findBySlug.mock.calls[0][0]).toBe('team');
     });
   });
 });

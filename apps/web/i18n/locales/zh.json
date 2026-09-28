@@ -532,6 +532,7 @@
       "provider": "提供商",
       "providerPlaceholder": "选择提供商",
       "providerGithub": "GitHub",
+      "providerGitlab": "GitLab",
       "owner": "仓库所有者",
       "ownerPlaceholder": "例如 octocat",
       "repo": "仓库名称",
@@ -553,7 +554,17 @@
       "update": "更新连接",
       "disconnect": "断开连接",
       "testing": "正在测试...",
-      "syncing": "正在同步..."
+      "syncing": "正在同步...",
+      "gitlabPollingOnly": "GitLab 连接仅支持轮询同步，不支持 Webhook 同步。"
+    },
+    "secret": {
+      "title": "Webhook 密钥",
+      "onceNotice": "请立即复制此密钥，之后将不再显示。",
+      "copy": "复制",
+      "copied": "密钥已复制",
+      "copyFailed": "无法复制密钥",
+      "rotate": "轮换 Webhook 密钥",
+      "rotateConfirm": "确定轮换 Webhook 密钥吗？使用旧密钥签名的投递将被拒绝。"
     },
     "validation": {
       "providerRequired": "请选择提供商",

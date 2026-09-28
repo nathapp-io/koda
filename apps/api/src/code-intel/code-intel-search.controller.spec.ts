@@ -1,14 +1,14 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
-import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import request from 'supertest';
 import { CodeIntelController } from './code-intel.controller';
 import { AstIndexService } from './ast-index.service';
 import { ProjectAccessService } from '../projects/project-access.service';
-import { UserPrincipal } from '../auth/principal/koda-principal.types';
+import { ProjectMembershipGuard } from '../projects/project-membership.guard';
+import { ProjectContext } from '../projects/project-context';
 
 // ---------------------------------------------------------------------------
-// Local type stubs matching the expected (not-yet-implemented) search interface
+// Local type stubs matching the search interface
 // ---------------------------------------------------------------------------
 
 interface SymbolSearchItem {
@@ -31,30 +31,13 @@ interface SearchSymbolsQuery {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeAdminUser(): UserPrincipal {
-  return {
-    actorType: 'user',
-    id: 'user-admin',
-    role: 'ADMIN',
-    email: 'admin@example.com',
-    blacklisted: false,
-    revoked: false,
-    authorities: ['ADMIN'],
-    extra: {},
-  } as unknown as UserPrincipal;
-}
-
-function makeMemberUser(): UserPrincipal {
-  return {
-    actorType: 'user',
-    id: 'user-member',
-    role: 'MEMBER',
-    email: 'member@example.com',
-    blacklisted: false,
-    revoked: false,
-    authorities: ['MEMBER'],
-    extra: {},
-  } as unknown as UserPrincipal;
+/**
+ * Slice 4: the search route receives the ProjectContext ProjectMembershipGuard
+ * resolved (slug from ?projectSlug=, membership and role checked there —
+ * covered by project-membership.guard.spec.ts and the integration specs).
+ */
+function makeCtx(id = 'proj-1', slug = 'my-project'): ProjectContext {
+  return { project: { id, slug }, role: 'ADMIN' };
 }
 
 function makeSearchItem(overrides: Partial<SymbolSearchItem> = {}): SymbolSearchItem {
@@ -68,16 +51,24 @@ function makeSearchItem(overrides: Partial<SymbolSearchItem> = {}): SymbolSearch
   };
 }
 
-// Calls the not-yet-existing searchSymbols method via optional chaining so the
-// test fails at the subsequent assertion rather than throwing pre-assertion.
+/** Route-dispatch tests run the handler directly, bypassing the HTTP guard. */
+const guardStub = {
+  canActivate: (ctx: { switchToHttp: () => { getRequest: () => { projectContext?: ProjectContext } } }) => {
+    ctx.switchToHttp().getRequest().projectContext = makeCtx();
+    return true;
+  },
+} as unknown as ProjectMembershipGuard;
+
+// Calls searchSymbols so a missing method fails at the subsequent assertion
+// rather than throwing pre-assertion.
 async function callSearch(
   controller: CodeIntelController,
   query: SearchSymbolsQuery,
-  principal: UserPrincipal,
+  ctx: ProjectContext,
 ) {
   return (controller as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>)[
     'searchSymbols'
-  ]?.(query, principal);
+  ]?.(query, ctx);
 }
 
 // ---------------------------------------------------------------------------
@@ -88,15 +79,11 @@ describe('CodeIntelController.searchSymbols()', () => {
   let controller: CodeIntelController;
   let mockSearchSymbols: jest.Mock;
   let mockGetSymbol: jest.Mock;
-  let mockFindProjectIdBySlug: jest.Mock;
-  let mockAssertProjectMembership: jest.Mock;
   let module: TestingModule;
 
   beforeEach(async () => {
     mockSearchSymbols = jest.fn();
     mockGetSymbol = jest.fn();
-    mockFindProjectIdBySlug = jest.fn().mockResolvedValue('proj-1');
-    mockAssertProjectMembership = jest.fn().mockResolvedValue(undefined);
 
     module = await Test.createTestingModule({
       controllers: [CodeIntelController],
@@ -114,8 +101,8 @@ describe('CodeIntelController.searchSymbols()', () => {
         {
           provide: ProjectAccessService,
           useValue: {
-            findProjectIdBySlug: mockFindProjectIdBySlug,
-            assertProjectMembership: mockAssertProjectMembership,
+            findProjectIdBySlug: jest.fn().mockResolvedValue('proj-1'),
+            assertProjectMembership: jest.fn().mockResolvedValue(undefined),
           } as unknown as ProjectAccessService,
         },
       ],
@@ -141,7 +128,7 @@ describe('CodeIntelController.searchSymbols()', () => {
       ];
       mockSearchSymbols.mockResolvedValue({ items, total: 2 });
 
-      const result = await callSearch(controller, { projectSlug: 'my-project', q: 'foo' }, makeAdminUser());
+      const result = await callSearch(controller, { projectSlug: 'my-project', q: 'foo' }, makeCtx());
 
       expect((result as { data?: { items?: unknown[] } })?.data?.items).toHaveLength(2);
     });
@@ -156,7 +143,7 @@ describe('CodeIntelController.searchSymbols()', () => {
       });
       mockSearchSymbols.mockResolvedValue({ items: [item], total: 1 });
 
-      const result = await callSearch(controller, { projectSlug: 'my-project', q: 'foo' }, makeAdminUser());
+      const result = await callSearch(controller, { projectSlug: 'my-project', q: 'foo' }, makeCtx());
 
       const resultItem = (result as { data?: { items?: SymbolSearchItem[] } })?.data?.items?.[0];
       expect(resultItem).toHaveProperty('id');
@@ -169,7 +156,7 @@ describe('CodeIntelController.searchSymbols()', () => {
     it('AC1 boundary: q with no matches returns empty items array', async () => {
       mockSearchSymbols.mockResolvedValue({ items: [], total: 0 });
 
-      const result = await callSearch(controller, { projectSlug: 'my-project', q: 'zzz-no-match' }, makeAdminUser());
+      const result = await callSearch(controller, { projectSlug: 'my-project', q: 'zzz-no-match' }, makeCtx());
 
       expect((result as { data?: { items?: unknown[] } })?.data?.items).toHaveLength(0);
     });
@@ -183,7 +170,7 @@ describe('CodeIntelController.searchSymbols()', () => {
     it('AC2: returns data.total matching the service result', async () => {
       mockSearchSymbols.mockResolvedValue({ items: [makeSearchItem()], total: 42 });
 
-      const result = await callSearch(controller, { projectSlug: 'my-project', q: 'foo' }, makeAdminUser());
+      const result = await callSearch(controller, { projectSlug: 'my-project', q: 'foo' }, makeCtx());
 
       expect((result as { data?: { total?: number } })?.data?.total).toBe(42);
     });
@@ -191,7 +178,7 @@ describe('CodeIntelController.searchSymbols()', () => {
     it('AC2 boundary: total is 0 when no items match', async () => {
       mockSearchSymbols.mockResolvedValue({ items: [], total: 0 });
 
-      const result = await callSearch(controller, { projectSlug: 'my-project', q: 'no-match' }, makeAdminUser());
+      const result = await callSearch(controller, { projectSlug: 'my-project', q: 'no-match' }, makeCtx());
 
       expect((result as { data?: { total?: number } })?.data?.total).toBe(0);
     });
@@ -208,7 +195,7 @@ describe('CodeIntelController.searchSymbols()', () => {
         total: 1,
       });
 
-      await callSearch(controller, { projectSlug: 'my-project', file: 'auth' }, makeAdminUser());
+      await callSearch(controller, { projectSlug: 'my-project', file: 'auth' }, makeCtx());
 
       expect(mockSearchSymbols).toHaveBeenCalledWith(
         'proj-1',
@@ -220,7 +207,7 @@ describe('CodeIntelController.searchSymbols()', () => {
       const items = [makeSearchItem({ file: 'src/auth/auth.service.ts' })];
       mockSearchSymbols.mockResolvedValue({ items, total: 1 });
 
-      const result = await callSearch(controller, { projectSlug: 'my-project', file: 'auth' }, makeAdminUser());
+      const result = await callSearch(controller, { projectSlug: 'my-project', file: 'auth' }, makeCtx());
 
       expect((result as { data?: { items?: unknown[] } })?.data?.items).toHaveLength(1);
     });
@@ -228,7 +215,7 @@ describe('CodeIntelController.searchSymbols()', () => {
     it('AC3 boundary: empty items when file fragment matches nothing', async () => {
       mockSearchSymbols.mockResolvedValue({ items: [], total: 0 });
 
-      const result = await callSearch(controller, { projectSlug: 'my-project', file: 'zz-no-such-path' }, makeAdminUser());
+      const result = await callSearch(controller, { projectSlug: 'my-project', file: 'zz-no-such-path' }, makeCtx());
 
       expect((result as { data?: { items?: unknown[] } })?.data?.items).toHaveLength(0);
     });
@@ -242,7 +229,7 @@ describe('CodeIntelController.searchSymbols()', () => {
     it('AC4: passes page=2 and limit=20 to the service', async () => {
       mockSearchSymbols.mockResolvedValue({ items: [], total: 50 });
 
-      await callSearch(controller, { projectSlug: 'my-project', q: 'foo', page: 2, limit: 20 }, makeAdminUser());
+      await callSearch(controller, { projectSlug: 'my-project', q: 'foo', page: 2, limit: 20 }, makeCtx());
 
       expect(mockSearchSymbols).toHaveBeenCalledWith(
         'proj-1',
@@ -259,7 +246,7 @@ describe('CodeIntelController.searchSymbols()', () => {
       const result = await callSearch(
         controller,
         { projectSlug: 'my-project', q: 'foo', page: 2, limit: 20 },
-        makeAdminUser(),
+        makeCtx(),
       );
 
       expect((result as { data?: { items?: unknown[] } })?.data?.items).toHaveLength(20);
@@ -274,7 +261,7 @@ describe('CodeIntelController.searchSymbols()', () => {
     it('AC5: service is called with effective limit at or below 100 when limit=9999 is requested', async () => {
       mockSearchSymbols.mockResolvedValue({ items: [], total: 0 });
 
-      await callSearch(controller, { projectSlug: 'my-project', limit: 9999 }, makeAdminUser());
+      await callSearch(controller, { projectSlug: 'my-project', limit: 9999 }, makeCtx());
 
       // searchSymbols must have been called (fails if method doesn't exist yet)
       expect(mockSearchSymbols).toHaveBeenCalledTimes(1);
@@ -291,7 +278,7 @@ describe('CodeIntelController.searchSymbols()', () => {
     it('AC6: calls service without q or file when neither is provided', async () => {
       mockSearchSymbols.mockResolvedValue({ items: [makeSearchItem()], total: 1 });
 
-      await callSearch(controller, { projectSlug: 'my-project' }, makeAdminUser());
+      await callSearch(controller, { projectSlug: 'my-project' }, makeCtx());
 
       expect(mockSearchSymbols).toHaveBeenCalledTimes(1);
       const callOpts = mockSearchSymbols.mock.calls[0]?.[1] as { q?: unknown; file?: unknown } | undefined;
@@ -303,7 +290,7 @@ describe('CodeIntelController.searchSymbols()', () => {
       const items = [makeSearchItem({ name: 'Alpha' }), makeSearchItem({ name: 'Beta' })];
       mockSearchSymbols.mockResolvedValue({ items, total: 2 });
 
-      const result = await callSearch(controller, { projectSlug: 'my-project' }, makeAdminUser());
+      const result = await callSearch(controller, { projectSlug: 'my-project' }, makeCtx());
 
       expect((result as { data?: { items?: unknown[] } })?.data?.items).toHaveLength(2);
     });
@@ -311,60 +298,10 @@ describe('CodeIntelController.searchSymbols()', () => {
     it('AC6 boundary: empty project returns empty items with total 0', async () => {
       mockSearchSymbols.mockResolvedValue({ items: [], total: 0 });
 
-      const result = await callSearch(controller, { projectSlug: 'my-project' }, makeAdminUser());
+      const result = await callSearch(controller, { projectSlug: 'my-project' }, makeCtx());
 
       expect((result as { data?: { items?: unknown[]; total?: number } })?.data?.items).toHaveLength(0);
       expect((result as { data?: { total?: number } })?.data?.total).toBe(0);
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // AC7: unknown projectSlug → 404
-  // -------------------------------------------------------------------------
-
-  describe('AC7: unknown projectSlug returns HTTP 404', () => {
-    it('AC7: throws NotFoundAppException when projectSlug does not resolve', async () => {
-      mockFindProjectIdBySlug.mockRejectedValue(new NotFoundAppException({}, 'projects'));
-
-      let caughtError: unknown;
-      try {
-        await callSearch(controller, { projectSlug: 'no-such-slug' }, makeAdminUser());
-      } catch (e) {
-        caughtError = e;
-      }
-
-      expect(caughtError).toBeInstanceOf(NotFoundAppException);
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // AC8: non-member principal → 403
-  // -------------------------------------------------------------------------
-
-  describe('AC8: non-member principal returns HTTP 403', () => {
-    it('AC8: throws ForbiddenAppException when principal is not a project member', async () => {
-      mockAssertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'code-intel'));
-
-      let caughtError: unknown;
-      try {
-        await callSearch(controller, { projectSlug: 'my-project' }, makeMemberUser());
-      } catch (e) {
-        caughtError = e;
-      }
-
-      expect(caughtError).toBeInstanceOf(ForbiddenAppException);
-    });
-
-    it('AC8 boundary: no service call is made when membership check fails', async () => {
-      mockAssertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'code-intel'));
-
-      try {
-        await callSearch(controller, { projectSlug: 'my-project' }, makeMemberUser());
-      } catch {
-        // expected
-      }
-
-      expect(mockSearchSymbols).not.toHaveBeenCalled();
     });
   });
 
@@ -398,7 +335,7 @@ describe('CodeIntelController.searchSymbols()', () => {
       };
       mockGetSymbol.mockResolvedValue(sym);
 
-      const result = await controller.getSymbol('repo:src/a.ts::Foo', 'my-project', makeAdminUser());
+      const result = await controller.getSymbol('repo:src/a.ts::Foo', makeCtx());
 
       expect(mockGetSymbol).toHaveBeenCalledWith('proj-1', 'repo:src/a.ts::Foo');
       expect(mockSearchSymbols).not.toHaveBeenCalled();
@@ -411,7 +348,9 @@ describe('CodeIntelController.searchSymbols()', () => {
 // AC10 HTTP routing layer: verify at the Fastify dispatch level that
 // GET /code-intel/symbols/:symbolId does NOT get captured by the search route.
 // A decorator/path-order regression (e.g. wrong path string, wildcard route)
-// would cause the wrong mock to be called and fail these tests.
+// would cause the wrong mock to be called and fail these tests. The project
+// guard is stubbed: its slug/membership decisions are covered by the guard
+// unit spec and the DB-backed integration specs.
 // ---------------------------------------------------------------------------
 
 describe('AC10 HTTP routing: detail route is not shadowed by the search route', () => {
@@ -459,7 +398,10 @@ describe('AC10 HTTP routing: detail route is not shadowed by the search route', 
           } as unknown as ProjectAccessService,
         },
       ],
-    }).compile();
+    })
+      .overrideGuard(ProjectMembershipGuard)
+      .useValue(guardStub)
+      .compile();
 
     routingApp = routingModule.createNestApplication<NestFastifyApplication>(
       new FastifyAdapter(),
@@ -491,90 +433,5 @@ describe('AC10 HTTP routing: detail route is not shadowed by the search route', 
 
     expect(mockGetSymbolForRouting).toHaveBeenCalledTimes(1);
     expect(mockSearchForRouting).not.toHaveBeenCalled();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// AC7 and AC8 HTTP status codes: verified at the Fastify route boundary.
-// The unit-test describe blocks above only assert on the exception type
-// thrown inside the controller method. These tests boot a real Fastify HTTP
-// server (mocked providers, no DB) so that NestJS's BaseExceptionFilter
-// runs the full dispatch path and we can assert on the response status code
-// the caller actually receives.
-// ---------------------------------------------------------------------------
-
-describe('AC7 and AC8 HTTP status codes at the route boundary', () => {
-  let statusApp: NestFastifyApplication;
-  let mockFindProjectIdHttp: jest.Mock;
-  let mockAssertMembershipHttp: jest.Mock;
-
-  beforeAll(async () => {
-    mockFindProjectIdHttp = jest.fn().mockResolvedValue('proj-1');
-    mockAssertMembershipHttp = jest.fn().mockResolvedValue(undefined);
-
-    const statusModule = await Test.createTestingModule({
-      controllers: [CodeIntelController],
-      providers: [
-        {
-          provide: AstIndexService,
-          useValue: {
-            indexCommit: jest.fn(),
-            getSymbol: jest.fn().mockResolvedValue(null),
-            getCallers: jest.fn().mockResolvedValue([]),
-            getCallees: jest.fn().mockResolvedValue([]),
-            searchSymbols: jest.fn().mockResolvedValue({ items: [], total: 0 }),
-          } as unknown as AstIndexService,
-        },
-        {
-          provide: ProjectAccessService,
-          useValue: {
-            findProjectIdBySlug: mockFindProjectIdHttp,
-            assertProjectMembership: mockAssertMembershipHttp,
-          } as unknown as ProjectAccessService,
-        },
-      ],
-    }).compile();
-
-    statusApp = statusModule.createNestApplication<NestFastifyApplication>(
-      new FastifyAdapter(),
-    );
-    await statusApp.init();
-    await statusApp.getHttpAdapter().getInstance().ready();
-  });
-
-  afterAll(async () => {
-    if (statusApp) await statusApp.close();
-  });
-
-  beforeEach(() => {
-    // Reset to happy-path defaults before each test so Once overrides don't leak.
-    mockFindProjectIdHttp.mockReset().mockResolvedValue('proj-1');
-    mockAssertMembershipHttp.mockReset().mockResolvedValue(undefined);
-  });
-
-  // -------------------------------------------------------------------------
-  // AC7: unknown projectSlug → HTTP 404
-  // -------------------------------------------------------------------------
-
-  it('AC7: GET /code-intel/symbols returns HTTP 404 when projectSlug does not resolve', async () => {
-    mockFindProjectIdHttp.mockRejectedValueOnce(new NotFoundAppException({}, 'projects'));
-
-    const res = await request(statusApp.getHttpServer())
-      .get('/code-intel/symbols?projectSlug=no-such-slug');
-
-    expect(res.status).toBe(404);
-  });
-
-  // -------------------------------------------------------------------------
-  // AC8: non-member principal → HTTP 403
-  // -------------------------------------------------------------------------
-
-  it('AC8: GET /code-intel/symbols returns HTTP 403 when principal is not a project member', async () => {
-    mockAssertMembershipHttp.mockRejectedValueOnce(new ForbiddenAppException({}, 'code-intel'));
-
-    const res = await request(statusApp.getHttpServer())
-      .get('/code-intel/symbols?projectSlug=my-project');
-
-    expect(res.status).toBe(403);
   });
 });

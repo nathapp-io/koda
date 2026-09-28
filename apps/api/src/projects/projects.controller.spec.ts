@@ -6,6 +6,7 @@ import { ImpactAnalysisService } from '../code-intel/impact-analysis.service';
 import { AgentsService } from '../agents/agents.service';
 import { ForbiddenAppException, NotFoundAppException } from '@nathapp/nestjs-common';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
+import { ProjectContext } from './project-context';
 import { ProjectAccessService } from './project-access.service';
 import { ProjectResponseDto } from './dto/project-response.dto';
 
@@ -226,33 +227,32 @@ describe('ProjectsController', () => {
 
 
   describe('getChangeImpact', () => {
+    // Slice 4: the route is guarded by ProjectMembershipGuard, so the handler
+    // receives the guard-resolved ProjectContext instead of a slug+principal.
+    const adminCtx: ProjectContext = { project: { id: 'proj-1', slug: 'alpha' }, role: 'ADMIN' };
+
     it('throws BadRequestException when required params are missing', async () => {
-      projectsService.findBySlug.mockResolvedValue(mockProject as any);
-
       await expect(
-        controller.getChangeImpact('alpha', '', 'abc123', 'file.ts', adminPrincipal),
+        controller.getChangeImpact('', 'abc123', 'file.ts', adminCtx),
       ).rejects.toThrow(BadRequestException);
 
       await expect(
-        controller.getChangeImpact('alpha', 'repo-1', '', 'file.ts', adminPrincipal),
+        controller.getChangeImpact('repo-1', '', 'file.ts', adminCtx),
       ).rejects.toThrow(BadRequestException);
 
       await expect(
-        controller.getChangeImpact('alpha', 'repo-1', 'abc123', '', adminPrincipal),
+        controller.getChangeImpact('repo-1', 'abc123', '', adminCtx),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('calls impactAnalysisService with parsed changed files', async () => {
-      projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      projectsService.assertProjectMembership.mockResolvedValue(undefined);
       impactAnalysisService.getChangeImpact.mockResolvedValue({ affected: [] } as any);
 
       const result = await controller.getChangeImpact(
-        'alpha',
         'repo-1',
         'abc123',
         'src/auth.ts, src/user.ts',
-        adminPrincipal,
+        adminCtx,
         'ticket-1',
       );
 
@@ -264,15 +264,6 @@ describe('ProjectsController', () => {
         ticketId: 'ticket-1',
       });
       expect((result as any).data).toEqual({ affected: [] });
-    });
-
-    it('forbids member without membership', async () => {
-      projectsService.findBySlug.mockResolvedValue(mockProject as any);
-      projectsService.assertProjectMembership.mockRejectedValue(new ForbiddenAppException({}, 'projects'));
-
-      await expect(
-        controller.getChangeImpact('alpha', 'repo-1', 'abc', 'file.ts', memberPrincipal),
-      ).rejects.toThrow(ForbiddenAppException);
     });
   });
 

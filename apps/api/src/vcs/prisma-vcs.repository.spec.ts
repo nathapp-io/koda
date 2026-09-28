@@ -38,6 +38,7 @@ describe('PrismaVcsRepository', () => {
     const result = await repo.createTicketFromIssue(
       { id: 'p1' } as never,
       { number: 99, title: 'Issue title', body: 'Issue body', url: 'http://gh/issue/99' } as never,
+      'acme/widgets#99',
     );
 
     expect(mockRun).toHaveBeenCalledTimes(1);
@@ -46,7 +47,7 @@ describe('PrismaVcsRepository', () => {
         data: expect.objectContaining({
           projectId: 'p1',
           number: 8,
-          externalVcsId: '99',
+          externalVcsId: 'acme/widgets#99',
           externalVcsUrl: 'http://gh/issue/99',
         }),
       }),

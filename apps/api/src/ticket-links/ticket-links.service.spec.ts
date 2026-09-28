@@ -25,7 +25,6 @@ describe('TicketLinksService', () => {
     findLinkByUrl: jest.fn(),
     createLink: jest.fn(),
     findLinksByTicket: jest.fn(),
-    updateLink: jest.fn(),
     findLinkByIdAndTicket: jest.fn(),
     deleteLink: jest.fn(),
     findByPrNumber: jest.fn(),

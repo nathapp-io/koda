@@ -5,13 +5,14 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import type { VcsConnectionDomain } from './domain/vcs.domain';
 import { decryptToken } from '../common/utils/encryption.util';
-import { createVcsProvider } from './factory';
+import { providerForConnection } from './provider-for-connection';
 import { VcsPrStatus } from './types';
 import { TicketStatus, CommentType } from '../common/enums';
 import { validateTransition } from '../tickets/state-machine/ticket-transitions';
 import { VcsLinkExtractorService } from './vcs-link-extractor.service';
 import type { VcsTicketDomain } from './domain/vcs.domain';
 import { IVcsRepository, TicketLinkData, VCS_REPOSITORY } from './domain/vcs.repository';
+import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 
 export interface SyncPrStatusResult {
   updated: number;
@@ -25,6 +26,7 @@ export class VcsPrSyncService {
   constructor(
     @Inject(VCS_REPOSITORY) private readonly vcsRepo: IVcsRepository,
     @Optional() private readonly vcsLinkExtractorService?: VcsLinkExtractorService,
+    @Optional() @Inject(VCS_CFG) private readonly vcsConfig?: IVcsConfig,
   ) {}
 
   /**
@@ -61,11 +63,7 @@ export class VcsPrSyncService {
     const decryptedToken = decryptToken(connection.encryptedToken, encryptionKey);
 
     // Create VCS provider
-    const provider = createVcsProvider(connection.provider, {
-      provider: connection.provider,
-      token: decryptedToken,
-      repoUrl: `https://github.com/${connection.repoOwner}/${connection.repoName}`,
-    });
+    const provider = providerForConnection(connection, decryptedToken, this.vcsConfig);
 
     // Query TicketLink entries with active PRs and their linked tickets
     const ticketLinks = (await this.vcsRepo.findActiveTicketLinksWithPrs(project.id)) as TicketLinkData[];
@@ -98,8 +96,9 @@ export class VcsPrSyncService {
             }
 
             // Always update prState regardless of transition outcome
-            await this.vcsRepo.updateTicketLinkPrState(link.id, newPrState);
-            updated++;
+            if ((await this.vcsRepo.updateTicketLinkWithPrState(link.id, newPrState)) === 'updated') {
+              updated++;
+            }
 
             // AC6: After syncPrStatus() updates a TicketLink, extractLinksFromPr() is called
             // to pick up new commits from the PR
@@ -129,8 +128,9 @@ export class VcsPrSyncService {
       } catch (error) {
         if (error instanceof NotFoundAppException) {
           // 404: mark as closed
-          await this.vcsRepo.updateTicketLinkPrState(link.id, 'closed');
-          updated++;
+          if ((await this.vcsRepo.updateTicketLinkWithPrState(link.id, 'closed')) === 'updated') {
+            updated++;
+          }
         } else {
           // General API error: skip this PR
           skipped++;

@@ -10,27 +10,39 @@ import {
   HttpStatus,
   HttpException,
   Inject,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
   ApiBearerAuth,
   ApiOperation,
+  ApiParam,
   ApiResponse,
 } from '@nestjs/swagger';
 import { Principal, RequiredPermission } from '@nathapp/nestjs-auth';
-import { ValidationAppException } from '@nathapp/nestjs-common';
+import { JsonResponse, ForbiddenAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 import { VcsConnectionService } from './vcs-connection.service';
 import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { ProjectsService } from '../projects/projects.service';
+import { ProjectMembershipGuard } from '../projects/project-membership.guard';
+import { ProjectRoles } from '../projects/project-roles.decorator';
+import { CurrentProject } from '../projects/current-project.decorator';
+import { ProjectContext } from '../projects/project-context';
 import { CreateVcsConnectionDto } from './dto/create-vcs-connection.dto';
 import { UpdateVcsConnectionDto } from './dto/update-vcs-connection.dto';
-import { VcsConnectionResponseDto } from './dto/vcs-connection-response.dto';
+import {
+  VcsConnectionResponseDto,
+  VcsConnectionCreatedResponseDto,
+  VcsConnectionUpdatedResponseDto,
+  WebhookSecretResponseDto,
+} from './dto/vcs-connection-response.dto';
 import { TestConnectionResultDto } from './dto/test-connection-result.dto';
 import { SyncResultDto } from './dto/sync-result.dto';
 import { decryptToken } from '../common/utils/encryption.util';
-import { createVcsProvider } from './factory';
+import { providerForConnection } from './provider-for-connection';
+import { isUserPrincipal } from '../auth/principal/koda-principal.types';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 @ApiTags('vcs')
@@ -56,6 +68,7 @@ export class VcsController {
   @Post()
   @RequiredPermission('ADMIN')
   @ApiOperation({ summary: 'Create a VCS connection for a project' })
+  @ApiResponse({ status: 201, type: VcsConnectionCreatedResponseDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role or project membership required' })
   @HttpCode(HttpStatus.CREATED)
@@ -63,7 +76,7 @@ export class VcsController {
     @Param('slug') slug: string,
     @Body() dto: CreateVcsConnectionDto,
     @Principal() principal: KodaPrincipal,
-  ): Promise<VcsConnectionResponseDto> {
+  ) {
     // Get project by slug
     const project = await this.projectsService.findBySlug(slug);
     await this.projectsService.assertProjectMembership(project.id, principal);
@@ -74,7 +87,7 @@ export class VcsController {
       this.throwEncryptionKeyNotConfigured();
     }
 
-    return this.vcsService.create(project.id, encryptionKey, dto);
+    return JsonResponse.Ok(await this.vcsService.create(project.id, encryptionKey, dto));
   }
 
   /**
@@ -84,17 +97,18 @@ export class VcsController {
   @Get()
   @RequiredPermission('ADMIN')
   @ApiOperation({ summary: 'Get VCS connection for a project' })
+  @ApiResponse({ status: 200, type: VcsConnectionResponseDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role or project membership required' })
   async getConnection(
     @Param('slug') slug: string,
     @Principal() principal: KodaPrincipal,
-  ): Promise<VcsConnectionResponseDto> {
+  ) {
     // Get project by slug
     const project = await this.projectsService.findBySlug(slug);
     await this.projectsService.assertProjectMembership(project.id, principal);
 
-    return this.vcsService.findByProject(project.id);
+    return JsonResponse.Ok(await this.vcsService.findByProject(project.id));
   }
 
   /**
@@ -104,13 +118,14 @@ export class VcsController {
   @Patch()
   @RequiredPermission('ADMIN')
   @ApiOperation({ summary: 'Update VCS connection for a project' })
+  @ApiResponse({ status: 200, type: VcsConnectionUpdatedResponseDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role or project membership required' })
   async updateConnection(
     @Param('slug') slug: string,
     @Body() dto: UpdateVcsConnectionDto,
     @Principal() principal: KodaPrincipal,
-  ): Promise<VcsConnectionResponseDto> {
+  ) {
     // Get project by slug
     const project = await this.projectsService.findBySlug(slug);
     await this.projectsService.assertProjectMembership(project.id, principal);
@@ -121,7 +136,7 @@ export class VcsController {
       this.throwEncryptionKeyNotConfigured();
     }
 
-    return this.vcsService.update(project.id, encryptionKey, dto);
+    return JsonResponse.Ok(await this.vcsService.update(project.id, encryptionKey, dto));
   }
 
   /**
@@ -152,12 +167,13 @@ export class VcsController {
   @Post('/test')
   @RequiredPermission('ADMIN')
   @ApiOperation({ summary: 'Test the VCS connection for a project' })
+  @ApiResponse({ status: 200, type: TestConnectionResultDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - admin role or project membership required' })
   async testConnection(
     @Param('slug') slug: string,
     @Principal() principal: KodaPrincipal,
-  ): Promise<TestConnectionResultDto> {
+  ) {
     // Get project by slug
     const project = await this.projectsService.findBySlug(slug);
     await this.projectsService.assertProjectMembership(project.id, principal);
@@ -168,7 +184,32 @@ export class VcsController {
       this.throwEncryptionKeyNotConfigured();
     }
 
-    return this.vcsService.testConnection(project.id, encryptionKey);
+    return JsonResponse.Ok(await this.vcsService.testConnection(project.id, encryptionKey));
+  }
+
+  /**
+   * POST /projects/:slug/vcs/webhook-secret/rotate
+   * M9: project ADMIN or global ADMIN. Agents never hold VCS webhook secrets:
+   * ProjectRoles lets agents through, so the handler refuses them.
+   */
+  @Post('/webhook-secret/rotate')
+  @UseGuards(ProjectMembershipGuard)
+  @ProjectRoles('ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Rotate the VCS webhook secret and return the new secret once' })
+  @ApiParam({ name: 'slug', required: true, schema: { type: 'string' } })
+  @ApiResponse({ status: 200, type: WebhookSecretResponseDto })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - project ADMIN or global ADMIN required' })
+  @ApiResponse({ status: 404, description: 'Project or VCS connection not found' })
+  async rotateWebhookSecret(
+    @CurrentProject() ctx: ProjectContext,
+    @Principal() principal: KodaPrincipal,
+  ) {
+    if (!isUserPrincipal(principal)) {
+      throw new ForbiddenAppException({}, 'projects');
+    }
+    return JsonResponse.Ok(await this.vcsService.rotateWebhookSecret(ctx.project.id));
   }
 
   /**
@@ -187,7 +228,7 @@ export class VcsController {
     @Param('slug') slug: string,
     @Param('issueNumber') issueNumber: string,
     @Principal() principal: KodaPrincipal,
-  ): Promise<SyncResultDto> {
+  ) {
     // Get project by slug
     const project = await this.projectsService.findBySlug(slug);
     await this.projectsService.assertProjectMembership(project.id, principal);
@@ -203,17 +244,13 @@ export class VcsController {
 
     // Decrypt token and create provider
     const decryptedToken = decryptToken(connection.encryptedToken, encryptionKey);
-    const provider = createVcsProvider(connection.provider, {
-      provider: connection.provider,
-      token: decryptedToken,
-      repoUrl: `https://github.com/${connection.repoOwner}/${connection.repoName}`,
-    });
+    const provider = providerForConnection(connection, decryptedToken, this.vcsConfig);
 
     // Fetch specific issue
     const issue = await provider.fetchIssue(parseInt(issueNumber, 10));
 
     // Sync the issue (regardless of allowedAuthors per AC)
-    const result = await this.syncService.syncIssue(project, issue, 'manual');
+    const result = await this.syncService.syncIssue(project, issue, 'manual', connection);
 
     // Return HTTP 409 if issue is already synced
     if (result.action === 'skipped') {
@@ -222,7 +259,7 @@ export class VcsController {
 
     const ref = result.ticketNumber ? `${project.key}-${result.ticketNumber}` : undefined;
 
-    return {
+    return JsonResponse.Ok({
       syncType: 'manual',
       issuesSynced: 1,
       issuesSkipped: 0,
@@ -235,7 +272,7 @@ export class VcsController {
               },
             ]
           : [],
-    };
+    });
   }
 
   /**
@@ -252,7 +289,7 @@ export class VcsController {
   async syncAll(
     @Param('slug') slug: string,
     @Principal() principal: KodaPrincipal,
-  ): Promise<SyncResultDto> {
+  ) {
     // Get project by slug
     const project = await this.projectsService.findBySlug(slug);
     await this.projectsService.assertProjectMembership(project.id, principal);
@@ -269,7 +306,7 @@ export class VcsController {
     // Run full sync
     const result = await this.syncService.fullSync(project, connection, encryptionKey);
 
-    return {
+    return JsonResponse.Ok({
       syncType: 'manual',
       issuesSynced: result.issuesSynced,
       issuesSkipped: result.issuesSkipped,
@@ -277,7 +314,7 @@ export class VcsController {
         ref: `${project.key}-${ticket.number}`,
         title: ticket.title,
       })),
-    };
+    });
   }
 
   /**
@@ -294,7 +331,7 @@ export class VcsController {
   async syncPr(
     @Param('slug') slug: string,
     @Principal() principal: KodaPrincipal,
-  ): Promise<{ updated: number }> {
+  ) {
     // Get project by slug
     const project = await this.projectsService.findBySlug(slug);
     await this.projectsService.assertProjectMembership(project.id, principal);
@@ -311,6 +348,6 @@ export class VcsController {
     // Run PR sync
     const result = await this.prSyncService.syncPrStatus(project, connection, encryptionKey);
 
-    return { updated: result.updated };
+    return JsonResponse.Ok({ updated: result.updated });
   }
 }

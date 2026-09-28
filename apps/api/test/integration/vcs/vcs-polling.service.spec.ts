@@ -133,7 +133,7 @@ describe('VcsPollingService', () => {
     findExistingTicketByExternalId: jest.fn(),
     createTicketFromIssue: jest.fn(),
     findActiveTicketLinksWithPrs: jest.fn(),
-    updateTicketLinkPrState: jest.fn(),
+    updateTicketLinkWithPrState: jest.fn(),
     applyMergedPrTransition: jest.fn(),
   };
 
@@ -141,6 +141,7 @@ describe('VcsPollingService', () => {
     encryptionKey: 'test-encryption-key',
     defaultPollingIntervalMs: 300000,
     githubApiUrl: 'https://api.github.com',
+    gitlabApiUrl: 'https://gitlab.com/api/v4',
   };
 
   // schedulePolling() creates real Node setInterval timers. The mocked
@@ -273,7 +274,7 @@ describe('VcsPollingService', () => {
     it('should filter issues by allowedAuthors list', async () => {
       const connectionWithProject = { ...mockVcsConnection, project: mockProject };
       const mockProvider = {
-        fetchIssues: jest.fn().mockResolvedValue([mockVcsIssue1, mockVcsIssue2, mockVcsIssueOther]),
+        fetchIssues: jest.fn().mockResolvedValue({ issues: [mockVcsIssue1, mockVcsIssue2, mockVcsIssueOther], cursor: null, capped: false }),
       };
 
       // Mock the provider creation

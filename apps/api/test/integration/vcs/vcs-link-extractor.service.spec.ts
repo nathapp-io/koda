@@ -188,7 +188,8 @@ describe('VcsLinkExtractorService', () => {
         mockTicket as any,
         mockVcsConnection,
         'encryption-key',
-        mockBranchName,
+mockBranchName,
+mockPrStatus.number,
       );
 
       expect(mockPrismaService.client.ticketLink.create).toHaveBeenCalledWith(
@@ -220,7 +221,8 @@ describe('VcsLinkExtractorService', () => {
         mockTicket as any,
         mockVcsConnection,
         'encryption-key',
-        mockBranchName,
+mockBranchName,
+mockPrStatus.number,
       );
 
       const createCall = mockPrismaService.client.ticketLink.create.mock.calls[0][0];
@@ -247,7 +249,8 @@ describe('VcsLinkExtractorService', () => {
         mockTicket as any,
         mockVcsConnection,
         'encryption-key',
-        mockBranchName,
+mockBranchName,
+mockPrStatus.number,
       );
 
       // Should be called for branch link + 2 matching commits (KODA-42 appears twice)
@@ -292,7 +295,8 @@ describe('VcsLinkExtractorService', () => {
         mockTicket as any,
         mockVcsConnection,
         'encryption-key',
-        mockBranchName,
+mockBranchName,
+mockPrStatus.number,
       );
 
       const commitCall = mockPrismaService.client.ticketLink.create.mock.calls.find(
@@ -329,7 +333,8 @@ describe('VcsLinkExtractorService', () => {
         mockTicket as any,
         mockVcsConnection,
         'encryption-key',
-        mockBranchName,
+mockBranchName,
+mockPrStatus.number,
       );
 
       // findFirst should be called to check for existing
@@ -354,7 +359,8 @@ describe('VcsLinkExtractorService', () => {
         mockTicket as any,
         mockVcsConnection,
         'encryption-key',
-        mockBranchName,
+mockBranchName,
+mockPrStatus.number,
       );
 
       expect(mockPrismaService.client.ticketLink.create).toHaveBeenCalled();
@@ -388,7 +394,8 @@ describe('VcsLinkExtractorService', () => {
         mockTicket as any,
         mockVcsConnection,
         'encryption-key',
-        mockBranchName,
+mockBranchName,
+mockPrStatus.number,
       );
 
       // Only branch link should be created, no commit links
@@ -424,7 +431,8 @@ describe('VcsLinkExtractorService', () => {
         mockTicket as any,
         mockVcsConnection,
         'encryption-key',
-        mockBranchName,
+mockBranchName,
+mockPrStatus.number,
       );
 
       // Only branch link should be created
@@ -455,7 +463,8 @@ describe('VcsLinkExtractorService', () => {
           mockTicket as any,
           mockVcsConnection,
           'encryption-key',
-          mockBranchName,
+mockBranchName,
+mockPrStatus.number,
         ),
       ).resolves.toBeUndefined();
 
@@ -484,7 +493,8 @@ describe('VcsLinkExtractorService', () => {
         mockTicket as any,
         mockVcsConnection,
         'encryption-key',
-        mockBranchName,
+mockBranchName,
+mockPrStatus.number,
       );
 
       expect(loggerWarnSpy).toHaveBeenCalledWith(
@@ -510,7 +520,8 @@ describe('VcsLinkExtractorService', () => {
         mockTicket as any,
         mockVcsConnection,
         'encryption-key',
-        mockBranchName,
+mockBranchName,
+mockPrStatus.number,
       );
 
       expect(mockVcsProvider.getPullRequestStatus).toHaveBeenCalledWith(mockPrStatus.number);
@@ -534,7 +545,8 @@ describe('VcsLinkExtractorService', () => {
         mockTicket as any,
         mockVcsConnection,
         'encryption-key',
-        mockBranchName,
+mockBranchName,
+mockPrStatus.number,
       );
 
       expect(decryptToken).toHaveBeenCalledWith(mockVcsConnection.encryptedToken, 'encryption-key');
@@ -556,7 +568,8 @@ describe('VcsLinkExtractorService', () => {
         mockTicket as any,
         mockVcsConnection,
         'encryption-key',
-        mockBranchName,
+mockBranchName,
+mockPrStatus.number,
       );
 
       expect(mockVcsProvider.listPrCommits).toHaveBeenCalledWith(mockPrStatus.number);
@@ -597,7 +610,8 @@ describe('VcsLinkExtractorService', () => {
         mockTicket as any,
         mockVcsConnection,
         'encryption-key',
-        mockBranchName,
+mockBranchName,
+mockPrStatus.number,
       );
 
       // Should only create one commit link (deduplicated by URL)

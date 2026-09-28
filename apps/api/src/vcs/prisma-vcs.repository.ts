@@ -14,6 +14,7 @@ import {
   IVcsRepository,
   MergedPrTransitionInput,
   OutboxDedupQuery,
+  PrStateWriteResult,
   TicketLinkData,
   UpdateVcsConnectionData,
 } from './domain/vcs.repository';
@@ -127,10 +128,11 @@ export class PrismaVcsRepository implements IVcsRepository {
     return this.toConnectionDomain(await this.db.vcsConnection.update({ where: { projectId }, data }));
   }
 
-  async updateVcsConnectionLastSynced(connectionId: string): Promise<void> {
+  /** M10: the poll cursor, the newest issue update seen (never "now"). */
+  async updateVcsConnectionLastSynced(connectionId: string, syncedAt: Date): Promise<void> {
     await this.db.vcsConnection.update({
       where: { id: connectionId },
-      data: { lastSyncedAt: new Date() },
+      data: { lastSyncedAt: syncedAt },
     });
   }
 
@@ -152,14 +154,14 @@ export class PrismaVcsRepository implements IVcsRepository {
 
   /**
    * Check whether a ticket with the given externalVcsId already exists in the project.
-   * Includes soft-deleted tickets to prevent duplicate number allocation.
+   * Includes soft-deleted tickets, so a deleted import is never re-imported (M11).
    */
   async findExistingTicketByExternalId(
     projectId: string,
     externalVcsId: string,
   ): Promise<VcsTicketDomain | null> {
     const ticket = await this.db.ticket.findFirst({
-      where: { projectId, externalVcsId, deletedAt: null },
+      where: { projectId, externalVcsId },
     });
     return ticket ? this.toTicketDomain(ticket) : null;
   }
@@ -171,6 +173,7 @@ export class PrismaVcsRepository implements IVcsRepository {
   async createTicketFromIssue(
     project: { id: string },
     issue: VcsIssue,
+    externalVcsId: string,
   ): Promise<CreateTicketFromIssueResult> {
     return runWithTicketNumberRetry(this.txManager, async () => {
       const lastTicket = await this.db.ticket.findFirst({
@@ -189,7 +192,7 @@ export class PrismaVcsRepository implements IVcsRepository {
           description: issue.body,
           status: 'CREATED',
           priority: 'MEDIUM',
-          externalVcsId: `${issue.number}`,
+          externalVcsId,
           externalVcsUrl: issue.url,
           vcsSyncedAt: new Date(),
         },
@@ -273,20 +276,24 @@ export class PrismaVcsRepository implements IVcsRepository {
   }
 
   /**
-   * Update a TicketLink's prState and prUpdatedAt.
+   * M12: the only TicketLink.prState write. A late or replayed event (fresh
+   * delivery id, so replay protection lets it through) must not regress a merged
+   * PR, so the write skips rows already `merged`. NULL is matched explicitly:
+   * `prState <> 'merged'` alone is NULL, not true, for a NULL row.
+   *
+   * `count === 0` is ambiguous (already merged vs deleted), so the miss is
+   * disambiguated with one existence read; callers must not report a vanished
+   * link as already merged.
    */
-  async updateTicketLinkPrState(id: string, prState: string): Promise<void> {
-    await this.db.ticketLink.update({
-      where: { id },
+  async updateTicketLinkWithPrState(id: string, prState: string): Promise<PrStateWriteResult> {
+    const { count } = await this.db.ticketLink.updateMany({
+      where: { id, OR: [{ prState: null }, { prState: { not: 'merged' } }] },
       data: { prState, prUpdatedAt: new Date() },
     });
-  }
+    if (count === 1) return 'updated';
 
-  /**
-   * Update a TicketLink's prState and prUpdatedAt (alias for webhook service).
-   */
-  async updateTicketLinkWithPrState(id: string, prState: string): Promise<void> {
-    await this.updateTicketLinkPrState(id, prState);
+    const existing = await this.db.ticketLink.findUnique({ where: { id }, select: { id: true } });
+    return existing ? 'already-merged' : 'not-found';
   }
 
   /**

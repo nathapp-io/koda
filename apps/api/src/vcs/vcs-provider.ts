@@ -1,14 +1,14 @@
-import { VcsIssue, VcsPullRequest, VcsPrStatus, VcsCommit, CreatePrParams, SourceFile } from './types';
+import { VcsIssue, VcsPullRequest, VcsPrStatus, VcsCommit, CreatePrParams, SourceFile, IssueFetchResult } from './types';
 
 /**
  * Interface for VCS providers (GitHub, GitLab, etc.)
  */
 export interface IVcsProvider {
   /**
-   * Fetch issues from the repository
-   * @param since Optional - fetch issues created after this date
+   * Fetch open issues in update order, paginated up to MAX_ISSUE_PAGES.
+   * @param since Optional - only issues updated at or after this time
    */
-  fetchIssues(since?: Date): Promise<VcsIssue[]>;
+  fetchIssues(since?: Date): Promise<IssueFetchResult>;
 
   /**
    * Fetch a specific issue by number

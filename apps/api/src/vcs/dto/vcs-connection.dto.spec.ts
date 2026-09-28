@@ -151,6 +151,25 @@ describe('VCS Connection DTOs', () => {
       const errors = await validate(dto);
       expect(errors).toHaveLength(0);
     });
+
+    describe('Slice 4: provider and syncMode enums', () => {
+      const base = { repoOwner: 'o', repoName: 'r', token: 't' };
+
+      it('accepts gitlab', async () => {
+        const errors = await validate(plainToInstance(CreateVcsConnectionDto, { ...base, provider: 'gitlab' }));
+        expect(errors).toHaveLength(0);
+      });
+
+      it('rejects an unknown provider', async () => {
+        const errors = await validate(plainToInstance(CreateVcsConnectionDto, { ...base, provider: 'bitbucket' }));
+        expect(errors.map((e) => e.property)).toContain('provider');
+      });
+
+      it('rejects an unknown syncMode on create', async () => {
+        const errors = await validate(plainToInstance(CreateVcsConnectionDto, { ...base, provider: 'github', syncMode: 'hourly' }));
+        expect(errors.map((e) => e.property)).toContain('syncMode');
+      });
+    });
   });
 
   describe('UpdateVcsConnectionDto', () => {
@@ -230,26 +249,6 @@ describe('VCS Connection DTOs', () => {
       expect(errors.length).toBeGreaterThan(0);
       expect(errors[0].property).toBe('allowedAuthors');
       expect(errors[0].constraints).toHaveProperty('isArray');
-    });
-
-    it('should validate webhookSecret with length >= 32', async () => {
-      const dto = plainToInstance(UpdateVcsConnectionDto, {
-        webhookSecret: '12345678901234567890123456789012',
-      });
-
-      const errors = await validate(dto);
-      expect(errors).toHaveLength(0);
-    });
-
-    it('should reject webhookSecret shorter than 32 chars', async () => {
-      const dto = plainToInstance(UpdateVcsConnectionDto, {
-        webhookSecret: 'too-short-secret',
-      });
-
-      const errors = await validate(dto);
-      expect(errors.length).toBeGreaterThan(0);
-      const webhookSecretError = errors.find((error) => error.property === 'webhookSecret');
-      expect(webhookSecretError?.constraints).toHaveProperty('minLength');
     });
   });
 
