@@ -10,7 +10,7 @@ import { RagService } from '../../rag/rag.service';
 import { WebhookDispatcherService } from '../../webhook/webhook-dispatcher.service';
 import { VcsConnectionService } from '../../vcs/vcs-connection.service';
 import { buildBranchName } from '../../vcs/branch-name.util';
-import { createVcsProvider } from '../../vcs/factory';
+import { providerForConnection } from '../../vcs/provider-for-connection';
 import { VcsLinkExtractorService } from '../../vcs/vcs-link-extractor.service';
 import { VCS_CFG, IVcsConfig } from '../../config/vcs.config';
 import { decryptToken } from '../../common/utils/encryption.util';
@@ -230,13 +230,7 @@ export class TicketTransitionsService {
         if (!connection.isActive) return Promise.resolve();
 
         const token = decryptToken(connection.encryptedToken, encryptionKey);
-        const repoUrl = `https://github.com/${connection.repoOwner}/${connection.repoName}`;
-        const provider = createVcsProvider(connection.provider, {
-          provider: connection.provider,
-          token,
-          repoUrl,
-          githubApiUrl: this.vcsConfig?.githubApiUrl,
-        });
+        const provider = providerForConnection(connection, token, this.vcsConfig);
 
         return provider.getDefaultBranch().then((baseBranch): Promise<void> => {
           const branchName = buildBranchName(projectKey, ticket.number, ticket.title);
@@ -257,7 +251,7 @@ export class TicketTransitionsService {
             return repo.createTicketLink({
               ticketId,
               url: pr.url,
-              provider: 'github',
+              provider: connection.provider,
               externalRef: `${connection.repoOwner}/${connection.repoName}#${pr.number}`,
               prNumber: pr.number,
               prState: 'draft',

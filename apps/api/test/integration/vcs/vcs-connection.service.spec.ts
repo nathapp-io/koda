@@ -39,6 +39,7 @@ describe('VcsConnectionService', () => {
     encryptionKey,
     defaultPollingIntervalMs: 300000,
     githubApiUrl: 'https://api.github.com',
+    gitlabApiUrl: 'https://gitlab.com/api/v4',
   };
 
   const mockPrismaDelegate = {
@@ -672,6 +673,7 @@ describe('VcsConnectionService', () => {
         token, // Decrypted token
         repoUrl: 'https://github.com/owner/repo',
         githubApiUrl: 'https://api.github.com',
+        gitlabApiUrl: 'https://gitlab.com/api/v4',
       });
 
       // Verify provider.testConnection() was called

@@ -89,6 +89,7 @@ describe('VcsPollingService PR Sync Integration (VCS-P3-002-C AC1)', () => {
     encryptionKey: 'test-encryption-key',
     defaultPollingIntervalMs: 300000,
     githubApiUrl: 'https://api.github.com',
+    gitlabApiUrl: 'https://gitlab.com/api/v4',
   };
 
   // schedulePolling() creates real Node setInterval timers. The mocked

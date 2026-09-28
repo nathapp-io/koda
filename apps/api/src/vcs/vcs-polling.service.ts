@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nest
 import { SchedulerRegistry } from '@nestjs/schedule';
 import type { VcsConnectionWithProjectDomain } from './domain/vcs.domain';
 import { decryptToken } from '../common/utils/encryption.util';
-import { createVcsProvider } from './factory';
+import { providerForConnection } from './provider-for-connection';
 import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
@@ -113,11 +113,7 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
       const decryptedToken = decryptToken(connection.encryptedToken, encryptionKey);
 
       // Create provider
-      const provider = createVcsProvider(connection.provider, {
-        provider: connection.provider,
-        token: decryptedToken,
-        repoUrl: `https://github.com/${connection.repoOwner}/${connection.repoName}`,
-      });
+      const provider = providerForConnection(connection, decryptedToken, this.vcsConfig);
 
       // Fetch issues since last sync
       const issues = await provider.fetchIssues(connection.lastSyncedAt ?? undefined);

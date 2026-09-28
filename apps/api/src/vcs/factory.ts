@@ -20,6 +20,8 @@ export interface VcsProviderConfig {
   repoUrl: string;
   /** GitHub API base URL (GHES support); defaults to https://api.github.com */
   githubApiUrl?: string;
+  /** GitLab API base URL (self-hosted support); defaults to https://gitlab.com/api/v4 */
+  gitlabApiUrl?: string;
   [key: string]: unknown;
   httpClient?: HttpClient;
 }
@@ -74,6 +76,35 @@ function createDefaultHttpClient(): HttpClient {
 }
 
 /**
+ * Owner and name from a repository web URL on any host (GHES, self-hosted
+ * GitLab). GitHub takes the first two path segments. GitLab takes every segment
+ * before the last as the (sub)group path, stopping at a `/-/` route.
+ */
+export function parseRepoPath(
+  providerType: string,
+  repoUrl: string | undefined,
+): { repoOwner: string; repoName: string } | null {
+  if (!repoUrl) return null;
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(repoUrl) ? repoUrl : `https://${repoUrl}`;
+  let segments: string[];
+  try {
+    segments = new URL(withScheme).pathname.split('/').filter(Boolean);
+  } catch {
+    return null;
+  }
+
+  if (providerType.toLowerCase() === 'gitlab') {
+    const routeStart = segments.indexOf('-');
+    const path = routeStart === -1 ? segments : segments.slice(0, routeStart);
+    if (path.length < 2) return null;
+    return { repoOwner: path.slice(0, -1).join('/'), repoName: path[path.length - 1].replace(/\.git$/, '') };
+  }
+
+  if (segments.length < 2) return null;
+  return { repoOwner: segments[0], repoName: segments[1].replace(/\.git$/, '') };
+}
+
+/**
  * Factory function to create VCS provider instances
  */
 export function createVcsProvider(
@@ -84,45 +115,18 @@ export function createVcsProvider(
     throw new ValidationAppException({}, 'vcs');
   }
 
-  if (providerType.toLowerCase() === 'github') {
-    // Parse repoUrl to extract owner and repo
-    // Expected format: https://github.com/owner/repo
-    const urlMatch = config.repoUrl?.match(/github\.com\/([^/]+)\/([^/]+)/) || [];
-    const repoOwner = urlMatch[1];
-    const repoName = urlMatch[2];
-
-    if (!repoOwner || !repoName) {
-      throw new ValidationAppException({}, 'vcs');
-    }
-
-    // Create a default HTTP client using fetch
-    let httpClient = config.httpClient;
-    if (!httpClient) {
-      httpClient = createDefaultHttpClient();
-    }
-
-    return new GitHubProvider(repoOwner, repoName, config.token, httpClient, config.githubApiUrl);
+  const type = providerType.toLowerCase();
+  if (type !== 'github' && type !== 'gitlab') {
+    throw new ValidationAppException({}, 'vcs');
   }
 
-  if (providerType.toLowerCase() === 'gitlab') {
-    // Parse repoUrl to extract owner and repo.
-    // Greedy ".+" + "/" + last segment handles subgroups like
-    // gitlab.com/group/sub/repo → owner=group/sub, repo=repo (BUG-14).
-    const urlMatch = config.repoUrl?.match(/gitlab\.com\/(.+)\/([^/]+)/) || [];
-    const repoOwner = urlMatch[1];
-    const repoName = urlMatch[2];
-
-    if (!repoOwner || !repoName) {
-      throw new ValidationAppException({}, 'vcs');
-    }
-
-    let httpClient = config.httpClient;
-    if (!httpClient) {
-      httpClient = createDefaultHttpClient();
-    }
-
-    return new GitLabProvider(repoOwner, repoName, config.token, httpClient);
+  const repo = parseRepoPath(type, config.repoUrl);
+  if (!repo) {
+    throw new ValidationAppException({}, 'vcs');
   }
 
-  throw new ValidationAppException({}, 'vcs');
+  const httpClient = config.httpClient ?? createDefaultHttpClient();
+  return type === 'github'
+    ? new GitHubProvider(repo.repoOwner, repo.repoName, config.token, httpClient, config.githubApiUrl)
+    : new GitLabProvider(repo.repoOwner, repo.repoName, config.token, httpClient, config.gitlabApiUrl);
 }

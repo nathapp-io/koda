@@ -30,7 +30,7 @@ import { VcsConnectionResponseDto } from './dto/vcs-connection-response.dto';
 import { TestConnectionResultDto } from './dto/test-connection-result.dto';
 import { SyncResultDto } from './dto/sync-result.dto';
 import { decryptToken } from '../common/utils/encryption.util';
-import { createVcsProvider } from './factory';
+import { providerForConnection } from './provider-for-connection';
 import type { KodaPrincipal } from '../auth/principal/koda-principal.types';
 
 @ApiTags('vcs')
@@ -203,11 +203,7 @@ export class VcsController {
 
     // Decrypt token and create provider
     const decryptedToken = decryptToken(connection.encryptedToken, encryptionKey);
-    const provider = createVcsProvider(connection.provider, {
-      provider: connection.provider,
-      token: decryptedToken,
-      repoUrl: `https://github.com/${connection.repoOwner}/${connection.repoName}`,
-    });
+    const provider = providerForConnection(connection, decryptedToken, this.vcsConfig);
 
     // Fetch specific issue
     const issue = await provider.fetchIssue(parseInt(issueNumber, 10));

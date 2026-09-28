@@ -69,6 +69,7 @@ export const mockVcsConfig: IVcsConfig = {
   encryptionKey: undefined,
   defaultPollingIntervalMs: 300000,
   githubApiUrl: 'https://api.github.com',
+  gitlabApiUrl: 'https://gitlab.com/api/v4',
 };
 
 export const mockLiveConfig: ILiveConfig = { heartbeatMs: 25000, maxStreamsPerUser: 5 };

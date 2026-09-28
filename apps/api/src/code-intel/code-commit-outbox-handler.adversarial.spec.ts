@@ -53,22 +53,22 @@ describe('Adversarial Review Findings — code-commit-outbox-handler.ts', () => 
   });
 
   // ──────────────────────────────────────────────────────────────────────────
-  // Bug 2: VcsProviderConfig is imported but never used.
+  // Bug 2: hand-rolled provider construction (BUG-14 groundwork refactor).
   //
   // Spec-correct behavior:
-  //   VcsProviderConfig must appear as a type annotation beyond the import
-  //   line. The natural usage site is the config object literal passed to
-  //   createVcsProvider(), which should be explicitly typed so maintainers
-  //   can see the full shape without navigating to the factory.
+  //   The handler must not build a provider config object literal itself; it
+  //   delegates to providerForConnection(), which derives the repository URL
+  //   and API base from the connection's provider (see
+  //   vcs/provider-construction-sites.spec.ts for the repo-wide guard).
   // ──────────────────────────────────────────────────────────────────────────
-  describe('Bug 2: VcsProviderConfig type usage', () => {
-    it('should reference VcsProviderConfig beyond the import declaration', () => {
+  describe('Bug 2: provider construction via providerForConnection', () => {
+    it('should call providerForConnection beyond the import declaration', () => {
       const lines = handlerSource.split('\n');
       const nonImportLines = lines
         .filter((l) => !l.trimStart().startsWith('import '))
         .join('\n');
 
-      const usageCount = (nonImportLines.match(/VcsProviderConfig/g) || []).length;
+      const usageCount = (nonImportLines.match(/providerForConnection\(/g) || []).length;
       expect(usageCount).toBeGreaterThan(0);
     });
   });

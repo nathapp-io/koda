@@ -47,6 +47,7 @@ function createMockVcsConfig(encryptionKey?: string): IVcsConfig {
     encryptionKey,
     defaultPollingIntervalMs: 600000,
     githubApiUrl: 'https://api.github.com',
+    gitlabApiUrl: 'https://gitlab.com/api/v4',
   };
 }
 

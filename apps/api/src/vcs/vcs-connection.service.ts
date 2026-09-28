@@ -7,7 +7,7 @@ import { CreateVcsConnectionDto } from './dto/create-vcs-connection.dto';
 import { UpdateVcsConnectionDto } from './dto/update-vcs-connection.dto';
 import { VcsConnectionResponseDto } from './dto/vcs-connection-response.dto';
 import { TestConnectionResultDto } from './dto/test-connection-result.dto';
-import { createVcsProvider } from './factory';
+import { providerForConnection } from './provider-for-connection';
 import { VcsPollingService } from './vcs-polling.service';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
@@ -198,12 +198,7 @@ export class VcsConnectionService {
 
     // Create provider and test connection
     try {
-      const provider = createVcsProvider(connection.provider, {
-        provider: connection.provider,
-        token: decryptedToken,
-        repoUrl: `https://github.com/${connection.repoOwner}/${connection.repoName}`,
-        githubApiUrl: this.vcsConfig?.githubApiUrl,
-      });
+      const provider = providerForConnection(connection, decryptedToken, this.vcsConfig);
 
       const result = await provider.testConnection();
       const latencyMs = Date.now() - startTime;

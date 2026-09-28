@@ -71,22 +71,28 @@ interface GitLabFileResponse {
 }
 
 /**
- * GitLab VCS provider implementation (targets gitlab.com API v4)
+ * GitLab VCS provider implementation (GitLab API v4, gitlab.com or self-hosted)
  */
 export class GitLabProvider implements IVcsProvider {
   private readonly projectId: string;
+  private readonly apiBaseUrl: string;
+  private readonly webBaseUrl: string;
 
   constructor(
     private readonly repoOwner: string,
     private readonly repoName: string,
     private readonly token: string,
     private readonly httpClient: HttpClient,
+    apiBaseUrl?: string,
   ) {
     this.projectId = encodeURIComponent(`${repoOwner}/${repoName}`);
+    // BUG-14: self-hosted GitLab sets VCS_GITLAB_API_URL; default to gitlab.com.
+    this.apiBaseUrl = (apiBaseUrl ?? 'https://gitlab.com/api/v4').replace(/\/+$/, '');
+    this.webBaseUrl = this.apiBaseUrl.replace(/\/api\/v4$/, '');
   }
 
   private get baseUrl(): string {
-    return `https://gitlab.com/api/v4/projects/${this.projectId}`;
+    return `${this.apiBaseUrl}/projects/${this.projectId}`;
   }
 
   private get authHeaders(): Record<string, string> {
@@ -287,7 +293,7 @@ export class GitLabProvider implements IVcsProvider {
       sha: gitLabCommit.id,
       message: gitLabCommit.message,
       authorLogin: gitLabCommit.author_name,
-      url: `https://gitlab.com/${this.repoOwner}/${this.repoName}/-/commit/${gitLabCommit.id}`,
+      url: `${this.webBaseUrl}/${this.repoOwner}/${this.repoName}/-/commit/${gitLabCommit.id}`,
       date: new Date(gitLabCommit.authored_date),
     };
   }

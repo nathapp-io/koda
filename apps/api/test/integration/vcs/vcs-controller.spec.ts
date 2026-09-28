@@ -52,6 +52,7 @@ describe('VcsController REST Endpoints (VCS-P1-003-C)', () => {
     encryptionKey,
     defaultPollingIntervalMs: 300000,
     githubApiUrl: 'https://api.github.com',
+    gitlabApiUrl: 'https://gitlab.com/api/v4',
   };
 
   const principal: KodaPrincipal = {

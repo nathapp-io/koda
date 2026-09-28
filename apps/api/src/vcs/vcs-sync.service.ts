@@ -1,10 +1,11 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { VcsConnectionDomain } from './domain/vcs.domain';
 import { VcsIssue } from './types';
-import { createVcsProvider } from './factory';
+import { providerForConnection } from './provider-for-connection';
 import { decryptToken } from '../common/utils/encryption.util';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
 import { externalVcsIdFor, VcsRepoRef } from './external-vcs-id';
+import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 
 /**
  * Result of syncing a single issue
@@ -19,7 +20,10 @@ export interface SyncIssueResult {
 
 @Injectable()
 export class VcsSyncService {
-  constructor(@Inject(VCS_REPOSITORY) private readonly vcsRepo: IVcsRepository) {}
+  constructor(
+    @Inject(VCS_REPOSITORY) private readonly vcsRepo: IVcsRepository,
+    @Optional() @Inject(VCS_CFG) private readonly vcsConfig?: IVcsConfig,
+  ) {}
 
   /**
    * Sync a single issue into a ticket
@@ -96,11 +100,7 @@ export class VcsSyncService {
       const decryptedToken = decryptToken(connection.encryptedToken, encryptionKey);
 
       // Create provider
-      const provider = createVcsProvider(connection.provider, {
-        provider: connection.provider,
-        token: decryptedToken,
-        repoUrl: `https://github.com/${connection.repoOwner}/${connection.repoName}`,
-      });
+      const provider = providerForConnection(connection, decryptedToken, this.vcsConfig);
 
       // Fetch all issues
       const issues = await provider.fetchIssues();

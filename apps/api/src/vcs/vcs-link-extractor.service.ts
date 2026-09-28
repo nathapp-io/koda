@@ -11,7 +11,7 @@ import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import type { VcsConnectionDomain, VcsTicketDomain } from './domain/vcs.domain';
 import { PrismaVcsRepository } from './prisma-vcs.repository';
 import { decryptToken } from '../common/utils/encryption.util';
-import { createVcsProvider } from './factory';
+import { providerForConnection, branchWebUrl } from './provider-for-connection';
 import { containsTicketRef } from './ticket-ref-matcher.util';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
 
@@ -41,12 +41,11 @@ export class VcsLinkExtractorService {
     branchName: string,
     prNumber?: number,
   ): Promise<void> {
-    const provider = createVcsProvider(connection.provider, {
-      provider: connection.provider,
-      token: decryptToken(connection.encryptedToken, encryptionKey),
-      repoUrl: `https://github.com/${connection.repoOwner}/${connection.repoName}`,
-      githubApiUrl: this.vcsConfig?.githubApiUrl,
-    });
+    const provider = providerForConnection(
+      connection,
+      decryptToken(connection.encryptedToken, encryptionKey),
+      this.vcsConfig,
+    );
 
     // Get PR number from externalVcsId (format: "owner/repo#123" or just "123")
     // Extract any trailing digits as the PR number
@@ -61,11 +60,11 @@ export class VcsLinkExtractorService {
     // Get PR status to obtain the actual PR number and verify the PR exists
     const prStatus = await provider.getPullRequestStatus(resolvedPrNumber);
 
-    // Create branch link URL: https://github.com/{owner}/{repo}/tree/{branchName}
-    const branchUrl = `https://github.com/${connection.repoOwner}/${connection.repoName}/tree/${branchName}`;
+    // Create branch link URL on the connection's host (/tree/ or /-/tree/)
+    const branchUrl = branchWebUrl(connection, branchName, this.vcsConfig);
 
     // Upsert branch link
-    await this.upsertTicketLink(ticket.id, branchUrl, 'github', 'branch', branchName);
+    await this.upsertTicketLink(ticket.id, branchUrl, connection.provider, 'branch', branchName);
 
     // Try to list commits and create commit links
     let commits: { sha: string; message: string; authorLogin: string; url: string; date: Date }[] = [];
@@ -94,7 +93,7 @@ export class VcsLinkExtractorService {
 
     // Create commit links for matching commits
     for (const commit of uniqueCommits) {
-      await this.upsertTicketLink(ticket.id, commit.url, 'github', 'commit', commit.message, commit.date);
+      await this.upsertTicketLink(ticket.id, commit.url, connection.provider, 'commit', commit.message, commit.date);
     }
   }
 

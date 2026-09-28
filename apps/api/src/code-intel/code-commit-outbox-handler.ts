@@ -1,8 +1,7 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { AstIndexService, SourceFile } from './ast-index.service';
-import { createVcsProvider } from '../vcs/factory';
+import { providerForConnection } from '../vcs/provider-for-connection';
 import { VCS_CFG, IVcsConfig } from '../config/vcs.config';
-import type { VcsProviderConfig } from '../vcs/factory';
 import { PrismaCodeIntelRepository } from './prisma-code-intel.repository';
 
 interface CodeCommitPayload {
@@ -55,13 +54,7 @@ export class CodeCommitOutboxHandler {
       return;
     }
 
-    const providerConfig: VcsProviderConfig = {
-      provider: connection.provider,
-      token,
-      repoUrl: `https://github.com/${connection.repoOwner}/${connection.repoName}`,
-      githubApiUrl: this.vcsConfig?.githubApiUrl,
-    };
-    const provider = createVcsProvider(connection.provider, providerConfig);
+    const provider = providerForConnection(connection, token, this.vcsConfig);
 
     let sourceFiles: SourceFile[];
     try {
