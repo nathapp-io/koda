@@ -56,7 +56,7 @@ function storedGraphFromNodes(
 
 describe('IncrementalGraphDiffService', () => {
   let service: IncrementalGraphDiffService;
-  let mockGraphStore: jest.Mocked<Pick<GraphStoreService, 'getStoredGraph' | 'upsertNodes' | 'deleteNodes'>>;
+  let mockGraphStore: jest.Mocked<Pick<GraphStoreService, 'getStoredGraph' | 'applyDiff' | 'markVectorStale' | 'findVectorStaleNodeIds' | 'clearVectorStale'>>;
   let mockVectorStore: { indexDocument: jest.Mock; deleteBySource: jest.Mock };
   let mockTxManager: { run: jest.Mock };
 
@@ -67,8 +67,10 @@ describe('IncrementalGraphDiffService', () => {
 
     mockGraphStore = {
       getStoredGraph: jest.fn(),
-      upsertNodes: jest.fn(),
-      deleteNodes: jest.fn(),
+      applyDiff: jest.fn().mockResolvedValue(undefined),
+      markVectorStale: jest.fn().mockResolvedValue(undefined),
+      findVectorStaleNodeIds: jest.fn().mockResolvedValue([]),
+      clearVectorStale: jest.fn().mockResolvedValue(undefined),
     };
 
     mockVectorStore = {
@@ -104,7 +106,7 @@ describe('IncrementalGraphDiffService', () => {
 
       expect(result.added).toBe(1);
       expect(result.removed).toBe(1);
-      expect(mockGraphStore.deleteNodes).toHaveBeenCalledWith(projectId, ['node-2']);
+      expect(mockGraphStore.applyDiff).toHaveBeenCalledWith(projectId, expect.objectContaining({ removedNodeIds: ['node-2'] }));
       expect(mockVectorStore.deleteBySource).toHaveBeenCalledWith(projectId, 'node-2');
     });
 
@@ -123,7 +125,7 @@ describe('IncrementalGraphDiffService', () => {
       const result = await service.diffAndApply(projectId, newNodes, []);
 
       expect(result.removed).toBe(1);
-      expect(mockGraphStore.deleteNodes).toHaveBeenCalledWith(projectId, ['node-2']);
+      expect(mockGraphStore.applyDiff).toHaveBeenCalledWith(projectId, expect.objectContaining({ removedNodeIds: ['node-2'] }));
       expect(mockVectorStore.deleteBySource).toHaveBeenCalledWith(projectId, 'node-2');
     });
 
@@ -144,7 +146,7 @@ describe('IncrementalGraphDiffService', () => {
       expect(result.updated).toBe(0);
       expect(result.removed).toBe(0);
       expect(result.indexed).toBe(0);
-      expect(mockGraphStore.upsertNodes).not.toHaveBeenCalled();
+      expect(mockGraphStore.applyDiff).not.toHaveBeenCalled();
       expect(mockVectorStore.indexDocument).not.toHaveBeenCalled();
     });
   });
@@ -201,7 +203,7 @@ describe('IncrementalGraphDiffService', () => {
       const result = await service.diffAndApply(projectId, [], []);
 
       expect(result.removed).toBe(3);
-      expect(mockGraphStore.deleteNodes).toHaveBeenCalledWith(projectId, ['node-1', 'node-2', 'node-3']);
+      expect(mockGraphStore.applyDiff).toHaveBeenCalledWith(projectId, expect.objectContaining({ removedNodeIds: ['node-1', 'node-2', 'node-3'] }));
       expect(mockVectorStore.deleteBySource).toHaveBeenCalledTimes(3);
     });
   });
@@ -367,7 +369,7 @@ describe('IncrementalGraphDiffService', () => {
       const result = await service.diffAndApply(projectId, newNodes, []);
 
       expect(mockGraphStore.getStoredGraph).toHaveBeenCalledWith(projectId);
-      expect(mockGraphStore.upsertNodes).toHaveBeenCalledWith(projectId, newNodes, []);
+      expect(mockGraphStore.applyDiff).toHaveBeenCalledWith(projectId, expect.objectContaining({ nodes: newNodes, links: [] }));
       expect(mockVectorStore.indexDocument).toHaveBeenCalledWith(projectId, expect.objectContaining({ source: 'code', sourceId: 'node-1' }));
       expect(result.added).toBe(1);
     });
@@ -383,8 +385,7 @@ describe('IncrementalGraphDiffService', () => {
       await service.diffAndApply(projectId, [], []);
 
       expect(mockGraphStore.getStoredGraph).toHaveBeenCalledWith(projectId);
-      expect(mockGraphStore.deleteNodes).not.toHaveBeenCalled();
-      expect(mockGraphStore.upsertNodes).not.toHaveBeenCalled();
+      expect(mockGraphStore.applyDiff).not.toHaveBeenCalled();
     });
   });
 
@@ -404,41 +405,34 @@ describe('IncrementalGraphDiffService', () => {
 
       await service.diffAndApply(projectId, newNodes, []);
 
-      expect(mockGraphStore.deleteNodes).toHaveBeenCalledWith(projectId, ['node-2']);
-      expect(mockGraphStore.upsertNodes).toHaveBeenCalledWith(projectId, [{ id: 'node-3', label: 'NewService', type: 'class' }], []);
+      expect(mockGraphStore.applyDiff).toHaveBeenCalledWith(projectId, expect.objectContaining({ removedNodeIds: ['node-2'] }));
+      expect(mockGraphStore.applyDiff).toHaveBeenCalledWith(projectId, expect.objectContaining({ nodes: [{ id: 'node-3', label: 'NewService', type: 'class' }], links: [] }));
     });
 
-    it('LanceDB operations happen after Prisma graph-store writes', async () => {
+    it('orders the write: pre-mark, vector delete, one graph write, index, clear', async () => {
       const calls: string[] = [];
-      mockGraphStore.deleteNodes.mockImplementation(async () => {
-        calls.push('deleteNodes');
-      });
-      mockGraphStore.upsertNodes.mockImplementation(async () => {
-        calls.push('upsertNodes');
-      });
-      mockVectorStore.deleteBySource.mockImplementation(async () => {
-        calls.push('deleteBySource');
-      });
-      mockVectorStore.indexDocument.mockImplementation(async () => {
-        calls.push('indexDocument');
-      });
+      mockGraphStore.markVectorStale.mockImplementation(async () => { calls.push('markVectorStale'); });
+      mockGraphStore.applyDiff.mockImplementation(async () => { calls.push('applyDiff'); });
+      mockGraphStore.clearVectorStale.mockImplementation(async () => { calls.push('clearVectorStale'); });
+      mockVectorStore.deleteBySource.mockImplementation(async () => { calls.push('deleteBySource'); });
+      mockVectorStore.indexDocument.mockImplementation(async () => { calls.push('indexDocument'); });
 
-      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraphFromNodes([
-        makeStoredNode('old-node'),
-      ]));
+      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraphFromNodes([makeStoredNode('old-node')]));
 
       await service.diffAndApply('test-project', [{ id: 'new-node', label: 'New', type: 'class' }], []);
 
-      const deleteNodesIdx = calls.indexOf('deleteNodes');
-      const upsertNodesIdx = calls.indexOf('upsertNodes');
-      const deleteBySourceIdx = calls.indexOf('deleteBySource');
-      const indexDocumentIdx = calls.indexOf('indexDocument');
+      expect(calls).toEqual(['markVectorStale', 'deleteBySource', 'applyDiff', 'indexDocument', 'clearVectorStale']);
+    });
 
-      expect(deleteNodesIdx).toBeGreaterThanOrEqual(0);
-      expect(upsertNodesIdx).toBeGreaterThan(deleteNodesIdx);
-      // LanceDB ops (deleteBySource, indexDocument) should be after graph writes
-      expect(deleteBySourceIdx).toBeGreaterThan(upsertNodesIdx);
-      expect(indexDocumentIdx).toBeGreaterThan(upsertNodesIdx);
+    it('re-indexes leftover stale nodes from the stored graph before diffing', async () => {
+      mockGraphStore.getStoredGraph.mockResolvedValue(storedGraphFromNodes([makeStoredNode('node-1')]));
+      mockGraphStore.findVectorStaleNodeIds.mockResolvedValue(['node-1']);
+
+      await service.diffAndApply('test-project', [makeStoredNode('node-1')], []);
+
+      expect(mockVectorStore.indexDocument).toHaveBeenCalledWith('test-project', expect.objectContaining({ sourceId: 'node-1' }));
+      expect(mockGraphStore.clearVectorStale).toHaveBeenCalledWith('test-project', 'node-1');
+      expect(mockGraphStore.applyDiff).not.toHaveBeenCalled();
     });
   });
 });

@@ -15,6 +15,12 @@ export function buildActiveKey(_projectId: string, kind: string, subject: string
   return `${kind}:${subject}:${predicate}`;
 }
 
+export interface MemoryDedupKey {
+  kind: string;
+  subject: string;
+  predicate: string;
+}
+
 @Injectable()
 export class PrismaMemoryItemRepository
   extends AbstractPrismaRepository<MemoryItem, MemoryItemModel, string> {
@@ -110,6 +116,40 @@ export class PrismaMemoryItemRepository
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
     return models.remap((m) => this.toDomain(m));
+  }
+
+  /** M21: keyset page over active rows; stable while rows leave 'active'. */
+  async findActiveAfterId(projectId: string, afterId: string | null, take: number): Promise<MemoryItem[]> {
+    const models = await this.prisma.client.memoryItem.findMany({
+      where: {
+        projectId,
+        deletedAt: null,
+        status: 'active',
+        ...(afterId ? { id: { gt: afterId } } : {}),
+      },
+      orderBy: { id: 'asc' },
+      take,
+    });
+    return models.map((m) => this.toDomain(m));
+  }
+
+  /** M21: dedup keys with more than one active row, found in SQL instead of per page. */
+  async findDuplicateActiveKeys(projectId: string, kind?: string): Promise<MemoryDedupKey[]> {
+    const groups = await this.prisma.client.memoryItem.groupBy({
+      by: ['kind', 'subject', 'predicate'],
+      where: { projectId, deletedAt: null, status: 'active', ...(kind ? { kind } : {}) },
+      having: { id: { _count: { gt: 1 } } },
+      orderBy: [{ kind: 'asc' }, { subject: 'asc' }, { predicate: 'asc' }],
+    });
+    return groups.map(({ kind: k, subject, predicate }) => ({ kind: k, subject, predicate }));
+  }
+
+  async findActiveByKey(projectId: string, key: MemoryDedupKey): Promise<MemoryItem[]> {
+    const models = await this.prisma.client.memoryItem.findMany({
+      where: { projectId, deletedAt: null, status: 'active', kind: key.kind, subject: key.subject, predicate: key.predicate },
+      orderBy: { id: 'asc' },
+    });
+    return models.map((m) => this.toDomain(m));
   }
 
   async upsert(item: MemoryItemInput): Promise<MemoryItem> {

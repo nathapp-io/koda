@@ -432,12 +432,14 @@ model GraphNode {
   type        String?
   sourceFile  String?
   community   Int?
+  vectorStale Boolean  @default(false) // M19: LanceDB vector missing or out of date; healed on the next import
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@unique([projectId, nodeId])
+  @@index([projectId, vectorStale])
 }
 
 model GraphLink {

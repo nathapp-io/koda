@@ -8,11 +8,11 @@ import { VectorStore } from './vector-store.service';
 import { EmbeddingService } from './embedding.service';
 import { HybridRetrieverService } from './hybrid-retriever.service';
 import { LanceTableManager } from './lance-table-manager';
-import { LexicalIndex } from './lexical-index';
 import { EntityStore } from './entity-store';
 import { GraphStoreService } from './graph-store.service';
 import { IncrementalGraphDiffService } from './incremental-graph-diff.service';
 import { PrismaRagRepository } from './prisma-rag.repository';
+import { KbTicketLifecycleSubscriber } from './kb-ticket-lifecycle.subscriber';
 import { RAG_REPOSITORY } from './domain/rag.domain';
 import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interface';
 import { CounterOptimizeStrategy } from './strategies/counter-optimize.strategy';
@@ -21,59 +21,6 @@ import { ManualOptimizeStrategy } from './strategies/manual-optimize.strategy';
 import { OutboxModule } from '../outbox/outbox.module';
 import { FanOutPublisher } from '../outbox/fan-out-publisher';
 import { ProjectAccessModule } from '../projects/project-access.module';
-
-@Injectable()
-class LexicalIndexWarmup implements OnModuleInit {
-  private readonly logger = new Logger(LexicalIndexWarmup.name);
-
-  constructor(
-    private readonly lexicalIndex: LexicalIndex,
-    private readonly ragService: RagService,
-    private readonly outboxFanOutRegistry: FanOutPublisher,
-    @Optional() private readonly ragRepository?: PrismaRagRepository,
-  ) {}
-
-  async onModuleInit(): Promise<void> {
-    this.outboxFanOutRegistry.register('document_indexed', async (payload: unknown) => {
-      const p = payload as { projectId?: string; sourceId?: string; content?: string; metadata?: Record<string, unknown> };
-      if (p.projectId && p.sourceId && p.content !== undefined) {
-        const event = {
-          eventType: 'document_indexed',
-          payload: { projectId: p.projectId, sourceId: p.sourceId, content: p.content, metadata: p.metadata ?? {} },
-        };
-        await this.lexicalIndex.handleOutboxEvent(event);
-        this.logger.debug(`LexicalIndex rebuild triggered for project ${p.projectId}`);
-      }
-    });
-    this.logger.debug('LexicalIndex outbox handler registered');
-
-    if (this.ragRepository) {
-      const ragRepository = this.ragRepository;
-      // Begin warmup in background — does not block API startup
-      Promise.resolve().then(async () => {
-        try {
-          const projects = await ragRepository.findAllActiveProjectIds();
-          let warmedUp = 0;
-          for (const { id: projectId } of projects) {
-            try {
-              const docs = await this.ragService.listDocuments(projectId, 50_000);
-              if (docs.length > 0) {
-                this.lexicalIndex.buildIndex(projectId, docs.map(d => ({ id: d.sourceId, content: d.content })));
-                this.lexicalIndex.setWarmupCompleted(projectId, true);
-                warmedUp++;
-              }
-            } catch {
-              // non-fatal: lazy build will handle this project on first search
-            }
-          }
-          this.logger.log(`LexicalIndex warmup completed for ${warmedUp}/${projects.length} projects`);
-        } catch (err) {
-          this.logger.warn(`LexicalIndex warmup skipped: ${(err as Error).message}`);
-        }
-      }).catch(() => {});
-    }
-  }
-}
 
 @Injectable()
 class EntityStoreWarmup implements OnModuleInit {
@@ -141,10 +88,9 @@ class EntityStoreWarmup implements OnModuleInit {
     VectorStore,
     EmbeddingService,
     HybridRetrieverService,
-    LexicalIndex,
-    LexicalIndexWarmup,
     EntityStore,
     EntityStoreWarmup,
+    KbTicketLifecycleSubscriber,
     GraphStoreService,
     IncrementalGraphDiffService,
     {
@@ -165,6 +111,6 @@ class EntityStoreWarmup implements OnModuleInit {
       inject: [RAG_CFG, SchedulerRegistry],
     },
   ],
-  exports: [RagService, HybridRetrieverService, LanceTableManager, LexicalIndex, EntityStore, GraphStoreService, FTS_OPTIMIZE_STRATEGY, IncrementalGraphDiffService, PrismaRagRepository],
+  exports: [RagService, HybridRetrieverService, LanceTableManager, EntityStore, GraphStoreService, FTS_OPTIMIZE_STRATEGY, IncrementalGraphDiffService, PrismaRagRepository],
 })
 export class RagModule {}

@@ -158,16 +158,16 @@ describe('IncrementalGraphDiffService integration', () => {
         { source: 'node-2', target: 'node-3', relation: 'uses' },
       ];
 
-      // diff path: nodes are persisted through GraphStoreService (which owns
-      // the Prisma transaction), not via the full-reimport delete+rewrite.
-      const upsertSpy = jest.spyOn(graphStore, 'upsertNodes');
+      // diff path: nodes are persisted through GraphStoreService.applyDiff
+      // (one Prisma transaction), not via the full-reimport delete+rewrite.
+      const applySpy = jest.spyOn(graphStore, 'applyDiff');
 
       const firstResult = await ragService.importGraphify(projectId, nodes, links);
 
       expect(firstResult.imported).toBe(3);
-      expect(upsertSpy).toHaveBeenCalledTimes(1);
-      expect(upsertSpy.mock.calls[0][1]).toHaveLength(3);
-      upsertSpy.mockRestore();
+      expect(applySpy).toHaveBeenCalledTimes(1);
+      expect(applySpy.mock.calls[0][1].nodes).toHaveLength(3);
+      applySpy.mockRestore();
     });
 
     it('second import with same nodes results in 0 indexed (no changes)', async () => {

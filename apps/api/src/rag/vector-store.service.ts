@@ -4,9 +4,9 @@ import { ValidationAppException, ForbiddenAppException } from '@nathapp/nestjs-c
 import { PrismaRagRepository } from './prisma-rag.repository';
 import { EmbeddingService } from './embedding.service';
 import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interface';
-import { LexicalIndex } from './lexical-index';
 import { EntityStore } from './entity-store';
-import { LanceTableManager } from './lance-table-manager';
+import { LanceTableManager, isSafeFilterValue } from './lance-table-manager';
+import { resolveCreatedAt } from './created-at-override';
 import type { LanceRecord, LanceTable } from './lance-table-manager';
 import { simpleFtsScore, reciprocalRankFusion, getSimilarityTier, getVerdict } from './rag.service';
 import type { IndexDocumentInput } from './rag.service';
@@ -38,7 +38,6 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
     @Optional() private readonly embeddingService?: EmbeddingService,
     @Optional() @Inject(FTS_OPTIMIZE_STRATEGY) private readonly optimizeStrategy?: FtsOptimizeStrategy,
     @Optional() private readonly ragRepository?: PrismaRagRepository,
-    @Optional() private readonly lexicalIndex?: LexicalIndex,
     @Optional() private readonly entityStore?: EntityStore,
     @Optional() lanceTableManager?: LanceTableManager,
   ) {
@@ -105,7 +104,6 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
 
   clearProjectCaches(projectId: string): void {
     this.lanceTable.evictTable(`project_${projectId}`);
-    this.lexicalIndex?.clearProject(projectId);
     this.entityStore?.clear(projectId);
     this.optimizeStrategy?.clearProject?.(projectId);
   }
@@ -207,11 +205,10 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
       vector = Array(dims).fill(0) as number[];
     }
 
-    // createdAtOverride lets callers backdate a record's created_at (matches
-    // the previous HybridRetrieverService.indexDocument behavior).
-    const createdAtOverride = doc.metadata?.['createdAtOverride'];
-    const createdAt =
-      typeof createdAtOverride === 'string' ? createdAtOverride : new Date().toISOString();
+    const { createdAt, rejectedOverride } = resolveCreatedAt(doc.metadata);
+    if (rejectedOverride !== undefined) {
+      this.logger.warn(`Ignoring unparseable createdAtOverride for ${doc.sourceId}`);
+    }
 
     const id = generateId();
     const record: LanceRecord = {
@@ -231,9 +228,6 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
 
     if (this.lanceTable.available && this.optimizeStrategy) {
       await this.optimizeStrategy.onInsert(projectId, table);
-    }
-    if (this.lexicalIndex) {
-      this.lexicalIndex.addDocument(projectId, { id: doc.sourceId, content: doc.content });
     }
 
     return id;
@@ -463,23 +457,13 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
   async deleteBySource(projectId: string, sourceId: string): Promise<void> {
     await this.validateProjectId(projectId);
 
-    // Graph/code source IDs are often path-like, so allow punctuation used in
-    // repo paths while rejecting quote/control characters used to break filters.
-    if (
-      !sourceId ||
-      sourceId.includes("'") ||
-      [...sourceId].some((char) => {
-        const code = char.charCodeAt(0);
-        return code < 32 || code === 127;
-      })
-    ) {
+    // Graph/code source IDs are often path-like; isSafeFilterValue allows repo-path
+    // punctuation and rejects the quote/control characters that could break the filter.
+    if (!isSafeFilterValue(sourceId)) {
       throw new ValidationAppException();
     }
     const table = await this.getOrCreateTable(projectId);
     await this.lanceTable.exclusive(`project_${projectId}`, () => table.delete(`source_id = '${sourceId}'`));
-    if (this.lexicalIndex) {
-      this.lexicalIndex.removeDocument(projectId, sourceId);
-    }
   }
 
   /**

@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { FtsOptimizeStrategy } from './fts-optimize-strategy.interface';
+import { optimizeInBackground } from './optimize-in-background';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type LanceTable = any;
@@ -15,7 +16,7 @@ export class ManualOptimizeStrategy implements FtsOptimizeStrategy {
 
   onFirstAccess(projectId: string, table: LanceTable): void {
     this.logger.debug(`onFirstAccess fire-and-forget for project ${projectId}`);
-    void table.optimize();
+    optimizeInBackground(table, projectId, this.logger);
   }
 
   async onDestroy(): Promise<void> {

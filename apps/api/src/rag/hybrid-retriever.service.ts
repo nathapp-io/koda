@@ -4,6 +4,7 @@ import { PrismaRagRepository } from './prisma-rag.repository';
 import { EmbeddingService } from './embedding.service';
 import { EntityStore } from './entity-store';
 import { LanceTableManager } from './lance-table-manager';
+import { resolveCreatedAt } from './created-at-override';
 import type { LanceRecord, LanceTable } from './lance-table-manager';
 import {
   HybridSearchQuery,
@@ -100,9 +101,10 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
       vector = Array(dims).fill(0) as number[];
     }
 
-    const createdAtOverride = doc.metadata?.['createdAtOverride'];
-    const createdAt =
-      typeof createdAtOverride === 'string' ? createdAtOverride : new Date().toISOString();
+    const { createdAt, rejectedOverride } = resolveCreatedAt(doc.metadata);
+    if (rejectedOverride !== undefined) {
+      this.logger.warn({ storyId: 'US-004', msg: `Ignoring unparseable createdAtOverride for ${doc.sourceId}` });
+    }
 
     const record: LanceRecord = {
       id: generateId(),
@@ -143,10 +145,18 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     const allRows: LanceRecord[] = await table.query().limit(Math.min(rowCount, 500)).toArray();
 
     let ftsRanked: { id: string; score: number }[] = [];
+    // M17: rows returned by native FTS may lie outside the scanned `allRows`
+    // window; keep them so they can resolve in recordMap.
+    let nativeFtsRows: LanceRecord[] = [];
+    const inMemoryFts = (): { id: string; score: number }[] =>
+      allRows
+        .map((r) => ({ id: r.id as string, score: simpleFtsScore(r.content as string, query.query) }))
+        .filter((r) => r.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, candidatePoolSize);
     if (this.lanceTable.available) {
       try {
         const nativeFtsResult = await table.search(query.query, 'fts', 'content');
-        let nativeFtsRows: LanceRecord[] = [];
         if (Array.isArray(nativeFtsResult)) {
           nativeFtsRows = nativeFtsResult as LanceRecord[];
         } else if (nativeFtsResult && typeof nativeFtsResult === 'object' && 'toArray' in nativeFtsResult) {
@@ -154,18 +164,11 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
         }
         ftsRanked = nativeFtsRows.map((r, i) => ({ id: r.id as string, score: 1 / (i + 1) }));
       } catch {
-        ftsRanked = allRows
-          .map((r) => ({ id: r.id as string, score: simpleFtsScore(r.content as string, query.query) }))
-          .filter((r) => r.score > 0)
-          .sort((a, b) => b.score - a.score)
-          .slice(0, candidatePoolSize);
+        nativeFtsRows = [];
+        ftsRanked = inMemoryFts();
       }
     } else {
-      ftsRanked = allRows
-        .map((r) => ({ id: r.id as string, score: simpleFtsScore(r.content as string, query.query) }))
-        .filter((r) => r.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, candidatePoolSize);
+      ftsRanked = inMemoryFts();
     }
 
     const ftsScoreMap = new Map<string, number>(ftsRanked.map((r) => [r.id, r.score]));
@@ -222,6 +225,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
 
     const recordMap = new Map<string, LanceRecord>();
     allRows.forEach((r) => recordMap.set(r.id as string, r));
+    nativeFtsRows.forEach((r) => recordMap.set(r.id as string, r));
     vectorRows.forEach((r) => recordMap.set(r.id as string, r));
 
     const simMap = new Map<string, number>();
@@ -242,15 +246,11 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
 
       if (!effectiveGraphifyEnabled && record.source === 'code') continue;
 
-      if (query.timeWindow?.from) {
-        const startTime = new Date(query.timeWindow.from).getTime();
-        const docTime = new Date(record.created_at).getTime();
-        if (docTime < startTime) continue;
-      }
-      if (query.timeWindow?.to) {
-        const endTime = new Date(query.timeWindow.to).getTime();
-        const docTime = new Date(record.created_at).getTime();
-        if (docTime > endTime) continue;
+      if (query.timeWindow?.from || query.timeWindow?.to) {
+        const docTime = Date.parse(record.created_at);
+        if (!Number.isFinite(docTime)) continue;
+        if (query.timeWindow.from && docTime < new Date(query.timeWindow.from).getTime()) continue;
+        if (query.timeWindow.to && docTime > new Date(query.timeWindow.to).getTime()) continue;
       }
 
       const hasVector = simMap.has(id);
@@ -277,19 +277,17 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
       return { results: [], scores: [], retrievedAt };
     }
 
-    const normalizeMinMax = (scores: number[], hasPresence: boolean[]): number[] => {
-      if (scores.length === 0) return [];
+    const normalizeMinMax = (rawScores: number[], hasPresence: boolean[]): number[] => {
+      if (rawScores.length === 0) return [];
+      // M16: a non-finite input (e.g. recency from an unparseable created_at) counts as 0
+      const scores = rawScores.map((s) => (Number.isFinite(s) ? s : 0));
       const min = Math.min(...scores);
       const max = Math.max(...scores);
       const range = max - min;
       if (range < 1e-9) {
         return scores.map((s, i) => (s > 0 && hasPresence[i] ? 1 : 0));
       }
-      const result: number[] = new Array(scores.length);
-      for (let i = 0; i < scores.length; i++) {
-        result[i] = hasPresence[i] ? (scores[i] - min) / range : 0;
-      }
-      return result;
+      return scores.map((s, i) => (hasPresence[i] ? (s - min) / range : 0));
     };
 
     const hasVectorArr = rawScores.map((s) => s.hasVector);
@@ -342,7 +340,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
         sourceId: record.source_id as string,
         content: record.content as string,
         score: finalScore,
-        similarity: this.getSimilarityTier(finalScore),
+        similarity: this.tierFor(id, simMap),
         metadata: meta,
         createdAt: record.created_at as string,
         provenance: {
@@ -404,16 +402,24 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
   }
 
   private calcRawRecencyScore(createdAt: string): number {
-    const docDate = new Date(createdAt).getTime();
-    const now = Date.now();
-    const ageDays = (now - docDate) / (1000 * 60 * 60 * 24);
-    return Math.pow(0.5, ageDays / 30);
+    const docDate = Date.parse(createdAt);
+    if (!Number.isFinite(docDate)) return 0;
+    const ageDays = (Date.now() - docDate) / (1000 * 60 * 60 * 24);
+    const score = Math.pow(0.5, ageDays / 30);
+    return Number.isFinite(score) ? score : 0;
   }
 
-  private getSimilarityTier(score: number): 'high' | 'medium' | 'low' | 'none' {
-    if (score >= this.similarityHigh) return 'high';
-    if (score >= this.similarityMedium) return 'medium';
-    if (score >= this.similarityLow) return 'low';
+  /**
+   * M18: tier on the raw cosine similarity of the vector hit (the per-query
+   * min-max-normalised finalScore is only for ranking). A hit with no vector
+   * similarity matched lexically only and is capped at 'low'.
+   */
+  private tierFor(id: string, simMap: Map<string, number>): 'high' | 'medium' | 'low' | 'none' {
+    const cosine = simMap.get(id);
+    if (cosine === undefined) return 'low';
+    if (cosine >= this.similarityHigh) return 'high';
+    if (cosine >= this.similarityMedium) return 'medium';
+    if (cosine >= this.similarityLow) return 'low';
     return 'none';
   }
 }

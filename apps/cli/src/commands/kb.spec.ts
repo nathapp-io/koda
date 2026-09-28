@@ -353,7 +353,7 @@ describe('kbCommand', () => {
       await listCmd?.parseAsync(['node', 'test', '--project', 'koda']);
 
       expect(ragControllerListDocuments).toHaveBeenCalledWith(
-        expect.objectContaining({ path: expect.objectContaining({ slug: 'koda' }), query: expect.objectContaining({ limit: '100' })})
+        expect.objectContaining({ path: expect.objectContaining({ slug: 'koda' }), query: expect.objectContaining({ limit: 100 })})
       );
       expect(exitSpy).toHaveBeenCalledWith(0);
     });

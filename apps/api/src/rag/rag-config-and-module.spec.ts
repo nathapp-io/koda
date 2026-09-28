@@ -4,6 +4,7 @@ import { FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interfac
 import { CounterOptimizeStrategy } from './strategies/counter-optimize.strategy';
 import { CronOptimizeStrategy } from './strategies/cron-optimize.strategy';
 import { ManualOptimizeStrategy } from './strategies/manual-optimize.strategy';
+import { RagModule } from './rag.module';
 
 function mockRagConfig(overrides: Partial<IRagConfig> = {}): IRagConfig {
   return {
@@ -147,5 +148,19 @@ describe('RAG Config & Module Wiring (US-002)', () => {
       // Suppress unused variable warning — ragCfg is used in beforeEach to test default state
       void ragCfg;
     });
+  });
+
+  it('registers KbTicketLifecycleSubscriber as a RagModule provider (M15 wiring)', () => {
+    const providers = (Reflect.getMetadata('providers', RagModule) ?? []) as Array<{ name?: string; provide?: unknown }>;
+    expect(providers.map((p) => p.name ?? String(p.provide))).toContain('KbTicketLifecycleSubscriber');
+  });
+
+  it('no longer provides the unused LexicalIndex or its 50k-row warmup', () => {
+    const providers = (Reflect.getMetadata('providers', RagModule) ?? []) as Array<{ name?: string; provide?: unknown }>;
+    const names = providers.map((p) => p.name ?? String(p.provide));
+    expect(names).not.toContain('LexicalIndex');
+    expect(names).not.toContain('LexicalIndexWarmup');
+    const exported = (Reflect.getMetadata('exports', RagModule) ?? []) as Array<{ name?: string }>;
+    expect(exported.map((e) => e.name)).not.toContain('LexicalIndex');
   });
 });

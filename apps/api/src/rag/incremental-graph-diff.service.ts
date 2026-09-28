@@ -33,6 +33,9 @@ export class IncrementalGraphDiffService {
 
     const storedGraph = await this.graphStore.getStoredGraph(projectId);
 
+    // Step 0 (M19): heal nodes a previous run left without a current vector.
+    await this.reindexStaleNodes(projectId, storedGraph);
+
     const incomingNodeMap = new Map(newNodes.map((n) => [n.id, n]));
     const incomingLinksBySource = this.groupLinksBySource(newLinks);
 
@@ -59,43 +62,51 @@ export class IncrementalGraphDiffService {
       }
     }
 
-    const removed = removedNodeIds.length;
-    const added = addedNodes.length;
-    const updated = updatedNodes.length;
-    const indexed = added + updated;
-
-    // Apply Prisma writes. GraphStoreService batches writes with $transaction,
-    // so avoid wrapping here to prevent nested transaction conflicts.
-    if (removedNodeIds.length > 0) {
-      await this.graphStore.deleteNodes(projectId, removedNodeIds);
-    }
-
-    const nodesToUpsert = [...addedNodes, ...updatedNodes];
-    if (nodesToUpsert.length > 0) {
-      const linksForUpsert = newLinks.filter((l) =>
-        nodesToUpsert.some((n) => n.id === l.source),
-      );
-      await this.graphStore.upsertNodes(projectId, nodesToUpsert, linksForUpsert);
-    }
-
-    // LanceDB operations (outside Prisma transaction)
-    for (const nodeId of removedNodeIds) {
+    // Step 1: pre-mark, then drop the vectors of removed and updated nodes. If the
+    // graph write below fails, these nodes stay in the graph marked stale, so the
+    // next run re-indexes them even when it sends unchanged content.
+    const updatedIds = updatedNodes.map((n) => n.id);
+    await this.graphStore.markVectorStale(projectId, [...removedNodeIds, ...updatedIds]);
+    for (const nodeId of [...removedNodeIds, ...updatedIds]) {
       await this.vectorStore.deleteBySource(projectId, nodeId);
     }
 
-    for (const node of updatedNodes) {
-      await this.vectorStore.deleteBySource(projectId, node.id);
+    // Step 2: one Prisma transaction for the graph write.
+    const nodesToUpsert = [...addedNodes, ...updatedNodes];
+    if (removedNodeIds.length > 0 || nodesToUpsert.length > 0) {
+      const upsertIds = new Set(nodesToUpsert.map((n) => n.id));
+      await this.graphStore.applyDiff(projectId, {
+        removedNodeIds,
+        nodes: nodesToUpsert,
+        links: newLinks.filter((l) => upsertIds.has(l.source)),
+      });
     }
 
-    const nodesToIndex = [...addedNodes, ...updatedNodes];
-    for (const node of nodesToIndex) {
+    // Step 3: index the changed nodes, clearing each flag after its vector lands.
+    for (const node of nodesToUpsert) {
       const nodeLinks = incomingLinksBySource.get(node.id) ?? [];
       await this.indexNode(projectId, node, nodeLinks, incomingNodeMap);
+      await this.graphStore.clearVectorStale(projectId, node.id);
     }
 
-    const durationMs = Date.now() - startTime;
+    return {
+      added: addedNodes.length,
+      updated: updatedNodes.length,
+      removed: removedNodeIds.length,
+      indexed: nodesToUpsert.length,
+      durationMs: Date.now() - startTime,
+    };
+  }
 
-    return { added, updated, removed, indexed, durationMs };
+  /** Re-indexes every vectorStale node from the stored graph, clearing each flag after its write. */
+  private async reindexStaleNodes(projectId: string, storedGraph: StoredGraph): Promise<void> {
+    const staleIds = await this.graphStore.findVectorStaleNodeIds(projectId);
+    for (const nodeId of staleIds) {
+      const node = storedGraph.nodeMap.get(nodeId);
+      if (!node) continue;
+      await this.indexNode(projectId, node, storedGraph.linkMap.get(nodeId) ?? [], storedGraph.nodeMap);
+      await this.graphStore.clearVectorStale(projectId, nodeId);
+    }
   }
 
   private groupLinksBySource(

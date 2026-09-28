@@ -9,8 +9,6 @@ export interface StoredGraph {
 
 @Injectable()
 export class GraphStoreService {
-  private static readonly BATCH_SIZE = 500;
-
   constructor(
     private readonly ragRepository: PrismaRagRepository,
   ) {}
@@ -45,46 +43,32 @@ export class GraphStoreService {
     return { nodeMap, linkMap };
   }
 
-  async upsertNodes(
+  async applyDiff(
     projectId: string,
-    nodes: GraphifyNodeDto[],
-    links: GraphifyLinkDto[],
+    diff: { removedNodeIds: string[]; nodes: GraphifyNodeDto[]; links: GraphifyLinkDto[] },
   ): Promise<void> {
-    const nodeIds = nodes.map((n) => n.id);
-
-    await this.ragRepository.upsertNodesInBatches(
-      projectId,
-      nodes.map((n) => ({
+    await this.ragRepository.applyGraphDiff(projectId, {
+      removedNodeIds: diff.removedNodeIds,
+      nodes: diff.nodes.map((n) => ({
         nodeId: n.id,
         label: n.label,
         type: n.type,
         sourceFile: n.source_file,
         community: n.community,
       })),
-      links.map((l) => ({
-        sourceId: l.source,
-        targetId: l.target,
-        relation: l.relation,
-      })),
-      nodeIds,
-      GraphStoreService.BATCH_SIZE,
-    );
-  }
-
-  async deleteNodes(projectId: string, nodeIds: string[]): Promise<void> {
-    if (nodeIds.length === 0) return;
-    await this.ragRepository.deleteGraphLinksByNodeIds(projectId, nodeIds);
-    await this.ragRepository.deleteGraphNodesByIds(projectId, nodeIds);
-  }
-
-  async deleteLinks(projectId: string, linkIds: string[]): Promise<void> {
-    if (linkIds.length === 0) return;
-
-    const conditions = linkIds.map((compositeId) => {
-      const [sourceId, targetId] = compositeId.split('::');
-      return { sourceId, targetId };
+      links: diff.links.map((l) => ({ sourceId: l.source, targetId: l.target, relation: l.relation })),
     });
+  }
 
-    await this.ragRepository.deleteGraphNodeLinks(projectId, conditions);
+  markVectorStale(projectId: string, nodeIds: string[]): Promise<void> {
+    return this.ragRepository.markGraphNodesVectorStale(projectId, nodeIds);
+  }
+
+  findVectorStaleNodeIds(projectId: string): Promise<string[]> {
+    return this.ragRepository.findVectorStaleNodeIds(projectId);
+  }
+
+  clearVectorStale(projectId: string, nodeId: string): Promise<void> {
+    return this.ragRepository.clearGraphNodeVectorStale(projectId, nodeId);
   }
 }

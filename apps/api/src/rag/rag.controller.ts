@@ -17,6 +17,8 @@ import { HybridRetrieverService } from './hybrid-retriever.service';
 import { AddDocumentDto } from './dto/add-document.dto';
 import { SearchKbDto } from './dto/search-kb.dto';
 import { ImportGraphifyDto } from './dto/import-graphify.dto';
+import { ListKbDocumentsQuery } from './dto/list-kb-documents.query';
+import { parseQuery } from '../common/dto/koda-page.query';
 import { Principal, RequiredPermission } from '@nathapp/nestjs-auth';
 import type { CaslPermissionAction } from '@nathapp/nestjs-auth';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
@@ -74,15 +76,16 @@ export class RagController {
   @Get('documents')
   @ApiOperation({ summary: 'List indexed documents in the project knowledge base' })
   @ApiResponse({ status: 200, description: 'Documents listed' })
+  @ApiResponse({ status: 400, description: 'Invalid limit' })
   @ApiResponse({ status: 403, description: 'Forbidden - no project role' })
   @ApiResponse({ status: 404, description: 'Project not found' })
   async listDocuments(
     @Param('slug') slug: string,
     @Principal() _principal: KodaPrincipal,
-    @Query('limit') limitStr?: string,
+    @Query() rawQuery?: ListKbDocumentsQuery,
   ) {
     const project = await this.resolveProject(slug);
-    const limit = limitStr ? Math.min(parseInt(limitStr, 10), 500) : 100;
+    const { limit } = parseQuery(ListKbDocumentsQuery, rawQuery ?? {});
     const data = await this.ragService.listDocuments(project.id, limit);
     return JsonResponse.Ok(data);
   }
