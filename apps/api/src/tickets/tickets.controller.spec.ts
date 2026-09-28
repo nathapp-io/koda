@@ -633,6 +633,16 @@ describe('TicketsController', () => {
         .rejects.toBeInstanceOf(ForbiddenAppException);
     });
 
+    // Authorization runs BEFORE body validation: a non-admin gets 403 even
+    // when their request body is malformed. Pin the ordering so a future
+    // re-order does not silently turn the 403 into a 400 (the body's
+    // validation only fires for callers who passed the admin check).
+    it.each([undefined, '', '   '])('403 for a non-admin with malformed body %j (authz runs before validation)', async (body) => {
+      await expect(controller.close('koda', 'KODA-1', { body }, mockMemberUser, project('DEVELOPER')))
+        .rejects.toBeInstanceOf(ForbiddenAppException);
+      expect(mockTransitionsService.close).not.toHaveBeenCalled();
+    });
+
     it.each([undefined, '', '   '])('400 for a project ADMIN with reason %j', async (body) => {
       await expect(controller.close('koda', 'KODA-1', { body }, mockMemberUser, project('ADMIN')))
         .rejects.toBeInstanceOf(ValidationAppException);

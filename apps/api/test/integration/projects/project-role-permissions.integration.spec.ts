@@ -70,10 +70,26 @@ describeIntegration('project-role permissions (#144)', () => {
   const adminOnly = { ADMIN: true, DEVELOPER: false, VIEWER: false };
   const whoFor: Record<Role, string> = { ADMIN: 'padmin', DEVELOPER: 'pdev', VIEWER: 'pviewer' };
 
-  const cases: Case[] = [
-    { capability: 'read ticket', allowed: all, setup: async () => ({ method: 'get', url: `/api/projects/team/tickets/${await ticketIn('CREATED')}` }) },
+  // Read cases share a single ticket (or no ticket, for project-wide reads).
+  // All three role assertions hit the SAME target, so a future regression
+  // where one role silently sees a different ticket cannot pass.
+  // The shared fixtures are built lazily by the per-case setup() below; the
+  // ticket/labels are reused across the three role-asserted it()s.
+  const sharedReadFixtures: Record<string, () => Promise<{ method: Method; url: string; body?: Record<string, unknown> }>> = {
+    'read ticket': async () => ({ method: 'get', url: `/api/projects/team/tickets/${await ticketIn('CREATED')}` }),
+    'read comments': async () => ({ method: 'get', url: `/api/projects/team/tickets/${await ticketIn('CREATED')}/comments` }),
+    'create comment': async () => ({ method: 'post', url: `/api/projects/team/tickets/${await ticketIn('CREATED')}/comments`, body: { body: 'hello' } }),
+  };
+
+  const readCases: Case[] = [
+    { capability: 'read ticket', allowed: all, setup: sharedReadFixtures['read ticket'] },
     { capability: 'read labels', allowed: all, setup: async () => ({ method: 'get', url: '/api/projects/team/labels' }) },
-    { capability: 'read comments', allowed: all, setup: async () => ({ method: 'get', url: `/api/projects/team/tickets/${await ticketIn('CREATED')}/comments` }) },
+    { capability: 'read comments', allowed: all, setup: sharedReadFixtures['read comments'] },
+  ];
+
+  // Write cases each build a fresh target per role: a transition or delete
+  // consumes its target, so we cannot share across the three roles.
+  const writeCases: Case[] = [
     { capability: 'create ticket', allowed: workers, setup: async () => ({ method: 'post', url: '/api/projects/team/tickets', body: { type: 'BUG', title: 'by role' } }) },
     { capability: 'update ticket', allowed: workers, setup: async () => ({ method: 'patch', url: `/api/projects/team/tickets/${await ticketIn('CREATED')}`, body: { title: 'renamed' } }) },
     { capability: 'status via PATCH', allowed: workers, setup: async () => ({ method: 'patch', url: `/api/projects/team/tickets/${await ticketIn('VERIFIED')}`, body: { status: 'IN_PROGRESS' } }) },
@@ -97,7 +113,7 @@ describeIntegration('project-role permissions (#144)', () => {
         return { method: 'delete', url: `/api/projects/team/tickets/${ref}/labels/${labelId}` };
       },
     },
-    { capability: 'create comment', allowed: all, setup: async () => ({ method: 'post', url: `/api/projects/team/tickets/${await ticketIn('CREATED')}/comments`, body: { body: 'hello' } }) },
+    { capability: 'create comment', allowed: all, setup: sharedReadFixtures['create comment'] },
     {
       capability: 'update own comment', allowed: all, setup: async () => {
         const ref = await ticketIn('CREATED');
@@ -145,7 +161,41 @@ describeIntegration('project-role permissions (#144)', () => {
     await app?.close();
   });
 
-  for (const c of cases) {
+  // Build shared read fixtures once (in beforeAll) so the three role-asserted
+  // tests inside `for (const c of readCases)` hit the SAME target — a
+  // future regression where one role silently sees a different ticket cannot
+  // pass. The fixture shape matches what `setup()` would have returned.
+  const readFixtures: Record<string, Awaited<ReturnType<Case['setup']>>> = {};
+  beforeAll(async () => {
+    for (const c of readCases) {
+      readFixtures[c.capability] = await c.setup();
+    }
+  }, 30_000);
+
+  for (const c of readCases) {
+    // Read cases share the same target across the three role assertions.
+    // The shared fixture is resolved at TEST TIME (not registration time),
+    // so the `beforeAll` above has populated readFixtures by the time each
+    // it() callback runs.
+    for (const role of ['ADMIN', 'DEVELOPER', 'VIEWER'] as const) {
+      const expected = c.allowed[role];
+      it(`${c.capability}: project ${role} -> ${expected ? 'allowed' : '403'} (shared fixture)`, async () => {
+        const sharedSpec = readFixtures[c.capability];
+        const url = await resolveUrl(role, sharedSpec);
+        const req = request(server)[sharedSpec.method](url).set(auth(whoFor[role]));
+        const res = await (sharedSpec.body === undefined ? req : req.send(sharedSpec.body));
+        if (expected) {
+          expect({ status: res.status, ok: res.status >= 200 && res.status < 300 }).toEqual({ status: res.status, ok: true });
+        } else {
+          expect(res.status).toBe(403);
+        }
+      }, TIMEOUT);
+    }
+  }
+
+  for (const c of writeCases) {
+    // Write cases each build a fresh target per role: a transition or delete
+    // consumes its target, so sharing would cross-contaminate the matrix.
     for (const role of ['ADMIN', 'DEVELOPER', 'VIEWER'] as const) {
       const expected = c.allowed[role];
       it(`${c.capability}: project ${role} -> ${expected ? 'allowed' : '403'}`, async () => {

@@ -8,8 +8,11 @@ const read = (...p: string[]) => readFileSync(join(webDir, ...p), 'utf-8')
 describe('#144 ticket page visibility follows the project role', () => {
   const page = () => read('pages', '[project]', 'tickets', '[ref].vue')
 
-  test('loads the caller project role from the members endpoint', () => {
-    expect(page()).toContain('useProjectMembers(')
+  test('loads the caller project role via the SSR-friendly useProjectViewerRole composable', () => {
+    // #144 + BUG-4: viewerRole must be populated on SSR (useAsyncData) so
+    // the controls are present on first paint — no flash of "no controls"
+    // after hydration.
+    expect(page()).toContain('useProjectViewerRole(')
     expect(page()).toContain('viewerRole')
   })
 

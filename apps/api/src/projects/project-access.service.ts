@@ -18,6 +18,11 @@ export class ProjectAccessService {
    * Resolves the caller's role in a project with at most one query.
    * Global ADMIN -> 'ADMIN' (no query); agent -> null (no query); member ->
    * their ProjectMember.role; non-member user -> 403.
+   *
+   * The allow-list keeps the legacy 'AGENT' / 'MEMBER' values so older rows
+   * continue to authenticate (the CASL factory collapses them to the VIEWER
+   * least-privilege set — see KodaCaslAbilityFactory.projectRolePermissions).
+   * New code should type the return as ProjectMemberRole.
    */
   async resolveMembership(projectId: string, principal: KodaPrincipal): Promise<string | null> {
     if (!isUserPrincipal(principal)) return null;

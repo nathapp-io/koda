@@ -98,14 +98,14 @@ export function ticketCommand(program: Command): void {
         }
 
         const response = await ticketsControllerCreate({
-  body: {
+          body: {
             type: options.type as 'BUG' | 'ENHANCEMENT' | 'TASK' | 'QUESTION',
             title: options.title,
             description: options.desc,
             priority: options.priority,
           },
-  path: { slug: ctx.projectSlug }
-  });
+          path: { slug: ctx.projectSlug },
+        });
         const ticketData = unwrap<{ ref?: string; number?: number }>(response);
 
         if (options.json) {

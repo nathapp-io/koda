@@ -272,10 +272,18 @@ assert "koda ticket update" "update\|success\|Updated" "$(koda ticket update KOD
 # =============================================================================
 # STEP 12: Ticket close (direct)
 # =============================================================================
+# Track 3 Slice 3 (#144): close is an admin override — agents no longer
+# have a path to it. The CLI is logged in as an agent, so the close step
+# hits the API directly with the user JWT (captured at bootstrap) instead
+# of going through the CLI.
 log "Step 12: Ticket close..."
 koda ticket create --project koda --type TASK --title "Close test ticket" > /dev/null
 koda ticket start KODA-4 > /dev/null
-assert "koda ticket close"    "close\|CLOSED\|success"  "$(koda ticket close KODA-4)"
+CLOSE_OUT=$(curl -sf -X POST "$API_URL/api/projects/koda/tickets/KODA-4/close" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $JWT" \
+  -d '{"body":"Closing in smoke test"}' 2>&1)
+assert "ticket close (admin override)" "close\|CLOSED\|success" "$CLOSE_OUT"
 
 # =============================================================================
 # STEP 13: Ticket links

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref as vueRef } from 'vue'
+import { computed, reactive, ref as vueRef } from 'vue'
 import MarkdownEditor from '~/components/MarkdownEditor.vue'
 import { extractApiError } from '~/composables/useApi'
 import { createDebouncer } from '~/lib/debounce'
@@ -284,9 +284,12 @@ const assigneeUserId = vueRef('')
 const assigning = vueRef(false)
 
 // #144: controls follow the caller's role in THIS project (the API decides;
-// this only avoids offering actions that would 403).
-const { canManage, viewerRole, load: loadMembership } = useProjectMembers(slug)
-onMounted(() => { loadMembership().catch(() => {}) })
+// this only avoids offering actions that would 403). useProjectViewerRole
+// is SSR-friendly so canManage/viewerRole are populated before hydration —
+// no flash of "no controls" → "controls appear" on first paint.
+const { data: viewerRoleData } = useProjectViewerRole(slug)
+const canManage = computed(() => viewerRoleData.value?.canManage === true)
+const viewerRole = computed(() => viewerRoleData.value?.viewerRole ?? null)
 const canWork = computed(() => canManage.value || viewerRole.value === 'DEVELOPER')
 
 async function assignTicket() {
