@@ -80,8 +80,11 @@ export interface IVcsRepository {
   // TicketLink operations
   findActiveTicketLinksWithPrs(projectId: string): Promise<TicketLinkData[]>;
   findTicketLinkByPrNumber(projectId: string, prNumber: number): Promise<TicketLinkData | null>;
-  updateTicketLinkPrState(id: string, prState: string): Promise<void>;
-  updateTicketLinkWithPrState(id: string, prState: string): Promise<void>;
+  /**
+   * M12: the only TicketLink.prState write. `merged` is terminal: a link already
+   * merged is left unchanged. Resolves true when the row changed.
+   */
+  updateTicketLinkWithPrState(id: string, prState: string): Promise<boolean>;
 
   // Merged PR auto-transition
   applyMergedPrTransition(input: MergedPrTransitionInput): Promise<void>;

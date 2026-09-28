@@ -83,13 +83,6 @@ export class PrismaTicketLinkRepository {
     return rows.map(m => this.toDomain(m));
   }
 
-  async updateLink(
-    id: string,
-    data: { prState: string; prUpdatedAt: Date },
-  ): Promise<void> {
-    await this.db.ticketLink.update({ where: { id }, data });
-  }
-
   async findLinkByIdAndTicket(
     id: string,
     ticketId: string,

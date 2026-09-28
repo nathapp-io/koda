@@ -82,8 +82,7 @@ function createMockRepo(): jest.Mocked<IVcsRepository> {
   return {
     findActiveTicketLinksWithPrs: jest.fn().mockResolvedValue([]),
     findTicketLinkByPrNumber: jest.fn().mockResolvedValue(null),
-    updateTicketLinkPrState: jest.fn().mockResolvedValue(undefined),
-    updateTicketLinkWithPrState: jest.fn().mockResolvedValue(undefined),
+    updateTicketLinkWithPrState: jest.fn().mockResolvedValue(true),
     applyMergedPrTransition: jest.fn().mockResolvedValue(undefined),
     findTicketWithProject: jest.fn().mockResolvedValue(null),
     findProjectById: jest.fn().mockResolvedValue(null),
@@ -161,7 +160,7 @@ describe('VcsPrSyncService', () => {
 
       const result = await service.syncPrStatus(project, connection, encryptionKey);
 
-      expect(mockRepo.updateTicketLinkPrState).toHaveBeenCalledWith(link.id, 'closed');
+      expect(mockRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith(link.id, 'closed');
       expect(result.updated).toBe(1);
       expect(result.skipped).toBe(0);
     });
@@ -173,7 +172,7 @@ describe('VcsPrSyncService', () => {
 
       const result = await service.syncPrStatus(project, connection, encryptionKey);
 
-      expect(mockRepo.updateTicketLinkPrState).not.toHaveBeenCalled();
+      expect(mockRepo.updateTicketLinkWithPrState).not.toHaveBeenCalled();
       expect(result.updated).toBe(0);
     });
 
@@ -184,7 +183,7 @@ describe('VcsPrSyncService', () => {
 
       const result = await service.syncPrStatus(project, connection, encryptionKey);
 
-      expect(mockRepo.updateTicketLinkPrState).toHaveBeenCalledWith(link.id, 'closed');
+      expect(mockRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith(link.id, 'closed');
       expect(result.updated).toBe(1);
     });
 
@@ -195,7 +194,7 @@ describe('VcsPrSyncService', () => {
 
       const result = await service.syncPrStatus(project, connection, encryptionKey);
 
-      expect(mockRepo.updateTicketLinkPrState).not.toHaveBeenCalled();
+      expect(mockRepo.updateTicketLinkWithPrState).not.toHaveBeenCalled();
       expect(result.skipped).toBe(1);
       expect(result.updated).toBe(0);
     });
@@ -221,7 +220,7 @@ describe('VcsPrSyncService', () => {
       expect(mockRepo.applyMergedPrTransition).toHaveBeenCalledWith(
         expect.objectContaining({ ticketId: 'ticket-1' }),
       );
-      expect(mockRepo.updateTicketLinkPrState).toHaveBeenCalledWith(link.id, 'merged');
+      expect(mockRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith(link.id, 'merged');
     });
 
     it('should still update prState to merged even when auto-transition fails', async () => {
@@ -241,7 +240,7 @@ describe('VcsPrSyncService', () => {
 
       const result = await service.syncPrStatus(project, connection, encryptionKey);
 
-      expect(mockRepo.updateTicketLinkPrState).toHaveBeenCalledWith(link.id, 'merged');
+      expect(mockRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith(link.id, 'merged');
       expect(result.updated).toBe(1);
     });
 
@@ -254,7 +253,7 @@ describe('VcsPrSyncService', () => {
 
       await service.syncPrStatus(project, connection, encryptionKey);
 
-      expect(mockRepo.updateTicketLinkPrState).toHaveBeenCalledWith(link.id, 'draft');
+      expect(mockRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith(link.id, 'draft');
     });
 
     it('should process remaining links even when one link fails', async () => {
@@ -269,7 +268,7 @@ describe('VcsPrSyncService', () => {
 
       expect(result.skipped).toBe(1);
       expect(result.updated).toBe(1);
-      expect(mockRepo.updateTicketLinkPrState).toHaveBeenCalledWith('link-2', 'closed');
+      expect(mockRepo.updateTicketLinkWithPrState).toHaveBeenCalledWith('link-2', 'closed');
     });
   });
 

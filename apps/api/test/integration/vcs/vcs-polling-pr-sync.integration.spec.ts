@@ -111,7 +111,7 @@ describe('VcsPollingService PR Sync Integration (VCS-P3-002-C AC1)', () => {
             findExistingTicketByExternalId: jest.fn(),
             createTicketFromIssue: jest.fn(),
             findActiveTicketLinksWithPrs: jest.fn(),
-            updateTicketLinkPrState: jest.fn(),
+            updateTicketLinkWithPrState: jest.fn(),
             applyMergedPrTransition: jest.fn(),
           },
         },

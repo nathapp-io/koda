@@ -80,6 +80,13 @@ export class VcsWebhookService implements OnModuleDestroy {
   // BUG-11: hard cap so the map can never grow unboundedly even if the
   // cleanup cadence (currently == dedupWindowMs) drifts from the window.
   private static readonly MAX_DEDUP_ENTRIES = 10_000;
+
+  // M12: a merged link never changes; late deliveries for it are acknowledged, not applied.
+  private static readonly ALREADY_MERGED: WebhookHandleResult = {
+    success: true,
+    ignored: true,
+    reason: 'PR is already merged',
+  };
   private readonly cleanupInterval: ReturnType<typeof setInterval>;
   private dbDedupVerified = false;
   private dbDedupWorks = false;
@@ -297,7 +304,9 @@ export class VcsWebhookService implements OnModuleDestroy {
 
     const newPrState = pr.draft ? 'draft' : 'open';
 
-    await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, newPrState);
+    if (!(await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, newPrState))) {
+      return VcsWebhookService.ALREADY_MERGED;
+    }
 
     this.logger.debug(`Updated TicketLink ${ticketLink.id} prState to '${newPrState}' for PR #${prNumber}`);
 
@@ -327,6 +336,11 @@ export class VcsWebhookService implements OnModuleDestroy {
         ignored: true,
         reason: 'No TicketLink found for PR number',
       };
+    }
+
+    // A duplicate merged delivery must not re-run the transition.
+    if (ticketLink.prState === 'merged') {
+      return VcsWebhookService.ALREADY_MERGED;
     }
 
     // Trigger auto-transition logic (same as VcsPrSyncService.handleMergedPrAutoTransition)
@@ -378,7 +392,9 @@ export class VcsWebhookService implements OnModuleDestroy {
       };
     }
 
-    await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'closed');
+    if (!(await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'closed'))) {
+      return VcsWebhookService.ALREADY_MERGED;
+    }
 
     this.logger.debug(`Updated TicketLink ${ticketLink.id} prState to 'closed' for PR #${prNumber}`);
 
@@ -410,7 +426,9 @@ export class VcsWebhookService implements OnModuleDestroy {
       };
     }
 
-    await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'open');
+    if (!(await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'open'))) {
+      return VcsWebhookService.ALREADY_MERGED;
+    }
 
     this.logger.debug(`Updated TicketLink ${ticketLink.id} prState to 'open' for PR #${prNumber}`);
 
@@ -439,7 +457,9 @@ export class VcsWebhookService implements OnModuleDestroy {
       };
     }
 
-    await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'open');
+    if (!(await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'open'))) {
+      return VcsWebhookService.ALREADY_MERGED;
+    }
 
     return {
       success: true,
@@ -465,7 +485,9 @@ export class VcsWebhookService implements OnModuleDestroy {
       };
     }
 
-    await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'draft');
+    if (!(await this.vcsRepo.updateTicketLinkWithPrState(ticketLink.id, 'draft'))) {
+      return VcsWebhookService.ALREADY_MERGED;
+    }
 
     return {
       success: true,

@@ -273,20 +273,17 @@ export class PrismaVcsRepository implements IVcsRepository {
   }
 
   /**
-   * Update a TicketLink's prState and prUpdatedAt.
+   * M12: the only TicketLink.prState write. A late or replayed event (fresh
+   * delivery id, so replay protection lets it through) must not regress a merged
+   * PR, so the write skips rows already `merged`. NULL is matched explicitly:
+   * `prState <> 'merged'` alone is NULL, not true, for a NULL row.
    */
-  async updateTicketLinkPrState(id: string, prState: string): Promise<void> {
-    await this.db.ticketLink.update({
-      where: { id },
+  async updateTicketLinkWithPrState(id: string, prState: string): Promise<boolean> {
+    const { count } = await this.db.ticketLink.updateMany({
+      where: { id, OR: [{ prState: null }, { prState: { not: 'merged' } }] },
       data: { prState, prUpdatedAt: new Date() },
     });
-  }
-
-  /**
-   * Update a TicketLink's prState and prUpdatedAt (alias for webhook service).
-   */
-  async updateTicketLinkWithPrState(id: string, prState: string): Promise<void> {
-    await this.updateTicketLinkPrState(id, prState);
+    return count === 1;
   }
 
   /**

@@ -146,7 +146,7 @@ describe('VcsPollingService - Comprehensive Behavior Tests', () => {
     findExistingTicketByExternalId: jest.fn(),
     createTicketFromIssue: jest.fn(),
     findActiveTicketLinksWithPrs: jest.fn(),
-    updateTicketLinkPrState: jest.fn(),
+    updateTicketLinkWithPrState: jest.fn(),
     applyMergedPrTransition: jest.fn(),
   };
 

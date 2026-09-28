@@ -98,8 +98,9 @@ export class VcsPrSyncService {
             }
 
             // Always update prState regardless of transition outcome
-            await this.vcsRepo.updateTicketLinkPrState(link.id, newPrState);
-            updated++;
+            if (await this.vcsRepo.updateTicketLinkWithPrState(link.id, newPrState)) {
+              updated++;
+            }
 
             // AC6: After syncPrStatus() updates a TicketLink, extractLinksFromPr() is called
             // to pick up new commits from the PR
@@ -129,8 +130,9 @@ export class VcsPrSyncService {
       } catch (error) {
         if (error instanceof NotFoundAppException) {
           // 404: mark as closed
-          await this.vcsRepo.updateTicketLinkPrState(link.id, 'closed');
-          updated++;
+          if (await this.vcsRepo.updateTicketLinkWithPrState(link.id, 'closed')) {
+            updated++;
+          }
         } else {
           // General API error: skip this PR
           skipped++;

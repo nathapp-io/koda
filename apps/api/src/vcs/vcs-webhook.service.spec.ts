@@ -35,7 +35,6 @@ function createMockVcsRepository(sharedEnqueuedEvents?: SharedEnqueuedEvent[]): 
     findTicketWithProject: jest.fn().mockResolvedValue(null),
     findActiveTicketLinksWithPrs: jest.fn().mockResolvedValue([]),
     findTicketLinkByPrNumber: jest.fn().mockResolvedValue(null),
-    updateTicketLinkPrState: jest.fn(),
     updateTicketLinkWithPrState: jest.fn(),
     applyMergedPrTransition: jest.fn(),
     findPendingOutboxEvents: jest.fn().mockImplementation((query: OutboxDedupQuery) => {
