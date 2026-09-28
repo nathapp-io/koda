@@ -89,6 +89,7 @@ function createMockRepo(): jest.Mocked<IVcsRepository> {
     findProjectById: jest.fn().mockResolvedValue(null),
     findVcsConnectionByProjectId: jest.fn().mockResolvedValue(null),
     findVcsConnectionById: jest.fn().mockResolvedValue(null),
+    findVcsConnectionByProjectSlug: jest.fn().mockResolvedValue(null),
     findPollingConnections: jest.fn().mockResolvedValue([]),
     createVcsConnection: jest.fn(),
     updateVcsConnection: jest.fn(),

@@ -1,6 +1,6 @@
 import { HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
-import type { VcsConnectionDomain } from './domain/vcs.domain';
+import type { VcsConnectionDomain, VcsConnectionWithProjectDomain } from './domain/vcs.domain';
 import { randomBytes } from 'crypto';
 import { encryptToken, decryptToken } from '../common/utils/encryption.util';
 import { CreateVcsConnectionDto } from './dto/create-vcs-connection.dto';
@@ -231,6 +231,16 @@ export class VcsConnectionService {
     }
 
     return connection;
+  }
+
+  /**
+   * The connection (with its project) that receives inbound webhooks for
+   * `slug`, or null when the slug is unknown, the project is soft-deleted, or it
+   * has no connection. Never throws NotFound: the webhook route answers every
+   * miss with the same 401.
+   */
+  async findInboundTarget(slug: string): Promise<VcsConnectionWithProjectDomain | null> {
+    return this.vcsRepo.findVcsConnectionByProjectSlug(slug);
   }
 
   /**

@@ -93,6 +93,8 @@ export interface IVcsRepository {
   findProjectById(projectId: string): Promise<{ id: string } | null>;
   findVcsConnectionByProjectId(projectId: string): Promise<VcsConnectionDomain | null>;
   findVcsConnectionById(connectionId: string): Promise<VcsConnectionWithProjectDomain | null>;
+  /** The connection of a live (not soft-deleted) project by slug; null for any miss. */
+  findVcsConnectionByProjectSlug(slug: string): Promise<VcsConnectionWithProjectDomain | null>;
   findPollingConnections(): Promise<VcsConnectionWithProjectDomain[]>;
   createVcsConnection(data: CreateVcsConnectionData): Promise<VcsConnectionDomain>;
   updateVcsConnection(projectId: string, data: UpdateVcsConnectionData): Promise<VcsConnectionDomain>;

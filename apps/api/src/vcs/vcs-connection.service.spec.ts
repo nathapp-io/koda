@@ -57,6 +57,7 @@ function createMockRepo(): jest.Mocked<IVcsRepository> {
     findProjectById: jest.fn().mockResolvedValue({ id: 'proj-1' }),
     findVcsConnectionByProjectId: jest.fn().mockResolvedValue(null),
     findVcsConnectionById: jest.fn().mockResolvedValue(null),
+    findVcsConnectionByProjectSlug: jest.fn().mockResolvedValue(null),
     findPollingConnections: jest.fn().mockResolvedValue([]),
     createVcsConnection: jest.fn().mockResolvedValue(makeConnection()),
     updateVcsConnection: jest.fn().mockResolvedValue(makeConnection()),
@@ -102,6 +103,22 @@ describe('VcsConnectionService', () => {
     }).compile();
 
     service = module.get<VcsConnectionService>(VcsConnectionService);
+  });
+
+  describe('findInboundTarget', () => {
+    it('returns the connection with its project from the slug lookup', async () => {
+      const target = { ...makeConnection({ syncMode: 'webhook' }), project: { id: 'proj-1', key: 'P', slug: 'p' } };
+      mockRepo.findVcsConnectionByProjectSlug.mockResolvedValue(target);
+
+      await expect(service.findInboundTarget('p')).resolves.toBe(target);
+      expect(mockRepo.findVcsConnectionByProjectSlug).toHaveBeenCalledWith('p');
+    });
+
+    it('returns null instead of throwing NotFound when nothing matches', async () => {
+      mockRepo.findVcsConnectionByProjectSlug.mockResolvedValue(null);
+
+      await expect(service.findInboundTarget('missing')).resolves.toBeNull();
+    });
   });
 
   describe('create', () => {
