@@ -239,11 +239,12 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
 
         await controller.syncIssue(mockProject.slug, issueNumber, principal);
 
-        // Verify syncIssue was called with 'manual' mode
+        // Verify syncIssue was called with 'manual' mode and the connection's repo
         expect(syncService.syncIssue).toHaveBeenCalledWith(
           mockProject,
           expect.objectContaining({ number: 42 }),
-          'manual'
+          'manual',
+          mockVcsConnection
         );
       });
     });

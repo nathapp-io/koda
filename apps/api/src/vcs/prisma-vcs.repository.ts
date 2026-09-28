@@ -152,14 +152,14 @@ export class PrismaVcsRepository implements IVcsRepository {
 
   /**
    * Check whether a ticket with the given externalVcsId already exists in the project.
-   * Includes soft-deleted tickets to prevent duplicate number allocation.
+   * Includes soft-deleted tickets, so a deleted import is never re-imported (M11).
    */
   async findExistingTicketByExternalId(
     projectId: string,
     externalVcsId: string,
   ): Promise<VcsTicketDomain | null> {
     const ticket = await this.db.ticket.findFirst({
-      where: { projectId, externalVcsId, deletedAt: null },
+      where: { projectId, externalVcsId },
     });
     return ticket ? this.toTicketDomain(ticket) : null;
   }
@@ -171,6 +171,7 @@ export class PrismaVcsRepository implements IVcsRepository {
   async createTicketFromIssue(
     project: { id: string },
     issue: VcsIssue,
+    externalVcsId: string,
   ): Promise<CreateTicketFromIssueResult> {
     return runWithTicketNumberRetry(this.txManager, async () => {
       const lastTicket = await this.db.ticket.findFirst({
@@ -189,7 +190,7 @@ export class PrismaVcsRepository implements IVcsRepository {
           description: issue.body,
           status: 'CREATED',
           priority: 'MEDIUM',
-          externalVcsId: `${issue.number}`,
+          externalVcsId,
           externalVcsUrl: issue.url,
           vcsSyncedAt: new Date(),
         },

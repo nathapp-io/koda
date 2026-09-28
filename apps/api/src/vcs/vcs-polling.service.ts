@@ -133,7 +133,7 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
       let issuesSkipped = 0;
 
       for (const issue of filteredIssues) {
-        const result = await this.syncService.syncIssue(connection.project, issue, 'polling');
+        const result = await this.syncService.syncIssue(connection.project, issue, 'polling', connection);
         if (result.action === 'created') {
           issuesSynced++;
         } else {

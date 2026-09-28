@@ -213,7 +213,7 @@ export class VcsController {
     const issue = await provider.fetchIssue(parseInt(issueNumber, 10));
 
     // Sync the issue (regardless of allowedAuthors per AC)
-    const result = await this.syncService.syncIssue(project, issue, 'manual');
+    const result = await this.syncService.syncIssue(project, issue, 'manual', connection);
 
     // Return HTTP 409 if issue is already synced
     if (result.action === 'skipped') {

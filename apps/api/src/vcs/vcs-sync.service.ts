@@ -4,6 +4,7 @@ import { VcsIssue } from './types';
 import { createVcsProvider } from './factory';
 import { decryptToken } from '../common/utils/encryption.util';
 import { IVcsRepository, VCS_REPOSITORY } from './domain/vcs.repository';
+import { externalVcsIdFor, VcsRepoRef } from './external-vcs-id';
 
 /**
  * Result of syncing a single issue
@@ -27,12 +28,12 @@ export class VcsSyncService {
     project: { id: string },
     issue: VcsIssue,
     syncMode: 'manual' | 'polling' | 'webhook',
+    repo: VcsRepoRef,
   ): Promise<SyncIssueResult> {
-    // Check if issue already exists (deduplication)
-    const existingTicket = await this.vcsRepo.findExistingTicketByExternalId(
-      project.id,
-      `${issue.number}`,
-    );
+    const externalVcsId = externalVcsIdFor(repo, issue.number);
+
+    // Dedup includes soft-deleted tickets (M11): a deleted import stays deleted.
+    const existingTicket = await this.vcsRepo.findExistingTicketByExternalId(project.id, externalVcsId);
 
     if (existingTicket) {
       return {
@@ -42,7 +43,7 @@ export class VcsSyncService {
     }
 
     // Allocate ticket number in transaction and create ticket
-    const result = await this.vcsRepo.createTicketFromIssue(project, issue);
+    const result = await this.vcsRepo.createTicketFromIssue(project, issue, externalVcsId);
 
     return {
       action: 'created',
@@ -110,7 +111,7 @@ export class VcsSyncService {
       // Sync each issue
       for (const issue of filteredIssues) {
         try {
-          const result = await this.syncIssue(project, issue, 'manual');
+          const result = await this.syncIssue(project, issue, 'manual', connection);
           if (result.action === 'created') {
             issuesSynced++;
             if (result.ticketId && result.ticketNumber) {

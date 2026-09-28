@@ -214,7 +214,7 @@ export class VcsWebhookService implements OnModuleDestroy {
 
     // Sync the issue
     try {
-      const result = await this.syncService.syncIssue(connection.project, issue, 'webhook');
+      const result = await this.syncService.syncIssue(connection.project, issue, 'webhook', connection);
 
       return {
         success: true,

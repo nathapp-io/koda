@@ -75,7 +75,11 @@ export interface OutboxDedupQuery {
 export interface IVcsRepository {
   // Ticket + Issue operations
   findExistingTicketByExternalId(projectId: string, externalVcsId: string): Promise<VcsTicketDomain | null>;
-  createTicketFromIssue(project: { id: string }, issue: { number: number; title: string; body: string | null }): Promise<CreateTicketFromIssueResult>;
+  createTicketFromIssue(
+    project: { id: string },
+    issue: { number: number; title: string; body: string | null },
+    externalVcsId: string,
+  ): Promise<CreateTicketFromIssueResult>;
 
   // TicketLink operations
   findActiveTicketLinksWithPrs(projectId: string): Promise<TicketLinkData[]>;

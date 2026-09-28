@@ -126,6 +126,7 @@ describeIntegration('M6 ticket-number allocation under concurrency', () => {
             labels: [],
             createdAt: new Date(),
           },
+          `vcs/${i + 1}`,
         ),
       ),
     );
