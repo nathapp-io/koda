@@ -145,10 +145,18 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     const allRows: LanceRecord[] = await table.query().limit(Math.min(rowCount, 500)).toArray();
 
     let ftsRanked: { id: string; score: number }[] = [];
+    // M17: rows returned by native FTS may lie outside the scanned `allRows`
+    // window; keep them so they can resolve in recordMap.
+    let nativeFtsRows: LanceRecord[] = [];
+    const inMemoryFts = (): { id: string; score: number }[] =>
+      allRows
+        .map((r) => ({ id: r.id as string, score: simpleFtsScore(r.content as string, query.query) }))
+        .filter((r) => r.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, candidatePoolSize);
     if (this.lanceTable.available) {
       try {
         const nativeFtsResult = await table.search(query.query, 'fts', 'content');
-        let nativeFtsRows: LanceRecord[] = [];
         if (Array.isArray(nativeFtsResult)) {
           nativeFtsRows = nativeFtsResult as LanceRecord[];
         } else if (nativeFtsResult && typeof nativeFtsResult === 'object' && 'toArray' in nativeFtsResult) {
@@ -156,18 +164,11 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
         }
         ftsRanked = nativeFtsRows.map((r, i) => ({ id: r.id as string, score: 1 / (i + 1) }));
       } catch {
-        ftsRanked = allRows
-          .map((r) => ({ id: r.id as string, score: simpleFtsScore(r.content as string, query.query) }))
-          .filter((r) => r.score > 0)
-          .sort((a, b) => b.score - a.score)
-          .slice(0, candidatePoolSize);
+        nativeFtsRows = [];
+        ftsRanked = inMemoryFts();
       }
     } else {
-      ftsRanked = allRows
-        .map((r) => ({ id: r.id as string, score: simpleFtsScore(r.content as string, query.query) }))
-        .filter((r) => r.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, candidatePoolSize);
+      ftsRanked = inMemoryFts();
     }
 
     const ftsScoreMap = new Map<string, number>(ftsRanked.map((r) => [r.id, r.score]));
@@ -224,6 +225,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
 
     const recordMap = new Map<string, LanceRecord>();
     allRows.forEach((r) => recordMap.set(r.id as string, r));
+    nativeFtsRows.forEach((r) => recordMap.set(r.id as string, r));
     vectorRows.forEach((r) => recordMap.set(r.id as string, r));
 
     const simMap = new Map<string, number>();
@@ -338,7 +340,7 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
         sourceId: record.source_id as string,
         content: record.content as string,
         score: finalScore,
-        similarity: this.getSimilarityTier(finalScore),
+        similarity: this.tierFor(id, simMap),
         metadata: meta,
         createdAt: record.created_at as string,
         provenance: {
@@ -407,10 +409,17 @@ export class HybridRetrieverService implements OnModuleInit, OnModuleDestroy {
     return Number.isFinite(score) ? score : 0;
   }
 
-  private getSimilarityTier(score: number): 'high' | 'medium' | 'low' | 'none' {
-    if (score >= this.similarityHigh) return 'high';
-    if (score >= this.similarityMedium) return 'medium';
-    if (score >= this.similarityLow) return 'low';
+  /**
+   * M18: tier on the raw cosine similarity of the vector hit (the per-query
+   * min-max-normalised finalScore is only for ranking). A hit with no vector
+   * similarity matched lexically only and is capped at 'low'.
+   */
+  private tierFor(id: string, simMap: Map<string, number>): 'high' | 'medium' | 'low' | 'none' {
+    const cosine = simMap.get(id);
+    if (cosine === undefined) return 'low';
+    if (cosine >= this.similarityHigh) return 'high';
+    if (cosine >= this.similarityMedium) return 'medium';
+    if (cosine >= this.similarityLow) return 'low';
     return 'none';
   }
 }

@@ -95,3 +95,59 @@ describe('HybridRetrieverService scoring (M16)', () => {
     expect(result.results.map((r) => r.id)).toEqual(['in']);
   });
 });
+
+describe('HybridRetrieverService FTS-only hits (M17)', () => {
+  it('returns a native-FTS hit that is outside the first 500 scanned rows', async () => {
+    const scanned = Array.from({ length: 500 }, (_, i) => row(`scan-${i}`, 'unrelated filler'));
+    const deep = row('deep-fts', 'rare keyword match');
+    const retriever = buildRetriever(stubTable({ scanned, fts: [deep], vector: [] }));
+
+    const result = await retriever.search({ projectId: 'p', query: 'rare keyword' });
+
+    expect(result.results.map((r) => r.id)).toContain('deep-fts');
+  });
+});
+
+describe('HybridRetrieverService similarity tiers (M18)', () => {
+  it('tiers every strong vector hit by its raw cosine, not by a min-max-normalised score', async () => {
+    const first = row('a', 'alpha', { _distance: 0.05 }); // cosine 0.95
+    const second = row('b', 'alpha', { _distance: 0.1 }); // cosine 0.90
+    const retriever = buildRetriever(stubTable({ scanned: [], fts: [], vector: [first, second] }));
+
+    const result = await retriever.search({ projectId: 'p', query: 'alpha' });
+
+    expect(result.results.map((r) => [r.id, r.similarity])).toEqual([
+      ['a', 'high'],
+      ['b', 'high'],
+    ]);
+  });
+
+  it('labels a single weak vector hit by its raw cosine', async () => {
+    const weak = row('weak', 'alpha', { _distance: 0.6 }); // cosine 0.40 < similarityLow 0.5
+    const retriever = buildRetriever(stubTable({ scanned: [], fts: [], vector: [weak] }));
+
+    const result = await retriever.search({ projectId: 'p', query: 'alpha' });
+
+    expect(result.results[0].similarity).toBe('none');
+  });
+
+  it('caps an FTS-only hit at low', async () => {
+    const lexical = row('lex', 'rare keyword match');
+    const retriever = buildRetriever(stubTable({ scanned: [lexical], fts: [lexical], vector: [] }));
+
+    const result = await retriever.search({ projectId: 'p', query: 'rare keyword' });
+
+    expect(result.results.map((r) => [r.id, r.similarity])).toEqual([['lex', 'low']]);
+  });
+
+  it('leaves the ranking unchanged', async () => {
+    const a = row('a', 'alpha', { _distance: 0.3 });
+    const b = row('b', 'alpha', { _distance: 0.1 });
+    const retriever = buildRetriever(stubTable({ scanned: [], fts: [], vector: [b, a] }));
+
+    const result = await retriever.search({ projectId: 'p', query: 'alpha' });
+
+    expect(result.results.map((r) => r.id)).toEqual(['b', 'a']);
+    expect(result.scores[0].finalScore).toBeGreaterThan(result.scores[1].finalScore);
+  });
+});
