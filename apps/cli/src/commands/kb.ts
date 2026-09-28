@@ -88,7 +88,7 @@ export function kbCommand(program: Command): void {
       try {
         const ctx = await withContext({ projectSlug: options.project });
 
-        const response = await ragControllerListDocuments({ path: { slug: ctx.projectSlug }, query: { limit: '100' }});
+        const response = await ragControllerListDocuments({ path: { slug: ctx.projectSlug }, query: { limit: 100 }});
         const data = unwrap<{ items: Array<{ id: string; source: string; createdAt: string }>; total: number }>(response);
 
         if (options.json) {

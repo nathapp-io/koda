@@ -5,6 +5,7 @@ import { HybridRetrieverService } from './hybrid-retriever.service';
 import { NotFoundAppException } from '@nathapp/nestjs-common';
 import { PrismaRagRepository } from './prisma-rag.repository';
 import { ProjectAccessService } from '../projects/project-access.service';
+import type { ListKbDocumentsQuery } from './dto/list-kb-documents.query';
 
 const mockProject = {
   id: 'proj-1',
@@ -177,25 +178,16 @@ describe('RagController', () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
       ragService.listDocuments.mockResolvedValue([]);
 
-      await controller.listDocuments('alpha', mockAdminUser);
+      await controller.listDocuments('alpha', mockAdminUser, {} as ListKbDocumentsQuery);
 
       expect(ragService.listDocuments).toHaveBeenCalledWith('proj-1', 100);
     });
 
-    it('respects provided limit capped at 500', async () => {
+    it('uses the validated limit', async () => {
       mockFindProjectBySlug.mockResolvedValue(mockProject);
       ragService.listDocuments.mockResolvedValue([]);
 
-      await controller.listDocuments('alpha', mockAdminUser, '1000');
-
-      expect(ragService.listDocuments).toHaveBeenCalledWith('proj-1', 500);
-    });
-
-    it('uses provided limit when below cap', async () => {
-      mockFindProjectBySlug.mockResolvedValue(mockProject);
-      ragService.listDocuments.mockResolvedValue([]);
-
-      await controller.listDocuments('alpha', mockAdminUser, '25');
+      await controller.listDocuments('alpha', mockAdminUser, { limit: '25' } as unknown as ListKbDocumentsQuery);
 
       expect(ragService.listDocuments).toHaveBeenCalledWith('proj-1', 25);
     });

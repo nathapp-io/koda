@@ -760,13 +760,19 @@
             "required": false,
             "in": "query",
             "schema": {
-              "type": "string"
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100,
+              "type": "number"
             }
           }
         ],
         "responses": {
           "200": {
             "description": "Documents listed"
+          },
+          "400": {
+            "description": "Invalid limit"
           },
           "403": {
             "description": "Forbidden - no project role"
@@ -968,11 +974,91 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "intent",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": "answer",
+              "type": "string",
+              "enum": [
+                "answer",
+                "diagnose",
+                "plan",
+                "update",
+                "search"
+              ]
+            }
+          },
+          {
+            "name": "query",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maxLength": 2000,
+              "type": "string"
+            }
+          },
+          {
+            "name": "ticketIds",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maxItems": 100,
+              "maxLength": 200,
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "repoRefs",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "maxItems": 100,
+              "maxLength": 200,
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "includeCodeIntel",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "includeGraph",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "tokenBudget",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100000,
+              "type": "number"
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "Project context retrieved"
+          },
+          "400": {
+            "description": "Invalid query"
           },
           "401": {
             "description": "Unauthorized"
@@ -1021,6 +1107,9 @@
         "responses": {
           "200": {
             "description": "Project context retrieved"
+          },
+          "400": {
+            "description": "Invalid query"
           },
           "401": {
             "description": "Unauthorized"
@@ -4851,7 +4940,50 @@
       },
       "GetContextQueryDto": {
         "type": "object",
-        "properties": {}
+        "properties": {
+          "intent": {
+            "enum": [
+              "answer",
+              "diagnose",
+              "plan",
+              "update",
+              "search"
+            ],
+            "type": "string",
+            "default": "answer"
+          },
+          "query": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "ticketIds": {
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          "repoRefs": {
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          "includeCodeIntel": {
+            "type": "boolean"
+          },
+          "includeGraph": {
+            "type": "boolean"
+          },
+          "tokenBudget": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100000
+          }
+        }
       },
       "ExtractEventDto": {
         "type": "object",

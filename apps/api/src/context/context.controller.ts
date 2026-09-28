@@ -12,18 +12,10 @@ import { Principal, RequiredPermission, CaslPermissionAction } from '@nathapp/ne
 import { JsonResponse, ForbiddenAppException } from '@nathapp/nestjs-common';
 import { KodaPrincipal } from '../auth/principal/koda-principal.types';
 import { KodaAction } from '../auth/casl/koda-action.enum';
-import { ContextBuilderService, GetProjectContextQuery, ContextIntent } from './context-builder.service';
+import { ContextBuilderService, GetProjectContextQuery } from './context-builder.service';
+import { GetContextQueryDto } from './dto/get-context-query.dto';
+import { parseQuery } from '../common/dto/koda-page.query';
 import { ProjectAccessService } from '../projects/project-access.service';
-
-class GetContextQueryDto {
-  intent!: ContextIntent;
-  query?: string;
-  ticketIds?: string[];
-  repoRefs?: string[];
-  includeCodeIntel?: boolean;
-  includeGraph?: boolean;
-  tokenBudget?: number;
-}
 
 @ApiTags('context')
 @ApiBearerAuth()
@@ -51,8 +43,9 @@ export class ContextController {
   private buildQuery(
     projectId: string,
     actorId: string,
-    dto: GetContextQueryDto,
+    raw: GetContextQueryDto | undefined,
   ): GetProjectContextQuery {
+    const dto = parseQuery(GetContextQueryDto, raw ?? {});
     return {
       projectId,
       actorId,
@@ -62,13 +55,14 @@ export class ContextController {
       repoRefs: dto.repoRefs,
       includeCodeIntel: dto.includeCodeIntel,
       includeGraph: dto.includeGraph,
-      tokenBudget: dto.tokenBudget ? Number(dto.tokenBudget) : undefined,
+      tokenBudget: dto.tokenBudget,
     };
   }
 
   @Get(':slug')
   @ApiOperation({ summary: 'Get project context for agent use' })
   @ApiResponse({ status: 200, description: 'Project context retrieved' })
+  @ApiResponse({ status: 400, description: 'Invalid query' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Project not found' })
@@ -91,6 +85,7 @@ export class ContextController {
   @HttpCode(200)
   @ApiOperation({ summary: 'Query project context with request body' })
   @ApiResponse({ status: 200, description: 'Project context retrieved' })
+  @ApiResponse({ status: 400, description: 'Invalid query' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Project not found' })
