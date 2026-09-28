@@ -77,7 +77,7 @@ git status -sb
 git merge-base HEAD main
 ```
 
-Expected: branch `feat/track3-web-cli-hygiene` and merge-base `8589f872`. The only change is this plan file, which is committed in Step 4.
+Expected: branch `feat/track3-web-cli-hygiene`, merge-base `8589f872`, and a clean tree.
 
 - [ ] **Step 2: Start the test database and generate the CLI client**
 
@@ -96,12 +96,9 @@ cd apps/api && bun run test:scoped test/integration/projects/project-membership-
 
 Expected: both green. Write the suite and test counts into the PR draft notes. If anything is red on the untouched branch, stop and report it. Do not start Task 1 on a red baseline.
 
-- [ ] **Step 4: Commit the plan**
+- [ ] **Step 4: Confirm the plan is committed**
 
-```bash
-git add docs/superpowers/plans/2026-09-29-track-3-slice-6-web-cli-hygiene.md
-git commit -m "docs: Track 3 Slice 6 web and CLI hygiene plan"
-```
+The plan was committed as `8e89d36d` when it was written. `git log --oneline -3` should show it. There is nothing to commit here.
 
 ---
 
