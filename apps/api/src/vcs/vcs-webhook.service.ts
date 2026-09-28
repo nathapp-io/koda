@@ -642,6 +642,7 @@ export class VcsWebhookService implements OnModuleDestroy {
         commitHash,
         ref,
         changedFiles,
+        removedFiles: commit.removed ?? [],
         projectId: connection.projectId,
         webhookOnly: true,
       };

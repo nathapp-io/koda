@@ -458,7 +458,7 @@ model GraphLink {
 }
 
 model Symbol {
-  id         String   @id  // {repoId}:{filePath}::{SymbolName}
+  id         String   @id  // {projectId}:{repoId}:{filePath}::{SymbolName}
   symbolId   String
   projectId  String
   repoId     String

@@ -206,6 +206,31 @@ describe('VcsWebhookService', () => {
       );
     });
 
+    it('records removedFiles (and keeps them in changedFiles) when a commit deletes files', async () => {
+      const connection = createMockConnection();
+      const payload = createPushPayload({
+        commits: [
+          { id: 'commit-rm', message: 'chore: drop module', timestamp: 't', author: { name: 'n', email: 'e' }, added: [], removed: ['src/gone.ts'], modified: [] },
+        ],
+      });
+
+      await service.handleWebhook(connection, 'push', payload);
+
+      expect(mockRecord).toHaveBeenCalledTimes(1);
+      expect(mockRecord).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'code_commit',
+          payload: expect.objectContaining({
+            repoId: 'owner/repo',
+            commitHash: 'commit-rm',
+            ref: 'refs/heads/main',
+            changedFiles: expect.arrayContaining(['src/gone.ts']),
+            removedFiles: ['src/gone.ts'],
+          }),
+        }),
+      );
+    });
+
     it('should skip commits within the 5-minute deduplication window', async () => {
       const connection = createMockConnection();
       const payload = createPushPayload({
