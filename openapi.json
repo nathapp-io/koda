@@ -2082,7 +2082,7 @@
             "bearer": []
           }
         ],
-        "summary": "Get SLO dashboard metrics for a time window",
+        "summary": "Get SLO dashboard metrics (default: the last 24 hours)",
         "tags": [
           "admin"
         ]
@@ -3441,7 +3441,16 @@
     "/api/projects/{slug}/vcs/webhook-secret/rotate": {
       "post": {
         "operationId": "VcsController_rotateWebhookSecret",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "slug",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",

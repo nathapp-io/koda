@@ -201,6 +201,7 @@ export class VcsController {
   @ApiResponse({ status: 403, description: 'Forbidden - project ADMIN or global ADMIN required' })
   @ApiResponse({ status: 404, description: 'Project or VCS connection not found' })
   async rotateWebhookSecret(
+    @Param('slug') slug: string,
     @CurrentProject() ctx: ProjectContext,
     @Principal() principal: KodaPrincipal,
   ) {
