@@ -228,4 +228,53 @@ describeIntegration('webhook routes over HTTP (US-003)', () => {
     const row = await prisma.client.webhook.findUniqueOrThrow({ where: { id } });
     expect(row.events).toBe('["STATUS_CHANGE"]');
   });
+
+  it("Slice 2b: DELETE projects/:slug/webhooks/:id of another project's webhook returns 404 and keeps the row", async () => {
+    const id = await registerWebhook(projectBSlug, OTHER_ALLOWED_URL);
+
+    const res = await request(httpServer)
+      .delete(`/api/projects/${projectASlug}/webhooks/${id}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(404);
+    expect(await prisma.client.webhook.findUnique({ where: { id } })).not.toBeNull();
+  });
+
+  it("Slice 2b: DELETE projects/:slug/webhooks/:id of the project's own webhook returns 204 and removes the row", async () => {
+    const id = await registerWebhook(projectASlug, ALLOWED_URL);
+
+    await request(httpServer)
+      .delete(`/api/projects/${projectASlug}/webhooks/${id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(204);
+
+    expect(await prisma.client.webhook.findUnique({ where: { id } })).toBeNull();
+  });
+
+  it('Slice 2b: DELETE projects/:slug/webhooks/:id under an unknown slug returns 404 and keeps the row', async () => {
+    const id = await registerWebhook(projectASlug, ALLOWED_URL);
+
+    const res = await request(httpServer)
+      .delete(`/api/projects/no-such-project/webhooks/${id}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(404);
+    expect(await prisma.client.webhook.findUnique({ where: { id } })).not.toBeNull();
+  });
+
+  it('Slice 2b: slug-less DELETE webhooks/:id stays the global-ADMIN cross-project route', async () => {
+    const id = await registerWebhook(projectBSlug, OTHER_ALLOWED_URL);
+
+    const asMember = await request(httpServer)
+      .delete(`/api/webhooks/${id}`)
+      .set('Authorization', `Bearer ${memberToken}`);
+    expect(asMember.status).toBe(403);
+    expect(await prisma.client.webhook.findUnique({ where: { id } })).not.toBeNull();
+
+    await request(httpServer)
+      .delete(`/api/webhooks/${id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(204);
+    expect(await prisma.client.webhook.findUnique({ where: { id } })).toBeNull();
+  });
 });

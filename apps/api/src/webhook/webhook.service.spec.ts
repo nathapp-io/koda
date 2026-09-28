@@ -401,6 +401,31 @@ describe('WebhookService', () => {
     });
   });
 
+  describe('removeForProject', () => {
+    it("deletes the project's own webhook", async () => {
+      webhookRepo.findById.mockResolvedValue(mockWebhook);
+      webhookRepo.deleteWebhook.mockResolvedValue(mockWebhook);
+
+      await service.removeForProject('proj-1', 'wh-1');
+
+      expect(webhookRepo.deleteWebhook).toHaveBeenCalledWith('wh-1');
+    });
+
+    it("throws NotFoundAppException for another project's webhook and deletes nothing", async () => {
+      webhookRepo.findById.mockResolvedValue(mockWebhook);
+
+      await expect(service.removeForProject('proj-other', 'wh-1')).rejects.toThrow(NotFoundAppException);
+      expect(webhookRepo.deleteWebhook).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFoundAppException when the webhook does not exist', async () => {
+      webhookRepo.findById.mockResolvedValue(null);
+
+      await expect(service.removeForProject('proj-1', 'wh-missing')).rejects.toThrow(NotFoundAppException);
+      expect(webhookRepo.deleteWebhook).not.toHaveBeenCalled();
+    });
+  });
+
   describe('findByProjectSlug', () => {
     it('returns webhooks when project exists', async () => {
       webhookRepo.findProjectBySlug.mockResolvedValue(mockProject);

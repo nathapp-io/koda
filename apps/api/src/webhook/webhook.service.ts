@@ -83,6 +83,15 @@ export class WebhookService {
     await this.webhookRepo.deleteWebhook(id);
   }
 
+  /** Deletes a project's webhook. Another project's webhook is a 404, as in `update`. */
+  async removeForProject(projectId: string, id: string): Promise<void> {
+    const webhook = await this.webhookRepo.findById(id);
+    if (!webhook || webhook.projectId !== projectId) {
+      throw new NotFoundAppException({}, 'webhooks');
+    }
+    await this.webhookRepo.deleteWebhook(id);
+  }
+
   async findByProjectSlug(slug: string): Promise<WebhookListItem[]> {
     const project = await this.webhookRepo.findProjectBySlug(slug);
     if (!project || project.deletedAt) {
