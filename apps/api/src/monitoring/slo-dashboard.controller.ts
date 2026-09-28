@@ -13,7 +13,7 @@ export class SloDashboardController {
 
   @Get('slos')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Get SLO dashboard metrics for a time window' })
+  @ApiOperation({ summary: 'Get SLO dashboard metrics (default: the last 24 hours)' })
   @ApiResponse({ status: 200, description: 'SLO metrics computed' })
   @ApiResponse({ status: 403, description: 'Forbidden - requires admin role' })
   @RequiredPermission('ADMIN')
@@ -22,7 +22,7 @@ export class SloDashboardController {
     @Query('to') to?: string,
   ) {
     const now = new Date();
-    const fromDate = this.parseOptionalDate(from, new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000));
+    const fromDate = this.parseOptionalDate(from, new Date(now.getTime() - 24 * 60 * 60 * 1000));
     const toDate = this.parseOptionalDate(to, now);
 
     const metrics = await this.sloDashboardService.getSloMetrics({

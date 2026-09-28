@@ -32,6 +32,7 @@ export class VcsLinkExtractorService {
    * @param connection The VCS connection
    * @param encryptionKey The encryption key for decrypting the token
    * @param branchName The head branch name of the PR
+   * @param prNumber The number of the pull request to extract links from (required)
    */
   async extractLinksFromPr(
     project: { id: string; key: string },
@@ -39,7 +40,7 @@ export class VcsLinkExtractorService {
     connection: VcsConnectionDomain,
     encryptionKey: string,
     branchName: string,
-    prNumber?: number,
+    prNumber: number,
   ): Promise<void> {
     const provider = providerForConnection(
       connection,
@@ -47,18 +48,8 @@ export class VcsLinkExtractorService {
       this.vcsConfig,
     );
 
-    // Get PR number from externalVcsId (format: "owner/repo#123" or just "123")
-    // Extract any trailing digits as the PR number
-    let resolvedPrNumber = prNumber ?? 0;
-    if (!resolvedPrNumber && ticket.externalVcsId) {
-      const match = ticket.externalVcsId.match(/(\d+)$/);
-      if (match) {
-        resolvedPrNumber = parseInt(match[1], 10);
-      }
-    }
-
     // Get PR status to obtain the actual PR number and verify the PR exists
-    const prStatus = await provider.getPullRequestStatus(resolvedPrNumber);
+    const prStatus = await provider.getPullRequestStatus(prNumber);
 
     // Create branch link URL on the connection's host (/tree/ or /-/tree/)
     const branchUrl = branchWebUrl(connection, branchName, this.vcsConfig);

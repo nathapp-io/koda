@@ -184,14 +184,6 @@ describe('VcsLinkExtractorService', () => {
       );
     });
 
-    it('should resolve prNumber from ticket.externalVcsId when prNumber argument is not provided', async () => {
-      const ticket = makeTicket({ externalVcsId: 'owner/repo#10' });
-
-      await service.extractLinksFromPr(project, ticket, connection, encryptionKey, 'feature/branch');
-
-      expect(mockProvider.getPullRequestStatus).toHaveBeenCalledWith(10);
-    });
-
     it('should not create any commit links when no commits match the ticket reference', async () => {
       const ticket = makeTicket({ number: 42 });
       mockProvider.listPrCommits.mockResolvedValue([

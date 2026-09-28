@@ -10,6 +10,13 @@ import { TICKET_REPOSITORY } from '../domain/ticket.domain';
 import { KodaCaslAbilityFactory } from '../../auth/casl/koda-casl-ability.factory';
 import type { AgentPrincipal, KodaPrincipal, UserPrincipal } from '../../auth/principal/koda-principal.types';
 
+jest.mock('../../vcs/factory', () => ({ createVcsProvider: jest.fn() }));
+jest.mock('../../common/utils/encryption.util', () => ({
+  decryptToken: jest.fn().mockReturnValue('plain-token'),
+}));
+
+import { createVcsProvider } from '../../vcs/factory';
+
 describe('TicketTransitionsService', () => {
   let service: TicketTransitionsService;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1018,5 +1025,95 @@ describe('TicketTransitionsService (H13: outbox emission)', () => {
     const { service, outboxService } = buildService();
     outboxService.record.mockRejectedValue(new Error('outbox down'));
     await expect(service.start('koda', 'KODA-1', principal)).rejects.toThrow('outbox down');
+  });
+});
+
+describe('TicketTransitionsService (auto-PR on VERIFIED: extractLinksFromPr prNumber)', () => {
+  const autoPrProject = {
+    id: 'proj-123',
+    slug: 'koda',
+    key: 'KODA',
+    deletedAt: null,
+  };
+
+  const autoPrTicket = {
+    id: 'ticket-123',
+    projectId: 'proj-123',
+    number: 1,
+    type: 'BUG',
+    title: 'Fix login bug',
+    description: 'Users cannot login',
+    status: TicketStatus.CREATED,
+    priority: 'HIGH',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    deletedAt: null,
+  };
+
+  const autoPrPrincipal = {
+    actorType: 'user' as const,
+    id: 'user-123',
+    name: 'user@example.com',
+    email: 'user@example.com',
+    role: 'MEMBER' as const,
+    blacklisted: false,
+    revoked: false,
+    authorities: ['MEMBER'],
+    extra: { sub: 'user-123' },
+  };
+
+  it('passes the created PR number as the sixth argument to extractLinksFromPr', async () => {
+    const createdPr = { number: 555, url: 'https://github.com/acme/widgets/pull/555' };
+    const provider = {
+      getDefaultBranch: jest.fn().mockResolvedValue('main'),
+      createPullRequest: jest.fn().mockResolvedValue(createdPr),
+    };
+    (createVcsProvider as jest.Mock).mockReturnValue(provider);
+
+    const connection = {
+      isActive: true,
+      provider: 'github',
+      repoOwner: 'acme',
+      repoName: 'widgets',
+      encryptedToken: 'enc-token',
+    };
+
+    const ticketRepo = {
+      findProjectBySlug: jest.fn().mockResolvedValue(autoPrProject),
+      findTicketByRefRaw: jest.fn().mockResolvedValue(autoPrTicket),
+      updateTicketStatusIf: jest.fn().mockResolvedValue({ ...autoPrTicket, status: TicketStatus.VERIFIED }),
+      createComment: jest.fn().mockResolvedValue({ id: 'comment-123' }),
+      createTicketActivity: jest.fn().mockResolvedValue({ id: 'activity-123' }),
+      createTicketLink: jest.fn().mockResolvedValue({ id: 'link-123' }),
+      createTicketActivity2: undefined,
+    };
+    const txManager = { run: (fn: () => unknown) => fn() };
+    const vcsConnectionService = { getFullByProject: jest.fn().mockResolvedValue(connection) };
+    const vcsLinkExtractorService = { extractLinksFromPr: jest.fn().mockResolvedValue(undefined) };
+    const vcsConfig = { encryptionKey: 'k'.repeat(64) };
+
+    const svc = new TicketTransitionsService(
+      ticketRepo as never,
+      txManager as never,
+      undefined,
+      undefined,
+      vcsConnectionService as never,
+      { create: jest.fn() } as never,
+      vcsLinkExtractorService as never,
+      vcsConfig as never,
+    );
+
+    await svc.verify('koda', 'KODA-1', 'Verified', autoPrPrincipal as never);
+
+    expect(provider.createPullRequest).toHaveBeenCalled();
+    expect(vcsLinkExtractorService.extractLinksFromPr).toHaveBeenCalledTimes(1);
+    expect(vcsLinkExtractorService.extractLinksFromPr).toHaveBeenCalledWith(
+      expect.objectContaining({ id: autoPrProject.id, key: autoPrProject.key }),
+      expect.objectContaining({ id: autoPrTicket.id, number: autoPrTicket.number }),
+      connection,
+      'k'.repeat(64),
+      expect.stringContaining('KODA-1'),
+      555,
+    );
   });
 });

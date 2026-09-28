@@ -223,6 +223,7 @@ export class TicketTransitionsService {
     const projectId = project.id;
     const ticketId = ticket.id;
     const projectKey = project.key;
+    let createdPrNumber = 0;
     const repo = this.ticketRepo as import('../prisma-tickets.repository').PrismaTicketsRepository;
 
     return vcsService.getFullByProject(projectId)
@@ -248,6 +249,7 @@ export class TicketTransitionsService {
             baseBranch,
             draft: true,
           }).then((pr): Promise<void> => {
+            createdPrNumber = pr.number;
             return repo.createTicketLink({
               ticketId,
               url: pr.url,
@@ -271,6 +273,7 @@ export class TicketTransitionsService {
               connection,
               encryptionKey,
               branchName,
+              createdPrNumber,
             );
           }).catch((err) => {
             this.logger.warn(
