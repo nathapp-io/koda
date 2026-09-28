@@ -6,6 +6,7 @@ import {
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
+import { parsePositiveInt } from '../utils/parse-positive-int';
 
 export function contextCommand(program: Command): void {
   const ctx = program.command('context');
@@ -37,7 +38,7 @@ export function contextCommand(program: Command): void {
     .option('--query <text>', 'Natural-language query')
     .option('--intent <intent>', 'Query intent (e.g. plan, diagnose, review)')
     .option('--ticket-ids <ids>', 'Comma-separated ticket IDs to scope the query')
-    .option('--token-budget <n>', 'Max token budget for the response', parseInt)
+    .option('--token-budget <n>', 'Max token budget for the response', parsePositiveInt)
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
@@ -47,7 +48,7 @@ export function contextCommand(program: Command): void {
         if (options.query) requestBody['query'] = options.query;
         if (options.intent) requestBody['intent'] = options.intent;
         if (options.ticketIds) requestBody['ticketIds'] = (options.ticketIds as string).split(',').map((s: string) => s.trim()).filter(Boolean);
-        if (options.tokenBudget) requestBody['tokenBudget'] = options.tokenBudget;
+        if (options.tokenBudget !== undefined) requestBody['tokenBudget'] = options.tokenBudget;
 
         const response = await contextControllerQueryContext({
   body: requestBody,

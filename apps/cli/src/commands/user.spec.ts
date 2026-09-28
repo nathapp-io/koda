@@ -42,6 +42,13 @@ describe('userCommand', () => {
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
 
+  it('list rejects a non-numeric --page with exit 1 and sends nothing', async () => {
+    await expect(
+      program.parseAsync(['node', 'koda', 'user', 'list', '--page', 'abc']),
+    ).rejects.toMatchObject({ code: 'commander.invalidArgument', exitCode: 1 });
+    expect(adminUsersControllerList).not.toHaveBeenCalled();
+  });
+
   it('list --json prints the page', async () => {
     (adminUsersControllerList as jest.Mock).mockResolvedValue({ ret: 0, data: page });
     await program.parseAsync(['node', 'koda', 'user', 'list', '--json']);

@@ -4,6 +4,7 @@ import { table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
+import { parsePositiveInt } from '../utils/parse-positive-int';
 
 /**
  * The memory write endpoints take a project *ID*, not a slug — unlike most
@@ -31,7 +32,7 @@ export function memoryCommand(program: Command): void {
     .option('--ticket-id <id>', 'Filter by ticket ID')
     .option('--from <iso>', 'Start of time range (ISO 8601)')
     .option('--to <iso>', 'End of time range (ISO 8601)')
-    .option('--limit <n>', 'Maximum number of events to return (1-100, default: 50)', '50')
+    .option('--limit <n>', 'Maximum number of events to return (1-100, default: 50)', parsePositiveInt, 50)
     .option('--cursor <cursor>', 'Pagination cursor')
     .option('--json', 'Output as JSON')
     .action(async (options) => {

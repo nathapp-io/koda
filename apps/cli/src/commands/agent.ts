@@ -13,6 +13,7 @@ import { table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
+import { parsePositiveInt } from '../utils/parse-positive-int';
 
 function maskApiKey(apiKey: string): string {
   if (apiKey.length <= 8) {
@@ -124,7 +125,7 @@ const response = await agentsControllerFindAll();
     .requiredOption('--name <name>', 'Agent name')
     .option('--slug <slug>', 'Agent slug (defaults to a slugified name)')
     .option('--roles <roles>', 'Comma-separated list of roles (e.g. DEVELOPER,AGENT)')
-    .option('--max-concurrent-tickets <n>', 'Max concurrent tickets this agent can handle')
+    .option('--max-concurrent-tickets <n>', 'Max concurrent tickets this agent can handle', parsePositiveInt)
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
@@ -136,7 +137,7 @@ const response = await agentsControllerGenerateApiKey({
             roles: ((options.roles
               ? String(options.roles).split(',').map((r: string) => r.trim()).filter(Boolean)
               : []) as CreateAgentDto['roles']),
-            maxConcurrentTickets: options.maxConcurrentTickets !== undefined ? Number(options.maxConcurrentTickets) : undefined,
+            maxConcurrentTickets: options.maxConcurrentTickets,
           }
   });
         const created = unwrap<{ name: string; slug: string; apiKey?: string }>(response);
@@ -162,7 +163,7 @@ const response = await agentsControllerGenerateApiKey({
     .argument('<slug>', 'Agent slug')
     .option('--name <name>', 'New agent name')
     .option('--status <status>', 'New status: ACTIVE, PAUSED, or OFFLINE')
-    .option('--max-concurrent-tickets <n>', 'New max concurrent tickets')
+    .option('--max-concurrent-tickets <n>', 'New max concurrent tickets', parsePositiveInt)
     .option('--json', 'Output as JSON')
     .action(async (slug: string, options) => {
       try {
@@ -171,7 +172,7 @@ const response = await agentsControllerUpdate({
   body: {
             name: options.name,
             status: options.status,
-            maxConcurrentTickets: options.maxConcurrentTickets !== undefined ? Number(options.maxConcurrentTickets) : undefined,
+            maxConcurrentTickets: options.maxConcurrentTickets,
           },
   path: { slug }
   });

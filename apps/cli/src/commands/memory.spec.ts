@@ -95,7 +95,7 @@ describe('memoryCommand', () => {
         '--limit', '10',
       ]);
 
-      expect(mockGetTimeline).toHaveBeenCalledWith(expect.objectContaining({ query: expect.objectContaining({ actorId: 'u-1', ticketId: 't-1', from: '2026-01-01', to: '2026-06-01', limit: '10' })}));
+      expect(mockGetTimeline).toHaveBeenCalledWith(expect.objectContaining({ query: expect.objectContaining({ actorId: 'u-1', ticketId: 't-1', from: '2026-01-01', to: '2026-06-01', limit: 10 })}));
     });
 
     it('handles empty result gracefully', async () => {

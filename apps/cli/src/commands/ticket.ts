@@ -24,6 +24,7 @@ import { table } from '../utils/output';
 import { unwrap } from '../utils/api';
 import { handleApiError } from '../utils/error';
 import { withContext } from '../utils/context';
+import { parsePositiveInt } from '../utils/parse-positive-int';
 
 type TicketRow = {
   ref?: string;
@@ -129,8 +130,8 @@ export function ticketCommand(program: Command): void {
     .option('--priority <priority>', 'Filter by priority')
     .option('--assigned-to <slug>', 'Filter by assignee')
     .option('--unassigned', 'Show only unassigned tickets')
-    .option('--page <number>', 'Page number (1-based)', '1')
-    .option('--size <number>', 'Tickets per page (1-100)', '20')
+    .option('--page <number>', 'Page number (1-based)', parsePositiveInt, 1)
+    .option('--size <number>', 'Tickets per page (1-100)', parsePositiveInt, 20)
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
@@ -138,7 +139,7 @@ export function ticketCommand(program: Command): void {
 
         const response = await ticketsControllerFindAll({
   path: { slug: ctx.projectSlug },
-  query: { status: options.status, type: options.type, priority: options.priority, assignedTo: options.assignedTo, unassigned: options.unassigned ? true : undefined, current: parseInt(options.page, 10), size: parseInt(options.size, 10) }
+  query: { status: options.status, type: options.type, priority: options.priority, assignedTo: options.assignedTo, unassigned: options.unassigned ? true : undefined, current: options.page, size: options.size }
   });
         const page = unwrap<TicketPage>(response);
         const items = page.records ?? [];

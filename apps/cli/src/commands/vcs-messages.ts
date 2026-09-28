@@ -15,7 +15,6 @@ export const VCS_MESSAGES = {
   MISSING_PROJECT: 'Project slug not specified. Use --project flag or set via config',
   CONNECTED: (projectSlug: string) => `\nVCS connection established for project ${projectSlug}:`,
   STATUS_HEADER: (projectSlug: string) => `\nVCS Connection status for project ${projectSlug}:`,
-  INVALID_ISSUE_NUMBER: 'Issue number must be a valid integer',
   SETTINGS_UPDATED: (projectSlug: string) => `VCS settings updated for project ${projectSlug}`,
   CONNECTION_TEST_FAILED: 'Connection test failed',
   ISSUE_IMPORTED: (ticketRef: string) => `Issue imported: ${ticketRef}`,

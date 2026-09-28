@@ -10,6 +10,7 @@ import { table, error } from '../utils/output';
 import { handleApiError } from '../utils/error';
 import { unwrap } from '../utils/api';
 import { withContext } from '../utils/context';
+import { parsePositiveInt } from '../utils/parse-positive-int';
 import { VCS_MESSAGES } from './vcs-messages';
 import {
   vcsControllerCreateConnection,
@@ -189,7 +190,7 @@ export function vcsCommand(program: Command): void {
     .command('update')
     .option('--sync-mode <mode>', 'Sync mode (off, polling, webhook)')
     .option('--authors <authors>', 'Comma-separated list of allowed authors')
-    .option('--polling-interval-ms <ms>', 'Polling interval in milliseconds')
+    .option('--polling-interval-ms <ms>', 'Polling interval in milliseconds', parsePositiveInt)
     .option('--project <slug>', 'Project slug (uses config if not provided)')
     .action(async (options) => {
       try {
@@ -205,8 +206,8 @@ export function vcsCommand(program: Command): void {
             .map((author) => author.trim())
             .filter(Boolean);
         }
-        if (options.pollingIntervalMs) {
-          requestBody.pollingIntervalMs = Number(options.pollingIntervalMs);
+        if (options.pollingIntervalMs !== undefined) {
+          requestBody.pollingIntervalMs = options.pollingIntervalMs;
         }
 
         const response = await vcsControllerUpdateConnection({
@@ -305,17 +306,11 @@ export function vcsCommand(program: Command): void {
     });
 
   vcs
-    .command('import <issueNumber>')
+    .command('import')
+    .argument('<issueNumber>', 'Issue number to import', parsePositiveInt)
     .option('--project <slug>', 'Project slug (uses config if not provided)')
-    .action(async (issueNumberArg, options) => {
+    .action(async (issueNumber: number, options) => {
       try {
-        const issueNumber = parseInt(issueNumberArg, 10);
-        if (isNaN(issueNumber)) {
-          error(VCS_MESSAGES.INVALID_ISSUE_NUMBER);
-          process.exit(1);
-          return;
-        }
-
         const ctx = await withContext({ projectSlug: options.project });
 
         const response = await vcsControllerSyncIssue({
