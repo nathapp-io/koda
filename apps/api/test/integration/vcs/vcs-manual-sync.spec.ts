@@ -22,6 +22,7 @@ import { VcsSyncService, SyncIssueResult } from '../../../src/vcs/vcs-sync.servi
 import { VcsWebhookService } from '../../../src/vcs/vcs-webhook.service';
 import { VcsPrSyncService } from '../../../src/vcs/vcs-pr-sync.service';
 import { ProjectsService } from '../../../src/projects/projects.service';
+import { ProjectAccessService } from '../../../src/projects/project-access.service';
 import { ConfigService } from '@nestjs/config';
 import { VCS_CFG, IVcsConfig } from '../../../src/config/vcs.config';
 import { HttpException, HttpStatus } from '@nestjs/common';
@@ -29,6 +30,7 @@ import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-co
 import { VcsIssue } from '../../../src/vcs/types';
 import { Project, VcsConnection } from '@prisma/client';
 import type { KodaPrincipal } from '../../../src/auth/principal/koda-principal.types';
+import { SyncResultDto } from '../../../src/vcs/dto/sync-result.dto';
 
 // Mock the createVcsProvider factory
 jest.mock('../../../src/vcs/factory', () => ({
@@ -157,6 +159,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         { provide: VcsPrSyncService, useValue: {} },
         { provide: VcsWebhookService, useValue: {} },
         { provide: ProjectsService, useValue: mockProjectsServiceInstance },
+        { provide: ProjectAccessService, useValue: {} },
         { provide: ConfigService, useValue: mockConfigServiceInstance },
         { provide: VCS_CFG, useValue: mockVcsConfig },
       ],
@@ -190,7 +193,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
         syncService.syncIssue.mockResolvedValue(syncResult);
 
-        const result = await controller.syncIssue(mockProject.slug, issueNumber, principal);
+        const result = (await controller.syncIssue(mockProject.slug, issueNumber, principal)).data as SyncResultDto;
 
         // Verify the result includes the synced ticket
         expect(result).toBeDefined();
@@ -220,7 +223,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
         syncService.syncIssue.mockResolvedValue(syncResult);
 
-        const result = await controller.syncIssue(mockProject.slug, issueNumber, principal);
+        const result = (await controller.syncIssue(mockProject.slug, issueNumber, principal)).data as SyncResultDto;
 
         // Should still sync even though author is not in allowedAuthors
         expect(syncService.syncIssue).toHaveBeenCalled();
@@ -304,7 +307,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
         syncService.syncIssue.mockResolvedValue(syncResult);
 
-        const result = await controller.syncIssue(mockProject.slug, issueNumber, principal);
+        const result = (await controller.syncIssue(mockProject.slug, issueNumber, principal)).data as SyncResultDto;
 
         expect(result.tickets).toHaveLength(1);
         expect(result.tickets[0].ref).toBe(`${mockProject.key}-5`);
@@ -321,7 +324,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
         syncService.syncIssue.mockResolvedValue(syncResult);
 
-        const result = await controller.syncIssue(mockProject.slug, issueNumber, principal);
+        const result = (await controller.syncIssue(mockProject.slug, issueNumber, principal)).data as SyncResultDto;
 
         expect(result.tickets[0].ref).toMatch(new RegExp(`^${mockProject.key}-`));
       });
@@ -337,7 +340,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
         syncService.syncIssue.mockResolvedValue(syncResult);
 
-        const result = await controller.syncIssue(mockProject.slug, issueNumber, principal);
+        const result = (await controller.syncIssue(mockProject.slug, issueNumber, principal)).data as SyncResultDto;
 
         expect(result.tickets[0].ref).toBe(`${mockProject.key}-7`);
       });
@@ -353,7 +356,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
         syncService.syncIssue.mockResolvedValue(syncResult);
 
-        const result = await controller.syncIssue(mockProject.slug, issueNumber, principal);
+        const result = (await controller.syncIssue(mockProject.slug, issueNumber, principal)).data as SyncResultDto;
 
         expect(result).toHaveProperty('issuesSynced');
         expect(result).toHaveProperty('issuesSkipped');
@@ -374,7 +377,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
         syncService.syncIssue.mockResolvedValue(syncResult);
 
-        const result = await controller.syncIssue(mockProject.slug, issueNumber, principal);
+        const result = (await controller.syncIssue(mockProject.slug, issueNumber, principal)).data as SyncResultDto;
 
         expect(result.issuesSynced).toBe(1);
         expect(result.issuesSkipped).toBe(0);
@@ -440,7 +443,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
         syncService.fullSync.mockResolvedValue(fullSyncResult);
 
-        const result = await controller.syncAll(mockProject.slug, principal);
+        const result = (await controller.syncAll(mockProject.slug, principal)).data as SyncResultDto;
 
         expect(result.issuesSynced).toBe(3);
         expect(result.issuesSkipped).toBe(2);
@@ -488,7 +491,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
         syncService.fullSync.mockResolvedValue(fullSyncResult);
 
-        const result = await controller.syncAll(mockProject.slug, principal);
+        const result = (await controller.syncAll(mockProject.slug, principal)).data as SyncResultDto;
 
         expect(result.issuesSynced).toBe(5);
         expect(result.issuesSkipped).toBe(0);
@@ -508,7 +511,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
         syncService.fullSync.mockResolvedValue(fullSyncResult);
 
-        const result = await controller.syncAll(mockProject.slug, principal);
+        const result = (await controller.syncAll(mockProject.slug, principal)).data as SyncResultDto;
 
         expect(result.issuesSynced).toBe(2);
         expect(result.issuesSkipped).toBe(3);
@@ -531,7 +534,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
         syncService.fullSync.mockResolvedValue(fullSyncResult);
 
-        const result = await controller.syncAll(mockProject.slug, principal);
+        const result = (await controller.syncAll(mockProject.slug, principal)).data as SyncResultDto;
 
         expect(result.tickets).toHaveLength(3);
         expect(result.tickets[0].ref).toBe(`${mockProject.key}-1`);
@@ -553,7 +556,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
         syncService.fullSync.mockResolvedValue(fullSyncResult);
 
-        const result = await controller.syncAll(mockProject.slug, principal);
+        const result = (await controller.syncAll(mockProject.slug, principal)).data as SyncResultDto;
 
         expect(result.tickets.every((t) => t.ref.startsWith(`${mockProject.key}-`))).toBe(true);
       });
@@ -573,7 +576,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
         syncService.fullSync.mockResolvedValue(fullSyncResult);
 
-        const result = await controller.syncAll(mockProject.slug, principal);
+        const result = (await controller.syncAll(mockProject.slug, principal)).data as SyncResultDto;
 
         expect(result.tickets[0].ref).toBe(`${mockProject.key}-10`);
         expect(result.tickets[1].ref).toBe(`${mockProject.key}-11`);
@@ -591,7 +594,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
         syncService.fullSync.mockResolvedValue(fullSyncResult);
 
-        const result = await controller.syncAll(mockProject.slug, principal);
+        const result = (await controller.syncAll(mockProject.slug, principal)).data as SyncResultDto;
 
         expect(result.tickets).toHaveLength(0);
         expect(Array.isArray(result.tickets)).toBe(true);
@@ -613,7 +616,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
         syncService.fullSync.mockResolvedValue(fullSyncResult);
 
-        const result = await controller.syncAll(mockProject.slug, principal);
+        const result = (await controller.syncAll(mockProject.slug, principal)).data as SyncResultDto;
 
         expect(result).toHaveProperty('issuesSynced');
         expect(result).toHaveProperty('issuesSkipped');
@@ -631,7 +634,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
         syncService.fullSync.mockResolvedValue(fullSyncResult);
 
-        const result = await controller.syncAll(mockProject.slug, principal);
+        const result = (await controller.syncAll(mockProject.slug, principal)).data as SyncResultDto;
 
         expect(result).toHaveProperty('issuesSynced', 1);
         expect(result).toHaveProperty('issuesSkipped', 2);
@@ -652,7 +655,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
         syncService.fullSync.mockResolvedValue(fullSyncResult);
 
-        const result = await controller.syncAll(mockProject.slug, principal);
+        const result = (await controller.syncAll(mockProject.slug, principal)).data as SyncResultDto;
 
         // errors field should be undefined when empty
         expect((result as unknown as { errors?: string[] }).errors).toBeUndefined();
@@ -715,8 +718,8 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
         .mockResolvedValueOnce(syncResult1)
         .mockResolvedValueOnce(syncResult2);
 
-      const result1 = await controller.syncIssue(mockProject.slug, issueNumber1, principal);
-      const result2 = await controller.syncIssue(mockProject.slug, issueNumber2, principal);
+      const result1 = (await controller.syncIssue(mockProject.slug, issueNumber1, principal)).data as SyncResultDto;
+      const result2 = (await controller.syncIssue(mockProject.slug, issueNumber2, principal)).data as SyncResultDto;
 
       expect(result1.tickets[0].ref).toBe(`${mockProject.key}-1`);
       expect(result2.tickets[0].ref).toBe(`${mockProject.key}-2`);
@@ -736,7 +739,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
       vcsConnectionService.getFullByProject.mockResolvedValue(mockVcsConnection);
       syncService.fullSync.mockResolvedValue(fullSyncResult);
 
-      const result = await controller.syncAll(mockProject.slug, principal);
+      const result = (await controller.syncAll(mockProject.slug, principal)).data as SyncResultDto;
 
       expect(result.issuesSynced + result.issuesSkipped).toBe(3);
       expect(result.tickets.length).toBe(result.issuesSynced);

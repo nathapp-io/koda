@@ -7,7 +7,10 @@ import { VcsConnectionService } from './vcs-connection.service';
 import { VcsSyncService } from './vcs-sync.service';
 import { VcsPrSyncService } from './vcs-pr-sync.service';
 import { ProjectsService } from '../projects/projects.service';
+import { ProjectAccessService } from '../projects/project-access.service';
+import type { ProjectContext } from '../projects/project-context';
 import { VcsConnectionResponseDto } from './dto/vcs-connection-response.dto';
+import { SyncResultDto } from './dto/sync-result.dto';
 import { CreateVcsConnectionDto } from './dto/create-vcs-connection.dto';
 import { UpdateVcsConnectionDto } from './dto/update-vcs-connection.dto';
 import type { VcsConnectionDomain } from './domain/vcs.domain';
@@ -88,12 +91,14 @@ describe('VcsController', () => {
   let mockProjectsService: jest.Mocked<
     Pick<ProjectsService, 'findBySlug' | 'assertProjectMembership'>
   >;
-  let mockVcsService: jest.Mocked<Pick<VcsConnectionService, 'create' | 'findByProject' | 'update' | 'delete' | 'testConnection' | 'getFullByProject'>>;
+  let mockVcsService: jest.Mocked<Pick<VcsConnectionService, 'create' | 'findByProject' | 'update' | 'delete' | 'testConnection' | 'getFullByProject' | 'rotateWebhookSecret'>>;
   let mockSyncService: jest.Mocked<Pick<VcsSyncService, 'syncIssue' | 'fullSync'>>;
   let mockPrSyncService: jest.Mocked<Pick<VcsPrSyncService, 'syncPrStatus'>>;
   let mockVcsConfig: { encryptionKey: string | null };
 
   const encryptionKey = 'test-key-32-chars-exactly-padded!!';
+
+  const projectContext = (): ProjectContext => ({ project: { id: 'proj-1', slug: 'test-project' }, role: 'ADMIN' });
 
   const adminUser: KodaPrincipal = {
     actorType: 'user',
@@ -141,6 +146,7 @@ describe('VcsController', () => {
       delete: jest.fn().mockResolvedValue(undefined),
       testConnection: jest.fn().mockResolvedValue({ ok: true, latencyMs: 42 }),
       getFullByProject: jest.fn().mockResolvedValue(makeFullConnection()),
+      rotateWebhookSecret: jest.fn().mockResolvedValue({ webhookSecret: 'a'.repeat(32) }),
     };
 
     mockSyncService = {
@@ -163,6 +169,7 @@ describe('VcsController', () => {
         { provide: VcsSyncService, useValue: mockSyncService },
         { provide: VcsPrSyncService, useValue: mockPrSyncService },
         { provide: ProjectsService, useValue: mockProjectsService },
+        { provide: ProjectAccessService, useValue: {} },
         { provide: VCS_CFG, useValue: mockVcsConfig },
       ],
     }).compile();
@@ -188,8 +195,7 @@ describe('VcsController', () => {
       expect(mockProjectsService.findBySlug).toHaveBeenCalledWith('test-project');
       expect(mockProjectsService.assertProjectMembership).toHaveBeenCalledWith('proj-1', adminUser);
       expect(mockVcsService.create).toHaveBeenCalledWith('proj-1', encryptionKey, dto);
-      expect(result).toBeDefined();
-      expect(result.id).toBe('conn-1');
+      expect(result.data).toMatchObject({ id: 'conn-1' });
     });
 
     it('should reject when the principal is not a project member', async () => {
@@ -223,7 +229,7 @@ describe('VcsController', () => {
       expect(mockProjectsService.findBySlug).toHaveBeenCalledWith('test-project');
       expect(mockProjectsService.assertProjectMembership).toHaveBeenCalledWith('proj-1', adminUser);
       expect(mockVcsService.findByProject).toHaveBeenCalledWith('proj-1');
-      expect(result.id).toBe('conn-1');
+      expect(result.data).toMatchObject({ id: 'conn-1' });
     });
 
     it('should reject when the principal is not a project member', async () => {
@@ -298,8 +304,7 @@ describe('VcsController', () => {
 
       const result = await controller.testConnection('test-project', adminUser);
 
-      expect(result.ok).toBe(true);
-      expect(result.latencyMs).toBe(100);
+      expect(result.data).toMatchObject({ ok: true, latencyMs: 100 });
       expect(mockProjectsService.assertProjectMembership).toHaveBeenCalledWith('proj-1', adminUser);
       expect(mockVcsService.testConnection).toHaveBeenCalledWith('proj-1', encryptionKey);
     });
@@ -319,6 +324,25 @@ describe('VcsController', () => {
       mockVcsConfig.encryptionKey = null;
 
       await expect(controller.testConnection('test-project', adminUser)).rejects.toThrow(ValidationAppException);
+    });
+  });
+
+  describe('rotateWebhookSecret', () => {
+    it('wraps the rotated secret in JsonResponse.Ok for a user', async () => {
+      mockVcsService.rotateWebhookSecret.mockResolvedValue({ webhookSecret: 'b'.repeat(32) });
+
+      const result = await controller.rotateWebhookSecret(projectContext(), adminUser);
+
+      expect(result.ret).toBe(0);
+      expect(result.data).toEqual({ webhookSecret: 'b'.repeat(32) });
+      expect(mockVcsService.rotateWebhookSecret).toHaveBeenCalledWith('proj-1');
+    });
+
+    it('refuses agents: they never hold webhook secrets', async () => {
+      await expect(
+        controller.rotateWebhookSecret(projectContext(), agentPrincipal),
+      ).rejects.toThrow(ForbiddenAppException);
+      expect(mockVcsService.rotateWebhookSecret).not.toHaveBeenCalled();
     });
   });
 
@@ -348,10 +372,9 @@ describe('VcsController', () => {
       expect(mockProvider.fetchIssue).toHaveBeenCalledWith(5);
       expect(mockProjectsService.assertProjectMembership).toHaveBeenCalledWith('proj-1', adminUser);
       expect(mockSyncService.syncIssue).toHaveBeenCalled();
-      expect(result.syncType).toBe('manual');
-      expect(result.issuesSynced).toBe(1);
-      expect(result.tickets).toHaveLength(1);
-      expect(result.tickets[0].ref).toContain('TEST-5');
+      expect(result.data).toMatchObject({ syncType: 'manual', issuesSynced: 1 });
+      expect((result.data as SyncResultDto).tickets).toHaveLength(1);
+      expect((result.data as SyncResultDto).tickets[0].ref).toContain('TEST-5');
     });
 
     it('should reject when the principal is not a project member', async () => {
@@ -409,11 +432,9 @@ describe('VcsController', () => {
       const result = await controller.syncAll('test-project', adminUser);
 
       expect(mockProjectsService.assertProjectMembership).toHaveBeenCalledWith('proj-1', adminUser);
-      expect(result.syncType).toBe('manual');
-      expect(result.issuesSynced).toBe(3);
-      expect(result.issuesSkipped).toBe(1);
-      expect(result.tickets[0].ref).toBe('TEST-7');
-      expect(result.tickets[0].title).toBe('Issue 7');
+      expect(result.data).toMatchObject({ syncType: 'manual', issuesSynced: 3, issuesSkipped: 1 });
+      expect((result.data as SyncResultDto).tickets[0].ref).toBe('TEST-7');
+      expect((result.data as SyncResultDto).tickets[0].title).toBe('Issue 7');
     });
 
     it('should reject when the principal is not a project member', async () => {
@@ -441,7 +462,7 @@ describe('VcsController', () => {
       const result = await controller.syncPr('test-project', adminUser);
 
       expect(mockProjectsService.assertProjectMembership).toHaveBeenCalledWith('proj-1', adminUser);
-      expect(result.updated).toBe(5);
+      expect(result.data).toMatchObject({ updated: 5 });
       expect(mockPrSyncService.syncPrStatus).toHaveBeenCalled();
     });
 

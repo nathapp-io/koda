@@ -3250,7 +3250,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/VcsConnectionResponseDto"
+                  "$ref": "#/components/schemas/VcsConnectionCreatedResponseDto"
                 }
               }
             }
@@ -3340,7 +3340,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/VcsConnectionResponseDto"
+                  "$ref": "#/components/schemas/VcsConnectionUpdatedResponseDto"
                 }
               }
             }
@@ -3410,7 +3410,7 @@
           }
         ],
         "responses": {
-          "201": {
+          "200": {
             "description": "",
             "content": {
               "application/json": {
@@ -3433,6 +3433,42 @@
           }
         ],
         "summary": "Test the VCS connection for a project",
+        "tags": [
+          "vcs"
+        ]
+      }
+    },
+    "/api/projects/{slug}/vcs/webhook-secret/rotate": {
+      "post": {
+        "operationId": "VcsController_rotateWebhookSecret",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSecretResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - project ADMIN or global ADMIN required"
+          },
+          "404": {
+            "description": "Project or VCS connection not found"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Rotate the VCS webhook secret and return the new secret once",
         "tags": [
           "vcs"
         ]
@@ -6014,6 +6050,73 @@
           "token"
         ]
       },
+      "VcsConnectionCreatedResponseDto": {
+        "type": "object",
+        "properties": {
+          "webhookSecret": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "repoOwner": {
+            "type": "string"
+          },
+          "repoName": {
+            "type": "string"
+          },
+          "syncMode": {
+            "type": "string"
+          },
+          "allowedAuthors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pollingIntervalMs": {
+            "type": "number"
+          },
+          "webhookSecretConfigured": {
+            "type": "boolean"
+          },
+          "lastSyncedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "webhookSecret",
+          "id",
+          "projectId",
+          "provider",
+          "repoOwner",
+          "repoName",
+          "syncMode",
+          "allowedAuthors",
+          "pollingIntervalMs",
+          "webhookSecretConfigured",
+          "lastSyncedAt",
+          "isActive",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
       "VcsConnectionResponseDto": {
         "type": "object",
         "properties": {
@@ -6100,12 +6203,74 @@
           "pollingIntervalMs": {
             "type": "number",
             "minimum": 60000
-          },
-          "webhookSecret": {
-            "type": "string",
-            "minLength": 32
           }
         }
+      },
+      "VcsConnectionUpdatedResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "repoOwner": {
+            "type": "string"
+          },
+          "repoName": {
+            "type": "string"
+          },
+          "syncMode": {
+            "type": "string"
+          },
+          "allowedAuthors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pollingIntervalMs": {
+            "type": "number"
+          },
+          "webhookSecretConfigured": {
+            "type": "boolean"
+          },
+          "lastSyncedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "webhookSecret": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "provider",
+          "repoOwner",
+          "repoName",
+          "syncMode",
+          "allowedAuthors",
+          "pollingIntervalMs",
+          "webhookSecretConfigured",
+          "lastSyncedAt",
+          "isActive",
+          "createdAt",
+          "updatedAt"
+        ]
       },
       "TestConnectionResultDto": {
         "type": "object",
@@ -6123,6 +6288,17 @@
         "required": [
           "ok",
           "latencyMs"
+        ]
+      },
+      "WebhookSecretResponseDto": {
+        "type": "object",
+        "properties": {
+          "webhookSecret": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "webhookSecret"
         ]
       },
       "SyncResultDto": {

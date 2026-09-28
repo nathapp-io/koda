@@ -560,7 +560,6 @@ describe('VcsConnectionService', () => {
       const updateDto: UpdateVcsConnectionDto = {
         token: newToken,
         syncMode: VcsSyncModeType.WEBHOOK,
-        webhookSecret: 'new-secret',
       };
 
       const updatedConnection = {

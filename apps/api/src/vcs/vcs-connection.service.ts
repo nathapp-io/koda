@@ -1,11 +1,16 @@
 import { HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import type { VcsConnectionDomain, VcsConnectionWithProjectDomain } from './domain/vcs.domain';
-import { randomBytes } from 'crypto';
+import { generateWebhookSecret } from './webhook-secret';
 import { encryptToken, decryptToken } from '../common/utils/encryption.util';
 import { CreateVcsConnectionDto } from './dto/create-vcs-connection.dto';
 import { UpdateVcsConnectionDto } from './dto/update-vcs-connection.dto';
-import { VcsConnectionResponseDto } from './dto/vcs-connection-response.dto';
+import {
+  VcsConnectionResponseDto,
+  VcsConnectionCreatedResponseDto,
+  VcsConnectionUpdatedResponseDto,
+  WebhookSecretResponseDto,
+} from './dto/vcs-connection-response.dto';
 import { TestConnectionResultDto } from './dto/test-connection-result.dto';
 import { providerForConnection } from './provider-for-connection';
 import { parseRepoPath } from './factory';
@@ -28,7 +33,7 @@ export class VcsConnectionService {
     projectId: string,
     encryptionKey: string,
     dto: CreateVcsConnectionDto,
-  ): Promise<VcsConnectionResponseDto> {
+  ): Promise<VcsConnectionCreatedResponseDto> {
     // Verify project exists
     const project = await this.vcsRepo.findProjectById(projectId);
 
@@ -67,6 +72,10 @@ export class VcsConnectionService {
     this.assertSyncModeSupported(dto.provider, syncMode);
     const pollingIntervalMs = dto.pollingIntervalMs ?? this.vcsConfig.defaultPollingIntervalMs;
 
+    // Keep a secret in every mode so late webhook deliveries can be
+    // authenticated before the controller acknowledges them as ignored.
+    const webhookSecret = generateWebhookSecret();
+
     const connection = await this.vcsRepo.createVcsConnection({
       projectId,
       provider: dto.provider.toLowerCase(),
@@ -76,15 +85,14 @@ export class VcsConnectionService {
       syncMode,
       allowedAuthors: JSON.stringify(dto.allowedAuthors ?? []),
       pollingIntervalMs,
-      // Keep a secret in every mode so late webhook deliveries can be
-      // authenticated before the controller acknowledges them as ignored.
-      webhookSecret: randomBytes(16).toString('hex'),
+      webhookSecret,
       isActive: true,
     });
 
     await this.vcsPollingService.refreshConnectionSchedule(connection.id);
 
-    return this.mapToResponseDto(connection);
+    // M9: besides a rotation, the only time the secret leaves the server.
+    return { ...this.mapToResponseDto(connection), webhookSecret };
   }
 
   /**
@@ -107,7 +115,7 @@ export class VcsConnectionService {
     projectId: string,
     encryptionKey: string,
     dto: UpdateVcsConnectionDto,
-  ): Promise<VcsConnectionResponseDto> {
+  ): Promise<VcsConnectionUpdatedResponseDto> {
     // Verify connection exists
     const connection = await this.vcsRepo.findVcsConnectionByProjectId(projectId);
 
@@ -147,9 +155,12 @@ export class VcsConnectionService {
 
     // Generate a secret when enabling webhooks on a legacy row, and keep it
     // when switching away so senders can sign in-flight deliveries while sync
-    // is off or polling.
-    if (dto.syncMode === 'webhook' && !connection.webhookSecret) {
-      updateData.webhookSecret = randomBytes(16).toString('hex');
+    // is off or polling. A generated secret is returned once (M9).
+    const generatedSecret = dto.syncMode === 'webhook' && !connection.webhookSecret
+      ? generateWebhookSecret()
+      : undefined;
+    if (generatedSecret) {
+      updateData.webhookSecret = generatedSecret;
     }
 
     // Only update if there are changes
@@ -161,7 +172,8 @@ export class VcsConnectionService {
 
     await this.vcsPollingService.refreshConnectionSchedule(updated.id);
 
-    return this.mapToResponseDto(updated);
+    const response = this.mapToResponseDto(updated);
+    return generatedSecret ? { ...response, webhookSecret: generatedSecret } : response;
   }
 
   /**
@@ -177,6 +189,22 @@ export class VcsConnectionService {
     await this.vcsRepo.deleteVcsConnection(projectId);
 
     this.vcsPollingService.unschedulePolling(connection.id);
+  }
+
+  /**
+   * M9: replace the inbound webhook secret and return the new one, once.
+   * Deliveries signed with the old secret are rejected from now on.
+   */
+  async rotateWebhookSecret(projectId: string): Promise<WebhookSecretResponseDto> {
+    const connection = await this.vcsRepo.findVcsConnectionByProjectId(projectId);
+
+    if (!connection) {
+      throw new NotFoundAppException({}, 'vcs');
+    }
+
+    const webhookSecret = generateWebhookSecret();
+    await this.vcsRepo.updateVcsConnection(projectId, { webhookSecret });
+    return { webhookSecret };
   }
 
   /**
@@ -247,8 +275,8 @@ export class VcsConnectionService {
 
   /**
    * Map VcsConnectionDomain to response DTO (excludes encryptedToken and
-   * webhookSecret — the secret is the credential used to authenticate inbound
-   * GitHub webhook payloads, so it must never leave the server).
+   * webhookSecret: the secret leaves the server only in the create/update/rotate
+   * responses that produced it (M9)).
    */
   private mapToResponseDto(connection: VcsConnectionDomain): VcsConnectionResponseDto {
     return {
