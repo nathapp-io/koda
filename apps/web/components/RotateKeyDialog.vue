@@ -37,6 +37,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { apiPath } from '~/lib/api-path'
 
 interface Agent {
   id: string
@@ -68,7 +69,7 @@ const isSubmitting = ref(false)
 async function onConfirm() {
   isSubmitting.value = true
   try {
-    const response = await $api.post('/agents/' + props.agent.slug + '/rotate-key', {}) as { apiKey: string }
+    const response = await $api.post(apiPath`/agents/${props.agent.slug}/rotate-key`, {}) as { apiKey: string }
     apiKey.value = response.apiKey
   } catch {
     toast.error(t('agents.rotateKey.failed'))

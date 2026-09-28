@@ -24,7 +24,7 @@ describe('Web OpenAPI gap operations are wired in source', () => {
 
   test('comment thread uses DELETE /comments/:id', () => {
     const source = src(commentThreadPath)
-    expect(source).toContain('$api.delete(`/comments/${comment.id}`)')
+    expect(source).toContain('$api.delete(apiPath`/comments/${comment.id}`)')
   })
 
   test('labels page uses PATCH /projects/:slug/labels/:id', () => {

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { apiPath } from '~/lib/api-path'
+
 const props = defineProps<{ projectSlug: string }>()
 const emit = defineEmits<{ 'added': [] }>()
 
@@ -28,7 +30,7 @@ async function submit() {
   }
   loading.value = true
   try {
-    await $api.post(`/projects/${props.projectSlug}/kb/documents`, {
+    await $api.post(apiPath`/projects/${props.projectSlug}/kb/documents`, {
       sourceId: form.sourceId,
       source: form.source,
       content: form.content,

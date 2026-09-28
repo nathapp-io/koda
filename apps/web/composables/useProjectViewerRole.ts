@@ -14,6 +14,8 @@
  * returns `canManage` and `viewerRole` alongside the paginated rows. We
  * request `size: 1` so the payload stays small.
  */
+import { apiPath } from '~/lib/api-path'
+
 export function useProjectViewerRole(slug: string) {
   return useAsyncData<{ canManage: boolean; viewerRole: string | null }>(
     `project-viewer-role-${slug}`,
@@ -22,7 +24,7 @@ export function useProjectViewerRole(slug: string) {
       const res = await $api.get<{
         canManage?: boolean
         viewerRole?: string | null
-      }>(`/projects/${encodeURIComponent(slug)}/members`, { query: { size: '1' } })
+      }>(apiPath`/projects/${slug}/members`, { query: { size: '1' } })
       return {
         canManage: res.canManage === true,
         viewerRole: res.viewerRole ?? null,

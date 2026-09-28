@@ -85,6 +85,7 @@ import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { extractApiError } from '~/composables/useApi'
 import MarkdownEditor from '~/components/MarkdownEditor.vue'
+import { apiPath } from '~/lib/api-path'
 
 const props = defineProps<{
   open: boolean
@@ -124,7 +125,7 @@ const { $api } = useApi()
 
 const onSubmit = handleSubmit(async (formValues) => {
   try {
-    await $api.post(`/projects/${props.projectSlug}/tickets`, formValues as Record<string, unknown>)
+    await $api.post(apiPath`/projects/${props.projectSlug}/tickets`, formValues as Record<string, unknown>)
     toast.success(t('tickets.toast.created'))
     emit('created')
     emit('update:open', false)

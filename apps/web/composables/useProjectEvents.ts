@@ -1,4 +1,5 @@
 import { onBeforeUnmount, onMounted } from 'vue'
+import { apiPath } from '~/lib/api-path'
 import {
   createProjectEventStream,
   type EventSourceLike,
@@ -15,7 +16,7 @@ export function useProjectEvents(slug: string, handlers: ProjectEventHandlers): 
 
   onMounted(() => {
     if (typeof EventSource === 'undefined') return
-    stream = createProjectEventStream(`/api/projects/${encodeURIComponent(slug)}/events`, handlers, {
+    stream = createProjectEventStream(apiPath`/api/projects/${slug}/events`, handlers, {
       createEventSource: url => new EventSource(url) as unknown as EventSourceLike,
       refreshAuth: refresh,
       setTimer: (fn, ms) => setTimeout(fn, ms),

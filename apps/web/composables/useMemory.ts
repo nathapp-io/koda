@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue'
+import { apiPath } from '~/lib/api-path'
 
 export interface MemoryItem {
   id: string
@@ -62,7 +63,7 @@ export function useMemory(slug: string) {
         page: page.value || undefined,
       })
       const res = await $api.get<MemoryResponse>(
-        `/projects/${slug}/memory`,
+        apiPath`/projects/${slug}/memory`,
         { query },
       )
       if (requestId !== latestRequestId) return

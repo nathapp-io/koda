@@ -59,6 +59,7 @@ import * as z from 'zod'
 import { ref, watch } from 'vue'
 import { LucideX } from 'lucide-vue-next'
 import { normalizeCapabilities } from '~/lib/utils'
+import { apiPath } from '~/lib/api-path'
 
 const props = defineProps<{
   open: boolean
@@ -111,7 +112,7 @@ const { $api } = useApi()
 
 const onSubmit = handleSubmit(async () => {
   try {
-    await $api.patch(`/agents/${props.agent.slug}/update-capabilities`, { capabilities: capabilitiesTags.value })
+    await $api.patch(apiPath`/agents/${props.agent.slug}/update-capabilities`, { capabilities: capabilitiesTags.value })
     toast.success(t('agents.toast.capabilitiesUpdated'))
     emit('updated')
     emit('update:open', false)
