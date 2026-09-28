@@ -31,8 +31,8 @@ export interface LanceRecord {
 
 /**
  * True when `value` can be embedded in a LanceDB single-quoted SQL filter
- * without escaping (no quotes, no control characters). Mirrors the validation
- * used by VectorStore.deleteBySource.
+ * without escaping (no quotes, no control characters). Shared by
+ * LanceTableManager.addRecord and VectorStore.deleteBySource.
  */
 export function isSafeFilterValue(value: string): boolean {
   if (!value) return false;

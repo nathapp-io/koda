@@ -6,7 +6,7 @@ import { EmbeddingService } from './embedding.service';
 import { FTS_OPTIMIZE_STRATEGY, FtsOptimizeStrategy } from './strategies/fts-optimize-strategy.interface';
 import { LexicalIndex } from './lexical-index';
 import { EntityStore } from './entity-store';
-import { LanceTableManager } from './lance-table-manager';
+import { LanceTableManager, isSafeFilterValue } from './lance-table-manager';
 import type { LanceRecord, LanceTable } from './lance-table-manager';
 import { simpleFtsScore, reciprocalRankFusion, getSimilarityTier, getVerdict } from './rag.service';
 import type { IndexDocumentInput } from './rag.service';
@@ -463,16 +463,9 @@ export class VectorStore implements OnModuleInit, OnModuleDestroy {
   async deleteBySource(projectId: string, sourceId: string): Promise<void> {
     await this.validateProjectId(projectId);
 
-    // Graph/code source IDs are often path-like, so allow punctuation used in
-    // repo paths while rejecting quote/control characters used to break filters.
-    if (
-      !sourceId ||
-      sourceId.includes("'") ||
-      [...sourceId].some((char) => {
-        const code = char.charCodeAt(0);
-        return code < 32 || code === 127;
-      })
-    ) {
+    // Graph/code source IDs are often path-like; isSafeFilterValue allows repo-path
+    // punctuation and rejects the quote/control characters that could break the filter.
+    if (!isSafeFilterValue(sourceId)) {
       throw new ValidationAppException();
     }
     const table = await this.getOrCreateTable(projectId);
