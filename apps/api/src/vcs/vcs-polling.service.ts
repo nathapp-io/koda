@@ -116,7 +116,7 @@ export class VcsPollingService implements OnModuleInit, OnModuleDestroy {
       const provider = providerForConnection(connection, decryptedToken, this.vcsConfig);
 
       // Fetch issues since last sync
-      const issues = await provider.fetchIssues(connection.lastSyncedAt ?? undefined);
+      const { issues } = await provider.fetchIssues(connection.lastSyncedAt ?? undefined);
 
       // Filter by allowed authors
       const filteredIssues = this.syncService.filterByAllowedAuthors(

@@ -1,7 +1,8 @@
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { IVcsProvider } from '../vcs-provider';
-import { VcsIssue, VcsPullRequest, VcsPrStatus, VcsCommit, CreatePrParams, SourceFile } from '../types';
+import { VcsIssue, VcsPullRequest, VcsPrStatus, VcsCommit, CreatePrParams, SourceFile, IssueFetchResult } from '../types';
 import { HttpClient } from '../factory';
+import { ISSUES_PER_PAGE, MAX_ISSUE_PAGES, laterOf, nextPageNumber } from './pagination';
 
 /**
  * GitLab REST API (v4) response for an issue
@@ -16,6 +17,7 @@ interface GitLabIssueResponse {
   web_url: string;
   labels: string[];
   created_at: string;
+  updated_at: string;
 }
 
 /**
@@ -99,24 +101,31 @@ export class GitLabProvider implements IVcsProvider {
     return { 'PRIVATE-TOKEN': this.token };
   }
 
-  async fetchIssues(since?: Date): Promise<VcsIssue[]> {
-    const params: Record<string, unknown> = {
+  async fetchIssues(since?: Date): Promise<IssueFetchResult> {
+    const baseParams: Record<string, unknown> = {
       state: 'opened',
-      order_by: 'created_at',
+      order_by: 'updated_at',
       sort: 'asc',
+      per_page: ISSUES_PER_PAGE,
+      ...(since ? { updated_after: since.toISOString() } : {}),
     };
+    const issues: VcsIssue[] = [];
+    let cursor: Date | null = null;
+    let page: number | null = 1;
 
-    if (since) {
-      params.created_after = since.toISOString();
+    for (let pages = 0; page !== null && pages < MAX_ISSUE_PAGES; pages++) {
+      const response = await this.httpClient.get(`${this.baseUrl}/issues`, {
+        headers: this.authHeaders,
+        params: { ...baseParams, page },
+      });
+      for (const item of response.data as GitLabIssueResponse[]) {
+        cursor = laterOf(cursor, item.updated_at);
+        issues.push(this.mapGitLabIssueToVcsIssue(item));
+      }
+      page = nextPageNumber(response.headers?.['x-next-page']);
     }
 
-    const response = await this.httpClient.get(`${this.baseUrl}/issues`, {
-      headers: this.authHeaders,
-      params,
-    });
-
-    const data = response.data as GitLabIssueResponse[];
-    return data.map((issue) => this.mapGitLabIssueToVcsIssue(issue));
+    return { issues, cursor, capped: page !== null };
   }
 
   async fetchIssue(issueNumber: number): Promise<VcsIssue> {

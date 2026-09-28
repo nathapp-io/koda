@@ -143,7 +143,7 @@ describe('VcsController Manual Sync Endpoints (VCS-P1-004-D)', () => {
     // Mock the VCS provider
     const mockProvider = {
       fetchIssue: jest.fn().mockResolvedValue(mockVcsIssue),
-      fetchIssues: jest.fn().mockResolvedValue([mockVcsIssue]),
+      fetchIssues: jest.fn().mockResolvedValue({ issues: [mockVcsIssue], cursor: null, capped: false }),
     };
 
     const { createVcsProvider } = require('../../../src/vcs/factory');

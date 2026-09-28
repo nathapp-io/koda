@@ -1,7 +1,8 @@
 import { NotFoundAppException, ValidationAppException } from '@nathapp/nestjs-common';
 import { IVcsProvider } from '../vcs-provider';
-import { VcsIssue, VcsPullRequest, VcsPrStatus, VcsCommit, CreatePrParams, SourceFile } from '../types';
+import { VcsIssue, VcsPullRequest, VcsPrStatus, VcsCommit, CreatePrParams, SourceFile, IssueFetchResult } from '../types';
 import { HttpClient } from '../factory';
+import { ISSUES_PER_PAGE, MAX_ISSUE_PAGES, laterOf, nextLinkUrl, sameOrigin } from './pagination';
 
 /**
  * GitHub REST API response for an issue
@@ -16,6 +17,7 @@ interface GitHubIssueResponse {
   html_url: string;
   labels: Array<{ name: string }>;
   created_at: string;
+  updated_at: string;
   pull_request?: unknown;
 }
 
@@ -100,31 +102,36 @@ export class GitHubProvider implements IVcsProvider {
     this.apiBaseUrl = (apiBaseUrl ?? 'https://api.github.com').replace(/\/+$/, '');
   }
 
-  async fetchIssues(since?: Date): Promise<VcsIssue[]> {
-    const params: Record<string, unknown> = {
+  async fetchIssues(since?: Date): Promise<IssueFetchResult> {
+    const headers = { Authorization: `Bearer ${this.token}` };
+    const issues: VcsIssue[] = [];
+    let cursor: Date | null = null;
+    let url: string | null = `${this.apiBaseUrl}/repos/${this.repoOwner}/${this.repoName}/issues`;
+    // The next link already carries the query, so params go on the first request only.
+    let params: Record<string, unknown> | undefined = {
       state: 'open',
-      sort: 'created',
+      sort: 'updated',
       direction: 'asc',
+      per_page: ISSUES_PER_PAGE,
+      ...(since ? { since: since.toISOString() } : {}),
     };
 
-    if (since) {
-      params.since = since.toISOString();
+    for (let pages = 0; url && pages < MAX_ISSUE_PAGES; pages++) {
+      const response = await this.httpClient.get(url, { headers, params });
+      for (const item of response.data as GitHubIssueResponse[]) {
+        // PRs come back from the issues endpoint: they advance the cursor but are not issues.
+        cursor = laterOf(cursor, item.updated_at);
+        if (!item.pull_request) issues.push(this.mapGitHubIssueToVcsIssue(item));
+      }
+      url = nextLinkUrl(response.headers?.['link']);
+      params = undefined;
+      if (url && !sameOrigin(url, this.apiBaseUrl)) {
+        // Never follow a link that would carry the token to another host.
+        return { issues, cursor, capped: true };
+      }
     }
 
-    const url = `${this.apiBaseUrl}/repos/${this.repoOwner}/${this.repoName}/issues`;
-
-    const response = await this.httpClient.get(url, {
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-      },
-      params,
-    });
-
-    // Filter out pull requests (which GitHub API returns in issues endpoint)
-    const data = response.data as GitHubIssueResponse[];
-    const issues = data.filter((item) => !item.pull_request);
-
-    return issues.map((issue) => this.mapGitHubIssueToVcsIssue(issue));
+    return { issues, cursor, capped: url !== null };
   }
 
   async fetchIssue(issueNumber: number): Promise<VcsIssue> {

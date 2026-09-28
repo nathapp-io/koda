@@ -103,7 +103,7 @@ export class VcsSyncService {
       const provider = providerForConnection(connection, decryptedToken, this.vcsConfig);
 
       // Fetch all issues
-      const issues = await provider.fetchIssues();
+      const { issues } = await provider.fetchIssues();
 
       // Filter by allowed authors
       const filteredIssues = this.filterByAllowedAuthors(issues, connection.allowedAuthors);

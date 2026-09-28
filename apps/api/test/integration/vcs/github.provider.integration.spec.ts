@@ -58,8 +58,9 @@ describe('GitHubProvider (Integration)', () => {
             }),
             params: expect.objectContaining({
               state: 'open',
-              sort: 'created',
+              sort: 'updated',
               direction: 'asc',
+              per_page: 100,
             }),
           }),
         );
@@ -84,9 +85,9 @@ describe('GitHubProvider (Integration)', () => {
 
         const result = await provider.fetchIssues();
 
-        expect(Array.isArray(result)).toBe(true);
-        expect(result.length).toBe(1);
-        expect(result[0]).toEqual({
+        expect(Array.isArray(result.issues)).toBe(true);
+        expect(result.issues.length).toBe(1);
+        expect(result.issues[0]).toEqual({
           number: 42,
           title: 'Test Issue',
           body: 'Test body',
@@ -95,6 +96,7 @@ describe('GitHubProvider (Integration)', () => {
           labels: ['bug', 'feature'],
           createdAt: new Date('2024-01-01T00:00:00Z'),
         });
+        expect(result.capped).toBe(false);
       });
 
       it('should handle empty issues list', async () => {
@@ -102,8 +104,9 @@ describe('GitHubProvider (Integration)', () => {
 
         const result = await provider.fetchIssues();
 
-        expect(Array.isArray(result)).toBe(true);
-        expect(result.length).toBe(0);
+        expect(Array.isArray(result.issues)).toBe(true);
+        expect(result.issues.length).toBe(0);
+        expect(result.cursor).toBeNull();
       });
 
       it('should handle null body in GitHub response', async () => {
@@ -125,7 +128,7 @@ describe('GitHubProvider (Integration)', () => {
 
         const result = await provider.fetchIssues();
 
-        expect(result[0].body).toBeNull();
+        expect(result.issues[0].body).toBeNull();
       });
 
       it('should map multiple labels correctly', async () => {
@@ -151,7 +154,7 @@ describe('GitHubProvider (Integration)', () => {
 
         const result = await provider.fetchIssues();
 
-        expect(result[0].labels).toEqual(['bug', 'critical', 'needs-review']);
+        expect(result.issues[0].labels).toEqual(['bug', 'critical', 'needs-review']);
       });
 
       it('should handle issues with no labels', async () => {
@@ -173,7 +176,7 @@ describe('GitHubProvider (Integration)', () => {
 
         const result = await provider.fetchIssues();
 
-        expect(result[0].labels).toEqual([]);
+        expect(result.issues[0].labels).toEqual([]);
       });
 
       it('should parse ISO 8601 created_at date correctly', async () => {
@@ -196,7 +199,7 @@ describe('GitHubProvider (Integration)', () => {
 
         const result = await provider.fetchIssues();
 
-        expect(result[0].createdAt).toEqual(new Date(isoDate));
+        expect(result.issues[0].createdAt).toEqual(new Date(isoDate));
       });
     });
 
@@ -241,9 +244,9 @@ describe('GitHubProvider (Integration)', () => {
 
         const result = await provider.fetchIssues();
 
-        expect(result.length).toBe(2);
-        expect(result[0].number).toBe(1);
-        expect(result[1].number).toBe(3);
+        expect(result.issues.length).toBe(2);
+        expect(result.issues[0].number).toBe(1);
+        expect(result.issues[1].number).toBe(3);
       });
 
       it('should filter PRs even when pull_request field is empty object', async () => {
@@ -275,8 +278,8 @@ describe('GitHubProvider (Integration)', () => {
 
         const result = await provider.fetchIssues();
 
-        expect(result.length).toBe(1);
-        expect(result[0].number).toBe(1);
+        expect(result.issues.length).toBe(1);
+        expect(result.issues[0].number).toBe(1);
       });
 
       it('should include issues when pull_request field is undefined', async () => {
@@ -298,8 +301,8 @@ describe('GitHubProvider (Integration)', () => {
 
         const result = await provider.fetchIssues();
 
-        expect(result.length).toBe(1);
-        expect(result[0].number).toBe(1);
+        expect(result.issues.length).toBe(1);
+        expect(result.issues[0].number).toBe(1);
       });
     });
 

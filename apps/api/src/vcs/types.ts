@@ -12,6 +12,16 @@ export interface VcsIssue {
 }
 
 /**
+ * M10: one poll's worth of issues. `cursor` is the newest update time among
+ * every item fetched (null when none); `capped` means more remained.
+ */
+export interface IssueFetchResult {
+  issues: VcsIssue[];
+  cursor: Date | null;
+  capped: boolean;
+}
+
+/**
  * Parameters for creating a pull request
  */
 export interface CreatePrParams {

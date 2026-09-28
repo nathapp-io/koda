@@ -1,5 +1,5 @@
 import { IVcsProvider } from './vcs-provider';
-import { VcsIssue, VcsPullRequest, VcsPrStatus, CreatePrParams, VcsCommit, SourceFile } from './types';
+import { VcsIssue, VcsPullRequest, VcsPrStatus, CreatePrParams, VcsCommit, SourceFile, IssueFetchResult } from './types';
 
 describe('VcsIssue Type', () => {
   describe('VcsIssue type structure', () => {
@@ -139,8 +139,8 @@ describe('IVcsProvider Interface', () => {
   describe('IVcsProvider interface structure', () => {
     it('should define fetchIssues method with optional since parameter', () => {
       class MockVcsProvider implements IVcsProvider {
-        async fetchIssues(since?: Date): Promise<VcsIssue[]> {
-          return [];
+        async fetchIssues(since?: Date): Promise<IssueFetchResult> {
+          return { issues: [], cursor: null, capped: false };
         }
 
         async fetchIssue(issueNumber: number): Promise<VcsIssue> {
@@ -180,21 +180,25 @@ describe('IVcsProvider Interface', () => {
       expect(typeof provider.fetchIssues).toBe('function');
     });
 
-    it('should have fetchIssues return Promise<VcsIssue[]>', async () => {
+    it('should have fetchIssues return Promise<IssueFetchResult>', async () => {
       class MockVcsProvider implements IVcsProvider {
-        async fetchIssues(since?: Date): Promise<VcsIssue[]> {
+        async fetchIssues(since?: Date): Promise<IssueFetchResult> {
           const now = new Date();
-          return [
-            {
-              number: 1,
-              title: 'Issue 1',
-              body: null,
-              authorLogin: 'user',
-              url: 'https://example.com/1',
-              labels: [],
-              createdAt: now,
-            },
-          ];
+          return {
+            issues: [
+              {
+                number: 1,
+                title: 'Issue 1',
+                body: null,
+                authorLogin: 'user',
+                url: 'https://example.com/1',
+                labels: [],
+                createdAt: now,
+              },
+            ],
+            cursor: now,
+            capped: false,
+          };
         }
 
         async fetchIssue(issueNumber: number): Promise<VcsIssue> {
@@ -232,17 +236,19 @@ describe('IVcsProvider Interface', () => {
 
       const provider = new MockVcsProvider();
       const result = await provider.fetchIssues();
-      expect(Array.isArray(result)).toBe(true);
-      expect(result.length).toBeGreaterThanOrEqual(0);
+      expect(Array.isArray(result.issues)).toBe(true);
+      expect(result.issues.length).toBeGreaterThanOrEqual(0);
+      expect(result.cursor).toBeInstanceOf(Date);
+      expect(result.capped).toBe(false);
     });
 
     it('should have fetchIssues accept optional since parameter', async () => {
       class MockVcsProvider implements IVcsProvider {
-        async fetchIssues(since?: Date): Promise<VcsIssue[]> {
+        async fetchIssues(since?: Date): Promise<IssueFetchResult> {
           if (since) {
-            return [];
+            return { issues: [], cursor: null, capped: false };
           }
-          return [];
+          return { issues: [], cursor: null, capped: false };
         }
 
         async fetchIssue(issueNumber: number): Promise<VcsIssue> {
@@ -281,13 +287,13 @@ describe('IVcsProvider Interface', () => {
       const provider = new MockVcsProvider();
       const sinceDate = new Date('2024-01-01');
       const result = await provider.fetchIssues(sinceDate);
-      expect(Array.isArray(result)).toBe(true);
+      expect(Array.isArray(result.issues)).toBe(true);
     });
 
     it('should define fetchIssue method with issueNumber parameter', async () => {
       class MockVcsProvider implements IVcsProvider {
-        async fetchIssues(since?: Date): Promise<VcsIssue[]> {
-          return [];
+        async fetchIssues(since?: Date): Promise<IssueFetchResult> {
+          return { issues: [], cursor: null, capped: false };
         }
 
         async fetchIssue(issueNumber: number): Promise<VcsIssue> {
@@ -337,8 +343,8 @@ describe('IVcsProvider Interface', () => {
 
     it('should have fetchIssue return Promise<VcsIssue>', async () => {
       class MockVcsProvider implements IVcsProvider {
-        async fetchIssues(since?: Date): Promise<VcsIssue[]> {
-          return [];
+        async fetchIssues(since?: Date): Promise<IssueFetchResult> {
+          return { issues: [], cursor: null, capped: false };
         }
 
         async fetchIssue(issueNumber: number): Promise<VcsIssue> {
@@ -390,8 +396,8 @@ describe('IVcsProvider Interface', () => {
 
     it('should define testConnection method', async () => {
       class MockVcsProvider implements IVcsProvider {
-        async fetchIssues(since?: Date): Promise<VcsIssue[]> {
-          return [];
+        async fetchIssues(since?: Date): Promise<IssueFetchResult> {
+          return { issues: [], cursor: null, capped: false };
         }
 
         async fetchIssue(issueNumber: number): Promise<VcsIssue> {
@@ -433,8 +439,8 @@ describe('IVcsProvider Interface', () => {
 
     it('should have testConnection return Promise<{ ok: boolean; error?: string }>', async () => {
       class MockVcsProvider implements IVcsProvider {
-        async fetchIssues(since?: Date): Promise<VcsIssue[]> {
-          return [];
+        async fetchIssues(since?: Date): Promise<IssueFetchResult> {
+          return { issues: [], cursor: null, capped: false };
         }
 
         async fetchIssue(issueNumber: number): Promise<VcsIssue> {
@@ -478,8 +484,8 @@ describe('IVcsProvider Interface', () => {
 
     it('should have testConnection return error on failure', async () => {
       class MockVcsProvider implements IVcsProvider {
-        async fetchIssues(since?: Date): Promise<VcsIssue[]> {
-          return [];
+        async fetchIssues(since?: Date): Promise<IssueFetchResult> {
+          return { issues: [], cursor: null, capped: false };
         }
 
         async fetchIssue(issueNumber: number): Promise<VcsIssue> {
@@ -539,8 +545,8 @@ describe('VcsIssue and IVcsProvider exports', () => {
 
   it('should export IVcsProvider interface', () => {
     class TestProvider implements IVcsProvider {
-      async fetchIssues(since?: Date): Promise<VcsIssue[]> {
-        return [];
+      async fetchIssues(since?: Date): Promise<IssueFetchResult> {
+        return { issues: [], cursor: null, capped: false };
       }
 
       async fetchIssue(issueNumber: number): Promise<VcsIssue> {

@@ -19,7 +19,7 @@ import { createVcsProvider } from '../vcs/factory';
 
 function createMockVcsProvider(overrides?: Partial<IVcsProvider>): IVcsProvider {
   return {
-    fetchIssues: jest.fn().mockResolvedValue([]),
+    fetchIssues: jest.fn().mockResolvedValue({ issues: [], cursor: null, capped: false }),
     fetchIssue: jest.fn().mockResolvedValue(null),
     testConnection: jest.fn().mockResolvedValue({ ok: true }),
     getDefaultBranch: jest.fn().mockResolvedValue('main'),

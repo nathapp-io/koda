@@ -274,7 +274,7 @@ describe('VcsPollingService', () => {
     it('should filter issues by allowedAuthors list', async () => {
       const connectionWithProject = { ...mockVcsConnection, project: mockProject };
       const mockProvider = {
-        fetchIssues: jest.fn().mockResolvedValue([mockVcsIssue1, mockVcsIssue2, mockVcsIssueOther]),
+        fetchIssues: jest.fn().mockResolvedValue({ issues: [mockVcsIssue1, mockVcsIssue2, mockVcsIssueOther], cursor: null, capped: false }),
       };
 
       // Mock the provider creation

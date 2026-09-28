@@ -191,10 +191,14 @@ describe('VcsSyncService', () => {
       const encryptionKey = 'test-key-32-chars-exactly-padded!!';
 
       const mockProvider = {
-        fetchIssues: jest.fn().mockResolvedValue([
-          makeIssue({ number: 1, title: 'Issue 1' }),
-          makeIssue({ number: 2, title: 'Issue 2' }),
-        ]),
+        fetchIssues: jest.fn().mockResolvedValue({
+          issues: [
+            makeIssue({ number: 1, title: 'Issue 1' }),
+            makeIssue({ number: 2, title: 'Issue 2' }),
+          ],
+          cursor: null,
+          capped: false,
+        }),
         testConnection: jest.fn(),
         fetchIssue: jest.fn(),
         getPullRequestStatus: jest.fn(),
@@ -221,7 +225,7 @@ describe('VcsSyncService', () => {
       const encryptionKey = 'test-key-32-chars-exactly-padded!!';
 
       const mockProvider = {
-        fetchIssues: jest.fn().mockResolvedValue([makeIssue({ number: 1 })]),
+        fetchIssues: jest.fn().mockResolvedValue({ issues: [makeIssue({ number: 1 })], cursor: null, capped: false }),
         testConnection: jest.fn(),
         fetchIssue: jest.fn(),
         getPullRequestStatus: jest.fn(),
@@ -243,10 +247,14 @@ describe('VcsSyncService', () => {
       const encryptionKey = 'test-key-32-chars-exactly-padded!!';
 
       const mockProvider = {
-        fetchIssues: jest.fn().mockResolvedValue([
-          makeIssue({ number: 1 }),
-          makeIssue({ number: 2 }),
-        ]),
+        fetchIssues: jest.fn().mockResolvedValue({
+          issues: [
+            makeIssue({ number: 1 }),
+            makeIssue({ number: 2 }),
+          ],
+          cursor: null,
+          capped: false,
+        }),
         testConnection: jest.fn(),
         fetchIssue: jest.fn(),
         getPullRequestStatus: jest.fn(),

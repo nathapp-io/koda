@@ -7,7 +7,7 @@ import { GitLabProvider } from './providers/gitlab.provider';
  * HTTP client interface for making requests
  */
 export interface HttpClient {
-  get(url: string, config: { headers: Record<string, string>; params?: Record<string, unknown> }): Promise<{ data: unknown }>;
+  get(url: string, config: { headers: Record<string, string>; params?: Record<string, unknown> }): Promise<{ data: unknown; headers?: Record<string, string> }>;
   post(url: string, config: { headers: Record<string, string>; body: unknown }): Promise<{ data: unknown }>;
 }
 
@@ -41,7 +41,7 @@ async function httpError(response: Response): Promise<Error> {
  */
 function createDefaultHttpClient(): HttpClient {
   return {
-    async get(url: string, config: { headers: Record<string, string>; params?: Record<string, unknown> }): Promise<{ data: unknown }> {
+    async get(url: string, config: { headers: Record<string, string>; params?: Record<string, unknown> }): Promise<{ data: unknown; headers?: Record<string, string> }> {
       const urlObj = new URL(url);
       if (config.params) {
         Object.entries(config.params).forEach(([key, value]) => {
@@ -59,7 +59,7 @@ function createDefaultHttpClient(): HttpClient {
       }
 
       const data = await response.json();
-      return { data };
+      return { data, headers: Object.fromEntries(response.headers.entries()) };
     },
     async post(url: string, config: { headers: Record<string, string>; body: unknown }): Promise<{ data: unknown }> {
       const response = await fetch(url, {
