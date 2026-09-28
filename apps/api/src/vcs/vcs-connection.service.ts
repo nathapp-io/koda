@@ -276,7 +276,7 @@ export class VcsConnectionService {
   /**
    * Map VcsConnectionDomain to response DTO (excludes encryptedToken and
    * webhookSecret: the secret leaves the server only in the create/update/rotate
-   * responses that produced it (M9)).
+   * responses that produced it (M9).
    */
   private mapToResponseDto(connection: VcsConnectionDomain): VcsConnectionResponseDto {
     return {

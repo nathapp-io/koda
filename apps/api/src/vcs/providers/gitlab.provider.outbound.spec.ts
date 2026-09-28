@@ -12,7 +12,9 @@ function jsonResponse(status: number, body: unknown): Response {
 describe('GitLabProvider.createPullRequest with the default HTTP client', () => {
   let fetchSpy: jest.SpyInstance;
 
-  afterEach(() => fetchSpy.mockRestore());
+  afterEach(() => {
+    if (fetchSpy) fetchSpy.mockRestore();
+  });
 
   it('creates the MR when the branch already exists', async () => {
     fetchSpy = jest.spyOn(global, 'fetch')

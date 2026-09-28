@@ -520,15 +520,16 @@ describe('VcsPrSyncService.syncPrStatus', () => {
           title: 'PR 102',
         });
 
-      // First update fails DB
+      // First update fails DB; second succeeds
       vcsRepo.updateTicketLinkWithPrState
         .mockRejectedValueOnce(new Error('DB error'))
-        .mockResolvedValueOnce(undefined);
+        .mockResolvedValueOnce(true);
 
       const result = await service.syncPrStatus(mockProject as any, mockVcsConnection as any, 'encryption-key');
 
       // Should have processed both PRs (one updated, one skipped due to DB error)
-      expect(result.skipped).toBeGreaterThanOrEqual(1);
+      expect(result.updated).toBe(1);
+      expect(result.skipped).toBe(1);
     });
   });
 

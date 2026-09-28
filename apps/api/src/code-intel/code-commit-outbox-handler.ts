@@ -43,6 +43,9 @@ export class CodeCommitOutboxHandler {
     const removed = new Set(removedFiles);
     const filesToIndex = p.changedFiles.filter((file) => !removed.has(file));
     if (filesToIndex.length === 0) {
+      this.logger.debug(
+        `code_commit: all ${removedFiles.length} changed files removed for ${p.repoId} ${p.commitHash}, nothing to index (project ${p.projectId})`,
+      );
       return;
     }
 
