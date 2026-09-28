@@ -58,9 +58,10 @@ const storedGraphEmpty: StoredGraph = {
 
 const mockGraphStore = {
   getStoredGraph: jest.fn().mockResolvedValue(storedGraphEmpty),
-  upsertNodes: jest.fn().mockResolvedValue(undefined),
-  deleteNodes: jest.fn().mockResolvedValue(undefined),
-  deleteLinks: jest.fn().mockResolvedValue(undefined),
+  applyDiff: jest.fn().mockResolvedValue(undefined),
+  markVectorStale: jest.fn().mockResolvedValue(undefined),
+  findVectorStaleNodeIds: jest.fn().mockResolvedValue([]),
+  clearVectorStale: jest.fn().mockResolvedValue(undefined),
 };
 
 const mockTxManager = {
@@ -125,8 +126,7 @@ describe('IncrementalGraphDiffService wiring (SRC-001)', () => {
   beforeEach(() => {
     diffAndApplyMock.mockClear();
     mockGraphStore.getStoredGraph.mockClear();
-    mockGraphStore.upsertNodes.mockClear();
-    mockGraphStore.deleteNodes.mockClear();
+    mockGraphStore.applyDiff.mockClear();
     mockTxManager.run.mockClear();
   });
 

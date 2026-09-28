@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@nathapp/nestjs-prisma';
-import { Prisma, PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import type { IRagRepository } from './domain/rag.domain';
 
 export interface RagProjectSlugRecord {
@@ -21,10 +21,32 @@ export interface RagTicketRecord {
   title: string;
 }
 
+export interface GraphDiffWrite {
+  removedNodeIds: string[];
+  nodes: Array<{ nodeId: string; label: string; type?: string; sourceFile?: string; community?: number }>;
+  links: Array<{ sourceId: string; targetId: string; relation?: string }>;
+}
+
+/** Large graphify imports run hundreds of statements in one interactive transaction. */
+const GRAPH_DIFF_TX_TIMEOUT_MS = 120_000;
+
+/**
+ * In-memory dedup before createMany: Postgres treats NULLs as distinct in the
+ * (projectId, sourceId, targetId, relation) unique index, so skipDuplicates
+ * alone would keep duplicate relation-less links.
+ */
+function dedupeLinks(links: GraphDiffWrite['links']): GraphDiffWrite['links'] {
+  const seen = new Set<string>();
+  return links.filter((link) => {
+    const key = `${link.sourceId}\u0000${link.targetId}\u0000${link.relation ?? ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 @Injectable()
 export class PrismaRagRepository implements IRagRepository {
-  private static readonly BATCH_SIZE = 500;
-
   constructor(private readonly prisma: PrismaService<PrismaClient>) {}
 
   async findProjectGraphifyEnabled(
@@ -64,100 +86,69 @@ export class PrismaRagRepository implements IRagRepository {
     return this.prisma.client.graphLink.findMany({ where: { projectId } });
   }
 
-  async upsertNodesInBatches(
-    projectId: string,
-    nodes: Array<{
-      nodeId: string;
-      label: string;
-      type?: string;
-      sourceFile?: string;
-      community?: number;
-    }>,
-    links: Array<{ sourceId: string; targetId: string; relation?: string }>,
-    nodeIds: string[],
-    batchSize: number,
-  ): Promise<void> {
-    const operations: Prisma.PrismaPromise<unknown>[] = [];
-
-    for (const node of nodes) {
-      operations.push(
-        this.prisma.client.graphNode.upsert({
-          where: { projectId_nodeId: { projectId, nodeId: node.nodeId } },
-          create: {
-            projectId,
-            nodeId: node.nodeId,
-            label: node.label,
-            type: node.type,
-            sourceFile: node.sourceFile,
-            community: node.community,
-          },
-          update: {
-            label: node.label,
-            type: node.type,
-            sourceFile: node.sourceFile,
-            community: node.community,
-          },
-        }),
-      );
-    }
-
-    if (nodeIds.length > 0) {
-      operations.push(
-        this.prisma.client.graphLink.deleteMany({
-          where: { projectId, sourceId: { in: nodeIds } },
-        }),
-      );
-    }
-
-    for (const link of links) {
-      operations.push(
-        this.prisma.client.graphLink.create({
-          data: {
-            projectId,
-            sourceId: link.sourceId,
-            targetId: link.targetId,
-            relation: link.relation,
-          },
-        }),
-      );
-    }
-
-    for (let i = 0; i < operations.length; i += batchSize) {
-      const batch = operations.slice(i, i + batchSize);
-      await this.prisma.client.$transaction(batch);
-    }
-  }
-
-  async deleteGraphNodeLinks(
-    projectId: string,
-    conditions: { sourceId: string; targetId: string }[],
-  ): Promise<void> {
-    if (conditions.length === 0) return;
-    await this.prisma.client.graphLink.deleteMany({
-      where: {
-        projectId,
-        OR: conditions,
+  /**
+   * M19: one transaction for the whole graph write. Removed nodes and every link
+   * touching them go; changed nodes are upserted with vectorStale = true; their
+   * outgoing links are replaced by the deduped incoming set.
+   */
+  async applyGraphDiff(projectId: string, diff: GraphDiffWrite): Promise<void> {
+    const changedIds = diff.nodes.map((n) => n.nodeId);
+    await this.prisma.client.$transaction(
+      async (client) => {
+        const db = client as unknown as PrismaClient;
+        if (diff.removedNodeIds.length > 0) {
+          await db.graphLink.deleteMany({
+            where: {
+              projectId,
+              OR: [{ sourceId: { in: diff.removedNodeIds } }, { targetId: { in: diff.removedNodeIds } }],
+            },
+          });
+          await db.graphNode.deleteMany({ where: { projectId, nodeId: { in: diff.removedNodeIds } } });
+        }
+        for (const node of diff.nodes) {
+          const fields = { label: node.label, type: node.type, sourceFile: node.sourceFile, community: node.community, vectorStale: true };
+          await db.graphNode.upsert({
+            where: { projectId_nodeId: { projectId, nodeId: node.nodeId } },
+            create: { projectId, nodeId: node.nodeId, ...fields },
+            update: fields,
+          });
+        }
+        if (changedIds.length > 0) {
+          await db.graphLink.deleteMany({ where: { projectId, sourceId: { in: changedIds } } });
+          const links = dedupeLinks(diff.links);
+          if (links.length > 0) {
+            await db.graphLink.createMany({
+              data: links.map((l) => ({ projectId, sourceId: l.sourceId, targetId: l.targetId, relation: l.relation })),
+              skipDuplicates: true,
+            });
+          }
+        }
       },
-    });
+      { timeout: GRAPH_DIFF_TX_TIMEOUT_MS },
+    );
   }
 
-  async deleteGraphNodesByIds(projectId: string, nodeIds: string[]): Promise<void> {
+  async markGraphNodesVectorStale(projectId: string, nodeIds: string[]): Promise<void> {
     if (nodeIds.length === 0) return;
-    await this.prisma.client.graphNode.deleteMany({
+    await this.prisma.client.graphNode.updateMany({
       where: { projectId, nodeId: { in: nodeIds } },
+      data: { vectorStale: true },
     });
   }
 
-  async deleteGraphLinksByNodeIds(projectId: string, nodeIds: string[]): Promise<void> {
-    if (nodeIds.length === 0) return;
-    await this.prisma.client.graphLink.deleteMany({
-      where: {
-        projectId,
-        OR: [
-          { sourceId: { in: nodeIds } },
-          { targetId: { in: nodeIds } },
-        ],
-      },
+  async findVectorStaleNodeIds(projectId: string): Promise<string[]> {
+    const rows = await this.prisma.client.graphNode.findMany({
+      where: { projectId, vectorStale: true },
+      select: { nodeId: true },
+      orderBy: { nodeId: 'asc' },
+    });
+    return rows.map((r) => r.nodeId);
+  }
+
+  async clearGraphNodeVectorStale(projectId: string, nodeId: string): Promise<void> {
+    await this.prisma.client.graphNode.updateMany({
+      where: { projectId, nodeId },
+      data: { vectorStale: false },
     });
   }
 

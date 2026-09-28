@@ -5,10 +5,10 @@ function makeRagRepo(): jest.Mocked<PrismaRagRepository> {
   return {
     getStoredGraphNodes: jest.fn(),
     getStoredGraphLinks: jest.fn(),
-    upsertNodesInBatches: jest.fn(),
-    deleteGraphLinksByNodeIds: jest.fn(),
-    deleteGraphNodesByIds: jest.fn(),
-    deleteGraphNodeLinks: jest.fn(),
+    applyGraphDiff: jest.fn(),
+    markGraphNodesVectorStale: jest.fn(),
+    findVectorStaleNodeIds: jest.fn(),
+    clearGraphNodeVectorStale: jest.fn(),
   } as unknown as jest.Mocked<PrismaRagRepository>;
 }
 
@@ -77,61 +77,34 @@ describe('GraphStoreService', () => {
     });
   });
 
-  describe('upsertNodes', () => {
-    it('calls upsertNodesInBatches with mapped shapes', async () => {
-      ragRepo.upsertNodesInBatches.mockResolvedValue(undefined);
+  describe('applyDiff', () => {
+    it('maps DTO shapes onto the repository write', async () => {
+      ragRepo.applyGraphDiff.mockResolvedValue(undefined);
 
-      await service.upsertNodes(
-        'proj-1',
-        [{ id: 'n1', label: 'Foo', type: 'class', source_file: 'foo.ts', community: 1 }],
-        [{ source: 'n1', target: 'n2', relation: 'CALLS' }],
-      );
+      await service.applyDiff('proj-1', {
+        removedNodeIds: ['gone'],
+        nodes: [{ id: 'n1', label: 'Foo', type: 'class', source_file: 'foo.ts', community: 1 }],
+        links: [{ source: 'n1', target: 'n2', relation: 'CALLS' }],
+      });
 
-      expect(ragRepo.upsertNodesInBatches).toHaveBeenCalledWith(
-        'proj-1',
-        [{ nodeId: 'n1', label: 'Foo', type: 'class', sourceFile: 'foo.ts', community: 1 }],
-        [{ sourceId: 'n1', targetId: 'n2', relation: 'CALLS' }],
-        ['n1'],
-        500,
-      );
+      expect(ragRepo.applyGraphDiff).toHaveBeenCalledWith('proj-1', {
+        removedNodeIds: ['gone'],
+        nodes: [{ nodeId: 'n1', label: 'Foo', type: 'class', sourceFile: 'foo.ts', community: 1 }],
+        links: [{ sourceId: 'n1', targetId: 'n2', relation: 'CALLS' }],
+      });
     });
   });
 
-  describe('deleteNodes', () => {
-    it('does nothing when nodeIds is empty', async () => {
-      await service.deleteNodes('proj-1', []);
+  describe('vectorStale helpers', () => {
+    it('delegate to the repository', async () => {
+      ragRepo.findVectorStaleNodeIds.mockResolvedValue(['n1']);
 
-      expect(ragRepo.deleteGraphLinksByNodeIds).not.toHaveBeenCalled();
-      expect(ragRepo.deleteGraphNodesByIds).not.toHaveBeenCalled();
-    });
+      await service.markVectorStale('proj-1', ['n1']);
+      await service.clearVectorStale('proj-1', 'n1');
 
-    it('deletes links then nodes', async () => {
-      ragRepo.deleteGraphLinksByNodeIds.mockResolvedValue(undefined);
-      ragRepo.deleteGraphNodesByIds.mockResolvedValue(undefined);
-
-      await service.deleteNodes('proj-1', ['n1', 'n2']);
-
-      expect(ragRepo.deleteGraphLinksByNodeIds).toHaveBeenCalledWith('proj-1', ['n1', 'n2']);
-      expect(ragRepo.deleteGraphNodesByIds).toHaveBeenCalledWith('proj-1', ['n1', 'n2']);
-    });
-  });
-
-  describe('deleteLinks', () => {
-    it('does nothing when linkIds is empty', async () => {
-      await service.deleteLinks('proj-1', []);
-
-      expect(ragRepo.deleteGraphNodeLinks).not.toHaveBeenCalled();
-    });
-
-    it('parses composite link ids and calls deleteGraphNodeLinks', async () => {
-      ragRepo.deleteGraphNodeLinks.mockResolvedValue(undefined);
-
-      await service.deleteLinks('proj-1', ['n1::n2', 'n3::n4']);
-
-      expect(ragRepo.deleteGraphNodeLinks).toHaveBeenCalledWith('proj-1', [
-        { sourceId: 'n1', targetId: 'n2' },
-        { sourceId: 'n3', targetId: 'n4' },
-      ]);
+      expect(await service.findVectorStaleNodeIds('proj-1')).toEqual(['n1']);
+      expect(ragRepo.markGraphNodesVectorStale).toHaveBeenCalledWith('proj-1', ['n1']);
+      expect(ragRepo.clearGraphNodeVectorStale).toHaveBeenCalledWith('proj-1', 'n1');
     });
   });
 });

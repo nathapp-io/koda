@@ -1,3 +1,5 @@
+import type { GraphDiffWrite } from '../prisma-rag.repository';
+
 export const RAG_REPOSITORY = Symbol('RAG_REPOSITORY');
 
 export interface RagProjectRecord {
@@ -16,23 +18,8 @@ export interface IRagRepository {
   getStoredGraphLinks(projectId: string): Promise<
     { sourceId: string; targetId: string; relation: string | null }[]
   >;
-  upsertNodesInBatches(
-    projectId: string,
-    nodes: Array<{
-      nodeId: string;
-      label: string;
-      type?: string;
-      sourceFile?: string;
-      community?: number;
-    }>,
-    links: Array<{ sourceId: string; targetId: string; relation?: string }>,
-    nodeIds: string[],
-    batchSize: number,
-  ): Promise<void>;
-  deleteGraphNodeLinks(
-    projectId: string,
-    conditions: { sourceId: string; targetId: string }[],
-  ): Promise<void>;
-  deleteGraphNodesByIds(projectId: string, nodeIds: string[]): Promise<void>;
-  deleteGraphLinksByNodeIds(projectId: string, nodeIds: string[]): Promise<void>;
+  applyGraphDiff(projectId: string, diff: GraphDiffWrite): Promise<void>;
+  markGraphNodesVectorStale(projectId: string, nodeIds: string[]): Promise<void>;
+  findVectorStaleNodeIds(projectId: string): Promise<string[]>;
+  clearGraphNodeVectorStale(projectId: string, nodeId: string): Promise<void>;
 }
