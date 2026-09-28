@@ -574,6 +574,28 @@ describe('config', () => {
         const result = await resolveContext({}, deps);
         expect(result.projectSlug).toBe('env-project');
       });
+
+      it('an empty KODA_API_URL falls through to the configured URL', async () => {
+        process.env.KODA_API_URL = '';
+        const deps: ResolveContextDeps = {
+          findProjectConfig: makeProjectConfigDep(null),
+          getConfig: makeGlobalConfig({ apiUrl: 'https://global.example.com' }),
+        };
+        const result = await resolveContext({}, deps);
+        expect(result.apiUrl).toBe('https://global.example.com');
+      });
+
+      it('an empty --api-url flag and an empty profile apiUrl fall through too', async () => {
+        const deps: ResolveContextDeps = {
+          findProjectConfig: makeProjectConfigDep({ projectSlug: 'p', profile: 'blank' }),
+          getConfig: makeGlobalConfig({
+            apiUrl: 'https://global.example.com',
+            profiles: { blank: { apiUrl: '', apiKey: 'profile-key-abcdef' } },
+          }),
+        };
+        const result = await resolveContext({ apiUrl: '' }, deps);
+        expect(result.apiUrl).toBe('https://global.example.com');
+      });
     });
   });
 });

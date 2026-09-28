@@ -154,11 +154,13 @@ export async function resolveContext(
   const profileName = projectConfig?.profile;
   const profile = profileName ? globalConfig.profiles[profileName] : undefined;
 
+  // `||`, not `??`: an empty flag, env var or profile value means "not set".
   const apiUrl =
-    flags.apiUrl ??
-    process.env.KODA_API_URL ??
-    profile?.apiUrl ??
-    (globalConfig.apiUrl || DEFAULT_API_URL);
+    flags.apiUrl ||
+    process.env.KODA_API_URL ||
+    profile?.apiUrl ||
+    globalConfig.apiUrl ||
+    DEFAULT_API_URL;
 
   const apiKey =
     flags.apiKey ??

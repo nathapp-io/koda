@@ -147,6 +147,11 @@ describe('loginError — distinguishes auth failures from network and 5xx', () =
     );
   });
 
+  it('saves the default URL when --api-url is an empty string', async () => {
+    await loginCommand('sk-proj-test123456', '', {});
+    expect(mockStore.set).toHaveBeenCalledWith('apiUrl', 'http://localhost:3100');
+  });
+
   it('returns success message', async () => {
     const result = await loginCommand('sk-proj-test123456', 'http://example.com', {});
     expect(result).toEqual(expect.objectContaining({ success: true }));

@@ -17,7 +17,7 @@ export async function loginCommand(
   }
 
   // Strip /api suffix so the client base URL is set to the bare host
-  const url = (apiUrl ?? 'http://localhost:3100').replace(/\/api\/?$/, '');
+  const url = (apiUrl || 'http://localhost:3100').replace(/\/api\/?$/, '');
 
   configureApiClient(url, apiKey);
 
