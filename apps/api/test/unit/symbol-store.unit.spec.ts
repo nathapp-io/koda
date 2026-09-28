@@ -46,8 +46,8 @@ describe('SymbolStore', () => {
   describe('AC-1: upsertSymbol stores symbol metadata', () => {
     it('should store symbol with all metadata fields', async () => {
       const symbol = {
-        id: 'repo:src/auth.ts::authenticate',
-        symbolId: 'authenticate',
+        id: 'proj-123:repo-123:src/auth.ts::authenticate',
+        symbolId: 'proj-123:repo-123:src/auth.ts::authenticate',
         projectId: 'proj-123',
         repoId: 'repo-123',
         commitHash: 'abc123',
@@ -68,18 +68,30 @@ describe('SymbolStore', () => {
 
       expect(result).toEqual(symbol);
       expect(mockPrismaClient.symbol.upsert).toHaveBeenCalledWith({
-        where: { id: symbol.id },
+        where: { projectId_symbolId: { projectId: symbol.projectId, symbolId: symbol.symbolId } },
         create: symbol,
-        update: symbol,
+        update: {
+          repoId: symbol.repoId,
+          commitHash: symbol.commitHash,
+          name: symbol.name,
+          kind: symbol.kind,
+          file: symbol.file,
+          startLine: symbol.startLine,
+          endLine: symbol.endLine,
+          signature: symbol.signature,
+          callers: symbol.callers,
+          callees: symbol.callees,
+          docComment: symbol.docComment,
+        },
       });
     });
   });
 
-  describe('AC-2: symbolId convention {repoId}:{filePath}::{SymbolName}', () => {
+  describe('AC-2: symbolId convention {projectId}:{repoId}:{filePath}::{SymbolName}', () => {
     it('should create symbol id using the convention', async () => {
       const symbol = {
-        id: 'repo-abc:src/services/user.ts::UserService',
-        symbolId: 'UserService',
+        id: 'proj-123:repo-abc:src/services/user.ts::UserService',
+        symbolId: 'proj-123:repo-abc:src/services/user.ts::UserService',
         projectId: 'proj-123',
         repoId: 'repo-abc',
         commitHash: 'def456',
@@ -99,14 +111,19 @@ describe('SymbolStore', () => {
       await store.upsertSymbol(symbol);
 
       const upsertCall = mockPrismaClient.symbol.upsert.mock.calls[0][0];
-      expect(upsertCall.create.id).toBe('repo-abc:src/services/user.ts::UserService');
-      expect(upsertCall.update.id).toBe('repo-abc:src/services/user.ts::UserService');
+      expect(upsertCall.where).toEqual({
+        projectId_symbolId: { projectId: 'proj-123', symbolId: 'proj-123:repo-abc:src/services/user.ts::UserService' },
+      });
+      expect(upsertCall.create.id).toBe('proj-123:repo-abc:src/services/user.ts::UserService');
+      // M13: the row is keyed by (projectId, symbolId), so the update payload
+      // refreshes metadata but never rewrites the id.
+      expect(upsertCall.update.id).toBeUndefined();
     });
 
     it('should handle overloaded symbols with # suffix', async () => {
       const symbol = {
-        id: 'repo:src/overload.ts::doSomething#2',
-        symbolId: 'doSomething#2',
+        id: 'proj-123:repo:src/overload.ts::doSomething#2',
+        symbolId: 'proj-123:repo:src/overload.ts::doSomething#2',
         projectId: 'proj-123',
         repoId: 'repo',
         commitHash: 'over123',
@@ -133,10 +150,10 @@ describe('SymbolStore', () => {
   describe('AC-3: findCallers returns symbols with symbolId in callers list', () => {
     it('should find all symbols that call the given symbol', async () => {
       const projectId = 'proj-123';
-      const symbolId = 'repo:src/auth.ts::authenticate';
+      const symbolId = 'proj-123:repo:src/auth.ts::authenticate';
       const callers = [
-        { symbolId: 'repo:src/login.ts::login', file: 'src/login.ts', name: 'login', kind: 'function' },
-        { symbolId: 'repo:src/verify.ts::verify', file: 'src/verify.ts', name: 'verify', kind: 'method' },
+        { symbolId: 'proj-123:repo:src/login.ts::login', file: 'src/login.ts', name: 'login', kind: 'function' },
+        { symbolId: 'proj-123:repo:src/verify.ts::verify', file: 'src/verify.ts', name: 'verify', kind: 'method' },
       ];
 
       mockPrismaClient.symbol.findUnique.mockResolvedValue({
@@ -160,8 +177,8 @@ describe('SymbolStore', () => {
       const result = await store.findCallers(projectId, symbolId);
 
       expect(result).toHaveLength(2);
-      expect(result[0].symbolId).toBe('repo:src/login.ts::login');
-      expect(result[1].symbolId).toBe('repo:src/verify.ts::verify');
+      expect(result[0].symbolId).toBe('proj-123:repo:src/login.ts::login');
+      expect(result[1].symbolId).toBe('proj-123:repo:src/verify.ts::verify');
     });
   });
 
@@ -175,7 +192,7 @@ describe('SymbolStore', () => {
       ];
 
       mockPrismaClient.symbol.findUnique.mockResolvedValue({
-        id: `repo:src/login.ts::login`,
+        id: `proj-123:repo:src/login.ts::login`,
         symbolId: 'login',
         projectId,
         repoId: 'repo',
@@ -193,7 +210,7 @@ describe('SymbolStore', () => {
 
       mockPrismaClient.symbol.findMany.mockResolvedValue([
         {
-          id: `repo:src/auth.ts::authenticate`,
+          id: `proj-123:repo:src/auth.ts::authenticate`,
           symbolId: 'authenticate',
           projectId,
           repoId: 'repo',
@@ -209,7 +226,7 @@ describe('SymbolStore', () => {
           docComment: undefined,
         },
         {
-          id: `repo:src/user.ts::loadUser`,
+          id: `proj-123:repo:src/user.ts::loadUser`,
           symbolId: 'loadUser',
           projectId,
           repoId: 'repo',
@@ -239,7 +256,7 @@ describe('SymbolStore', () => {
       const commitHash = 'newcommit';
 
       await store.upsertSymbol({
-        id: `${repoId}:src/new.ts::newFunc`,
+        id: `${projectId}:${repoId}:src/new.ts::newFunc`,
         symbolId: 'newFunc',
         projectId,
         repoId,
@@ -262,8 +279,8 @@ describe('SymbolStore', () => {
   describe('BUG-3: findCallers should read the target symbol caller list directly', () => {
     it('should load only symbols referenced by the target symbol caller list', async () => {
       const projectId = 'proj-bug3';
-      const symbolId = 'repo:src/target.ts::targetSymbol';
-      const callerId = 'repo:src/caller.ts::callerSymbol';
+      const symbolId = 'proj-bug3:repo:src/target.ts::targetSymbol';
+      const callerId = 'proj-bug3:repo:src/caller.ts::callerSymbol';
 
       mockPrismaClient.symbol.findUnique.mockResolvedValue({
         id: symbolId,
@@ -303,7 +320,7 @@ describe('SymbolStore', () => {
       const symbolId = 'main';
 
       const mainSymbol = {
-        id: 'repo:src/main.ts::main',
+        id: 'proj-bug4:repo:src/main.ts::main',
         symbolId: 'main',
         projectId,
         repoId: 'repo',
@@ -321,7 +338,7 @@ describe('SymbolStore', () => {
 
       const calleeSymbols = [
         {
-          id: 'repo:src/auth.ts::UserService.authenticate',
+          id: 'proj-bug4:repo:src/auth.ts::UserService.authenticate',
           symbolId: 'UserService.authenticate',
           projectId,
           repoId: 'repo',
@@ -337,7 +354,7 @@ describe('SymbolStore', () => {
           docComment: undefined,
         },
         {
-          id: 'repo:src/user.ts::UserService.getUser',
+          id: 'proj-bug4:repo:src/user.ts::UserService.getUser',
           symbolId: 'UserService.getUser',
           projectId,
           repoId: 'repo',

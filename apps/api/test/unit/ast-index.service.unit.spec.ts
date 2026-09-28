@@ -93,7 +93,7 @@ describe('AstIndexService', () => {
       expect(mockSymbolStore.upsertSymbol).toHaveBeenCalledTimes(1);
     });
 
-    it('AC-2: Symbol.symbolId should use convention {repoId}:{filePath}::{SymbolName}', async () => {
+    it('AC-2: Symbol.symbolId should use convention {projectId}:{repoId}:{filePath}::{SymbolName}', async () => {
       const repoId = 'repo-456';
       const commitHash = 'def456';
       const projectId = 'proj-789';
@@ -129,8 +129,8 @@ describe('AstIndexService', () => {
       const result = await service.indexCommit(repoId, commitHash, files, projectId);
 
       const storedSymbol = mockSymbolStore.upsertSymbol.mock.calls[0][0];
-      expect(storedSymbol.id).toBe(`${repoId}:src/services/user.ts::UserService`);
-      expect(storedSymbol.symbolId).toBe(`${repoId}:src/services/user.ts::UserService`);
+      expect(storedSymbol.id).toBe(`${projectId}:${repoId}:src/services/user.ts::UserService`);
+      expect(storedSymbol.symbolId).toBe(`${projectId}:${repoId}:src/services/user.ts::UserService`);
       expect(result.symbolsIndexed).toBe(1);
     });
 
@@ -372,10 +372,10 @@ describe('AstIndexService', () => {
       expect(mockSymbolStore.upsertSymbol).toHaveBeenCalledTimes(2);
       const firstCall = mockSymbolStore.upsertSymbol.mock.calls[0][0];
       const secondCall = mockSymbolStore.upsertSymbol.mock.calls[1][0];
-      expect(firstCall.symbolId).toBe(`${repoId}:src/overload.ts::doSomething`);
-      expect(secondCall.symbolId).toMatch(new RegExp(`^${repoId}:src/overload\\.ts::doSomething#\\d+$`));
-      expect(firstCall.id).toBe(`${repoId}:src/overload.ts::doSomething`);
-      expect(secondCall.id).toMatch(new RegExp(`^${repoId}:src/overload\\.ts::doSomething#\\d+$`));
+      expect(firstCall.symbolId).toBe(`${projectId}:${repoId}:src/overload.ts::doSomething`);
+      expect(secondCall.symbolId).toMatch(new RegExp(`^${projectId}:${repoId}:src/overload\\.ts::doSomething#\\d+$`));
+      expect(firstCall.id).toBe(`${projectId}:${repoId}:src/overload.ts::doSomething`);
+      expect(secondCall.id).toMatch(new RegExp(`^${projectId}:${repoId}:src/overload\\.ts::doSomething#\\d+$`));
     });
   });
 
