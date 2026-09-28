@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Code2 } from 'lucide-vue-next'
 import { extractApiError } from '~/composables/useApi'
+import { apiPath } from '~/lib/api-path'
 
 definePageMeta({ layout: 'default' })
 
@@ -89,11 +90,10 @@ async function toggleSymbol(id: string) {
   detailState.value = null
   const requestId = ++detailRequestId
   try {
-    const encodedId = encodeURIComponent(id)
     const [detail, callers, callees] = await Promise.all([
-      $api.get<CodeIntelSymbolDetail>(`/code-intel/symbols/${encodedId}`, { query: { projectSlug: slug } }),
-      $api.get<CallerInfo[]>(`/code-intel/symbols/${encodedId}/callers`, { query: { projectSlug: slug } }),
-      $api.get<CallerInfo[]>(`/code-intel/symbols/${encodedId}/callees`, { query: { projectSlug: slug } }),
+      $api.get<CodeIntelSymbolDetail>(apiPath`/code-intel/symbols/${id}`, { query: { projectSlug: slug } }),
+      $api.get<CallerInfo[]>(apiPath`/code-intel/symbols/${id}/callers`, { query: { projectSlug: slug } }),
+      $api.get<CallerInfo[]>(apiPath`/code-intel/symbols/${id}/callees`, { query: { projectSlug: slug } }),
     ])
     if (requestId !== detailRequestId) return
     if (expandedSymbolId.value !== id) return

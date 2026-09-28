@@ -34,7 +34,7 @@ describe('US-003 AC3: Given normalized value does not match ^#[0-9A-F]{6}$, when
     const onSubmitMatch = source.match(/const onSubmit = handleSubmit\(async \(values\) =>\s*\{[\s\S]*?\}\)/)
     expect(onSubmitMatch).not.toBeNull()
     const onSubmitBody = onSubmitMatch?.[0] ?? ''
-    expect(onSubmitBody).toMatch(/\$api\.post\(`\/projects\/\$\{slug\}\/labels`/)
+    expect(onSubmitBody).toMatch(/\$api\.post\(apiPath`\/projects\/\$\{slug\}\/labels`/)
     expect(onSubmitBody).toContain('color: normalizeHexColor')
   })
 

@@ -3,6 +3,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { ApiError, extractApiError } from '~/composables/useApi'
+import { apiPath } from '~/lib/api-path'
 
 definePageMeta({ layout: 'default' })
 
@@ -46,7 +47,7 @@ const { data: connectionData, pending: loadingConnection, error: connectionError
   `vcs-connection-${slug}`,
   async () => {
     try {
-      return await $api.get(`/projects/${slug}/vcs`) as VcsConnection
+      return await $api.get(apiPath`/projects/${slug}/vcs`) as VcsConnection
     } catch (error) {
       const fetchStatus = (error as { response?: { status?: number } }).response?.status
       const appCode = error instanceof ApiError ? error.code : undefined
@@ -63,7 +64,7 @@ const existingConnection = computed(() => connectionData.value)
 
 const { data: projectData, pending: loadingProject, error: projectError, refresh: refreshProject } = useAsyncData(
   `project-${slug}`,
-  () => $api.get(`/projects/${slug}`) as Promise<ProjectDetails>,
+  () => $api.get(apiPath`/projects/${slug}`) as Promise<ProjectDetails>,
 )
 
 const projectForm = reactive({
@@ -94,7 +95,7 @@ async function saveProject() {
 
   savingProject.value = true
   try {
-    await $api.patch(`/projects/${slug}`, payload)
+    await $api.patch(apiPath`/projects/${slug}`, payload)
     toast.success(t('projects.settings.updated'))
     await refreshProject()
   } catch (err) {
@@ -109,7 +110,7 @@ async function deleteProject() {
   if (!window.confirm(t('projects.settings.deleteConfirm'))) return
   deletingProject.value = true
   try {
-    await $api.delete(`/projects/${slug}`)
+    await $api.delete(apiPath`/projects/${slug}`)
     toast.success(t('projects.settings.deleted'))
     await router.push('/')
   } catch (err) {
@@ -181,8 +182,8 @@ const onSubmit = handleSubmit(async (values) => {
     }
 
     const saved = existingConnection.value
-      ? await $api.patch<VcsConnectionWithSecret>(`/projects/${slug}/vcs`, payload)
-      : await $api.post<VcsConnectionWithSecret>(`/projects/${slug}/vcs`, payload)
+      ? await $api.patch<VcsConnectionWithSecret>(apiPath`/projects/${slug}/vcs`, payload)
+      : await $api.post<VcsConnectionWithSecret>(apiPath`/projects/${slug}/vcs`, payload)
     // GitLab is polling-only (the API refuses webhook mode), so its stored secret
     // is not usable and is not surfaced.
     if (saved?.provider !== 'gitlab') revealSecret(saved?.webhookSecret)
@@ -217,7 +218,7 @@ async function rotateSecret() {
   if (!window.confirm(t('vcs.secret.rotateConfirm'))) return
   rotatingSecret.value = true
   try {
-    const result = await $api.post<{ webhookSecret: string }>(`/projects/${slug}/vcs/webhook-secret/rotate`)
+    const result = await $api.post<{ webhookSecret: string }>(apiPath`/projects/${slug}/vcs/webhook-secret/rotate`)
     revealSecret(result.webhookSecret)
   } catch (err) {
     toast.error(extractApiError(err))
@@ -231,7 +232,7 @@ const testingConnection = ref(false)
 async function testConnection() {
   testingConnection.value = true
   try {
-    await $api.post(`/projects/${slug}/vcs/test`)
+    await $api.post(apiPath`/projects/${slug}/vcs/test`)
     toast.success(t('vcs.toast.connectionTestSuccess'))
   } catch (err) {
     const errorMsg = extractApiError(err)
@@ -246,7 +247,7 @@ const syncing = ref(false)
 async function syncNow() {
   syncing.value = true
   try {
-    const result = await $api.post<SyncResult>(`/projects/${slug}/vcs/sync`)
+    const result = await $api.post<SyncResult>(apiPath`/projects/${slug}/vcs/sync`)
     toast.success(t('vcs.toast.syncComplete', {
       created: result.issuesSynced,
       updated: 0,
@@ -264,7 +265,7 @@ const syncingPr = ref(false)
 async function syncPrStatus() {
   syncingPr.value = true
   try {
-    const result = await $api.post<{ updated: number }>(`/projects/${slug}/vcs/sync-pr`)
+    const result = await $api.post<{ updated: number }>(apiPath`/projects/${slug}/vcs/sync-pr`)
     toast.success(t('vcs.toast.syncPrComplete', { updated: result.updated }))
   } catch (err) {
     const errorMsg = extractApiError(err)
@@ -276,7 +277,7 @@ async function syncPrStatus() {
 
 async function disconnect() {
   try {
-    await $api.delete(`/projects/${slug}/vcs`)
+    await $api.delete(apiPath`/projects/${slug}/vcs`)
     toast.success(t('vcs.toast.disconnectSuccess'))
     revealedSecret.value = null
     await refreshConnection()

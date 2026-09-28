@@ -57,6 +57,7 @@ async function buildPageBundle(): Promise<string> {
 
   const code = scriptResult.content
     .replace(/~\/composables\/useApi/g, join(webDir, 'composables/useApi'))
+    .replace(/~\/lib\/api-path/g, join(webDir, 'lib/api-path'))
     .replace(
       'return __returned__',
       'globalThis.__CI_SETUP_STATE__ = __returned__;\n    return __returned__',

@@ -5,6 +5,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { extractApiError } from '~/composables/useApi'
+import { apiPath } from '~/lib/api-path'
 import { normalizeHexColor } from '~/lib/utils'
 
 const fallbackColor = '#E5E7EB'
@@ -35,7 +36,7 @@ const canCreate = computed(() => canManage.value || viewerRole.value === 'DEVELO
 
 const { data: labelsData, pending, error, refresh } = useAsyncData(
   `labels-${slug}`,
-  () => $api.get(`/projects/${slug}/labels`) as Promise<Label[]>,
+  () => $api.get(apiPath`/projects/${slug}/labels`) as Promise<Label[]>,
 )
 
 const labels = computed(() => labelsData.value ?? [])
@@ -55,7 +56,7 @@ const { handleSubmit, resetForm } = useForm({
 
 const onSubmit = handleSubmit(async (values) => {
   try {
-    await $api.post(`/projects/${slug}/labels`, {
+    await $api.post(apiPath`/projects/${slug}/labels`, {
       name: values.name,
       color: normalizeHexColor(values.color || '#6366F1'),
     })
@@ -69,7 +70,7 @@ const onSubmit = handleSubmit(async (values) => {
 
 async function deleteLabel(labelId: string) {
   try {
-    await $api.delete(`/projects/${slug}/labels/${labelId}`)
+    await $api.delete(apiPath`/projects/${slug}/labels/${labelId}`)
     toast.success(t('labels.toast.deleted'))
     await refresh()
   } catch (err) {
@@ -107,7 +108,7 @@ async function saveEdit(label: Label) {
   }
 
   try {
-    await $api.patch(`/projects/${slug}/labels/${label.id}`, payload)
+    await $api.patch(apiPath`/projects/${slug}/labels/${label.id}`, payload)
     toast.success(t('labels.toast.updated'))
     cancelEdit()
     await refresh()

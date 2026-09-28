@@ -4,8 +4,8 @@ import { join, relative } from 'path'
 
 const webDir = join(__dirname, '../..')
 
-/** Directories whose API paths must go through apiPath. Task 3 adds 'pages'. */
-const GUARDED_DIRS = ['components', 'composables']
+/** Directories whose API paths must go through apiPath. */
+const GUARDED_DIRS = ['components', 'composables', 'pages']
 
 const API_ROOT = String.raw`(?:api\/)?(?:projects|agents|comments|admin|code-intel)\/`
 /** An API path written as an untagged template literal with an interpolation. */

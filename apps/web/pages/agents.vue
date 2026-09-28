@@ -4,6 +4,7 @@ import EditAgentRolesDialog from '~/components/EditAgentRolesDialog.vue'
 import EditAgentCapabilitiesDialog from '~/components/EditAgentCapabilitiesDialog.vue'
 import RotateKeyDialog from '~/components/RotateKeyDialog.vue'
 import DeleteAgentDialog from '~/components/DeleteAgentDialog.vue'
+import { apiPath } from '~/lib/api-path'
 
 definePageMeta({ layout: 'default' })
 
@@ -93,7 +94,7 @@ function statusClass(status: string) {
 
 async function changeStatus(agent: Agent, newStatus: 'ACTIVE' | 'PAUSED' | 'OFFLINE') {
   try {
-    await $api.patch(`/agents/${agent.slug}`, { status: newStatus })
+    await $api.patch(apiPath`/agents/${agent.slug}`, { status: newStatus })
     toast.success(t('agents.toast.statusUpdated', { status: newStatus }))
     refresh()
   } catch {
